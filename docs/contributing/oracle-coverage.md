@@ -1942,7 +1942,10 @@ the WASM or the worker lookup and expects `PersistenceUnavailableError` with no
 worker, which the README requires for capability failures. It also opens from
 an `about:srcdoc` frame, whose URL cannot resolve Vite's asset paths. The
 earlier lookup rejected with a raw `TypeError` in both cases; classifying only
-the WASM lookup fails the worker history. A page served from another origin
+the WASM lookup fails the worker history. A missing WASM file, which the
+worker loads itself, also expects that error after one worker starts; the
+earlier worker reported it as an internal `OPFSWorkerRequestError`. A page
+served from another origin
 than Vite, as in a backend integration, makes the Worker constructor throw a
 `SecurityError`; the witness expects `PersistenceUnavailableError` there as
 well. The
@@ -1950,7 +1953,11 @@ well. The
 adds a transitive install, whose package name the Vite root cannot resolve. A
 pre-bundled transitive install gets this classified error. Excluded from
 pre-bundling, as the README directs, it opens because the package is served
-beside its assets; the earlier lookup ran anyway and failed. The consumer
+beside its assets; the earlier lookup ran anyway and failed. A pre-bundled
+direct install whose Vite cache directory is named `dist` still opens. The
+package treats its code as moved when the worker and WASM URLs no longer share
+a directory; an earlier check of the `dist/assets/` path name skipped the
+needed lookup there. The consumer
 witness also checks that the built package starts a classic worker in
 development and production; the earlier opener started a module worker. No
 available browser lacks module workers, so the witness observes the requested

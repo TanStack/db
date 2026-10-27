@@ -28,6 +28,8 @@ const packageDirectory = fileURLToPath(new URL('../', import.meta.url))
  */
 it.each([
   { layout: `direct`, cache: `custom`, excluded: false, opens: true },
+  // A moved module must not look in place because its cache is named dist.
+  { layout: `direct`, cache: `dist`, excluded: false, opens: true },
   { layout: `hoisted`, cache: `default`, excluded: false, opens: true },
   { layout: `hoisted`, cache: `custom`, excluded: false, opens: true },
   { layout: `direct`, cache: `default`, excluded: true, opens: true },
@@ -107,7 +109,9 @@ globalThis.openDatabase = () => openBrowserWASQLiteOPFSDatabase({ databaseName: 
         cacheDir:
           cache === `custom`
             ? join(appDirectory, `node_modules/.cache/vite`)
-            : undefined,
+            : cache === `dist`
+              ? join(appDirectory, `node_modules/.cache/dist`)
+              : undefined,
         logLevel: `error`,
         optimizeDeps: excluded
           ? { exclude: [`@tanstack/browser-db-sqlite-persistence`] }

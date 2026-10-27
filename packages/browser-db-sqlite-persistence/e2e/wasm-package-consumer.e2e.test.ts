@@ -369,14 +369,40 @@ type OpenOutcome =
 
 /*
  * The README surfaces OPFS capability failures as PersistenceUnavailableError.
- * The packaged assets are part of that capability. When the dev server cannot
- * resolve either lookup, as for a transitive install that the Vite root cannot
+ * The packaged assets are part of that capability. The worker loads the WASM
+ * file itself, so a missing file must also report that error. When the dev
+ * server cannot resolve either lookup, as for a transitive install that the Vite root cannot
  * resolve by package name, the open must report that error and create no
  * worker. An application cannot otherwise tell this failure from a bug.
  */
-it.each([`wa-sqlite.wasm`, `assets/`])(
-  `reports unavailable persistence when Vite cannot resolve the packaged %s lookup`,
-  async (failedLookup) => {
+// The packaged lookups precede the worker; the WASM file loads inside it.
+const assetFailures = [
+  {
+    asset: `WASM lookup`,
+    fails: (url: string) =>
+      url.includes(
+        `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`,
+      ),
+    createdWorkers: 0,
+  },
+  {
+    asset: `worker lookup`,
+    fails: (url: string) =>
+      url.includes(`/@id/@tanstack/browser-db-sqlite-persistence/assets/`),
+    createdWorkers: 0,
+  },
+  {
+    asset: `WASM file`,
+    fails: (url: string) =>
+      !url.includes(`/@id/`) &&
+      new URL(url, `http://x`).pathname.endsWith(`.wasm`),
+    createdWorkers: 1,
+  },
+]
+
+it.each(assetFailures)(
+  `reports unavailable persistence when the packaged $asset fails to load`,
+  async ({ fails, createdWorkers }) => {
     const browser = await chromium.launch({ headless: true })
     const developmentServer = await createServer({
       configFile: false,
@@ -389,11 +415,7 @@ it.each([`wa-sqlite.wasm`, `assets/`])(
           name: `fail-packaged-asset-lookup`,
           configureServer(server) {
             server.middlewares.use((request, response, next) => {
-              if (
-                request.url?.includes(
-                  `/@id/@tanstack/browser-db-sqlite-persistence/${failedLookup}`,
-                )
-              ) {
+              if (request.url && fails(request.url)) {
                 response.statusCode = 404
                 response.end()
                 return
@@ -425,7 +447,7 @@ it.each([`wa-sqlite.wasm`, `assets/`])(
       })
       expect(outcome).toEqual({
         name: `PersistenceUnavailableError`,
-        createdWorkers: 0,
+        createdWorkers,
       })
     } finally {
       await developmentServer.close()

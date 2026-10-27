@@ -78,9 +78,10 @@ for (const pkg of readdirSync(join(root, `packages`))) {
   // Examples document published packages only.
   if (unpublished) continue
   for (const [subpath, target] of Object.entries(exports)) {
-    // A plain string export, such as package.json or a WASM asset, has no
-    // types condition for a snippet to import.
-    if (typeof target === `string`) continue
+    // A plain string export of a file that is not a JavaScript module, such as
+    // package.json, a WASM asset, or an asset directory, has no source for a
+    // snippet to import.
+    if (typeof target === `string` && !/\.[cm]?js$/.test(target)) continue
     // `.` is src/index; `./x` is src/x.ts or src/x/index.ts.
     const stem = subpath === `.` ? `index` : subpath.slice(2)
     const entry = [`${stem}.ts`, `${stem}.tsx`, `${stem}/index.ts`]

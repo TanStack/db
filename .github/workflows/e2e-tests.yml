@@ -132,9 +132,12 @@ jobs:
 
       - name: Run Browser SQLite packaged consumer E2E tests
         if: matrix.group == 'browser'
+        # Build browser dependencies already built this package's workspace
+        # dependencies; test:e2e would rebuild them.
         run: |
           cd packages/browser-db-sqlite-persistence
-          pnpm test:e2e
+          pnpm build
+          pnpm exec vitest --config vitest.e2e.config.ts --run
 
       - name: Run Browser SQLite OPFS with live Electric E2E tests
         if: matrix.group == 'browser'

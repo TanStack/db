@@ -147,8 +147,13 @@ async function initializeWorkerDatabase(request: {
 
   await closeWorkerDatabase()
 
+  // The WASM file is a separate asset, so loading it is part of the capability.
   const sqliteModule = await SQLiteESMFactory({
     locateFile: () => request.wasmUrl,
+  }).catch((error: unknown) => {
+    throw new PersistenceUnavailableError(
+      `Failed to load wa-sqlite WebAssembly from ${request.wasmUrl}: ${String(error)}`,
+    )
   })
   const sqlite3 = SQLite.Factory(sqliteModule)
   const opfsVfs = await OPFSCoopSyncVFS.create(request.vfsName, sqliteModule)

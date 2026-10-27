@@ -67,7 +67,11 @@ const config = defineConfig({
   // an absolute "/assets/worker.js" path that breaks for library consumers.
   base: `./`,
   plugins: [packageWaSqliteWasm()],
-  worker: { plugins: () => [preserveWaSqliteWasmUrl()] },
+  worker: {
+    // opfs-database.ts starts the built worker as a classic script.
+    format: `iife`,
+    plugins: () => [preserveWaSqliteWasmUrl()],
+  },
   test: {
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],

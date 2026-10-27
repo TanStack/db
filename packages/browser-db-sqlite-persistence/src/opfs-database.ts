@@ -144,6 +144,7 @@ type OPFSAssetUrls = {
  * Bundlers otherwise resolve the static asset URLs.
  */
 function resolveViteAssetUrls({
+  wasmFileUrl,
   workerFileUrl,
 }: OPFSAssetUrls): Promise<OPFSAssetUrls> | undefined {
   const viteClient = (
@@ -159,16 +160,16 @@ function resolveViteAssetUrls({
     return undefined
   }
 
-  const workerFile = workerFileUrl.pathname.split(`/`).at(-1)
-  if (!workerFile) {
-    throw new PersistenceUnavailableError(`Browser OPFS worker URL is missing`)
-  }
-  // A package excluded from pre-bundling is served in place, beside its
-  // assets. Only a moved module needs the lookup, which can fail when the app
+  // The build emits dist/wa-sqlite.wasm and dist/assets/<worker>, at different
+  // depths from the code. In place, as when the package is excluded from
+  // pre-bundling, both URLs share dist/. A moved module resolves them to
+  // different directories and needs the lookup, which can fail when the app
   // root cannot resolve the package name.
-  if (workerFileUrl.pathname.endsWith(`/dist/assets/${workerFile}`)) {
+  if (new URL(`../`, workerFileUrl).href === new URL(`./`, wasmFileUrl).href) {
     return undefined
   }
+  const { pathname } = workerFileUrl
+  const workerFile = pathname.slice(pathname.lastIndexOf(`/`) + 1)
 
   // Ask Vite to resolve the package exports instead of guessing install paths.
   const packageUrl = new URL(
