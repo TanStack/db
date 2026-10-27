@@ -72,9 +72,10 @@ ipcMain.handle(`demand:close-session`, () => {
   session?.close()
   session = undefined
 })
+// Quit only after stdout has flushed: a result can be larger than the pipe's
+// buffer, and an early quit truncates it.
 ipcMain.handle(`demand:result`, (_event, result: string) => {
-  process.stdout.write(`${RESULT_PREFIX}${result}\n`)
-  app.quit()
+  process.stdout.write(`${RESULT_PREFIX}${result}\n`, () => app.quit())
 })
 
 void app.whenReady().then(() => {

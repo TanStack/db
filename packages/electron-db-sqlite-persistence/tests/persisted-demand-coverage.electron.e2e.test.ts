@@ -1,50 +1,31 @@
 /**
  * # Receiving witness: persisted demand coverage over Electron
  *
- * Law (`docs/contributing/oracle-reviews/2026-10-20-on-demand-network-first-law.md`,
- * and the primary oracle `packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`):
- * with `initialRender: { strategy: 'network-first', networkTimeoutMs }` on a
- * persisted `syncMode: 'on-demand'` Collection, a demand that an earlier
- * online session loaded settles from SQLite in a later offline session once
- * the wait has passed. A never-loaded demand stays loading. A row deleted
- * after coverage ends coverage. An ordered window (`orderBy rank`, `limit 2`)
- * settles only while its restore holds the rows it held when it settled.
+ * Law and authority: the receiving contract
+ * (`packages/db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract.ts`)
+ * holds the histories and records the sessions. The law is
+ * `docs/contributing/oracle-reviews/2026-10-20-on-demand-network-first-law.md`,
+ * and the primary oracle `packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`
+ * owns it across its cells. This file is the Electron host. It runs the
+ * histories through the real Electron persistence path: the renderer's
+ * `createElectronSQLitePersistence` over real IPC to the main process's
+ * `exposeElectronSQLitePersistence`, with `node:sqlite` in main (Electron's
+ * ABI cannot load better-sqlite3). The node witness covers better-sqlite3.
  *
- * Authority: the primary oracle owns the law across its cells. This file is a
- * receiving witness: it checks the same law through the real Electron
- * persistence path, the renderer's `createElectronSQLitePersistence` over real
- * IPC to the main process's `exposeElectronSQLitePersistence`, with the Node
- * persistence over `node:sqlite` in main (Electron's ABI cannot load
- * better-sqlite3). The node witness covers better-sqlite3 directly.
+ * Histories: every history of `RECEIVING_HISTORIES`, each with its own
+ * database file, one per history. The test launches Electron twice. Phase 1
+ * is an online app launch that records each history's session 1 log. Phase 2
+ * is a later, separate app launch over the same files that records each
+ * history's session 2. Session 2's upstream behavior is the history's.
  *
- * Histories (each has two sessions over one database file, one per history):
- * - `covered`: session 1 is online and loads D (`group = 'a'`) with a1 and a2.
- * - `never`: session 1 never asks for D.
- * - `deleted`: session 1 loads D, then the source deletes a1.
- * - `window-covered`: session 1 loads `group = 'a' orderBy rank limit 2` with
- *   a1, a2, a3 in the source, so the window holds a1 and a2.
- * - `window-replaced`: as `window-covered`, then the source deletes a1 and
- *   inserts a15 at rank 1.5, below the boundary.
- * Session 2 is offline: its upstream load is recorded and never answers.
+ * Production path: the renderer driver
+ * (`tests/e2e/persisted-demand-coverage/renderer.ts`) calls the contract's
+ * recorders in a real renderer, and each history opens its main-process session
+ * over IPC.
  *
- * Production path: the test launches one real Electron app for phase 1 and a
- * second, separate app launch for phase 2. Each launch runs the renderer
- * driver (`tests/e2e/persisted-demand-coverage/renderer.ts`) in a real
- * renderer. Session 2 opens the same database file through a new main-process
- * session, with a wait of `SESSION_2_WAIT_MS`, and runs the query's preload.
- *
- * Observations and checkpoints (phase 2 only):
- * - `beforeDeadline`: after the upstream load is forwarded and 100 ms have
- *   passed, while the wait has not passed. Every history must still be loading.
- * - `afterDeadline`: after polling up to `AFTER_DEADLINE_POLL_MS` for the
- *   query to leave loading. Covered histories must be ready with the restored
- *   rows. Other histories must still be loading.
- * - Positive witness: session 2's upstream load was forwarded, so the offline
- *   source was asked. Phase 1 also checks that session 1 held a1 and a2 online.
- *
- * Mutant evidence (run in a temporary copy, see the coverage map): with
- * `SESSION_2_WAIT_MS = 60_000` in the renderer driver, the covered histories
- * stay loading at `afterDeadline` and fail.
+ * Observations: the records carry the source log, the loads the source
+ * received, and two session 2 checkpoints with their elapsed time since the
+ * forward. The shared judge compares them with the law.
  *
  * Limits: one driver (Electron renderer over IPC to a node:sqlite main
  * process, one window, single-process coordinator). It does not cover
@@ -59,6 +40,15 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import electronPath from 'electron'
 import { expect, it, onTestFinished } from 'vitest'
+import {
+  RECEIVING_HISTORIES,
+  coverageRecords,
+} from '../../db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract'
+import { coverageViolations } from '../../db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle'
+import type {
+  Session1Record,
+  Session2Record,
+} from '../../db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract'
 
 const fixture = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -69,36 +59,13 @@ const packages = resolve(fixture, `../../../..`)
 const RESULT_PREFIX = `__TANSTACK_DB_DEMAND_COVERAGE__:`
 const APP_TIMEOUT_MS = 240_000
 
-const HISTORY_NAMES = [
-  `covered`,
-  `never`,
-  `deleted`,
-  `window-covered`,
-  `window-replaced`,
-] as const
-
-// The expected session 2 settlement of each history, from the law.
-const SETTLES: Record<(typeof HISTORY_NAMES)[number], boolean> = {
-  covered: true,
-  never: false,
-  deleted: false,
-  'window-covered': true,
-  'window-replaced': false,
-}
-
-type Observation = {
-  status: string
-  rows?: Array<string>
-  upstreamCalls: number
-}
-
 type PhaseResult = {
   phase: `1` | `2`
   results: Array<{
     name: string
     error?: string
-    beforeDeadline?: Observation
-    afterDeadline?: Observation
+    session1?: Session1Record
+    session2?: Session2Record
   }>
 }
 
@@ -210,7 +177,7 @@ function runPhase(
   })
 }
 
-it(`real Electron session 2 settles a covered demand offline and keeps the others loading`, async () => {
+it(`real Electron records every persisted demand coverage history across two app launches`, async () => {
   const out = mkdtempSync(join(tmpdir(), `demand-coverage-app-`))
   const databases = mkdtempSync(join(tmpdir(), `demand-coverage-db-`))
   onTestFinished(() => {
@@ -220,33 +187,41 @@ it(`real Electron session 2 settles a covered demand offline and keeps the other
   await bundle(out)
 
   const session1 = await runPhase(out, databases, `1`)
-  expect(session1.results.map(({ name }) => name)).toEqual(HISTORY_NAMES)
+  expect(session1.results.map(({ name }) => name)).toEqual(
+    RECEIVING_HISTORIES.map(({ id }) => id),
+  )
   expect(session1.results.filter(({ error }) => error !== undefined)).toEqual(
     [],
   )
 
   const session2 = await runPhase(out, databases, `2`)
-  expect(session2.results.map(({ name }) => name)).toEqual(HISTORY_NAMES)
-  // One table for all histories, so a failure shows every history's outcome.
-  // Each history waits for the network before it may settle (`beforeStatus`),
-  // and session 2 must have asked the offline source (`forwarded`).
-  const observed = session2.results.map(
-    ({ name, error, beforeDeadline, afterDeadline }) => ({
-      name,
-      error,
-      beforeStatus: beforeDeadline?.status,
-      forwarded: (afterDeadline?.upstreamCalls ?? 0) > 0,
-      status: afterDeadline?.status,
-      rows: afterDeadline?.rows,
-    }),
+  expect(session2.results.map(({ name }) => name)).toEqual(
+    RECEIVING_HISTORIES.map(({ id }) => id),
   )
-  const expected = HISTORY_NAMES.map((name) => ({
-    name,
-    beforeStatus: `loading`,
-    forwarded: true,
-    ...(SETTLES[name]
-      ? { status: `ready`, rows: [`a1`, `a2`] }
-      : { status: `loading`, rows: undefined }),
-  }))
-  expect(observed).toEqual(expected)
+  expect(session2.results.filter(({ error }) => error !== undefined)).toEqual(
+    [],
+  )
+  // Positive witness: each session 2 asked the offline source for the demand.
+  for (const result of session2.results) {
+    expect(result.session2?.sent.length ?? 0).toBeGreaterThan(0)
+  }
+  // Each history's session 1 log and session 2 record go to the shared judge,
+  // one judgment per checkpoint.
+  for (const history of RECEIVING_HISTORIES) {
+    const session1Record = session1.results.find(
+      ({ name }) => name === history.id,
+    )?.session1
+    const session2Record = session2.results.find(
+      ({ name }) => name === history.id,
+    )?.session2
+    expect(session1Record).toBeDefined()
+    expect(session2Record).toBeDefined()
+    const records = coverageRecords(
+      history,
+      session1Record as Session1Record,
+      session2Record as Session2Record,
+    )
+    expect(coverageViolations(records.beforeDeadline), history.id).toEqual([])
+    expect(coverageViolations(records.afterDeadline), history.id).toEqual([])
+  }
 }, 600_000)
