@@ -463,3 +463,46 @@ Classified survivors:
   check, or the client-stream failure in `isInitialRenderReady`; take the
   source as the demand owner; or stop rendering at once on network
   readiness.
+
+## 2026-10-27: closing the remaining gaps
+
+Starting head: `0db1fa68b` (CI green). No production change.
+
+- **Readiness owner.** Six histories in `persisted-readiness-oracle.test.ts`
+  kill the six observer and gate survivors:
+  - a restore held past the deadline, and a gate read before the preload
+    starts;
+  - a retried observer after a failed client stream, over an empty and a
+    nonempty restore;
+  - a retried observer after the Collection's preload has started;
+  - two readers of one on-demand source, only one of which has settled;
+  - a network answer before a 60 s deadline.
+
+  The owner passes 77 of 77. One finding is left for design review: the
+  on-demand initial-render wait rarely differs from network readiness,
+  because an on-demand query becomes ready when its demands settle. Only the
+  synchronous gate distinguishes the two-reader history.
+- **Claim renewal.** A history holds the load's own cache-claim renewal past
+  the wait; a wait measured from after the renewal fails it. The first
+  attempt held the startup renewal instead, before the load started, and its
+  failure on unchanged code came from the history, not production. Every
+  survivor of the sweep in this owner is now killed or classified.
+- **Windows in the campaign.** The campaign adds the window `w` over
+  generated ranks with ties. A query is ready offline exactly when every
+  load it sent in session 2 is covered, so the model judges the
+  tie-boundary load without predicting when core sends it. A driver check
+  that every active demand loads again right after a truncate did not hold
+  for the window, and the model no longer depends on it, so it was removed.
+  Mutants that ignore window keys, compare them in order, or record keys for
+  every demand each fail the campaign. So do the five earlier campaign
+  mutants.
+- **Remaining hosts.** Receiving witnesses run the five native histories on
+  Electron (two app launches over one file, in the desktop E2E job),
+  Cloudflare Durable Objects (`wrangler dev` restarted over one persist
+  directory, in the cloud-mobile job), React Native (an op-sqlite-shaped
+  driver, cloud-mobile job), Expo (an expo-sqlite shim, not in CI), and Tauri
+  and Capacitor (their unit-suite SQLite stand-ins). In each, a 60 s
+  session-2 wait fails the two covered histories. The native Tauri and
+  Capacitor paths need `cargo` or a device here. The Expo witness failed once
+  on its first local run, under concurrent load, and passed the next ten
+  runs; the cause is unknown.

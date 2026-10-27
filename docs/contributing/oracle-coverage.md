@@ -2996,6 +2996,14 @@ restore, including a failed record already present before mount. They also
 check error-boundary handling for derived-query failures with and without a
 failed client stream. A replacement client record arriving during an
 initial-render wait has no persisted-fallback witness yet.
+Its synchronous-gate histories read `isInitialRenderReady()` directly: a
+restore held past its deadline keeps the gate shut, an unstarted preload keeps
+it shut until a retried observer sees a completed preload, a failed client
+stream opens it after a completed restore, and a settled reader of a shared
+on-demand source opens while another reader's demand is held. An early network
+answer ends the wait before its deadline. These kill the mutants that drop the
+restore check, preload registration, client-stream failure, demand owner, and
+network-ready exit.
 This owner uses a controlled persistence adapter, not native SQLite or a real
 network provider; it does not prove browser scheduling or arbitrary histories.
 The framework identity scenario does not cover every possible rejection value
@@ -3134,18 +3142,21 @@ demand after each step of a load: the source Collection stops loading, and
 every load left behind was aborted. Mutants that ignore the row count, let
 an obsolete load record coverage, keep coverage across a truncate, let a
 failed coverage read fail the load, or keep a released load's wait each fail
-it. Its limits: unordered demands only, real timers in session 1, one
-process, and `node:sqlite`.
+it. The campaign also reads the window `group = 'a' orderBy rank limit 2`
+over generated ranks with ties: a query is ready offline exactly when every
+load it sent in session 2 is covered, which judges the tie-boundary load
+without predicting when core sends it. Mutants that ignore window keys,
+compare them in order, or record keys for every demand each fail it. Its
+limits: real timers in session 1, one process, `node:sqlite`, and no cursor
+or offset loads.
 A scripted mutation sweep (63 mutants, recorded in the review record) then
 added five fixed histories: an empty covered demand after a rotation, a
 truncate during an empty load's coverage read, a synchronous answer whose
 durable write lands late, claim recovery after an expired claim during the
-check, and a coverage read that outlasts the wait. Open survivors: the clock
-read after a claim wait, and six observer and gate mutants that the
-persisted-readiness owner does not distinguish (the restore check, preload
-registration, and client-stream failure in `isInitialRenderReady`; the
-source taken as the demand owner; and rendering at once on network
-readiness).
+check, and a coverage read that outlasts the wait. A sixth history holds the
+load's cache-claim renewal past the wait and kills the last survivor, a wait
+measured from after that renewal. No survivor of the sweep remains open in
+this owner.
 
 Native SQLite receiving witnesses run five of the primary oracle's histories
 (covered settles, never-loaded stays loading, covered then a source delete
@@ -3164,10 +3175,32 @@ settlements. A sixth history passes `BrowserCollectionCoordinator` and pins the
 guide's out-of-scope statement (`docs/guides/sqlite-persistence.md`): a covered
 demand stays loading and waits for the network. That history pins the guide,
 not the law; it changes if the guide does.
-The Electron app, which runs fixed scenario inputs through a main-process
-runner, and the Capacitor, Expo, React Native, Tauri, and Cloudflare hosts have
-no witness here. The Electron e2e suite runs locally, but a new history needs
-a new runner scenario. The other hosts were not run in this pass.
+The Electron witness (`packages/electron-db-sqlite-persistence/tests/persisted-demand-coverage.electron.e2e.test.ts`,
+driver under `tests/e2e/persisted-demand-coverage/`) runs the five histories in a
+real Electron renderer over IPC to a `node:sqlite` main process, in two app
+launches over the same database files. It passes all five; its 60 000 ms mutant
+fails the two covered settlements. The Cloudflare witness
+(`packages/cloudflare-durable-objects-db-sqlite-persistence/e2e/cloudflare-persisted-demand-coverage.e2e.test.ts`)
+runs the five histories inside local workerd, restarting `wrangler dev` over the
+same persist directory between sessions. It passes all five, and its mutant
+fails the two covered settlements. The React Native, Expo, Tauri, and Capacitor
+witnesses run the five histories through their package wrapper over a
+better-sqlite3 stand-in, in one process with two driver instances over one file
+(`packages/react-native-db-sqlite-persistence/e2e/react-native-persisted-demand-coverage.e2e.test.ts`,
+`packages/expo-db-sqlite-persistence/e2e/expo-persisted-demand-coverage.e2e.test.ts`,
+`packages/tauri-db-sqlite-persistence/tests/tauri-persisted-demand-coverage.test.ts`,
+`packages/capacitor-db-sqlite-persistence/tests/capacitor-persisted-demand-coverage.test.ts`).
+Each passes all five and fails its two covered settlements at 60 000 ms. The
+Expo witness is skipped on the emulator runtime lane, as its conformance suite
+is; the React Native witness runs there only through the runtime factory the
+lane supplies. No CI job runs the Expo, Capacitor, or Tauri e2e suites, and the
+Electron, React Native, and Cloudflare witnesses run in the existing e2e CI jobs.
+No host has a witness on its native runtime. The Capacitor device e2e needs an iOS simulator
+or Android emulator, and `adb` is not installed here. Its Node e2e fails at file
+load (`SqliteError: cannot start a transaction within a transaction` at
+`tests/helpers/capacitor-sqlite-test-db.ts:22`), so its 113 tests report as
+skipped. The Tauri native e2e needs `cargo`, which is not installed here
+(`failed to run 'cargo metadata'`).
 
 ## Deferred contracts and evidence
 
