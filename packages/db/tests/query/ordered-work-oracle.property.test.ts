@@ -7457,6 +7457,33 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
+  // Trace 1 from a comment on #2221: an ascending unindexed window behind an
+  // anti-joined marker whose only row is ineligible. Before prefix growth the
+  // short prefix took the full-source fallback, twice, after a signalling
+  // refetch; the refetch law allows none.
+  it(`reads no full source after a signalling refetch of a short anti-joined window`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+      initial: [],
+      history: [
+        { type: `upsert`, id: 0, rank: 0, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
+
   // Found by the unindexed-refetch random campaign. A refetch report moves
   // the page's end onto a null rank, which no cursor can express. Reading
   // that end's tie would take the boundary's full-source fallback, so the

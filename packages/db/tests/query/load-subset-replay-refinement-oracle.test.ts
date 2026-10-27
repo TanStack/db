@@ -2705,6 +2705,27 @@ describe(`Ordered windows across truncate replays`, () => {
       recovers: true,
     },
     {
+      // Trace 2 from a comment on #2221. The window grows to three rows while
+      // loads are held, shrinks to one behind a marker replay, and a source
+      // truncate then discards that replay. The deferred one-row move was
+      // dropped with it, so the settled window kept three rows.
+      name: `a window shrink deferred behind a replay that a truncate discards`,
+      history: [
+        { type: `hold` },
+        { type: `window`, offset: 0, limit: 3 },
+        { type: `truncateMarkers` },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `truncate`, armAfterStart: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: false,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+    },
+    {
       // A marker truncate replays the include's demand, and its load throws
       // while it starts. The throw fails the replay as a rejection does, so
       // it keeps the last publication; it used to end the query.
