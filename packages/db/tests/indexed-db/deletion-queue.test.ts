@@ -1,8 +1,13 @@
 /**
- * Administrative delete-by-name follows the native connection queue. Its
- * receipt has no Collection publication authority, even across recreation and
- * a second blocked deletion. This refines deletion_queue_oracle.tla: lifetimes
- * A/B below are test identities only, never stored database metadata.
+ * Scenario tests for administrative delete-by-name. They declare no check or
+ * model and generate no histories: each cell asserts literal outcomes, so this
+ * file is not an oracle. The TLA spec deletion_queue_oracle.tla, cited in
+ * ORACLE.md, states the refined law; these scenarios mirror it by hand.
+ *
+ * Authority: administrative delete-by-name follows the native connection
+ * queue. Its receipt has no Collection publication authority, even across
+ * recreation and a second blocked deletion. Lifetimes A/B below are test
+ * identities only, never stored database metadata.
  *
  * The grammar crosses old transaction/blocker release order with old receipt
  * delivery before recreation, after recreation, during B's blocked deletion,
@@ -10,6 +15,7 @@
  * native success; this models delivery delay, not a claim about browser tasks.
  * Every checkpoint checks native/caller outcome separately, retained public
  * rows, and sticky error status. Native blockers and writes are real IDB work.
+
  */
 import { expect, it, vi } from 'vitest'
 import { deleteDatabase } from '../../src'
