@@ -343,7 +343,8 @@ describe('reserved commits across real-adapter hydrations', () => {
           ? await harness.commitFromPeer('peer edit')
           : undefined
       if (notice) durableBefore = 'peer edit'
-      let load: Promise<unknown> | undefined
+      // The subset load's settlement, judged after the reservation ends.
+      let load: Promise<'fulfilled' | 'rejected'> | undefined
       const admitRoute = () => {
         if (notice) harness.coordinator.deliverFromPeer(COLLECTION_ID, notice)
         else if (route === 'peer reset') {
@@ -355,7 +356,10 @@ describe('reserved commits across real-adapter hydrations', () => {
         } else {
           load = Promise.resolve(
             harness.collection._sync.loadSubset({ limit: 1 }),
-          ).catch((error: unknown) => error)
+          ).then(
+            () => 'fulfilled' as const,
+            () => 'rejected' as const,
+          )
         }
       }
       if (timing === 'mutex turn') {
@@ -412,7 +416,7 @@ describe('reserved commits across real-adapter hydrations', () => {
         () => 'fulfilled',
         () => 'rejected',
       )
-      await load
+      const loadOutcome = await load
       reach.assertReached()
       const expectedValue = ending === 'commits' ? 'refetched' : durableBefore
       await waitFor(() =>
@@ -420,9 +424,16 @@ describe('reserved commits across real-adapter hydrations', () => {
           value: expectedValue,
         }),
       )
-      expect({ outcome, status: harness.collection.status }).toEqual({
+      // A subset load that waited runs after the reservation and succeeds.
+      expect({
+        outcome,
+        status: harness.collection.status,
+        loadOutcome,
+      }).toEqual({
         outcome: ending === 'commits' ? 'fulfilled' : 'rejected',
         status: 'ready',
+        loadOutcome:
+          route === 'subset admitted earlier' ? 'fulfilled' : undefined,
       })
     },
   )

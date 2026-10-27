@@ -1925,6 +1925,17 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
+    let transactionStarted = false
+    // Commit with an aborted signal: the wrapper discards the transaction and
+    // its reserved commit turn ends.
+    const abandonOpenTransaction = () => {
+      if (!transactionStarted) return
+      transactionStarted = false
+      const cancellation = new AbortController()
+      cancellation.abort()
+      const abandoned = commit(cancellation.signal)
+      if (abandoned !== true) void abandoned.catch(() => undefined)
+    }
     // A final initial failure decides its waiting loads. A cleanup that a
     // status listener runs inside that failure must not relabel it.
     let initialSyncFailedFinally = false
@@ -1956,6 +1967,9 @@ function createElectricSync<T extends Row<unknown>>(
       const fails = isActiveLifecycle() && collection.status === `loading`
       abortController.abort()
       if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      // A source that stops must end its reserved transaction. The initial
+      // failure decides first: abandoning commits.
+      abandonOpenTransaction()
     }
 
     if (shapeOptions.signal) {
@@ -2032,17 +2046,6 @@ function createElectricSync<T extends Row<unknown>>(
         return
       },
     })
-    let transactionStarted = false
-    // Commit with an aborted signal: the wrapper discards the transaction and
-    // its reserved commit turn ends.
-    const abandonOpenTransaction = () => {
-      if (!transactionStarted) return
-      transactionStarted = false
-      const cancellation = new AbortController()
-      cancellation.abort()
-      const abandoned = commit(cancellation.signal)
-      if (abandoned !== true) void abandoned.catch(() => undefined)
-    }
     const newTxids = new Set<Txid>()
     const newSnapshots: Array<PostgresSnapshot> = []
     // Track if we've completed initial sync in progressive mode. A persisted
@@ -2725,6 +2728,9 @@ function createElectricSync<T extends Row<unknown>>(
           collection.status === `loading`
         )
           failInitialSync(error)
+        // A source that stops must end its reserved transaction. The initial
+        // failure decides first: abandoning commits.
+        abandonOpenTransaction()
       },
     )
 

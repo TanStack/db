@@ -85,6 +85,9 @@ type ControlledStream = {
   send: (messages: Array<Message<Item>>) => void
   // Electric's stream-error handler, which the test calls to fail the stream.
   onError: (error: unknown) => unknown
+  // The subscriber's error callback, which the SDK calls when it stops
+  // retrying.
+  giveUp: (error: unknown) => void
 }
 
 const streams: Array<ControlledStream> = []
@@ -110,11 +113,18 @@ vi.mock(
               throw new Error(`stream for tab ${stream.tab} is not subscribed`)
             },
             onError: (error) => options.onError?.(error),
+            giveUp: () => {
+              throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+            },
           }
           streams.push(stream)
           return {
-            subscribe: (send: ControlledStream[`send`]) => {
+            subscribe: (
+              send: ControlledStream[`send`],
+              giveUp: ControlledStream[`giveUp`],
+            ) => {
               stream.send = send
+              stream.giveUp = giveUp
               return () => undefined
             },
             requestSnapshot: vi.fn().mockResolvedValue(undefined),
@@ -156,6 +166,7 @@ const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 // ---------------------------------------------------------------------------
 
 type SyncMode = `eager` | `on-demand`
+type StreamStop = `error without retry` | `SDK gives up` | `signal aborted`
 
 function openHost() {
   const directory = mkdtempSync(join(tmpdir(), `tsdb-multi-tab-`))
@@ -196,6 +207,8 @@ function openHost() {
       }
     }
     const coordinator = new BrowserCollectionCoordinator({ dbName })
+    // The application's signal, which can stop the stream from outside.
+    const external = new AbortController()
     const collection = createCollection(
       persistedCollectionOptions<
         Item,
@@ -209,6 +222,7 @@ function openHost() {
             url: `http://electric.test/v1/shape`,
             params: { table: `items` },
             headers: { 'x-tab': tab },
+            signal: external.signal,
           },
           syncMode,
           getKey: (row) => row.id,
@@ -250,8 +264,15 @@ function openHost() {
         current.lastOffset = position.offset
         current.send(messages)
       },
-      // A stream error with no retry stops the provider session for good.
-      failStream: () => stream().onError(new Error(`stream failed`)),
+      // Each way a stream stops for good: an error that `onError` does not
+      // retry, the SDK giving up its own retries, or the application's
+      // signal aborting the stream.
+      stopStream: (how: StreamStop) => {
+        const error = new Error(`stream failed`)
+        if (how === `error without retry`) return stream().onError(error)
+        if (how === `SDK gives up`) return stream().giveUp(error)
+        external.abort()
+      },
       publicRows: () =>
         Array.from(collection.values(), ({ id, label }) => ({
           id,
@@ -326,16 +347,24 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // tab finishes its refetch first, whether every tab's must-refetch arrives
   // before any refetch finishes (a storm) or each tab finishes before the next
   // receives must-refetch (staggered, the neighbouring control), and whether
-  // the last tab's stream fails for good while its refetch is open. A source
-  // that stops for good abandons its reserved transaction (maintainer
-  // decision on #2226), so that tab still applies its peers' refetch from
-  // durable rows, as it did before reservations deferred hydrations.
+  // whether the last tab's stream stops for good while its refetch is open,
+  // through each terminal path Electric has. A source that stops for good
+  // abandons its reserved transaction (maintainer decision on #2226), so that
+  // tab still applies its peers' refetch from durable rows, as it did before
+  // reservations deferred hydrations.
   it.each(
     [2, 3].flatMap((tabCount) =>
       ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
         ([`first`, `last`] as const).flatMap((finisher) =>
           ([`storm`, `staggered`] as const).flatMap((arrival) =>
-            ([`ok`, `fails while refetching`] as const).map((stream) => ({
+            (
+              [
+                `ok`,
+                `error without retry`,
+                `SDK gives up`,
+                `signal aborted`,
+              ] as const
+            ).map((stream) => ({
               tabCount,
               syncMode,
               finisher,
@@ -347,7 +376,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       ),
     ),
   )(
-    `commits every reserved refetch across tabs ($tabCount tabs, $syncMode, $finisher finishes first, $arrival, stream $stream)`,
+    `commits every reserved refetch across tabs ($tabCount tabs, $syncMode, $finisher finishes first, $arrival, stream stop: $stream)`,
     async ({ tabCount, syncMode, finisher, arrival, stream }) => {
       host = openHost()
       const tabs = await openWarmTabs(host, tabCount, syncMode)
@@ -360,7 +389,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }
       type RefetchReach =
         | `peer commit announced during an open refetch`
-        | `a stream failed while its refetch was open`
+        | `a stream stopped while its refetch was open`
       const reach = createOracleReach<RefetchReach>(
         `browser.multi-tab-reserved-refetch`,
         [
@@ -369,19 +398,20 @@ describe(`multi-tab Electric over one persisted database`, () => {
             : []),
           ...(stream === `ok`
             ? []
-            : ([`a stream failed while its refetch was open`] as const)),
+            : ([`a stream stopped while its refetch was open`] as const)),
         ],
       )
       reach.beginHistory()
 
       const finishOrder = finisher === `first` ? tabs : [...tabs].reverse()
-      // The last tab to finish is the one whose stream may fail.
+      // The last tab to finish is the one whose stream may stop.
       const failingTab =
         stream === `ok` ? undefined : finishOrder[finishOrder.length - 1]
       const failStream = async (tab: Tab) => {
-        void Promise.resolve(tab.failStream()).catch(() => undefined)
-        await host!.quiesce(`tab ${tab.tab} stream failed`)
-        reach.reach(`a stream failed while its refetch was open`)
+        if (stream === `ok`) return
+        void Promise.resolve(tab.stopStream(stream)).catch(() => undefined)
+        await host!.quiesce(`tab ${tab.tab} stream stopped`)
+        reach.reach(`a stream stopped while its refetch was open`)
       }
       const refetch = (tab: Tab) =>
         tab.deliver([...afterDeploy.map(insert), upToDate], {

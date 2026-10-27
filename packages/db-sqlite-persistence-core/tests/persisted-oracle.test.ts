@@ -17674,15 +17674,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     | `peer change announced while reserved`
     | `reset and pre-reset commit announced while waiting`
 
-  const runPersistedReadHistory = async ({
-    syncMode,
-    route,
-    operation,
-    truncateReplay,
-    commitTiming,
-    ending,
-    followUp,
-  }: PersistedReadHistory) => {
+  // The rows of the persisted-reads histories. Each history gets fresh
+  // objects, so no history can observe another's.
+  const createPersistedReadRows = () => {
     const storedRow = { id: `shared`, title: `persisted`, detail: `old` }
     const storedOnly = { id: `stored-only`, title: `removed by truncate` }
     const gateRow = { id: `gate`, title: `earlier sync transaction` }
@@ -17691,15 +17685,44 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const peerRow = { id: `peer`, title: `peer change` }
     const remoteRow = { id: `remote`, title: `owner` }
     const supersededRow = { id: `superseded`, title: `before the reset` }
-    const adapter = createRecordingAdapter([
-      { ...storedRow },
-      { ...storedOnly },
-    ])
-    adapter.rowMetadata.set(`shared`, { owner: `persisted` })
-    adapter.collectionMetadata.set(`cursor`, `persisted`)
-    const coordinator = createFailStopCoordinatorHarness(
-      `persisted-read-precedence`,
-    )
+    return {
+      storedRow,
+      storedOnly,
+      gateRow,
+      networkRow,
+      replacementRow,
+      peerRow,
+      remoteRow,
+      supersededRow,
+    }
+  }
+  type PersistedReadRows = ReturnType<typeof createPersistedReadRows>
+
+  // Independent model. It reads only the history and its input rows,
+  // never an observation from production, so it can be reviewed and
+  // calibrated apart from the driver.
+  const expectedPersistedReadOutcome = (
+    history: PersistedReadHistory,
+    fixtureRows: PersistedReadRows,
+  ) => {
+    const {
+      syncMode,
+      route,
+      operation,
+      truncateReplay,
+      commitTiming,
+      ending,
+      followUp,
+    } = history
+    const {
+      storedRow,
+      storedOnly,
+      gateRow,
+      networkRow,
+      replacementRow,
+      peerRow,
+      remoteRow,
+    } = fixtureRows
     const waits =
       commitTiming === `open across mutex turn` ||
       commitTiming === `open across scope entry`
@@ -17709,6 +17732,203 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       commitTiming === `open in the first publication`
     const reserves =
       waits || straddles || commitTiming === `open across startup`
+    const sourceSteps =
+      truncateReplay === `none`
+        ? [`network`]
+        : truncateReplay === `before`
+          ? [`replacement`, `network`]
+          : [`network`, `replacement`]
+    const demandRoute =
+      route === `subset` ||
+      route === `complete subset` ||
+      route === `routed subset`
+    const noDemandRead =
+      syncMode === `on-demand` && !demandRoute && route !== `source baseline`
+    // Rows the route adds durably. The owner's row for a routed subset lands
+    // after the follower's own read, so reads never see it.
+    const routeRows =
+      route === `targeted`
+        ? [peerRow]
+        : route === `routed subset`
+          ? [remoteRow]
+          : []
+    const lateRowIds = new Set(route === `routed subset` ? [remoteRow.id] : [])
+    const readBaselineRows = [
+      storedRow,
+      storedOnly,
+      gateRow,
+      ...routeRows,
+    ].filter((row) => !lateRowIds.has(row.id))
+    // Steps that apply: an abandoned reservation applies none of its writes.
+    const appliedSteps =
+      ending === `abandoned` ? sourceSteps.slice(1) : sourceSteps
+    const abandonedStep = ending === `abandoned` ? sourceSteps[0] : undefined
+
+    // Independent snapshot algebra: a later replacement discards everything
+    // before it. Otherwise the baseline survives only when there is no
+    // replacement, and the newer change decides the shared key. Complete row
+    // values and explicit metadata avoid the separate partial-update contract.
+    // Source steps are input history, never observations from production.
+    const baselineRows = [storedRow, storedOnly, gateRow, ...routeRows]
+    const expectedRows =
+      abandonedStep !== undefined
+        ? baselineRows
+        : truncateReplay === `after`
+          ? [replacementRow]
+          : [
+              ...(truncateReplay === `before`
+                ? [replacementRow]
+                : [storedOnly, gateRow, ...routeRows]),
+              ...(operation === `delete` ? [] : [networkRow]),
+            ]
+    // On-demand without demand exposes the source's own rows; an aborted
+    // demand loads nothing. Every other route exposes the durable rows.
+    // Uncertified on-demand cache rows stay quarantined after a baseline
+    // hydration (electric.ts: "loaded only through fresh subset snapshots").
+    const exposesSourceRowsOnly =
+      noDemandRead || route === `source baseline` || ending === `demand aborted`
+    const expectedPublicRows =
+      exposesSourceRowsOnly && truncateReplay === `none`
+        ? [
+            gateRow,
+            ...(abandonedStep !== undefined || operation === `delete`
+              ? []
+              : [networkRow]),
+          ]
+        : expectedRows
+    const sharedMetadata =
+      abandonedStep !== undefined
+        ? exposesSourceRowsOnly
+          ? { public: undefined, durable: { owner: `persisted` } }
+          : { public: { owner: `persisted` }, durable: { owner: `persisted` } }
+        : truncateReplay !== `after` && operation !== `delete`
+          ? { public: { owner: `network` }, durable: { owner: `network` } }
+          : { public: undefined, durable: undefined }
+    const replacementMetadata =
+      truncateReplay === `none` ? undefined : { owner: `replacement` }
+    const expectedCursor =
+      abandonedStep !== undefined
+        ? `persisted`
+        : truncateReplay === `after`
+          ? `replacement`
+          : `network`
+    const readsSomething =
+      !noDemandRead &&
+      route !== `targeted` &&
+      route !== `source baseline` &&
+      ending !== `demand aborted`
+    // A routed subset reads its local rows, then rereads to admit the
+    // owner's row; a reset follow-up reloads, and so does the fenced
+    // pre-reset notice.
+    const expectedReadCount =
+      (!readsSomething ? 0 : route === `routed subset` ? 2 : 1) +
+      (followUp === `none` ? 0 : 2)
+    const applyDurableEvent = (rows: Map<string, Todo>, event: string) => {
+      if (event === `replacement`) {
+        rows.clear()
+        rows.set(replacementRow.id, replacementRow)
+      } else if (event === `network`) {
+        if (operation === `delete`) rows.delete(`shared`)
+        else rows.set(networkRow.id, networkRow)
+      } else if (event === `owner commit`) rows.set(remoteRow.id, remoteRow)
+    }
+    const startupStepCommitted =
+      commitTiming === `open across startup` && abandonedStep === undefined
+    const noWaitPullSinceCalls = route === `seq-gap pull` ? 1 : 0
+    // A route notice waits in the waiting timings; a follower's owner notice
+    // arrives during a straddled reservation and waits there. Each notice
+    // that waited may ask the leader once more; nothing else may.
+    const waitedNotices =
+      (waits && (route === `full-reload` || route === `seq-gap pull`)) ||
+      (straddles && route === `routed subset`)
+        ? 1
+        : 0
+    const expectedSourceLoads =
+      route === `subset` ||
+      route === `complete subset` ||
+      route === `routed subset`
+        ? ending === `demand aborted`
+          ? 0
+          : 1
+        : route === `seq-gap` && syncMode === `eager`
+          ? 1
+          : 0
+    const metadataKeys = [`shared`, `stored-only`, `gate`, `replacement`]
+    const expectedMetadata = (side: `public` | `durable`) =>
+      metadataKeys.map((key) =>
+        key === `shared`
+          ? sharedMetadata[side]
+          : key === `replacement`
+            ? replacementMetadata
+            : undefined,
+      )
+    return {
+      waits,
+      straddles,
+      reserves,
+      sourceSteps,
+      demandRoute,
+      readBaselineRows,
+      appliedSteps,
+      expectedRows,
+      exposesSourceRowsOnly,
+      expectedPublicRows,
+      expectedCursor,
+      expectedReadCount,
+      applyDurableEvent,
+      startupStepCommitted,
+      noWaitPullSinceCalls,
+      waitedNotices,
+      expectedSourceLoads,
+      metadataKeys,
+      expectedMetadata,
+    }
+  }
+
+  const runPersistedReadHistory = async (history: PersistedReadHistory) => {
+    const { syncMode, route, operation, commitTiming, ending, followUp } =
+      history
+    const fixtureRows = createPersistedReadRows()
+    const {
+      storedRow,
+      storedOnly,
+      gateRow,
+      networkRow,
+      replacementRow,
+      peerRow,
+      remoteRow,
+      supersededRow,
+    } = fixtureRows
+    const {
+      waits,
+      straddles,
+      reserves,
+      sourceSteps,
+      demandRoute,
+      readBaselineRows,
+      appliedSteps,
+      expectedRows,
+      exposesSourceRowsOnly,
+      expectedPublicRows,
+      expectedCursor,
+      expectedReadCount,
+      applyDurableEvent,
+      startupStepCommitted,
+      noWaitPullSinceCalls,
+      waitedNotices,
+      expectedSourceLoads,
+      metadataKeys,
+      expectedMetadata,
+    } = expectedPersistedReadOutcome(history, fixtureRows)
+    const adapter = createRecordingAdapter([
+      { ...storedRow },
+      { ...storedOnly },
+    ])
+    adapter.rowMetadata.set(`shared`, { owner: `persisted` })
+    adapter.collectionMetadata.set(`cursor`, `persisted`)
+    const coordinator = createFailStopCoordinatorHarness(
+      `persisted-read-precedence`,
+    )
     const persistenceEntered = createEventGate()
     const releasePersistence = createEventGate()
     const readApplied = createEventGate()
@@ -17887,12 +18107,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await recordRead(`scanRows`)
       return scanRows(...args)
     }
-    const sourceSteps =
-      truncateReplay === `none`
-        ? [`network`]
-        : truncateReplay === `before`
-          ? [`replacement`, `network`]
-          : [`network`, `replacement`]
     let sourceParams!: TodoSyncParams
     const writeSourceStep = (step: (typeof sourceSteps)[number]) => {
       if (step === `replacement`) {
@@ -17972,80 +18186,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       route === `complete subset`
         ? { signal: abortDemand.signal }
         : { limit: 100, signal: abortDemand.signal }
-    const demandRoute =
-      route === `subset` ||
-      route === `complete subset` ||
-      route === `routed subset`
-    const noDemandRead =
-      syncMode === `on-demand` && !demandRoute && route !== `source baseline`
-    // Rows the route adds durably. The owner's row for a routed subset lands
-    // after the follower's own read, so reads never see it.
-    const routeRows =
-      route === `targeted`
-        ? [peerRow]
-        : route === `routed subset`
-          ? [remoteRow]
-          : []
-    const lateRowIds = new Set(route === `routed subset` ? [remoteRow.id] : [])
-    const readBaselineRows = [
-      storedRow,
-      storedOnly,
-      gateRow,
-      ...routeRows,
-    ].filter((row) => !lateRowIds.has(row.id))
-    // Steps that apply: an abandoned reservation applies none of its writes.
-    const appliedSteps =
-      ending === `abandoned` ? sourceSteps.slice(1) : sourceSteps
-    const abandonedStep = ending === `abandoned` ? sourceSteps[0] : undefined
-
-    // Independent snapshot algebra: a later replacement discards everything
-    // before it. Otherwise the baseline survives only when there is no
-    // replacement, and the newer change decides the shared key. Complete row
-    // values and explicit metadata avoid the separate partial-update contract.
-    // Source steps are input history, never observations from production.
-    const baselineRows = [storedRow, storedOnly, gateRow, ...routeRows]
-    const expectedRows =
-      abandonedStep !== undefined
-        ? baselineRows
-        : truncateReplay === `after`
-          ? [replacementRow]
-          : [
-              ...(truncateReplay === `before`
-                ? [replacementRow]
-                : [storedOnly, gateRow, ...routeRows]),
-              ...(operation === `delete` ? [] : [networkRow]),
-            ]
-    // On-demand without demand exposes the source's own rows; an aborted
-    // demand loads nothing. Every other route exposes the durable rows.
-    // Uncertified on-demand cache rows stay quarantined after a baseline
-    // hydration (electric.ts: "loaded only through fresh subset snapshots").
-    const exposesSourceRowsOnly =
-      noDemandRead || route === `source baseline` || ending === `demand aborted`
-    const expectedPublicRows =
-      exposesSourceRowsOnly && truncateReplay === `none`
-        ? [
-            gateRow,
-            ...(abandonedStep !== undefined || operation === `delete`
-              ? []
-              : [networkRow]),
-          ]
-        : expectedRows
-    const sharedMetadata =
-      abandonedStep !== undefined
-        ? exposesSourceRowsOnly
-          ? { public: undefined, durable: { owner: `persisted` } }
-          : { public: { owner: `persisted` }, durable: { owner: `persisted` } }
-        : truncateReplay !== `after` && operation !== `delete`
-          ? { public: { owner: `network` }, durable: { owner: `network` } }
-          : { public: undefined, durable: undefined }
-    const replacementMetadata =
-      truncateReplay === `none` ? undefined : { owner: `replacement` }
-    const expectedCursor =
-      abandonedStep !== undefined
-        ? `persisted`
-        : truncateReplay === `after`
-          ? `replacement`
-          : `network`
     // Pending operations and the outcome each one owes.
     const pendingOperations: Array<Promise<unknown>> = []
     const expectedOutcomes: Array<`fulfilled` | `rejected`> = []
@@ -18414,26 +18554,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       // startup reservation commits, its step precedes the reads; while a read
       // waits for a reserved commit, reads and later steps may interleave.
       // Rows are compared by key: the adapter's row order is not part of the law.
-      const readsSomething =
-        !noDemandRead &&
-        route !== `targeted` &&
-        route !== `source baseline` &&
-        ending !== `demand aborted`
-      // A routed subset reads its local rows, then rereads to admit the
-      // owner's row; a reset follow-up reloads, and so does the fenced
-      // pre-reset notice.
-      const expectedReadCount =
-        (!readsSomething ? 0 : route === `routed subset` ? 2 : 1) +
-        (followUp === `none` ? 0 : 2)
-      const applyDurableEvent = (rows: Map<string, Todo>, event: string) => {
-        if (event === `replacement`) {
-          rows.clear()
-          rows.set(replacementRow.id, replacementRow)
-        } else if (event === `network`) {
-          if (operation === `delete`) rows.delete(`shared`)
-          else rows.set(networkRow.id, networkRow)
-        } else if (event === `owner commit`) rows.set(remoteRow.id, remoteRow)
-      }
       const durableBefore = (index: number) => {
         const rows = new Map(readBaselineRows.map((row) => [row.id, row]))
         for (const event of trace.slice(0, index))
@@ -18456,8 +18576,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const stepIndexes = trace.flatMap((event, index) =>
         event === `network` || event === `replacement` ? [index] : [],
       )
-      const startupStepCommitted =
-        commitTiming === `open across startup` && abandonedStep === undefined
       const observedReadOrder = waits
         ? `may interleave`
         : straddles
@@ -18478,34 +18596,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 )
               ? `before every step`
               : `other`
-      const noWaitPullSinceCalls = route === `seq-gap pull` ? 1 : 0
-      // A route notice waits in the waiting timings; a follower's owner notice
-      // arrives during a straddled reservation and waits there. Each notice
-      // that waited may ask the leader once more; nothing else may.
-      const waitedNotices =
-        (waits && (route === `full-reload` || route === `seq-gap pull`)) ||
-        (straddles && route === `routed subset`)
-          ? 1
-          : 0
-      const expectedSourceLoads =
-        route === `subset` ||
-        route === `complete subset` ||
-        route === `routed subset`
-          ? ending === `demand aborted`
-            ? 0
-            : 1
-          : route === `seq-gap` && syncMode === `eager`
-            ? 1
-            : 0
-      const metadataKeys = [`shared`, `stored-only`, `gate`, `replacement`]
-      const expectedMetadata = (side: `public` | `durable`) =>
-        metadataKeys.map((key) =>
-          key === `shared`
-            ? sharedMetadata[side]
-            : key === `replacement`
-              ? replacementMetadata
-              : undefined,
-        )
       const observed = {
         outcomes: outcomes.map(({ status }) => status),
         readsDuringReservation: straddles ? [] : readsDuringReservation,

@@ -2908,18 +2908,23 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       admitted earlier) with two timings (a held write of this Collection,
       or the shared scheduler holding the scope after its turn) and two
       endings (commits, abandoned). It runs on `SQLiteCorePersistenceAdapter`.
-      Its 10 cells pass. Every committing cell fails on `5649a07d4`. A peer
+      It also judges that a subset load that waited settles successfully.
+      Its 10 cells pass. Every committing cell fails on `5649a07d4`. A
+      mutant that rejects the waited load after the reservation fails the 4
+      subset cells; before the load's outcome was judged, it passed. A peer
       full reload behind this Collection's own held write cannot become
       durable through the single SQLite writer, so it is excluded here and
       left to the grammar's fixture leader.
       Browser host: the multi-tab Electric oracle in
       `browser-db-sqlite-persistence` crosses two or three tabs, eager or
       on-demand Collections, which tab finishes first, a storm or staggered
-      arrival, and whether the last tab's stream fails while its refetch is
-      open. Its 32 cells pass. Every ordinary storm cell fails on
-      `5649a07d4`. Without Electric's abandon-on-failure, the eager storm
-      cells where a stream fails also fail. On-demand cells judge receipts
-      and status only.
+      arrival, and how the last tab's stream stops for good while its refetch
+      is open: no stop, an error that `onError` does not retry, the SDK
+      giving up its retries, or the application's signal aborting the
+      stream. Its 64 cells pass. Every ordinary storm cell fails on
+      `5649a07d4`. Without Electric's abandon on each stop path, the eager
+      storm cells for that path also fail (4 cells per path). On-demand
+      cells judge receipts and status only.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in
