@@ -6,12 +6,6 @@ const packageDirectory = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   base: `./`,
-  // The worker passes wa-sqlite its WASM URL through locateFile, so this
-  // exclusion no longer locates the WASM file. These fixtures serve the package
-  // source; the packaged-consumer e2e tests own the dependency-optimizer path.
-  optimizeDeps: {
-    exclude: [`@journeyapps/wa-sqlite`],
-  },
   resolve: {
     alias: {
       '@tanstack/db': resolve(packageDirectory, `../db/src`),

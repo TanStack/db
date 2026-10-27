@@ -53,18 +53,26 @@ function preserveWaSqliteWasmUrl(): Plugin {
       if (!source.includes(defaultUrl)) {
         this.error(`wa-sqlite's WASM URL pattern changed`)
       }
-      return source.replace(
-        defaultUrl,
-        `new URL("wa-sqlite" + ".wasm",import.meta.url)`,
-      )
+      return {
+        code: source.replace(
+          defaultUrl,
+          `new URL("wa-sqlite" + ".wasm",import.meta.url)`,
+        ),
+        // The edit stays within one line, so the existing mappings still hold
+        // apart from columns after it on that line.
+        map: null,
+      }
     },
   }
 }
 
 const config = defineConfig({
-  // Build with relative paths so the ?worker import generates
-  // new URL("../assets/worker.js", import.meta.url) instead of
-  // an absolute "/assets/worker.js" path that breaks for library consumers.
+  // Build with relative paths so the ?worker&url and WASM URL imports emit
+  // new URL("../assets/opfs-worker-<hash>.js", import.meta.url) and
+  // new URL("../../wa-sqlite.wasm", import.meta.url) instead of absolute
+  // "/assets/..." paths that break for library consumers. opfs-database.ts
+  // relies on the two depths differing to tell a pre-bundled copy of this
+  // package from one served in place; the install-layout e2e test covers it.
   base: `./`,
   plugins: [packageWaSqliteWasm()],
   worker: {

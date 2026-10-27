@@ -260,6 +260,9 @@ export async function openBrowserWASQLiteOPFSDatabase(
   const openFailure = new Promise<never>((_resolve, reject) => {
     failOpen = reject
   })
+  // A failure before any step awaits this signal, such as an abort followed by
+  // a throwing Worker constructor, must not become an unhandled rejection.
+  openFailure.catch(() => {})
   const onAbort = (): void => {
     if (signal) failOpen(getOpenAbortError(signal))
   }
@@ -277,7 +280,11 @@ export async function openBrowserWASQLiteOPFSDatabase(
   }
 
   try {
-    const pageUrl = globalThis.location.href
+    // Resolve like the Worker constructor does: against the document base,
+    // which an about:srcdoc frame inherits. A worker has only its location.
+    const pageUrl =
+      (globalThis as BrowserOPFSFeatureGlobal).document?.baseURI ??
+      globalThis.location.href
     const bundledUrls = {
       wasmFileUrl: new URL(wasmUrl, pageUrl),
       workerFileUrl: new URL(workerUrl, pageUrl),
