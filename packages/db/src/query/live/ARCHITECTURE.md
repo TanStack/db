@@ -1752,8 +1752,11 @@ every row before the top-K (a recorded limit).
    started by its active replay demands settles; failure keeps the prior public
    result and later partial source changes private until an authoritative replay
    succeeds. A failed replay with no remaining logical demand cannot gate other
-   graph work. A demand change counts as one step, so a change that asks for
-   data again leaves the replay its new demand.
+   graph work. A lazy load that fails after initial-query readiness settles
+   its demand: graph output that waited for that load publishes at once, and
+   the failure shows as a request error (law 16). A demand change counts as
+   one step, so a change that asks for data again leaves the replay its new
+   demand.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered and every eager source is ready; obsolete demand does not block
     it, and an on-demand source's own Collection readiness does not gate it.
@@ -1810,13 +1813,29 @@ every row before the top-K (a recorded limit).
     it replaces: a replaced load's own outcome decides
     nothing, even when it settles after the replay. A load that fails while
     the replay is in flight fails with its own error once the replay
-    settles. A lazy demand's error clears as soon as a later load of its
-    failed key succeeds, without waiting for its other loads. The replay loads
-    the query's demand again as one unit: the query's first load waits for
-    the whole replay, the replay fails only for a demand the query still
-    holds when it settles, and its success clears only the errors of demands
-    it loaded again. A load that threw holds no demand, so a replay does not
-    load it again and its error stays. Query failures and contract
+    settles, in failure order; once the replay has failed, a load that joins
+    it and fails shows its own error at once. A lazy demand's error clears as
+    soon as a later load of its failed key succeeds, without waiting for its
+    other loads. The replay loads the query's demand again as one unit: the
+    query's first load waits for the whole replay, the replay fails only for
+    a demand the query still holds when it settles, and its success clears
+    the errors of the keys it loaded again, also a key whose earlier load
+    threw. A load that threw holds no demand, so a replay does not load it
+    again: a key only such a load covers keeps its error, and so does a key
+    whose later load failed while the query still holds that request. A
+    request error belongs to the request that failed: once a demand change
+    retires that request, the replay's load of its key decides the key, so
+    the error goes when the replay succeeds. When several request errors are
+    open, the query's node shows the newest, as TanStack Query's `error`;
+    two requests that fail with one error show one problem, which keeps the
+    place of its first failure, and a failed replay shows the subscription's
+    replay error. A replay request that throws leaves
+    its key to that replay's verdict: a demand change during the replay does
+    not request the key by itself, and only a replacement for fragmented
+    coverage (law 10) requests it again, inside the whole current key union.
+    While the source shows a failed first load, the query's demand changes
+    start the acquisitions law 10 asks for without a request: they join an
+    open replay, and the source's restart or next replay requests them. Query failures and contract
     violations, such as a graph failure or a Collection cleaned up under the
     query, crash the query. An Effect follows the same rules, with its
     initial-query readiness at its settled initial loads: a crashed source,

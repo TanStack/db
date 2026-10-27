@@ -1114,8 +1114,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     if (!this.reachedReady && this.canCompleteInitialLoad()) {
       this.reachedReady = true
       // A problem the sources already show when the gate opens is the first
-      // change the app hears of.
-      if (this.healthTree().hasErrors) this.reportHealth()
+      // change the app hears of. A healthy gate's tree is known without an
+      // announcement, so a health:change for the status change that opened
+      // the gate repeats nothing.
+      const tree = this.healthTree()
+      if (tree.hasErrors) this.reportHealth()
+      else this.reportedTree = tree
     }
     return this.reachedReady
   }

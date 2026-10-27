@@ -566,10 +566,10 @@ export class CollectionConfigBuilder<
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    if (this.reportFailedRequest(planId, normalized)) {
-      // The failure settles the demand: the request error shows it, and
-      // ordered work must not wait for a load that already ended. Output
-      // held for this demand publishes now.
+    if (this.liveQueryCollection?._lifecycle.status === `ready`) {
+      // The failure settles the demand: the request errors of its keys show
+      // it, and ordered work must not wait for a load that already ended.
+      // Output held for this demand publishes now.
       demand.settled = true
       this.maybeRunGraphFn?.()
       return
@@ -672,7 +672,6 @@ export class CollectionConfigBuilder<
   retireDemand(planId: string): void {
     const demand = this.activeDemands.get(planId)
     this.activeDemands.delete(planId)
-    this.clearFailedRequest(planId)
     demand?.participant?.resolve()
   }
 
@@ -686,11 +685,10 @@ export class CollectionConfigBuilder<
     this.clearFailedRequest(`root:${sourceId}`)
   }
 
-  /** A source's truncate replay loaded these demands again. */
-  settleReplayedRequests(sourceId: string, planIds: Iterable<string>): void {
+  /** A source's truncate replay loaded the query's demand again. */
+  settleReplayedRequests(sourceId: string): void {
     this.settleRootLoad(sourceId)
     this.clearFailedRequest(`replay:${sourceId}`)
-    for (const planId of planIds) this.clearFailedRequest(planId)
   }
 
   /** A source's truncate replay could not load the query's data again. */
@@ -700,8 +698,8 @@ export class CollectionConfigBuilder<
   }
 
   // After the first ready, a failed load is a request error on this query's
-  // node. It clears when every failed request settles later or is released.
-  private reportFailedRequest(key: string, error: Error): boolean {
+  // node. It clears when the failed request settles later or is released.
+  reportFailedRequest(key: string, error: Error): boolean {
     const lifecycle = this.liveQueryCollection?._lifecycle
     if (lifecycle?.status !== `ready`) return false
     lifecycle.reportRequestError(key, error)

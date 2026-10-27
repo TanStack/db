@@ -30,6 +30,19 @@ import { fc } from '@fast-check/vitest'
  * legal commands with fixed and random seeds. The drivers compare production
  * loads, unloads, results, status, errors, and publication against this trace.
  *
+ * A demand change is one step (ARCHITECTURE law 9, "Replay participants and
+ * failure"). Its `change` command retires several logical owners at once, as
+ * a lazy join's demand change retires several segments, and the model judges
+ * an open replay once, after every owner in the change has retired. Its
+ * `replace` command marks one held owner as the replacement for another's
+ * coverage, as a lazy join's fragmented-churn replacement does (law 10,
+ * "Source cancellation and applied settlement"): the replacement requests the
+ * whole current key union, so while it is held and its own acquisition did
+ * not fail, the replay does not fail for the owner it replaces. Retiring the
+ * replacement returns that verdict to the replaced owner. Only the
+ * demand-change grammar below generates these two commands and the third
+ * demand `c`.
+ *
  * `LifecycleAttempt` is deliberately broader than production's
  * `SubsetAcquisition`: it begins when `loadSubset` is invoked, including a
  * synchronous throw that creates no acquisition or acquisition lease. Its
@@ -38,7 +51,7 @@ import { fc } from '@fast-check/vitest'
  * not renamed production states.
  */
 
-export type DemandName = `a` | `b`
+export type DemandName = `a` | `b` | `c`
 
 /**
  * Ordinary subscription admission may start one sync run. Cleanup from its
@@ -142,6 +155,8 @@ export type LifecycleCommand =
   | { type: `request`; demand: DemandName }
   | { type: `abort`; demand: DemandName }
   | { type: `release`; demand: DemandName }
+  | { type: `change`; release: ReadonlyArray<DemandName> }
+  | { type: `replace`; demand: DemandName; replaced: DemandName }
   | {
       type: `settle`
       demand: DemandName
@@ -186,6 +201,8 @@ export type LifecycleOwner = {
   demand: DemandName
   aborted: boolean
   attemptId?: number
+  // Owners whose coverage this owner replaces (`replace`).
+  replaces?: Array<number>
 }
 
 export type LifecycleAttempt = {
@@ -252,6 +269,8 @@ export type LifecycleModel = {
 
 export type LifecycleEffect = {
   ownerId?: number
+  // The owners one `change` retired, in release order.
+  ownerIds?: Array<number>
   attemptId?: number
   requestResult?: boolean
 }
@@ -303,18 +322,70 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
 }
 
 // Settled failure is not an authoritative replacement. Keep subsequent reads
-// private until the failed owner retires or a new replay succeeds.
+// private until the failed owner retires or a new replay succeeds. A held
+// replacement whose own acquisition did not fail covers the owners it
+// replaces, so their failure does not fail the replay. An owner without a
+// current acquisition attempt owes nothing, as before.
 function replacementSucceeded(model: LifecycleModel): boolean {
+  const loaded = ({ attemptId }: LifecycleOwner) =>
+    attemptId === undefined || model.attempts[attemptId]!.outcome === `resolve`
   return (
     !model.attempts.some(
       ({ gating, inReplacement }) => gating && inReplacement,
     ) &&
     model.owners.every(
-      ({ attemptId }) =>
-        attemptId === undefined ||
-        model.attempts[attemptId]!.outcome === `resolve`,
+      (owner) =>
+        loaded(owner) ||
+        model.owners.some(
+          (replacement) =>
+            replacement.replaces?.includes(owner.id) && loaded(replacement),
+        ),
     )
   )
+}
+
+// Judge an open replay: success closes the publication barrier.
+function judgeReplay(model: LifecycleModel): void {
+  if (!model.publicationBarrierOpen || !replacementSucceeded(model)) return
+  model.publicationBarrierOpen = false
+  if (
+    model.owners.some(
+      ({ attemptId }) =>
+        attemptId !== undefined &&
+        model.attempts[attemptId]!.outcome === `reject`,
+    )
+  )
+    model.reach.add(`replacement-decides-failed-owner`)
+}
+
+// What judging the open replay now would decide. Only `change` asks, to name
+// the histories in which judging between its releases would differ.
+function replayVerdict(
+  model: LifecycleModel,
+): `closed` | `open` | `failed` | `succeeded` {
+  if (!model.publicationBarrierOpen) return `closed`
+  if (
+    model.attempts.some(({ gating, inReplacement }) => gating && inReplacement)
+  )
+    return `open`
+  return replacementSucceeded(model) ? `succeeded` : `failed`
+}
+
+// Retire one logical owner and its acquisition lease without judging the
+// replay: the caller judges once its whole demand change has retired.
+function retireOwner(
+  model: LifecycleModel,
+  demand: DemandName,
+): LifecycleOwner | undefined {
+  const index = model.owners.findIndex((owner) => owner.demand === demand)
+  if (index === -1) return undefined
+  const [owner] = model.owners.splice(index, 1)
+  retireAttempt(model, owner!, { unload: true })
+  // Retirement removes the logical owner, including its older transports.
+  for (const attempt of model.attempts) {
+    if (attempt.ownerId === owner!.id) attempt.gating = false
+  }
+  return owner
 }
 
 function startAttempt(
@@ -505,25 +576,60 @@ export function reduceLifecycle(
   }
 
   if (command.type === `release`) {
-    const index = model.owners.findIndex(
-      ({ demand }) => demand === command.demand,
-    )
-    if (index === -1) {
+    const owner = retireOwner(model, command.demand)
+    if (!owner) {
       model.reach.add(`noop:release`)
       return {}
     }
     model.reach.add(`effective:release`)
-    const [owner] = model.owners.splice(index, 1)
-    retireAttempt(model, owner!, { unload: true })
-    // Retirement removes the logical owner, including its older transports.
-    for (const attempt of model.attempts) {
-      if (attempt.ownerId === owner!.id) attempt.gating = false
-    }
-    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
-      model.publicationBarrierOpen = false
-    }
+    judgeReplay(model)
     setStatus(model)
-    return { ownerId: owner!.id }
+    return { ownerId: owner.id }
+  }
+
+  if (command.type === `change`) {
+    // Law 9: the change is one step. Every named owner retires first, and
+    // the replay is judged once after the last. The verdicts between its
+    // releases are recorded only to name the histories they would mislead.
+    const verdicts: Array<ReturnType<typeof replayVerdict>> = []
+    const retired: Array<LifecycleOwner> = []
+    for (const demand of command.release) {
+      const owner = retireOwner(model, demand)
+      if (!owner) continue
+      retired.push(owner)
+      verdicts.push(replayVerdict(model))
+    }
+    if (retired.length === 0) {
+      model.reach.add(`noop:change`)
+      return {}
+    }
+    model.reach.add(`effective:change`)
+    const verdict = verdicts.at(-1)!
+    if (retired.length > 1 && verdict !== `closed`)
+      model.reach.add(`change:several-owners-during-replay`)
+    const between = verdicts.slice(0, -1)
+    if (verdict === `failed` && between.includes(`succeeded`))
+      model.reach.add(`change:between-releases-would-publish`)
+    if (verdict === `succeeded` && between.includes(`failed`))
+      model.reach.add(`change:between-releases-would-fail`)
+    judgeReplay(model)
+    setStatus(model)
+    return { ownerIds: retired.map(({ id }) => id) }
+  }
+
+  if (command.type === `replace`) {
+    const replacement = model.owners.find(
+      ({ demand }) => demand === command.demand,
+    )
+    if (!replacement) {
+      model.reach.add(`noop:replace`)
+      return {}
+    }
+    model.reach.add(`effective:replace`)
+    replacement.replaces = model.owners
+      .filter(({ demand }) => demand === command.replaced)
+      .map(({ id }) => id)
+    return { ownerId: replacement.id }
   }
 
   if (command.type === `settle`) {
@@ -548,9 +654,7 @@ export function reduceLifecycle(
       model.errors.push({ attemptId: attempt.id, error: attempt.failure })
       model.trace.push({ type: `error`, attemptId: attempt.id })
     }
-    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
-      model.publicationBarrierOpen = false
-    }
+    judgeReplay(model)
     setStatus(model)
     return { attemptId: attempt.id }
   }
@@ -593,9 +697,7 @@ export function reduceLifecycle(
         startAttempt(model, owner)
       }
     }
-    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
-      model.publicationBarrierOpen = false
-    }
+    judgeReplay(model)
     setStatus(model)
     return {}
   }
@@ -641,9 +743,7 @@ export function reduceLifecycle(
     for (const owner of model.owners) {
       if (!owner.aborted) replayLoads.push(startAttempt(model, owner, false))
     }
-    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
-      model.publicationBarrierOpen = false
-    }
+    judgeReplay(model)
     model.publications++
     model.trace.push({ type: `publication` })
     for (const load of replayLoads) {
@@ -676,6 +776,187 @@ export const syncLifecycleHistoryArbitrary = fc.array(
   lifecycleCommandArbitrary,
   { minLength: 1, maxLength: 20 },
 )
+
+/**
+ * The demand-change grammar: three demands, with `change` and `replace`.
+ * Each history first requests all three demands in any order, names a
+ * replacement, and truncates soon after. A few current settlements and then
+ * a change meet the open replay, and a snapshot request right after the
+ * change observes whether the replay still holds publication. The change
+ * often retires the replacement and the third owner, keeping the replaced
+ * one; a later `replace` may name another. The suffix weights
+ * settlements and changes, the commands whose order decides the verdict;
+ * every other lifecycle command stays legal anywhere.
+ */
+const anyDemand = fc.constantFrom<DemandName>(`a`, `b`, `c`)
+type ReplaceCommand = Extract<LifecycleCommand, { type: `replace` }>
+const replaceArbitrary: fc.Arbitrary<ReplaceCommand> = fc
+  .tuple(anyDemand, anyDemand)
+  .filter(([demand, replaced]) => demand !== replaced)
+  .map(([demand, replaced]) => ({ type: `replace`, demand, replaced }))
+const currentSettleArbitrary: fc.Arbitrary<LifecycleCommand> = fc
+  .tuple(anyDemand, fc.constantFrom(`resolve` as const, `reject` as const))
+  .map(([demand, outcome]) => settle(demand, `current`, `oldest`, outcome))
+const demandChangeCommandArbitrary: fc.Arbitrary<LifecycleCommand> = fc.oneof(
+  // A current acquisition's own outcome decides the verdict most often.
+  { weight: 6, arbitrary: currentSettleArbitrary },
+  {
+    weight: 1,
+    arbitrary: fc
+      .record({
+        demand: anyDemand,
+        scope: fc.constantFrom(`current` as const, `obsolete` as const),
+        age: fc.constantFrom(`oldest` as const, `newest` as const),
+        outcome: fc.constantFrom(`resolve` as const, `reject` as const),
+      })
+      .map(({ demand, scope, age, outcome }) =>
+        settle(demand, scope, age, outcome),
+      ),
+  },
+  {
+    // A change that keeps one owner can leave it to a failed verdict.
+    weight: 3,
+    arbitrary: fc
+      .tuple(anyDemand, anyDemand)
+      .filter(([first, second]) => first !== second)
+      .map(([first, second]): LifecycleCommand => ({
+        type: `change`,
+        release: [first, second],
+      })),
+  },
+  {
+    weight: 1,
+    arbitrary: fc
+      .shuffledSubarray<DemandName>([`a`, `b`, `c`], { minLength: 3 })
+      .map((release): LifecycleCommand => ({ type: `change`, release })),
+  },
+  {
+    weight: 1,
+    arbitrary: fc
+      .tuple(
+        fc.constantFrom(
+          `request` as const,
+          `release` as const,
+          `abort` as const,
+        ),
+        anyDemand,
+      )
+      .map(([type, demand]): LifecycleCommand => ({ type, demand })),
+  },
+  { weight: 1, arbitrary: replaceArbitrary },
+  {
+    weight: 1,
+    arbitrary: fc.constantFrom<LifecycleCommand>(
+      { type: `truncate` },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `unsubscribe` },
+    ),
+  },
+)
+
+// A change that retires a replacement and another owner, but keeps the owner
+// it replaces, is the shape whose verdict depends on judging once.
+function changeArbitrary(
+  replace: ReplaceCommand,
+): fc.Arbitrary<LifecycleCommand> {
+  const other = ([`a`, `b`, `c`] as const).find(
+    (demand) => demand !== replace.demand && demand !== replace.replaced,
+  )!
+  return fc.oneof(
+    {
+      weight: 2,
+      arbitrary: fc.constantFrom<LifecycleCommand>(
+        { type: `change`, release: [other, replace.demand] },
+        { type: `change`, release: [replace.demand, other] },
+      ),
+    },
+    { weight: 2, arbitrary: demandChangeCommandArbitrary },
+  )
+}
+
+export const demandChangeLifecycleHistoryArbitrary: fc.Arbitrary<
+  Array<LifecycleCommand>
+> = replaceArbitrary.chain((replace) =>
+  fc
+    .tuple(
+      fc.shuffledSubarray<LifecycleCommand>(
+        [
+          { type: `request`, demand: `a` },
+          { type: `request`, demand: `b` },
+          { type: `request`, demand: `c` },
+        ],
+        { minLength: 3 },
+      ),
+      fc.array(demandChangeCommandArbitrary, { maxLength: 2 }),
+      // Each demand's current acquisition may settle once, in any order.
+      fc
+        .tuple(
+          ...([`a`, `b`, `c`] as const).map((demand) =>
+            fc
+              .constantFrom(`resolve` as const, `reject` as const, undefined)
+              .map(
+                (outcome) =>
+                  outcome && settle(demand, `current`, `oldest`, outcome),
+              ),
+          ),
+        )
+        .chain((settles) => {
+          const present = settles.filter((command) => command !== undefined)
+          return fc.shuffledSubarray(present, { minLength: present.length })
+        }),
+      changeArbitrary(replace),
+      // A snapshot request observes whether the replay still holds
+      // publication.
+      anyDemand.map((demand): LifecycleCommand => ({
+        type: `request`,
+        demand,
+      })),
+      fc.array(demandChangeCommandArbitrary, { maxLength: 6 }),
+    )
+    .map(([requests, before, settles, change, request, after]) => [
+      ...requests,
+      replace,
+      ...before,
+      { type: `truncate` },
+      ...settles,
+      change,
+      request,
+      ...after,
+    ]),
+)
+
+/**
+ * The shrunk lazy-join trace: `b` replaces `a`, the replay loads `b` and
+ * fails `a`, and one change retires `c`, whose replay load is still pending,
+ * and then `b`. Judged after `c` alone, `b` still covers `a` and the replay
+ * would publish; judged after the whole change, `a` is held and failed, so
+ * the replay fails and a later snapshot stays private.
+ */
+export const changeRetiresReplacementHistory: ReadonlyArray<LifecycleCommand> =
+  [
+    { type: `request`, demand: `a` },
+    { type: `request`, demand: `b` },
+    { type: `request`, demand: `c` },
+    { type: `replace`, demand: `b`, replaced: `a` },
+    { type: `truncate` },
+    {
+      type: `settle`,
+      demand: `b`,
+      scope: `current`,
+      age: `oldest`,
+      outcome: `resolve`,
+    },
+    {
+      type: `settle`,
+      demand: `a`,
+      scope: `current`,
+      age: `oldest`,
+      outcome: `reject`,
+    },
+    { type: `change`, release: [`c`, `b`] },
+    { type: `request`, demand: `c` },
+  ]
 
 export const settle = (
   demand: DemandName,

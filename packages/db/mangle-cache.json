@@ -213,7 +213,6 @@
   "orderDirty": "d4",
   "recordRequestFailure": "d5",
   "refreshDetachedState": "d6",
-  "releaseDemandAt": "d7",
   "requestedSubsetWhere": "d8",
   "restoreInitialWindow": "d9",
   "settleTruncateReplay": "ea",
@@ -412,7 +411,6 @@
   "reloadReplayed": "ce",
   "requestErrors": "cE",
   "assertAdapterActive": "cI",
-  "reportFailedRequest": "cL",
   "cancelSyncTransaction": "dk",
   "keepsFailedReplayOpen": "dp",
   "loadSubsetDepth": "eN",
@@ -443,6 +441,8 @@
   "enterSync": "hf",
   "endedProblem": "hg",
   "loadOrder": "hh",
-  "onLoaded": "hj",
-  "views": "hk"
+  "views": "hk",
+  "onKeyOutcome": "cL",
+  "releaseDemands": "d7",
+  "show": "hj"
 }

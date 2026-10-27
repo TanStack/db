@@ -10,6 +10,7 @@
  * whose `cause` is the exact value the adapter reported. Solid's own resource
  * wrapper would otherwise turn a non-Error into a generic "Unknown error".
  * The failure can happen while sync starts or after the query has suspended.
+ * A crash during the first load follows the same rule.
  */
 import { describe, expect, it } from 'vitest'
 import { render, waitFor } from '@solidjs/testing-library'
@@ -80,6 +81,80 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
       } finally {
         view.unmount()
         await source.cleanup()
+      }
+    },
+  )
+
+  // A crash while the query waits for its first load reaches the boundary
+  // under the same rule. (The shared conformance cells
+  // `crashed-status-during-first-load-*` check that the status is `crashed`.)
+  // A sync function that throws crashes the Collection while it starts; a
+  // later crash is the one core raises for a broken local store, and the
+  // witness raises it the same way.
+  it.each([
+    { kind: `an Error`, deferred: false, isError: true },
+    { kind: `an Error`, deferred: true, isError: true },
+    { kind: `not an Error`, deferred: false, isError: false },
+    { kind: `not an Error`, deferred: true, isError: false },
+  ])(
+    `sends a crash cause that is $kind as an Error (deferred: $deferred)`,
+    async ({ deferred, isError }) => {
+      const cause: unknown = isError
+        ? new Error(`local store broke`)
+        : { code: `SQLITE_CORRUPT` }
+      let started = false
+      const source = createCollection<Post>({
+        id: `solid-crash-cause-${isError}-${deferred}`,
+        getKey: (post) => post.id,
+        sync: {
+          sync: () => {
+            started = true
+            if (!deferred) throw cause
+          },
+        },
+      })
+      const caught: Array<unknown> = []
+      function Titles() {
+        const query = useLiveQuery((q) => q.from({ post: source }))
+        return <div>{query().length} posts</div>
+      }
+      const view = render(() => (
+        <ErrorBoundary
+          fallback={(error) => {
+            caught.push(error)
+            return <div>Boundary caught</div>
+          }}
+        >
+          <Suspense fallback={<div>Loading</div>}>
+            <Titles />
+          </Suspense>
+        </ErrorBoundary>
+      ))
+      try {
+        if (deferred) {
+          await waitFor(() => expect(started).toBe(true))
+          ;(
+            source as unknown as {
+              _lifecycle: { crash: (error: unknown) => void }
+            }
+          )._lifecycle.crash(cause)
+        }
+        await waitFor(() =>
+          expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+        )
+        expect(source.status).toBe(`crashed`)
+        expect(source.health.error?.cause).toBe(cause)
+        const thrown = caught[0]
+        if (isError) {
+          expect(thrown, `an Error cause is thrown as is`).toBe(cause)
+        } else {
+          expect(thrown, `a non-Error cause is wrapped`).toBeInstanceOf(Error)
+          expect((thrown as Error).message).toBe(source.health.error?.message)
+          expect((thrown as Error).cause).toBe(cause)
+        }
+      } finally {
+        view.unmount()
+        await source.cleanup().catch(() => undefined)
       }
     },
   )

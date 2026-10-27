@@ -1,14 +1,16 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it as vitestIt } from 'vitest'
+import { afterAll, describe, expect, it as vitestIt } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   abortReplayHistory,
   abortedRestartHistory,
+  changeRetiresReplacementHistory,
   cleanedRestartDemandCases,
   compoundLifecycleCoverageHistories,
   createLifecycleModel,
+  demandChangeLifecycleHistoryArbitrary,
   expectedCleanedRestartDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
@@ -20,6 +22,7 @@ import {
   syncLifecycleHistoryArbitrary,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { flushPromises, withOracleCleanup } from './utils.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
@@ -223,6 +226,15 @@ describe(`demand created while its Collection is cleaned up`, () => {
  * delivery cases separately settle an acquisition attempt after unsubscribe; the
  * generated grammar cannot select that obsolete attempt after unsubscribe.
  *
+ * A demand change is one step (ARCHITECTURE law 9). The driver gives a
+ * `change` to production as one `releaseSnapshot()` call with every retired
+ * owner's predicate, and a `replace` as `replaceSnapshots()`, the internal
+ * call a lazy join's fragmented-churn replacement makes. The comparison runs
+ * after the whole change, the checkpoint at which the model judged the
+ * replay: a replay judged between the releases publishes early, so a later
+ * snapshot request publishes where the model keeps it private, and a waiting
+ * caller settles differently.
+ *
  * Row contents and real-provider behavior are outside this controlled adapter
  * driver. The publication oracle checks row contents separately.
  */
@@ -304,7 +316,22 @@ function updateCallerOutcomes(
       )
     )
       continue
-    const current = new Set(model.owners.map(({ attemptId }) => attemptId))
+    // A failed owner that a held replacement covers does not fail the
+    // replay (law 10): the replacement loaded the whole key union.
+    const loaded = ({ attemptId }: (typeof model.owners)[number]) =>
+      attemptId === undefined || !failedAttempts.has(attemptId)
+    const current = new Set(
+      model.owners
+        .filter(
+          (failed) =>
+            !model.owners.some(
+              (replacement) =>
+                replacement.replaces?.includes(failed.id) &&
+                loaded(replacement),
+            ),
+        )
+        .map(({ attemptId }) => attemptId),
+    )
     const failure = [...failedAttempts.keys()].find((attemptId) =>
       current.has(attemptId),
     )
@@ -369,10 +396,12 @@ async function runHistory(
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+    c: new Func(`eq`, [new PropRef([`id`]), new Value(`c`)]),
   }
   const demandForWhere = new Map<unknown, DemandName>([
     [where.a, `a`],
     [where.b, `b`],
+    [where.c, `c`],
   ])
   const runtimeAttempts = new Map<number, RuntimeAttempt>()
   const runtimeOwners: Array<RuntimeOwner> = []
@@ -720,6 +749,28 @@ async function runHistory(
           runtimeOwners.splice(runtimeOwners.indexOf(runtimeOwner), 1)
         }
         subscription.releaseSnapshot(where[command.demand])
+      } else if (command.type === `change`) {
+        const retired: Array<number> = []
+        for (const demand of command.release) {
+          const owner = runtimeOwners.find(
+            (candidate) => candidate.demand === demand,
+          )
+          if (!owner) continue
+          retired.push(owner.id)
+          if (owner.attemptId !== undefined) {
+            runtimeAttempts.get(owner.attemptId)!.current = false
+          }
+          runtimeOwners.splice(runtimeOwners.indexOf(owner), 1)
+        }
+        check(effect.ownerIds ?? []).toEqual(retired)
+        // One demand change is one release call.
+        subscription.releaseSnapshot(
+          ...command.release.map((demand) => where[demand]),
+        )
+      } else if (command.type === `replace`) {
+        subscription.replaceSnapshots(where[command.demand], [
+          where[command.replaced],
+        ])
       } else if (command.type === `settle`) {
         check(effect.attemptId).toBe(runtimeAttempt?.id)
         if (effect.attemptId === undefined) {
@@ -1430,6 +1481,39 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     )
   })
 
+  // Law 9: a demand change is one step. The states below are where judging
+  // the replay between a change's releases would differ from judging it once
+  // after the change (ORC-015). The model names them; this property records
+  // them for the histories the demand-change grammar generates.
+  const demandChangeReachStates = {
+    'change:several-owners-during-replay': `a change retires several owners during a replay`,
+    'replacement-decides-failed-owner': `a held replacement covers a failed owner`,
+    'change:between-releases-would-publish': `judging between releases would publish a replay the change fails`,
+    'change:between-releases-would-fail': `judging between releases would fail a replay the change publishes`,
+  } as const
+  const demandChangeReach = createOracleReach(
+    `subscription-lifecycle.demand-change`,
+    Object.values(demandChangeReachStates),
+  )
+  let demandChangeHistoriesRan = false
+  afterAll(() => {
+    if (demandChangeHistoriesRan) demandChangeReach.assertReached()
+  })
+  const runDemandChangeHistory = async (
+    history: ReadonlyArray<LifecycleCommand>,
+    cancellation: `manual` | `reject` = `manual`,
+  ) => {
+    demandChangeReach.beginHistory()
+    const reached = await runHistory(history, { cancellation })
+    for (const [label, state] of Object.entries(demandChangeReachStates))
+      if (reached.has(label)) demandChangeReach.reach(state)
+  }
+
+  it(`judges a replay once after a change that retires a replacement and a pending owner`, async () => {
+    const reached = await runHistory(changeRetiresReplacementHistory)
+    expect(reached).toContain(`change:between-releases-would-publish`)
+  })
+
   const runs = 80 * multiplier
   const cancellationArbitrary = fc.constantFrom(
     `manual` as const,
@@ -1457,6 +1541,32 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `matches the pure lifecycle model for a random or replayed seed`,
     async (history, cancellation) => {
       await runHistory(history, { cancellation })
+    },
+    120_000,
+  )
+  fixedCampaign.prop(
+    [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
+    { numRuns: 5 * runs, seed: 1_657_005 },
+  )(
+    `judges a replay once per demand change for a fixed seed`,
+    async (history, cancellation) => {
+      demandChangeHistoriesRan = true
+      await runDemandChangeHistory(history, cancellation)
+    },
+    120_000,
+  )
+  randomCampaign(`subscription-lifecycle.demand-change`).prop(
+    [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
+    oracleRandomParameters(
+      5 * runs,
+      replay,
+      `subscription-lifecycle.demand-change`,
+    ),
+  )(
+    `judges a replay once per demand change for a random or replayed seed`,
+    async (history, cancellation) => {
+      demandChangeHistoriesRan = true
+      await runDemandChangeHistory(history, cancellation)
     },
     120_000,
   )

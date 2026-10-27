@@ -609,9 +609,12 @@ async function runPublicationHistory(
     batches: [],
     sentKeys: new Set(),
   }
-  const where = {
+  // The publication arbitrary draws only `a` and `b`; `c` belongs to the
+  // demand-change grammar and completes the record.
+  const where: Record<DemandName, Func> = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+    c: new Func(`eq`, [new PropRef([`id`]), new Value(`c`)]),
   }
   const demandForWhere = new Map<unknown, DemandName>([
     [where.a, `a`],

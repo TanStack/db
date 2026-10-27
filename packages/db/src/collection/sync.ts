@@ -228,15 +228,18 @@ export class CollectionSyncManager<
     if (this.syncEntryActive || this.loadSubsetDepth > 0) {
       return Promise.reject(new CollectionReloadDuringSyncEntryError(this.id))
     }
-    const reload = this.lifecycle.beginReload()
+    // Listeners run while the reload announces itself, retires the run, and
+    // detaches subscription demand. A cleanup one of them runs ends the
+    // reload with its run, so the epoch and the truncate are set before any
+    // of them, and the epoch is checked once they have all run.
     const syncCallbackEpoch = ++this.syncCallbackEpoch
+    this.state.reloadTruncatePending = true
+    const reload = this.lifecycle.beginReload()
     // A retired run whose cleanup fails broke the adapter contract.
     const retired = this.retireSyncRun()
     void retired.catch((error: unknown) => this.lifecycle.crash(error))
-    this.state.reloadTruncatePending = true
     // Subscriptions detach demand from the retired run; the reload's
-    // truncate replays it through the new run's loader. A cleanup their
-    // listeners run meanwhile ends the reload with its run.
+    // truncate replays it through the new run's loader.
     this.lifecycle.retireSubscriptionDemand()
     if (syncCallbackEpoch !== this.syncCallbackEpoch) return reload
     try {
