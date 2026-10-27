@@ -1,8 +1,8 @@
 /**
  * A consumer app that installs the built package, shared by the Chromium
  * tests. The app exposes `openDatabase(options)` on the page. The worker probe
- * runs in every frame before its scripts and records each worker that starts,
- * its requested type, and each termination.
+ * runs in every frame before its scripts and records each constructor call,
+ * each worker that starts, its requested type, and each termination.
  */
 import {
   copyFileSync,
@@ -64,6 +64,7 @@ export type ProbeGlobal = typeof globalThis & {
   openDatabase: (
     options?: Partial<OpenBrowserWASQLiteOPFSDatabaseOptions>,
   ) => Promise<BrowserWASQLiteDatabase>
+  attemptedWorkers: number
   startedWorkers: number
   terminatedWorkers: number
   workerTypes: Array<WorkerType>
@@ -76,11 +77,13 @@ export type ProbeGlobal = typeof globalThis & {
 export function probeWorkers(options: { refuseWorkers: boolean }): void {
   const probe = globalThis as ProbeGlobal
   const NativeWorker = probe.Worker
+  probe.attemptedWorkers = 0
   probe.startedWorkers = 0
   probe.terminatedWorkers = 0
   probe.workerTypes = []
   probe.Worker = class extends NativeWorker {
     constructor(...args: ConstructorParameters<typeof Worker>) {
+      probe.attemptedWorkers++
       if (options.refuseWorkers) {
         throw new DOMException(`The worker was refused`, `SecurityError`)
       }

@@ -179,6 +179,10 @@ duplicates inside that horizon remain idempotent.
     `PersistenceUnavailableError`.
   - If more than one copy is installed, the pre-bundled copy loads the assets
     of the copy that the root resolves, which can be another version.
+  - The copy finds the dev server through the page's Vite client script. If
+    the database opens inside a worker, or the page loads the Vite client
+    without a script `src`, the copy cannot find its assets and the open
+    rejects with `PersistenceUnavailableError`.
 
   In those cases, exclude the package from pre-bundling so Vite serves it
   beside its own assets. List the name that the importing code uses, which is

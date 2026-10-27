@@ -1,9 +1,12 @@
 /**
  * jsdom production driver for the OPFS open outcome oracle in
  * `opfs-open-outcome-oracle.ts`. It calls the public opener with a controlled
- * Worker, which can refuse construction, answer initialization, stay silent,
- * or report the WASM failure the way the real worker does: as a
- * `PERSISTENCE_UNAVAILABLE` response. Fake timers drive the open deadline.
+ * Worker, which can refuse construction, fail to load its script (an `error`
+ * event after construction), answer initialization, stay silent, or report
+ * the WASM failure the way the real worker does: as a
+ * `PERSISTENCE_UNAVAILABLE` response. Fake timers drive the open deadline. The
+ * driver records reach at the Worker boundary: constructor calls and the
+ * initialization requests that a loaded worker receives.
  *
  * No asset lookup runs here, because only the package build defines it. The
  * Chromium driver in `e2e/opfs-open-outcome-oracle.e2e.test.ts` supplies the
@@ -30,7 +33,7 @@ import type {
 
 const jsdomReach: OpenDriverReach = {
   lookup: [`not needed`],
-  workerStart: [`starts`, `throws`],
+  workerStart: [`starts`, `throws`, `fails to load`],
   wasm: [`loads`, `fails`],
   init: [`answers`, `silent`],
   interrupt: [`none`, `deadline`, `abort`],
@@ -41,6 +44,8 @@ const deadlineMs = 40
 // Implements only the Worker surface that the opener uses.
 class ControlledWorker {
   static history: OpenHistory
+  static constructorCalls = 0
+  static initRequests = 0
   static started = 0
   static terminated = 0
   static heldResponses: Array<() => void> = []
@@ -48,23 +53,36 @@ class ControlledWorker {
   private readonly listeners = new Set<
     (event: MessageEvent<BrowserOPFSWorkerResponse>) => void
   >()
+  private readonly errorListeners = new Set<(event: Event) => void>()
 
   constructor() {
+    ControlledWorker.constructorCalls++
     if (ControlledWorker.history.workerStart === `throws`) {
       throw new DOMException(`The worker was refused`, `SecurityError`)
     }
     ControlledWorker.started++
+    if (ControlledWorker.history.workerStart === `fails to load`) {
+      // The browser reports a script that fails to load after construction.
+      queueMicrotask(() => {
+        for (const listener of this.errorListeners) listener(new Event(`error`))
+      })
+    }
   }
 
   addEventListener(type: string, listener: (event: MessageEvent) => void) {
     if (type === `message`) this.listeners.add(listener)
+    if (type === `error`) this.errorListeners.add(listener)
   }
 
   removeEventListener(type: string, listener: (event: MessageEvent) => void) {
     if (type === `message`) this.listeners.delete(listener)
+    if (type === `error`) this.errorListeners.delete(listener)
   }
 
   postMessage(request: BrowserOPFSWorkerRequest): void {
+    // A worker whose script did not load handles no messages.
+    if (ControlledWorker.history.workerStart === `fails to load`) return
+    if (request.type === `init`) ControlledWorker.initRequests++
     const respond = (response: BrowserOPFSWorkerResponse) =>
       queueMicrotask(() => {
         for (const listener of this.listeners) {
@@ -106,6 +124,8 @@ class ControlledWorker {
 
 function installEnvironment(history: OpenHistory): void {
   ControlledWorker.history = history
+  ControlledWorker.constructorCalls = 0
+  ControlledWorker.initRequests = 0
   ControlledWorker.started = 0
   ControlledWorker.terminated = 0
   ControlledWorker.heldResponses = []
@@ -158,6 +178,12 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     settlement: settlement!,
     startedWorkers: ControlledWorker.started,
     terminatedWorkers: ControlledWorker.terminated,
+    reached: {
+      // No asset lookup runs outside the package build.
+      lookup: false,
+      workerStart: ControlledWorker.constructorCalls > 0,
+      initialization: ControlledWorker.initRequests > 0,
+    },
   }
   await database?.close?.()
 

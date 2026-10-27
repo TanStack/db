@@ -4,16 +4,20 @@
  * `tests/opfs-open-outcome-oracle.ts`. A consumer app installs the built
  * package, and a Vite dev server pre-bundles it, so every open runs the asset
  * lookup. Dev-server middleware resolves, holds, or fails that lookup and can
- * fail the real worker's WASM fetch. A page init script can make the Worker
- * constructor refuse to start, as a browser does for a worker it will not run.
+ * fail the worker script or the real worker's WASM fetch. A page init script
+ * can make the Worker constructor refuse to start, as a browser does for a
+ * worker it will not run. Reach is recorded at the boundaries the driver
+ * controls: the dev server counts lookup and WASM file requests, and the page
+ * probe counts Worker constructor calls.
  *
  * Interruptions use no wall-clock timing. An init script holds back the
  * opener's deadline timer, recognized by its unique delay, and the driver fires
  * it explicitly; every other page timer runs normally. The driver
  * interrupts only after the middleware reports the lookup held, reads the
  * settlement one task after the interruption, and counts workers one task after
- * the released lookup's module loads in the page. Every history uses a new page,
- * because the browser caches a failed module fetch for the life of a document.
+ * the released lookup's module loads in the page. Every history uses a new
+ * browser context, because a document caches a failed module fetch and a
+ * context shares its HTTP cache and OPFS storage.
  */
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,7 +47,7 @@ import type { ProbeGlobal } from './packaged-consumer'
 
 const chromiumReach: OpenDriverReach = {
   lookup: [`resolves`, `held`, `fails`],
-  workerStart: [`starts`, `throws`],
+  workerStart: [`starts`, `throws`, `fails to load`],
   wasm: [`loads`, `fails`],
   init: [`answers`],
   interrupt: [`none`, `deadline`, `abort`],
@@ -64,11 +68,21 @@ type OracleProbe = ProbeGlobal & {
 // Dev-server premises for the current history.
 const premises: {
   lookup: AssetLookup
+  workerScript: `loads` | `fails`
   wasm: WasmLoad
+  lookupRequests: number
+  wasmFileRequests: number
   heldLookups: Array<() => void>
   heldLookupPath?: string
   onHeld?: () => void
-} = { lookup: `resolves`, wasm: `loads`, heldLookups: [] }
+} = {
+  lookup: `resolves`,
+  workerScript: `loads`,
+  wasm: `loads`,
+  lookupRequests: 0,
+  wasmFileRequests: 0,
+  heldLookups: [],
+}
 
 const temporaryDirectory = realpathSync(
   mkdtempSync(join(realpathSync(tmpdir()), `db-open-outcome-`)),
@@ -91,7 +105,9 @@ beforeAll(async () => {
         configureServer(devServer) {
           devServer.middlewares.use((request, response, next) => {
             const url = request.url ?? ``
+            const pathname = new URL(url, `http://x`).pathname
             if (url.includes(wasmLookup)) {
+              premises.lookupRequests++
               if (premises.lookup === `fails`) {
                 response.statusCode = 404
                 response.end()
@@ -105,9 +121,21 @@ beforeAll(async () => {
               }
             }
             if (
+              premises.workerScript === `fails` &&
+              !url.includes(`/@id/`) &&
+              pathname.endsWith(`/opfs-worker.js`)
+            ) {
+              response.statusCode = 404
+              response.end()
+              return
+            }
+            if (!url.includes(`/@id/`) && pathname.endsWith(`.wasm`)) {
+              premises.wasmFileRequests++
+            }
+            if (
               premises.wasm === `fails` &&
               !url.includes(`/@id/`) &&
-              new URL(url, `http://x`).pathname.endsWith(`.wasm`)
+              pathname.endsWith(`.wasm`)
             ) {
               response.statusCode = 404
               response.end()
@@ -170,13 +198,18 @@ function readHeldLookupPath(): string | undefined {
 
 async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   premises.lookup = history.lookup
+  premises.workerScript =
+    history.workerStart === `fails to load` ? `fails` : `loads`
   premises.wasm = history.wasm
+  premises.lookupRequests = 0
+  premises.wasmFileRequests = 0
   premises.heldLookups = []
   premises.heldLookupPath = undefined
   const lookupHeld = new Promise<void>((resolve) => {
     premises.onHeld = resolve
   })
-  const page = await browser.newPage()
+  const context = await browser.newContext()
+  const page = await context.newPage()
   try {
     await page.addInitScript(probeWorkers, {
       refuseWorkers: history.workerStart === `throws`,
@@ -261,8 +294,16 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
         settlement: probe.settlement,
         startedWorkers: probe.startedWorkers,
         terminatedWorkers: probe.terminatedWorkers,
+        attemptedWorkers: probe.attemptedWorkers,
       }
-    })) as OpenObservation
+    })) as OpenObservation & { attemptedWorkers?: number }
+    observation.reached = {
+      lookup: premises.lookupRequests > 0,
+      workerStart: observation.attemptedWorkers! > 0,
+      // The worker requests the WASM file when it handles initialization.
+      initialization: premises.wasmFileRequests > 0,
+    }
+    delete observation.attemptedWorkers
     observation.settlement = settlement as OpenSettlement
     await page.evaluate(async () => {
       await (globalThis as OracleProbe).database?.close?.()
@@ -287,7 +328,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     return observation
   } finally {
     for (const release of premises.heldLookups.splice(0)) release()
-    await page.close()
+    await context.close()
   }
 }
 

@@ -5,7 +5,9 @@
  *
  * 1. Asset lookup. Only a pre-bundled copy under a Vite dev server asks the dev
  *    server for its asset URLs; elsewhere this step is not needed.
- * 2. Worker start. The page constructs the dedicated worker.
+ * 2. Worker start. The page constructs the dedicated worker, and the browser
+ *    loads its script. Construction can throw, or the script can fail to load
+ *    after construction, which the worker reports with an `error` event.
  * 3. WASM load. The worker fetches and compiles `wa-sqlite.wasm`.
  * 4. Initialization. The worker opens the database and answers.
  *
@@ -19,7 +21,8 @@
  *
  * This module holds that law, the history grammar, the model, and the
  * comparison. Each production driver supplies the entry point, controls the
- * steps it can reach, and records an observation. The jsdom driver reaches
+ * steps it can reach, and records an observation, including which steps
+ * production actually reached. The jsdom driver reaches
  * worker start, initialization, and the worker's WASM failure response with a
  * controlled worker. The Chromium driver reaches the asset lookup, a real WASM
  * fetch, and worker start against a real Vite dev server. Neither driver states
@@ -40,7 +43,7 @@ import { expect } from 'vitest'
  * their defaults, so the product has no duplicates.
  */
 export type AssetLookup = `not needed` | `resolves` | `held` | `fails`
-export type WorkerStart = `starts` | `throws`
+export type WorkerStart = `starts` | `throws` | `fails to load`
 export type WasmLoad = `loads` | `fails`
 export type Initialization = `answers` | `silent`
 export type Interruption = `none` | `deadline` | `abort`
@@ -84,7 +87,7 @@ export function openHistories(
       }))
     }
     return reach.workerStart.flatMap((workerStart): Array<OpenHistory> => {
-      if (workerStart === `throws`) {
+      if (workerStart !== `starts`) {
         return [{ ...settledEarly, lookup, workerStart }]
       }
       return reach.wasm.flatMap((wasm): Array<OpenHistory> => {
@@ -112,7 +115,20 @@ export function openHistories(
  * complete before it counts started and terminated workers. That checkpoint
  * catches a worker started by a late step. After an interruption the driver
  * also opens again in the same page.
+ *
+ * `reached` is the positive execution witness: the steps that production
+ * actually reached, recorded at the boundary the driver controls. The asset
+ * lookup is reached when the dev server receives it, worker start when the
+ * Worker constructor runs, and initialization when the worker receives the
+ * request that loads the WASM file. Without it, a history could pass by
+ * settling the same way through a different path.
  */
+export type ReachedSteps = {
+  lookup: boolean
+  workerStart: boolean
+  initialization: boolean
+}
+
 export type OpenSettlement =
   `opened` | `PersistenceUnavailableError` | `TimeoutError` | `AbortError`
 
@@ -120,6 +136,7 @@ export type OpenObservation = {
   settlement: OpenSettlement
   startedWorkers: number
   terminatedWorkers: number
+  reached: ReachedSteps
   laterOpen?: `opened`
 }
 
@@ -135,13 +152,32 @@ export type DecidingStep =
 
 export function decidingStep(history: OpenHistory): DecidingStep {
   if (history.lookup === `fails` || history.lookup === `held`) return `lookup`
-  if (history.workerStart === `throws`) return `worker start`
+  if (history.workerStart !== `starts`) return `worker start`
   if (history.wasm === `fails`) return `wasm`
   if (history.init === `silent`) return `initialization`
   return `none`
 }
 
+// Steps run in order, so each step is reached only when every earlier one
+// completed.
+function expectedReach(history: OpenHistory): ReachedSteps {
+  const lookup = history.lookup !== `not needed`
+  const workerStart =
+    history.lookup === `not needed` || history.lookup === `resolves`
+  return {
+    lookup,
+    workerStart,
+    initialization: workerStart && history.workerStart === `starts`,
+  }
+}
+
 export function expectedOpenOutcome(history: OpenHistory): OpenObservation {
+  return { ...expectedSettlement(history), reached: expectedReach(history) }
+}
+
+function expectedSettlement(
+  history: OpenHistory,
+): Omit<OpenObservation, `reached`> {
   const interrupted: OpenSettlement =
     history.interrupt === `deadline` ? `TimeoutError` : `AbortError`
   switch (decidingStep(history)) {
@@ -159,11 +195,19 @@ export function expectedOpenOutcome(history: OpenHistory): OpenObservation {
             terminatedWorkers: 0,
           }
     case `worker start`:
-      return {
-        settlement: `PersistenceUnavailableError`,
-        startedWorkers: 0,
-        terminatedWorkers: 0,
-      }
+      // A worker whose script fails to load was constructed, so the failed
+      // open terminates it.
+      return history.workerStart === `throws`
+        ? {
+            settlement: `PersistenceUnavailableError`,
+            startedWorkers: 0,
+            terminatedWorkers: 0,
+          }
+        : {
+            settlement: `PersistenceUnavailableError`,
+            startedWorkers: 1,
+            terminatedWorkers: 1,
+          }
     case `wasm`:
       return {
         settlement: `PersistenceUnavailableError`,
@@ -183,11 +227,12 @@ export function expectedOpenOutcome(history: OpenHistory): OpenObservation {
 }
 
 /*
- * ## Reach
+ * ## Grammar coverage
  *
- * Each driver declares the deciding steps and settlements its histories must
- * reach. The check fails when the product reaches fewer, so a narrowed reach
- * cannot pass silently.
+ * Each driver declares the deciding steps and settlements that its history
+ * product must cover. This check judges the grammar, not production: it fails
+ * when a narrowed reach declaration drops an outcome. The `reached`
+ * observation is the production reach witness.
  */
 export function reachedOutcomes(
   histories: ReadonlyArray<OpenHistory>,

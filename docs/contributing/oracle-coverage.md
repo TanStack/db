@@ -1935,9 +1935,10 @@ start, WASM load, and initialization. One module holds the law, the history
 grammar, the model, and the comparison; neither driver states expected
 results. A history fixes each step (the lookup resolves, is held, or fails;
 the worker starts or is refused; the WASM loads or fails; initialization
-answers or stays silent) and pairs every pending step with a deadline or an
-abort. The model predicts the settlement, started and terminated workers, and
-a later open after an interruption. The
+answers or stays silent; the worker script can also fail to load) and pairs
+every pending step with a deadline or an abort. The model predicts the
+settlement, started and terminated workers, the steps that production reached,
+and a later open after an interruption. The
 [jsdom driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts)
 reaches worker start, initialization, and the worker's WASM failure response.
 The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
@@ -1945,19 +1946,23 @@ reaches the lookup, the real worker's WASM fetch, and worker start against a
 Vite dev server that pre-bundles the built package. It holds back only the
 opener's deadline timer and fires it explicitly, interrupts only after the
 server holds the lookup, and reads the settlement and worker counts one task
-after each event, so no observation depends on elapsed time. Each driver fails when its product
-reaches fewer outcomes than it declares. Mutants that leave the lookup outside
+after each event, so no observation depends on elapsed time. Each driver checks that its
+history product covers the outcomes it declares; the `reached` observation is
+the production reach witness. Mutants that leave the lookup outside
 the deadline and abort, start a worker after a late lookup, report a WASM
 failure as an internal error, or let a refused Worker constructor's error
-escape each fail the driver that reaches that step. The grammar does not
+escape each fail the driver that reaches that step, and a mutant that rejects
+before making the lookup fails only on `reached`. The grammar does not
 interrupt an open in the same turn as a failing step, because no law orders
 those causes yet.
 
 The
-[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-install-layouts.e2e.test.ts)
+[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
 models which installs open in Vite development and production: direct,
 hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
-directories, and exclusion by import name or package name. A pre-bundled copy
+directories, and exclusion by import name or package name. It reads the
+importer's specifier and the Node resolution of the package name from each
+installed tree rather than from a table per layout. A pre-bundled copy
 opens when the app root resolves the package name and otherwise reports
 `PersistenceUnavailableError`; with two copies it loads the copy that the root
 resolves. Excluding the specifier that the importer uses serves the copy in
@@ -1973,7 +1978,9 @@ production, an `about:srcdoc` frame, and a page on another origin than the
 Vite server, where the Worker constructor throws `SecurityError` and the open
 reports `PersistenceUnavailableError`. These owners cover Vite only, not
 webpack or Turbopack development, an open from inside a worker, a Vite client
-injected without a script `src`, or browsers other than Chromium.
+injected without a script `src`, or browsers other than Chromium. The
+[PR #2103 review record](oracle-reviews/pr-2103-separate-wasm.md) classifies
+each calibration control and records every applicable requirement.
 
 The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how

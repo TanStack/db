@@ -19,13 +19,18 @@
  *   another installed copy, the moved copy loads that copy's assets.
  *
  * The model below states those rules over install layout, cache directory,
- * exclusion, and server. The driver installs the built package in each layout,
- * opens and queries it in Chromium, and records the outcome and which copy's
- * worker started. The model does not predict which copy a production build
- * emits; the copies are identical, so the driver does not observe it there.
+ * exclusion, and server. It reads two facts from each installed tree rather
+ * than from a table per layout: the specifier that the opened copy's importer
+ * uses, and the copy that Node resolution finds for the package name from the
+ * app root. The driver installs the built package in each layout, opens and
+ * queries it in Chromium, and records the outcome, the number of workers, and
+ * which copy's worker started. The model does not predict which copy a
+ * production build emits; the copies are identical, so the driver does not
+ * observe it there.
  */
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -35,7 +40,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
@@ -59,34 +64,51 @@ type LayoutCase = {
   server: Server
 }
 type LayoutOutcome =
-  { opens: false } | { opens: true; worker?: `imported copy` | `other copy` }
+  | { opens: false; workers: 0 }
+  | { opens: true; workers: 1; worker?: `imported copy` | `other copy` }
 
-// The specifier that the opened copy's importer uses.
-function importName(layout: Layout): string {
-  return layout === `alias` ? aliasName : packageName
+/** Facts read from an installed tree; see `installLayout`. */
+type InstallFacts = {
+  appDirectory: string
+  // The real directory of the copy that the app opens.
+  importedCopy: string
+  // The specifier that the opened copy's importer uses.
+  importSpecifier: string
+  // The real directory that the package name resolves to from the app root.
+  rootResolvedCopy: string | undefined
 }
 
-// Node resolution from the Vite root, which the dev server's lookup uses.
-const appRootResolvesPackageName: Record<Layout, boolean> = {
-  direct: true,
-  hoisted: true,
-  pnpm: true,
-  transitive: false,
-  alias: false,
-  'two copies': true,
+// Node resolution: the nearest node_modules/<name> from a directory upward.
+function resolveFrom(directory: string, stop: string): string | undefined {
+  for (let current = directory; ; current = dirname(current)) {
+    const candidate = join(current, `node_modules`, packageName)
+    if (existsSync(candidate)) return realpathSync(candidate)
+    if (current === stop) return undefined
+  }
 }
 
-function expectedOutcome(layoutCase: LayoutCase): LayoutOutcome {
-  if (layoutCase.server === `production`) return { opens: true }
-  const servedInPlace =
-    layoutCase.exclusion === `import name` ||
-    (layoutCase.exclusion === `package name` &&
-      importName(layoutCase.layout) === packageName)
-  if (servedInPlace) return { opens: true, worker: `imported copy` }
-  if (!appRootResolvesPackageName[layoutCase.layout]) return { opens: false }
+function expectedOutcome(
+  layoutCase: LayoutCase,
+  install: InstallFacts,
+): LayoutOutcome {
+  if (layoutCase.server === `production`) return { opens: true, workers: 1 }
+  const excludedName =
+    layoutCase.exclusion === `import name`
+      ? install.importSpecifier
+      : layoutCase.exclusion === `package name`
+        ? packageName
+        : undefined
+  if (excludedName === install.importSpecifier) {
+    return { opens: true, workers: 1, worker: `imported copy` }
+  }
+  if (!install.rootResolvedCopy) return { opens: false, workers: 0 }
   return {
     opens: true,
-    worker: layoutCase.layout === `two copies` ? `other copy` : `imported copy`,
+    workers: 1,
+    worker:
+      install.rootResolvedCopy === install.importedCopy
+        ? `imported copy`
+        : `other copy`,
   }
 }
 
@@ -134,29 +156,12 @@ const layoutCases: Array<LayoutCase> = [
 ]
 
 let browser: Browser
+const coveredOutcomes = new Set<string>()
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true })
 })
 afterAll(async () => {
   await browser.close()
-})
-
-it(`reaches every promised layout outcome`, () => {
-  const outcomes = new Set(
-    layoutCases.map((layoutCase) =>
-      JSON.stringify(expectedOutcome(layoutCase)),
-    ),
-  )
-  expect([...outcomes].sort()).toEqual(
-    [
-      { opens: false },
-      { opens: true },
-      { opens: true, worker: `imported copy` },
-      { opens: true, worker: `other copy` },
-    ]
-      .map((outcome) => JSON.stringify(outcome))
-      .sort(),
-  )
 })
 
 it.each(layoutCases)(
@@ -166,22 +171,31 @@ it.each(layoutCases)(
       mkdtempSync(join(realpathSync(tmpdir()), `db-wasm-layout-`)),
     )
     try {
-      const { appDirectory, importedCopy } = installLayout(
-        temporaryDirectory,
-        layoutCase.layout,
-      )
-      const observed = await openInLayout(
-        appDirectory,
-        importedCopy,
-        layoutCase,
-      )
-      expect(observed).toEqual(expectedOutcome(layoutCase))
+      const install = installLayout(temporaryDirectory, layoutCase.layout)
+      const expected = expectedOutcome(layoutCase, install)
+      coveredOutcomes.add(JSON.stringify(expected))
+      expect(await openInLayout(install, layoutCase)).toEqual(expected)
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true })
     }
   },
   120_000,
 )
+
+// Grammar coverage: the cases above must reach every outcome the model can
+// predict. Runs after them, because the predictions read installed trees.
+it(`covers every promised layout outcome`, () => {
+  expect([...coveredOutcomes].sort()).toEqual(
+    [
+      { opens: false, workers: 0 },
+      { opens: true, workers: 1 },
+      { opens: true, workers: 1, worker: `imported copy` },
+      { opens: true, workers: 1, worker: `other copy` },
+    ]
+      .map((outcome) => JSON.stringify(outcome))
+      .sort(),
+  )
+})
 
 // Copies the built package to a directory, as an install would.
 function copyPackage(destination: string, version?: string): void {
@@ -225,14 +239,8 @@ function writeWrapper(appModules: string): string {
   return wrapper
 }
 
-/**
- * Installs the built package in one layout. Returns the app directory and the
- * real directory of the copy that the app opens.
- */
-function installLayout(
-  root: string,
-  layout: Layout,
-): { appDirectory: string; importedCopy: string } {
+/** Installs the built package in one layout and reads its install facts. */
+function installLayout(root: string, layout: Layout): InstallFacts {
   const appDirectory =
     layout === `hoisted` ? join(root, `apps/web`) : join(root, `app`)
   const appModules = join(appDirectory, `node_modules`)
@@ -297,12 +305,16 @@ function installLayout(
     `import { openBrowserWASQLiteOPFSDatabase } from '${entry}';
 globalThis.openDatabase = () => openBrowserWASQLiteOPFSDatabase({ databaseName: 'layout.sqlite', timeoutMs: 0 });`,
   )
-  return { appDirectory, importedCopy: realpathSync(importedCopy) }
+  return {
+    appDirectory,
+    importedCopy: realpathSync(importedCopy),
+    importSpecifier: layout === `alias` ? aliasName : packageName,
+    rootResolvedCopy: resolveFrom(appDirectory, root),
+  }
 }
 
 async function openInLayout(
-  appDirectory: string,
-  importedCopy: string,
+  { appDirectory, importedCopy, importSpecifier }: InstallFacts,
   layoutCase: LayoutCase,
 ): Promise<LayoutOutcome> {
   const config = {
@@ -322,7 +334,7 @@ async function openInLayout(
         : {
             exclude: [
               layoutCase.exclusion === `import name`
-                ? importName(layoutCase.layout)
+                ? importSpecifier
                 : packageName,
             ],
           },
@@ -378,22 +390,25 @@ async function openInLayout(
       if (opened.name !== `PersistenceUnavailableError`) {
         throw new Error(`${opened.name}\n${diagnostics.join(`\n`)}`)
       }
-      return { opens: false }
+      return { opens: false, workers: workerUrls.length } as LayoutOutcome
     }
-    if (layoutCase.server === `production`) return { opens: true }
-    expect(workerUrls).toHaveLength(1)
+    if (layoutCase.server === `production`) {
+      return { opens: true, workers: workerUrls.length } as LayoutOutcome
+    }
     // Vite serves a file under the root by its root path and one outside the
     // root under /@fs/ with its absolute path.
-    const workerPath = decodeURIComponent(new URL(workerUrls[0]!).pathname)
     const importedPath = importedCopy.startsWith(`${appDirectory}/`)
       ? importedCopy.slice(appDirectory.length)
       : importedCopy
+    const fromImportedCopy = workerUrls.map((url) =>
+      decodeURIComponent(new URL(url).pathname).includes(`${importedPath}/`),
+    )
     return {
       opens: true,
-      worker: workerPath.includes(`${importedPath}/`)
-        ? `imported copy`
-        : `other copy`,
-    }
+      workers: workerUrls.length,
+      // With other than one worker the count already differs from the model.
+      worker: fromImportedCopy.every(Boolean) ? `imported copy` : `other copy`,
+    } as LayoutOutcome
   } finally {
     await page.close()
     await developmentServer?.close()
