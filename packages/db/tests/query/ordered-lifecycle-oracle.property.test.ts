@@ -2513,6 +2513,5 @@ declareOracle({
     expectedInitialSettlementObservation,
     expectedInitialFallback,
     expectedLaterFallbackWindow,
-    expectedNullablePaletteIds,
   ],
 })
