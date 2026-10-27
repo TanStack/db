@@ -515,25 +515,40 @@ export class CollectionConfigBuilder<
   }
 
   /**
-   * A lazy demand load failure ends the query unless it failed a truncate
-   * replay after the query first became ready: that replay keeps the last
-   * publication until a later replay of the source reacquires the demand.
-   * Before the first ready there is no publication to keep, so the failure
-   * is an initial load failure. A failed demand is settled either way, so it
-   * holds no ordered loading.
+   * A lazy demand load failure ends the query unless a failed replay of its
+   * source's collection holds publication after the query first became
+   * ready: that replay keeps the last publication until a later replay of
+   * the source reacquires the demand. A demand that a pending replay decides
+   * reaches here only once that replay settled. Before the first ready there
+   * is no publication to keep, so the failure is an initial load failure. A
+   * failed demand is settled either way, so it holds no ordered loading.
    */
   failDemand(
+    subscription: CollectionSubscription,
+    collection: Collection,
     planId: string,
     generation: number,
     error: unknown,
-    fatal = true,
   ): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
     demand.settled = true
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    if (fatal || this.liveQueryCollection?.status === `loading`)
+    // A failure while a failed replay of this source holds the shared
+    // barrier belongs to that recovery: it does not end the query, and it
+    // holds this subscription's publication too, so retiring the other
+    // replay's failed demand cannot publish without this demand's rows.
+    if (
+      this.liveQueryCollection?.status !== `loading` &&
+      this.collectionSources.some(
+        (source) =>
+          source.collection === collection &&
+          this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+      )
+    )
+      subscription.failReplacement(normalized)
+    else
       this.transitionToError(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Subset demand '${planId}' failed: ${normalized.message}`
@@ -653,10 +668,10 @@ export class CollectionConfigBuilder<
   }
 
   /** Replays of other subscriptions to a source's collection that still load. */
-  siblingReplays(sourceId: string): Promise<unknown> | undefined {
-    const collection = this.collectionSources.find(
-      (source) => source.sourceId === sourceId,
-    )?.collection
+  siblingReplays(
+    collection: Collection,
+    sourceId: string,
+  ): Promise<unknown> | undefined {
     const pending = this.collectionSources.flatMap((source) => {
       const subscription = this.subscriptions[source.sourceId]
       // A replay whose completion already settled cannot be waited on.
@@ -668,18 +683,6 @@ export class CollectionConfigBuilder<
         : []
     })
     return pending.length > 0 ? Promise.allSettled(pending) : undefined
-  }
-
-  /**
-   * Whether a failed replay of a collection still holds publication. The
-   * query's subscriptions to one collection share that replay's barrier.
-   */
-  hasFailedReplay(collection: Collection): boolean {
-    return this.collectionSources.some(
-      (source) =>
-        source.collection === collection &&
-        this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
-    )
   }
 
   private hasFailedSourceRecovery(): boolean {

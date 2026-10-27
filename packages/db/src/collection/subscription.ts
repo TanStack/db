@@ -791,9 +791,7 @@ export class CollectionSubscription
    * this subscription's last demand retires.
    */
   failReplacement(error: unknown): void {
-    if (!this.options.truncateReplayPublication || this.truncateReplayState) {
-      return
-    }
+    if (this.truncateReplayState) return
     const replayState = this.createTruncateReplayState(
       this.collection._sync.getSyncRunGeneration(),
       () => new Map(),
