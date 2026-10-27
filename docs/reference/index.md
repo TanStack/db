@@ -102,7 +102,6 @@ title: "@tanstack/db"
 - [SetWindowFindOneLimitError](classes/SetWindowFindOneLimitError.md)
 - [SetWindowReentrancyError](classes/SetWindowReentrancyError.md)
 - [SetWindowRequiresOrderByError](classes/SetWindowRequiresOrderByError.md)
-- [SortedMap](classes/SortedMap.md)
 - [SourceCollectionIdReuseError](classes/SourceCollectionIdReuseError.md)
 - [StorageError](classes/StorageError.md)
 - [StorageKeyRequiredError](classes/StorageKeyRequiredError.md)

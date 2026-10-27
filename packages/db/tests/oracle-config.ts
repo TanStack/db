@@ -190,6 +190,7 @@ const staticOracleProperties = [
   `query-identity.equality-partition`,
   `where-predicate.publication`,
   `join-result-key.pairs`,
+  `group-result-key.groups`,
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
   `local-storage.value-fidelity`,

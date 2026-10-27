@@ -2255,6 +2255,25 @@ describe(`Ordered windows across truncate replays`, () => {
       failureState: replayDemandStates[1],
     },
     {
+      // The random campaign's trace from #2224 (also reported as #2239). With
+      // includes and no joined source, the failed load is new include demand
+      // issued during the marker replay, so the terminal error is fatal.
+      name: `a failed include demand during a marker replay`,
+      history: [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        limit: 1,
+        joined: `none`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+      failureState: replayDemandStates[0],
+    },
+    {
       name: `two window moves while a load is held`,
       history: [
         { type: `hold` },

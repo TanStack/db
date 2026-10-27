@@ -1735,8 +1735,9 @@ const engineeringStats = deptStats.get(1)
 ```
 
 > **Note**: Grouped results are keyed differently based on the grouping:
-> - **Single column grouping**: Keyed by the actual value (e.g., `deptStats.get(1)`)
+> - **Single column grouping**: A string or number group value is the key (e.g., `deptStats.get(1)`). A `null`, `undefined`, boolean, or bigint group value gets a string key instead, because Collection keys are strings or numbers. A string that starts with TanStack DB's reserved `\u0000tanstack-db:` prefix also gets a different string key. Read these keys from the row's `$key`.
 > - **Multiple column grouping**: Keyed by a JSON string of the grouped values (e.g., `userStats.get('[1,"admin"]')`)
+> - **Custom keys**: A `getKey` option on the live query replaces these keys.
 
 ## findOne
 
