@@ -1600,7 +1600,6 @@ declareOracle({
     reduceHandlerRefetchBoundary,
     reduceMutationRefreshLiveness,
     observeHandlerRefetchBoundary,
-    observeHandlerIdentity,
     observeQueryCacheWork,
     observeFetchRecordSuccessorWork,
     modelReacquisition,
