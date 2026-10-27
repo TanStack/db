@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 
+type Row = { id: string; group: string }
+
 describe(`loadSubset transaction refinement`, () => {
   // A load aborted before it starts rejects with `AbortError` and never
   // reaches the source.

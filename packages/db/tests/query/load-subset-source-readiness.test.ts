@@ -10,6 +10,8 @@ import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { flushPromises } from '../utils.js'
 import { finishCleanup } from './load-subset-source-readiness-support.js'
 
+type Row = { id: string; group: string }
+
 it.each([`resolve`, `reject`, `cleanup`] as const)(
   `matches cross-source initial readiness through %s`,
   async (secondOutcome) => {
