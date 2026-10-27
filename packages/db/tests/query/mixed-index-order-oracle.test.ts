@@ -30,6 +30,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
+import { declareOracle } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
@@ -159,100 +160,105 @@ function applyStep(
   source.utils.commit()
 }
 
+async function expectIndexedPublicOrder(
+  scenario: Scenario,
+  IndexType: typeof BasicIndex | typeof BTreeIndex,
+  direction: `asc` | `desc`,
+): Promise<void> {
+  const scanOptions = mockSyncCollectionOptions<Row>({
+    id: `mixed-order-scan-${scenario.name}-${IndexType.name}`,
+    getKey: (row) => row.id,
+    initialData: scenario.initial,
+    autoIndex: `off`,
+  })
+  const indexedOptions = mockSyncCollectionOptions<Row>({
+    id: `mixed-order-indexed-${scenario.name}-${IndexType.name}`,
+    getKey: (row) => row.id,
+    initialData: scenario.initial,
+    autoIndex: `eager`,
+    defaultIndexType: IndexType,
+  })
+  const scan = createCollection(scanOptions)
+  const indexed = createCollection(indexedOptions)
+  const scanRows = new Map(scenario.initial.map((row) => [row.id, row]))
+  const indexedRows = new Map(scanRows)
+  let scanLive: ReturnType<typeof createLiveQueryCollection> | undefined
+  let indexedLive: ReturnType<typeof createLiveQueryCollection> | undefined
+  await withOracleCleanup(async () => {
+    await Promise.all([scan.stateWhenReady(), indexed.stateWhenReady()])
+    // Keep one ascending physical index so descending reads must use
+    // ReverseIndex rather than auto-creating a descending index.
+    indexed.createIndex((row) => row.value, { indexType: IndexType })
+    const check = (checkpoint: string, expectIndexRead: boolean) => {
+      const expected = orderedSnapshot(scan, direction)
+      const indexes = [...indexed.indexes.values()]
+      expect(indexes, `${checkpoint}: index exists`).toHaveLength(1)
+      const index = indexes[0] as BaseIndex<string>
+      expect(index, `${checkpoint}: index type`).toBeInstanceOf(IndexType)
+      expect(index.matchesDirection(`asc`)).toBe(true)
+      const take = vi.spyOn(
+        index,
+        direction === `asc` ? `takeFromStart` : `takeReversedFromEnd`,
+      )
+      try {
+        expect(
+          orderedSnapshot(indexed, direction),
+          `${checkpoint}: direct prefix`,
+        ).toEqual(expected)
+        if (expectIndexRead)
+          expect(take, `${checkpoint}: indexed route`).toHaveBeenCalled()
+        else
+          expect(take, `${checkpoint}: full-scan route`).not.toHaveBeenCalled()
+      } finally {
+        take.mockRestore()
+      }
+      expect(
+        [...scanLive!.values()].map((row) => row.id),
+        `${checkpoint}: scan live prefix`,
+      ).toEqual(expected)
+      expect(
+        [...indexedLive!.values()].map((row) => row.id),
+        `${checkpoint}: indexed live prefix`,
+      ).toEqual(expected)
+    }
+    // Compile both live queries while the initial source domain is mixed.
+    scanLive = createLiveQueryCollection((q) =>
+      q
+        .from({ row: scan })
+        .orderBy(({ row }) => row.value, direction)
+        .limit(2),
+    )
+    indexedLive = createLiveQueryCollection((q) =>
+      q
+        .from({ row: indexed })
+        .orderBy(({ row }) => row.value, direction)
+        .limit(2),
+    )
+    await Promise.all([scanLive.preload(), indexedLive.preload()])
+    check(`initial domain`, scenario.indexedReads[0]!)
+    for (const [position, step] of scenario.steps.entries()) {
+      applyStep(scanOptions, scanRows, step)
+      applyStep(indexedOptions, indexedRows, step)
+      check(
+        `step ${position + 1}: ${step.type}`,
+        scenario.indexedReads[position + 1]!,
+      )
+    }
+  }, [
+    () => indexedLive?.cleanup(),
+    () => scanLive?.cleanup(),
+    () => indexed.cleanup(),
+    () => scan.cleanup(),
+  ])
+}
+
+declareOracle({ check: [expectIndexedPublicOrder] })
+
 for (const scenario of histories) {
   for (const IndexType of [BasicIndex, BTreeIndex]) {
     for (const direction of [`asc`, `desc`] as const) {
-      it(`${IndexType.name} preserves ${scenario.name} ${direction} public order across kind changes`, async () => {
-        const scanOptions = mockSyncCollectionOptions<Row>({
-          id: `mixed-order-scan-${scenario.name}-${IndexType.name}`,
-          getKey: (row) => row.id,
-          initialData: scenario.initial,
-          autoIndex: `off`,
-        })
-        const indexedOptions = mockSyncCollectionOptions<Row>({
-          id: `mixed-order-indexed-${scenario.name}-${IndexType.name}`,
-          getKey: (row) => row.id,
-          initialData: scenario.initial,
-          autoIndex: `eager`,
-          defaultIndexType: IndexType,
-        })
-        const scan = createCollection(scanOptions)
-        const indexed = createCollection(indexedOptions)
-        const scanRows = new Map(scenario.initial.map((row) => [row.id, row]))
-        const indexedRows = new Map(scanRows)
-        let scanLive: ReturnType<typeof createLiveQueryCollection> | undefined
-        let indexedLive:
-          ReturnType<typeof createLiveQueryCollection> | undefined
-        await withOracleCleanup(async () => {
-          await Promise.all([scan.stateWhenReady(), indexed.stateWhenReady()])
-          // Keep one ascending physical index so descending reads must use
-          // ReverseIndex rather than auto-creating a descending index.
-          indexed.createIndex((row) => row.value, { indexType: IndexType })
-          const check = (checkpoint: string, expectIndexRead: boolean) => {
-            const expected = orderedSnapshot(scan, direction)
-            const indexes = [...indexed.indexes.values()]
-            expect(indexes, `${checkpoint}: index exists`).toHaveLength(1)
-            const index = indexes[0] as BaseIndex<string>
-            expect(index, `${checkpoint}: index type`).toBeInstanceOf(IndexType)
-            expect(index.matchesDirection(`asc`)).toBe(true)
-            const take = vi.spyOn(
-              index,
-              direction === `asc` ? `takeFromStart` : `takeReversedFromEnd`,
-            )
-            try {
-              expect(
-                orderedSnapshot(indexed, direction),
-                `${checkpoint}: direct prefix`,
-              ).toEqual(expected)
-              if (expectIndexRead)
-                expect(take, `${checkpoint}: indexed route`).toHaveBeenCalled()
-              else
-                expect(
-                  take,
-                  `${checkpoint}: full-scan route`,
-                ).not.toHaveBeenCalled()
-            } finally {
-              take.mockRestore()
-            }
-            expect(
-              [...scanLive!.values()].map((row) => row.id),
-              `${checkpoint}: scan live prefix`,
-            ).toEqual(expected)
-            expect(
-              [...indexedLive!.values()].map((row) => row.id),
-              `${checkpoint}: indexed live prefix`,
-            ).toEqual(expected)
-          }
-          // Compile both live queries while the initial source domain is mixed.
-          scanLive = createLiveQueryCollection((q) =>
-            q
-              .from({ row: scan })
-              .orderBy(({ row }) => row.value, direction)
-              .limit(2),
-          )
-          indexedLive = createLiveQueryCollection((q) =>
-            q
-              .from({ row: indexed })
-              .orderBy(({ row }) => row.value, direction)
-              .limit(2),
-          )
-          await Promise.all([scanLive.preload(), indexedLive.preload()])
-          check(`initial domain`, scenario.indexedReads[0]!)
-          for (const [position, step] of scenario.steps.entries()) {
-            applyStep(scanOptions, scanRows, step)
-            applyStep(indexedOptions, indexedRows, step)
-            check(
-              `step ${position + 1}: ${step.type}`,
-              scenario.indexedReads[position + 1]!,
-            )
-          }
-        }, [
-          () => indexedLive?.cleanup(),
-          () => scanLive?.cleanup(),
-          () => indexed.cleanup(),
-          () => scan.cleanup(),
-        ])
-      })
+      it(`${IndexType.name} preserves ${scenario.name} ${direction} public order across kind changes`, () =>
+        expectIndexedPublicOrder(scenario, IndexType, direction))
     }
   }
 }
