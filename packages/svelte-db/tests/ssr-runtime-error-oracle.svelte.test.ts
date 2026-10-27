@@ -24,6 +24,7 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -218,33 +219,38 @@ describe(`Svelte SSR runtime errors`, () => {
       `runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
       () => checkRuntimeHistory(history, makeRuntimeReach()),
     )
-  for (const campaign of [`fixed`, `random`] as const) {
-    const run = campaign === `fixed` ? it.skipIf(oracleReplayRequested()) : it
-    run(
-      `keeps runtime failures on their ordinary error surface (${campaign})`,
-      async () => {
-        const reach = makeRuntimeReach()
-        try {
-          await fc.assert(
-            fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
-              checkRuntimeHistory(history, reach),
-            ),
-            {
-              ...(campaign === `fixed`
-                ? { numRuns: oracleRuns(64), seed: 2229 }
-                : oraclePropertyOptions(64, `svelte.ssr-runtime-errors`)),
-              examples: ssrRuntimeErrorExamples.map((history) => [history]),
-            },
-          )
-          reach.assertReached()
-        } finally {
-          console.info(
-            `svelte-ssr-runtime ${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-      },
-      30_000,
-    )
+  const runCampaign = async (campaign: `fixed` | `random`) => {
+    const reach = makeRuntimeReach()
+    try {
+      await fc.assert(
+        fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
+          checkRuntimeHistory(history, reach),
+        ),
+        {
+          ...(campaign === `fixed`
+            ? { numRuns: oracleRuns(64), seed: 2229 }
+            : oraclePropertyOptions(64, `svelte.ssr-runtime-errors`)),
+          examples: ssrRuntimeErrorExamples.map((history) => [history]),
+        },
+      )
+      reach.assertReached()
+    } finally {
+      console.info(
+        `svelte-ssr-runtime ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    }
   }
+  // The fixed campaign stands aside during every replay; the random campaign
+  // runs as this property's replay.
+  oracleReplayTest(it)(
+    `keeps runtime failures on their ordinary error surface (fixed)`,
+    () => runCampaign(`fixed`),
+    30_000,
+  )
+  oracleReplayTest(it, `svelte.ssr-runtime-errors`)(
+    `keeps runtime failures on their ordinary error surface (random)`,
+    () => runCampaign(`random`),
+    30_000,
+  )
 })
