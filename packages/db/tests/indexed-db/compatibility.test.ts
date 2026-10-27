@@ -1,5 +1,9 @@
 /**
- * Compatibility boundary oracle.
+ * Compatibility boundary tests. This file declares no check or model: its
+ * expectations are authored rows per store, written into each scenario, and it
+ * generates no histories. The law below is the boundary's authority. Until a
+ * generated grammar and model own it, these are supplemental scenarios (see
+ * ORACLE.md).
  *
  * Authority: safeRandomUUID's supported capability domain, the first-party
  * DbClient materialization contract, and createIndexedDB's custom-factory API.
