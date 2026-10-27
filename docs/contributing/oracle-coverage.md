@@ -2933,12 +2933,20 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Browser host: the multi-tab Electric oracle in
       `browser-db-sqlite-persistence` crosses two or three tabs, eager or
       on-demand Collections, which tab finishes first, a storm or staggered
-      arrival, and how the last tab's stream stops for good while its refetch
-      is open: no stop, an error that `onError` does not retry, the SDK
-      giving up its retries, or the application's signal aborting the
-      stream. Its 64 cells pass. Every ordinary storm cell fails on
-      `5649a07d4`. Without Electric's abandon on each stop path, the eager
-      storm cells for that path also fail (4 cells per path). On-demand
+      arrival, the last tab's open reserved transaction (its refetch, or an
+      ordinary batch after it resumed from the persisted position), how its
+      source stops for good (an error that `onError` does not retry, the SDK
+      giving up, a signal abort, cleanup, or resume invalidation), and how
+      the application recovers it (restart in the page, or reload). It
+      judges every tab's status and rows once every source has delivered or
+      stopped, again after recovery, and the full-snapshot request after
+      resume invalidation. Its 290 storm cells pass. Every ordinary storm
+      cell fails on `5649a07d4`. Removing Electric's abandon on the `onError`,
+      give-up, or signal-abort path fails 12 cells each. Two abandon mutants
+      survive here: cleanup's, because the persisted wrapper ends its
+      transactions on cleanup (the Electric descriptor-isolation oracle kills
+      it without persistence), and resume invalidation's, which changes only
+      the rows of a Collection in `error`, which no law promises. On-demand
       cells judge receipts and status only.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
