@@ -107,7 +107,21 @@ function createOPFSWorkerInstance(workerFileUrl: URL): BrowserOPFSWorkerLike {
     )
   }
 
-  return new WorkerConstructor(workerFileUrl, { type: `module` })
+  try {
+    // The package build ships the worker as a classic script, which browsers
+    // without module workers can start. Vite serves the source as a module.
+    return new WorkerConstructor(workerFileUrl, {
+      type:
+        typeof __BROWSER_SQLITE_PACKAGE_BUILD__ === `undefined`
+          ? `module`
+          : `classic`,
+    })
+  } catch (error) {
+    // For example, a worker URL on another origin throws a SecurityError.
+    throw new PersistenceUnavailableError(
+      `Failed to start the OPFS worker: ${String(error)}`,
+    )
+  }
 }
 
 function getOpenAbortError(signal: AbortSignal): Error {
@@ -129,10 +143,9 @@ type OPFSAssetUrls = {
  * Returns a pending lookup only for the built package under a Vite dev server.
  * Bundlers otherwise resolve the static asset URLs.
  */
-function resolveViteAssetUrls(
-  pageUrl: string,
-  { workerFileUrl }: OPFSAssetUrls,
-): Promise<OPFSAssetUrls> | undefined {
+function resolveViteAssetUrls({
+  workerFileUrl,
+}: OPFSAssetUrls): Promise<OPFSAssetUrls> | undefined {
   const viteClient = (
     globalThis as BrowserOPFSFeatureGlobal
   ).document?.querySelector<HTMLScriptElement>(`script[src*="/@vite/client"]`)
@@ -146,15 +159,22 @@ function resolveViteAssetUrls(
     return undefined
   }
 
+  const workerFile = workerFileUrl.pathname.split(`/`).at(-1)
+  if (!workerFile) {
+    throw new PersistenceUnavailableError(`Browser OPFS worker URL is missing`)
+  }
+  // A package excluded from pre-bundling is served in place, beside its
+  // assets. Only a moved module needs the lookup, which can fail when the app
+  // root cannot resolve the package name.
+  if (workerFileUrl.pathname.endsWith(`/dist/assets/${workerFile}`)) {
+    return undefined
+  }
+
   // Ask Vite to resolve the package exports instead of guessing install paths.
   const packageUrl = new URL(
     `@id/@tanstack/browser-db-sqlite-persistence/`,
     new URL(`../`, viteClient.src),
   )
-  const workerFile = workerFileUrl.pathname.split(`/`).at(-1)
-  if (!workerFile) {
-    throw new PersistenceUnavailableError(`Browser OPFS worker URL is missing`)
-  }
   return Promise.all([
     import(
       /* @vite-ignore */ /* webpackIgnore: true */ new URL(
@@ -168,10 +188,19 @@ function resolveViteAssetUrls(
         packageUrl,
       ).href
     ) as Promise<{ default: string }>,
-  ]).then(([wasmAsset, workerAsset]) => ({
-    wasmFileUrl: new URL(wasmAsset.default, pageUrl),
-    workerFileUrl: new URL(workerAsset.default, pageUrl),
-  }))
+  ]).then(
+    // Vite returns paths on its own server; some page URLs, such as
+    // about:srcdoc, cannot resolve a path.
+    ([wasmAsset, workerAsset]) => ({
+      wasmFileUrl: new URL(wasmAsset.default, packageUrl),
+      workerFileUrl: new URL(workerAsset.default, packageUrl),
+    }),
+    (error: unknown) => {
+      throw new PersistenceUnavailableError(
+        `Vite could not resolve the browser OPFS assets: ${String(error)}`,
+      )
+    },
+  )
 }
 
 async function closeWorkerConnection(
@@ -252,7 +281,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
       wasmFileUrl: new URL(wasmUrl, pageUrl),
       workerFileUrl: new URL(workerUrl, pageUrl),
     }
-    const viteUrls = resolveViteAssetUrls(pageUrl, bundledUrls)
+    const viteUrls = resolveViteAssetUrls(bundledUrls)
     return await openOPFSWorkerDatabase(
       viteUrls ? await Promise.race([viteUrls, openFailure]) : bundledUrls,
       databaseName,

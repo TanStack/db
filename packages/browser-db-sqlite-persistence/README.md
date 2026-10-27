@@ -172,6 +172,22 @@ duplicates inside that horizon remain idempotent.
   that worker context. The package includes the worker and a separate
   `wa-sqlite.wasm` asset. Vite includes both automatically, with no asset
   copying or WASM URL configuration required.
+- In Vite development, a pre-bundled copy of this package asks the dev server
+  for its assets by package name. If the app root cannot resolve that name,
+  the open rejects with `PersistenceUnavailableError`. This happens when the
+  app reaches the package only through another library, through an npm alias,
+  or with more than one installed version. Exclude the package from
+  pre-bundling in that case, so Vite serves it beside its assets:
+
+  ```ts
+  // vite.config.ts
+  export default defineConfig({
+    optimizeDeps: {
+      exclude: [`@tanstack/browser-db-sqlite-persistence`],
+    },
+  })
+  ```
+
 - Opening has a 30-second deadline by default. `timeoutMs` changes it; `0`
   explicitly disables the deadline. A timed-out open rejects with
   `TimeoutError` and terminates its pending worker, so it cannot acquire the

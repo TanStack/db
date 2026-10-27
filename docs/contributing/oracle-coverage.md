@@ -1937,8 +1937,25 @@ deadline rejects with `TimeoutError`, an abort rejects with its reason, neither
 creates a worker after the lookup completes, and a later open succeeds. The
 earlier opener, which started the deadline after asset resolution, left both
 opens pending. The witness restates those outcomes because the lifecycle open
-cases are fixed examples without a shared model module. It covers one held
-lookup in Vite development, not webpack, Turbopack, or a failed lookup.
+cases are fixed examples without a shared model module. The same file fails
+the WASM or the worker lookup and expects `PersistenceUnavailableError` with no
+worker, which the README requires for capability failures. It also opens from
+an `about:srcdoc` frame, whose URL cannot resolve Vite's asset paths. The
+earlier lookup rejected with a raw `TypeError` in both cases; classifying only
+the WASM lookup fails the worker history. A page served from another origin
+than Vite, as in a backend integration, makes the Worker constructor throw a
+`SecurityError`; the witness expects `PersistenceUnavailableError` there as
+well. The
+[install-layout witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-install-layouts.e2e.test.ts)
+adds a transitive install, whose package name the Vite root cannot resolve. A
+pre-bundled transitive install gets this classified error. Excluded from
+pre-bundling, as the README directs, it opens because the package is served
+beside its assets; the earlier lookup ran anyway and failed. The consumer
+witness also checks that the built package starts a classic worker in
+development and production; the earlier opener started a module worker. No
+available browser lacks module workers, so the witness observes the requested
+worker type rather than such a browser. These witnesses cover Vite development only, not webpack, Turbopack,
+an open from a worker, or a Vite client injected without a script `src`.
 
 The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how

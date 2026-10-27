@@ -11,6 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { createServer as createHttpServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build, createServer, preview } from 'vite'
+import type { AddressInfo } from 'node:net'
 import type { Response } from '@playwright/test'
 import type {
   BrowserWASQLiteDatabase,
@@ -160,25 +162,30 @@ it(`opens and queries SQLite under a nested base without asset configuration`, a
       })
       page.on(`worker`, (worker) => diagnostics.push(`worker ${worker.url()}`))
       try {
+        await page.addInitScript(countCreatedWorkers)
         await page.goto(baseUrl!)
-        const rows = await page.evaluate(async () => {
-          const openDatabase = (
-            globalThis as typeof globalThis & {
-              openDatabase: () => Promise<BrowserWASQLiteDatabase>
-            }
-          ).openDatabase
-          const database = await openDatabase()
+        const opened = await page.evaluate(async () => {
+          const probe = globalThis as ProbeGlobal
+          const database = await probe.openDatabase()
           try {
             await database.execute(`CREATE TABLE items (value INTEGER)`)
             await database.execute(`INSERT INTO items (value) VALUES (42)`)
-            return await database.execute<{ value: number }>(
-              `SELECT value FROM items`,
-            )
+            return {
+              rows: await database.execute<{ value: number }>(
+                `SELECT value FROM items`,
+              ),
+              workerTypes: probe.workerTypes,
+            }
           } finally {
             await database.close?.()
           }
         })
-        expect(rows).toEqual([{ value: 42 }])
+        // The package ships its worker as a classic script, so browsers
+        // without module workers can still start it.
+        expect(opened).toEqual({
+          rows: [{ value: 42 }],
+          workerTypes: [`classic`],
+        })
         diagnostics.push(
           ...wasmResponses.map(
             (response) =>
@@ -215,6 +222,22 @@ type ProbeGlobal = typeof globalThis & {
     options?: Partial<OpenBrowserWASQLiteOPFSDatabaseOptions>,
   ) => Promise<BrowserWASQLiteDatabase>
   createdWorkers: number
+  workerTypes: Array<WorkerType>
+}
+
+// Runs in every frame before its scripts, so each realm counts its own workers.
+function countCreatedWorkers(): void {
+  const probe = globalThis as ProbeGlobal
+  const NativeWorker = probe.Worker
+  probe.createdWorkers = 0
+  probe.workerTypes = []
+  probe.Worker = class extends NativeWorker {
+    constructor(...args: ConstructorParameters<typeof Worker>) {
+      probe.createdWorkers++
+      probe.workerTypes.push(args[1]?.type ?? `classic`)
+      super(...args)
+    }
+  }
 }
 
 /*
@@ -261,17 +284,7 @@ it(`applies the open deadline and abort while Vite resolves packaged assets`, as
   try {
     await developmentServer.listen()
     const page = await browser.newPage()
-    await page.addInitScript(() => {
-      const probe = globalThis as ProbeGlobal
-      const NativeWorker = probe.Worker
-      probe.createdWorkers = 0
-      probe.Worker = class extends NativeWorker {
-        constructor(...args: ConstructorParameters<typeof Worker>) {
-          probe.createdWorkers++
-          super(...args)
-        }
-      }
-    })
+    await page.addInitScript(countCreatedWorkers)
     await page.goto(developmentServer.resolvedUrls!.local[0]!)
 
     const interrupted = await page.evaluate(async () => {
@@ -345,6 +358,198 @@ it(`applies the open deadline and abort while Vite resolves packaged assets`, as
     })
   } finally {
     for (const release of heldLookups.splice(0)) release()
+    await developmentServer.close()
+    await browser.close()
+  }
+}, 120_000)
+
+type OpenOutcome =
+  | { name: string; createdWorkers: number }
+  | { rows: ReadonlyArray<unknown>; createdWorkers: number }
+
+/*
+ * The README surfaces OPFS capability failures as PersistenceUnavailableError.
+ * The packaged assets are part of that capability. When the dev server cannot
+ * resolve either lookup, as for a transitive install that the Vite root cannot
+ * resolve by package name, the open must report that error and create no
+ * worker. An application cannot otherwise tell this failure from a bug.
+ */
+it.each([`wa-sqlite.wasm`, `assets/`])(
+  `reports unavailable persistence when Vite cannot resolve the packaged %s lookup`,
+  async (failedLookup) => {
+    const browser = await chromium.launch({ headless: true })
+    const developmentServer = await createServer({
+      configFile: false,
+      root: consumerDirectory,
+      base: consumerBase,
+      logLevel: `error`,
+      server: { host: `127.0.0.1`, port: 0 },
+      plugins: [
+        {
+          name: `fail-packaged-asset-lookup`,
+          configureServer(server) {
+            server.middlewares.use((request, response, next) => {
+              if (
+                request.url?.includes(
+                  `/@id/@tanstack/browser-db-sqlite-persistence/${failedLookup}`,
+                )
+              ) {
+                response.statusCode = 404
+                response.end()
+                return
+              }
+              next()
+            })
+          },
+        },
+      ],
+    })
+
+    try {
+      await developmentServer.listen()
+      const page = await browser.newPage()
+      await page.addInitScript(countCreatedWorkers)
+      await page.goto(developmentServer.resolvedUrls!.local[0]!)
+      const outcome = await page.evaluate(async (): Promise<OpenOutcome> => {
+        const probe = globalThis as ProbeGlobal
+        try {
+          const database = await probe.openDatabase({ timeoutMs: 5_000 })
+          await database.close?.()
+          return { rows: [], createdWorkers: probe.createdWorkers }
+        } catch (error) {
+          return {
+            name: (error as Error).name,
+            createdWorkers: probe.createdWorkers,
+          }
+        }
+      })
+      expect(outcome).toEqual({
+        name: `PersistenceUnavailableError`,
+        createdWorkers: 0,
+      })
+    } finally {
+      await developmentServer.close()
+      await browser.close()
+    }
+  },
+  120_000,
+)
+
+/*
+ * An about:srcdoc frame shares its parent's origin and OPFS storage, but its
+ * own URL cannot resolve a path. Vite returns asset paths for the dev server,
+ * so the package must resolve them against that server rather than the page.
+ */
+it(`opens packaged SQLite from an about:srcdoc frame under Vite development`, async () => {
+  const browser = await chromium.launch({ headless: true })
+  const developmentServer = await createServer({
+    configFile: false,
+    root: consumerDirectory,
+    base: consumerBase,
+    logLevel: `error`,
+    server: { host: `127.0.0.1`, port: 0 },
+  })
+
+  try {
+    await developmentServer.listen()
+    const page = await browser.newPage()
+    await page.addInitScript(countCreatedWorkers)
+    await page.goto(developmentServer.resolvedUrls!.local[0]!)
+    const outcome = await page.evaluate(async (base): Promise<OpenOutcome> => {
+      const frame = document.createElement(`iframe`)
+      frame.srcdoc = `<script type="module" src="${base}@vite/client"></script><script type="module" src="${base}main.js"></script>`
+      document.body.append(frame)
+      const probe = await new Promise<ProbeGlobal>((resolve) => {
+        const poll = () => {
+          const frameGlobal = frame.contentWindow as ProbeGlobal | null
+          if (typeof frameGlobal?.openDatabase === `function`) {
+            resolve(frameGlobal)
+          } else {
+            setTimeout(poll, 20)
+          }
+        }
+        poll()
+      })
+      try {
+        const database = await probe.openDatabase({
+          databaseName: `consumer-srcdoc.sqlite`,
+          timeoutMs: 5_000,
+        })
+        try {
+          return {
+            rows: await database.execute(`SELECT 42 AS value`),
+            createdWorkers: probe.createdWorkers,
+          }
+        } finally {
+          await database.close?.()
+        }
+      } catch (error) {
+        return {
+          name: `${(error as Error).name}: ${(error as Error).message}`,
+          createdWorkers: probe.createdWorkers,
+        }
+      }
+    }, consumerBase)
+    expect(outcome).toEqual({ rows: [{ value: 42 }], createdWorkers: 1 })
+  } finally {
+    await developmentServer.close()
+    await browser.close()
+  }
+}, 120_000)
+
+/*
+ * In a backend integration, the page comes from the application server and
+ * its scripts come from the Vite server. A browser cannot start a worker from
+ * another origin, so this open cannot succeed. It must still report
+ * unavailable persistence rather than the Worker constructor's SecurityError.
+ */
+it(`reports unavailable persistence when the page and Vite server origins differ`, async () => {
+  const browser = await chromium.launch({ headless: true })
+  const developmentServer = await createServer({
+    configFile: false,
+    root: consumerDirectory,
+    base: consumerBase,
+    logLevel: `error`,
+    server: { host: `127.0.0.1`, port: 0 },
+  })
+
+  const applicationServer = createHttpServer()
+
+  try {
+    await developmentServer.listen()
+    const viteUrl = developmentServer.resolvedUrls!.local[0]!
+    applicationServer.on(`request`, (_request, response) => {
+      response.setHeader(`content-type`, `text/html`)
+      response.end(
+        `<script type="module" src="${viteUrl}@vite/client"></script><script type="module" src="${viteUrl}main.js"></script>`,
+      )
+    })
+    await new Promise<void>((resolve) =>
+      applicationServer.listen(0, `localhost`, resolve),
+    )
+    const { port } = applicationServer.address() as AddressInfo
+    const page = await browser.newPage()
+    await page.addInitScript(countCreatedWorkers)
+    await page.goto(`http://localhost:${port}/`)
+    await page.waitForFunction(
+      () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
+    )
+    const outcome = await page.evaluate(async (): Promise<OpenOutcome> => {
+      const probe = globalThis as ProbeGlobal
+      try {
+        const database = await probe.openDatabase({ timeoutMs: 5_000 })
+        await database.close?.()
+        return { rows: [], createdWorkers: probe.createdWorkers }
+      } catch (error) {
+        return {
+          name: (error as Error).name,
+          createdWorkers: probe.createdWorkers,
+        }
+      }
+    })
+    expect(outcome).toMatchObject({ name: `PersistenceUnavailableError` })
+  } finally {
+    applicationServer.close()
     await developmentServer.close()
     await browser.close()
   }
