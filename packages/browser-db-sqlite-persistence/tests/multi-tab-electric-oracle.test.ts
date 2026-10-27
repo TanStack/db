@@ -271,7 +271,7 @@ function openHost() {
         const error = new Error(`stream failed`)
         if (how === `error without retry`) return stream().onError(error)
         if (how === `SDK gives up`) return stream().giveUp(error)
-        external.abort()
+        return external.abort()
       },
       publicRows: () =>
         Array.from(collection.values(), ({ id, label }) => ({
