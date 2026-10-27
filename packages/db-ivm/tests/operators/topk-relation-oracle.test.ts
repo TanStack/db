@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
+import { declareOracle } from '../../../db/tests/oracle-config.js'
 import { TopKRelation } from './topk-relation-oracle.js'
+
+declareOracle({ check: [TopKRelation] })
 
 /**
  * # How do we know the top-K oracle can detect a fault?
