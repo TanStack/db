@@ -17608,6 +17608,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   //   subset load is admitted, so the load waits in the wrapper's admission
   //   path. Whether the reservation commits or is abandoned, the load runs
   //   after it ends (maintainer decision on PR #2265);
+  // - `unreserved across pullSince`: it begins without reserving before a
+  //   gap notice and commits while recovery waits for pullSince. Recovery
+  //   is a hydration cycle only from the point where it will change rows, so
+  //   the commit is accepted (maintainer decision on PR #2265);
+  // - `open during pullSince`: it begins and reserves while recovery waits
+  //   for pullSince, before recovery's cycle begins, so recovery waits for
+  //   its commit and asks the leader again;
   // - `open across mutex turn`: it begins and reserves while the read waits
   //   behind the gate, before the read's turn;
   // - `open across scope entry`: it reserves after the read's turn began and
@@ -17649,6 +17656,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     | `after read`
     | `queued`
     | `open before admission`
+    | `unreserved across pullSince`
+    | `open during pullSince`
     | `open across mutex turn`
     | `open across scope entry`
     | `open during the read`
@@ -17673,6 +17682,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     | `route performed a persisted read`
     | `reservation opened while the read was pending`
     | `reservation opened before the route was admitted`
+    | `unreserved transaction committed while recovery waited for pullSince`
+    | `reservation opened while recovery waited for pullSince`
     | `reservation opened while a read was in progress`
     | `reservation opened in the route's first publication`
     | `reservation opened before startup settled`
@@ -17730,6 +17741,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } = fixtureRows
     const waits =
       commitTiming === `open before admission` ||
+      commitTiming === `open during pullSince` ||
       commitTiming === `open across mutex turn` ||
       commitTiming === `open across scope entry`
     // The transaction straddles a hydration that already began.
@@ -17738,18 +17750,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       commitTiming === `open in the first publication`
     const reserves =
       waits || straddles || commitTiming === `open across startup`
-    // Gap recovery is one hydration cycle from its first step, which comes
-    // before it enters its hydration scope. A reservation that opens at scope
-    // entry therefore straddles the recovery instead of waiting for it
-    // (law: a transaction opened after a hydration began straddles it). Every
-    // other route begins its hydration inside the scope.
+    // Gap recovery is a hydration cycle only from the point where it will
+    // change rows (maintainer decision on PR #2265). With pullSince that is
+    // after the leader answers, before recovery enters its hydration scope,
+    // so a reservation that opens at scope entry straddles the recovery.
+    // Without pullSince it is the reload inside the scope, so such a
+    // reservation comes first and the recovery waits. Every other route
+    // begins its hydration inside the scope.
     const recoveryStraddles =
       commitTiming === `open across scope entry` &&
-      (route === `seq-gap` ||
-        route === `seq-gap pull` ||
-        route === `seq-gap deltas`)
-    const hydrationWaits = waits && !recoveryStraddles
-    const hydrationStraddles = straddles || recoveryStraddles
+      (route === `seq-gap pull` || route === `seq-gap deltas`)
+    // A peer reset abandons a reserved transaction that opened before the
+    // reset's hydration began: the route reset when the reservation opened
+    // before its turn, or a follow-up reset delivered while the reservation
+    // is open (maintainer decision on PR #2265). Its commit rejects, its
+    // first step applies nothing, and the reset runs without waiting.
+    const resetAbandons =
+      waits && (route === `collection-reset` || followUp !== `none`)
+    const hydrationWaits = waits && !recoveryStraddles && !resetAbandons
+    const hydrationStraddles = straddles || recoveryStraddles || resetAbandons
+    const noticeWaited = waits && !recoveryStraddles
     const sourceSteps =
       truncateReplay === `none`
         ? [`network`]
@@ -17778,58 +17798,61 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       ...routeRows,
     ].filter((row) => !lateRowIds.has(row.id))
     // Steps that apply: an abandoned reservation applies none of its writes.
-    const appliedSteps =
-      ending === `abandoned` ? sourceSteps.slice(1) : sourceSteps
-    const abandonedStep = ending === `abandoned` ? sourceSteps[0] : undefined
+    const firstStepAbandoned = ending === `abandoned` || resetAbandons
+    const appliedSteps = firstStepAbandoned ? sourceSteps.slice(1) : sourceSteps
+    const abandonedStep = firstStepAbandoned ? sourceSteps[0] : undefined
 
-    // Independent snapshot algebra: a later replacement discards everything
-    // before it. Otherwise the baseline survives only when there is no
-    // replacement, and the newer change decides the shared key. Complete row
-    // values and explicit metadata avoid the separate partial-update contract.
-    // Source steps are input history, never observations from production.
+    // Independent snapshot algebra over the source steps that apply, in
+    // order. A replacement discards every earlier row and leaves only its
+    // own; a network step writes or deletes the shared key. An abandoned step
+    // applies nothing. Complete row values and explicit metadata avoid the
+    // separate partial-update contract. Source steps are input history, never
+    // observations from production.
     const baselineRows = [storedRow, storedOnly, gateRow, ...routeRows]
-    const expectedRows =
-      abandonedStep !== undefined
-        ? baselineRows
-        : truncateReplay === `after`
-          ? [replacementRow]
-          : [
-              ...(truncateReplay === `before`
-                ? [replacementRow]
-                : [storedOnly, gateRow, ...routeRows]),
-              ...(operation === `delete` ? [] : [networkRow]),
-            ]
-    // On-demand without demand exposes the source's own rows; an aborted
-    // demand loads nothing. Every other route exposes the durable rows.
-    // Uncertified on-demand cache rows stay quarantined after a baseline
-    // hydration (electric.ts: "loaded only through fresh subset snapshots").
+    const foldSteps = (initialRows: Array<Todo>) => {
+      const rows = new Map<string, Todo>(
+        initialRows.map((row) => [row.id, row]),
+      )
+      for (const step of appliedSteps) {
+        if (step === `replacement`) {
+          rows.clear()
+          rows.set(replacementRow.id, replacementRow)
+        } else if (operation === `delete`) rows.delete(`shared`)
+        else rows.set(networkRow.id, networkRow)
+      }
+      return [...rows.values()]
+    }
+    let durableSharedMetadata: unknown = { owner: `persisted` }
+    let expectedCursor = `persisted` as string
+    for (const step of appliedSteps) {
+      durableSharedMetadata =
+        step === `replacement` || operation === `delete`
+          ? undefined
+          : { owner: `network` }
+      expectedCursor = step
+    }
+    const expectedRows = foldSteps(baselineRows)
+    // On-demand without demand exposes the source's own rows, folded from its
+    // earlier row; an aborted demand loads nothing. Every other route exposes
+    // the durable rows. Uncertified on-demand cache rows stay quarantined
+    // after a baseline hydration (electric.ts: "loaded only through fresh
+    // subset snapshots").
     const exposesSourceRowsOnly =
       noDemandRead || route === `source baseline` || ending === `demand aborted`
-    const expectedPublicRows =
-      exposesSourceRowsOnly && truncateReplay === `none`
-        ? [
-            gateRow,
-            ...(abandonedStep !== undefined || operation === `delete`
-              ? []
-              : [networkRow]),
-          ]
-        : expectedRows
-    const sharedMetadata =
-      abandonedStep !== undefined
-        ? exposesSourceRowsOnly
-          ? { public: undefined, durable: { owner: `persisted` } }
-          : { public: { owner: `persisted` }, durable: { owner: `persisted` } }
-        : truncateReplay !== `after` && operation !== `delete`
-          ? { public: { owner: `network` }, durable: { owner: `network` } }
-          : { public: undefined, durable: undefined }
-    const replacementMetadata =
-      truncateReplay === `none` ? undefined : { owner: `replacement` }
-    const expectedCursor =
-      abandonedStep !== undefined
-        ? `persisted`
-        : truncateReplay === `after`
-          ? `replacement`
-          : `network`
+    const expectedPublicRows = exposesSourceRowsOnly
+      ? foldSteps([gateRow])
+      : expectedRows
+    // The persisted shared metadata is public only where the durable rows are.
+    const sharedMetadata = {
+      public:
+        exposesSourceRowsOnly && appliedSteps.length === 0
+          ? undefined
+          : durableSharedMetadata,
+      durable: durableSharedMetadata,
+    }
+    const replacementMetadata = appliedSteps.includes(`replacement`)
+      ? { owner: `replacement` }
+      : undefined
     const readsSomething =
       !noDemandRead &&
       route !== `targeted` &&
@@ -17850,6 +17873,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         else rows.set(networkRow.id, networkRow)
       } else if (event === `owner commit`) rows.set(remoteRow.id, remoteRow)
     }
+    // The first step committed before the route's reads inside startup. A
+    // commit made while gap recovery waits for pullSince is accepted, but its
+    // durable write waits behind recovery's apply-mutex turn, so recovery's
+    // reads still come first.
     const startupStepCommitted =
       commitTiming === `open across startup` && abandonedStep === undefined
     const noWaitPullSinceCalls =
@@ -17858,7 +17885,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     // arrives during a straddled reservation and waits there. Each notice
     // that waited may ask the leader once more; nothing else may.
     const waitedNotices =
-      (hydrationWaits &&
+      (noticeWaited &&
         (route === `full-reload` ||
           route === `seq-gap pull` ||
           route === `seq-gap deltas`)) ||
@@ -17889,6 +17916,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       straddles,
       reserves,
       hydrationWaits,
+      resetAbandons,
       hydrationStraddles,
       sourceSteps,
       demandRoute,
@@ -17927,6 +17955,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       waits,
       reserves,
       hydrationWaits,
+      resetAbandons,
       hydrationStraddles,
       sourceSteps,
       demandRoute,
@@ -18023,11 +18052,29 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     // Every route but `seq-gap` has a leader that answers pullSince with a
     // full reload.
     let pullSinceCalls = 0
+    // Holds the next pullSince request open for the pullSince timings.
+    let pullSinceHold:
+      | {
+          entered: ReturnType<typeof createEventGate>
+          release: ReturnType<typeof createEventGate>
+        }
+      | undefined =
+      commitTiming === `unreserved across pullSince` ||
+      commitTiming === `open during pullSince`
+        ? { entered: createEventGate(), release: createEventGate() }
+        : undefined
+    const pullHold = pullSinceHold
     coordinator.pullSince =
       route === `seq-gap`
         ? undefined
-        : () => {
+        : async () => {
             pullSinceCalls++
+            const hold = pullSinceHold
+            pullSinceHold = undefined
+            if (hold) {
+              hold.entered.resolve()
+              await hold.release.promise
+            }
             if (route === `seq-gap deltas`) {
               // A targeted delta for the row the peer stored at the skipped
               // position, then a delta past the targeted-invalidation limit.
@@ -18187,11 +18234,23 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           followUp === `none`)
           ? []
           : ([`route performed a persisted read`] as const)),
-        ...(waits && commitTiming !== `open before admission`
+        ...(waits &&
+        commitTiming !== `open before admission` &&
+        commitTiming !== `open during pullSince`
           ? ([`reservation opened while the read was pending`] as const)
           : []),
         ...(commitTiming === `open before admission`
           ? ([`reservation opened before the route was admitted`] as const)
+          : []),
+        ...(commitTiming === `unreserved across pullSince`
+          ? ([
+              `unreserved transaction committed while recovery waited for pullSince`,
+            ] as const)
+          : []),
+        ...(commitTiming === `open during pullSince`
+          ? ([
+              `reservation opened while recovery waited for pullSince`,
+            ] as const)
           : []),
         ...(commitTiming === `open during the read`
           ? ([`reservation opened while a read was in progress`] as const)
@@ -18259,17 +18318,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       pendingOperations.push(pending)
       expectedOutcomes.push(expected)
     }
-    const commitSourceTransaction = (signal?: AbortSignal) => {
+    const commitSourceTransaction = (
+      signal?: AbortSignal,
+      expected: `fulfilled` | `rejected` = signal ? `rejected` : `fulfilled`,
+    ) => {
       try {
-        retainOperation(
-          sourceParams.commit(signal),
-          signal ? `rejected` : `fulfilled`,
-        )
+        retainOperation(sourceParams.commit(signal), expected)
       } catch (error) {
-        retainOperation(
-          Promise.reject(error),
-          signal ? `rejected` : `fulfilled`,
-        )
+        retainOperation(Promise.reject(error), expected)
       }
     }
     const endReservation = () => {
@@ -18278,7 +18334,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         const cancelled = new AbortController()
         cancelled.abort()
         commitSourceTransaction(cancelled.signal)
-      } else commitSourceTransaction()
+      } else {
+        // A reset that abandoned the reservation rejects its commit.
+        commitSourceTransaction(
+          undefined,
+          resetAbandons ? `rejected` : `fulfilled`,
+        )
+      }
     }
     const published = new Set<string>()
     let hasPrimaryFailure = false
@@ -18355,6 +18417,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           stripVirtualProps(row),
         ]),
       )
+      if (commitTiming === `unreserved across pullSince`) {
+        sourceParams.begin()
+        writeSourceStep(sourceSteps[0]!)
+      }
       if (commitTiming === `open before admission`) {
         beginReservedSourceStep()
         reach.reach(`reservation opened before the route was admitted`)
@@ -18475,6 +18541,19 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         } else await persistenceQuiesced(`targeted change applied`)
         deliverFollowUp()
         await persistenceQuiesced(`follow-up applied`)
+      } else if (commitTiming === `unreserved across pullSince`) {
+        releasePersistence.resolve()
+        await atPersistedOracleCheckpoint(
+          pullHold!.entered.promise,
+          `recovery waits for pullSince`,
+        )
+        commitSourceTransaction()
+        reach.reach(
+          `unreserved transaction committed while recovery waited for pullSince`,
+        )
+        pullHold!.release.resolve()
+        await persistenceQuiesced(`recovery finished`)
+        remainingSteps = sourceSteps.slice(1)
       } else if (commitTiming === `queued`) {
         // The sync transaction commits while the read waits (below).
       } else if (commitTiming === `open in the first publication`) {
@@ -18516,7 +18595,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         endReservation()
         remainingSteps = sourceSteps.slice(1)
       } else {
-        if (commitTiming === `open before admission`) {
+        if (commitTiming === `open during pullSince`) {
+          releasePersistence.resolve()
+          await atPersistedOracleCheckpoint(
+            pullHold!.entered.promise,
+            `recovery waits for pullSince`,
+          )
+          beginReservedSourceStep()
+          reach.reach(`reservation opened while recovery waited for pullSince`)
+          pullHold!.release.resolve()
+        } else if (commitTiming === `open before admission`) {
           // The reservation opened before the route was admitted.
           releasePersistence.resolve()
           await atPersistedOracleCheckpoint(
@@ -18884,6 +18972,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         [
           `after read`,
           `open before admission`,
+          `unreserved across pullSince`,
+          `open during pullSince`,
           `open across mutex turn`,
           `open across scope entry`,
           `open during the read`,
@@ -18891,6 +18981,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           `open across startup`,
         ] as const
       ).flatMap((commitTiming) => {
+        // Only a gap recovery that asks the leader waits for pullSince.
+        if (
+          (commitTiming === `unreserved across pullSince` ||
+            commitTiming === `open during pullSince`) &&
+          route !== `seq-gap pull` &&
+          route !== `seq-gap deltas`
+        ) {
+          return []
+        }
         // Only a subset load is admitted through the wrapper's admission.
         if (
           commitTiming === `open before admission` &&
@@ -18913,10 +19012,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
         const waits =
           commitTiming === `open before admission` ||
+          commitTiming === `open during pullSince` ||
           commitTiming === `open across mutex turn` ||
           commitTiming === `open across scope entry`
         const endings: Array<PersistedReadEnding> =
-          commitTiming === `after read`
+          commitTiming === `after read` ||
+          commitTiming === `unreserved across pullSince`
             ? [`commits`]
             : waits
               ? [

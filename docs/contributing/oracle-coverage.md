@@ -2975,10 +2975,16 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       reset, full reload, sequence gap with or without pullSince, sequence
       gap whose pullSince deltas reload partway through (a targeted delta,
       then one past the targeted-invalidation limit), and a targeted change
-      that starts no hydration. Gap recovery is one hydration cycle from its
-      first step, so a reservation that opens at its scope entry straddles
-      it. The reserving timings are
-      before a subset load's admission, across the mutex turn, across scope
+      that starts no hydration. Gap recovery is a hydration cycle only from
+      the point where it will change rows (maintainer decision on PR #2265):
+      after pullSince answers, or at its reload without pullSince. A
+      reservation opened after that point straddles it; one opened during
+      pullSince makes it wait, and a transaction that did not reserve may
+      commit during pullSince. A peer reset abandons a reserved transaction
+      that began before it (maintainer decision on PR #2265): the commit
+      rejects and the reset does not wait. The reserving timings are
+      before a subset load's admission, during gap recovery's pullSince
+      (with or without a reservation), across the mutex turn, across scope
       entry, during the read, in the route's first publication, and across
       startup. A load that waits for a reservation runs after it ends,
       whether it commits or is abandoned (maintainer decision on PR #2265);
@@ -2992,10 +2998,17 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       events before it. Every cell declares reach (ORC-015).
       | Evidence | Result |
       | --- | --- |
-      | Row-algebra cross and reservation cross | 657 cells pass. |
+      | Row-algebra cross and reservation cross | 677 cells pass. |
+      | Peer reset against an older reservation, on `2047f4281` | 53 cells fail: the reset waited and the stale commit landed in the new epoch. Abandoning only at the reset's turn fails 6 follow-up cells; abandoning only on arrival fails 40 route cells. |
+      | Gap recovery's cycle start, on `2047f4281` | 12 pullSince cells fail: an unreserved commit during pullSince rejected, and a reservation opened then straddled. Dropping the reservation check after pullSince fails 8. |
       | Gap recovery that reloads partway through, on `851e8d9da` | 28 cells fail: recovery advanced the stream position and applied a targeted delta before it deferred, so its retry skipped the reload. A gate only at recovery start still fails 15 scope-entry cells; reloads that start their own cycle inside recovery fail 61. |
       | `5649a07d4` | The open cells fail with `a persisted sync transaction cannot cross a hydration cycle`. Three `after read` reset follow-up cells also fail, because `main` applied a pre-reset commit before the reset set its term fence. Queueing resets with notices fixes this pre-existing defect. |
       | Hostile mutants | Each mutant fails its cells, and every failure is an assertion. Deferring every notice fails the targeted change. Dropping the follower reply's wait fails the routed subset. Reporting hydration start before the check fails the aborted demand. A reset reload that starts its own cycle fails the first-publication reset. Applying a reset outside the notice queue fails the reset follow-ups. Retrying a waited notice while the reservation is open fails the follow-up and routed cells (repeated pullSince). Checking only at the mutex turn fails every scope-entry cell. Gating subset hydration only fails every reset, reload, and gap cell. Requeueing a waited notice behind later notices fails 12 reset follow-up cells: the pre-reset commit is published before its reset, and a reload is lost. |
+      Known limit (maintainer decision on PR #2265): no fairness rule. A
+      hydration released by a commit waits again for a reservation that
+      opens before its next mutex turn, so a source that reserves back to
+      back can delay it; Electric reserves across batches only during an
+      initial sync or refetch.
       Not covered: `forceReloadSubset`, which only a sync-absent Collection
       has, and which therefore never meets a reservation; startup hydration,
       which source entry follows (an `open across startup` observation);
@@ -3008,6 +3021,9 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       or the shared scheduler holding the scope after its turn) and two
       endings (commits, abandoned). It runs on `SQLiteCorePersistenceAdapter`.
       It also judges that a subset load that waited settles successfully.
+      Its peer-reset cells judge that the reset abandons the reservation:
+      the commit rejects and row-1 keeps its durable value (both committing
+      peer-reset cells fail on `2047f4281`).
       Its 10 cells pass. Every committing cell fails on `5649a07d4`. A
       mutant that rejects the waited load after the reservation fails the 4
       subset cells; before the load's outcome was judged, it passed. A peer

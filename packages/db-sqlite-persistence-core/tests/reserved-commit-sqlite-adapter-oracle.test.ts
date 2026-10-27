@@ -5,7 +5,10 @@
  * Law: a persisted hydration that would start while a reserved sync
  * transaction is open waits until it ends; a commit is then accepted, and an
  * abandoned transaction applies nothing (`reserveCommitTurn`,
- * packages/db/src/types.ts, widened by maintainer decision on #2226). The
+ * packages/db/src/types.ts, widened by maintainer decision on #2226). A peer
+ * reset is the exception: it abandons a reserved transaction that began
+ * before it, so that commit rejects and the reset does not wait (maintainer
+ * decision on PR #2265). The
  * primary owner is the persisted-reads grammar in persisted-oracle.test.ts,
  * which uses a recording adapter and simulates a held hydration scope. This
  * oracle drives the same law through `SQLiteCorePersistenceAdapter` over
@@ -21,8 +24,8 @@
  *
  * Model: row-1's durable value before the reservation follows from the
  * history alone: the initial row, a peer edit, or the held write's value. A
- * commit makes row-1 `refetched`; an abandoned transaction leaves the durable
- * value. Each cell reaches its premise: the hydration entered its scope while
+ * commit makes row-1 `refetched`; an abandoned transaction, or one a peer
+ * reset abandoned, leaves the durable value. Each cell reaches its premise: the hydration entered its scope while
  * the reservation was open.
  *
  * Limits: the simulated peer writes straight to the adapter and announces
@@ -418,7 +421,9 @@ describe('reserved commits across real-adapter hydrations', () => {
       )
       const loadOutcome = await load
       reach.assertReached()
-      const expectedValue = ending === 'commits' ? 'refetched' : durableBefore
+      // A peer reset abandons the reservation, which began before it.
+      const commitAccepted = ending === 'commits' && route !== 'peer reset'
+      const expectedValue = commitAccepted ? 'refetched' : durableBefore
       await waitFor(() =>
         expect(harness.collection.get('row-1')).toMatchObject({
           value: expectedValue,
@@ -430,7 +435,7 @@ describe('reserved commits across real-adapter hydrations', () => {
         status: harness.collection.status,
         loadOutcome,
       }).toEqual({
-        outcome: ending === 'commits' ? 'fulfilled' : 'rejected',
+        outcome: commitAccepted ? 'fulfilled' : 'rejected',
         status: 'ready',
         loadOutcome:
           route === 'subset admitted earlier' ? 'fulfilled' : undefined,

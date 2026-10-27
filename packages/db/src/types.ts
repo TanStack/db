@@ -589,7 +589,11 @@ export type SyncPersistenceCapabilityV1<
    * load admitted while the turn is reserved also runs after the commit's
    * durable write. The source must end the transaction: commit it, or abandon
    * it by committing with an aborted signal. An abandon releases the waiting
-   * hydrations as a commit does, so they run. A source that stops for good
+   * hydrations as a commit does, so they run. A peer reset abandons a
+   * reserved transaction that began before the reset: its commit rejects
+   * with `SyncTransactionAbortedError`, and the reset does not wait.
+   * Sequence-gap recovery counts as a hydration only from the point where it
+   * changes rows. A source that stops for good
    * abandons it, or every later hydration keeps waiting. The source must not
    * await a `hydrateBaseline` that it started before reserving while the
    * reservation is open: that baseline waits for the commit. Calling
