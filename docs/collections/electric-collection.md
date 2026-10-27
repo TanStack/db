@@ -355,6 +355,13 @@ A mutation handler waiting on one of them rejects; a later handler can wait for
 evidence from the replacement session. The replacement reloads demanded
 subsets and does not treat acknowledgements from the retired session as current.
 
+Before constructing a replacement `ShapeStream`, Electric releases the
+adapter-owned resources of the retired provider session, including its
+subscriptions and host lifecycle listeners. The replacement starts after cache
+rotation completes. An HTTP request that ignores cancellation may still finish
+later; its response cannot publish rows or settle waits for the replacement
+session.
+
 Persisted resumes wait for the cached row baseline to finish hydrating. If the
 persistence wrapper cannot verify hydration completion, Electric starts a fresh
 snapshot instead of using the saved offset and handle. It warns once per options

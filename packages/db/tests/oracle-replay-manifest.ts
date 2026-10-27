@@ -122,12 +122,22 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     `electric`,
-    `sdk-snapshot-delivery sdk-dnf-membership`,
+    `sdk-snapshot-delivery sdk-dnf-membership sdk-source-release sdk-rotation-release`,
   ],
   [
     `db/tests/collection-sync-reentrancy-oracle.test.ts`,
     `collection-sync`,
     `reentrant-drain`,
+  ],
+  [
+    `db/tests/collection-gc-transaction-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-persisting-transaction`,
+  ],
+  [
+    `db/tests/collection-gc-mutation-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-mutation-shapes`,
   ],
   [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
@@ -245,6 +255,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
   ],
   [
+    `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
+    `replay`,
+    `ordered-window-faults keyed-request-failures subscription-demand-origin`,
+  ],
+  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
@@ -283,6 +298,11 @@ for (const law of [
   }
 }
 
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
+
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
     owners.set(
@@ -312,6 +332,18 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `collection-lifecycle.gc-mutation-shapes`,
+    `retains every touched Collection across mutation shapes.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-persisting-transaction`,
+    `retires a Collection only after gcTime.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
   [
     `ssr.stream-record-lifetime`,
     `settles each record demand at its transport checkpoint.*random`,
@@ -402,6 +434,12 @@ const replayTestNames = new Map([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property === `replay.ordered-window-faults`)
+    return `keeps the ordered window under load and release faults \\(replay campaign\\)`
+  if (property === `replay.keyed-request-failures`)
+    return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
+  if (property === `replay.subscription-demand-origin`)
+    return `distinguishes failed demand origins \\(replay campaign\\)`
   if (property === `cold-join.compound`)
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
