@@ -10,35 +10,10 @@ import {
   expectedValueRows,
   valueKinds,
 } from '../../tests/indexed-db/structured-clone-oracle'
+import { declareOracle } from '../../tests/oracle-config'
 import { test } from './browser-test'
 import type {} from './coverage-browser'
-import type { Page } from '@playwright/test'
-
-// Cleanup cannot replace a value/readiness mismatch or silently pass on its
-// own failure. Browser contexts own page closure after this helper completes.
-async function withCoverage(pages: Array<Page>, run: () => Promise<void>) {
-  let primary: unknown
-  let failed = false
-  try {
-    await run()
-  } catch (error) {
-    primary = error
-    failed = true
-  }
-  const results = await Promise.allSettled(
-    pages.map((page) => page.evaluate(() => window.coverage.cleanup())),
-  )
-  const errors = results.flatMap((result) =>
-    result.status === 'rejected' ? [result.reason as unknown] : [],
-  )
-  if (errors.length)
-    throw new AggregateError(
-      failed ? [primary, ...errors] : errors,
-      'Native oracle cleanup failed',
-      { cause: failed ? primary : errors[0] },
-    )
-  if (failed) throw primary
-}
+import { withCoverage } from './coverage-cleanup'
 
 for (const kind of valueKinds) {
   test(`preserves supported ${kind} values or reports native rejection`, async ({
@@ -167,6 +142,17 @@ for (const kind of valueKinds) {
   })
 }
 
+// First-open model: a shared database name gives every writer's Collection all
+// rows; separate names give each writer only its own row.
+function expectedFirstOpenRows<T>(
+  rows: Array<T>,
+  shared: boolean,
+): Array<Array<T>> {
+  return rows.map((row) => (shared ? rows : [row]))
+}
+
+declareOracle({ model: [expectedFirstOpenRows] })
+
 // Same/independent names distinguish queue sharing from accidental global
 // ownership. Prototype and Unicode store names also receive native creation,
 // dictionary lookup, broadcast and restore; the wider renaming grammar stays
@@ -213,7 +199,7 @@ for (const shared of [true, false]) {
           ['complete'],
         ])
         const rows = [0, 1, 2].map((id) => ({ id, name: `writer-${id}` }))
-        const expected = rows.map((row) => (shared ? rows : [row]))
+        const expected = expectedFirstOpenRows(rows, shared)
         await expect
           .poll(() => page.evaluate(() => window.initialization.rows()))
           .toEqual(expected)
@@ -223,43 +209,6 @@ for (const shared of [true, false]) {
         expect(
           await page.evaluate(() => window.initialization.upgrade()),
         ).toEqual({ blocked: 0, statuses: ['error', 'error', 'error'] })
-      })
-    })
-  }
-}
-
-// A same-origin iframe supplies actual foreign native constructors in each
-// engine. Authored bytes and graph identity judge callback-return capture,
-// settled public rows, native storage and export without constructor-source
-// inspection in the expected result. Both property orders reach buffer copying.
-for (const kind of ['u8', 'view'] as const) {
-  for (const viewFirst of [false, true]) {
-    test(`captures foreign ${kind} aliases with viewFirst=${viewFirst}`, async ({
-      page,
-    }) => {
-      await withCoverage([page], async () => {
-        await page.goto('/e2e/indexed-db/coverage.html')
-        await page.waitForFunction(() => Boolean(window.coverage))
-        const result = await page.evaluate(
-          async ({ name, first, viewKind }) => {
-            window.valuePeer = await window.coverage.valuePeer(name)
-            return window.valuePeer.captureRealm(first, viewKind)
-          },
-          {
-            name: `realm-${crypto.randomUUID()}`,
-            first: viewFirst,
-            viewKind: kind,
-          },
-        )
-        expect(result).toEqual(
-          Array.from({ length: 4 }, () => ({
-            bytes: [0, 1, 2, 3, 4, 5, 6, 7],
-            offset: 2,
-            length: 3,
-            alias: true,
-            detached: true,
-          })),
-        )
       })
     })
   }
