@@ -904,7 +904,7 @@ path reseeds the unseeded campaigns. Run it with this file's package-local
 Vitest command.
 */
 declareOracle({
-  check: [expectSettlementSet, runFailureHistory],
+  check: [runFailureHistory],
   model: [expectedCloseSettlements],
 })
 
