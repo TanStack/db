@@ -514,6 +514,19 @@ function calleeCall(callee, name) {
   return undefined
 }
 
+/** Whether a function written in an `.each(...)` table uses a declared part. */
+function tableFunctionReaches(module, table) {
+  let reaches = false
+  for (const row of table.arguments) {
+    walk(row, (node) => {
+      if (!reaches && isFunction(node) && module.nodeReaches(node)) {
+        reaches = true
+      }
+    })
+  }
+  return reaches
+}
+
 function isPlaceholder(body) {
   return (
     isFunction(body) &&
@@ -550,12 +563,14 @@ export default {
       CallExpression(node) {
         const test = registeredTest(node, sourceCode)
         if (test === undefined || isPlaceholder(test.body)) return
-        // An `.each(table)` row is input to the test body, so a row that
-        // uses a declared part makes the test use it.
+        // An `.each(table)` row can carry a function that the test body calls,
+        // such as a hostile observation each check must reject. A function in
+        // the table that uses a declared part makes the test use it. Plain
+        // data, such as the grammar's cells, does not: the body must use them.
         const table = calleeCall(node.callee, `each`)
         const reaches =
           module.propRegistrationGenerates(node, test.body, sourceCode) ||
-          (table?.arguments.some((row) => module.nodeReaches(row)) ?? false) ||
+          (table !== undefined && tableFunctionReaches(module, table)) ||
           (test.body.type === `Identifier`
             ? module.variableReaches(
                 findVariable(sourceCode.getScope(test.body), test.body.name),

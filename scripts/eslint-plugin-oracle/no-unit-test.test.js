@@ -345,6 +345,16 @@ fcTest.prop([fc.integer()])('encodes a date', encodesDate)`,
       filename,
       errors: [{ messageId: `unitTest` }],
     },
+    // Iterating the declared grammar's cells does not reach it: the body must.
+    {
+      code: `import { declareOracle } from './oracle-config.js'
+const cells = [{ a: 1 }]
+function checkHistory(h) { return h }
+declareOracle({ check: [checkHistory], grammar: [cells] })
+it.each(cells)('handles $a', ({ a }) => expect(compile(a)).toBe(1))`,
+      filename,
+      errors: [{ messageId: `unitTest` }],
+    },
     // A test inside a suite and a test passed a timeout are still tests.
     {
       code: `${header}describe('suite', () => {
