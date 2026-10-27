@@ -104,7 +104,7 @@ The same interpreter runs a fixed corpus and generated histories.
   survives, and a row the service deleted while no stream listened stays,
   because core does not sweep after a reload (snapshot-api §8, issue #2269)
   and a page cannot say a row is gone. `an aborted load writes no rows and
-  its late result changes nothing` checks that a subset load whose signal
+its late result changes nothing` checks that a subset load whose signal
   aborts while its list is in flight rejects with `AbortError` and writes
   no row when the list answers. Two histories make this limit
   executable; they do not claim it is the right product behavior. They pin
