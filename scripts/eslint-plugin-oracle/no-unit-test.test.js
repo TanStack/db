@@ -181,6 +181,15 @@ utilsProperty('is reflexive', [fc.anything()], (x) => expect(isEqual(x, x)).toBe
 utilsProperty('is symmetric', [fc.anything(), fc.anything()], (x, y) => expect(isEqual(x, y)).toBe(isEqual(y, x)))`,
       filename,
     },
+    // A registration that passes named arbitraries and a named predicate.
+    {
+      code: `${fcImport}const arbitraries = [fc.integer(), fc.string()]
+async function checkCampaign(id, name) { expect(await publish(id, name)).toBe(name) }
+const checkPolicy = async (id) => expect(await persist(id)).toBe(id)
+fcTest.prop(arbitraries)('publishes generated commits', checkCampaign)
+fcTest.prop(arbitraries)('persists generated commits', checkPolicy)`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,
@@ -317,6 +326,13 @@ utilsProperty('encodes a date', [fc.integer()], () => expect(encode(date)).toBe(
 it('checks', () => checkHistory([]))`,
       filename,
       errors: [{ messageId: `unitTest`, line: 6 }],
+    },
+    // A named predicate that ignores its input checks one written value.
+    {
+      code: `${fcImport}function encodesDate() { expect(encode(date)).toBe('x') }
+fcTest.prop([fc.integer()])('encodes a date', encodesDate)`,
+      filename,
+      errors: [{ messageId: `undeclared` }],
     },
     // A test inside a suite and a test passed a timeout are still tests.
     {

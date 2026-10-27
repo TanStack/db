@@ -379,7 +379,7 @@ class OracleModule {
 
   /** A function that reads at least one of its parameters. */
   usesInput(fn) {
-    if (!isFunction(fn)) return false
+    if (!isFunction(fn) && fn?.type !== `FunctionDeclaration`) return false
     return this.scopeManager
       .getDeclaredVariables(fn)
       .some(
@@ -391,8 +391,9 @@ class OracleModule {
 
   /**
    * Whether a `.prop([...])` registration runs a generated property: some
-   * arbitrary is not a constant, and the test reads its input. A test passed
-   * in as a parameter is checked at every call of its helper.
+   * arbitrary is not a constant, and the test reads its input. A named test
+   * is checked at its definition, and a test passed in as a parameter at
+   * every call of its helper.
    */
   propRegistrationGenerates(registration, body, sourceCode) {
     const prop = calleeProp(registration.callee)
@@ -410,6 +411,11 @@ class OracleModule {
     if (isFunction(body)) return this.usesInput(body)
     const definition = findVariable(sourceCode.getScope(body), body.name)
       ?.defs[0]
+    // A named predicate: a function declaration or a const bound to one.
+    if (definition?.type === `FunctionName`)
+      return this.usesInput(definition.node)
+    if (definition?.type === `Variable`)
+      return this.usesInput(definition.node.init)
     if (definition?.type !== `Parameter`) return false
     const calls = this.#callsOf(definition)
     return (
