@@ -223,10 +223,14 @@ class OracleModule {
     }
     if (statement.type !== `ExportNamedDeclaration`) return
     if (statement.declaration !== null) {
+      // A class declares its name twice: in the module and inside its own
+      // scope. The module binding is the one a declaration refers to.
+      const moduleScope = this.#moduleScope()
       for (const variable of this.scopeManager.getDeclaredVariables(
         statement.declaration,
       )) {
-        this.exported.set(variable.name, { variable })
+        if (variable.scope === moduleScope)
+          this.exported.set(variable.name, { variable })
       }
       for (const declarator of statement.declaration.declarations ?? []) {
         for (const variable of this.scopeManager.getDeclaredVariables(

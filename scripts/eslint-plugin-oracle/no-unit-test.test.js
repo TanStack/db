@@ -26,6 +26,8 @@ export { modelHistory }
 // Every caller here passes work that runs the check, but an importer passes
 // its own work.
 export async function withCleanup(work) { return work() }
+export class Relation { add() {} }
+declareOracle({ check: [Relation] })
 it('checks with cleanup', () => withCleanup(() => runHistory([])))
 `,
 )
@@ -203,6 +205,12 @@ fcTest.prop(arbitraries)('persists generated commits', checkPolicy)`,
     {
       code: `${fcImport}function roundTrips(value) { expect(decode(encode(value))).toBe(value) }
 it('round-trips every value', () => fc.assert(fc.property(fc.string(), roundTrips)))`,
+      filename,
+    },
+    // An exported class declared as a check in its home module.
+    {
+      code: `import { Relation } from './history-oracle.js'
+it('adds a row', () => { new Relation().add() })`,
       filename,
     },
     // A placeholder registered during a replay runs nothing.
