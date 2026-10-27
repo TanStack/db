@@ -846,6 +846,22 @@ const cycle = (demand: Demand): ReadonlyArray<Command> => [
 const stepArb: fc.Arbitrary<ReadonlyArray<Command>> = fc.oneof(
   { arbitrary: commandArb.map((command) => [command]), weight: 6 },
   {
+    // Cover the window over two rows, then rank a third row below them, so
+    // the window would hold other rows than it recorded.
+    arbitrary: fc
+      .tuple(
+        fc.shuffledSubarray([...IDS], { minLength: 3, maxLength: 3 }),
+        rankArb,
+      )
+      .map(([[first, second, third], rank]): ReadonlyArray<Command> => [
+        { type: `write`, id: first!, group: `a`, rank: 2 },
+        { type: `write`, id: second!, group: `a`, rank: 3 },
+        ...cycle(`w`),
+        { type: `write`, id: third!, group: `a`, rank: rank === 3 ? 1 : rank },
+      ]),
+    weight: 2,
+  },
+  {
     arbitrary: fc
       .tuple(
         demandArb,
