@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import type {
   BrowserOPFSWorkerRequest,
@@ -152,30 +152,9 @@ const diagnosticInput = fc.record({
 
 const diagnosticProperty = `opfs-worker.diagnostics`
 const diagnosticRuns = 40
-// A path replay runs only the selected property's recorded history, once. A
-// seed without a path reseeds the random campaign and keeps the fixed one.
-const replay = readOracleRunConfig()
-const campaigns =
-  replay.replayPath === undefined
-    ? [
-        {
-          name: `fixed`,
-          options: { seed: 1846, numRuns: oracleRuns(diagnosticRuns) },
-        },
-        {
-          name: `random`,
-          options: oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
-        },
-      ]
-    : replay.replayProperty === diagnosticProperty
-      ? [
-          {
-            name: `replay`,
-            options: oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
-          },
-        ]
-      : []
-
+// A path replay of this property runs only the random campaign, from its
+// recorded history, once. A seed without a path reseeds the random campaign
+// and keeps the fixed one.
 const diagnosticExamples: Array<[DiagnosticInput]> = [
   [
     {
@@ -293,14 +272,22 @@ describe(`OPFS worker diagnostics oracle`, () => {
     },
   )
 
-  it.each(campaigns)(
-    `matches the independent diagnostic formatter ($name campaign)`,
-    async ({ options }) => {
-      await fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
-        ...options,
-        verbose: true,
-      })
-    },
+  const checkDiagnostics = (options: { numRuns: number; seed?: number }) =>
+    fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
+      ...options,
+      verbose: true,
+    })
+  oracleReplayTest(it)(
+    `matches the independent diagnostic formatter (fixed campaign)`,
+    () => checkDiagnostics({ seed: 1846, numRuns: oracleRuns(diagnosticRuns) }),
+    15_000,
+  )
+  oracleReplayTest(it, diagnosticProperty)(
+    `matches the independent diagnostic formatter (random campaign)`,
+    () =>
+      checkDiagnostics(
+        oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
+      ),
     15_000,
   )
 })

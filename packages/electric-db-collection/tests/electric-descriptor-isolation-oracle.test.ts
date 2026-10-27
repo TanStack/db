@@ -15,8 +15,8 @@ import { electricCollectionOptions } from '../src/electric'
 import { StreamAbortedError } from '../src/errors'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { atCheckpoint } from './electric-oracle-lifecycle'
 import { storageTargetId, tagPersistence } from './electric-persistence-fixture'
@@ -51,9 +51,9 @@ import type { ElectricCollectionUtils } from '../src/electric'
  * framing or service behavior; those have separate owners.
  */
 
-const { replayPath, replayProperty } = readOracleRunConfig()
-const fixedCase = replayPath === undefined ? it : it.skip
-const fixedDescribe = replayPath === undefined ? describe : describe.skip
+// Ordinary tests stand aside during any path replay, which runs one property.
+const fixedCase = oracleReplayTest(it)
+const fixedDescribe = oracleReplayTest(describe)
 
 // The durable fixture is a driver, not the independent tag model. It must
 // preserve the SQLite adapter's mutation algebra: an insert replaces the old
@@ -131,7 +131,7 @@ type StreamHarness = {
   send: (messages: Array<Message<TestRow>>) => void
   unsubscribe: ReturnType<typeof vi.fn>
   holdSnapshots: boolean
-  ignoreUnsubscribe: boolean
+  ignoreAbort: boolean
   pendingSnapshotCount: () => number
   snapshotRequested: () => Promise<void>
   completeSnapshot: (messages?: Array<Message<TestRow>>) => void
@@ -145,27 +145,36 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn((options: { log?: string }) => {
+    ShapeStream: vi.fn((options: { log?: string; signal?: AbortSignal }) => {
       const pendingSnapshots: Array<{
         resolve: () => void
         reject: (error: Error) => void
       }> = []
       const requestObservers: Array<() => void> = []
       let snapshotRequests = 0
-      const unsubscribe = vi.fn(() => {
-        if (harness?.ignoreUnsubscribe) return
-        for (const pending of pendingSnapshots.splice(0)) {
-          pending.reject(new Error(`snapshot aborted`))
-        }
-      })
+      const unsubscribe = vi.fn()
+      // As in the SDK, abort owns snapshot cancellation. Callback release
+      // alone does not reject an in-flight HTTP request.
+      options.signal?.addEventListener(
+        `abort`,
+        () => {
+          if (harness?.ignoreAbort) return
+          for (const pending of pendingSnapshots.splice(0)) {
+            pending.reject(new Error(`snapshot aborted`))
+          }
+        },
+        { once: true },
+      )
       let harness: StreamHarness | undefined
       return {
         subscribe: (send: StreamHarness[`send`]) => {
           harness = {
+            // Deliberately retain the raw callback for late-delivery tests.
+            // Release calls are observed separately from these injections.
             send,
             unsubscribe,
             holdSnapshots: holdNewSnapshots,
-            ignoreUnsubscribe: false,
+            ignoreAbort: false,
             pendingSnapshotCount: () => pendingSnapshots.length,
             snapshotRequested: () =>
               snapshotRequests > 0
@@ -184,6 +193,7 @@ vi.mock(`@electric-sql/client`, async () => {
           onStreamSubscribed?.()
           return unsubscribe
         },
+        unsubscribeAll: unsubscribe,
         // ShapeStream.requestSnapshot is legal only in changes_only mode.
         // The installed-SDK delivery oracle is the receiving witness.
         requestSnapshot: vi.fn(() => {
@@ -607,32 +617,25 @@ fixedCase.each([
   },
 )
 
-// The two campaigns use the same grammar, checker, and budget. An explicit
-// replay registers only its selected property. Reproduce a saved failure with:
+// The two campaigns use the same grammar, checker, and budget. A path replay
+// of the property runs only the random campaign. Reproduce a saved failure with:
 // TANSTACK_DB_ORACLE_PROPERTY=electric.persisted-tag-history
 // TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path>
 // pnpm exec vitest run tests/electric-descriptor-isolation-oracle.test.ts
-if (replayPath === undefined) {
-  fcTest.prop([tagHistory], { seed: 42712, numRuns: oracleRuns(10) })(
-    `persisted tag histories preserve membership across warm and cold restart (fixed)`,
-    (history) => runTagHistory(history),
-  )
-  fcTest.prop(
-    [tagHistory],
-    oraclePropertyOptions(10, `electric.persisted-tag-history`),
-  )(
-    `persisted tag histories preserve membership across warm and cold restart (random)`,
-    (history) => runTagHistory(history),
-  )
-} else if (replayProperty === `electric.persisted-tag-history`) {
-  fcTest.prop(
-    [tagHistory],
-    oraclePropertyOptions(10, `electric.persisted-tag-history`),
-  )(
-    `persisted tag histories preserve membership across warm and cold restart (replay)`,
-    (history) => runTagHistory(history),
-  )
-}
+oracleReplayTest(fcTest).prop([tagHistory], {
+  seed: 42712,
+  numRuns: oracleRuns(10),
+})(
+  `persisted tag histories preserve membership across warm and cold restart (fixed)`,
+  (history) => runTagHistory(history),
+)
+oracleReplayTest(fcTest, `electric.persisted-tag-history`).prop(
+  [tagHistory],
+  oraclePropertyOptions(10, `electric.persisted-tag-history`),
+)(
+  `persisted tag histories preserve membership across warm and cold restart (random)`,
+  (history) => runTagHistory(history),
+)
 
 beforeEach(() => {
   streams.length = 0
@@ -775,7 +778,7 @@ fixedCase(
       await expect(collection.utils.awaitTxId(778)).resolves.toBe(true)
       await expect(collection.utils.awaitTxId(779)).resolves.toBe(true)
       old.holdSnapshots = true
-      old.ignoreUnsubscribe = true
+      old.ignoreAbort = true
       const oldWait = collection.utils.awaitTxId(801, 10_000).then(
         () => undefined,
         (error: unknown) => error,
@@ -965,7 +968,7 @@ fixedCase(`aborts one demand while its provider session restarts`, async () => {
     old.send([upToDate])
     await collection.stateWhenReady()
     old.holdSnapshots = true
-    old.ignoreUnsubscribe = true
+    old.ignoreAbort = true
     const released = Promise.resolve(
       collection._sync.loadSubset({ limit: 1, signal: aborter.signal }),
     ).then(
@@ -1389,7 +1392,7 @@ fixedCase(
       await atCheckpoint(secondStarted, `second cache rotation starts`)
       const retiredStream = streams[1]!
       expect(retiredStream.unsubscribe).toHaveBeenCalledOnce()
-      retiredStream.ignoreUnsubscribe = true
+      retiredStream.ignoreAbort = true
       retiredStream.send([insert(7, `retired`), upToDate])
       expect(write).not.toHaveBeenCalled()
       expect(markError).not.toHaveBeenCalled()
@@ -1748,27 +1751,20 @@ async function runOwnerHistory(history: {
   }
 }
 
-if (replayPath === undefined) {
-  fcTest.prop([ownerHistory], { seed: 42711, numRuns: oracleRuns(12) })(
-    `config derivation preserves independent owner histories (fixed)`,
-    runOwnerHistory,
-  )
-  fcTest.prop(
-    [ownerHistory],
-    oraclePropertyOptions(20, `electric.bound-descriptor-history`),
-  )(
-    `config derivation preserves independent owner histories (random)`,
-    runOwnerHistory,
-  )
-} else if (replayProperty === `electric.bound-descriptor-history`) {
-  fcTest.prop(
-    [ownerHistory],
-    oraclePropertyOptions(20, `electric.bound-descriptor-history`),
-  )(
-    `config derivation preserves independent owner histories (replay)`,
-    runOwnerHistory,
-  )
-}
+oracleReplayTest(fcTest).prop([ownerHistory], {
+  seed: 42711,
+  numRuns: oracleRuns(12),
+})(
+  `config derivation preserves independent owner histories (fixed)`,
+  runOwnerHistory,
+)
+oracleReplayTest(fcTest, `electric.bound-descriptor-history`).prop(
+  [ownerHistory],
+  oraclePropertyOptions(20, `electric.bound-descriptor-history`),
+)(
+  `config derivation preserves independent owner histories (random)`,
+  runOwnerHistory,
+)
 
 // The Electric descriptor may be reused across independent persisted wrappers.
 // The wrappers may address the same or different durable Collection IDs; that

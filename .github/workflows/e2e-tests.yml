@@ -114,6 +114,11 @@ jobs:
         working-directory: packages/db
         run: pnpm test:indexed-db:browser
 
+      - name: Run Collection GC native idle oracle
+        if: matrix.group == 'browser'
+        working-directory: packages/db
+        run: pnpm test:collection-gc:browser
+
       - name: Upload IndexedDB oracle evidence
         if: always() && matrix.group == 'browser'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -121,6 +126,7 @@ jobs:
           name: indexeddb-oracle-evidence
           path: |
             packages/db/test-results/indexed-db/
+            packages/db/test-results/collection-gc/
             packages/db/test-results/oracles/
           retention-days: 7
 

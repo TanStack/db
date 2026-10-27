@@ -11,6 +11,7 @@ import {
   assertOnlyKeysAffected,
   compareFractionalIndex,
 } from '../test-utils.js'
+import { oracleRuns } from '../../../db/tests/oracle-config.js'
 import { TopKMessageTracker, TopKRelation } from './topk-relation-oracle.js'
 
 // Helper function to check if indices are in lexicographic order
@@ -163,7 +164,7 @@ describe.each([
         ),
         {
           seed,
-          numRuns: 30,
+          numRuns: oracleRuns(30),
           examples: [
             [
               false,
@@ -243,7 +244,7 @@ describe.each([
         ),
         {
           seed,
-          numRuns: 100,
+          numRuns: oracleRuns(100),
           examples: [
             [
               1,
@@ -361,7 +362,7 @@ describe.each([
         ),
         {
           seed,
-          numRuns: 100,
+          numRuns: oracleRuns(100),
           examples: [
             [
               {

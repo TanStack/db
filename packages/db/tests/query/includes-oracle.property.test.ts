@@ -9,7 +9,12 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleRuns,
+} from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import {
@@ -214,11 +219,10 @@ const depthArbitrary = fc.constantFrom<IncludeDepth>(1, 2, 3, 4)
 // a fresh seed at the same budget. A seed-and-path replay runs only its named
 // property; other matrix cells cannot delay or obscure that reproduction.
 function generatedCampaigns(runs: number, property: string, fixedSeed: number) {
-  const replayProperty = process.env.TANSTACK_DB_ORACLE_PROPERTY
-  if (process.env.TANSTACK_DB_ORACLE_PATH !== undefined) {
-    return replayProperty === property
-      ? [{ label: `replay`, options: oraclePropertyOptions(runs, property) }]
-      : []
+  if (oracleReplayRequested()) {
+    return oracleReplaySkips(property)
+      ? []
+      : [{ label: `replay`, options: oraclePropertyOptions(runs, property) }]
   }
 
   return [
@@ -4986,7 +4990,6 @@ describe(`includes recompute oracle`, () => {
         ) {
           continue
         }
-
         for (const sourceBranch of [0, 1] as const) {
           const property = `includes.matrix.transition-${depth}-${firstTransition}-${secondTransition}-${sourceBranch}`
           const arbitrary = transitionHistoryScenariosArbitrary(

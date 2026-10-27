@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
 
 /**
  * # Does the murmur stream hash the bytes it is given?
@@ -86,7 +87,7 @@ describe(`MurmurHashStream`, () => {
       fc.property(fc.array(chunk, { minLength: 1, maxLength: 8 }), (chunks) => {
         expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
       }),
-      { numRuns: 2000 },
+      { numRuns: oracleRuns(2000) },
     )
   })
 
