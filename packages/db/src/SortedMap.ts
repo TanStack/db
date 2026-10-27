@@ -1,20 +1,6 @@
 import { compareKeys } from '@tanstack/db-ivm'
 
 /**
- * Grouped Collections can produce nullish keys at runtime, which compareKeys
- * does not order. Placing them first makes key order total, so binary search
- * finds every key.
- */
-function compareMapKeys(left: unknown, right: unknown): number {
-  if (left == null || right == null) {
-    if (left === right) return 0
-    if (left == null && right == null) return left === undefined ? -1 : 1
-    return left == null ? -1 : 1
-  }
-  return compareKeys(left as string | number, right as string | number)
-}
-
-/**
  * A Map implementation that keeps its entries sorted based on a comparator function
  * @template TKey - The type of keys in the map (must be string | number)
  * @template TValue - The type of values in the map
@@ -64,7 +50,7 @@ export class SortedMap<TKey extends string | number, TValue> {
       while (left < right) {
         const mid = Math.floor((left + right) / 2)
         const midKey = keys[mid]!
-        const keyComparison = compareMapKeys(key, midKey)
+        const keyComparison = compareKeys(key, midKey)
         if (keyComparison < 0) {
           right = mid
         } else if (keyComparison > 0) {
@@ -89,7 +75,7 @@ export class SortedMap<TKey extends string | number, TValue> {
         left = mid + 1
       } else {
         // Values are equal, use key as tie-breaker for deterministic ordering
-        const keyComparison = compareMapKeys(key, midKey)
+        const keyComparison = compareKeys(key, midKey)
         if (keyComparison < 0) {
           right = mid
         } else if (keyComparison > 0) {
@@ -116,19 +102,16 @@ export class SortedMap<TKey extends string | number, TValue> {
     if (this.dirtyKeys.size === 0) return
     const keys = this.sortedKeys
     const kept = keys.filter((key) => !this.dirtyKeys.has(key))
-    // Array sort moves undefined elements last without comparing them, so
-    // sort wrapped keys.
     const placed = [...this.dirtyKeys]
       .filter((key) => this.map.has(key))
-      .map((key) => [key] as const)
       .sort(
-        ([left], [right]) =>
+        (left, right) =>
           (this.comparator?.(this.map.get(left)!, this.map.get(right)!) ?? 0) ||
-          compareMapKeys(left, right),
+          compareKeys(left, right),
       )
     keys.length = 0
     let next = 0
-    for (const [key] of placed) {
+    for (const key of placed) {
       const index = this.indexOf(key, this.map.get(key)!, kept)
       while (next < index) keys.push(kept[next++]!)
       keys.push(key)

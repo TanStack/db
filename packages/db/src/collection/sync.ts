@@ -10,6 +10,7 @@ import {
   SyncRowReusedWithoutPreviousValueError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
+  assertCollectionKey,
 } from '../errors'
 import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
@@ -242,6 +243,8 @@ export class CollectionSyncManager<
               `key` in messageWithOptionalKey
                 ? messageWithOptionalKey.key
                 : this.config.getKey(messageWithOptionalKey.value)
+            // Ordered Collection state needs keys of the declared key type.
+            assertCollectionKey(key, messageWithOptionalKey)
 
             let messageType = messageWithOptionalKey.type
 

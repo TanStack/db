@@ -9,7 +9,6 @@ import { createTransaction, getActiveTransaction } from '../transactions'
 import {
   DeleteKeyNotFoundError,
   DuplicateKeyError,
-  InvalidKeyError,
   InvalidSchemaError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
@@ -20,8 +19,8 @@ import {
   NoKeysPassedToUpdateError,
   SchemaMustBeSynchronousError,
   SchemaValidationError,
-  UndefinedKeyError,
   UpdateKeyNotFoundError,
+  assertCollectionKey,
 } from '../errors'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -182,14 +181,7 @@ export class CollectionMutationsManager<
   }
 
   public generateGlobalKey(key: any, item: any): string {
-    if (typeof key !== `string` && typeof key !== `number`) {
-      // Preserve specific error for undefined keys
-      if (typeof key === `undefined`) {
-        throw new UndefinedKeyError(item)
-      }
-      throw new InvalidKeyError(key, item)
-    }
-
+    assertCollectionKey(key, item)
     return `KEY::${JSON.stringify([this.id, typeof key, String(key)])}`
   }
 
