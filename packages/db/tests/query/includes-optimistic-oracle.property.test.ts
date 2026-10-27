@@ -614,9 +614,26 @@ async function expectHistoryMatches(
 // compared with `recompute`, the model's rows for the same context. The
 // projection that the fixed traces use also calls `recompute`, so those traces
 // reach the model.
+/** The held-repair reference sorts the current authoritative roots by rank,
+ * then applies the one whole-row optimistic snapshot. It has no repair or D2
+ * state, so the live query must match it only after the ordered repair
+ * publishes. */
+function expectedHeldRepairRows(
+  sourceRows: ReadonlyMap<number, { id: number; rank: number; value: string }>,
+  optimisticValue?: string,
+): Array<{ id: number; value: string; children: Array<{ id: number }> }> {
+  return [...sourceRows.values()]
+    .sort((left, right) => left.rank - right.rank)
+    .map(({ id, value }) => ({
+      id,
+      value: id === 1 ? (optimisticValue ?? value) : value,
+      children: id === 1 ? [{ id: 10 }] : [],
+    }))
+}
+
 declareOracle({
   check: [expectHistoryMatches],
-  model: [recompute],
+  model: [recompute, expectedHeldRepairRows],
 })
 
 const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
@@ -670,17 +687,6 @@ describe(`optimistic relationship-transition oracle`, () => {
         [1, { id: 1, rank: 1, value: `A` }],
         [2, { id: 2, rank: 2, value: `X` }],
       ])
-      // The reference sorts current authoritative rows, then applies the
-      // one whole-row optimistic snapshot. It has no repair or D2 state.
-      const expectedRows = (optimisticValue?: string): Array<PublishedRoot> =>
-        [...sourceRows.values()]
-          .sort((left, right) => left.rank - right.rank)
-          .map(({ id, value }) => ({
-            id,
-            value: id === 1 ? (optimisticValue ?? value) : value,
-            children: id === 1 ? [{ id: 10 }] : [],
-          }))
-
       let sync!: Parameters<SyncConfig<OrderedRoot, number>[`sync`]>[0]
       let holdRepair = false
       let requests = 0
@@ -757,7 +763,7 @@ describe(`optimistic relationship-transition oracle`, () => {
       await withHistoryCleanup(
         async () => {
           await live.preload()
-          const before = expectedRows()
+          const before = expectedHeldRepairRows(sourceRows)
           expect(snapshot()).toEqual(before)
           const subscription = live.subscribeChanges(
             (changes) => {
@@ -820,15 +826,17 @@ describe(`optimistic relationship-transition oracle`, () => {
           }
           // Wrong-result controls reach this cut: early optimistic visibility
           // and a premature root retraction both fail the same refinement.
-          expect(() => checkHeldCut(expectedRows(`B`), [])).toThrow()
+          expect(() =>
+            checkHeldCut(expectedHeldRepairRows(sourceRows, `B`), []),
+          ).toThrow()
           expect(() => checkHeldCut(before.slice(1), [])).toThrow()
           checkHeldCut(snapshot(), callbacks)
 
           holdRepair = false
           for (const release of held.splice(0)) release()
           await flushPromises()
-          const after = expectedRows(`B`)
-          const withoutOverlay = expectedRows()
+          const after = expectedHeldRepairRows(sourceRows, `B`)
+          const withoutOverlay = expectedHeldRepairRows(sourceRows)
           expect(after).not.toEqual(before)
           expect(after).not.toEqual(withoutOverlay)
           const expectedPublication: typeof callbacks = [
