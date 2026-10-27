@@ -14,8 +14,6 @@ import type { Context, QueryBuilder } from '@tanstack/db'
 
 import type { Row } from './source-id-reuse-support'
 
-type Row = { id: string; value: string; rank: number }
-
 describe(`React source ID reuse`, () => {
   it(`releases a later shared source when earlier deferred sync starts fail`, async () => {
     const client = new DbClient()
