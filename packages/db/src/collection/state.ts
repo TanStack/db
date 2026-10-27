@@ -1202,11 +1202,15 @@ export class CollectionStateManager<
           // this truncate does not write. Completed attribution is one-use.
           this.syncedData.clear()
           this.syncedMetadata.clear()
-          this.hydrationSeedKeys.clear()
-          this.hydratedKeys.clear()
-          if (this.appliedAdapterKeys) {
-            this.hasAppliedAdapterTruncate = true
-            this.appliedAdapterKeys.clear()
+          // A wrapping sync's storage read that keeps seed keys replaces
+          // rows without truncating the source's authority over them.
+          if (!transaction.preserveHydrationSeedKeys) {
+            this.hydrationSeedKeys.clear()
+            this.hydratedKeys.clear()
+            if (this.appliedAdapterKeys) {
+              this.hasAppliedAdapterTruncate = true
+              this.appliedAdapterKeys.clear()
+            }
           }
           this.virtualPropsCache.clear()
           this.rowOrigins.clear()

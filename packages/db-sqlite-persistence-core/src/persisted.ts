@@ -3325,6 +3325,51 @@ class PersistedCollectionRuntime<
     )
   }
 
+  /**
+   * A row read from storage is a previous run's cache, a seed older than
+   * every source write (decision 9), unless the Collection holds it as a
+   * source row or a source wrote it in this run (decision 11). When this
+   * run's writes are unknown, a row that differs from the seed this tab
+   * holds was written; an unchanged seed stays one (decision 15).
+   */
+  private isStoredSeed(row: { key: TKey; value: T; metadata?: unknown }) {
+    const state = this.collection?._state
+    if (!state || this.runWrittenKeys.has(row.key)) return false
+    if (!state.hydrationSeedKeys.has(row.key))
+      return !state.syncedData.has(row.key) && !this.runWritesUnknown
+    return (
+      !this.runWritesUnknown ||
+      (equalPersistedSnapshotValues(
+        this.collection?.base.get(row.key),
+        row.value,
+      ) &&
+        equalPersistedSnapshotValues(
+          this.syncControls.metadata?.row.get(row.key),
+          row.metadata,
+        ))
+    )
+  }
+
+  /**
+   * Opens a storage read's transaction. Core keeps the seed keys' seed
+   * status, as it does a DbClient seed's, so a later seed can still replace
+   * them, and records adapter authority for every other write. Without seed
+   * keys, the read is adapter work. A `begin` that opened no transaction, as
+   * in a retired sync run, marks nothing.
+   */
+  private beginStorageRead(seedKeys: ReadonlyArray<TKey> | undefined): void {
+    const state = this.collection?._state
+    const queued = state?.pendingSyncedTransactions.length ?? 0
+    this.syncControls.begin?.()
+    const pending =
+      state && state.pendingSyncedTransactions.length > queued
+        ? state.pendingSyncedTransactions.at(-1)
+        : undefined
+    if (!pending || !seedKeys) return
+    pending.preserveHydrationSeedKeys = new Set(seedKeys)
+    for (const key of seedKeys) state!.hydrationSeedKeys.add(key)
+  }
+
   private withInternalApply<TResult>(task: () => TResult): TResult {
     if (this.internalApplyDepth++ === 0) this.internalApplyKeys = new Set()
     try {
@@ -3690,13 +3735,6 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    // A row read from storage is a previous run's cache, a seed older than
-    // every source write (decision 9), unless the Collection holds it as a
-    // source row or a source wrote it in this run (decision 11). Any other
-    // change a read applies, such as a validation delete, comes from a source
-    // write in this run. Core holds the seeds as it holds a DbClient seed, so
-    // a later seed can still replace them.
-    const state = this.collection?._state
     const base = this.collection?.base
     const sourceRows: typeof rows = []
     const seedRows: typeof rows = []
@@ -3706,12 +3744,7 @@ class PersistedCollectionRuntime<
         this.holdsHydrationSeed(row.key)
       )
         continue
-      ;(state &&
-      !this.isRunWritten(row.key) &&
-      (!state.syncedData.has(row.key) || state.hydrationSeedKeys.has(row.key))
-        ? seedRows
-        : sourceRows
-      ).push(row)
+      ;(this.isStoredSeed(row) ? seedRows : sourceRows).push(row)
     }
     const writeRow = (row: { key: TKey; value: T; metadata?: unknown }) => {
       if (
@@ -3728,19 +3761,8 @@ class PersistedCollectionRuntime<
     }
 
     return this.withInternalApply(() => {
-      const queued = state?.pendingSyncedTransactions.length ?? 0
-      this.syncControls.begin?.()
-      // One read publishes once. Core keeps the seed rows' seed status and
-      // records adapter authority for the other writes. A `begin` that
-      // opened no transaction, as in a retired sync run, marks nothing.
-      const pending =
-        state && state.pendingSyncedTransactions.length > queued
-          ? state.pendingSyncedTransactions.at(-1)
-          : undefined
-      if (pending && seedRows.length > 0)
-        pending.preserveHydrationSeedKeys = new Set(
-          seedRows.map((row) => row.key),
-        )
+      // One read publishes once.
+      this.beginStorageRead(seedRows.map((row) => row.key))
       // A full durable snapshot validates already public keys. Only
       // the requested subset may add keys to the public Collection.
       if (validationRows) {
@@ -3788,10 +3810,7 @@ class PersistedCollectionRuntime<
         }
       }
       sourceRows.forEach(writeRow)
-      for (const row of seedRows) {
-        if (pending) state!.hydrationSeedKeys.add(row.key)
-        writeRow(row)
-      }
+      seedRows.forEach(writeRow)
       if (collectionMetadata)
         this.applyCollectionMetadataSnapshot(collectionMetadata)
       return this.syncControls.commit?.() ?? true
@@ -3883,28 +3902,38 @@ class PersistedCollectionRuntime<
       ),
     )
     const rowKeys = new Set(rows.map((row) => row.key))
-    // A truncate replays the Collection's demand. A follower routes that
-    // demand to its leader, whose source loads and commits again, so a
-    // follower replaces its rows in place, except after a reset, which owes
-    // the replay.
+    // A truncate replays the Collection's demand and publishes each durable
+    // row's exact shape. A follower routes that demand to its leader, whose
+    // source loads and commits again, so a follower replaces its rows in
+    // place, except after a reset, which owes the replay.
     const followsLeader =
       this.canRouteRemoteDemandThroughCoordinator() &&
       !this.persistence.coordinator.isLeader(this.storageCollectionId)
     const truncate = hydratedKeys.size === 0 && (replayDemand || !followsLeader)
 
     return this.withInternalApply(() => {
-      this.syncControls.begin?.()
-      if (truncate) {
-        this.syncControls.truncate?.()
-      } else {
-        for (const key of base?.keys() ?? []) {
-          if (!hydratedKeys.has(key) && !rowKeys.has(key)) {
-            this.syncControls.write?.({ type: `delete`, key })
-          }
-        }
+      // A reload is a storage read, not a source write, so its truncate
+      // replaces rows without truncating source authority, and an unchanged
+      // seed stays one (decisions 9, 11, and 15). A reset is a source
+      // truncate.
+      this.beginStorageRead(
+        replayDemand
+          ? undefined
+          : rows
+              .filter(
+                (row) => !hydratedKeys.has(row.key) && this.isStoredSeed(row),
+              )
+              .map((row) => row.key),
+      )
+      if (truncate) this.syncControls.truncate?.()
+      else
         for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
-          []) {
+          [])
           this.syncControls.metadata?.row.delete(key)
+      // Each dropped row is a source's delete.
+      for (const key of base?.keys() ?? []) {
+        if (!hydratedKeys.has(key) && !rowKeys.has(key)) {
+          this.syncControls.write?.({ type: `delete`, key })
         }
       }
 
@@ -5406,19 +5435,11 @@ class PersistedCollectionRuntime<
           value: row.value,
           metadata: row.metadata,
         }))
-        // A reload is a storage read, not a source write. While this run's
-        // source writes are known, it validates the rows in place, so a row
-        // no source wrote keeps its seed status (decisions 9 and 11). A
-        // reset replays demand, and unknown writes count every stored row
-        // as a source write (decision 13); both replace the snapshot.
-        const applied =
-          replayDemand || this.runWritesUnknown
-            ? this.replaceCollectionSnapshot(
-                rows,
-                collectionMetadata,
-                replayDemand,
-              )
-            : this.applyRowsToCollection(rows, rows, collectionMetadata)
+        const applied = this.replaceCollectionSnapshot(
+          rows,
+          collectionMetadata,
+          replayDemand,
+        )
         await whenSyncAccepted(applied)
       }
     } finally {
@@ -6525,7 +6546,9 @@ function createWrappedSyncConfig<
           openTransaction.signal = signal
           pendingPublicationTransactions.push(openTransaction)
           rejudgeEnclosing(
-            openTransaction.truncate ? undefined : openTransaction.operationKeys,
+            openTransaction.truncate
+              ? undefined
+              : openTransaction.operationKeys,
           )
           if (
             openTransaction.queuedBecauseHydrating &&

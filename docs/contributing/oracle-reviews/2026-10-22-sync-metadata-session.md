@@ -170,7 +170,27 @@ encoding the author had extended without asking. Three more followed on
     a seed this tab holds stays, and a stored row this tab did not hold
     counts as a source write, so a later seed cannot replace it. A peer's
     write to a key this tab holds as a seed stays hidden until a notice
-    names the key or the source writes it.
+    names the key or the source writes it. Decision 15 extends the rule to
+    every stored row.
+14. **A commit fixes its inserts' kinds as it read them (2026-10-26).** The
+    fourth high review asked whether an inner transaction's insert, judged
+    against an enclosing open transaction's write it read, should be judged
+    again against the row it lands on when it commits ahead. The maintainer
+    kept the model's rule: a commit fixes its inserts' kinds in the order as
+    the transaction read it, so an inner equal re-insert of the enclosing
+    row keeps metadata and replaces the row it lands on. `30175be48` already
+    let an inner insert over an enclosing open truncate replace the row it
+    lands on. Decision 10's "an insert's kind follows the row it lands on"
+    concerns the inserts of transactions still open.
+15. **Under unknown writes, only a changed row is a source write
+    (2026-10-26).** Decision 13 left the code's two paths disagreeing about
+    stored rows when this tab cannot tell what a source wrote: a reload
+    counted every stored row and its truncate as source writes, so later
+    seeds were ignored for the rest of the run, while a validation read left
+    unchanged rows alone. The maintainer chose the second: a stored row that
+    differs from the one this tab holds was written; an unchanged seed stays
+    one; a dropped row is a source's delete; and a reload's truncate is not a
+    source truncate. A reset still is.
 
 ## Laws and sources
 
@@ -523,11 +543,17 @@ for the per-object record of writes in this run, judging open inserts
 again after internal writes, and the `begin` guard. `app` did not change
 in the third.
 
-The seventh round, against `6c1ca8f8f`: `app` grows 124 bytes, two fewer
+The seventh round: against `6c1ca8f8f`, `app` grew 124 bytes, two fewer
 than before, because the projection's accepted-source key set became a local
-of its rebuild. Persistence grows to 933 bytes (84 more): the reload's choice
-between validating in place and replacing the snapshot, and the internal
-apply's written keys.
+of its rebuild, and persistence 933 (84 more: the internal apply's written
+keys and the first reload repair). Against `b8d8ee07c`, after two merges,
+the pushed head measures `app` +135 and decision 15 adds 10 more (+145):
+core's truncate keeps authority and seed status for a transaction that
+marks seed keys. Persistence reaches +1002 (69 for decision 15: the shared
+stored-seed rule and the dropped rows' deletes). A first repair that
+validated reloaded rows in place, with no core change, failed the three
+exact-shape witnesses, because only a truncate republishes rows that change
+events consider equal.
 
 Earlier rounds: the private-member mangle cache now
 covers the branch's new private methods. Removing Query's owner supplement
@@ -721,8 +747,8 @@ storage never held.
 | Finding | Disposition |
 |---|---|
 | F1: a follower merges a targeted insert's row over its own and keeps a removed field | Refuted on the same path: a follower that shows the key reloads it from storage, and `follows durable same-key order for targeted insert replacement` (active and retired demand) passes |
-| F2: an inner insert is judged against the enclosing open transaction's row, though it commits ahead onto another | Awaiting the maintainer (see "Open"). Production and the model agree (`nested`, `nested-conflicts`) |
-| F3: reloads a peer's notice causes rewrote previous-run rows as source writes, and the reload's truncate counted as a source truncate | Fixed while the run's writes are known: such a reload validates rows in place through the storage-read path, so unchanged rows keep their status and new rows are marked as seeds (decisions 9 and 11). The grid failed three of four variants on `5013e5aba`; a later seed of a never-stored key was ignored after the truncating variant. A mutant that validates in place also under unknown writes fails the full-reload variant; one that only skips the truncate fails the other three. Unknown writes: awaiting the maintainer |
+| F2: an inner insert is judged against the enclosing open transaction's row, though it commits ahead onto another | Accepted design (decision 14). Production and the model agree (`nested`, `nested-conflicts`); a probe of the reported trace keeps metadata with no error. The mutant that re-judges accepted inserts, as `30175be48`'s replay did, fails both retention witnesses (fourth round) |
+| F3: reloads a peer's notice causes rewrote previous-run rows as source writes, and the reload's truncate counted as a source truncate | Fixed (decisions 9, 11, and 15). A reload marks its transaction's seed keys: rows no source wrote, and under unknown writes rows storage left unchanged. Core keeps authority and seed status across that transaction's truncate, and the reload deletes each dropped row as a source write. The truncate stays, because it publishes each durable row's exact shape (three exact-shape witnesses need it). The grid failed three of four variants on `5013e5aba`; a later seed of a never-stored key was ignored after a truncating reload. Decision 15 added a full-reload variant followed by a new demand's storage read and a row the peer deleted; both full-reload variants failed on `44ef0c2d0`. Mutants: core treating the truncate as a source truncate (four variants fail), no unchanged-seed exemption under unknown writes (both full-reload variants), and no per-key delete of a dropped row (four variants). An earlier repair that validated rows in place lost the exact-shape publication |
 | F4: every internal apply re-judged every open implicit insert | Fixed: the runtime passes the keys the internal apply's transaction wrote (every key after a truncate). Ten storage reads beside 4000 open inserts re-judged 40000 times, now none. A mutant that re-judges no keys fails `… (peer row during an open insert)`; no generated lane catches it |
 | F5: staging adds a storage read's seed keys to the source-key set that a rebuild excludes | Refuted as unobservable, as R7: a mutant that always rebuilds at acceptance changes no persisted session lane, persisted-oracle case, or core session lane; the wrapper's only classifier call skips keys no source wrote in this run |
 | F6: metadata reads scan every pending transaction | Accepted cost of read-your-writes: 10000 reads take 0.7 ms with no held transaction and 4.2 ms with 100 |
@@ -733,21 +759,8 @@ storage never held.
 
 ## Open
 
-Two questions for the maintainer from the seventh round:
-
-- **F2.** When an inner transaction commits ahead of an enclosing one whose
-  open write it read, is its insert's kind the one it had against that
-  write (the model and production; `30175be48` already let an inner insert
-  over an enclosing open truncate replace the row it lands on), or the one
-  it has against the row it lands on (core would reject the commit as a
-  duplicate; the wrapper would clear metadata)?
-- **F3, unknown writes.** After a full-reload notice or a missed notice, the
-  replace path counts every stored row and the reload's truncate as source
-  writes, so later seeds are ignored for the rest of the run; the
-  validation path, used when no demand is active, leaves unchanged rows'
-  status alone. Which rule holds?
-
-The limits in the evidence block still apply.
+Nothing in this bug class is known to be open. The limits in the evidence
+block still apply.
 
 ## Oracle guide requirements
 

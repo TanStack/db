@@ -367,7 +367,8 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
     ...state.pendingSyncedTransactions.filter((pending) => pending.committed),
     ...state.getStagedSyncTransactions(),
   ]) {
-    if (transaction.truncate) truncated = true
+    if (transaction.truncate && !transaction.preserveHydrationSeedKeys)
+      truncated = true
     for (const operation of transaction.operations)
       if (!transaction.preserveHydrationSeedKeys?.has(operation.key as TKey))
         rowKeys.add(operation.key as TKey)

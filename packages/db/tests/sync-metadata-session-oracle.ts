@@ -588,7 +588,8 @@ function writesSource(action: SessionAction): boolean {
  * nor does an open transaction's write that merges over it. A transaction
  * that commits after the seed, ordered before the insert, can merge over it,
  * and the insert then lands on the row that write left (decision 10). An open transaction's kinds follow the order as it changes; a commit
- * fixes them.
+ * fixes them in the order as the transaction read it, before it moves ahead
+ * of the transactions it began inside (decision 14).
  * When an inner transaction commits first, an enclosing transaction's insert
  * can land on a different row that the source wrote. That transaction is then
  * invalid, as a duplicate-key insert would be: no read includes its writes,

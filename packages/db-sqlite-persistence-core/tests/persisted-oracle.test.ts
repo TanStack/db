@@ -32645,23 +32645,28 @@ it.each([
 // while a row the notice names is a source write that the seed cannot
 // replace (decision 11). A key that storage never held is no source's
 // write either, so a seed supplies it. After a full-reload notice this tab
-// cannot tell which stored rows a source wrote, or whether a peer truncated,
-// so every stored row and the truncate count as source writes (decision 13:
-// the rule the code already followed). Each variant reloads through a different branch: no
-// `DbClient` seed held (the reload truncates core), a held seed (it deletes
-// and rewrites in place), and a notice over the key limit. Recorded in
+// cannot tell which stored rows a source wrote, so a stored row counts as a
+// source write only if it differs from the row this tab holds (decision
+// 15): the peer's row does, the unchanged previous-run row stays a seed, and
+// a later storage read for a new demand keeps that status. A row the peer
+// deleted is a source's delete, so a later seed cannot bring it back (D4).
+// Each variant
+// reaches a different branch: no `DbClient` seed held, a held seed, a notice
+// over the key limit, and unknown writes. Recorded in
 // docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md.
 it.each([
   `notice naming a shown row`,
   `notice naming a shown row while a seed is held`,
   `notice over the targeted key limit`,
   `full-reload notice`,
+  `full-reload notice, then a new demand reads the rows`,
 ] as const)(
   `keeps previous-run rows seeds across a reload a peer's notice causes (%s)`,
   async (variant) => {
     const adapter = createRecordingAdapter([
       { id: `cached`, title: `previous run` },
       { id: `shown`, title: `previous run` },
+      { id: `gone`, title: `previous run` },
     ])
     adapter.rowMetadata.set(`cached`, { cached: true })
     adapter.rowMetadata.set(`shown`, { cached: true })
@@ -32720,6 +32725,7 @@ it.each([
       }
       adapter.rows.set(`shown`, { id: `shown`, title: `written by a peer` })
       adapter.rowMetadata.set(`shown`, { peer: true })
+      adapter.rows.delete(`gone`)
       const unseen = Array.from({ length: 129 }, (_, index) => ({
         key: `unseen-${index}`,
         value: { id: `unseen-${index}`, title: `written by a peer` },
@@ -32733,7 +32739,7 @@ it.each([
           seq: 1,
           txId: `peer-write`,
           latestRowVersion: 1,
-          ...(variant === `full-reload notice`
+          ...(variant.startsWith(`full-reload notice`)
             ? { requiresFullReload: true as const }
             : {
                 requiresFullReload: false as const,
@@ -32746,7 +32752,7 @@ it.each([
                     ? unseen
                     : []),
                 ],
-                deletedKeys: [],
+                deletedKeys: [`gone`],
                 rowMetadataMutations: [
                   { type: `set` as const, key: `shown`, value: { peer: true } },
                 ],
@@ -32759,23 +32765,26 @@ it.each([
         expect(collection.get(`shown`)?.title).toBe(`written by a peer`),
       )
       await flushAsyncWork()
+      if (variant === `full-reload notice, then a new demand reads the rows`)
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(collection._sync.loadSubset({ limit: 10 })),
+          `new demand loaded`,
+        )
       seed(`cached`)
       seed(`shown`)
       seed(`fresh`)
+      seed(`gone`)
       await flushAsyncWork()
-      const unknownAuthorship = variant === `full-reload notice`
       expect({
         cached: observe(`cached`),
         shown: observe(`shown`),
         fresh: observe(`fresh`),
+        gone: observe(`gone`),
       }).toEqual({
-        cached: unknownAuthorship
-          ? { title: `previous run`, metadata: { cached: true } }
-          : { title: `later seed`, metadata: { seeded: true } },
+        cached: { title: `later seed`, metadata: { seeded: true } },
         shown: { title: `written by a peer`, metadata: { peer: true } },
-        fresh: unknownAuthorship
-          ? { title: undefined, metadata: undefined }
-          : { title: `later seed`, metadata: { seeded: true } },
+        fresh: { title: `later seed`, metadata: { seeded: true } },
+        gone: { title: undefined, metadata: undefined },
       })
     } finally {
       await client.cleanup()
