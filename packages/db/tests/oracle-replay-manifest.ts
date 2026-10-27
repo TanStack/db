@@ -19,6 +19,11 @@ const ownerGroups: ReadonlyArray<
     `part-reach`,
   ],
   [
+    `../scripts/run-budget-oracle.property.test.js`,
+    `scripts`,
+    `run-budget`,
+  ],
+  [
     `db/tests/ssr-stream-record-wait-oracle.test.ts`,
     `ssr`,
     `stream-record-lifetime`,
