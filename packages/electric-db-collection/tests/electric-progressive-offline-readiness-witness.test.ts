@@ -45,6 +45,7 @@ vi.mock(`@electric-sql/client`, async () => ({
       subscribers.push(subscriber)
       return () => {}
     },
+    unsubscribeAll: () => {},
     requestSnapshot: () => requestSnapshot(),
     fetchSnapshot: () => fetchSnapshot(),
     forceDisconnectAndRefresh: () => Promise.resolve(),

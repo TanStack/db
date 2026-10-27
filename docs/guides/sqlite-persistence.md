@@ -314,7 +314,7 @@ An on-demand Collection loads rows for each query demand: the filter, order, and
 
 ```ts
 const issues = createCollection(
-  persistedCollectionOptions<Issue, string>({
+  persistedCollectionOptions({
     ...electricCollectionOptions({
       id: 'issues',
       shapeOptions: { url: 'http://localhost:3000/v1/shape', params: { table: 'issues' } },
