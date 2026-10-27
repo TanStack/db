@@ -31,6 +31,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
+import { declareOracle } from '../oracle-config.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -43,10 +44,23 @@ const rows: ReadonlyArray<Row> = [
 ]
 
 // The query's rank order comes from its declaration, not index traversal.
-const expectedIds = [...rows]
-  .sort((a, b) => a.rank - b.rank)
-  .slice(0, 2)
-  .map((row) => row.id)
+// The model sorts the rows by rank and keeps the first two ids of the window.
+function expectedRankWindowIds(): Array<number> {
+  return [...rows]
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 2)
+    .map((row) => row.id)
+}
+
+// Each public window must equal the model's prediction for the same rows.
+function expectRankWindow(actualIds: unknown): void {
+  expect(actualIds).toEqual(expectedRankWindowIds())
+}
+
+declareOracle({
+  check: [expectRankWindow],
+  model: [expectedRankWindowIds],
+})
 
 function makeSource(
   mode: `eager` | `on-demand`,
@@ -116,7 +130,7 @@ it.each(
         ],
         limit: 2,
       })!
-      expect(direct.map((change) => change.value.id)).toEqual(expectedIds)
+      expectRankWindow(direct.map((change) => change.value.id))
 
       live = createLiveQueryCollection((q) =>
         q
@@ -125,7 +139,7 @@ it.each(
           .limit(2),
       )
       await live.preload()
-      expect([...live.values()].map((row) => row.id)).toEqual(expectedIds)
+      expectRankWindow([...live.values()].map((row) => row.id))
     }, [() => live?.cleanup(), () => source.cleanup()])
   },
 )
@@ -165,7 +179,7 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
       limit: 2,
       optimizedOnly: true,
     })
-    expect(direct?.map((change) => change.value.id)).toEqual(expectedIds)
+    expectRankWindow(direct?.map((change) => change.value.id))
 
     live = createLiveQueryCollection((q) =>
       q
@@ -175,7 +189,7 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
     )
     await live.preload()
 
-    expect([...live.values()].map((row) => row.id)).toEqual(expectedIds)
+    expectRankWindow([...live.values()].map((row) => row.id))
     expect(
       requests.some((request) => request.orderBy && request.limit === 2),
     ).toBe(true)
@@ -221,7 +235,7 @@ it(`eager indexing creates an ordered reader when only a custom reader exists`, 
         .limit(2),
     )
     await live.preload()
-    expect([...live.values()].map((row) => row.id)).toEqual(expectedIds)
+    expectRankWindow([...live.values()].map((row) => row.id))
     expect(
       [...source.indexes.values()].filter(
         (index) =>
@@ -238,6 +252,6 @@ it(`eager indexing creates an ordered reader when only a custom reader exists`, 
       limit: 2,
       optimizedOnly: true,
     })
-    expect(direct?.map((change) => change.value.id)).toEqual(expectedIds)
+    expectRankWindow(direct?.map((change) => change.value.id))
   }, [() => live?.cleanup(), () => source.cleanup()])
 })
