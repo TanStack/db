@@ -37,9 +37,11 @@ import type {
  * live queries. A direct subscriber can acquire again after restart.
  *
  * Model: the expected public rows are the last complete public snapshot until
- * every current replay participant succeeds or retires and any older
- * overlapping work that still participates settles. A completed replacement
- * supplies the next public rows.
+ * every current replay participant succeeds or retires. Older overlapping
+ * work that a newer replay aborted participates no more: an abort ends the
+ * load (maintainer decision), so its later settlement neither holds nor
+ * changes publication. A completed replacement supplies the next public
+ * rows.
  * The literal expected row sets below instantiate this rule independently of
  * the Collection's replay bookkeeping.
  *
@@ -833,7 +835,7 @@ describe(`loadSubset replay refinement`, () => {
     }
   })
 
-  it(`waits for every overlapping replay before publishing the newest success`, async () => {
+  it(`publishes the newest replay's success without waiting for the replay it aborted`, async () => {
     const sourceId = `replay-refinement-overlap`
     const row = (version: number) => ({
       sourceId,
@@ -854,22 +856,23 @@ describe(`loadSubset replay refinement`, () => {
       harness.pending[1]!.deferred.resolve()
       await flushPromises()
 
-      expect(harness.visibleRows()).toEqual([row(1)])
-      expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
-      expect(harness.callbackReads).toEqual([[row(1)]])
+      const published = () => {
+        expect(harness.coreRows()).toEqual([row(3)])
+        expect(harness.visibleRows()).toEqual([row(3)])
+        expect(harness.batches).toEqual([
+          [{ type: `insert`, row: row(1) }],
+          [{ type: `update`, row: row(3), previousVersion: 1 }],
+        ])
+        expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
+      }
+      published()
 
+      // The aborted load's late settlement changes nothing.
       harness.pending[0]!.deferred.reject(
         new DOMException(`obsolete`, `AbortError`),
       )
       await flushPromises()
-
-      expect(harness.coreRows()).toEqual([row(3)])
-      expect(harness.visibleRows()).toEqual([row(3)])
-      expect(harness.batches).toEqual([
-        [{ type: `insert`, row: row(1) }],
-        [{ type: `update`, row: row(3), previousVersion: 1 }],
-      ])
-      expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
+      published()
     } catch (error) {
       primaryFailure = { error }
       throw error

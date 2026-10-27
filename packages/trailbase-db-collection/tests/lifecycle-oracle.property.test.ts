@@ -1425,16 +1425,19 @@ it.each(
 /**
  * ## Does an unchanged row survive an on-demand reload?
  *
- * Law (maintainer decisions F19 and snapshot-api §7): an on-demand reload
+ * Law (maintainer decisions F19 and snapshot-api §8): an on-demand reload
  * keeps the rows; core replays the live query's demand through the new
- * run, and once every replay succeeds it sweeps each kept row the new run
- * did not write. So a page writes every row it returns, unchanged ones too.
+ * run, and the replayed pages apply on the kept rows (every page row is a
+ * full-row `update`, so a held key is never inserted). Core does not sweep
+ * after a reload (issue #2269), and a page cannot say a row is gone, so a
+ * row the service deleted while no stream listened stays: that is this
+ * adapter's limit for on-demand reloads.
  *
  * Reference: the same service as the eager reload lane. Between the runs
  * the service updates row 1 and deletes row 2 with no change event; row 3
  * is untouched. Checkpoint: once the reload settles and the replayed load
- * has applied, the rows equal the service's, so row 3 survives, row 1
- * shows its edit, and row 2 is gone.
+ * has applied, row 1 shows its edit, row 3 survives, and row 2 keeps its
+ * last value.
  */
 it(`an unchanged row survives an on-demand reload`, async () => {
   const service = new Map<number, RaceRow>(
@@ -1477,12 +1480,65 @@ it(`an unchanged row survives an on-demand reload`, async () => {
     await collection.reload()
     await vi.waitFor(() =>
       expect(sortedRows(collection.toArray)).toEqual(
-        sortedRows(service.values()),
+        sortedRows([...service.values(), { id: 2, data: `v1` }]),
       ),
     )
     expect(collection.status).toBe(`ready`)
   } finally {
     await live.cleanup()
+    await collection.cleanup()
+  }
+})
+
+/**
+ * ## Does an aborted load write no rows?
+ *
+ * Law (snapshot-api §8): an abort ends the load. Core stops listening to it
+ * at once, and the adapter must honor the signal: stop the fetch and write
+ * no rows for it. Reference: the service holds 3 rows; a subset load's list
+ * is held, the caller aborts, then the list answers. Checkpoints: the load
+ * rejects with `AbortError`, and after the late answer the Collection holds
+ * no row, while a later load lists every row.
+ */
+it(`an aborted load writes no rows and its late result changes nothing`, async () => {
+  const service = [1, 2, 3].map((id) => ({ id, data: `v1` }))
+  const page = deferred<ListResponse<RaceRow>>()
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() =>
+    Promise.resolve(new ReadableStream<Event>({ start() {} })),
+  )
+  api.list
+    .mockImplementationOnce(() => page.promise)
+    .mockImplementation(() => Promise.resolve({ records: service }))
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  try {
+    await collection.preload()
+    const abort = new AbortController()
+    const load = observe(
+      Promise.resolve(
+        collection._sync.loadSubset({ limit: 10, signal: abort.signal }),
+      ),
+    )
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledOnce())
+    abort.abort()
+    page.resolve({ records: service })
+    await turn()
+    expect(load.result).toBe(`rejected`)
+    expect(load.error).toMatchObject({ name: `AbortError` })
+    expect(collection.toArray).toEqual([])
+
+    await collection._sync.loadSubset({ limit: 10 })
+    expect(sortedRows(collection.toArray)).toEqual(sortedRows(service))
+  } finally {
     await collection.cleanup()
   }
 })

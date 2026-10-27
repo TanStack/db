@@ -4193,9 +4193,11 @@ describe(`pagination recomputation oracle`, () => {
       const initialRequestCount = requests.length
       throwNextPage = true
 
-      expect(() => live.utils.setWindow({ offset: 0, limit: 2 })).toThrow(
-        failure,
-      )
+      // A synchronous throw is a rejection (maintainer decision): the move
+      // fails with it.
+      await expect(
+        Promise.resolve(live.utils.setWindow({ offset: 0, limit: 2 })),
+      ).rejects.toBe(failure)
       expect(reentrantError).toMatchObject({ name: `SetWindowReentrancyError` })
       expect(requests).toHaveLength(initialRequestCount + 1)
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])

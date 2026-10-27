@@ -85,13 +85,15 @@ describe(`On-Demand Sync Mode`, () => {
   }
 
   // Receiving witness for the on-demand reload law (maintainer decisions
-  // F19 and snapshot-api §7): the reload keeps the rows, core replays the
-  // live query's demand through the new run, and once every replay
-  // succeeds core sweeps each kept row the new run did not write. So a load
-  // must write every row it returns, unchanged ones too. While the reload
-  // runs the table changes one row, deletes one, and leaves the others
-  // untouched. Afterwards the rows equal the table's matching rows: the
-  // untouched rows survive, the edit shows, and the deleted row is gone.
+  // F19 and snapshot-api §8): the reload keeps the rows, core replays the
+  // live query's demand through the new run, and the replayed load writes
+  // `update` for a key the Collection holds, so it never inserts a held key.
+  // Core does not sweep after a reload (issue #2269); a row goes only when
+  // the adapter deletes it. While the reload runs the table changes one row,
+  // deletes one, and leaves the others untouched; the new run's tracking
+  // sees the delete. Afterwards the rows equal the table's matching rows:
+  // the untouched rows survive, the edit shows, and the deleted row is gone.
+  // Limit: a row deleted while no trigger tracked the table stays.
   it(`an unchanged row survives an on-demand reload`, async () => {
     const db = await createDatabase()
     await createTestProducts(db)
@@ -2802,6 +2804,55 @@ describe(`On-Demand Sync Mode`, () => {
       } finally {
         firstHook.resolve()
         sync.cleanup?.()
+      }
+    })
+
+    // An abort ends the load (snapshot-api §8): core stops listening at
+    // once, and the adapter must stop and write no rows for it. The load's
+    // subset hook is held, the caller aborts, then the hook resolves.
+    // Checkpoints: the Collection holds no row and no trigger tracks the
+    // subset, while a later load of the same subset loads its rows.
+    it(`an aborted load writes no rows and its late result changes nothing`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const hook = pDefer<void>()
+      const onLoadSubset = vi
+        .fn()
+        .mockReturnValueOnce(hook.promise)
+        .mockResolvedValue(undefined)
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset,
+        }),
+      )
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+      try {
+        await collection.preload()
+        const abort = new AbortController()
+        const load = Promise.resolve(
+          collection._sync.loadSubset({
+            where: categoryEquals(`electronics`),
+            signal: abort.signal,
+          }),
+        ).catch(() => undefined)
+        await vi.waitFor(() => expect(onLoadSubset).toHaveBeenCalledOnce())
+        abort.abort()
+        hook.resolve()
+        await load
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(collection.size).toBe(0)
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+
+        await collection._sync.loadSubset({
+          where: categoryEquals(`electronics`),
+        })
+        expect(collection.size).toBe(3)
+      } finally {
+        hook.resolve()
+        await collection.cleanup()
       }
     })
 

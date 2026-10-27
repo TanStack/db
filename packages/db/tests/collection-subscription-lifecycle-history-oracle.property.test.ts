@@ -331,8 +331,10 @@ function updateCallerOutcomes(
         )
         .map(({ attemptId }) => attemptId),
     )
-    const failure = [...failedAttempts.keys()].find((attemptId) =>
-      current.has(attemptId),
+    // A rejection after the abort decides nothing: the abort ended the load.
+    const failure = [...failedAttempts.keys()].find(
+      (attemptId) =>
+        current.has(attemptId) && !model.attempts[attemptId]!.endedByAbort,
     )
     if (failure !== undefined) {
       const error = failedAttempts.get(failure)
@@ -1201,7 +1203,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       history: pendingSupersessionHistory,
     },
   ])(
-    `waits for delayed cancellation settlement for $name`,
+    `does not wait for an aborted load to settle for $name`,
     async ({ history }) => {
       await runHistory(history)
     },
@@ -1531,6 +1533,48 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       { cancellation: `reject` },
     )
   })
+
+  // An abort ends the load (maintainer decision), so an aborted
+  // replacement decides nothing: it never applied, so it covers none of the
+  // owners it replaces (law 10: a failed or obsolete replacement cannot
+  // retire established coverage). The replaced owner's failure stays, and
+  // the replay keeps its publication private. 30-times counterexamples of
+  // production, which counted the aborted replacement as covering.
+  it.each([
+    {
+      name: `a replacement aborted after its replaced owner failed`,
+      history: [
+        { type: `request`, demand: `c` },
+        { type: `request`, demand: `b` },
+        { type: `request`, demand: `a` },
+        { type: `replace`, demand: `a`, replaced: `c` },
+        { type: `truncate` },
+        settle(`c`, `current`, `oldest`, `reject`),
+        settle(`b`, `current`, `oldest`, `resolve`),
+        { type: `abort`, demand: `a` },
+        { type: `request`, demand: `a` },
+      ],
+    },
+    {
+      name: `a replacement aborted after a peer loaded and its replaced owner failed`,
+      history: [
+        { type: `request`, demand: `c` },
+        { type: `request`, demand: `b` },
+        { type: `request`, demand: `a` },
+        { type: `replace`, demand: `b`, replaced: `c` },
+        { type: `truncate` },
+        settle(`a`, `current`, `oldest`, `resolve`),
+        settle(`c`, `current`, `oldest`, `reject`),
+        { type: `abort`, demand: `b` },
+        { type: `request`, demand: `a` },
+      ],
+    },
+  ] satisfies Array<{ name: string; history: Array<LifecycleCommand> }>)(
+    `keeps a replay failed when $name`,
+    async ({ history }) => {
+      await runDemandChangeHistory(history)
+    },
+  )
 
   const runs = 80 * multiplier
   const cancellationArbitrary = fc.constantFrom(

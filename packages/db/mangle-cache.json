@@ -394,12 +394,10 @@
   "windowIsInsideOwnPrefix": "gE",
   "failureReasonFromReload": "g5",
   "endReload": "g9",
-  "loadOrder": "ha",
   "views": "he",
   "isDeferredSyncKey": "b6",
   "overlayHeldAndActive": "e8",
   "recordOutcome": "gP",
-  "replacements": "dp",
   "publishedHealth": "gK",
   "reportHealth": "gT",
   "healthTree": "gV",
@@ -417,7 +415,6 @@
   "coverSource": "hd",
   "supersedes": "hf",
   "oweDebt": "hg",
-  "keepsFailedReplayOpen": "gJ",
   "loadSubsetDepth": "gR",
   "requestedWhere": "hh",
   "onKeyOutcome": "hj",
@@ -440,7 +437,6 @@
   "reloadSnapshotPending": "al",
   "requestErrorsFromReload": "fs",
   "isResultComplete": "fD",
-  "decided": "gU",
-  "reloadLeftovers": "gY",
-  "endReloadLeftovers": "g1"
+  "rootLoadsBeforeFailure": "dp",
+  "rootLoadsStarted": "gI"
 }

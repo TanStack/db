@@ -389,16 +389,10 @@ export class CollectionLifecycleManager<
     run.resolve()
   }
 
-  /**
-   * A reload retired the sync run; subscriptions detach its demand. Returns
-   * the replays they started.
-   */
-  public retireSubscriptionDemand(): Array<Promise<void>> {
-    return [...this.changes.changeSubscriptions].flatMap((subscription) => {
+  /** A reload retired the sync run; subscriptions detach its demand. */
+  public retireSubscriptionDemand(): void {
+    for (const subscription of [...this.changes.changeSubscriptions])
       subscription.retireSyncRun()
-      const replay = subscription.pendingTruncateReplacement
-      return replay ? [replay] : []
-    })
   }
 
   /** The reload ended without a commit, for example by cleanup. */
@@ -858,46 +852,6 @@ export class RequestErrors {
     const errors = Array.from(this.open.values(), ({ failure }) => failure)
     this.problem = errors.length > 0 ? problemOf(errors) : null
     return true
-  }
-}
-
-/**
- * @internal Orders one source's loads: a request error clears only when a
- * load started after the failure succeeds. A load already in flight cannot
- * cover the data whose request failed, and a load a replay replaced decides
- * nothing: the replay decides it (law 16).
- */
-export class LoadOrder {
-  private started = 0
-  // Loads started up to here decide nothing: a later failure or a replay
-  // decides their data.
-  private decided = 0
-  private readonly pending = new Set<number>()
-
-  track(result: unknown, settle: () => void): void {
-    const order = ++this.started
-    this.pending.add(order)
-    void Promise.resolve(result).then(
-      () => {
-        this.pending.delete(order)
-        if (order > this.decided) settle()
-      },
-      () => {
-        this.pending.delete(order)
-        if (order > this.decided) this.decided = this.started
-      },
-    )
-  }
-
-  /**
-   * A replay replaced every load started so far. Returns whether one was
-   * still pending and not yet replaced, such as the retry of a failed load:
-   * the replay's verdict then decides that failure too.
-   */
-  replace(): boolean {
-    const retried = [...this.pending].some((order) => order > this.decided)
-    this.decided = this.started
-    return retried
   }
 }
 

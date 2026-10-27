@@ -100,9 +100,6 @@ export class CollectionSyncManager<
   private syncCallbackEpoch = 0
   private syncRunGeneration = 0
   private syncEntryActive = false
-  // The rows a reload's retired run left that the new run has not written
-  // yet: an insert of one replaces it, and the reload sweep deletes them.
-  private reloadLeftovers: Set<TKey> | undefined
   // A loadSubset call of the adapter is running; a reload from it would
   // retire the run under the call.
   private loadSubsetDepth = 0
@@ -243,30 +240,12 @@ export class CollectionSyncManager<
     const syncCallbackEpoch = ++this.syncCallbackEpoch
     const reload = this.lifecycle.beginReload()
     // A retired run whose cleanup fails broke the adapter contract.
-    const retired = this.retireSyncRun()
-    const leftovers = (this.reloadLeftovers = new Set(
-      [...this.state.acceptedSyncedEntries()].map(([key]) => key),
-    ))
-    void retired.catch((error: unknown) => this.lifecycle.crash(error))
+    void this.retireSyncRun().catch((error: unknown) =>
+      this.lifecycle.crash(error),
+    )
     // Subscriptions detach demand from the retired run and replay on-demand
     // demand through the new run's loader.
-    const replays = this.lifecycle.retireSubscriptionDemand()
-    // The reload sweep: once the reload completed and every replay
-    // succeeded, an on-demand Collection deletes each row its new run did
-    // not write. An aborted replay decides nothing; a failed one, or a
-    // failed reload, sweeps nothing, and a failed replay leaves the rows to
-    // the run, which may still write them.
-    void Promise.all([
-      reload,
-      ...replays.map((replay) =>
-        replay.catch((error: unknown) => {
-          if (!(error instanceof LoadSubsetOperationAbortedError)) throw error
-        }),
-      ),
-    ]).then(
-      () => this.endReloadLeftovers(leftovers, true),
-      () => this.endReloadLeftovers(leftovers, false),
-    )
+    this.lifecycle.retireSubscriptionDemand()
     if (syncCallbackEpoch !== this.syncCallbackEpoch) return reload
     try {
       // A ready callback that throws reaches no caller: the reload settles
@@ -338,21 +317,17 @@ export class CollectionSyncManager<
 
             let messageType = messageWithOptionalKey.type
 
-            // Check if an item with this key already exists when inserting
-            // An insert of a row a reload's retired run left replaces it,
-            // also from a replayed load after the reload completed;
-            // otherwise a duplicate insert throws.
-            let replacesKept = false
+            // Check if an item with this key already exists when inserting.
+            // During a reload, as at any time, the rows the Collection holds
+            // are the baseline: an insert of one throws.
             if (messageWithOptionalKey.type === `insert`) {
               const disposition = this.state.classifyPendingSyncedInsert(
                 key,
                 messageWithOptionalKey.value,
               )
-              replacesKept =
-                disposition === `duplicate` &&
-                this.reloadLeftovers?.has(key) === true
-              if (disposition !== `duplicate`) messageType = disposition
-              else if (!replacesKept) throw this.createDuplicateKeyError(key)
+              if (disposition === `duplicate`)
+                throw this.createDuplicateKeyError(key)
+              messageType = disposition
             }
 
             if (
@@ -374,19 +349,8 @@ export class CollectionSyncManager<
             } as OptimisticChangeMessage<TOutput, TKey> & {
               originalSyncType?: `insert`
             }
-            if (replacesKept) {
-              const removal = {
-                type: `delete`,
-                key,
-                value: this.state.getAcceptedSyncedRow(key),
-              } as OptimisticChangeMessage<TOutput, TKey>
-              pendingTransaction.operations.push(removal)
-              this.state.stagePendingSyncOperation(removal)
-            }
             pendingTransaction.operations.push(message)
             this.state.stagePendingSyncOperation(message)
-            if (this.reloadLeftovers?.delete(key))
-              (pendingTransaction.leftoversTaken ??= new Set()).add(key)
 
             const metadataWrite = automaticRowMetadataWrite(message)
             if (metadataWrite) {
@@ -408,10 +372,6 @@ export class CollectionSyncManager<
               signal?.aborted ||
               pendingTransaction.invalidationError !== undefined
             ) {
-              // A canceled commit never happened: the rows it was first to
-              // write are the retired run's again.
-              for (const key of pendingTransaction.leftoversTaken ?? [])
-                this.reloadLeftovers?.add(key)
               this.state.cancelPendingSyncedTransaction(
                 pendingTransaction,
                 signal?.aborted
@@ -592,44 +552,6 @@ export class CollectionSyncManager<
         deferred.reject(error)
       }
     }
-  }
-
-  /**
-   * The reload settled: an on-demand Collection whose replays succeeded
-   * deletes, in one transaction, every row the new run did not write. One
-   * whose replay failed keeps the rows for the run to write. Otherwise the
-   * leftovers end with the reload.
-   */
-  private endReloadLeftovers(leftovers: Set<TKey>, sweep: boolean): void {
-    if (this.reloadLeftovers !== leftovers) return
-    const onDemand = this.syncMode === `on-demand`
-    if (!sweep && onDemand && this.lifecycle.status !== `crashed`) return
-    this.reloadLeftovers = undefined
-    if (!sweep || !onDemand || this.lifecycle.status === `crashed`) return
-    const stale = [...this.state.acceptedSyncedEntries()].filter(([key]) =>
-      leftovers.has(key),
-    )
-    if (stale.length === 0) return
-    const applied = createDeferred<void>()
-    void applied.promise.catch(() => undefined)
-    this.state.acceptSeedTransaction({
-      committed: true,
-      applicationStarted: false,
-      layoutChanged: false,
-      operations: stale.map(
-        ([key, value]) =>
-          ({ type: `delete`, key, value }) as OptimisticChangeMessage<
-            TOutput,
-            TKey
-          >,
-      ),
-      rowMetadataWrites: new Map(
-        stale.map(([key]) => [key, { type: `delete` as const }]),
-      ),
-      explicitRowMetadataWrites: new Map(),
-      collectionMetadataWrites: new Map(),
-      applied,
-    })
   }
 
   private getActivePendingSyncTransaction() {
@@ -1068,7 +990,10 @@ export class CollectionSyncManager<
     return true
   }
 
-  /** Run the adapter's loadSubset; a reload from inside it rejects. */
+  /**
+   * Run the adapter's loadSubset; a reload from inside it rejects. A
+   * synchronous throw is a rejection: the load failed.
+   */
   private callLoadSubset(
     loadSubset: NonNullable<typeof this.syncLoadSubsetFn>,
     options: LoadSubsetOptions,
@@ -1076,6 +1001,8 @@ export class CollectionSyncManager<
     this.loadSubsetDepth++
     try {
       return loadSubset(options)
+    } catch (error) {
+      return Promise.reject(error)
     } finally {
       this.loadSubsetDepth--
     }
@@ -1224,7 +1151,6 @@ export class CollectionSyncManager<
     // before invoking adapter cleanup or allowing a new sync run to start.
     ++this.syncCallbackEpoch
     this.syncRunGeneration++
-    this.reloadLeftovers = undefined
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
     this.syncCleanupFn = null

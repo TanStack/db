@@ -12,8 +12,11 @@ import { fc } from '@fast-check/vitest'
  * Commands form the history grammar. The model's `request` command combines a
  * new logical owner with any acquisition attempt it starts. Its `release`
  * command combines demand retirement with release of that owner's acquisition
- * lease. `abort` only requests cancellation; it does not retire the owner.
- * `settle` changes an acquisition attempt. `truncate` starts a private
+ * lease. `abort` cancels the owner's current acquisition attempt but does not
+ * retire the owner. An abort ends the load (maintainer decision): from that
+ * moment the attempt holds no readiness, no replay waits for it, and a later
+ * settlement reports nothing. A replay that replaces an attempt aborts it
+ * too. `settle` changes an acquisition attempt. `truncate` starts a private
  * replacement. `cleanup` ends the current sync run; `restart` starts a new
  * sync run. `unsubscribe` ends this subscription, retires its logical subset
  * owners, and releases their acquisition leases. It does not end the
@@ -216,6 +219,9 @@ export type LifecycleAttempt = {
   inReplacement: boolean
   reportable: boolean
   aborted: boolean
+  // Aborted before it settled: the abort ended the load, so its outcome
+  // decides nothing.
+  endedByAbort: boolean
   failure: Error
 }
 
@@ -325,10 +331,15 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
 // private until the failed owner retires or a new replay succeeds. A held
 // replacement whose own acquisition did not fail covers the owners it
 // replaces, so their failure does not fail the replay. An owner without a
-// current acquisition attempt owes nothing, as before.
+// current acquisition attempt owes nothing, as before, and so does one whose
+// attempt was aborted: the abort ended its load, so it decides nothing.
 function replacementSucceeded(model: LifecycleModel): boolean {
   const loaded = ({ attemptId }: LifecycleOwner) =>
-    attemptId === undefined || model.attempts[attemptId]!.outcome === `resolve`
+    attemptId === undefined ||
+    (model.attempts[attemptId]!.outcome === `resolve` &&
+      !model.attempts[attemptId]!.endedByAbort)
+  const owesNothing = ({ attemptId }: LifecycleOwner) =>
+    attemptId === undefined || model.attempts[attemptId]!.endedByAbort
   return (
     !model.attempts.some(
       ({ gating, inReplacement }) => gating && inReplacement,
@@ -336,6 +347,7 @@ function replacementSucceeded(model: LifecycleModel): boolean {
     model.owners.every(
       (owner) =>
         loaded(owner) ||
+        owesNothing(owner) ||
         model.owners.some(
           (replacement) =>
             replacement.replaces?.includes(owner.id) && loaded(replacement),
@@ -352,7 +364,8 @@ function judgeReplay(model: LifecycleModel): void {
     model.owners.some(
       ({ attemptId }) =>
         attemptId !== undefined &&
-        model.attempts[attemptId]!.outcome === `reject`,
+        model.attempts[attemptId]!.outcome === `reject` &&
+        !model.attempts[attemptId]!.endedByAbort,
     )
   )
     model.reach.add(`replacement-decides-failed-owner`)
@@ -409,6 +422,7 @@ function startAttempt(
     inReplacement: model.publicationBarrierOpen,
     reportable: true,
     aborted: false,
+    endedByAbort: false,
     failure: model.failureForAttempt(id),
   }
   model.attempts.push(attempt)
@@ -443,13 +457,13 @@ function startAttempt(
 function retireAttempt(
   model: LifecycleModel,
   owner: LifecycleOwner,
-  options: { unload: boolean; trace?: boolean; keepPending?: boolean },
+  options: { unload: boolean; trace?: boolean },
 ): void {
   if (owner.attemptId === undefined) return
   const attempt = model.attempts[owner.attemptId]
   owner.attemptId = undefined
   if (!attempt) throw new Error(`model lost attempt`)
-  attempt.gating = options.keepPending === true && attempt.outcome === undefined
+  attempt.gating = false
   attempt.reportable = false
   abortAttempt(model, attempt)
   if (options.unload) {
@@ -467,12 +481,14 @@ function retireAttempt(
   }
 }
 
+// An abort ends the load: it stops gating at once, whether the adapter
+// settles it promptly (`reject`) or later (`manual`).
 function abortAttempt(model: LifecycleModel, attempt: LifecycleAttempt): void {
   attempt.aborted = true
-  if (model.cancellation === `reject` && attempt.outcome === undefined) {
+  if (attempt.outcome === undefined) attempt.endedByAbort = true
+  attempt.gating = false
+  if (model.cancellation === `reject` && attempt.outcome === undefined)
     attempt.outcome = `reject`
-    attempt.gating = false
-  }
 }
 
 function selectAttempt(
@@ -571,8 +587,8 @@ export function reduceLifecycle(
       abortAttempt(model, attempt)
       attempt.reportable = false
     }
-    // Prompt cancellation settles the attempt, so the replay is judged as
-    // after any settlement: a held replacement can still cover it.
+    // The abort ends the attempt, so the replay is judged as after any
+    // settlement: a held replacement can still cover it.
     judgeReplay(model)
     setStatus(model)
     return { ownerId: owner.id }
@@ -682,20 +698,18 @@ export function reduceLifecycle(
     // Replay setup is asynchronous even when every acquisition is synchronous
     // or canceled. Logical owners queue setup; live owners start acquisitions.
     setStatus(model, model.owners.length > 0)
-    // A canceled-only truncate starts no new work, but cannot end a prior
-    // replay's publication wait while that owner still owes settlement.
+    // A canceled-only truncate starts no new work. It still opens the
+    // barrier when a prior replay's current attempt was pending; aborting
+    // that attempt below ends its wait.
     model.publicationBarrierOpen =
       model.owners.some(({ aborted }) => !aborted) ||
       model.attempts.some(
         ({ gating, inReplacement }) => gating && inReplacement,
       )
     for (const owner of model.owners) {
-      // Replacing an acquisition is not releasing its logical owner. Delayed
-      // cancellation still holds readiness; replay work also holds publication.
-      retireAttempt(model, owner, {
-        unload: true,
-        keepPending: true,
-      })
+      // Replacing an acquisition is not releasing its logical owner, but it
+      // ends the replaced load: it holds neither readiness nor publication.
+      retireAttempt(model, owner, { unload: true })
       if (!owner.aborted) {
         startAttempt(model, owner)
       }

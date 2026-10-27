@@ -422,15 +422,15 @@ describe(`Electric Integration`, () => {
   // snapshots that a subscription's demand requests. The reload's new run
   // sends no snapshot of the whole shape, so it completes at its
   // markReady() and keeps the rows; core then replays the demand, and the
-  // replayed subset snapshot's rows apply on the kept rows (an insert of a
-  // kept key replaces it). The fake source answers every subset request
-  // with its current rows. A resumed stream delivers its changes after the
-  // stored offset; a stream that cannot resume starts at `now` and delivers
-  // none of them. Once every replay succeeds, core sweeps each kept row the
-  // new run did not write (snapshot-api §7), so a row the source deleted
-  // while no stream listened goes too, and the untouched row 3 survives
-  // because the replayed snapshot writes it. Afterwards the rows equal the
-  // source's rows in both histories.
+  // replayed subset snapshot's rows apply on the kept rows: Electric writes
+  // an update for a key the Collection holds (snapshot-api §8). The fake
+  // source answers every subset request with its current rows. A resumed
+  // stream delivers its changes after the stored offset; a stream that
+  // cannot resume starts at `now` and delivers none of them. Afterwards a
+  // row the source holds shows its current value, and an untouched row
+  // survives. Core does not sweep after a reload (§8, issue #2269), so a row
+  // the source deleted while no stream listened stays in the history that
+  // cannot resume: no subset snapshot can say a row is gone.
   it.each([true, false])(
     `an on-demand reload keeps its rows and ends with the source's rows (resumes: %s)`,
     async (handle) => {
@@ -514,7 +514,7 @@ describe(`Electric Integration`, () => {
         subscriber([...resumedChanges, upToDate()])
 
         expect(await reload).toBe(`resolved`)
-        const expected = new Map(table)
+        const expected = new Map(handle ? table : [...before, ...table])
         await vi.waitFor(() => expect(rows()).toEqual(expected))
         expect(onDemand.status).toBe(`ready`)
       } finally {
@@ -523,6 +523,55 @@ describe(`Electric Integration`, () => {
       }
     },
   )
+
+  // An abort ends the load (snapshot-api §8): the adapter must stop and
+  // write no rows for it. Electric serializes subset requests on one stream
+  // cursor, so a load can wait behind another. Here the second load aborts
+  // while it waits. Checkpoints: it rejects with `AbortError`, Electric
+  // never requests its snapshot, and once the first request settles the
+  // Collection holds only the first load's rows. Limit: an abort while a
+  // request is in flight cannot stop the rows the SDK already publishes
+  // through the stream (ShapeStream.requestSnapshot accepts no signal).
+  it(`an aborted load writes no rows and its late result changes nothing`, async () => {
+    const first = createDeferred<void>()
+    mockRequestSnapshot.mockReturnValueOnce(first.promise)
+    const onDemand = createCollection(
+      electricCollectionOptions({
+        id: `on-demand-aborted-load`,
+        shapeOptions: { url: `http://test-url`, params: { table: `t` } },
+        syncMode: `on-demand`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }),
+    )
+    try {
+      subscriber([{ headers: { control: `up-to-date` } }])
+      const firstLoad = Promise.resolve(onDemand._sync.loadSubset({ limit: 1 }))
+      const abort = new NativeAbortController()
+      const second = Promise.resolve(
+        onDemand._sync.loadSubset({ limit: 2, signal: abort.signal }),
+      ).then(
+        () => `resolved`,
+        (error: unknown) => error,
+      )
+      await vi.waitFor(() => expect(mockRequestSnapshot).toHaveBeenCalledOnce())
+      abort.abort()
+      expect(await second).toMatchObject({ name: `AbortError` })
+
+      subscriber([
+        { key: `1`, value: { id: 1 }, headers: { operation: `insert` } },
+        { headers: { control: `subset-end` } },
+      ])
+      first.resolve()
+      await firstLoad
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(mockRequestSnapshot).toHaveBeenCalledOnce()
+      expect([...onDemand.keys()]).toEqual([1])
+    } finally {
+      first.resolve()
+      await onDemand.cleanup()
+    }
+  })
 
   // The same law for a progressive Collection whose reload cannot resume.
   // Its new stream starts over, so it buffers the full log until its first

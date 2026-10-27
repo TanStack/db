@@ -125,8 +125,11 @@ result applies and clears it.
 ## Incremental Subset Load Errors
 
 An incremental `loadSubset` failure does not discard rows that are already
-available or put the shared source collection into `error`. The failure belongs
-to the subscription that requested that subset:
+available or put the shared source collection into `error`. A `loadSubset`
+that throws synchronously fails the same way as one that rejects: neither
+`requestSnapshot()` nor `setWindow()` throws, and the error arrives as a
+rejection. The failure belongs to the subscription that requested that
+subset:
 
 ```ts
 const subscription = todoCollection.subscribeChanges(handleChanges, {
@@ -181,9 +184,10 @@ keeps its last successful snapshot and reports the subset error. A live query
 shows it as an `error` on its own node until a later replay succeeds. It discards
 the incomplete replay batch and keeps later source changes private because they
 cannot prove a complete replacement. The next truncate retries every active
-subset. Overlapping truncates form one atomic replay: all in-flight requests
-settle, the newest attempt decides the result, and subscribers receive the
-replacement only when that attempt succeeds. Cleanup rejects window moves that
+subset. Overlapping truncates form one atomic replay: a newer truncate aborts
+the older attempt's requests, and an aborted request is over, so the replay
+does not wait for it. The newest attempt decides the result, and subscribers
+receive the replacement only when that attempt succeeds. Cleanup rejects window moves that
 are waiting for replay with `AbortError`.
 
 ## Loading and Sync Errors
@@ -396,6 +400,11 @@ node (`root`) shows an `error`. The sources stay healthy and the rows already
 shown stay. The error clears when the data loads, or when the query no longer
 needs it, for example after the user scrolls back. When several requests fail,
 the node shows the newest, and its `errors` lists every request still failing.
+A request that TanStack DB cancels, for example because the window moved on,
+is over: its late result changes nothing. When a source's reload or truncate
+loads the query's data again, that replay decides the query's failed
+requests: its success clears them all, and its failure replaces them with
+the replay's own failures.
 
 ```tsx
 const { data, health, fetchNextPage } = useLiveInfiniteQuery(
@@ -430,15 +439,10 @@ visible changes until the reload completes.
   becomes `ready` when the new run calls `markReady()`.
 - If the new run fails, the old rows and status stay, the node shows the new
   `error`, and the `reload()` promise rejects.
-- From the reload's start until its sweep, or until it ends without one, the
-  new run's `insert` of a row the old run left and the new run has not
-  written replaces that row, also from a replayed load after the reload
-  completed. Any other duplicate `insert` still throws.
-- On an on-demand Collection, once the reload completed and every replay of
-  the current demand succeeded, core deletes in one change each row the new
-  run did not write: a row the backend deleted while no stream told the
-  Collection, or one that no demand loads any more. A failed replay deletes
-  nothing.
+- A reload keeps every row its new run does not rewrite. Core never deletes
+  rows on its own after a reload: a row the backend deleted goes when the
+  sync adapter sends a snapshot, a `delete`, or its own cleanup of that
+  row ([#2269](https://github.com/TanStack/db/issues/2269)).
 - A live query's own reload keeps its rows and its window (the offset and
   limit it settled on) until its new run has a complete result, then shows
   that result in one change.
@@ -448,7 +452,7 @@ then the query itself if its own node has an `error`: its first load failed,
 or a request for more data failed. To reload one source instead, call
 `reload()` on that source's Collection; a query in `error` stays there until
 its own `reload()`. A source's reload also loads the query's data again, so it
-clears the query's failed requests when those loads succeed.
+clears all of the query's failed requests when that replay succeeds.
 
 ```ts
 // Retry a failed first load every 30 seconds until the backend is back.
@@ -636,13 +640,21 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
   holds the previous run's rows. Send the new run's full state as one
   snapshot (`begin({ snapshot: true })`), or write against the kept rows:
   `update` a row the Collection holds, `delete` a row that is gone, then call
-  `markReady()`. An `insert` of a row the old run left replaces it, until
-  the reload's sweep. An on-demand Collection's `loadSubset` result is
-  partial, so never mark it as a snapshot; core deletes the kept rows the new
-  run did not write once its replay succeeds. So write every row a load
-  returns during a reload, unchanged ones too: an `update` with the row's
-  current value changes nothing on screen, and it keeps the row from that
-  deletion.
+  `markReady()`. Your adapter has four obligations during a reload
+  ([#2269](https://github.com/TanStack/db/issues/2269)):
+  - Never `insert` a key the Collection holds: write `update` for it. An
+    `insert` of a held key with a different value throws
+    `DuplicateKeySyncError`, during a reload as at any time, also for a
+    replayed `loadSubset` that lands after the reload completed.
+  - Remove the rows the backend deleted yourself. Core does not delete kept
+    rows after a reload. An on-demand Collection's `loadSubset` result is
+    partial, so never mark it as a snapshot; delete a row from your stream,
+    or through the row ownership your adapter keeps.
+  - Honor the `loadSubset` signal. When it aborts, the load is over for
+    core: stop the fetch and write no rows for it. Core ignores a later
+    resolve or reject of that load.
+  - A `loadSubset` that throws synchronously fails the load exactly as one
+    that returns a rejected promise.
 
 ### Migrating
 

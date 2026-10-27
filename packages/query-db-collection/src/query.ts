@@ -1126,11 +1126,6 @@ export function queryCollectionOptions(
       collection,
       metadata,
     } = params
-    // The rows a reload kept from the retired run. A result writes each one
-    // it returns, unchanged ones too, so the on-demand reload sweep keeps it.
-    const unwrittenKeptRows = new Set(
-      Array.from(collection._state.acceptedSyncedEntries(), ([key]) => key),
-    )
 
     // Readiness of this sync run. A reload calls `sync` again while the
     // Collection still shows the previous run's status, so status cannot say
@@ -2708,10 +2703,7 @@ export function queryCollectionOptions(
               write({ type: `delete`, key })
               removedRows.add(key)
             }
-          } else if (
-            oldItem &&
-            (!deepEquals(oldItem, newItem) || unwrittenKeptRows.delete(key))
-          ) {
+          } else if (oldItem && !deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
           }
         })
@@ -2744,18 +2736,15 @@ export function queryCollectionOptions(
           if (insertsRow) {
             write({ type: `insert`, value: newItem })
           } else if (
-            (!previouslyOwnedRows.has(key) &&
-              (result.isFetchedAfterMount ||
-                (directPosition !== undefined &&
-                  cachedRemoteFetchStart !== undefined &&
-                  cachedRemoteFetchStart > directPosition)) &&
-              !deepEquals(currentSyncedItems.get(key), newItem)) ||
-            (deepEquals(currentSyncedItems.get(key), newItem) &&
-              unwrittenKeptRows.delete(key))
+            !previouslyOwnedRows.has(key) &&
+            (result.isFetchedAfterMount ||
+              (directPosition !== undefined &&
+                cachedRemoteFetchStart !== undefined &&
+                cachedRemoteFetchStart > directPosition)) &&
+            !deepEquals(currentSyncedItems.get(key), newItem)
           ) {
             // A fetched row can first claim a directly inserted key. That
             // claim also replaces the direct value with the server value.
-            // An unchanged kept row's identical update changes nothing.
             write({ type: `update`, value: newItem })
           }
           if (addsOwner || insertsRow) {

@@ -888,13 +888,12 @@ rows themselves.
 The source contract stays abstract: a demand request eventually establishes
 one coherent baseline and identifies when that baseline is complete. Each
 request receives an `AbortSignal`. Cancellation is cooperative at this source
-boundary. An obsolete request cannot satisfy current demand. Its settlement
-may release a replay wait, but never substitutes for completion of the current
-acquisition. A source that can cancel request-scoped work must honor the signal
-before installing more rows. A source that cannot cancel an in-flight baseline
-must settle that work; core keeps overlapping replay private until then. Core
-cannot prevent an arbitrary adapter from writing after it ignores both parts
-of that contract. Buffering, snapshot tokens, shape offsets, Collection
+boundary. An obsolete request cannot satisfy current demand. An abort ends
+the load for core: from that moment its later success or rejection decides
+nothing, holds no readiness, and no replay waits for it. A source must honor
+the signal and install no more rows for the aborted request; rows it still
+writes apply as ordinary sync writes. A `loadSubset` that throws synchronously
+is a rejection: a failed load. Buffering, snapshot tokens, shape offsets, Collection
 transactions, and local indexes are source-specific ways to satisfy it; they
 are not materializer state.
 
@@ -927,8 +926,8 @@ awaits an on-demand load of its own Collection waits for itself. A source must
 not add priority merely to make a subset load settle. Truncate retains its
 queue-bypass contract; if it applies a parked subset transaction as part of
 that prefix, the subset receipt settles only after the writes are visible. Rejected acquisitions establish no result. Canceled or obsolete
-acquisitions either stop before publishing more request-scoped rows or settle
-behind the active replay barrier.
+acquisitions stop before publishing more request-scoped rows, and the active
+replay barrier does not wait for them.
 
 ### Ordered requests, continuation, and recovery
 
@@ -1403,17 +1402,15 @@ A truncate replay is one publication barrier. Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the
 barrier. Success publishes only after all current acquisitions settle. A
 released demand stops participating even if its canceled transport promise
-never settles. A newer truncate aborts prior acquisitions, but publication
-still waits for overlapping work that had already started because some sources
-cannot cancel an in-flight snapshot. Such work must settle and must not install
-rows after observing cancellation. Settled historical attempts are discarded.
-Replacing an acquisition does not release its logical owner. A delayed
-cancellation therefore remains pending; prompt cancellation settles that wait.
-Releasing the owner removes both its current and older work from readiness.
-An ordinary acquisition started before replay may still hold subscription
-readiness after its replacement publishes. It is not a replay publication
-participant: its canceled writes must stop at the source boundary. Work started
-inside replay, including an older overlapping replay, does hold publication.
+never settles. A newer truncate aborts prior acquisitions, and an abort ends
+the load: publication and readiness stop waiting for it at once, whether the
+source settles it promptly or late, and its later outcome decides nothing.
+The source must not install rows after observing cancellation. Settled
+historical attempts are discarded. Replacing an acquisition does not release
+its logical owner, but an owner whose current acquisition was aborted owes
+the replay nothing. Releasing the owner removes its work from readiness. Work
+started inside the current replay attempt holds publication until it
+settles or aborts.
 Core installs each tentative acquisition and binds it to the current replay
 attempt before calling adapter code. A reentrant release or newer truncate can
 therefore see and retire the exact work it supersedes; work returned after that
@@ -1807,54 +1804,46 @@ every row before the top-K (a recorded limit).
     load or a root Collection's load that fails after initial-query readiness
     is an `error` on the query's own node. A lazy demand's error clears when
     that demand settles or is released; a root Collection's error clears when
-    a later load of that Collection settles. A source reload starts the
+    a later load of that Collection settles: one started after the failure,
+    for a root Collection, since a load already in flight cannot cover the
+    data whose request failed. A source reload starts the
     replay of every subscription's on-demand demand (a live query's, an
     Effect's, or a direct subscriber's) when it retires the sync run, as a
     truncate does, and the rows stay: the new run's writes apply on them.
     Only the new run's snapshot (`begin({ snapshot: true })`) or its own
     `truncate()` replaces them, and that replacement replays the demand
-    again, also after the reload's replay settled. From the reload's
-    start until its sweep, or until it ends without one, the new run's
-    insert of a row the retired run left, and has not written, replaces it,
-    also from a replayed load after the reload completed.
-    When the reload completed and every replay it started succeeded, an
-    on-demand Collection deletes, in one transaction, each row its new run
-    did not write (the reload sweep); a failed replay or a failed reload
-    sweeps nothing. A live query's own reload keeps its rows, its node, and
-    its settled window until its new run's graph result is complete (law
-    9), then commits that result as its snapshot; the node then drops the
-    retired run's request errors and keeps the new run's, and a window move
-    still waiting for a replay ends with the retired run.
-    The replay decides every load
-    it replaces: a replaced load's own outcome decides
-    nothing, even when it settles after the replay. A load that fails while
-    the replay is in flight fails with its own error once the replay
-    settles, in failure order; once the replay has failed, a load that joins
-    it and fails shows its own error at once. A lazy demand's error clears as
-    soon as a later load of its failed key succeeds, without waiting for its
-    other loads. The replay loads the query's demand again as one unit: the
-    query's first load waits for the whole replay, the replay fails only for
-    a demand the query still holds when it settles, and its success clears
-    the errors of the keys it loaded again, also a key whose earlier load
-    threw. A load that threw holds no demand, so a replay does not load it
-    again: a key only such a load covers keeps its error, and so does a key
-    whose later load failed while the query still holds that request. A
-    request error belongs to the request that failed: once a demand change
-    retires that request, the replay's load of its key decides the key, so
-    the error goes when the replay succeeds. When several request errors are
-    open, the query's node shows the newest, as TanStack Query's `error`,
-    and its `errors` lists every request failure still open, oldest first;
-    two requests that fail with one error are one failure, which keeps the
-    place of its first failure, and a failed replay lists every load it
-    failed for, in failure order. A replay in flight decides the loads it
-    replays or that join it, so their failures show in its verdict, not
-    as separate failures of the root Collection's load. A failed key whose
-    pending retry the replay replaced takes the replay's failure, so its
-    earlier failure leaves the list; a failed request without a retry keeps
-    its own failure next to the replay's. A replay request that throws leaves
-    its key to that replay's verdict: a demand change during the replay does
-    not request the key by itself, and only a replacement for fragmented
-    coverage (law 10) requests it again, inside the whole current key union.
+    again, also after the reload's replay settled. A reload keeps every row
+    its new run does not rewrite: core deletes no row on its own, so
+    removing a row the backend deleted is the sync adapter's job, through a
+    snapshot, a `delete`, or row ownership, and an `insert` of a key the
+    Collection holds throws `DuplicateKeySyncError`, during a reload as at
+    any time ([#2269](https://github.com/TanStack/db/issues/2269)). A live
+    query's own reload keeps its rows, its node, and its settled window
+    until its new run's graph result is complete (law 9), then commits that
+    result as its snapshot; the node then drops the retired run's request
+    errors and keeps the new run's, and a window move still waiting for a
+    replay ends with the retired run. An abort ends the load: once core
+    aborts a load (a window move, a demand retirement, a replay that
+    replaces it, or a reload that retires its run), its later success or
+    rejection decides no request error, holds no readiness, and no replay
+    waits for it. A `loadSubset` that throws synchronously is a rejection:
+    a failed load that holds its demand, which a later load or replay
+    retries. A replay's verdict decides every request error of the demand
+    it replayed: loads that settle while it is judged decide none
+    themselves, its success clears them all, and its failure replaces them
+    with its own failures, every failed load of its current attempt that the
+    query still holds for a key no later held load loaded, in failure order.
+    The replay loads the query's demand again as one unit: the query's first
+    load waits for the whole replay, and the replay fails only for a demand
+    the query still holds when it is judged. A failed replay stays a request
+    error until a replay succeeds or the query holds no demand; once its
+    attempt failed, a load that joins it and fails shows its own error at
+    once. A lazy demand's error clears as soon as a later load of its failed
+    key succeeds, without waiting for its other loads. When several request
+    errors are open, the query's node shows the newest, as TanStack Query's
+    `error`, and its `errors` lists every request failure still open, oldest
+    first; two requests that fail with one error are one failure, which
+    keeps the place of its first failure.
     While the source shows a failed first load, the query's demand changes
     start the acquisitions law 10 asks for without a request: they join an
     open replay, and the source's restart or next replay requests them. Query failures and contract

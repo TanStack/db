@@ -2118,7 +2118,11 @@ function createElectricSync<T extends Row<unknown>>(
     // When multiple subset queries return the same row, the server sends `insert`
     // for each response. We convert subsequent inserts to updates to avoid
     // duplicate key errors when the row's data has changed between requests.
-    const syncedKeys = new Set<string | number>()
+    // A reload keeps the retired run's rows, and an insert of a kept key
+    // edits it the same way.
+    const syncedKeys = new Set<string | number>(
+      Array.from(collection._state.acceptedSyncedEntries(), ([key]) => key),
+    )
     let resumeInvalid = false
 
     const stageResumeMetadata = () => {
@@ -2265,7 +2269,18 @@ function createElectricSync<T extends Row<unknown>>(
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
       waitForEstablishedSnapshot: () => fullSnapshotReady,
       begin,
-      write,
+      // A subset snapshot row is a full row. It edits a row the Collection
+      // holds, such as a reload's kept row before the atomic swap.
+      write: (mutation) =>
+        write({
+          ...mutation,
+          type:
+            collection._state.getAcceptedSyncedRow(
+              collection.getKeyFromItem(mutation.value),
+            ) === undefined
+              ? `insert`
+              : `update`,
+        }),
       commit,
       getCommitCursor: () => commitSequence,
       waitForCommitsAfter,

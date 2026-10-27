@@ -127,8 +127,6 @@ export class CollectionConfigBuilder<
 
   // Error state tracking
   private fatalQueryError = false
-  // The sync function is running: a failure there fails the query's start.
-  private starting = false
   private lastSubsetError: unknown | undefined
   // The query's own reload: its new run publishes nothing until its graph
   // result is complete (law 9), then commits that result as the snapshot
@@ -506,11 +504,6 @@ export class CollectionConfigBuilder<
     }
   }
 
-  /** The query's sync function is running. */
-  isStarting(): boolean {
-    return this.starting
-  }
-
   isLazySource(sourceId: string): boolean {
     return this.lazySources.has(sourceId)
   }
@@ -798,8 +791,8 @@ export class CollectionConfigBuilder<
             try {
               syncState.graph.run()
             } catch (error) {
-              // A first load that already failed in this run, such as a lazy
-              // load that threw, reported its error.
+              // A first load that already failed in this run reported its
+              // error.
               if (
                 isCurrentSyncRun() &&
                 this.liveQueryCollection?._lifecycle.stoppedThisRun !== true
@@ -930,7 +923,6 @@ export class CollectionConfigBuilder<
       }
     }
 
-    this.starting = true
     try {
       // Extend the pipeline such that it applies the incoming changes to the collection
       const fullSyncState = this.extendPipelineWithChangeProcessing(
@@ -967,8 +959,6 @@ export class CollectionConfigBuilder<
         // Preserve the setup failure. It is the error the caller can act on.
       }
       throw error
-    } finally {
-      this.starting = false
     }
 
     return teardown

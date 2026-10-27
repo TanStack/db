@@ -505,7 +505,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Reentrance guard
   private isGraphRunning = false
-  private starting = false
   private disposed = false
 
   private readonly onBatchProcessed: (
@@ -580,10 +579,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Subscribe to source collections and start processing */
   start(): void {
-    this.starting = true
     if (this.collectionSources.length === 0) {
       // Nothing to subscribe to
-      this.starting = false
       return
     }
 
@@ -608,7 +605,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     for (const source of this.collectionSources) {
       if (this.isDisposed()) {
-        this.starting = false
         return
       }
 
@@ -632,7 +628,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Registration can dispose the runner before its handle is available.
       if (this.isDisposed()) {
         cleanupStartUnsubscribe()
-        this.starting = false
         return
       }
       this.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
@@ -677,7 +672,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // the Effect before any subscription or load reaches that source.
       if (isFailedStatus(collection.status)) {
         this.onSourceError(stoppedSourceError(collectionId, collection.status))
-        this.starting = false
         return
       }
 
@@ -714,7 +708,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // the runner before returning the subscription.
       if (this.isDisposed()) {
         unsubscribe()
-        this.starting = false
         return
       }
 
@@ -862,7 +855,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     ) {
       this.initialLoadComplete = true
     }
-    this.starting = false
   }
 
   /** Handle incoming changes from a source collection */
@@ -893,17 +885,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
-    let update
-    try {
-      update = this.demand.setDemand(subscription, plan, keys)
-    } catch (error) {
-      // The subscription error event already reports adapter failures and
-      // disposes this effect. Do not let that query-local failure escape the
-      // source commit, but keep unrelated graph errors visible.
-      if (!Object.is(subscription.lastError, error)) throw error
-      if (this.starting) throw error
-      return
-    }
+    const update = this.demand.setDemand(subscription, plan, keys)
     if (update.ready instanceof Promise) {
       this.trackInitialLoad(
         update.ready,

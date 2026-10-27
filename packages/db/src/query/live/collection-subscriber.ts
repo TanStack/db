@@ -1,5 +1,4 @@
 import { normalizeExpressionPaths } from '../compiler/expressions.js'
-import { LoadOrder } from '../../collection/lifecycle.js'
 import { LoadSubsetOperationAbortedError } from '../../errors.js'
 import { OrderedSourceLoader } from './ordered-source-loader.js'
 import {
@@ -12,6 +11,7 @@ import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   ChangeMessage,
+  LoadSubsetOptions,
   LoadSubsetRequestResult,
   SubscribeChangesOptions,
   SubscriptionLoadSubsetErrorEvent,
@@ -32,7 +32,11 @@ export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
-  private readonly loadOrder = new LoadOrder()
+  // Root loads in start order: a request error clears only when a load
+  // started after the failure succeeds, since a load already in flight
+  // cannot cover the data whose request failed.
+  private rootLoadsStarted = 0
+  private rootLoadsBeforeFailure = 0
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
@@ -89,10 +93,26 @@ export class CollectionSubscriber<
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
-    const trackLoadResult = (result: LoadSubsetRequestResult) => {
-      // A later successful load clears this source's request error.
-      this.loadOrder.track(result, () =>
-        this.collectionConfigBuilder.settleRootLoad(this.sourceId),
+    const trackLoadResult = (
+      result: LoadSubsetRequestResult,
+      options?: LoadSubsetOptions,
+    ) => {
+      // A later successful load clears this source's request error. An
+      // aborted load decides nothing, and a replay's verdict decides the
+      // loads that settle while it is judged.
+      const order = ++this.rootLoadsStarted
+      const decides = () =>
+        !options?.signal?.aborted &&
+        !(options?.subscription as CollectionSubscription | undefined)
+          ?.pendingTruncateReplacement
+      void Promise.resolve(result).then(
+        () => {
+          if (order > this.rootLoadsBeforeFailure && decides())
+            this.collectionConfigBuilder.settleRootLoad(this.sourceId)
+        },
+        () => {
+          if (decides()) this.rootLoadsBeforeFailure = this.rootLoadsStarted
+        },
       )
       if (result instanceof Promise) {
         // Defer the tracked rejection by one microtask so the subscription's
@@ -220,22 +240,7 @@ export class CollectionSubscriber<
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
-    let update
-    try {
-      update = this.demand.setDemand(subscription, plan, keys)
-    } catch (error) {
-      // CollectionSubscription reports adapter failures before rethrowing.
-      // Convert that synchronous form to the same query-local fatal demand
-      // state as a rejected load, without letting it escape the source commit.
-      // Preserve unrelated graph/programming errors as throws.
-      // During the query's start, the throw fails the start, which releases
-      // the sources it subscribed to.
-      if (!Object.is(subscription.lastError, error)) throw error
-      const generation = this.collectionConfigBuilder.beginDemand(plan.id)
-      this.collectionConfigBuilder.failDemand(plan.id, generation, error)
-      if (this.collectionConfigBuilder.isStarting()) throw error
-      return
-    }
+    const update = this.demand.setDemand(subscription, plan, keys)
     if (!update.changed) return
 
     if (update.empty) {
@@ -249,7 +254,6 @@ export class CollectionSubscriber<
     const settle = () =>
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
     if (update.ready instanceof Promise) {
-      // Each segment follows a truncate's or a reload's replay itself.
       void update.ready.then(settle, (error) =>
         this.collectionConfigBuilder.failDemand(plan.id, generation, error),
       )
@@ -281,7 +285,10 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
-    onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
+    onLoadSubsetResult: (
+      result: LoadSubsetRequestResult,
+      options?: LoadSubsetOptions,
+    ) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const sendChanges = (
@@ -320,7 +327,10 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo,
     onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
-    onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
+    onLoadSubsetResult: (
+      result: LoadSubsetRequestResult,
+      options?: LoadSubsetOptions,
+    ) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     // Use a holder to forward-reference subscription in the callback
@@ -422,7 +432,7 @@ export class CollectionSubscriber<
       orderByInfo,
       subscription,
       this.alias,
-      (result, holdPublication, settlesAsync) => {
+      (result, holdPublication, settlesAsync, options) => {
         if (result instanceof Promise) {
           this.collectionConfigBuilder.trackOrderedLoadPromise(
             result,
@@ -431,7 +441,7 @@ export class CollectionSubscriber<
               !subscription.hasPendingTruncateReplacement,
           )
         }
-        onLoadSubsetResult(result)
+        onLoadSubsetResult(result, options)
       },
       () =>
         this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
@@ -453,44 +463,32 @@ export class CollectionSubscriber<
   ): TruncateReplayPublicationControl {
     const syncRunGeneration =
       this.collectionConfigBuilder.getSyncRunGeneration()
-    // The replay replaced a retry of a failed root load, so its verdict
-    // decides that failure too (law 16).
-    let replacedRetry = false
+    const isCurrent = () =>
+      syncRunGeneration === this.collectionConfigBuilder.getSyncRunGeneration()
+    // The replay's verdict decides every request error of the demand it
+    // replayed: its success clears them, and its failure replaces them with
+    // its own failures. The query then keeps its last snapshot, which no
+    // longer updates: a request error, or a failed first load before
+    // readiness.
+    const decide = (errors: Array<Error> = []) => {
+      this.demand.clearRequestErrors()
+      this.collectionConfigBuilder.settleReplayedRequests(this.sourceId)
+      if (errors.length > 0)
+        this.collectionConfigBuilder.failReplay(this.sourceId, errors)
+    }
     return {
-      start: (retired) => {
-        this.demand.startReplay()
-        replacedRetry = this.loadOrder.replace()
-        onStart?.(retired)
-      },
+      start: (retired) => onStart?.(retired),
       succeed: () => {
-        if (
-          syncRunGeneration !==
-          this.collectionConfigBuilder.getSyncRunGeneration()
-        ) {
-          return
-        }
+        if (!isCurrent()) return
         this.orderedLoader?.settleFullSourceReplay()
-        // The replay loaded every demand this subscription holds again.
-        this.demand.settleReplay()
-        this.collectionConfigBuilder.settleReplayedRequests(this.sourceId)
+        decide()
         this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
           syncRunGeneration,
         )
       },
-      // The query keeps its last snapshot, which no longer updates: a
-      // request error, or a failed first load before readiness.
       fail: (errors) => {
-        if (
-          syncRunGeneration !==
-          this.collectionConfigBuilder.getSyncRunGeneration()
-        )
-          return
-        if (replacedRetry)
-          this.collectionConfigBuilder.settleRootLoad(this.sourceId)
-        this.collectionConfigBuilder.failReplay(this.sourceId, errors)
-        this.demand.failReplay()
+        if (isCurrent()) decide(errors)
       },
-      holdsDemand: () => this.demand.holdsDemand(),
     }
   }
 

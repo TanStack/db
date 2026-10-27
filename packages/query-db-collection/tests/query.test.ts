@@ -11973,6 +11973,64 @@ describe(`reload settles on the new run's first result`, () => {
     },
   )
 
+  // An abort ends the load (snapshot-api §8): core stops listening at once,
+  // and the adapter must stop and write no rows for it. Core aborts a load
+  // when its demand retires, and releases it (`unloadSubset`) in the same
+  // step. Here a subscription's subset fetch is held, the subscription ends,
+  // then the fetch answers. Checkpoints: after the late answer the
+  // Collection holds no row, and a later subscription loads the subset's
+  // rows. Limit: query-db applies a late result after an abort without
+  // unloadSubset (a replay replacing the load within a run); its data is
+  // current, so it costs a write, not correctness.
+  it(`an aborted load writes no rows and its late result changes nothing`, async () => {
+    type Row = { id: number }
+    let answer!: (rows: Array<Row>) => void
+    const answers: Array<Promise<Array<Row>>> = [
+      new Promise((resolve) => (answer = resolve)),
+    ]
+    let fetches = 0
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `aborted-load`,
+        queryKey: [`aborted-load`],
+        queryClient: client,
+        syncMode: `on-demand`,
+        getKey: (row: Row) => row.id,
+        queryFn: () => {
+          fetches++
+          return answers.shift() ?? Promise.resolve([{ id: 1 }])
+        },
+      }),
+    )
+    try {
+      await collection.preload()
+      const first = collection.subscribeChanges(() => {}, {
+        includeInitialState: true,
+      })
+      await flushPromises()
+      // The reach of this case: the subset's fetch is in flight.
+      expect(fetches).toBe(1)
+      first.unsubscribe()
+      answer([{ id: 1 }])
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(collection.size).toBe(0)
+
+      const second = collection.subscribeChanges(() => {}, {
+        includeInitialState: true,
+      })
+      await vi.waitFor(() =>
+        expect(collection.toArray.map((row) => row.id)).toEqual([1]),
+      )
+      second.unsubscribe()
+    } finally {
+      await collection.cleanup()
+      client.clear()
+    }
+  })
+
   /**
    * A housekeeping transaction is not a snapshot either. Query
    * Collection's retention maintenance commits one: it removes an expired

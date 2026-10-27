@@ -1863,15 +1863,17 @@ describe(`createEffect`, () => {
       })
       const sourceErrors: Array<Error> = []
 
-      expect(() =>
-        createEffect({
-          query: (q) => q.from({ user: users }),
-          onBatch: () => {},
-          onSourceError: (error) => sourceErrors.push(error),
-        }),
-      ).toThrow(failure)
+      // A synchronous throw is a rejection (maintainer decision): the load
+      // fails after createEffect() returns, and ends the Effect.
+      const effect = createEffect({
+        query: (q) => q.from({ user: users }),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+      await flushPromises()
 
       expect(sourceErrors).toEqual([failure])
+      expect(effect.disposed).toBe(true)
       expect(users.subscriberCount).toBe(0)
       await users.cleanup()
     })
@@ -1897,19 +1899,21 @@ describe(`createEffect`, () => {
       })
       const sourceErrors: Array<Error> = []
 
-      expect(() =>
-        createEffect({
-          query: (q) =>
-            q
-              .from({ user: users })
-              .orderBy(({ user }) => user.name, `asc`)
-              .limit(1),
-          onBatch: () => {},
-          onSourceError: (error) => sourceErrors.push(error),
-        }),
-      ).toThrow(failure)
+      // A synchronous throw is a rejection (maintainer decision): the load
+      // fails after createEffect() returns, and ends the Effect.
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .orderBy(({ user }) => user.name, `asc`)
+            .limit(1),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+      await flushPromises()
 
       expect(sourceErrors).toEqual([failure])
+      expect(effect.disposed).toBe(true)
       expect(users.subscriberCount).toBe(0)
       await users.cleanup()
     })
@@ -1934,24 +1938,26 @@ describe(`createEffect`, () => {
       })
       const sourceErrors: Array<Error> = []
 
-      expect(() =>
-        createEffect({
-          query: (q) =>
-            q
-              .from({ user: users })
-              .leftJoin({ issue: issues }, ({ user, issue }) =>
-                eq(user.id, issue.userId),
-              )
-              .select(({ user, issue }) => ({
-                id: user.id,
-                issueId: issue.id,
-              })),
-          onBatch: () => {},
-          onSourceError: (error) => sourceErrors.push(error),
-        }),
-      ).toThrow(failure)
+      // A synchronous throw is a rejection (maintainer decision): the load
+      // fails after createEffect() returns, and ends the Effect.
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+      await flushPromises()
 
       expect(sourceErrors).toEqual([failure])
+      expect(effect.disposed).toBe(true)
       expect(users.subscriberCount).toBe(0)
       expect(issues.subscriberCount).toBe(0)
       await Promise.all([users.cleanup(), issues.cleanup()])
@@ -2008,6 +2014,8 @@ describe(`createEffect`, () => {
         }
 
         expect(commitError).toBeUndefined()
+        // A synchronous throw is a rejection, delivered after the commit.
+        await flushPromises()
         expect(sourceErrors).toEqual([failure])
         expect(effect.disposed).toBe(true)
       } finally {

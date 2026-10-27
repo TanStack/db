@@ -99,8 +99,14 @@ The same interpreter runs a fixed corpus and generated histories.
   every row at the new run's first commit, the two-page histories fail (the
   second page's rows vanish while it is held). Mutants that skip the sweep or
   let it delete an event-touched row fail the `delete` and `insert-event`
-  histories. On-demand reload replays partial subset pages, which cannot say
-  a row is gone; that limit has no lane. Two histories make this limit
+  histories. `an unchanged row survives an on-demand reload` checks the
+  on-demand reload: replayed pages update the kept rows, an untouched row
+  survives, and a row the service deleted while no stream listened stays,
+  because core does not sweep after a reload (snapshot-api §8, issue #2269)
+  and a page cannot say a row is gone. `an aborted load writes no rows and
+  its late result changes nothing` checks that a subset load whose signal
+  aborts while its list is in flight rejects with `AbortError` and writes
+  no row when the list answers. Two histories make this limit
   executable; they do not claim it is the right product behavior. They pin
   one stream end followed by one change and one load. A page whose newer
   event never arrives because the stream ended keeps the value the fence

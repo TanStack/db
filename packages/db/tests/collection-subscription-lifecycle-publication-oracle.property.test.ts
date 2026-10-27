@@ -464,10 +464,11 @@ function projectPublication(
     publication.retainedKeys = new Set(publication.visible.keys())
     publication.source.clear()
     publication.replacement = undefined
-  } else if (command.type === `release`) {
+  } else if (command.type === `release` || command.type === `abort`) {
     // Release changes demand, not source retention. Releasing alone never
     // changes the subscriber's rows; a source write, a successful
-    // replacement, or a later request does.
+    // replacement, or a later request does. An abort ends the owner's load
+    // (maintainer decision): the replacement no longer waits for it.
     finishReplacement(publication, lifecycle)
   } else if (command.type === `settle` && effect.attemptId !== undefined) {
     const attempt = lifecycle.attempts[effect.attemptId]!

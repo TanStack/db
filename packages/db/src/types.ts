@@ -1308,8 +1308,6 @@ export interface SubscribeChangesOptions<
     readonly succeed: () => void
     /** The replay could not load every active demand again: its failures, in failure order. */
     readonly fail?: (errors: Array<Error>) => void
-    /** The live query still holds logical demand. */
-    readonly holdsDemand?: () => boolean
   }
 }
 
