@@ -8,33 +8,87 @@
  *   disables nothing, such as the test that a replay registers when it does
  *   not select its property.
  * - A test that skips itself through its context, as in `ctx.skip()`.
- * - `.skipIf(condition)` or `.runIf(condition)`, unless the call is exactly
- *   `.skipIf(oracleReplayRequested())`. A replay may stand a test aside, and
- *   nothing else may switch an oracle test off. The shared helper fixes the
- *   polarity, so a condition cannot turn the test off in ordinary runs.
+ * - `.skipIf(condition)` or `.runIf(condition)`, unless the call is
+ *   `.skipIf(oracleReplayRequested())` or `.skipIf(oracleReplaySkips(...))`.
+ *   A replay may stand a test aside, and nothing else may switch an oracle
+ *   test off. The shared helpers in oracle-config are false in an ordinary
+ *   run, so no condition built from them can turn a test off there.
+ * - A test modifier passed around as a value, as in
+ *   `const run = replaying ? it.skip : it`. The rule cannot see what such an
+ *   alias switches off. `oracleReplayTest(test, property)` selects a replay.
+ * - A test registered under a condition, or after an early `return`, unless
+ *   the condition is a shared replay helper and the test registers when the
+ *   helper is false, as in `if (!oracleReplayRequested())`. Each helper is
+ *   false in an ordinary run, so such a test runs there. An early `throw`
+ *   fails the run loudly, and `continue` filters a loop's data, so neither
+ *   guards a registration. A registration made through `oracleReplayTest`
+ *   or `oracleCalibrationTest`, directly or through a constant bound to its
+ *   result, or through a renamed import such as `import { it as vitestIt }`,
+ *   is checked as a registration of its test.
  * - Playwright's runtime `test.skip()` or `test.fixme()` inside a test,
  *   unless its condition is `browserName !== '<browser>'`: a control that
  *   only one browser supports.
  * - A generated property limited to one run that pins no history: a literal
  *   `numRuns` of 1 or 0, or a base of 1 passed to the run helpers. One random
- *   history is not a generated property. A replay pins its history with a
- *   `path` beside `numRuns`, and a witness with a seed that is a number
- *   literal or a constant bound to one. `oraclePropertyOptions` returns one
- *   run for a path replay, so a campaign needs no one-run option of its own.
+ *   history is not a generated property. A witness pins its history with a
+ *   recorded `path` (a literal, or a failure's `counterexamplePath`) or with
+ *   a seed that is a number literal or a constant bound to one. A replay from
+ *   configuration takes its options from `oraclePropertyOptions`, which
+ *   returns one run for a path replay.
+ * - A literal run count above 1 that pins no history. It does not scale with
+ *   `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER`, so `oracleRuns` must wrap it.
+ * - A private replay variable: a `process.env` read whose name ends in
+ *   `_SEED`, `_PATH`, `_PROPERTY`, or `_RUNS`, other than the shared
+ *   `TANSTACK_DB_ORACLE_SEED`, `TANSTACK_DB_ORACLE_PATH`, and
+ *   `TANSTACK_DB_ORACLE_PROPERTY`. The replay manifest, the guarded replay
+ *   runner, and the retired-variable check see only the shared variables.
  *
  * The rule has no inline exception. A known gap is pinned with `it.fails` on
  * a fixed seed, not skipped.
  *
- * The rule cannot see a run count lowered to any value above 1, a `path` or
- * seed read from configuration that is absent in ordinary runs, a skip
- * reached through an alias such as `const run = it.skip`, or a registration
- * inside an `if`. Reviewers still check those.
+ * The rule cannot see a run count lowered to any value above 1, a run count
+ * or seed held in a variable that is not a constant bound to a number, a call
+ * to a local helper that registers tests under a condition, or a table built
+ * by a function that returns different items in different runs. Reviewers
+ * still check those.
  */
 
 const testRoots = new Set([`describe`, `fcTest`, `it`, `suite`, `test`])
 const disablingModifiers = new Set([`fixme`, `skip`, `todo`])
 const conditionalModifiers = new Set([`runIf`, `skipIf`])
-const replaySelection = `oracleReplayRequested`
+const aliasModifiers = new Set([
+  ...disablingModifiers,
+  ...conditionalModifiers,
+  `only`,
+])
+const replayConditions = new Set([`oracleReplayRequested`, `oracleReplaySkips`])
+// The members that keep a call a test registration. Playwright's `test` also
+// has calls such as `test.info()` and `test.step()` that register nothing.
+const registrationMembers = new Set([
+  ...aliasModifiers,
+  `concurrent`,
+  `describe`,
+  `each`,
+  `fails`,
+  `parallel`,
+  `prop`,
+  `sequential`,
+  `serial`,
+])
+// oracle-config implements replay selection, so its options may carry a
+// replay path from configuration.
+const replaySelectionModule =
+  /(^|[/\\])packages[/\\]db[/\\]tests[/\\]oracle-config\.ts$/
+// The shared helpers that return a test registration or its `skip` form.
+const selectionHelpers = new Set([`oracleCalibrationTest`, `oracleReplayTest`])
+// The variables that select a replay. Any other variable whose name ends
+// in one of these suffixes is a private replay selection.
+const sharedReplayVariables = new Set([
+  `TANSTACK_DB_ORACLE_PATH`,
+  `TANSTACK_DB_ORACLE_PROPERTY`,
+  `TANSTACK_DB_ORACLE_SEED`,
+])
+const replayVariableName = /_(PATH|PROPERTY|RUNS|SEED)$/
 const runHelpers = new Set([
   `oraclePropertyOptions`,
   `oracleRandomParameters`,
@@ -49,13 +103,53 @@ function calleeChain(callee) {
     if (node.type === `MemberExpression`) {
       if (node.property.type === `Identifier`) names.unshift(node.property.name)
       node = node.object
+    } else if (
+      node.type === `CallExpression` &&
+      node.callee.type === `Identifier` &&
+      selectionHelpers.has(node.callee.name) &&
+      node.arguments.length > 0
+    ) {
+      // `oracleReplayTest(it)` returns `it` or `it.skip`, so a registration
+      // made through it is checked as a registration of `it`.
+      node = node.arguments[0]
     } else if (node.type === `CallExpression`) {
       node = node.callee
     } else {
       break
     }
   }
-  return { root: node.type === `Identifier` ? node.name : undefined, names }
+  return {
+    root: node.type === `Identifier` ? node.name : undefined,
+    rootNode: node,
+    names,
+  }
+}
+
+/**
+ * Whether an identifier names a test function: `it`, `test`, and the
+ * other test roots, a renamed import of one (`import { it as vitestIt }`),
+ * or a constant bound to one through a selection helper or a member chain
+ * (`const fixedCase = oracleReplayTest(it)`). A registration made through
+ * such a constant is checked as a registration of its test.
+ */
+function isTestRoot(node, sourceCode, seen = new Set()) {
+  if (node?.type !== `Identifier`) return false
+  if (testRoots.has(node.name)) return true
+  const definition = findVariable(sourceCode.getScope(node), node.name)?.defs[0]
+  if (definition === undefined || seen.has(definition.node)) return false
+  seen.add(definition.node)
+  if (definition.type === `ImportBinding`) {
+    const imported = definition.node.imported
+    return (
+      imported !== undefined && testRoots.has(imported.name ?? imported.value)
+    )
+  }
+  return (
+    definition.type === `Variable` &&
+    definition.parent.kind === `const` &&
+    definition.node.init !== null &&
+    isTestRoot(calleeChain(definition.node.init).rootNode, sourceCode, seen)
+  )
 }
 
 function isFunction(node) {
@@ -94,27 +188,204 @@ function registrationCondition(callee) {
   return undefined
 }
 
-/** Exactly `.skipIf(oracleReplayRequested())`. */
-function isReplaySelection({ name, args }, sourceCode) {
-  const [condition] = args
+/**
+ * A call to one of the shared oracle-config helpers in `names`. The binding
+ * must be the import, not a local function with the same name.
+ */
+function isSharedHelperCall(node, names, sourceCode) {
   if (
-    name !== `skipIf` ||
-    args.length !== 1 ||
-    condition.type !== `CallExpression` ||
-    condition.callee.type !== `Identifier` ||
-    condition.callee.name !== replaySelection ||
-    condition.arguments.length > 0
+    node?.type !== `CallExpression` ||
+    node.callee.type !== `Identifier` ||
+    !names.has(node.callee.name)
   ) {
     return false
   }
-  // The helper must be the shared one, not a local function of that name.
-  const definition = findVariable(
-    sourceCode.getScope(condition),
-    replaySelection,
-  )?.defs[0]
+  const definition = findVariable(sourceCode.getScope(node), node.callee.name)
+    ?.defs[0]
   return (
     definition?.type === `ImportBinding` &&
     /(^|\/)oracle-config(\.js)?$/.test(definition.parent.source.value)
+  )
+}
+
+/** Exactly `.skipIf(<shared replay condition>)`, not negated. */
+function isReplaySelection({ name, args }, sourceCode) {
+  return (
+    name === `skipIf` &&
+    args.length === 1 &&
+    isSharedHelperCall(args[0], replayConditions, sourceCode)
+  )
+}
+
+/**
+ * Whether a statement always returns from its function. A `throw` fails the
+ * run loudly, and `continue` or `break` skips one item of a loop's data, as
+ * `.filter` would, so neither guards a registration.
+ */
+function returns(statement) {
+  if (statement === null || statement === undefined) return false
+  if (statement.type === `ReturnStatement`) return true
+  if (statement.type === `BlockStatement`) {
+    return returns(statement.body.at(-1))
+  }
+  if (statement.type === `IfStatement`) {
+    return returns(statement.consequent) && returns(statement.alternate)
+  }
+  return false
+}
+
+function isEmptyArray(node) {
+  return node?.type === `ArrayExpression` && node.elements.length === 0
+}
+
+/**
+ * The conditions that decide which items a loop's iterable or an `.each()`
+ * table holds, each with the value under which the items register. A branch
+ * that is `[]` registers nothing, a `.filter` callback that reads
+ * `process.env` filters by environment, and a constant is read through to
+ * its initializer.
+ */
+function iterableConditions(node, sourceCode, seen = new Set()) {
+  if (node === null || node === undefined || seen.has(node)) return []
+  seen.add(node)
+  if (node.type === `Identifier`) {
+    const definition = findVariable(sourceCode.getScope(node), node.name)
+      ?.defs[0]
+    return definition?.type === `Variable` && definition.parent.kind === `const`
+      ? iterableConditions(definition.node.init, sourceCode, seen)
+      : []
+  }
+  if (node.type === `ConditionalExpression`) {
+    const conditions = []
+    if (isEmptyArray(node.alternate)) {
+      conditions.push({ test: node.test, registersWhen: true })
+    } else if (isEmptyArray(node.consequent)) {
+      conditions.push({ test: node.test, registersWhen: false })
+    }
+    return [
+      ...conditions,
+      ...iterableConditions(node.consequent, sourceCode, seen),
+      ...iterableConditions(node.alternate, sourceCode, seen),
+    ]
+  }
+  if (node.type === `LogicalExpression`) {
+    return [
+      {
+        test: node.left,
+        registersWhen: node.operator === `&&` ? true : undefined,
+      },
+      ...iterableConditions(node.right, sourceCode, seen),
+    ]
+  }
+  if (
+    node.type === `CallExpression` &&
+    node.callee.type === `MemberExpression` &&
+    node.callee.property.name === `filter`
+  ) {
+    const [callback] = node.arguments
+    const readsEnvironment =
+      callback !== undefined &&
+      /process\.env/.test(sourceCode.getText(callback))
+    return [
+      ...(readsEnvironment
+        ? [{ test: callback, registersWhen: undefined }]
+        : []),
+      ...iterableConditions(node.callee.object, sourceCode, seen),
+    ]
+  }
+  return []
+}
+
+/** The table of an `.each(table)` call in a registration's callee chain. */
+function eachTable(callee) {
+  let node = callee
+  while (node.type === `CallExpression` || node.type === `MemberExpression`) {
+    if (
+      node.type === `CallExpression` &&
+      node.callee.type === `MemberExpression` &&
+      node.callee.property.name === `each`
+    ) {
+      return node.arguments[0]
+    }
+    node = node.type === `CallExpression` ? node.callee : node.object
+  }
+  return undefined
+}
+
+/**
+ * The conditions that decide whether `node` runs, each with the value that
+ * the condition must have for `node` to run: every enclosing `if`,
+ * conditional, or logical branch, and every earlier `if` in an enclosing
+ * block that returns. `registersWhen` is undefined when no single value
+ * decides it, as for `??`.
+ */
+function guardingConditions(node, sourceCode) {
+  const conditions = []
+  let child = node
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.type === `ForOfStatement` && child === parent.body) {
+      conditions.push(...iterableConditions(parent.right, sourceCode))
+    }
+    if (
+      (parent.type === `IfStatement` ||
+        parent.type === `ConditionalExpression`) &&
+      child !== parent.test
+    ) {
+      conditions.push({
+        test: parent.test,
+        registersWhen: child === parent.consequent,
+      })
+    } else if (parent.type === `LogicalExpression` && child === parent.right) {
+      conditions.push({
+        test: parent.left,
+        registersWhen:
+          parent.operator === `&&`
+            ? true
+            : parent.operator === `||`
+              ? false
+              : undefined,
+      })
+    } else if (
+      parent.type === `BlockStatement` ||
+      parent.type === `Program` ||
+      parent.type === `SwitchCase`
+    ) {
+      const body =
+        parent.type === `SwitchCase` ? parent.consequent : parent.body
+      for (const statement of body.slice(0, body.indexOf(child))) {
+        if (statement.type === `IfStatement` && returns(statement.consequent)) {
+          conditions.push({ test: statement.test, registersWhen: false })
+        }
+      }
+    }
+    child = parent
+  }
+  return conditions
+}
+
+/**
+ * Whether a guard keeps a registration in every ordinary run. Each shared
+ * replay helper is false in an ordinary run, so the registration must run
+ * when the helper is false: under `!helper()`, in the `else` branch of
+ * `helper()`, or after `if (helper()) return`. A registration that runs only
+ * when a helper is true would run only during a replay.
+ */
+function keepsOrdinaryRun({ test, registersWhen }, sourceCode) {
+  if (registersWhen === undefined) return false
+  const negated = test.type === `UnaryExpression` && test.operator === `!`
+  const helper = negated ? test.argument : test
+  if (!isSharedHelperCall(helper, replayConditions, sourceCode)) return false
+  return negated ? registersWhen : !registersWhen
+}
+
+/** A `path` that a witness recorded: a literal, or a failure's path. */
+function isRecordedPath(node) {
+  if (node.type === `TemplateLiteral`) return node.expressions.length === 0
+  if (node.type === `Literal`) return typeof node.value === `string`
+  return (
+    node.type === `MemberExpression` &&
+    !node.computed &&
+    node.property.name === `counterexamplePath`
   )
 }
 
@@ -169,16 +440,46 @@ function findVariable(scope, name) {
   return undefined
 }
 
-/** A number literal, or a constant bound to one. */
-function isFixedSeed(node, sourceCode) {
-  if (isNumberLiteral(node)) return true
-  if (node.type !== `Identifier`) return false
-  const definition = findVariable(sourceCode.getScope(node), node.name)?.defs[0]
+function isProcessEnv(node) {
   return (
-    definition?.type === `Variable` &&
+    node?.type === `MemberExpression` &&
+    !node.computed &&
+    node.object.type === `Identifier` &&
+    node.object.name === `process` &&
+    node.property.name === `env`
+  )
+}
+
+/** The name in `process.env.NAME` or `process.env['NAME']`. */
+function environmentKey(node) {
+  if (!isProcessEnv(node.object)) return undefined
+  if (!node.computed) return node.property.name
+  return node.property.type === `Literal` &&
+    typeof node.property.value === `string`
+    ? node.property.value
+    : undefined
+}
+
+function isPrivateReplayVariable(name) {
+  return replayVariableName.test(name) && !sharedReplayVariables.has(name)
+}
+
+/** A number literal, or a constant bound to one. */
+/** The number literal that `node` is, or that a constant `node` names. */
+function constantNumber(node, sourceCode) {
+  if (isNumberLiteral(node)) return node
+  if (node?.type !== `Identifier`) return undefined
+  const definition = findVariable(sourceCode.getScope(node), node.name)?.defs[0]
+  return definition?.type === `Variable` &&
     definition.parent.kind === `const` &&
     isNumberLiteral(definition.node.init)
-  )
+    ? definition.node.init
+    : undefined
+}
+
+/** A number literal, or a constant bound to one. */
+function isFixedSeed(node, sourceCode) {
+  return constantNumber(node, sourceCode) !== undefined
 }
 
 function propertyName(property) {
@@ -197,9 +498,7 @@ function isPinnedOrObservation(object, sourceCode) {
   const option = (name) =>
     object.properties.find((property) => propertyName(property) === name)
   const path = option(`path`)
-  if (path !== undefined && sourceCode.getText(path.value) !== `undefined`) {
-    return true
-  }
+  if (path !== undefined && isRecordedPath(path.value)) return true
   const seed = option(`seed`)
   if (seed !== undefined && isFixedSeed(seed.value, sourceCode)) return true
   const { parent } = object
@@ -235,8 +534,45 @@ function isContextSkip(node, sourceCode) {
   return (
     registration.type === `CallExpression` &&
     registration.arguments.includes(fn) &&
-    testRoots.has(calleeChain(registration.callee).root)
+    isTestRoot(calleeChain(registration.callee).rootNode, sourceCode)
   )
+}
+
+/**
+ * Whether a test function is passed around as a value: assigned, collected,
+ * returned, or passed to any call except a shared selection helper.
+ */
+function isPassedAsValue(node) {
+  const { parent } = node
+  switch (parent.type) {
+    case `VariableDeclarator`:
+      return parent.init === node
+    case `AssignmentExpression`:
+      return parent.right === node
+    case `ArrayExpression`:
+    case `ReturnStatement`:
+    case `SpreadElement`:
+      return true
+    case `Property`:
+      return parent.value === node && parent.parent.type === `ObjectExpression`
+    case `ConditionalExpression`:
+      return parent.test !== node
+    case `LogicalExpression`:
+      return true
+    case `ArrowFunctionExpression`:
+      return parent.body === node
+    case `CallExpression`:
+      return (
+        parent.arguments.includes(node) &&
+        !(
+          parent.callee.type === `Identifier` &&
+          selectionHelpers.has(parent.callee.name) &&
+          parent.arguments[0] === node
+        )
+      )
+    default:
+      return false
+  }
 }
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -250,8 +586,13 @@ export default {
     messages: {
       only: `\`.only\` runs only this test, so every other law in the file stops running. Remove it before committing.`,
       skip: `\`.{{name}}\` stops this test from enforcing its law. Remove it. To keep a known gap visible, pin a failing history with \`it.fails\` and a fixed seed.`,
-      conditional: `\`.{{name}}\` can switch this test off in ordinary runs. Only \`.skipIf(oracleReplayRequested())\` may switch an oracle test off, so that a replay can stand it aside. Remove the condition.`,
-      singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions. A replay passes \`path\`, and a witness passes a seed that is a number literal or a constant.`,
+      conditional: `\`.{{name}}\` can switch this test off in ordinary runs. Only \`.skipIf(oracleReplayRequested())\` or \`.skipIf(oracleReplaySkips(property))\` may switch an oracle test off, so that a replay can stand it aside. Remove the condition.`,
+      alias: `\`.{{name}}\` is passed around as a value, so the rule cannot see what it switches off. Call it directly, or select a replay with \`oracleReplayTest(test, property)\` from oracle-config.`,
+      aliasTest: `\`{{name}}\` is passed around as a value, so the rule cannot see what it registers or switches off. Call it directly, or select a replay with \`oracleReplayTest({{name}}, property)\` from oracle-config.`,
+      guarded: `This test registers only under a condition, so it can stop running in ordinary runs. Register it unconditionally. A replay selection uses \`oracleReplayRequested()\` or \`oracleReplaySkips(property)\` from oracle-config, or \`oracleReplayTest(test, property)\`.`,
+      singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions, which also selects a replay. A witness passes a recorded \`path\` or a seed that is a number literal or a constant.`,
+      replayVariable: `\`{{name}}\` selects a replay or a run count outside the shared variables, so the replay manifest, the guarded replay runner, and the retired-variable check cannot see it. Take the options from \`oraclePropertyOptions\` or \`oracleRandomParameters\` in oracle-config, which read TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY, and scale run counts with \`oracleRuns\`.`,
+      literalRuns: `A literal run count does not scale with TANSTACK_DB_ORACLE_RUNS_MULTIPLIER. Wrap it in oracleRuns, or pass it to oraclePropertyOptions.`,
     },
   },
   create(context) {
@@ -282,17 +623,30 @@ export default {
           context.report({ node, messageId: `skip`, data: { name: `skip` } })
           return
         }
-        const { root, names } = calleeChain(node.callee)
+        const { root, rootNode, names } = calleeChain(node.callee)
         if (runHelpers.has(root) && names.length === 0) {
           if (
-            isSingleRunLiteral(node.arguments[0]) &&
+            isSingleRunLiteral(constantNumber(node.arguments[0], sourceCode)) &&
             !isPinnedRunCount(node)
           ) {
             context.report({ node: node.arguments[0], messageId: `singleRun` })
           }
           return
         }
-        if (!testRoots.has(root)) return
+        if (
+          !isTestRoot(rootNode, sourceCode) ||
+          !names.every((member) => registrationMembers.has(member))
+        ) {
+          return
+        }
+        const unguarded = [
+          ...guardingConditions(node, sourceCode),
+          ...iterableConditions(eachTable(node.callee), sourceCode),
+        ].every((condition) => keepsOrdinaryRun(condition, sourceCode))
+        if (!unguarded) {
+          context.report({ node, messageId: `guarded` })
+          return
+        }
         if (names.includes(`only`)) {
           context.report({ node: node.callee, messageId: `only` })
           return
@@ -313,14 +667,88 @@ export default {
           context.report({ node, messageId: `skip`, data: { name: disabled } })
         }
       },
+      Identifier(node) {
+        if (!testRoots.has(node.name) || !isPassedAsValue(node)) return
+        // A local variable or parameter that shares a test function's name
+        // is not that function.
+        const definition = findVariable(sourceCode.getScope(node), node.name)
+          ?.defs[0]
+        if (definition !== undefined && definition.type !== `ImportBinding`) {
+          return
+        }
+        context.report({
+          node,
+          messageId: `aliasTest`,
+          data: { name: node.name },
+        })
+      },
+      MemberExpression(node) {
+        const variable = environmentKey(node)
+        if (
+          variable !== undefined &&
+          isPrivateReplayVariable(variable) &&
+          !replaySelectionModule.test(context.filename)
+        ) {
+          context.report({
+            node,
+            messageId: `replayVariable`,
+            data: { name: variable },
+          })
+        }
+        // Report a chain such as `fcTest.skip` or `it.skip.prop` once, at its
+        // outermost member, when nothing calls it.
+        if (
+          node.parent.type === `MemberExpression` &&
+          node.parent.object === node
+        ) {
+          return
+        }
+        if (
+          node.parent.type === `CallExpression` &&
+          node.parent.callee === node
+        ) {
+          return
+        }
+        const { rootNode, names } = calleeChain(node)
+        const name = names.find((member) => aliasModifiers.has(member))
+        if (isTestRoot(rootNode, sourceCode) && name !== undefined) {
+          context.report({ node, messageId: `alias`, data: { name } })
+        }
+      },
+      VariableDeclarator(node) {
+        if (
+          node.id.type !== `ObjectPattern` ||
+          !isProcessEnv(node.init) ||
+          replaySelectionModule.test(context.filename)
+        ) {
+          return
+        }
+        for (const property of node.id.properties) {
+          const name =
+            property.type === `Property` ? propertyName(property) : undefined
+          if (name !== undefined && isPrivateReplayVariable(name)) {
+            context.report({
+              node: property,
+              messageId: `replayVariable`,
+              data: { name },
+            })
+          }
+        }
+      },
       Property(node) {
         if (
-          propertyName(node) === `numRuns` &&
-          isSingleRunLiteral(node.value) &&
-          !isPinnedRunCount(node.value)
+          replaySelectionModule.test(context.filename) ||
+          propertyName(node) !== `numRuns`
         ) {
-          context.report({ node, messageId: `singleRun` })
+          return
         }
+        // A constant bound to a number literal counts as that literal.
+        const count = constantNumber(node.value, sourceCode)
+        if (count === undefined || isPinnedRunCount(node.value)) return
+        context.report({
+          node,
+          messageId: isSingleRunLiteral(count) ? `singleRun` : `literalRuns`,
+        })
       },
     }
   },

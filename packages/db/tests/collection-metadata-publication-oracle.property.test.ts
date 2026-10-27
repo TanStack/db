@@ -7,8 +7,9 @@ import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import type { Collection } from '../src/collection/index.js'
@@ -164,7 +165,6 @@ const metadataCancellationArbitrary = fc.record({
 
 const metadataOnlyProperty = `collection-publication.metadata-only`
 const metadataCancellationProperty = `collection-publication.metadata-cancellation`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 async function createPublicationHarness(): Promise<PublicationHarness> {
   let sync!: SyncActions
@@ -818,19 +818,12 @@ const runCancellationHistory = ({
   )
 
 describe(`generated metadata publication histories`, () => {
-  if (requestedReplayProperty === undefined) {
+  if (!oracleReplayRequested()) {
     fcTest.prop([publicationHistoryArbitrary], {
       numRuns: oracleRuns(50),
       seed: 1_805_001,
     })(
       `keeps metadata-only optimistic settlement a valid keyed diff (fixed)`,
-      runPublicationHistory,
-    )
-    fcTest.prop(
-      [publicationHistoryArbitrary],
-      oraclePropertyOptions(50, metadataOnlyProperty),
-    )(
-      `keeps metadata-only optimistic settlement a valid keyed diff (random)`,
       runPublicationHistory,
     )
 
@@ -841,22 +834,21 @@ describe(`generated metadata publication histories`, () => {
       `keeps metadata suppression owned by pending transactions (fixed)`,
       runCancellationHistory,
     )
-    fcTest.prop(
-      [metadataCancellationArbitrary],
-      oraclePropertyOptions(50, metadataCancellationProperty),
-    )(
-      `keeps metadata suppression owned by pending transactions (random)`,
-      runCancellationHistory,
-    )
-  } else if (requestedReplayProperty === metadataOnlyProperty) {
-    fcTest.prop(
-      [publicationHistoryArbitrary],
-      oraclePropertyOptions(50, metadataOnlyProperty),
-    )(`replays metadata-only optimistic settlement`, runPublicationHistory)
-  } else if (requestedReplayProperty === metadataCancellationProperty) {
-    fcTest.prop(
-      [metadataCancellationArbitrary],
-      oraclePropertyOptions(50, metadataCancellationProperty),
-    )(`replays metadata cancellation ownership`, runCancellationHistory)
   }
+  // A path replay of one property runs its one recorded history through that
+  // property's registration. The other registration stands aside.
+  oracleReplayTest(fcTest, metadataOnlyProperty).prop(
+    [publicationHistoryArbitrary],
+    oraclePropertyOptions(50, metadataOnlyProperty),
+  )(
+    `keeps metadata-only optimistic settlement a valid keyed diff (random)`,
+    runPublicationHistory,
+  )
+  oracleReplayTest(fcTest, metadataCancellationProperty).prop(
+    [metadataCancellationArbitrary],
+    oraclePropertyOptions(50, metadataCancellationProperty),
+  )(
+    `keeps metadata suppression owned by pending transactions (random)`,
+    runCancellationHistory,
+  )
 })
