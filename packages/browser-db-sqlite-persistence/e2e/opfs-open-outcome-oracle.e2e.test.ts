@@ -7,8 +7,9 @@
  * fail the real worker's WASM fetch. A page init script can make the Worker
  * constructor refuse to start, as a browser does for a worker it will not run.
  *
- * Interruptions use no wall-clock timing. The page clock is paused, so the open
- * deadline fires only when the driver advances that clock. The driver
+ * Interruptions use no wall-clock timing. An init script holds back the
+ * opener's deadline timer, recognized by its unique delay, and the driver fires
+ * it explicitly; every other page timer runs normally. The driver
  * interrupts only after the middleware reports the lookup held, reads the
  * settlement one task after the interruption, and counts workers one task after
  * the released lookup's module loads in the page. Every history uses a new page,
@@ -48,10 +49,12 @@ const chromiumReach: OpenDriverReach = {
   interrupt: [`none`, `deadline`, `abort`],
 }
 const histories = openHistories(chromiumReach)
-const deadlineMs = 1_000
+// A delay no other page timer uses, so the init script can hold it back.
+const deadlineMs = 987_654
 const wasmLookup = `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`
 
 type OracleProbe = ProbeGlobal & {
+  elapseDeadline: () => void
   controller: AbortController
   settled: Promise<void>
   settlement?: OpenSettlement
@@ -127,6 +130,37 @@ afterAll(async () => {
   rmSync(temporaryDirectory, { recursive: true, force: true })
 })
 
+/**
+ * Page init script. A timer with the deadline's delay waits until the driver
+ * calls `elapseDeadline`, which runs it as an elapsed deadline would.
+ */
+function holdDeadlineTimers(heldDelay: number): void {
+  const probe = globalThis as OracleProbe
+  const nativeSetTimeout = globalThis.setTimeout
+  const nativeClearTimeout = globalThis.clearTimeout
+  const held = new Map<ReturnType<typeof setTimeout>, () => void>()
+  probe.elapseDeadline = () => {
+    const callbacks = [...held.values()]
+    held.clear()
+    for (const callback of callbacks) callback()
+  }
+  globalThis.setTimeout = ((
+    callback: (...args: Array<unknown>) => void,
+    delay?: number,
+    ...args: Array<unknown>
+  ) => {
+    if (delay !== heldDelay) return nativeSetTimeout(callback, delay, ...args)
+    // A native timer that never fires gives the held timer a real handle.
+    const handle = nativeSetTimeout(() => {}, 2_147_483_647)
+    held.set(handle, () => callback(...args))
+    return handle
+  }) as typeof setTimeout
+  globalThis.clearTimeout = ((handle?: ReturnType<typeof setTimeout>) => {
+    if (handle !== undefined) held.delete(handle)
+    nativeClearTimeout(handle)
+  }) as typeof clearTimeout
+}
+
 let historyIndex = 0
 
 // The middleware sets this during a history, after the driver reset it.
@@ -147,14 +181,12 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     await page.addInitScript(probeWorkers, {
       refuseWorkers: history.workerStart === `throws`,
     })
-    await page.clock.install()
+    await page.addInitScript(holdDeadlineTimers, deadlineMs)
     const baseUrl = server.resolvedUrls!.local[0]!
     await page.goto(baseUrl)
     await page.waitForFunction(
       () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
     )
-    // From here the page's timers run only when the driver advances them.
-    await page.clock.pauseAt(Date.now() + 60_000)
 
     await page.evaluate(
       ({ databaseName, timeoutMs }) => {
@@ -192,7 +224,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     } else {
       await lookupHeld
       if (history.interrupt === `deadline`) {
-        await page.clock.runFor(deadlineMs)
+        await page.evaluate(() => (globalThis as OracleProbe).elapseDeadline())
       } else {
         await page.evaluate(() => {
           ;(globalThis as OracleProbe).controller.abort(

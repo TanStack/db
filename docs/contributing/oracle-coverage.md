@@ -1942,10 +1942,10 @@ a later open after an interruption. The
 reaches worker start, initialization, and the worker's WASM failure response.
 The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
 reaches the lookup, the real worker's WASM fetch, and worker start against a
-Vite dev server that pre-bundles the built package. It pauses the page clock
-and advances it for the deadline, interrupts only after the server holds the
-lookup, and reads the settlement and worker counts one task after each event,
-so no observation depends on elapsed time. Each driver fails when its product
+Vite dev server that pre-bundles the built package. It holds back only the
+opener's deadline timer and fires it explicitly, interrupts only after the
+server holds the lookup, and reads the settlement and worker counts one task
+after each event, so no observation depends on elapsed time. Each driver fails when its product
 reaches fewer outcomes than it declares. Mutants that leave the lookup outside
 the deadline and abort, start a worker after a late lookup, report a WASM
 failure as an internal error, or let a refused Worker constructor's error
