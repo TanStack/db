@@ -4,7 +4,7 @@ import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { where } from './collection-subscription-reentrancy-fixture.js'
 import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { LoadSubsetOptions } from '../src/types.js'
 
 /**

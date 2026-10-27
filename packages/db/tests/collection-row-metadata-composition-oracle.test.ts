@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { SyncConfig } from '../src/types.js'
 
 /**

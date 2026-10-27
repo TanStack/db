@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { declareOracle, oracleRuns } from '../../db/tests/oracle-config.js'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * # Does the murmur stream hash the bytes it is given?

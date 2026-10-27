@@ -1,4 +1,4 @@
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * Acquisition-boundary cells and scenario grammar for the demand lifecycle

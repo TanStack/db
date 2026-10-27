@@ -7,7 +7,7 @@ import {
   eq,
   waitForPersistedInitialRender,
 } from '@tanstack/db'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   checkWithCleanup,
   deferred,

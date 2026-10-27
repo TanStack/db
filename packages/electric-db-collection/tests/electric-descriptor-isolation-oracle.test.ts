@@ -4,11 +4,11 @@ import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { atCheckpoint } from './electric-oracle-lifecycle'
 import {
   expectWholeTagRecovery,

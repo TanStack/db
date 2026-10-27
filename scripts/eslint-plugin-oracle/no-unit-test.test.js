@@ -227,6 +227,14 @@ test('publishes a named row root', () => {
 })`,
       filename,
     },
+    // declareOracle can come from the dependency-free oracle-declaration module.
+    {
+      code: `import { declareOracle } from './oracle-declaration.js'
+function checkHistory(history) { return history }
+declareOracle({ check: [checkHistory] })
+it('checks a fixed history', () => checkHistory([]))`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,

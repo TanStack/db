@@ -1,4 +1,4 @@
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 /**
  * Value fidelity is independent of lifecycle ordering. IndexedDB persists
  * structured-clone values; changing a scalar sibling must preserve an untouched

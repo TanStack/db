@@ -7,11 +7,11 @@ import {
 import { PropRef } from '../../src/query/ir.js'
 import { captureMicrotaskErrors } from '../utils.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   createDeferred,
   createOrderByInfo,

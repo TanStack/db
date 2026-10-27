@@ -1,4 +1,4 @@
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { BasicExpression } from '../src/query/ir.js'
 
 function compareReferenceValues(left: unknown, right: unknown): number {

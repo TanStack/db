@@ -10,7 +10,7 @@ import {
   expectedValueRows,
   valueKinds,
 } from '../../tests/indexed-db/structured-clone-oracle'
-import { declareOracle } from '../../tests/oracle-config'
+import { declareOracle } from '../../tests/oracle-declaration'
 import { test } from './browser-test'
 import type {} from './coverage-browser'
 import { withCoverage } from './coverage-cleanup'

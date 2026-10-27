@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { PersistedTx, SQLiteDriver } from '../src'
 
 /**

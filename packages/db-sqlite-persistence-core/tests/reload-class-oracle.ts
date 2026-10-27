@@ -104,7 +104,7 @@
  */
 import fc from 'fast-check'
 import { createCollection, createLiveQueryCollection } from '@tanstack/db'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,

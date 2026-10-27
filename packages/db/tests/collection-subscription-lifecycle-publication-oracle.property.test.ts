@@ -13,11 +13,8 @@ import {
   greenLifecycleHistoryArbitrary,
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import {
-  declareOracle,
-  oracleRandomParameters,
-  readOracleRunConfig,
-} from './oracle-config.js'
+import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import {
   assertTerminalPublication,

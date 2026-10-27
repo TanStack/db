@@ -11,11 +11,8 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  readOracleRunConfig,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'

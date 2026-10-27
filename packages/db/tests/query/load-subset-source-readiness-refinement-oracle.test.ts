@@ -8,7 +8,7 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises } from '../utils.js'
 import { finishCleanup } from './load-subset-source-readiness-support.js'
 import type { LoadSubsetOptions } from '../../src/types.js'

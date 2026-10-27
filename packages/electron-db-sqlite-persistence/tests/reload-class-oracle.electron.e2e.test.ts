@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import electronPath from 'electron'
 import { expect, it, onTestFinished } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 const fixture = join(
   dirname(fileURLToPath(import.meta.url)),

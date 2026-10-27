@@ -15,11 +15,11 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   correlationKeys,

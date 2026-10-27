@@ -2,11 +2,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,

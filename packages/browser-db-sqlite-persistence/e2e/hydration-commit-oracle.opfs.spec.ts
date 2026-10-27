@@ -11,7 +11,7 @@
  * a partial on-demand cache has no authority to restore public rows alone.
  */
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { HydrationCommitObservation } from './hydration-commit.opfs'
 
 // The edit-log model's rows after the receipt cut and the ordinary tail: the rich

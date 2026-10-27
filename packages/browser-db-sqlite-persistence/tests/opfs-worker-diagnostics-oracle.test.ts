@@ -1,12 +1,12 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import type {
   BrowserOPFSWorkerRequest,
   BrowserOPFSWorkerResponse,

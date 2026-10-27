@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { Collection, SyncConfig } from '../src'
 import type { ChangeMessage } from '../src/types'
 

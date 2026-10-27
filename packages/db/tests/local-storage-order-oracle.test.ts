@@ -39,7 +39,7 @@ import { DbClient, collectionOptions } from '../src/client'
 import { createDeferred } from '../src/deferred'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
-import { declareOracle } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import {
   observeHistoryPromise,
   withHistoryCleanup,

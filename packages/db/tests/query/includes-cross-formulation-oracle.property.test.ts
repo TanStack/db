@@ -15,7 +15,6 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import {
-  declareOracle,
   oracleCalibrationTest,
   oraclePropertyOptions,
   oracleReplayRequested,
@@ -23,6 +22,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises } from '../utils.js'
 import {
   assertArrayKeys,

@@ -16,11 +16,11 @@ import {
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import {
   applyRetryModel,

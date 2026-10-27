@@ -2,11 +2,11 @@ import { describe, expect, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { createChangeProxy } from '../src/proxy'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?

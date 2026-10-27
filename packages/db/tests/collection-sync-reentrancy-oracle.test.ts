@@ -34,11 +34,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
-import {
-  declareOracle,
-  oracleRandomParameters,
-  readOracleRunConfig,
-} from './oracle-config.js'
+import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import {
   createSyncHarness,

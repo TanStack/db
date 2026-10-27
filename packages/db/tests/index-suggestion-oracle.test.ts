@@ -22,7 +22,7 @@ import {
 import { eq } from '../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from './utils.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { IndexSuggestion } from '../src/indexes/index-registry.js'
 
 type Row = { id: number; url: string }

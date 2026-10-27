@@ -71,11 +71,11 @@ import {
   decodePersistedStorageKey,
 } from '@tanstack/db-sqlite-persistence-core'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   Temporal,
   temporalFamilies,

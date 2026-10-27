@@ -3,11 +3,8 @@ import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
+import { declareOracle } from '../../oracle-declaration.js'
 
 /**
  * # Which values does `in` find in a list?

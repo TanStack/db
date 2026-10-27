@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { expectOrderedRows } from './result-laws'
 
 /** Page labels and request timing are separate laws, not inferred from rows. */

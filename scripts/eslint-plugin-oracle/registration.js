@@ -105,7 +105,7 @@ export function findVariable(scope, name) {
 
 /** Whether `source` is an import specifier of the shared oracle-config module. */
 export function isOracleConfigSource(source) {
-  return /(^|\/)oracle-config(\.js)?$/.test(source)
+  return /(^|\/)oracle-(config|declaration)(\.js)?$/.test(source)
 }
 
 /** A call to one of `names`, imported from oracle-config. */

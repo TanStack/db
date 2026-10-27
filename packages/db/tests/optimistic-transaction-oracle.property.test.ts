@@ -10,11 +10,8 @@ import {
   observeHistoryPromise,
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 import type { ReplacementRow, Row } from './optimistic-transaction-support.js'

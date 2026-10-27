@@ -6,12 +6,12 @@ import { SyncTransactionAbortedError } from '../src/errors.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import { metadataWorlds } from './metadata-publication-worlds.js'
 import type { Collection } from '../src/collection/index.js'

@@ -19,7 +19,7 @@ import { afterEach, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { IR, coalesce } from '../src'
 import { collections, createSource } from './collection-index-value-fixture.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 afterEach(async () => {
   await Promise.all(

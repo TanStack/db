@@ -1,11 +1,11 @@
 import { describe, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # Do built-in array and typed-array methods behave on a draft as natively?

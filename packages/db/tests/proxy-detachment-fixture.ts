@@ -6,7 +6,7 @@
  */
 import { expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { CollectionConfig } from '../src/types.js'
 

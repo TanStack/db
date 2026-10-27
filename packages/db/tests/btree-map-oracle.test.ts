@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # When does the B+ tree behave like a sorted Map?

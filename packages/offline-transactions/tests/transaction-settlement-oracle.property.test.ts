@@ -4,10 +4,10 @@ import { expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
-  declareOracle,
   oracleReplayRequested,
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { gate, turn } from './transaction-settlement-support'
 import {

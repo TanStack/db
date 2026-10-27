@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   checked,
   createAdapter,

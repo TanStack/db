@@ -2,11 +2,11 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it as vitestIt } from 'vitest'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   addWeight,
   expectedWeightedRowIdentity,

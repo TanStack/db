@@ -78,12 +78,12 @@ import {
   withFlatChangeTracking,
 } from '../src/proxy.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   FRESH_OBJECT,
   MISSING,

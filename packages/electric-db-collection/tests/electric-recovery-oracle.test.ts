@@ -4,11 +4,8 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,

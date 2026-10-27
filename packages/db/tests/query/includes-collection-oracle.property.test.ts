@@ -12,11 +12,11 @@ import {
 import { runTrace } from '../trace-runner.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import {
   assertDeleteIdentityEvents,

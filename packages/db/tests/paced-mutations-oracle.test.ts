@@ -6,7 +6,7 @@ import {
   queueStrategy,
   throttleStrategy,
 } from '../src/strategies'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   createReadyCollection,
   observeReceipt,

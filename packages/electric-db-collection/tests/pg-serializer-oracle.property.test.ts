@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
-import {
-  declareOracle,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleReplayTest, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   parseFiniteArray,
   parseFiniteNumber,

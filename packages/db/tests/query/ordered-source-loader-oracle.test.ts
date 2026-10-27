@@ -5,7 +5,7 @@
 // this area are fixed histories, owned by ordered-source-loader.test.ts.
 import { describe, expect, it, vi } from 'vitest'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   createDeferred,
   createOrderByInfo,

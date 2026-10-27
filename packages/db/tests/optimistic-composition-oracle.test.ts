@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { stripVirtualProps } from './utils.js'
 import {
   initial,

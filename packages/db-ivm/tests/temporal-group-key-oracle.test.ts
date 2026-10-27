@@ -8,7 +8,7 @@ import {
   output,
   serializeValue,
 } from '../src/index.js'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * Temporal values are valid db-ivm group keys. The established hash key domain

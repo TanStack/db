@@ -24,12 +24,12 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../../src'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
   recordOracleReplay,
 } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import {
   Channel,
   assertRows,

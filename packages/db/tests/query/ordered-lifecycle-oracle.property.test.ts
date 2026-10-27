@@ -14,10 +14,10 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
-  declareOracle,
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   assertFullSourceRequest,
   finishOracleCleanup,

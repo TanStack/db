@@ -1,11 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
 import {
-  declareOracle,
   oracleRandomParameters,
   oracleReplayTest,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'

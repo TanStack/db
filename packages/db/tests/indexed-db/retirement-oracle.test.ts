@@ -20,7 +20,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createTransaction } from '../../src'
-import { declareOracle } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import {
   assertRows,
   deferred,

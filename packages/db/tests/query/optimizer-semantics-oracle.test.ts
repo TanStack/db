@@ -38,7 +38,7 @@ import {
   sum,
 } from '../../src/query/builder/functions.js'
 import { CollectionRef, Func, PropRef } from '../../src/query/ir.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
   expectedTerms,

@@ -10,12 +10,12 @@ import {
 } from '../../src/query/index.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { runTrace } from '../trace-runner.js'
 import {
   cleanupPendingWork,

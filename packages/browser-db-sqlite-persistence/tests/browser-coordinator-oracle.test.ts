@@ -54,7 +54,7 @@
 
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   bindTransportControls,
   cleanupGlobals,

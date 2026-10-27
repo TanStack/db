@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   IR,
   createCollection,

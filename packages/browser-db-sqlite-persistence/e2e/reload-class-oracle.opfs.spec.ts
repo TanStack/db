@@ -6,7 +6,7 @@
  * stays distinct from a law violation.
  */
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { ReloadClassResult } from './reload-class.opfs'
 
 // The page's comparison of each fixed reload history with the oracle: every

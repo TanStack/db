@@ -7,11 +7,11 @@ import {
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { colliding } from './hash-collision-support.js'
 
 /**

@@ -10,7 +10,7 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { createControlledCollection } from './includes-collection-support.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver } from '../trace-runner.js'

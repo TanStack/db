@@ -1,11 +1,8 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { stripVirtualProps } from '../utils.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   BUCKETS,
   Driver,

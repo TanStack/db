@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
-import { declareOracle } from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { waitFor, waitForQueryData } from '../utils/helpers'
 import type {
   Comment,

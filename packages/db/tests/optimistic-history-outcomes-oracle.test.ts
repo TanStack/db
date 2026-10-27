@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   expectHistoryOutcome,
   observeHistoryPromise,

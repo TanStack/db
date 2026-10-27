@@ -14,7 +14,7 @@
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }

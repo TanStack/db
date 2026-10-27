@@ -1,4 +1,4 @@
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 /**
  * Reference model for the murmur stream oracle: the stream as it was before
  * it wrote whole words, with one `writeByte` call per byte. Load it after

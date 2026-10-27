@@ -6,7 +6,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { requestOrderExamples } from '../tests/opfs-request-order-oracle'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { OPFSRequestOrderResult } from './opfs-request-order.opfs'
 
 // The page's comparison of each fixed history's settlements with the model: no history may report a violation.

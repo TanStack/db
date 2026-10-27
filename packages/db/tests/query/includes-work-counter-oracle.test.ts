@@ -1,10 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {

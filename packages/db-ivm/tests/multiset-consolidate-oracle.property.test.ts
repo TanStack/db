@@ -2,11 +2,11 @@ import { describe, expect, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { MultiSet } from '../src/multiset.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { contentsOf } from './multiset-support.js'
 import type { Data } from './multiset-support.js'
 import type { MultiSetArray } from '../src/multiset.js'

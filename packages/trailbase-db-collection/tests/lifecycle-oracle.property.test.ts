@@ -1,11 +1,8 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
 import {

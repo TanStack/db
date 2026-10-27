@@ -19,11 +19,8 @@ import {
   NonAggregateExpressionNotInGroupByError,
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 
 /**
  * # What does an aggregate query publish beside its aggregates?

@@ -45,12 +45,12 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 const property = `join-result-key.pairs`

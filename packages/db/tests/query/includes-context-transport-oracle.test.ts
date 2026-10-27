@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   add,
   and,

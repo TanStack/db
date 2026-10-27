@@ -55,11 +55,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { Index } from '../src/indexes.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 type Prefix = number | string | bigint
 type Value = [Prefix, number | string] | number | string

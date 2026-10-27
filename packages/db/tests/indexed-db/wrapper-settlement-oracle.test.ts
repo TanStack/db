@@ -21,7 +21,7 @@
  */
 import { expect, it } from 'vitest'
 import { executeTransaction } from '../../src'
-import { declareOracle } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import { deferred, readStore, withHarness } from './harness'
 
 type NativeOutcome = 'complete' | 'abort'

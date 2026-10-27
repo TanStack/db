@@ -4,10 +4,10 @@ import { IR, createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { electricCollectionOptions } from '../src/electric'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   controlledHttp,
   deferred,

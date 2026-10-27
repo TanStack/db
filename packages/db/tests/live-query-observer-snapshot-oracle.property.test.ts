@@ -4,11 +4,8 @@ import { createCollection } from '../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # Is a retained live-query snapshot point-in-time?

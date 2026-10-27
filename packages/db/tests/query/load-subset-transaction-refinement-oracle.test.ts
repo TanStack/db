@@ -3,7 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createTransaction } from '../../src/transactions.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 
 /**
  * # When can an abort cancel a load?

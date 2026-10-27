@@ -2,11 +2,8 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   historyRow,
   optimisticHistory,

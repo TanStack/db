@@ -20,12 +20,12 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { runSQLiteBindingCapacityUnitTests } from './sqlite-core-adapter-binding-units'
 import {
   bigintBoundary,

@@ -18,7 +18,7 @@
  * specified here. harness.ts controls handlers and observes raw durable rows.
  */
 import { expect, it } from 'vitest'
-import { declareOracle } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import { initial } from './local-write-support'
 import {
   Channel,

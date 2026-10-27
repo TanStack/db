@@ -9,7 +9,7 @@ import {
 import { crossSerializeStream, getCrossReferenceHeader } from 'seroval'
 import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query.js'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { DehydratedState } from '@tanstack/query-core'
 import type { LoadSubsetOptions } from '@tanstack/db'
 

@@ -2,11 +2,8 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { finishHistory } from './observer-history-cleanup.js'
 import type { ChangeMessage } from '../src/types.js'
 

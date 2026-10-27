@@ -11,12 +11,12 @@ import {
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
 import { queryCollectionOptions } from '../src/query'
 import { sameOrderedIds, settle } from './refetch-ordered-prefix-support'

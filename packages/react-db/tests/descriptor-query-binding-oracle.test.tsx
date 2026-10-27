@@ -93,7 +93,7 @@ import { describe, expect, it } from 'vitest'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { Row } from './descriptor-query-binding-support.tsx'
 import type { ReactNode } from 'react'
 

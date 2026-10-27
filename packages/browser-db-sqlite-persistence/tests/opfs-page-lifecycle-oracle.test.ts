@@ -1,11 +1,11 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, vi } from 'vitest'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   ControlledWorker,

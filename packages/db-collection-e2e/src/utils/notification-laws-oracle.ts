@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { declareOracle } from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 
 export type Notification<Row> = {
   events: Array<{

@@ -1,11 +1,8 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import { resetCleanupQueue } from './utils'
 
 /**

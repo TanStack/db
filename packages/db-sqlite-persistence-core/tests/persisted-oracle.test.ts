@@ -19,12 +19,12 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   atPersistedOracleCheckpoint,
   cleanupPersistedOracle,

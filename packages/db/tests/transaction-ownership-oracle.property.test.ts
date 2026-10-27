@@ -3,11 +3,8 @@ import * as fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   captureCreatedTransactions,
   mockSyncCollectionOptionsNoInitialState,

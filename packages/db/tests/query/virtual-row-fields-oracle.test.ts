@@ -41,7 +41,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import {
   checkWithCleanup,

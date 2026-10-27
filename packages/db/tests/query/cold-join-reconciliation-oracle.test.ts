@@ -5,11 +5,11 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { runTrace } from '../trace-runner.js'
 import {
   checkWithCleanup,

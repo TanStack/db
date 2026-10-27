@@ -14,11 +14,8 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleReplayTest,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   assertCanStartOptimisticChange,
   assertMatchingConfirmation,

@@ -5,11 +5,8 @@ import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import type { SyncConfig } from '../../src/types.js'
 
 // Law: while an optimistic delete hides a derived row, synced batches for the

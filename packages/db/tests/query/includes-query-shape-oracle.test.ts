@@ -7,11 +7,8 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import { cleanupQuery } from './includes-query-shape-support.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'

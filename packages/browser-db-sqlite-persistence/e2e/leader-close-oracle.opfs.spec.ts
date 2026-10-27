@@ -20,7 +20,7 @@
  * detector for this no-pruning fixture, not a permanent storage contract.
  */
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { observe, openProbe } from './leader-close-probe'
 import type { BrowserContext, Page } from '@playwright/test'
 

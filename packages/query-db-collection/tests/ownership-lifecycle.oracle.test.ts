@@ -10,7 +10,7 @@ import {
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   compileSingleRowExpression,

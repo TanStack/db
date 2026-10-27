@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { withChangeTracking } from '../src/proxy.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { expectMembers, protocols, visit } from './proxy-iteration-fixture.js'
 import type { Item, Protocol } from './proxy-iteration-fixture.js'
 

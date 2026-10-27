@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { countEntries, withSpaceFixture } from './includes-space-helpers.js'
 import type { AdapterState } from './includes-space-helpers.js'
 

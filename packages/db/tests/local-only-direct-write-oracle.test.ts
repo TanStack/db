@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { declareOracle } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import {
   confirmEverything,
   createOrders,

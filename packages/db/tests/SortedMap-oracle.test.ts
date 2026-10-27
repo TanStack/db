@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 
 /**
  * SortedMap is an ordered view over ordinary map semantics.

@@ -12,11 +12,11 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**

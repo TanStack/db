@@ -11,7 +11,7 @@
  * the scheduling laws.
  */
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { Page } from '@playwright/test'
 import type { OPFSOracleResult } from './shared-driver-fairness.opfs'
 

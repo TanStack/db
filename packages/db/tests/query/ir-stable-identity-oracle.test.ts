@@ -15,7 +15,8 @@ import {
   getQueryIdentity,
 } from '../../src/query/ir-stable-identity.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
-import { declareOracle, oracleRuns } from '../oracle-config.js'
+import { oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   createAlphaRenamedIncludesQuery,
   createAlphaRenamedJoinQuery,

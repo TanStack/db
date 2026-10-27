@@ -2,11 +2,11 @@ import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { BASE_TIME, createTransaction } from './key-scheduler-support'
 import type { OfflineTransaction } from '../src/types'
 

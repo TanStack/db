@@ -31,7 +31,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 

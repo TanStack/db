@@ -16,11 +16,11 @@ import { StreamBuilder } from '../src/d2.js'
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   assertBinaryIncrementalization,
   assertUnaryIncrementalization,

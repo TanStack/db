@@ -6,11 +6,11 @@ import { output } from '../../src/operators/index.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { TopKRelation } from './topk-relation-oracle.js'
 
 declareOracle({ check: [TopKRelation] })

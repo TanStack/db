@@ -5,10 +5,10 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
-  declareOracle,
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   exactDemandAxisPairs,
   toLoadSubsetOptions,

@@ -79,12 +79,12 @@ import {
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,

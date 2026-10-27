@@ -1,4 +1,4 @@
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 /**
  * # Does an OPFS connection answer requests in order and close after them?
  *

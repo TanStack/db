@@ -10,11 +10,8 @@ import {
 } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import { captureCreatedTransactions } from './utils'
 import {
   cases,

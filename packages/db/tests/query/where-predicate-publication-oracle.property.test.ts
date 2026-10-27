@@ -89,12 +89,12 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { and, eq, not, or } from '../../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import {
   MISSING,

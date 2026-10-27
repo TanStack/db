@@ -8,10 +8,10 @@ import { and, eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
-  declareOracle,
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'

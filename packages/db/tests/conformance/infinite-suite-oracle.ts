@@ -21,7 +21,7 @@
  * infinite-suite-harness.ts.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { registerInfiniteQueryCaseScenarios } from './infinite-suite-cases'
 import {
   createScenarioState,

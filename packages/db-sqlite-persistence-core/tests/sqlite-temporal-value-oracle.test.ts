@@ -45,7 +45,7 @@
 import { IR } from '@tanstack/db'
 import { Temporal } from 'temporal-polyfill'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   temporalFamilies,
   temporalQueryCases,

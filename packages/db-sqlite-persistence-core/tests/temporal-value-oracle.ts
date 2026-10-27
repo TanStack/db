@@ -8,7 +8,7 @@
  */
 import { Temporal } from 'temporal-polyfill'
 import { IR } from '@tanstack/db'
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 export { Temporal }
 

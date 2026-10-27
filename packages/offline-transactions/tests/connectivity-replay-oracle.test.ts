@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 

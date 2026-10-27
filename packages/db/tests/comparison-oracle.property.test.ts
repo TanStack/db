@@ -11,13 +11,13 @@ import {
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRuns,
   recordOracleReplay,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { defaultOpts, lexicalOpts } from './comparison-options.js'
 import type { CompareOptions } from '../src/query/builder/types'
 

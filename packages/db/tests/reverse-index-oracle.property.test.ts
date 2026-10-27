@@ -3,11 +3,8 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { PropRef } from '../src/query/ir.js'
-import {
-  declareOracle,
-  oracleRandomParameters,
-  readOracleRunConfig,
-} from './oracle-config.js'
+import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # Does a reversed index read in its query's order, in bounded work?

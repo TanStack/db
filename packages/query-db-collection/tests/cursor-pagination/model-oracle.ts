@@ -1,4 +1,4 @@
-import { declareOracle } from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 
 export type Row = { id: number; rank: number; group: number }
 export type Scope = { group: number | undefined; descending: boolean }

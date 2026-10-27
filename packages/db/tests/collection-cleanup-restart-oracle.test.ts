@@ -5,7 +5,7 @@ import {
   createLiveQueryCollection,
 } from '../src'
 import { createDeferred } from '../src/deferred'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   cleanupError,
   completedBoundaryScenarios,

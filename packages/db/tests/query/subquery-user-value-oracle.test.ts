@@ -10,7 +10,7 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 

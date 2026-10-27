@@ -8,11 +8,8 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from './oracle-config'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import { indexTypes, withCollectionCleanup } from './index-update-support'
 import type { BaseIndex } from '../src/indexes/base-index.js'
 

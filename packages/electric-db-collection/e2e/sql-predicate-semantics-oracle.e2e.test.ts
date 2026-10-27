@@ -4,7 +4,7 @@ import { IR } from '@tanstack/db'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { compileSQL } from '../src/sql-compiler'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { Client } from 'pg'
 
 type Row = {

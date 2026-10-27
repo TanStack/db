@@ -8,7 +8,7 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import type { crossJoinParentRoutes } from '../../src/query/compiler/parent-routes.js'
 

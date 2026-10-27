@@ -4,11 +4,11 @@ import { createCollection } from '../src/collection/index'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
 import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import type { FrozenRow, StoredRow } from './proxy-native-rows'
 
 /**

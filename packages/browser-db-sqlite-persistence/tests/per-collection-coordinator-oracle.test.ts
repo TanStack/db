@@ -14,7 +14,7 @@ import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import {
   ControlledBroadcastChannel,

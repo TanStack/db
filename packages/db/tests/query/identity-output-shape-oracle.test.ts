@@ -22,11 +22,8 @@ import {
   UnionFrom,
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import {
-  declareOracle,
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { assertEqualityPartition } from './identity-output-shape-support.js'
 import type { EqualityPair } from './identity-output-shape-support.js'

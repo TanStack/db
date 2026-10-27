@@ -39,7 +39,7 @@ import {
   createLiveQueryCollection,
 } from '@tanstack/db'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
 import {

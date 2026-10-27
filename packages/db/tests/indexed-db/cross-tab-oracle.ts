@@ -1,4 +1,4 @@
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 /**
  * Independent cross-tab publication model.
  *

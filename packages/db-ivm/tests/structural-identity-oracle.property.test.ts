@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * # Does a structural identity agree with D2 value identity?

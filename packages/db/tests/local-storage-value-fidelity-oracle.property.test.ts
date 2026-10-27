@@ -33,12 +33,12 @@ import { SerializationError } from '../src/errors'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   observeHistoryPromise,
   withHistoryCleanup,

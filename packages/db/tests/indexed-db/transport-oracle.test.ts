@@ -19,7 +19,7 @@
  */
 import { expect, it } from 'vitest'
 import { executeTransaction } from '../../src'
-import { declareOracle } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import { Channel, assertRows, readStore, seed, withHarness } from './harness'
 import type { Row } from './harness'
 

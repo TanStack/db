@@ -48,7 +48,7 @@
 import { describe, expect, it } from 'vitest'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   EXPECTED_IDS,
   QUERY_SHAPES,

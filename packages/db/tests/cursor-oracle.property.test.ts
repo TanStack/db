@@ -4,11 +4,11 @@ import { createCollection } from '../src/collection/index.js'
 import { PropRef, Value } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import { orderBy } from './cursor-order-terms.js'
 import { evaluateReferenceExpression } from './reference-expression-oracle.js'

@@ -10,12 +10,12 @@ import {
   flushPromises,
 } from './utils.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
   readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   acquisitionCellDefinitions,
   acquisitionEntries,

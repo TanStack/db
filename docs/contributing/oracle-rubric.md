@@ -373,7 +373,8 @@ qualifies. Identify the mechanism in the code before applying the name.
 
 An oracle file holds only oracle tests. It names its parts with
 `declareOracle({ check: [...], model: [...], grammar: [...] })` from
-[`oracle-config.ts`](../../packages/db/tests/oracle-config.ts): the check
+[`oracle-declaration.ts`](../../packages/db/tests/oracle-declaration.ts), which
+imports nothing so that browser and native-app modules can use it: the check
 compares production observations with the model or with a second
 formulation, and the grammar is the generators that produce legal histories.
 Each part is optional. Every test in the file uses a declared part, directly

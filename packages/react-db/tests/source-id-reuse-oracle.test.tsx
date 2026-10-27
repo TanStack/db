@@ -34,7 +34,7 @@ import { describe, expect, it } from 'vitest'
 import { Suspense } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
-import { declareOracle } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { source } from './source-id-reuse-support'
 
 type Binding = { source: ReturnType<typeof source>; client?: DbClient }

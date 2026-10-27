@@ -7,11 +7,8 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
 import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
-import {
-  declareOracle,
-  oracleRandomParameters,
-  readOracleRunConfig,
-} from './oracle-config.js'
+import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import {
   expectSameSubsetRequest,

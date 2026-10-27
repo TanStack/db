@@ -24,7 +24,7 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils.js'
-import { declareOracle } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 const fields = [
   `years`,

@@ -15,7 +15,7 @@ import {
  * source, so it is not oracle coverage, even in a file named for an oracle.
  *
  * Each oracle file declares its parts with `declareOracle` from
- * oracle-config:
+ * oracle-declaration:
  *
  *   declareOracle({ check: [checkHistory], model: [modelHistory] })
  *
@@ -661,7 +661,7 @@ export default {
     messages: {
       unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model pin uses the declared model, and a grammar calibration uses the declared grammar.`,
       unknownTypeModel: `This typeModel name is not a type alias or interface in this file. A type model is the expected type that type-level tests compare with, so it must be declared here.`,
-      undeclared: `This oracle file registers tests and declares no oracle part. Name its check, model, and grammar with \`declareOracle({ check: [...], model: [...], grammar: [...] })\` from oracle-config. Then move each test that reaches none of them to an ordinary test file.`,
+      undeclared: `This oracle file registers tests and declares no oracle part. Name its check, model, and grammar with \`declareOracle({ check: [...], model: [...], grammar: [...] })\` from oracle-declaration. Then move each test that reaches none of them to an ordinary test file.`,
     },
   },
   create(context) {

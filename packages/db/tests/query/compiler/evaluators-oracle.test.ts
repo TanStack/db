@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, Value } from '../../../src/query/ir.js'
 import {
-  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
 } from '../../oracle-config.js'
+import { declareOracle } from '../../oracle-declaration.js'
 
 /**
  * # Does the LIKE evaluator preserve wildcard meaning without regex work?

@@ -1,4 +1,4 @@
-import { declareOracle } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 /**
  * # When does a cold hydrate get a turn on a shared SQLite driver?
  *

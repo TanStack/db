@@ -3,7 +3,7 @@ import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
-import { declareOracle } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import {
   makeSource,
   query,

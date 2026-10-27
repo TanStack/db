@@ -12,10 +12,10 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { toArray } from '../../src/query/index.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
-  declareOracle,
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
