@@ -428,7 +428,8 @@ describe(`Electric Integration`, () => {
   // stored offset; a stream that cannot resume starts at `now` and delivers
   // none of them. Once every replay succeeds, core sweeps each kept row the
   // new run did not write (snapshot-api §7), so a row the source deleted
-  // while no stream listened goes too. Afterwards the rows equal the
+  // while no stream listened goes too, and the untouched row 3 survives
+  // because the replayed snapshot writes it. Afterwards the rows equal the
   // source's rows in both histories.
   it.each([true, false])(
     `an on-demand reload keeps its rows and ends with the source's rows (resumes: %s)`,

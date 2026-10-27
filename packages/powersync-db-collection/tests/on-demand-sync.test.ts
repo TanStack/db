@@ -84,6 +84,61 @@ describe(`On-Demand Sync Mode`, () => {
     `)
   }
 
+  // Receiving witness for the on-demand reload law (maintainer decisions
+  // F19 and snapshot-api §7): the reload keeps the rows, core replays the
+  // live query's demand through the new run, and once every replay
+  // succeeds core sweeps each kept row the new run did not write. So a load
+  // must write every row it returns, unchanged ones too. While the reload
+  // runs the table changes one row, deletes one, and leaves the others
+  // untouched. Afterwards the rows equal the table's matching rows: the
+  // untouched rows survive, the edit shows, and the deleted row is gone.
+  it(`an unchanged row survives an on-demand reload`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      }),
+    )
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ product: collection })
+          .where(({ product }) => eq(product.category, `electronics`)),
+    })
+    const rows = () =>
+      new Map(collection.toArray.map((row) => [row.id, row.name]))
+    const table = async () =>
+      new Map(
+        (
+          await db.getAll<{ id: string; name: string }>(
+            `SELECT id, name FROM products WHERE category = 'electronics'`,
+          )
+        ).map((row) => [row.id, row.name]),
+      )
+    try {
+      await live.preload()
+      await vi.waitFor(async () => expect(rows()).toEqual(await table()))
+      expect(rows().size).toBe(3)
+
+      const reload = collection.reload()
+      await db.execute(`UPDATE products SET name = 'Edited' WHERE name = ?`, [
+        `Product A`,
+      ])
+      await db.execute(`DELETE FROM products WHERE name = ?`, [`Product B`])
+      await reload
+      await vi.waitFor(async () => expect(rows()).toEqual(await table()))
+      // The reach of this case: an untouched row was kept and survives.
+      expect([...rows().values()]).toContain(`Product D`)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      await live.cleanup()
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves complete public rows across overlapping demand ownership and release`, async () => {
     type Demand = `electronics` | `clothing` | `expensive`
     type Row = {

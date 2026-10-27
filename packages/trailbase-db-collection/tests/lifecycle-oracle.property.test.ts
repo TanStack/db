@@ -1423,6 +1423,71 @@ it.each(
 )
 
 /**
+ * ## Does an unchanged row survive an on-demand reload?
+ *
+ * Law (maintainer decisions F19 and snapshot-api §7): an on-demand reload
+ * keeps the rows; core replays the live query's demand through the new
+ * run, and once every replay succeeds it sweeps each kept row the new run
+ * did not write. So a page writes every row it returns, unchanged ones too.
+ *
+ * Reference: the same service as the eager reload lane. Between the runs
+ * the service updates row 1 and deletes row 2 with no change event; row 3
+ * is untouched. Checkpoint: once the reload settles and the replayed load
+ * has applied, the rows equal the service's, so row 3 survives, row 1
+ * shows its edit, and row 2 is gone.
+ */
+it(`an unchanged row survives an on-demand reload`, async () => {
+  const service = new Map<number, RaceRow>(
+    [1, 2, 3].map((id) => [id, { id, data: `v1` }]),
+  )
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() =>
+    Promise.resolve(new ReadableStream<Event>({ start() {} })),
+  )
+  api.list.mockImplementation((options) => {
+    const after = Number(options?.pagination?.cursor ?? 0)
+    const records = [...service.values()]
+      .sort((a, b) => a.id - b.id)
+      .filter((row) => row.id > after)
+      .slice(0, 256)
+    return Promise.resolve({
+      records,
+      cursor: String(records.at(-1)?.id ?? after),
+    })
+  })
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  const live = createLiveQueryCollection({
+    query: (q) => q.from({ row: collection }),
+  })
+  try {
+    await live.preload()
+    expect(sortedRows(collection.toArray)).toEqual(sortedRows(service.values()))
+
+    service.set(1, { id: 1, data: `v2` })
+    service.delete(2)
+    await collection.reload()
+    await vi.waitFor(() =>
+      expect(sortedRows(collection.toArray)).toEqual(
+        sortedRows(service.values()),
+      ),
+    )
+    expect(collection.status).toBe(`ready`)
+  } finally {
+    await live.cleanup()
+    await collection.cleanup()
+  }
+})
+
+/**
  * ## Do several pages, several changes, and overlapping loads still converge?
  *
  * Law: the same one as the page-event lane. Once every page and every change

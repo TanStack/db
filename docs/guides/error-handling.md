@@ -639,7 +639,10 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
   `markReady()`. An `insert` of a row the old run left replaces it, until
   the reload's sweep. An on-demand Collection's `loadSubset` result is
   partial, so never mark it as a snapshot; core deletes the kept rows the new
-  run did not write once its replay succeeds.
+  run did not write once its replay succeeds. So write every row a load
+  returns during a reload, unchanged ones too: an `update` with the row's
+  current value changes nothing on screen, and it keeps the row from that
+  deletion.
 
 ### Migrating
 
