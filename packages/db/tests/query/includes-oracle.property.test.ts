@@ -10,13 +10,37 @@ import {
 } from '../../src/query/index.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRuns,
 } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
-import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
+import {
+  cleanupPendingWork,
+  createControlledCollection,
+  createSources,
+  plainSubquery,
+  refsInclude,
+  releasePendingWork,
+  stripVirtualProperties,
+  trackPendingWork,
+  withPendingWorkCleanup,
+} from './includes-structural-support.js'
+import {
+  assertDisjointRelationshipKeys,
+  batchChild,
+  batchRoot,
+  createConnectedBatchBranches,
+  createRouteLifecycleScenario,
+  createVisibleRelationshipScenario,
+  otherBranch,
+  rowAt,
+  transitionHistoryBranches,
+  updateFullRowBatchModels,
+  updateModel,
+} from './includes-route-grammar-oracle.js'
 import {
   applyScopedWrite,
   canonicalScopedAliases,
@@ -30,6 +54,24 @@ import {
   sortedRequests,
 } from './includes-scope-identity-oracle.js'
 import type {
+  ConnectedBranch,
+  FullRowBatchScenario,
+  FullRowBatchStep,
+  IncludeDepth,
+  RouteLifecycleScenario,
+  RouteTransitionDescriptor,
+  VisibleRelationshipScenario,
+  VisibleRelationshipScenarioOptions,
+  VisibleScalarNoise,
+} from './includes-route-grammar-oracle.js'
+import type {
+  ChildRow,
+  PendingTransaction,
+  PendingWork,
+  RootRow,
+  Sources,
+} from './includes-structural-support.js'
+import type {
   TraceCheckpoint,
   TraceDriver,
   TraceProjection,
@@ -37,71 +79,12 @@ import type {
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 import type {
   ScopedAliases,
-  ScopedInclude,
   ScopedPart,
   ScopedRef,
   ScopedResultRow,
   ScopedScenario,
   ScopedShape,
-  ScopedSubquery,
 } from './includes-scope-identity-oracle.js'
-
-/**
- * # Does the incremental include graph equal full relationship recomputation?
- *
- * Authority: `packages/db/src/query/live/ARCHITECTURE.md`, normative laws
- * 1, 3–5, and 8. This owner checks inline result values and order through the
- * public live-query Collection after each synchronous source change.
- *
- * This is the central structural oracle for inline includes. Production updates
- * nested results incrementally. The reference stores source rows in plain Maps
- * and rebuilds the whole tree after every meaningful checkpoint.
- *
- * The suite protects five groups of laws:
- *
- * 1. Inserts, updates, deletes, and optimistic settlement match recomputation
- *    at one to four include levels.
- * 2. Rekey and reparent histories preserve route ownership through fresh,
- *    shared, retired, restored, merged, and split routes.
- * 3. Atomic and split full-row batches produce the same tree when they encode
- *    the same logical source state.
- * 4. Nested scalar materialization follows reference changes and shared paths.
- * 5. Alpha-renaming, sibling order, and unrelated siblings do not change the
- *    relevant result, including when sibling scopes such as a `from()`
- *    subquery and an include reuse alias names.
- *
- * These laws use a model graph, not one universal controller. The structural
- * node recomputes relationship trees. A separate scalar-reference node follows
- * explicit foreign keys. Metamorphic checks compare equivalent query forms.
- * Scenario builders describe legal route histories, but they do not compute
- * the expected result.
- *
- * The trace runner checks each intermediate cut that the contract exposes.
- * Focused pinned histories preserve small boundary cases. Random or replayed
- * campaigns explore longer action sequences and wider route values. Other
- * include suites own Collection facades, demand lifetime, functional callbacks,
- * and publication coherence.
- *
- * Known limits: the structural histories use numeric correlation groups,
- * finite row IDs, one to four levels, and the declared transition shapes.
- * Their public-row checks protect those represented histories at the named
- * checkpoints; they do not prove every route relation state or source schedule.
- * This file owns further structural route witnesses. The architecture's
- * executable-contract map assigns other include boundaries to their suites.
- */
-
-type IncludeDepth = 1 | 2 | 3 | 4
-
-type RootRow = {
-  id: number
-  group: number
-  value: number
-  position: number
-}
-
-type ChildRow = RootRow & {
-  parentGroup: number
-}
 
 type HistoryAction = {
   type: `put` | `delete` | `optimisticConfirm` | `optimisticRollback`
@@ -454,16 +437,6 @@ const confirmedChildReorderSeed: Scenario = {
   ],
 }
 
-function createControlledCollection<T extends { id: number }>(
-  name: string,
-  initialData: Array<T> = [],
-  rowUpdateMode: `partial` | `full` = `partial`,
-) {
-  return createOracleControlledCollection(name, initialData, {
-    rowUpdateMode,
-  })
-}
-
 function compareRows(left: RootRow, right: RootRow): number {
   return left.position - right.position || left.id - right.id
 }
@@ -506,22 +479,22 @@ function recompute(
 
 // Collection delivery metadata is independent of include materialization.
 // Compare only the user-defined row shape modeled by the recompute oracle.
-function stripVirtualProperties(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stripVirtualProperties)
-  }
-  if (!value || typeof value !== `object`) {
-    return value
-  }
+declareOracle({
+  check: [
+    expectScenarioMatches,
+    expectFullRowBatchScenarioMatches,
+    expectFlatMaterializationScenarioMatches,
+    expectMaterializeScenarioMatches,
+  ],
+  model: [
+    recompute,
+    recomputeFullRowBatchScenario,
+    recomputeFlatMaterialization,
+    recomputeMaterialize,
+  ],
 
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => !key.startsWith(`$`))
-      .map(([key, entry]) => [key, stripVirtualProperties(entry)]),
-  )
-}
-
-type Sources = ReturnType<typeof createSources>
+  grammar: [independentTransitionPrefix],
+})
 
 function createIncrementalQuery(depth: IncludeDepth, sources: Sources) {
   const { roots } = sources
@@ -738,22 +711,6 @@ function createIncrementalQuery(depth: IncludeDepth, sources: Sources) {
   }
 }
 
-function createSources(rowUpdateMode: `partial` | `full` = `partial`) {
-  return {
-    roots: createControlledCollection<RootRow>(
-      `oracle-roots`,
-      [],
-      rowUpdateMode,
-    ),
-    levels: [
-      createControlledCollection<ChildRow>(`oracle-level-1`, [], rowUpdateMode),
-      createControlledCollection<ChildRow>(`oracle-level-2`, [], rowUpdateMode),
-      createControlledCollection<ChildRow>(`oracle-level-3`, [], rowUpdateMode),
-      createControlledCollection<ChildRow>(`oracle-level-4`, [], rowUpdateMode),
-    ] as const,
-  }
-}
-
 function sameRoot(left: RootRow, right: RootRow): boolean {
   return (
     left.group === right.group &&
@@ -764,112 +721,6 @@ function sameRoot(left: RootRow, right: RootRow): boolean {
 
 function sameChild(left: ChildRow, right: ChildRow): boolean {
   return left.parentGroup === right.parentGroup && sameRoot(left, right)
-}
-
-type PendingTransaction = ReturnType<Sources[`roots`][`collection`][`update`]>
-
-type PendingWork = {
-  transaction: PendingTransaction
-  release: () => void
-  releaseAttempted: boolean
-  released: boolean
-  settled: boolean
-  receipt: Promise<void>
-}
-
-function trackPendingWork(
-  pending: Set<PendingWork>,
-  transaction: PendingTransaction,
-  release: () => void,
-): PendingWork {
-  const entry: PendingWork = {
-    transaction,
-    release,
-    releaseAttempted: false,
-    released: false,
-    settled: false,
-    receipt: Promise.resolve(),
-  }
-  pending.add(entry)
-  const settled = () => {
-    entry.settled = true
-    if (entry.released) pending.delete(entry)
-  }
-  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
-  return entry
-}
-
-function releasePendingWork(
-  pending: Set<PendingWork>,
-  entry: PendingWork,
-  release: () => void,
-): void {
-  entry.releaseAttempted = true
-  release()
-  entry.released = true
-  if (entry.settled) pending.delete(entry)
-}
-
-async function cleanupPendingWork(
-  pending: Set<PendingWork>,
-  collections: ReadonlyArray<{ cleanup: () => Promise<void> }>,
-): Promise<void> {
-  const errors: Array<unknown> = []
-  const entries = [...pending]
-  const attempt = (work: () => void) => {
-    try {
-      work()
-    } catch (error) {
-      errors.push(error)
-    }
-  }
-  for (const entry of entries) {
-    if (
-      entry.transaction.state === `pending` ||
-      entry.transaction.state === `persisting`
-    )
-      attempt(() => {
-        entry.transaction.rollback()
-      })
-    if (!entry.releaseAttempted)
-      attempt(() => releasePendingWork(pending, entry, entry.release))
-  }
-  if (errors.length === 0)
-    await Promise.all(entries.map(({ receipt }) => receipt))
-  const results = await Promise.allSettled(
-    collections.map(async (collection) => collection.cleanup()),
-  )
-  for (const result of results)
-    if (result.status === `rejected`) errors.push(result.reason as unknown)
-  if (errors.length === 1) throw errors[0]
-  if (errors.length > 1)
-    throw new AggregateError(errors, `Core oracle cleanup failed`)
-}
-
-async function withPendingWorkCleanup(
-  pending: Set<PendingWork>,
-  collections: ReadonlyArray<{ cleanup: () => Promise<void> }>,
-  work: () => Promise<void>,
-): Promise<void> {
-  let primary: { error: unknown } | undefined
-  try {
-    await work()
-  } catch (error) {
-    primary = { error }
-  }
-  try {
-    await cleanupPendingWork(pending, collections)
-  } catch (error) {
-    if (!primary) throw error
-    throw new AggregateError(
-      [primary.error, error],
-      `Core oracle work and cleanup failed`,
-      {
-        cause: primary.error,
-      },
-    )
-  }
-  if (primary) throw primary.error
 }
 
 async function settleOptimisticAction(
@@ -1086,10 +937,6 @@ function createStructuralTraceDriver(
   }
 }
 
-type FullRowBatchStep =
-  | { level: 0; changes: Array<SyncChange<RootRow>> }
-  | { level: IncludeDepth; changes: Array<SyncChange<ChildRow>> }
-
 type FullRowBatchInput = {
   level: 0 | IncludeDepth
   changes: Array<{
@@ -1100,36 +947,6 @@ type FullRowBatchInput = {
     value: number
     position: number
   }>
-}
-
-type FullRowBatchScenario = {
-  depth: IncludeDepth
-  steps: Array<FullRowBatchStep>
-}
-
-function updateModel<T extends { id: number }>(
-  model: Map<number, T>,
-  changes: ReadonlyArray<SyncChange<T>>,
-): void {
-  for (const change of changes) {
-    if (change.type === `delete`) {
-      model.delete(change.value.id)
-    } else {
-      model.set(change.value.id, change.value)
-    }
-  }
-}
-
-function updateFullRowBatchModels(
-  step: FullRowBatchStep,
-  roots: Map<number, RootRow>,
-  levels: Array<Map<number, ChildRow>>,
-): void {
-  if (step.level === 0) {
-    updateModel(roots, step.changes)
-  } else {
-    updateModel(levels[step.level - 1]!, step.changes)
-  }
 }
 
 function createFullRowBatchTraceDriver(
@@ -1148,24 +965,6 @@ function createFullRowBatchTraceDriver(
     },
     cleanup: cleanupStructuralTrace,
   }
-}
-
-function batchRoot(
-  id: number,
-  group: number,
-  value = id * 10,
-  position = id - 1,
-): RootRow {
-  return { id, group, value, position }
-}
-
-function batchChild(
-  id: number,
-  parentGroup: number,
-  value = id * 10,
-  position = id - 1,
-): ChildRow {
-  return { id, parentGroup, group: id * 10, value, position }
 }
 
 const fullRowBatchTrace: Array<FullRowBatchStep> = [
@@ -1292,49 +1091,6 @@ function createConnectedBatchPrefix(
   return steps
 }
 
-type ConnectedBranch = {
-  idBase: number
-  groupBase: number
-}
-
-function createConnectedBatchBranches(
-  depth: IncludeDepth,
-  branches: ReadonlyArray<ConnectedBranch> = [
-    { idBase: 100, groupBase: 100 },
-    { idBase: 200, groupBase: 200 },
-  ],
-): Array<FullRowBatchStep> {
-  const steps: Array<FullRowBatchStep> = [
-    {
-      level: 0,
-      changes: branches.map(({ idBase, groupBase }) => ({
-        type: `insert`,
-        value: batchRoot(idBase, groupBase, idBase, 0),
-      })),
-    },
-  ]
-
-  for (let level = 1; level <= depth; level++) {
-    steps.push({
-      level: level as IncludeDepth,
-      changes: branches.map(({ idBase, groupBase }) => ({
-        type: `insert`,
-        value: {
-          ...batchChild(
-            idBase + level,
-            groupBase + level - 1,
-            idBase + level,
-            0,
-          ),
-          group: groupBase + level,
-        },
-      })),
-    })
-  }
-
-  return steps
-}
-
 function normalizeFullRowBatchInputs(
   depth: IncludeDepth,
   inputs: Array<FullRowBatchInput>,
@@ -1448,10 +1204,6 @@ const branchDeliveryOrders: ReadonlyArray<BranchDeliveryOrder> = [
   `reverse`,
 ]
 
-function otherBranch(branch: 0 | 1): 0 | 1 {
-  return branch === 0 ? 1 : 0
-}
-
 function deliverBranches(
   branches: readonly [ConnectedBranch, ConnectedBranch],
   order: BranchDeliveryOrder,
@@ -1466,143 +1218,9 @@ function deliveredBranchIndex(
   return order === `forward` ? branch : otherBranch(branch)
 }
 
-type VisibleRelationshipScenario = FullRowBatchScenario & {
-  transitionStepIndex: number
-}
-
 type VisibleRelationshipScenarios = {
   transitionOnly: VisibleRelationshipScenario
   stateful: VisibleRelationshipScenario
-}
-
-type VisibleScalarNoise = {
-  side: `before` | `after`
-  level: 0 | IncludeDepth
-  branch: 0 | 1
-  value: number
-  position: number
-}
-
-type VisibleRelationshipScenarioOptions = {
-  depth: IncludeDepth
-  targetLevel: IncludeDepth
-  sourceBranch: 0 | 1
-  branches: readonly [ConnectedBranch, ConnectedBranch]
-  noise: ReadonlyArray<VisibleScalarNoise>
-} & (
-  | { transition: `reparent`; rekeyGroup?: never }
-  | { transition: `rekey`; rekeyGroup: number }
-)
-
-function assertDisjointRelationshipKeys(
-  depth: IncludeDepth,
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-  {
-    extraIds = [],
-    extraGroups = [],
-  }: {
-    extraIds?: ReadonlyArray<number>
-    extraGroups?: ReadonlyArray<number>
-  } = {},
-): void {
-  const ids = [
-    ...branches.flatMap(({ idBase }) =>
-      Array.from({ length: depth + 1 }, (_, level) => idBase + level),
-    ),
-    ...extraIds,
-  ]
-  const groups = [
-    ...branches.flatMap(({ groupBase }) =>
-      Array.from({ length: depth + 1 }, (_, level) => groupBase + level),
-    ),
-    ...extraGroups,
-  ]
-  if (
-    new Set(ids).size !== ids.length ||
-    new Set(groups).size !== groups.length
-  ) {
-    throw new Error(`Visible relationship keys overlap`)
-  }
-}
-
-function createVisibleRelationshipScenario(
-  options: VisibleRelationshipScenarioOptions,
-): VisibleRelationshipScenario {
-  const { depth, transition, targetLevel, sourceBranch, branches, noise } =
-    options
-  assertDisjointRelationshipKeys(
-    depth,
-    branches,
-    transition === `rekey` ? { extraGroups: [options.rekeyGroup] } : {},
-  )
-  const steps = createConnectedBatchBranches(depth, branches)
-  const roots = new Map<number, RootRow>()
-  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
-
-  for (const step of steps) {
-    updateFullRowBatchModels(step, roots, levels)
-  }
-
-  const appendNoise = (entry: VisibleScalarNoise): void => {
-    const branch = branches[entry.branch]
-    if (entry.level === 0) {
-      const current = roots.get(branch.idBase)!
-      const value = {
-        ...current,
-        value: entry.value,
-        position: entry.position,
-      }
-      roots.set(value.id, value)
-      steps.push({ level: 0, changes: [{ type: `update`, value }] })
-      return
-    }
-
-    const model = levels[entry.level - 1]!
-    const current = model.get(branch.idBase + entry.level)!
-    const value = {
-      ...current,
-      value: entry.value,
-      position: entry.position,
-    }
-    model.set(value.id, value)
-    steps.push({
-      level: entry.level,
-      changes: [{ type: `update`, value }],
-    })
-  }
-
-  for (const entry of noise.filter(({ side }) => side === `before`)) {
-    appendNoise(entry)
-  }
-
-  const source = branches[sourceBranch]
-  const destination = branches[otherBranch(sourceBranch)]
-  const targetModel = levels[targetLevel - 1]!
-  const current = targetModel.get(source.idBase + targetLevel)!
-  const value: ChildRow = {
-    ...current,
-    parentGroup:
-      transition === `reparent`
-        ? destination.groupBase + targetLevel - 1
-        : current.parentGroup,
-    group: transition === `rekey` ? options.rekeyGroup : current.group,
-  }
-  const transitionStepIndex = steps.length
-  steps.push({
-    level: targetLevel,
-    changes: [{ type: `update`, value }],
-  })
-  targetModel.set(value.id, value)
-
-  for (const entry of noise.filter(({ side }) => side === `after`)) {
-    appendNoise(entry)
-  }
-
-  return {
-    depth,
-    steps,
-    transitionStepIndex,
-  }
 }
 
 function visibleRelationshipScenarioArbitrary(
@@ -1975,241 +1593,6 @@ function expectEveryHistoryStepVisible(
     )
     expect(after).not.toEqual(before)
   }
-}
-
-type RouteDestination = {
-  strategy: `fresh` | `restore` | `merge` | `split` | `retired`
-  route: number
-}
-
-// Route lifecycle descriptors form a constrained design grammar. A numeric
-// `route` is a model-only parent group value for one include edge, not a
-// production BucketKey or route-relation row. `strategy` classifies legal
-// histories for generation; the Map recomputation still supplies the answer.
-// Constructors reject combinations that do not name a real lifecycle state.
-type RouteTransitionDescriptor = {
-  row: 0 | 1
-  stepsBefore?: ReadonlyArray<FullRowBatchStep>
-} & (
-  | {
-      kind: `reparent`
-      level: IncludeDepth
-      destination: { strategy: `merge`; route: number }
-    }
-  | {
-      kind: `rekey`
-      level: 0 | IncludeDepth
-      destination: RouteDestination
-    }
-)
-
-type RouteLifecycleScenario = FullRowBatchScenario & {
-  transitionStepIndexes: ReadonlyArray<number>
-}
-
-type RouteLifecycleScenarioOptions = {
-  depth: IncludeDepth
-  branches: readonly [ConnectedBranch, ConnectedBranch]
-  descriptors: ReadonlyArray<RouteTransitionDescriptor>
-  prefixSteps?: ReadonlyArray<FullRowBatchStep>
-  trailingSteps?: ReadonlyArray<FullRowBatchStep>
-}
-
-function rowAt(
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-  row: 0 | 1,
-  level: 0 | IncludeDepth,
-): number {
-  return branches[row].idBase + level
-}
-
-function applyRouteLifecycleStep(
-  step: FullRowBatchStep,
-  roots: Map<number, RootRow>,
-  levels: Array<Map<number, ChildRow>>,
-  seenRoutes: Set<string>,
-  retiredRouteOwners: Map<string, number>,
-): void {
-  const rows = step.level === 0 ? roots : levels[step.level - 1]!
-  const previousRouteOwners = new Map<number, Set<number>>()
-
-  for (const change of step.changes) {
-    const previous = rows.get(change.value.id)
-    if (!previous) continue
-    const owners = previousRouteOwners.get(previous.group) ?? new Set<number>()
-    owners.add(previous.id)
-    previousRouteOwners.set(previous.group, owners)
-  }
-
-  updateFullRowBatchModels(step, roots, levels)
-
-  for (const row of rows.values()) {
-    const route = routeIdentity(step.level, row.group)
-    seenRoutes.add(route)
-    retiredRouteOwners.delete(route)
-  }
-  for (const [route, previousOwners] of previousRouteOwners) {
-    if ([...rows.values()].some((row) => row.group === route)) continue
-    const retiredRoute = routeIdentity(step.level, route)
-    if (previousOwners.size === 1) {
-      retiredRouteOwners.set(retiredRoute, [...previousOwners][0]!)
-    } else {
-      retiredRouteOwners.delete(retiredRoute)
-    }
-  }
-}
-
-function routeIdentity(level: 0 | IncludeDepth, route: number): string {
-  // This oracle has one include edge per level, so level plus correlation value
-  // is the complete route identity. Equal values at different levels are not
-  // the same subscription lifecycle.
-  return `${level}:${route}`
-}
-
-function createRouteLifecycleScenario({
-  depth,
-  branches,
-  descriptors,
-  prefixSteps = createConnectedBatchBranches(depth, branches),
-  trailingSteps = [],
-}: RouteLifecycleScenarioOptions): RouteLifecycleScenario {
-  const seenRoutes = new Set<string>()
-  const retiredRouteOwners = new Map<string, number>()
-
-  const steps = [...prefixSteps]
-  const roots = new Map<number, RootRow>()
-  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
-  for (const step of steps) {
-    applyRouteLifecycleStep(step, roots, levels, seenRoutes, retiredRouteOwners)
-  }
-
-  const transitionStepIndexes: Array<number> = []
-  for (const descriptor of descriptors) {
-    const destination = descriptor.destination as RouteDestination
-    if (descriptor.kind === `reparent` && destination.strategy !== `merge`) {
-      throw new Error(
-        `reparent transitions only support live merge destinations`,
-      )
-    }
-    for (const step of descriptor.stepsBefore ?? []) {
-      steps.push(step)
-      applyRouteLifecycleStep(
-        step,
-        roots,
-        levels,
-        seenRoutes,
-        retiredRouteOwners,
-      )
-    }
-
-    const id = rowAt(branches, descriptor.row, descriptor.level)
-    const rowsAtLevel =
-      descriptor.level === 0
-        ? [...roots.values()]
-        : [...levels[descriptor.level - 1]!.values()]
-    const current = rowsAtLevel.find((row) => row.id === id)
-    if (!current) throw new Error(`Missing transition row ${id}`)
-    const currentRoute =
-      descriptor.kind === `rekey`
-        ? current.group
-        : (current as ChildRow).parentGroup
-    const destinationRows =
-      descriptor.kind === `rekey`
-        ? rowsAtLevel
-        : descriptor.level === 1
-          ? [...roots.values()]
-          : [...levels[descriptor.level - 2]!.values()]
-    const destinationIsLive = destinationRows.some(
-      (row) => row.group === descriptor.destination.route,
-    )
-    const currentRouteUsers = rowsAtLevel.filter((row) =>
-      descriptor.kind === `rekey`
-        ? row.group === currentRoute
-        : (row as ChildRow).parentGroup === currentRoute,
-    ).length
-    const destinationRoute = routeIdentity(
-      descriptor.level,
-      descriptor.destination.route,
-    )
-    const retiredOwner = retiredRouteOwners.get(destinationRoute)
-
-    switch (descriptor.destination.strategy) {
-      case `fresh`:
-        if (seenRoutes.has(destinationRoute)) {
-          throw new Error(`fresh route must never have been used`)
-        }
-        break
-      case `restore`:
-        if (destinationIsLive || retiredOwner !== id) {
-          throw new Error(`restore route must have been retired by this row`)
-        }
-        break
-      case `merge`:
-        if (
-          !destinationIsLive ||
-          descriptor.destination.route === currentRoute
-        ) {
-          throw new Error(`merge route must be live and different`)
-        }
-        break
-      case `split`:
-        if (seenRoutes.has(destinationRoute)) {
-          throw new Error(`split destination must be unused`)
-        }
-        if (currentRouteUsers < 2) {
-          throw new Error(`split source route must be shared`)
-        }
-        break
-      case `retired`:
-        if (
-          destinationIsLive ||
-          retiredOwner === undefined ||
-          retiredOwner === id
-        ) {
-          throw new Error(`retired route must have been retired by another row`)
-        }
-        break
-    }
-
-    let step: FullRowBatchStep
-    if (descriptor.level === 0) {
-      const root = roots.get(id)
-      if (!root) throw new Error(`Missing transition root ${id}`)
-      step = {
-        level: 0,
-        changes: [
-          {
-            type: `update`,
-            value: { ...root, group: descriptor.destination.route },
-          },
-        ],
-      }
-    } else {
-      const child = levels[descriptor.level - 1]!.get(id)
-      if (!child) throw new Error(`Missing transition child ${id}`)
-      step = {
-        level: descriptor.level,
-        changes: [
-          {
-            type: `update`,
-            value:
-              descriptor.kind === `rekey`
-                ? { ...child, group: descriptor.destination.route }
-                : {
-                    ...child,
-                    parentGroup: descriptor.destination.route,
-                  },
-          },
-        ],
-      }
-    }
-    transitionStepIndexes.push(steps.length)
-    steps.push(step)
-    applyRouteLifecycleStep(step, roots, levels, seenRoutes, retiredRouteOwners)
-  }
-
-  steps.push(...trailingSteps)
-  return { depth, steps, transitionStepIndexes }
 }
 
 function expectEveryRouteTransitionVisible(
@@ -3766,11 +3149,6 @@ const minimalRekeyScenario = createVisibleRelationshipScenario({
   noise: [],
 })
 
-const transitionHistoryBranches = [
-  { idBase: 100, groupBase: 600 },
-  { idBase: 1_100, groupBase: 1_600 },
-] as const
-
 const {
   control: rekeyRouteReuseControl,
   candidate: rekeyRouteResurrectionScenario,
@@ -4007,46 +3385,6 @@ describe(`includes recompute oracle`, () => {
       )
     }
   }
-
-  fcTest(`rejects subscriber lifecycle labels on reparent transitions`, () => {
-    expect(() =>
-      createRouteLifecycleScenario({
-        depth: 3,
-        branches: transitionHistoryBranches,
-        descriptors: [
-          {
-            kind: `reparent`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `fresh`, route: 2_100 },
-          } as unknown as RouteTransitionDescriptor,
-        ],
-      }),
-    ).toThrow(/reparent transitions only support live merge destinations/)
-  })
-
-  fcTest(`scopes rekey route histories to their include level`, () => {
-    expect(() =>
-      createRouteLifecycleScenario({
-        depth: 3,
-        branches: transitionHistoryBranches,
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 1,
-            row: 0,
-            destination: { strategy: `fresh`, route: 2_100 },
-          },
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `fresh`, route: 2_100 },
-          },
-        ],
-      }),
-    ).not.toThrow()
-  })
 
   fcTest(`the sibling topology targets rows under one parent`, () => {
     const branches = transitionHistoryBranches
@@ -4545,190 +3883,6 @@ describe(`includes recompute oracle`, () => {
         ),
     )
   }
-
-  fcTest(`rejects invalid route destination strategies`, () => {
-    const branches = transitionHistoryBranches
-    const ownRoute = branches[0].groupBase + 2
-    const otherRoute = branches[1].groupBase + 2
-    const freshRoute = 2_100
-    const invalidCases: ReadonlyArray<{
-      descriptors: ReadonlyArray<RouteTransitionDescriptor>
-      message: RegExp
-    }> = [
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `fresh`, route: otherRoute },
-          },
-        ],
-        message: /fresh route must never have been used/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `restore`, route: ownRoute },
-          },
-        ],
-        message: /restore route must have been retired by this row/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `fresh`, route: freshRoute },
-          },
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 1,
-            destination: { strategy: `restore`, route: ownRoute },
-          },
-        ],
-        message: /restore route must have been retired by this row/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `merge`, route: freshRoute },
-          },
-        ],
-        message: /merge route must be live and different/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `merge`, route: ownRoute },
-          },
-        ],
-        message: /merge route must be live and different/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `split`, route: freshRoute },
-          },
-        ],
-        message: /split source route must be shared/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `merge`, route: otherRoute },
-          },
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `split`, route: ownRoute },
-          },
-        ],
-        message: /split destination must be unused/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `retired`, route: otherRoute },
-          },
-        ],
-        message: /retired route must have been retired by another row/,
-      },
-      {
-        descriptors: [
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `fresh`, route: freshRoute },
-          },
-          {
-            kind: `rekey`,
-            level: 2,
-            row: 0,
-            destination: { strategy: `retired`, route: ownRoute },
-          },
-        ],
-        message: /retired route must have been retired by another row/,
-      },
-    ]
-
-    for (const invalidCase of invalidCases) {
-      expect(() =>
-        createRouteLifecycleScenario({
-          depth: 3,
-          branches,
-          descriptors: invalidCase.descriptors,
-        }),
-      ).toThrow(invalidCase.message)
-    }
-  })
-
-  fcTest(`rejects overlapping visible relationship keys`, () => {
-    const base = {
-      depth: 4,
-      transition: `rekey`,
-      targetLevel: 1,
-      sourceBranch: 0,
-      noise: [],
-    } as const
-    const collisions: Array<{
-      branches: readonly [ConnectedBranch, ConnectedBranch]
-      rekeyGroup: number
-    }> = [
-      {
-        branches: [
-          { idBase: 100, groupBase: 600 },
-          { idBase: 102, groupBase: 1_600 },
-        ],
-        rekeyGroup: 2_100,
-      },
-      {
-        branches: [
-          { idBase: 100, groupBase: 600 },
-          { idBase: 1_100, groupBase: 602 },
-        ],
-        rekeyGroup: 2_100,
-      },
-      {
-        branches: [
-          { idBase: 100, groupBase: 600 },
-          { idBase: 1_100, groupBase: 1_600 },
-        ],
-        rekeyGroup: 603,
-      },
-    ]
-
-    for (const collision of collisions) {
-      expect(() =>
-        createVisibleRelationshipScenario({
-          ...base,
-          ...collision,
-        }),
-      ).toThrow(/overlap/)
-    }
-  })
 
   for (const materialization of [`array`, `concat`] as const) {
     fcTest(`${materialization} follows an intra-batch child hand-off`, () =>
@@ -5381,211 +4535,6 @@ describe(`includes recompute oracle`, () => {
   fcTest(`shared scalar materialization preserves the deepest row`, () =>
     expectMaterializeScenarioMatches(sharedMaterializeSeed),
   )
-
-  fcTest(`parent correlation-key update rematerializes children`, async () => {
-    const roots = createControlledCollection<RootRow>(`correlation-seed-roots`)
-    const children = createControlledCollection<ChildRow>(
-      `correlation-seed-children`,
-    )
-    const live = createLiveQueryCollection((q) =>
-      q.from({ root: roots.collection }).select(({ root }) => ({
-        id: root.id,
-        group: root.group,
-        children: toArray(
-          q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentGroup, root.group))
-            .select(({ child }) => ({ id: child.id })),
-        ),
-      })),
-    )
-
-    try {
-      await live.preload()
-      children.write(`insert`, {
-        id: 1,
-        parentGroup: 0,
-        group: 0,
-        value: 0,
-        position: 0,
-      })
-      children.write(`insert`, {
-        id: 2,
-        parentGroup: 1,
-        group: 0,
-        value: 0,
-        position: 0,
-      })
-      roots.write(`insert`, { id: 1, group: 1, value: 0, position: 0 })
-      roots.write(`update`, { id: 1, group: 0, value: 0, position: 0 })
-
-      expect(stripVirtualProperties(live.toArray)).toEqual([
-        { id: 1, group: 0, children: [{ id: 1 }] },
-      ])
-    } finally {
-      await live.cleanup()
-      await Promise.all([
-        roots.collection.cleanup(),
-        children.collection.cleanup(),
-      ])
-    }
-  })
-
-  fcTest(
-    `alpha-renaming a duplicate sibling alias preserves results`,
-    async () => {
-      const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
-        { id: 1, group: 1, value: 0, position: 0 },
-      ])
-      const issues = createControlledCollection<ChildRow>(`alias-seed-issues`, [
-        {
-          id: 10,
-          parentGroup: 1,
-          group: 10,
-          value: 10,
-          position: 0,
-        },
-        {
-          id: 11,
-          parentGroup: 1,
-          group: 11,
-          value: 99,
-          position: 1,
-        },
-      ])
-      const tags = createControlledCollection<ChildRow>(`alias-seed-tags`, [
-        {
-          id: 20,
-          parentGroup: 1,
-          group: 20,
-          value: 20,
-          position: 0,
-        },
-        {
-          id: 21,
-          parentGroup: 1,
-          group: 21,
-          value: 99,
-          position: 1,
-        },
-      ])
-
-      try {
-        const uniqueAliases = await queryOnce((q) =>
-          q.from({ root: roots.collection }).select(({ root }) => ({
-            id: root.id,
-            issues: toArray(
-              q
-                .from({ issue: issues.collection })
-                .where(({ issue }) => eq(issue.parentGroup, root.group))
-                .where(({ issue }) => eq(issue.value, 10))
-                .select(({ issue }) => ({ id: issue.id })),
-            ),
-            tags: toArray(
-              q
-                .from({ tag: tags.collection })
-                .where(({ tag }) => eq(tag.parentGroup, root.group))
-                .where(({ tag }) => eq(tag.value, 20))
-                .select(({ tag }) => ({ id: tag.id })),
-            ),
-          })),
-        )
-        const duplicateAliases = await queryOnce((q) =>
-          q.from({ root: roots.collection }).select(({ root }) => ({
-            id: root.id,
-            issues: toArray(
-              q
-                .from({ item: issues.collection })
-                .where(({ item }) => eq(item.parentGroup, root.group))
-                .where(({ item }) => eq(item.value, 10))
-                .select(({ item }) => ({ id: item.id })),
-            ),
-            tags: toArray(
-              q
-                .from({ item: tags.collection })
-                .where(({ item }) => eq(item.parentGroup, root.group))
-                .where(({ item }) => eq(item.value, 20))
-                .select(({ item }) => ({ id: item.id })),
-            ),
-          })),
-        )
-
-        const expected = [{ id: 1, issues: [{ id: 10 }], tags: [{ id: 20 }] }]
-        expect(stripVirtualProperties(uniqueAliases)).toEqual(expected)
-        expect(stripVirtualProperties(duplicateAliases)).toEqual(expected)
-      } finally {
-        await Promise.all([
-          roots.collection.cleanup(),
-          issues.collection.cleanup(),
-          tags.collection.cleanup(),
-        ])
-      }
-    },
-  )
-
-  fcTest(`optimistic child reorder matches recomputation`, async () => {
-    const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
-      { id: 1, group: 1, value: 0, position: 0 },
-    ])
-    const children = createControlledCollection<ChildRow>(
-      `order-seed-children`,
-      [
-        {
-          id: 1,
-          parentGroup: 1,
-          group: 1,
-          value: 1,
-          position: 0,
-        },
-        {
-          id: 2,
-          parentGroup: 1,
-          group: 1,
-          value: 2,
-          position: 1,
-        },
-      ],
-    )
-    const live = createLiveQueryCollection((q) =>
-      q.from({ root: roots.collection }).select(({ root }) => ({
-        id: root.id,
-        children: toArray(
-          q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentGroup, root.group))
-            .orderBy(({ child }) => child.position)
-            .select(({ child }) => ({
-              id: child.id,
-              position: child.position,
-            })),
-        ),
-      })),
-    )
-
-    const pending = new Set<PendingWork>()
-    await withPendingWorkCleanup(
-      pending,
-      [live, roots.collection, children.collection],
-      async () => {
-        await live.preload()
-        const transaction = children.collection.update([1, 2], (drafts) => {
-          drafts[0]!.position = 1
-          drafts[1]!.position = 0
-        })
-        trackPendingWork(pending, transaction, children.resolveSync)
-
-        expect(stripVirtualProperties(live.toArray)).toEqual([
-          {
-            id: 1,
-            children: [
-              { id: 2, position: 0 },
-              { id: 1, position: 1 },
-            ],
-          },
-        ])
-      },
-    )
-  })
 })
 
 /**
@@ -5764,22 +4713,6 @@ const scopedNoteRows: Array<ScopedRef> = [
   { id: 200, partId: 2, clientId: 1 },
 ]
 
-const plainSubquery: ScopedSubquery = {
-  joins: `refs`,
-  refsJoin: `left`,
-  predicates: [`subActive`],
-  predicateForm: `separate`,
-  body: `plain`,
-  subSelect: `row`,
-}
-const refsInclude: ScopedInclude = {
-  body: `plain`,
-  form: `toArray`,
-  source: `refs`,
-  clientFilter: false,
-  outerSelect: `spread`,
-}
-
 function pinnedScenario(
   shape: ScopedShape,
   aliases: ScopedAliases,
@@ -5952,64 +4885,6 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
       )
     }
   }
-
-  fcTest(`legality admits shadowing and rejects same-scope reuse`, () => {
-    const shape: ScopedShape = {
-      topology: `fromSubquery`,
-      subquery: { ...plainSubquery, joins: `refsThenNotes` },
-      include: refsInclude,
-    }
-    const legal = {
-      outer: `a`,
-      sub: `a`,
-      joined: `b`,
-      noted: `c`,
-      include: `b`,
-    }
-    expect(classifyScopedNaming(shape, legal)).toBe(`legal`)
-    expect(classifyScopedNaming(shape, { ...legal, include: `a` })).toBe(
-      `shadowing`,
-    )
-    expect(classifyScopedNaming(shape, { ...legal, noted: `b` })).toBe(
-      `sameScope`,
-    )
-    expect(
-      classifyScopedNaming(
-        { ...shape, topology: `unionBranch` },
-        { ...legal, inactive: `c` },
-      ),
-    ).toBe(`sameScope`)
-    expect(
-      classifyScopedNaming(
-        { topology: `wrapper`, wrapperJoin: `left` },
-        { wrapped: `x`, joinSub: `x`, joinSource: `y` },
-      ),
-    ).toBe(`sameScope`)
-    const nestedShape: ScopedShape = {
-      ...shape,
-      include: { ...refsInclude, body: `nestedFrom` },
-    }
-    expect(
-      classifyScopedNaming(nestedShape, {
-        ...legal,
-        include: `a`,
-        includeOuter: `c`,
-      }),
-    ).toBe(`shadowing`)
-    expect(
-      classifyScopedNaming(nestedShape, {
-        ...legal,
-        include: `c`,
-        includeOuter: `c`,
-      }),
-    ).toBe(`shadowing`)
-    expect(
-      classifyScopedNaming(
-        { topology: `unionParent`, includeSource: `refs` },
-        { activeBranch: `a`, inactiveBranch: `a`, anchor: `b`, include: `c` },
-      ),
-    ).toBe(`sameScope`)
-  })
 
   for (const { label, options } of generatedCampaigns(
     80,
