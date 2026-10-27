@@ -296,15 +296,28 @@ function buildProgram(skeleton, features) {
   const tests = oracleSkeleton.tests.map((test, index) =>
     buildRegistration(test, index, oracle, features),
   )
-  return {
-    oracle: ORACLE,
-    modules,
-    tests,
-    calls:
-      registrarFile === undefined
-        ? []
-        : [{ alias: `regAll`, file: registrarFile }],
+  const isRegistrarAlias = (alias) =>
+    registrarFile !== undefined &&
+    oracle.imports.get(alias)?.from === registrarFile
+  const calls = []
+  if (registrarFile !== undefined) {
+    calls.push({ alias: `regAll`, file: registrarFile })
   }
+  for (const test of tests) {
+    const { body } = test
+    if (
+      body.kind === `call` &&
+      body.callee.kind === `import` &&
+      isRegistrarAlias(body.callee.alias)
+    ) {
+      calls.push({
+        alias: body.callee.alias,
+        file: registrarFile,
+        test: test.title,
+      })
+    }
+  }
+  return { oracle: ORACLE, modules, tests, calls }
 }
 
 /** The prefix of a module's own function names: `ofn` in an oracle, `c0f` in c0. */
@@ -686,7 +699,10 @@ function renderModule(module, program) {
   for (const star of module.stars) push(`export * from '${specOf(star)}'`)
   if (module.role === `oracle`) {
     if (module.declares) renderDeclaration(module, push)
-    for (const call of program.calls) {
+    // A call inside a registration is rendered with that registration.
+    for (const call of program.calls.filter(
+      (entry) => entry.test === undefined,
+    )) {
       push(`${call.alias}()`, { id: call.alias })
     }
     for (const test of program.tests) {
@@ -731,11 +747,21 @@ function arrowText(refs) {
 }
 
 /** Renders one registration. The first line carries its subject. */
+// The helper that a registration calls, which names an importedRegistration report.
+function callHelper(test) {
+  return test.body.kind === `call` && test.body.callee.kind === `import`
+    ? test.body.callee.alias
+    : undefined
+}
+
 function renderTest(test, push) {
   if (test.wrapped) push(`describe('d${test.title}', () => {`)
   const text = registrationText(test)
   text.forEach((line, offset) => {
-    push(line, offset === 0 ? { id: test.title } : undefined)
+    push(
+      line,
+      offset === 0 ? { id: test.title, helper: callHelper(test) } : undefined,
+    )
   })
   if (test.wrapped) push(`})`)
 }
@@ -789,7 +815,8 @@ function keyOf(message, subjects) {
   if (id === `unitTest`) return `unit:${subject.id}`
   if (id === `undeclared`) return `undeclared:${subject.id}`
   if (id === `unknownTypeModel`) return `typeModel:${subject.id}`
-  if (id === `importedRegistration`) return `imported:${subject.id}`
+  if (id === `importedRegistration`)
+    return `imported:${subject.helper ?? subject.id}`
   return `other:${id}@${message.line}`
 }
 

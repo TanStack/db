@@ -20,6 +20,7 @@ export const registrationMembers = new Set([
   `describe`,
   `each`,
   `fails`,
+  `for`,
   `parallel`,
   `prop`,
   `sequential`,
@@ -145,8 +146,56 @@ export function registeredTest(node, sourceCode) {
   ) {
     return undefined
   }
-  const body = node.arguments
-    .slice(1)
-    .find((argument) => isFunction(argument) || argument.type === `Identifier`)
+  const body = registrationBody(node.arguments.slice(1), sourceCode)
   return body === undefined ? undefined : { body }
+}
+
+/**
+ * The argument that a registration runs. Vitest takes `(name, fn, options)` or
+ * `(name, options, fn)`, so the body is the function wherever it is. Without a
+ * function, the body is a call or member expression that yields one, then an
+ * identifier. An options object, a number, or a value that is not a function
+ * binding is never the body while another argument can be.
+ */
+function registrationBody(args, sourceCode) {
+  return (
+    args.find(isFunction) ??
+    args.find(
+      (argument) =>
+        argument.type === `Identifier` &&
+        isFunctionBinding(argument, sourceCode),
+    ) ??
+    args.find(
+      (argument) =>
+        !plainValueTypes.has(argument.type) && argument.type !== `Identifier`,
+    ) ??
+    args.find((argument) => argument.type === `Identifier`)
+  )
+}
+
+// Argument types that carry data, not behavior, so they can be options.
+const plainValueTypes = new Set([
+  `Literal`,
+  `ObjectExpression`,
+  `ArrayExpression`,
+  `TemplateLiteral`,
+])
+
+/**
+ * Whether an identifier names a function, or may. A binding that holds a plain
+ * value is not a function. An import, a parameter, or a call result may be one.
+ */
+function isFunctionBinding(identifier, sourceCode) {
+  const definition = findVariable(
+    sourceCode.getScope(identifier),
+    identifier.name,
+  )?.defs[0]
+  if (definition?.type === `FunctionName`) return true
+  if (definition?.type === `Variable`) {
+    const init = definition.node.init
+    return init !== null && !plainValueTypes.has(init.type)
+  }
+  return definition !== undefined && definition.type !== `ImportBinding`
+    ? true
+    : definition?.type === `ImportBinding`
 }

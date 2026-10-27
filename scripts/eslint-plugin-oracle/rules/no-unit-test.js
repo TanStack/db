@@ -60,15 +60,116 @@ import {
  * The rule cannot see whether a test that reaches a part also compares
  * production with hand-written values, or whether a declared part is really
  * a check or a model. Reviewers still check those.
+ *
+ * An oracle file registers only oracle tests, so it may not call an imported
+ * helper that registers tests in a file that is not oracle-named. Such a call
+ * gets an importedRegistration report: the author registers those tests from
+ * an ordinary test file. A call to an oracle-named helper is not reported,
+ * because that module's tests are linted on their own.
  */
 
 const declarationHelper = `declareOracle`
 
-/** Every `{ mtimeMs, module }` that an earlier lint parsed, by path. */
+/**
+ * Every module that an earlier lint parsed, by path, with the mtime and size
+ * it was read at. Parsing is the costly part, so a module is parsed again only
+ * when it changes. The reach that a lint computes is never kept between lints,
+ * so an edit to any module reaches the next lint: see LintSession.
+ */
 const parsedModules = new Map()
 
+/**
+ * The reach state of one lint run: the modules it loaded, the production
+ * package flags it read, and the reach search that resolves bindings.
+ */
+class LintSession {
+  modules = new Map()
+  published = new Map()
+  search = new ReachSearch()
+}
+
+/**
+ * Resolves reach through cycles. A binding or export that is still being
+ * computed reads as not reaching, which is its least fixed point. A value that
+ * consulted such an assumption above its own computation is not kept, since the
+ * assumption may not hold: it is computed again on its next read. A reaching
+ * value is always kept, because reach only comes from declared parts.
+ */
+class ReachSearch {
+  #frames = []
+  #active = new Map()
+
+  solve(cache, key, compute) {
+    const known = cache.get(key)
+    if (known !== undefined) return known
+    if (!this.#active.has(cache)) this.#active.set(cache, new Map())
+    const active = this.#active.get(cache)
+    const depth = active.get(key)
+    if (depth !== undefined) {
+      const frame = this.#frames.at(-1)
+      frame.low = Math.min(frame.low, depth)
+      return false
+    }
+    const frame = { depth: this.#frames.length, low: Infinity }
+    this.#frames.push(frame)
+    active.set(key, frame.depth)
+    let reaches
+    try {
+      reaches = compute()
+    } finally {
+      this.#frames.pop()
+      active.delete(key)
+    }
+    const caller = this.#frames.at(-1)
+    if (caller !== undefined) caller.low = Math.min(caller.low, frame.low)
+    if (reaches || frame.low >= frame.depth) cache.set(key, reaches)
+    return reaches
+  }
+}
+
+/**
+ * Whether a binding that a module imports from `source` reaches a part. A
+ * module that cannot be loaded reaches nothing.
+ */
+function importedModuleReaches(fromFile, source, name, session) {
+  const file = resolveTestModule(fromFile, source, session)
+  const module = file === undefined ? undefined : loadModule(file, session)
+  return module !== undefined && module.exportReaches(name)
+}
+
+/** Whether a function that a module imports from `source` registers a test. */
+function importedRegisters(fromFile, source, name, session, visiting) {
+  const file = resolveTestModule(fromFile, source, session)
+  const module = file === undefined ? undefined : loadModule(file, session)
+  return module !== undefined && module.registersTests(name, visiting)
+}
+
+/**
+ * The call that an oracle file makes to an imported helper which registers
+ * tests, or undefined. A helper in an oracle-named module is linted on its own.
+ */
+function importedRegistrationCall(node, file, sourceCode, session) {
+  if (node.callee.type !== `Identifier`) return undefined
+  const definition = findVariable(sourceCode.getScope(node), node.callee.name)
+    ?.defs[0]
+  if (
+    definition?.type !== `ImportBinding` ||
+    definition.node.type !== `ImportSpecifier`
+  ) {
+    return undefined
+  }
+  const source = definition.parent.source.value
+  const imported =
+    definition.node.imported.name ?? definition.node.imported.value
+  const module = resolveTestModule(file, source, session)
+  if (module === undefined || basename(module).includes(`oracle`))
+    return undefined
+  const helper = loadModule(module, session)
+  return helper?.registersTests(imported) ? node : undefined
+}
+
 /** The test module that a relative import names, or undefined. */
-function resolveTestModule(fromFile, source) {
+function resolveTestModule(fromFile, source, session) {
   if (!source.startsWith(`.`)) return undefined
   const base = resolve(dirname(fromFile), source)
   const stem = base.replace(/\.(m?js|tsx?)$/, ``)
@@ -76,34 +177,37 @@ function resolveTestModule(fromFile, source) {
     (candidate) => existsSync(candidate),
   )
   // Production declares no oracle part, so the rule does not parse it.
-  if (file === undefined || isProductionModule(file)) return undefined
+  if (file === undefined || isProductionModule(file, session)) return undefined
   return file
 }
-
-/** Whether each package directory is published, by path. */
-const publishedPackages = new Map()
 
 /**
  * Whether a file is shipped source: under `src/` in a published package. A
  * private package, such as an end-to-end suite, keeps its tests in `src/`.
  */
-function isProductionModule(file) {
+function isProductionModule(file, session) {
   for (let directory = dirname(file); ; directory = dirname(directory)) {
     const manifest = join(directory, `package.json`)
     if (existsSync(manifest)) {
-      if (!publishedPackages.has(directory)) {
+      if (!session.published.has(directory)) {
         const { private: isPrivate } = JSON.parse(
           readFileSync(manifest, `utf8`),
         )
-        publishedPackages.set(directory, isPrivate !== true)
+        session.published.set(directory, isPrivate !== true)
       }
       return (
-        publishedPackages.get(directory) &&
+        session.published.get(directory) &&
         relative(directory, file).split(sep)[0] === `src`
       )
     }
     if (dirname(directory) === directory) return false
   }
+}
+
+/** The name of an object property, whether its key is an identifier or a string. */
+function propertyName(property) {
+  if (property.computed) return stringValue(property.key)
+  return property.key.name ?? stringValue(property.key)
 }
 
 function inTypeQuery(identifier) {
@@ -124,10 +228,32 @@ function setParents(node, parent) {
   }
 }
 
-function loadModule(file) {
-  const { mtimeMs } = statSync(file)
+/**
+ * The module that a file names, for this lint. A module that cannot be read or
+ * does not parse reaches nothing. Its own lint reports the error.
+ */
+function loadModule(file, session) {
+  if (!session.modules.has(file)) {
+    let parsed
+    try {
+      parsed = parseModule(file)
+    } catch {
+      parsed = undefined
+    }
+    const module =
+      parsed === undefined
+        ? undefined
+        : new OracleModule(file, parsed.ast, parsed.scopeManager, session)
+    session.modules.set(file, module)
+  }
+  return session.modules.get(file)
+}
+
+/** The parsed AST of a module, reused while its mtime and size are unchanged. */
+function parseModule(file) {
+  const { mtimeMs, size } = statSync(file)
   const cached = parsedModules.get(file)
-  if (cached?.mtimeMs === mtimeMs) return cached.module
+  if (cached?.mtimeMs === mtimeMs && cached.size === size) return cached
   const { ast, scopeManager } = parseForESLint(readFileSync(file, `utf8`), {
     filePath: file,
     jsx: file.endsWith(`.tsx`),
@@ -136,18 +262,21 @@ function loadModule(file) {
     sourceType: `module`,
   })
   setParents(ast, null)
-  const module = new OracleModule(file, ast, scopeManager)
-  parsedModules.set(file, { mtimeMs, module })
-  return module
+  const parsed = { mtimeMs, size, ast, scopeManager }
+  parsedModules.set(file, parsed)
+  return parsed
 }
 
 class OracleModule {
-  constructor(file, ast, scopeManager) {
+  constructor(file, ast, scopeManager, session) {
     this.file = file
     this.scopeManager = scopeManager
+    this.session = session
     this.reach = new Map()
     // Reach of a binding seen from another module, which ignores parameters.
     this.exportedReach = new Map()
+    // Reach of an exported name, by name.
+    this.exportReachCache = new Map()
     // Resolved references in source order, so a node's references are one
     // contiguous range.
     this.references = scopeManager.scopes
@@ -201,7 +330,7 @@ class OracleModule {
         const value = property.value
         const parts =
           value?.type === `ArrayExpression` ? value.elements : [value]
-        if (property.key?.name === `typeModel`) {
+        if (propertyName(property) === `typeModel`) {
           for (const part of parts) {
             const name = stringValue(part)
             if (name !== undefined) this.typeModels.set(name, part)
@@ -349,18 +478,15 @@ class OracleModule {
   variableReaches(variable, local = true) {
     if (variable === undefined) return false
     if (this.declared.has(variable)) return true
-    const cache = local ? this.reach : this.exportedReach
-    const known = cache.get(variable)
-    if (known !== undefined) return known
-    // A binding that uses itself does not reach a part through that use.
-    cache.set(variable, false)
-    const reaches =
-      variable.defs.some((definition) =>
-        this.#definitionReaches(definition, local),
-      ) ||
-      (local && this.#fedByReachingValue(variable, local))
-    cache.set(variable, reaches)
-    return reaches
+    return this.session.search.solve(
+      local ? this.reach : this.exportedReach,
+      variable,
+      () =>
+        variable.defs.some((definition) =>
+          this.#definitionReaches(definition, local),
+        ) ||
+        (local && this.#fedByReachingValue(variable, local)),
+    )
   }
 
   /**
@@ -450,18 +576,79 @@ class OracleModule {
   }
 
   #importReaches(source, name) {
-    const file = resolveTestModule(this.file, source)
-    return file !== undefined && loadModule(file).exportReaches(name)
+    return importedModuleReaches(this.file, source, name, this.session)
   }
 
   /** Whether an export of this module is a declared part, or uses one. */
   exportReaches(name) {
+    return this.session.search.solve(this.exportReachCache, name, () => {
+      const entry = this.exported.get(name)
+      if (entry?.variable !== undefined)
+        return this.variableReaches(entry.variable, false)
+      if (entry !== undefined)
+        return this.#importReaches(entry.source, entry.imported)
+      return this.starSources.some((source) =>
+        this.#importReaches(source, name),
+      )
+    })
+  }
+
+  /**
+   * Whether an export of this module is a function that registers a test. A
+   * function registers a test when its body contains a registration, including
+   * inside a function it declares. A cycle of re-exports registers nothing.
+   */
+  registersTests(name, visiting = new Set()) {
+    const key = `${this.file}\0${name}`
+    if (visiting.has(key)) return false
+    visiting.add(key)
     const entry = this.exported.get(name)
-    if (entry?.variable !== undefined)
-      return this.variableReaches(entry.variable, false)
-    if (entry !== undefined)
-      return this.#importReaches(entry.source, entry.imported)
-    return this.starSources.some((source) => this.#importReaches(source, name))
+    if (entry?.variable !== undefined) {
+      const definition = entry.variable.defs[0]
+      const fn =
+        definition?.type === `FunctionName`
+          ? definition.node
+          : definition?.type === `Variable` && isFunction(definition.node.init)
+            ? definition.node.init
+            : undefined
+      return fn !== undefined && this.#bodyRegisters(fn)
+    }
+    if (entry !== undefined) {
+      return importedRegisters(
+        this.file,
+        entry.source,
+        entry.imported,
+        this.session,
+        visiting,
+      )
+    }
+    return this.starSources.some((source) =>
+      importedRegisters(this.file, source, name, this.session, visiting),
+    )
+  }
+
+  #bodyRegisters(fn) {
+    const sourceCode = { getScope: (node) => this.scopeOf(node) }
+    let found = false
+    walk(fn, (node) => {
+      if (
+        !found &&
+        node.type === `CallExpression` &&
+        registeredTest(node, sourceCode) !== undefined
+      ) {
+        found = true
+      }
+    })
+    return found
+  }
+
+  /** The innermost scope of a node, as ESLint's `getScope` finds it. */
+  scopeOf(node) {
+    for (let current = node; current; current = current.parent) {
+      const scope = this.scopeManager.acquire(current, true)
+      if (scope) return scope
+    }
+    return this.scopeManager.globalScope
   }
 
   /**
@@ -687,6 +874,7 @@ export default {
     messages: {
       unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model pin uses the declared model, and a grammar calibration uses the declared grammar.`,
       unknownTypeModel: `This typeModel name is not a type alias or interface in this file. A type model is the expected type that type-level tests compare with, so it must be declared here.`,
+      importedRegistration: `This oracle file calls a helper that registers tests. An oracle file registers only oracle tests, so register those tests from an ordinary test file and keep this file to its checks and model.`,
       undeclared: `This oracle file registers tests and declares no oracle part. Name its check, model, and grammar with \`declareOracle({ check: [...], model: [...], grammar: [...] })\` from oracle-declaration. Then move each test that reaches none of them to an ordinary test file.`,
     },
   },
@@ -695,22 +883,30 @@ export default {
     // shared oracle machinery. Their tests check that machinery, not a law.
     if (basename(context.filename).startsWith(`oracle-`)) return {}
     const { sourceCode } = context
+    const session = new LintSession()
     const module = new OracleModule(
       context.filename,
       sourceCode.ast,
       sourceCode.scopeManager,
+      session,
     )
     const unreached = []
     let anyReached = false
     return {
       CallExpression(node) {
+        if (
+          importedRegistrationCall(node, context.filename, sourceCode, session)
+        ) {
+          context.report({ node, messageId: `importedRegistration` })
+        }
         const test = registeredTest(node, sourceCode)
         if (test === undefined || isPlaceholder(test.body)) return
         // An `.each(table)` row can carry a function that the test body calls,
         // such as a hostile observation each check must reject. A function in
         // the table that uses a declared part makes the test use it. Plain
         // data, such as the grammar's cells, does not: the body must use them.
-        const table = calleeCall(node.callee, `each`)
+        const table =
+          calleeCall(node.callee, `each`) ?? calleeCall(node.callee, `for`)
         const reaches =
           module.propRegistrationGenerates(node, test.body, sourceCode) ||
           (table !== undefined && tableFunctionReaches(module, table)) ||

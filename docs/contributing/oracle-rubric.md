@@ -420,6 +420,12 @@ ordinary test file beside the oracle. The `oracle/no-unit-test` lint rule
 reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are
 the shared oracle machinery and declare no parts.
 
+An oracle file also registers no test through a helper from an ordinary module.
+The rule reports a call to such a helper, because the helper's tests then appear
+under the oracle file. The ordinary runner registers those tests, and passes the
+shared suite a registrar when the suite needs one. A helper from an oracle-named
+module is linted on its own, so the rule does not report a call to it.
+
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
 files. Fixed regressions replay the shared law; supplemental examples live in
 ordinary test files.
