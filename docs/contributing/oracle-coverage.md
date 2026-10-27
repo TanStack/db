@@ -2938,9 +2938,11 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       source stops for good (an error that `onError` does not retry, the SDK
       giving up, a signal abort, cleanup, or resume invalidation), and how
       the application recovers it (restart in the page, or reload). It
-      judges every tab's status and rows once every source has delivered or
-      stopped, again after recovery, and the full-snapshot request after
-      resume invalidation. Its 290 storm cells pass. Every ordinary storm
+      judges every tab's status once every source has delivered or stopped,
+      and again after recovery. Eager cells also compare rows at both
+      checkpoints, except the stopped tab's rows before recovery after
+      cleanup or resume invalidation. It also judges the full-snapshot
+      request after resume invalidation. Its 290 storm cells pass. Every ordinary storm
       cell fails on `5649a07d4`. Removing Electric's abandon on the `onError`,
       give-up, or signal-abort path fails 12 cells each. Two abandon mutants
       survive here: cleanup's, because the persisted wrapper ends its
