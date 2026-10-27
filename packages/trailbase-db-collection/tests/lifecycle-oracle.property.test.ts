@@ -1,10 +1,23 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  declareOracle,
+  oraclePropertyOptions,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
+import {
+  deferred,
+  failure,
+  invalidValue,
+  observe,
+  source,
+  turn,
+} from './lifecycle-support'
 import type { Event, ListResponse } from 'trailbase'
+import type { Row } from './lifecycle-support'
 
 /**
  * # Does a TrailBase sync run publish and retire one valid row history?
@@ -25,7 +38,6 @@ import type { Event, ListResponse } from 'trailbase'
  * the boundary intentionally left to service-backed tests.
  */
 
-type Row = { id: number; value: number }
 type Change = { operation: `set` | `delete`; id: number; value: number }
 type Ending =
   `close` | `buffered-close` | `read-error` | `parse-error` | `cleanup`
@@ -49,65 +61,6 @@ type SyncRunPlan =
 type Scenario = {
   mode: `eager` | `on-demand`
   syncRuns: Array<SyncRunPlan>
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes
-    reject = no
-  })
-  // Every adapter promise is observed even when its sync run is abandoned.
-  void promise.catch(() => undefined)
-  return { promise, resolve, reject }
-}
-
-function observe(promise: Promise<unknown>) {
-  let result: `pending` | `fulfilled` | `rejected` = `pending`
-  let error: unknown
-  void promise.then(
-    () => {
-      result = `fulfilled`
-    },
-    (failure: unknown) => {
-      result = `rejected`
-      error = failure
-    },
-  )
-  return {
-    get result() {
-      return result
-    },
-    get error() {
-      return error
-    },
-  }
-}
-
-// All adapter I/O is gated. One host turn drains native stream microtasks and
-// exposes detached rejections; it does not stand in for a network completion.
-const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-const failure = new Error(`oracle stream failure`)
-const invalidValue = -10_000
-
-function source() {
-  let controller!: ReadableStreamDefaultController<Event>
-  const cancel = vi.fn((): void | Promise<void> => {})
-  const stream = new ReadableStream<Event>({
-    start(value) {
-      controller = value
-    },
-    cancel,
-  })
-  return {
-    stream,
-    cancel,
-    controller,
-    subscription: deferred<ReadableStream<Event>>(),
-    list: deferred<ListResponse<Row>>(),
-    listCalls: 0,
-  }
 }
 
 /**
@@ -476,91 +429,6 @@ const corpus: Array<{
     syncRuns: [{ kind }, live(`close`)],
   })),
 ]
-it.each([`resolve`, `reject`] as const)(
-  `rejects startup before stream cancellation can %s`,
-  async (cancellation) => {
-    const reports: Array<Array<unknown>> = []
-    const unhandled: Array<unknown> = []
-    const failures: Array<unknown> = []
-    const onUnhandled = (error: unknown) => unhandled.push(error)
-    const reported = vi
-      .spyOn(console, `error`)
-      .mockImplementation((...args) => {
-        reports.push(args)
-      })
-    process.on(`unhandledRejection`, onUnhandled)
-    const active = source()
-    const cancelled = deferred<void>()
-    active.cancel.mockImplementation(() => cancelled.promise)
-    const api = new MockRecordApi<Row>()
-    api.subscribe.mockResolvedValue(active.stream)
-    api.list.mockImplementation(() => active.list.promise)
-    const collection = createCollection(
-      trailBaseCollectionOptions({
-        recordApi: api,
-        getKey: (row: Row) => row.id,
-        syncMode: `eager`,
-        parse: {
-          value: () => {
-            throw failure
-          },
-        },
-        serialize: {},
-      }),
-    )
-    const preload = observe(collection.preload())
-    try {
-      await turn()
-      expect(api.list).toHaveBeenCalledOnce()
-      active.controller.enqueue({ Insert: { id: 1, value: invalidValue } })
-      await turn()
-      expect(active.cancel).toHaveBeenCalledOnce()
-      // Cleanup I/O is still pending, but it cannot postpone the load error.
-      expect(preload.result).toBe(`rejected`)
-      expect(preload.error).toBe(failure)
-      expect(collection.status).toBe(`error`)
-      active.list.resolve({ records: [] })
-      await turn()
-      expect(preload.result).toBe(`rejected`)
-      expect(collection.status).toBe(`error`)
-    } catch (error) {
-      failures.push(error)
-    } finally {
-      if (cancellation === `resolve`) cancelled.resolve()
-      else cancelled.reject(new Error(`cancel failure`))
-      active.list.resolve({ records: [] })
-      try {
-        await collection.cleanup()
-      } catch (error) {
-        failures.push(error)
-      }
-      await turn()
-      try {
-        // Observe the final cancellation/list continuations before restoring
-        // either recorder. Loading failure is reported through preload, not
-        // console.error, and canceled transport errors must stay observed.
-        expect(reports).toEqual([])
-        expect(unhandled).toEqual([])
-        expect(preload.result).toBe(`rejected`)
-        expect(preload.error).toBe(failure)
-        expect(active.stream.locked).toBe(false)
-        expect(active.cancel).toHaveBeenCalledOnce()
-        expect(collection.status).toBe(`cleaned-up`)
-      } catch (error) {
-        failures.push(error)
-      } finally {
-        process.off(`unhandledRejection`, onUnhandled)
-        reported.mockRestore()
-      }
-    }
-    if (failures.length === 1) throw failures[0]
-    if (failures.length > 1)
-      throw new AggregateError(failures, `Startup and cleanup checks failed`, {
-        cause: failures[0],
-      })
-  },
-)
-
 it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
@@ -1174,66 +1042,66 @@ it.each(heldPlans)(
  * Checkpoints: after the stream ends, after the service change, and after the
  * later load. Each compares rows, status, and subscribe calls.
  */
+async function checkStreamEnd(ending: `close` | `read-error`) {
+  const service = new Map(raceServiceRows.map((row) => [row.id, row]))
+  let controller!: ReadableStreamDefaultController<Event>
+  const stream = new ReadableStream<Event>({
+    start(value) {
+      controller = value
+    },
+  })
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() => Promise.resolve(stream))
+  api.list.mockImplementation(() =>
+    Promise.resolve({ records: [...service.values()] }),
+  )
+  const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  const rows = () => sortedRows(collection.toArray)
+
+  try {
+    await turn()
+    await collection._sync.loadSubset({})
+    await turn()
+    const established = sortedRows(service.values())
+    expect(rows(), `${ending} first page`).toEqual(established)
+
+    if (ending === `close`) controller.close()
+    else controller.error(failure)
+    await turn()
+    expect(collection.status, `${ending} status after the end`).toBe(`ready`)
+    expect(rows(), `${ending} rows after the end`).toEqual(established)
+
+    service.set(1, { id: 1, data: `v2` })
+    await turn()
+    expect(rows(), `${ending} a later change is not delivered`).toEqual(
+      established,
+    )
+
+    await collection._sync.loadSubset({ limit: 10 } as never)
+    await turn()
+    expect(api.subscribe, `${ending} subscribe calls`).toHaveBeenCalledTimes(1)
+    expect(rows(), `${ending} a later load lists current rows`).toEqual(
+      sortedRows(service.values()),
+    )
+  } finally {
+    await collection.cleanup()
+    reported.mockRestore()
+  }
+}
+
 it.each([`close`, `read-error`] as const)(
   `keeps rows and does not resubscribe after the stream ends: %s`,
-  async (ending) => {
-    const service = new Map(raceServiceRows.map((row) => [row.id, row]))
-    let controller!: ReadableStreamDefaultController<Event>
-    const stream = new ReadableStream<Event>({
-      start(value) {
-        controller = value
-      },
-    })
-    const api = new MockRecordApi<RaceRow>()
-    api.subscribe.mockImplementation(() => Promise.resolve(stream))
-    api.list.mockImplementation(() =>
-      Promise.resolve({ records: [...service.values()] }),
-    )
-    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const collection = createCollection(
-      trailBaseCollectionOptions({
-        recordApi: api,
-        getKey: (row: RaceRow) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        parse: {},
-        serialize: {},
-      }),
-    )
-    const rows = () => sortedRows(collection.toArray)
-
-    try {
-      await turn()
-      await collection._sync.loadSubset({})
-      await turn()
-      const established = sortedRows(service.values())
-      expect(rows(), `${ending} first page`).toEqual(established)
-
-      if (ending === `close`) controller.close()
-      else controller.error(failure)
-      await turn()
-      expect(collection.status, `${ending} status after the end`).toBe(`ready`)
-      expect(rows(), `${ending} rows after the end`).toEqual(established)
-
-      service.set(1, { id: 1, data: `v2` })
-      await turn()
-      expect(rows(), `${ending} a later change is not delivered`).toEqual(
-        established,
-      )
-
-      await collection._sync.loadSubset({ limit: 10 } as never)
-      await turn()
-      expect(api.subscribe, `${ending} subscribe calls`).toHaveBeenCalledTimes(
-        1,
-      )
-      expect(rows(), `${ending} a later load lists current rows`).toEqual(
-        sortedRows(service.values()),
-      )
-    } finally {
-      await collection.cleanup()
-      reported.mockRestore()
-    }
-  },
+  (ending) => checkStreamEnd(ending),
 )
 
 /**
@@ -1597,7 +1465,7 @@ fcTest.prop(
  * clock makes the old run's event and the new run's list call share a
  * millisecond, the case a wall-clock fence cannot order.
  */
-it(`loads a row in a fresh run that an earlier run's event touched`, async () => {
+async function checkFreshRunAfterEvent() {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
   const streams: Array<WritableStreamDefaultWriter<Event>> = []
   const api = new MockRecordApi<RaceRow>()
@@ -1646,4 +1514,20 @@ it(`loads a row in a fresh run that an earlier run's event touched`, async () =>
     for (const writer of streams) void writer.close().catch(() => undefined)
     await turn()
   }
+}
+
+it(`loads a row in a fresh run that an earlier run's event touched`, () =>
+  checkFreshRunAfterEvent())
+
+declareOracle({
+  check: [
+    checkLifecycle,
+    checkEarlyDemand,
+    checkPageEventRace,
+    checkHeldPage,
+    checkStreamEnd,
+    checkPageHistory,
+    checkFreshRunAfterEvent,
+  ],
+  model: [expectedEarlyDemand],
 })
