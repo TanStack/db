@@ -14,6 +14,7 @@ import {
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import { deepEquals, isTemporal } from '../../utils.js'
+import { normalizedKey } from '../../utils/comparison.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -95,13 +96,20 @@ function createPublicGroupKey(values: Array<unknown>): unknown {
   const identities = values.map(getEqualityValueIdentity)
   if (identities.length === 1) {
     const identity = identities[0]
+    if (typeof identity === `string` || typeof identity === `number`) {
+      return identity
+    }
+    // Collection keys are strings or numbers. Another primitive group value,
+    // such as `null`, `undefined`, or a boolean, keys its group in the
+    // namespace that `normalizeValue` reserves. No string group value
+    // occupies that namespace, so the key cannot collide with one.
     if (
       identity == null ||
       (typeof identity !== `object` &&
         typeof identity !== `function` &&
         typeof identity !== `symbol`)
     ) {
-      return identity
+      return normalizedKey(typeof identity, String(identity))
     }
   }
   return serializeValue(identities)

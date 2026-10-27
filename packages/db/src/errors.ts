@@ -207,11 +207,16 @@ export class CollectionOperationError extends TanStackDBError {
   }
 }
 
+// Development messages show a bigint key or field instead of failing to
+// serialize it.
+const showBigint = (_key: string, value: unknown) =>
+  typeof value === `bigint` ? `${value}n` : value
+
 export class UndefinedKeyError extends CollectionOperationError {
   constructor(item: any) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `An object was created without a defined key: ${JSON.stringify(item)}`
+        ? `An object was created without a defined key: ${JSON.stringify(item, showBigint)}`
         : codedMessage(14, { item }),
     )
   }
@@ -221,7 +226,7 @@ export class InvalidKeyError extends CollectionOperationError {
   constructor(key: unknown, item: unknown) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key)}. Item: ${JSON.stringify(item)}`
+        ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key, showBigint)}. Item: ${JSON.stringify(item, showBigint)}`
         : codedMessage(15, { key, type: key === null ? `null` : typeof key }),
     )
   }

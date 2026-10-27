@@ -136,7 +136,6 @@
   "leases": "cw",
   "pendingActivity": "cx",
   "reconcileStalePublishedChanges": "cy",
-  "runtimeKeyCount": "cz",
   "trackTruncateReplayParticipant": "cB",
   "_changes": "cC",
   "canCompleteInitialLoad": "cD",
@@ -220,7 +219,6 @@
   "filterAndFlipChanges": "d0",
   "getPreloadError": "d1",
   "graphCache": "d3",
-  "orderDirty": "d4",
   "recordRequestFailure": "d5",
   "refreshDetachedState": "d6",
   "releaseDemandAt": "d7",
@@ -413,5 +411,7 @@
   "ssrQueryWaiters": "bL",
   "includesRuntimeCache": "ch",
   "failSsrQueryWaiters": "cA",
-  "gcGraceUntil": "aP"
+  "gcGraceUntil": "aP",
+  "dirtyKeys": "bT",
+  "unplace": "cz"
 }
