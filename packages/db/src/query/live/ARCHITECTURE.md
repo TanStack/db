@@ -1012,14 +1012,11 @@ of the page's current end: the refetch re-read that tie, so every row that ties
 with the end is installed. A row that another request installed proves
 nothing. Neither does a tie that the loader read for an older end, because a
 refetch can move the end earlier, so a row the provider never sent can tie
-with the new end. When the end moved, the loader reads only the new end's tie
-on the next pass: the refetched page holds every row before the end, so that
-tie completes the proof without a repair. It then releases the older tie,
-whose rows sort after the end and outside the window, and the deletes that
-release causes are not an order change. A loader that already owes a repair,
-has other work in flight, or has an end that no cursor can express repairs
-instead: reading that end's tie would take the boundary's full-source
-fallback, while the repair's bounded prefix can prove the window. A window that needs a row
+with the new end. When the end moved, the loader repairs. (Reading only the
+new end's tie would also complete the proof, since the refetched page holds
+every row before the end, and saves one request; the bounded repair is kept
+because that read cost shipped bytes for one saved request per such
+refetch.) A window that needs a row
 past the page, such as one whose page
 holds rows a joined filter rejects, still repairs. So does any loader while
 its source holds accepted sync rows back, as behind a persisting optimistic

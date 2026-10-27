@@ -10,7 +10,7 @@ A source whose `loadSubset` throws instead of returning a rejected promise now f
 
 An aborted subset request that a source rejects with `AbortError`, as the source contract asks, no longer ends a live query. A truncate replay or newer demand decides that request instead.
 
-Some sources refetch and then report that their pages shifted. An ordered window over such a source no longer skips a row tied with the refetched first page's new end. When the report shows that the page's end moved, the window reads the new end's tie group. It no longer trusts a row that an older tie request installed.
+Some sources refetch and then report that their pages shifted. An ordered window over such a source no longer skips a row tied with the refetched first page's new end. When the report shows that the page's end moved, the window repairs its first page. It no longer trusts a row that an older tie request installed.
 
 A window move made while a truncate replay holds a live query's results now applies after that replay, even when a newer truncate discards it. Before, the move could reject, and an older move's window stayed.
 

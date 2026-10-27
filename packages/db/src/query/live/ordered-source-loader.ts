@@ -90,15 +90,11 @@ export class OrderedSourceLoader {
   private work: AuthoritativeWork = { kind: `idle` }
   // Keep callbacks, not copied requests or rows. Successful full-source work
   // subsumes these logical owners; unfinished transports remain observed.
-  // Each records its prefix count, for a repair's own acquisitions the epoch
-  // of the repair chain it belongs to, and for a tie request its boundary row.
+  // Each records its prefix count and, for a repair's own acquisitions, the
+  // epoch of the repair chain it belongs to.
   private settledFiniteAcquisitions = new Map<
     ReleaseLoadSubset,
-    {
-      count: number | undefined
-      chain: number | undefined
-      tie: Record<string, unknown> | undefined
-    }
+    { count: number | undefined; chain: number | undefined }
   >()
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
@@ -685,77 +681,22 @@ export class OrderedSourceLoader {
   revalidateLoadedCoverage(): void {
     // A `requiresFullSource` plan's coverage is its full-source read: nothing
     // has settled before it. Coverage that one full-source read completed
-    // holds the work slot, so the end's tie below defers to it, and an
-    // ordering invalidation owes it nothing.
+    // owes an ordering invalidation nothing, so it reads nothing below.
     if (!this.hasSettledSourceRequest) return
     const end = this.ownPrefixEnd()
-    if (end === undefined) {
-      this.invalidateSourceOrdering()
-      return
-    }
     // An installed row past the page proves the source's next row only when
     // the page read it, or when it ties with an end whose tie the loader
-    // read. A refetch can move the end before that tie; reading the new
-    // end's tie then proves the window. An `undefined` end also matches a
+    // read. A refetch can move the end before that tie, and then the bounded
+    // repair proves the window again. An `undefined` end also matches a
     // loader that attempted no tie. No cursor expresses a nullish end, so the
     // loader has started or will start a full-source read, which covers it.
     if (
-      (this.ownPrefixCount ?? 0) > this.info.offset + this.info.limit ||
-      Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary)
+      end !== undefined &&
+      ((this.ownPrefixCount ?? 0) > this.info.offset + this.info.limit ||
+        Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary))
     )
       return
-    this.loadMovedEndTie(end)
-  }
-
-  // The refetched page still holds every row before its end, so the end's
-  // tie completes the proof without a repair. The older tie's rows sort
-  // after the end and outside the window, and they prove nothing now.
-  private loadMovedEndTie(end: Record<string, unknown>): void {
-    // Other work owns the boundary, a repair is already owed, or a replay
-    // owns the leases, so the repair reads it. A staged continuation is
-    // replaced: the window needs no more rows, and a staged repair step owes
-    // a repair. No cursor can express some ends' ties; reading one would
-    // take the boundary's full-source fallback, while the repair's bounded
-    // prefix can prove the window without it.
-    if (
-      !canExpressCursorOrder(
-        normalizeOrderByPaths(this.info.orderBy, this.alias).slice(0, 1),
-        [this.info.valueExtractorForRawRow(end)],
-      ) ||
-      this.debt !== `none` ||
-      this.work.kind !== `idle` ||
-      this.pending ||
-      this.subscription.hasPendingTruncateReplacement
-    ) {
-      this.invalidateSourceOrdering()
-      return
-    }
-    const orderedLoadGeneration = this.orderedLoadGeneration
-    // The release can delete rows only the older tie held. Those deletes
-    // leave rows past the end, so they are not an order change.
-    this.retiringSupersededAcquisitions = true
-    try {
-      this.releaseOwned(
-        this.settledFiniteAcquisitions,
-        (_, { tie }) => tie !== undefined && this.info.comparator(tie, end) > 0,
-      )
-    } finally {
-      this.retiringSupersededAcquisitions = false
-    }
-    // A release that resets the cursor, or disposes the loader, hands the
-    // window to the replay or ends it.
-    if (orderedLoadGeneration !== this.orderedLoadGeneration) return
-    this.settledSourceBoundary = end
-    // The pass that follows the report reads the tie, as a repair's first
-    // request would start then, so a start that throws fails that pass.
-    this.stagedContinuation = {
-      orderedLoadGeneration,
-      authorityGeneration: this.authorityGeneration,
-      orderingInvalidationGeneration: this.orderingInvalidationGeneration,
-      role: `finite`,
-      kind: `boundary`,
-      continuesOrderedPrefixRepair: false,
-    }
+    this.invalidateSourceOrdering()
   }
 
   // The refetched first page holds every row from the start of the order
@@ -1102,7 +1043,6 @@ export class OrderedSourceLoader {
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const isOrderedRepair = kind === `ordered-repair`
-    const tie = kind === `boundary` ? this.settledSourceBoundary : undefined
     const isAuthoritativeRequest =
       isFullSource || isOrderedRepair || continuesOrderedPrefixRepair
     let observed:
@@ -1219,7 +1159,6 @@ export class OrderedSourceLoader {
               this.settledFiniteAcquisitions.set(release, {
                 count: prefixCount,
                 chain,
-                tie,
               })
               // Full-source coverage also retires a repair request that
               // settles after it.

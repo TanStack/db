@@ -1307,12 +1307,14 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // The ordinary insert into a top-N list. The page's end moves earlier, so
   // Query DB reports, but every window row is in the window's own first page.
   // The tie the loader read belongs to the old end, so its rows prove
-  // nothing about rows that tie with the new end. The refetch sends the
-  // Queries it refetches and one tie request for the new end, with no
-  // repair. The loader releases the old end's tie, so the Query count stays
-  // the same and later refetches do not re-run a tie that proves nothing.
+  // nothing about rows that tie with the new end, and the loader repairs:
+  // the refetch sends the Queries it refetches, then the bounded repair's
+  // ordered prefix and the new end's tie, and nothing unbounded. The repair
+  // retires the requests it replaces, so the Query count stays the same.
+  // (Maintainer decision: the repair replaces a cheaper tie-only read, which
+  // cost shipped bytes for one saved request per such refetch.)
   it.each([1, 2] as const)(
-    `a refetch of a window inside its first page starts no repair (%i order terms)`,
+    `a refetch that moves a first page's end repairs with a bounded prefix and the new end's tie (%i order terms)`,
     async (terms) => {
       const scenario: Scenario = {
         encoding: `cursor`,
@@ -1340,11 +1342,16 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           expectedWindow(run.backend, run.markers, scenario),
         )
         const extra = run.requests.slice(requestsBefore + queries)
-        expect(extra).toHaveLength(1)
-        // A tie request reads equal leading values, with no order or cursor.
-        expect(extra[0]!.orderBy).toBeUndefined()
+        expect(extra).toHaveLength(2)
+        // The repair's prefix reads the window's rows from the start of the
+        // order, bounded by the window, with no cursor.
+        expect(extra[0]!.orderBy).toBeDefined()
+        expect(extra[0]!.limit).toBe(scenario.offset + scenario.limit)
         expect(extra[0]!.cursor).toBeUndefined()
-        expect(extra[0]!.where).toBeDefined()
+        // A tie request reads equal leading values, with no order or cursor.
+        expect(extra[1]!.orderBy).toBeUndefined()
+        expect(extra[1]!.cursor).toBeUndefined()
+        expect(extra[1]!.where).toBeDefined()
         expect(run.activeQueries()).toBe(activeBefore)
       } catch (error) {
         primary = error

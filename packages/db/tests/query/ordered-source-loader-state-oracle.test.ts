@@ -2220,8 +2220,7 @@ type AuthorityObservation = {
   ignoredReportsOverFallback: number
   repairedReportsOnOwnPage: number
   // Reports after a refetch moved the page's end, while a repair was owed,
-  // while authoritative work was in flight, and reports whose release of an
-  // older tie truncated or disposed the loader.
+  // and while authoritative work was in flight.
   movedEndReports: number
   // Reports whose own first page read past a window that then shrank, and
   // reports to a disposed loader.
@@ -2229,12 +2228,8 @@ type AuthorityObservation = {
   reportsAfterDispose: number
   // Reports whose page's end, moved by a head insert, has no cursor.
   unexpressibleEndReports: number
-  // First finite requests after a report's release truncated the loader,
-  // which the reset law judges.
-  resetsAfterReportRelease: number
   reportsOwingRepair: number
   reportsDuringWork: number
-  reportReleasesEndingLoader: number
   truncates: number
   replayFailures: number
   optimisticDepartures: number
@@ -2328,8 +2323,6 @@ async function checkAuthorityCase(
   let releaseViolation: string | undefined
   let unexpressibleTieViolation: string | undefined
   let resetViolation: string | undefined
-  // The truncate count after a report's release truncated the loader.
-  let truncatedByReport = -1
   // A disposed loader owns nothing: it issues no request and releases no
   // lease, even as requests it issued earlier settle.
   let disposed = false
@@ -2423,18 +2416,6 @@ async function checkAuthorityCase(
       )
     ) {
       resetViolation ??= `request ${request.index}, the first finite request after a truncate, continued from a cursor`
-    }
-    if (
-      truncatedByReport === truncates &&
-      !fullSource &&
-      ledger.every(
-        (other) =>
-          other === request ||
-          other.fullSource ||
-          other.issuedTruncates !== truncates,
-      )
-    ) {
-      resetsAfterReportRelease++
     }
     const tie = tieValue(options)
     if (typeof tie === `number` && !Number.isFinite(tie)) {
@@ -2689,10 +2670,8 @@ async function checkAuthorityCase(
   let reportsPastWindow = 0
   let reportsAfterDispose = 0
   let unexpressibleEndReports = 0
-  let resetsAfterReportRelease = 0
   let reportsOwingRepair = 0
   let reportsDuringWork = 0
-  let reportReleasesEndingLoader = 0
   // Steps that settle a request successfully, run a pass, report, or change
   // joined work. None of them owes a repair.
   const quietCommand = (command: AuthorityCommand) =>
@@ -3096,19 +3075,7 @@ async function checkAuthorityCase(
             reportsDuringWork++
           }
           const before = ledger.length
-          const releasedBefore = ledger.filter(({ released }) => released)
-          const truncatesBefore = truncates
           loader.revalidateLoadedCoverage()
-          if (truncates > truncatesBefore) truncatedByReport = truncates
-          if (
-            (testCase.releaseTruncates || testCase.releaseDisposes) &&
-            ledger.some(
-              (request) =>
-                request.released && !releasedBefore.includes(request),
-            )
-          ) {
-            reportReleasesEndingLoader++
-          }
           if (command.react) graphPass()
           await flush()
           // A report while a repair is owed repairs instead: no tie or page
@@ -3532,10 +3499,8 @@ async function checkAuthorityCase(
     reportsPastWindow,
     reportsAfterDispose,
     unexpressibleEndReports,
-    resetsAfterReportRelease,
     reportsOwingRepair,
     reportsDuringWork,
-    reportReleasesEndingLoader,
     truncates,
     replayFailures,
     optimisticDepartures,
@@ -4168,27 +4133,21 @@ describe(`Ordered source request authority`, () => {
   //   repair is owed;
   // - an invalidation that starts its repair, then a report while that
   //   repair is in flight;
-  // - the moved-end prefix again with a release callback that truncates or
-  //   disposes the loader, so releasing the older tie ends the loader;
   // - a two-row window whose first page and tie settle, then shrinks to one
   //   row before a report: the page read past the window, which proves it;
   // - the moved-end prefix with the loader disposed before the report, which
   //   the dispose law then judges;
   // - the moved-end prefix with a `-Infinity` head row, so no cursor can
   //   express the page's new end;
-  // - the moved-end prefix whose release of the older tie truncates the
-  //   loader, then a window that grows, which needs a page after the reset;
   // - a one-row window whose page and tie settle, then a `-Infinity` head
   //   row and an invalidation: the repair's boundary has no cursor, so it
   //   falls back to a full-source read, and a report follows over it;
   // - a plan that reads only the full source, then a report over it.
   // A release that truncates or disposes would end the quiet history, so
-  // only the fifth prefix allows one.
+  // no prefix allows one.
   const unprovenReportProperty = `ordered-loader.unproven-report`
   const reportPrefixes: Array<{
     history: Array<AuthorityCommand>
-    endsLoader?: boolean
-    truncatesLoader?: boolean
     fullSource?: boolean
     narrow?: boolean
     wide?: boolean
@@ -4228,15 +4187,6 @@ describe(`Ordered source request authority`, () => {
       history: [
         { type: `settle`, pick: 0, ok: true },
         { type: `settle`, pick: 0, ok: true },
-        { type: `headInsert` },
-        { type: `report`, react: true },
-      ],
-      endsLoader: true,
-    },
-    {
-      history: [
-        { type: `settle`, pick: 0, ok: true },
-        { type: `settle`, pick: 0, ok: true },
         { type: `move`, delta: -1 },
         { type: `report`, react: true },
       ],
@@ -4265,16 +4215,6 @@ describe(`Ordered source request authority`, () => {
       history: [
         { type: `settle`, pick: 0, ok: true },
         { type: `settle`, pick: 0, ok: true },
-        { type: `headInsert` },
-        { type: `report`, react: true },
-        { type: `move`, delta: 1 },
-      ],
-      truncatesLoader: true,
-    },
-    {
-      history: [
-        { type: `settle`, pick: 0, ok: true },
-        { type: `settle`, pick: 0, ok: true },
         { type: `headInsert`, unexpressible: true },
         { type: `invalidate`, react: true },
         { type: `settleNewest` },
@@ -4290,10 +4230,9 @@ describe(`Ordered source request authority`, () => {
     .tuple(
       authorityCaseArbitrary,
       fc.constantFrom(...reportPrefixes),
-      fc.boolean(),
       fc.array(authorityCommand, { maxLength: 8 }),
     )
-    .map(([testCase, prefix, truncates, rest]) => ({
+    .map(([testCase, prefix, rest]) => ({
       ...testCase,
       settledFirst: true,
       requiresFullSource: prefix.fullSource === true,
@@ -4301,10 +4240,8 @@ describe(`Ordered source request authority`, () => {
       ...(prefix.narrow ? { limit: 1 as const, offset: 0 as const } : {}),
       snapshotRows: 3,
       needsMore: false,
-      releaseTruncates:
-        prefix.truncatesLoader === true ||
-        (prefix.endsLoader === true && truncates),
-      releaseDisposes: prefix.endsLoader === true && !truncates,
+      releaseTruncates: false,
+      releaseDisposes: false,
       history: [...prefix.history, ...rest],
     }))
   const unprovenReportCampaigns =
@@ -4327,10 +4264,8 @@ describe(`Ordered source request authority`, () => {
         `reportsPastWindow`,
         `reportsAfterDispose`,
         `unexpressibleEndReports`,
-        `resetsAfterReportRelease`,
         `reportsOwingRepair`,
         `reportsDuringWork`,
-        `reportReleasesEndingLoader`,
       ] as const
       const reach = createOracleReach(unprovenReportProperty, reportStates, {
         minimum: 20,
