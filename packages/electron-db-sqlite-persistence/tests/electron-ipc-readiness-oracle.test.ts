@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
+import { declareOracle } from '../../db/tests/oracle-config.js'
 import {
   IR,
   createCollection,
@@ -386,13 +387,26 @@ async function observeIpcReadinessHistory(
   return observed
 }
 
+// The law of initial readiness: the observed checkpoints of each composed load
+// equal the model's prediction for that history.
+async function compareIpcReadinessHistory(
+  history: IpcReadinessHistory,
+): Promise<void> {
+  expect(await observeIpcReadinessHistory(history)).toEqual(
+    expectedCheckpoints(history),
+  )
+}
+
+declareOracle({
+  check: [compareIpcReadinessHistory],
+  model: [expectedCheckpoints],
+})
+
 describe(`Electron renderer initial readiness follows the composed load`, () => {
   it.each(ipcReadinessHistories)(
     `matches the model: $renderer renderer, hydration $hydration, then $next`,
     async (history) => {
-      expect(await observeIpcReadinessHistory(history)).toEqual(
-        expectedCheckpoints(history),
-      )
+      await compareIpcReadinessHistory(history)
     },
     historyTimeout,
   )
@@ -603,6 +617,21 @@ async function observeCoordinatedRendererHistory(
   }
 }
 
+// The law of follower settlement: the observed follower checkpoints equal the
+// model's prediction for each apply outcome and consumer.
+async function compareCoordinatedRendererHistory(
+  history: CoordinatedRendererHistory,
+): Promise<void> {
+  expect(await observeCoordinatedRendererHistory(history)).toEqual(
+    expectedCoordinatedRenderer(history),
+  )
+}
+
+declareOracle({
+  check: [compareCoordinatedRendererHistory],
+  model: [expectedCoordinatedRenderer],
+})
+
 describe(`Electron follower renderer settles with its owner's rows`, () => {
   it.each(
     ([`ok`, `fails`] as const).flatMap((apply) =>
@@ -614,9 +643,7 @@ describe(`Electron follower renderer settles with its owner's rows`, () => {
   )(
     `matches the model: apply $apply, consumer $consumer`,
     async (history) => {
-      expect(await observeCoordinatedRendererHistory(history)).toEqual(
-        expectedCoordinatedRenderer(history),
-      )
+      await compareCoordinatedRendererHistory(history)
     },
     isElectronFullE2EEnabled() ? 180_000 : 20_000,
   )
