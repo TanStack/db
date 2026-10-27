@@ -683,7 +683,8 @@ type OraclePart =
  * Names the parts of an oracle that this module defines: its check, which
  * compares production observations with the model or with a second
  * formulation; its model; and its history grammar, the generators that
- * produce legal histories. Each is optional: a differential or metamorphic
+ * produce legal histories. A type-level oracle names its model types in
+ * `typeModel`. Each is optional: a differential or metamorphic
  * oracle has no model, and a companion module can hold only one part.
  *
  * Every test in an oracle file must use a declared part, directly or through
@@ -697,6 +698,9 @@ export function declareOracle(_parts: {
   model?: ReadonlyArray<OraclePart>
   // A grammar part is often a fast-check arbitrary, not a function.
   grammar?: ReadonlyArray<object>
+  // A type-level oracle's model is a type, which has no value to pass, so it
+  // is named: each name is a type alias or interface in the same file.
+  typeModel?: ReadonlyArray<string>
 }): void {}
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */

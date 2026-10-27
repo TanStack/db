@@ -388,6 +388,10 @@ or through a driver:
   production to inputs that nobody wrote down. A property whose arbitraries
   are all constants, or whose predicate ignores its input, checks written
   values instead.
+- A type-level test compares an inferred type with a type model. A type has no
+  value to pass, so the file names its model types in
+  `declareOracle({ typeModel: [...] })`. Each name is a type alias or
+  interface in the same file, and a type built from one counts as using it.
 
 A test that uses none of them compares production with a hand-written value. It
 is a unit test, even when it asserts a contract, and it belongs in an

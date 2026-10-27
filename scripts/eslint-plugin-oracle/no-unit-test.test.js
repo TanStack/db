@@ -213,6 +213,20 @@ it('round-trips every value', () => fc.assert(fc.property(fc.string(), roundTrip
 it('adds a row', () => { new Relation().add() })`,
       filename,
     },
+    // A type-level test that compares with a declared type model.
+    {
+      code: `import { declareOracle } from './oracle-config.js'
+type PublishedValueFor<T> = T extends { id: unknown } ? T & { $key: string } : T
+declareOracle({ typeModel: [\`PublishedValueFor\`] })
+type PublishedRow = PublishedValueFor<Row>
+test('publishes row roots', () => {
+  expectTypeOf(rowOf(query)).toEqualTypeOf<PublishedValueFor<Row>>()
+})
+test('publishes a named row root', () => {
+  expectTypeOf(rowOf(query)).toEqualTypeOf<PublishedRow>()
+})`,
+      filename,
+    },
     // A placeholder registered during a replay runs nothing.
     {
       code: `it.skip('runs only when its replay property is selected', () => {})`,
@@ -389,6 +403,23 @@ it('encodes a date', () => {
 })`,
       filename,
       errors: [{ messageId: `undeclared` }],
+    },
+    // A type test that names no type model, and a name that is not a type.
+    {
+      code: `import { declareOracle } from './oracle-config.js'
+type PublishedValueFor<T> = T
+declareOracle({ typeModel: ['PublishedValueFor', 'MissingModel'] })
+test('publishes row roots', () => {
+  expectTypeOf(rowOf(query)).toEqualTypeOf<PublishedValueFor<Row>>()
+})
+test('keeps a number', () => {
+  expectTypeOf(valueOf(query)).toEqualTypeOf<number>()
+})`,
+      filename,
+      errors: [
+        { messageId: `unknownTypeModel`, line: 3 },
+        { messageId: `unitTest`, line: 7 },
+      ],
     },
     // A test inside a suite and a test passed a timeout are still tests.
     {

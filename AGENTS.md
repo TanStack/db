@@ -708,7 +708,8 @@ Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
 
 An oracle file holds only oracle tests. It declares its check, model, and history
-grammar with `declareOracle` from `packages/db/tests/oracle-config.ts`. Each
+grammar with `declareOracle` from `packages/db/tests/oracle-config.ts`. A
+type-level oracle names its model types in `typeModel`. Each
 part is optional. Every test in the file must use a declared part, directly
 or through a driver, or run a generated property that states its law inline.
 A test that compares production with a hand-written value is a unit test:

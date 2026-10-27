@@ -173,7 +173,10 @@ class OracleModule {
       if (this.#isGeneratedProperty(node)) this.properties.push(node.range[0])
     })
     this.properties.sort((a, b) => a - b)
+    // Names that `typeModel` lists, with the string literal that names each.
+    this.typeModels = new Map()
     this.declared = this.#declaredParts()
+    this.#resolveTypeModels(ast)
     this.exported = new Map()
     this.starSources = []
     for (const statement of ast.body) this.#recordExports(statement)
@@ -198,6 +201,13 @@ class OracleModule {
         const value = property.value
         const parts =
           value?.type === `ArrayExpression` ? value.elements : [value]
+        if (property.key?.name === `typeModel`) {
+          for (const part of parts) {
+            const name = stringValue(part)
+            if (name !== undefined) this.typeModels.set(name, part)
+          }
+          continue
+        }
         for (const part of parts) {
           const variable = this.#variableAt(part)
           if (variable !== undefined) declared.add(variable)
@@ -264,7 +274,71 @@ class OracleModule {
   }
 
   get declaresParts() {
-    return this.declared.size > 0
+    return this.declared.size > 0 || this.typeModels.size > 0
+  }
+
+  /**
+   * A type model is a type alias or interface in this module's scope, which
+   * a type-level test uses as its expected type. Record where each is used,
+   * and the names that name no such type.
+   */
+  #resolveTypeModels(ast) {
+    this.typeModelUses = []
+    this.unknownTypeModels = []
+    if (this.typeModels.size === 0) return
+    const defined = new Map()
+    for (const statement of ast.body) {
+      const declaration =
+        statement.type === `ExportNamedDeclaration`
+          ? statement.declaration
+          : statement
+      if (
+        declaration?.type === `TSTypeAliasDeclaration` ||
+        declaration?.type === `TSInterfaceDeclaration`
+      ) {
+        defined.set(declaration.id.name, declaration)
+      }
+    }
+    for (const [name, literal] of this.typeModels) {
+      if (!defined.has(name)) this.unknownTypeModels.push(literal)
+    }
+    // A type built from a model, such as `PublishedValueFor<Variant>` under
+    // another name, predicts what the model predicts.
+    const models = new Set(
+      [...this.typeModels.keys()].filter((name) => defined.has(name)),
+    )
+    const namesModel = (node) => {
+      let found = false
+      walk(node, (child) => {
+        if (
+          child.type === `TSTypeReference` &&
+          child.typeName.type === `Identifier` &&
+          models.has(child.typeName.name)
+        ) {
+          found = true
+        }
+      })
+      return found
+    }
+    for (let grew = true; grew;) {
+      grew = false
+      for (const [name, declaration] of defined) {
+        if (!models.has(name) && namesModel(declaration)) {
+          models.add(name)
+          grew = true
+        }
+      }
+    }
+    walk(ast, (node) => {
+      if (
+        node.type === `TSTypeReference` &&
+        node.typeName.type === `Identifier` &&
+        models.has(node.typeName.name)
+      ) {
+        this.typeModelUses.push(node.range[0])
+      }
+    })
+    this.typeModelUses.sort((a, b) => a - b)
   }
 
   /**
@@ -466,20 +540,14 @@ class OracleModule {
 
   /** Whether code runs a generated property that it contains. */
   containsProperty(node) {
-    const [start, end] = node.range
-    let low = 0
-    let high = this.properties.length
-    while (low < high) {
-      const middle = (low + high) >> 1
-      if (this.properties[middle] < start) low = middle + 1
-      else high = middle
-    }
-    return low < this.properties.length && this.properties[low] < end
+    return containsOffset(this.properties, node)
   }
 
   /** Whether code uses a declared part, directly or through a binding. */
   nodeReaches(node, local = true) {
     if (this.containsProperty(node)) return true
+    // A type-level test reaches a type model by naming it in a type.
+    if (containsOffset(this.typeModelUses, node)) return true
     const [start, end] = node.range
     let low = 0
     let high = this.references.length
@@ -507,6 +575,28 @@ function isConstant(node) {
     !node.callee.computed &&
     [`constant`, `constantFrom`].includes(node.callee.property.name)
   )
+}
+
+/** The value of a string literal or of a template with no substitutions. */
+function stringValue(node) {
+  if (node?.type === `Literal` && typeof node.value === `string`)
+    return node.value
+  if (node?.type === `TemplateLiteral` && node.expressions.length === 0)
+    return node.quasis[0].value.cooked
+  return undefined
+}
+
+/** Whether a sorted list of start offsets has one inside a node. */
+function containsOffset(offsets, node) {
+  const [start, end] = node.range
+  let low = 0
+  let high = offsets.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (offsets[middle] < start) low = middle + 1
+    else high = middle
+  }
+  return low < offsets.length && offsets[low] < end
 }
 
 function walk(node, visit) {
@@ -570,6 +660,7 @@ export default {
     schema: [],
     messages: {
       unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model pin uses the declared model, and a grammar calibration uses the declared grammar.`,
+      unknownTypeModel: `This typeModel name is not a type alias or interface in this file. A type model is the expected type that type-level tests compare with, so it must be declared here.`,
       undeclared: `This oracle file registers tests and declares no oracle part. Name its check, model, and grammar with \`declareOracle({ check: [...], model: [...], grammar: [...] })\` from oracle-config. Then move each test that reaches none of them to an ordinary test file.`,
     },
   },
@@ -606,6 +697,9 @@ export default {
         else unreached.push(node)
       },
       'Program:exit'() {
+        for (const node of module.unknownTypeModels) {
+          context.report({ node, messageId: `unknownTypeModel` })
+        }
         // A file that relies on a companion module's declaration declares
         // nothing itself. It is undeclared only when no test reaches a part.
         if (!module.declaresParts && !anyReached) {
