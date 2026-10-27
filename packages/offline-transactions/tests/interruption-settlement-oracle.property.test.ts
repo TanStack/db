@@ -2,6 +2,7 @@ import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import {
+  declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
@@ -309,6 +310,8 @@ async function checkInterruption({
     )
   }
 }
+
+declareOracle({ check: [checkInterruption] })
 
 /**
  * Fixed histories designed to reach each interruption landing deterministically.
