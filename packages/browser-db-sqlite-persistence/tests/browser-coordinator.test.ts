@@ -98,6 +98,28 @@ bindTransportControls({
   },
 })
 
+/**
+ * Law: a leadership need posts one RPC of its request kind. A remote
+ * `ensureRemoteSubset` need may post several, all under one acquisition ID.
+ * A holder's own need, and `ensureLeadership`, post nothing. The expected
+ * posts come from the need table, not from production.
+ */
+function compareNeedPosts(
+  kind: string,
+  need: { readonly request: string | undefined },
+  callerIsHolder: boolean,
+  posts: ReadonlyArray<{ acquisitionId?: string }>,
+): void {
+  if (need.request === undefined || callerIsHolder) {
+    expect(posts).toEqual([])
+  } else if (kind === `remote subset`) {
+    expect(posts.length).toBeGreaterThan(0)
+    expect(new Set(posts.map((post) => post.acquisitionId)).size).toBe(1)
+  } else {
+    expect(posts).toHaveLength(1)
+  }
+}
+
 describe(`BrowserCollectionCoordinator`, () => {
   beforeEach(() => {
     installGlobals()
@@ -828,6 +850,179 @@ describe(`BrowserCollectionCoordinator`, () => {
         await Promise.race([pulled.catch(() => undefined), flush(0)])
       }
     })
+
+    /**
+     * # When may an election wait behind queued reads?
+     *
+     * Law: a Web Lock holder reserves its durable election term only after the
+     * reads already queued on its shared scheduler, unless some caller needs a
+     * leader first. A leadership need ends that wait at once: a local route
+     * wait, an outbound RPC, `ensureLeadership`, or an inbound route request or
+     * RPC from another tab. Without that rule, a hydrate that waits for its
+     * first writer route would wait for an election that waits for the hydrate.
+     * A need belongs to one election: it is still waiting at the grant, or it
+     * arrives before the term. A need that an earlier leader served, for this
+     * tab or another, does not exempt a later election. The lock is exclusive,
+     * so its holder has no route to another leader: a delayed heartbeat from
+     * the departed leader does not restore one, and a request made during the
+     * election is a need.
+     *
+     * Model: the reference is the need table below. Every listed request is a
+     * leadership need, so the term must exist while the queued read is still
+     * held. The read is a deferred hydrate: the scheduler barrier
+     * (`runInRegularScope.afterQueuedWork`) and all regular work wait for it,
+     * so it also holds the leader-side write for mutating requests. After
+     * the read is released, each request settles well before the RPC timeout.
+     * A remote request posts one RPC of its kind. Remote subset demand may also
+     * replay once when its first leader becomes known; every post carries the
+     * same acquisition ID, and the lease oracle owns exact lease accounting.
+     *
+     * Grammar: each request kind × a local requester (the lock holder itself)
+     * or a remote requester (a later tab whose lock request is queued). Remote
+     * `ensureLeadership` is excluded: the holder keeps the lock, so the remote
+     * caller has no route to its own leadership. Release of an unacquired
+     * subset sends no RPC and is not a leadership need.
+     *
+     * Checkpoints: before the request (premise: no term while the read is
+     * held), after bounded turns with the read still held (term and route), and
+     * after release (settlement and RPC count). Hostile mutants that skip any
+     * need mark fail the held-read checkpoint or the settlement deadline.
+     *
+     * Per-election cells: a follower takes over from a leader that served an
+     * earlier need, from another tab or from the follower itself, while the
+     * follower's queued read is held. The model has no term until the read is
+     * released. A third cell delivers the departed leader's heartbeat during
+     * the follower's election and then makes a request; the model has the
+     * follower's term while the read is still held.
+     */
+    const transaction = (txId: string): PersistedTx => ({
+      txId,
+      term: 0,
+      seq: 0,
+      rowVersion: 0,
+      mutations: [{ type: `insert`, key: txId, value: { id: txId } }],
+    })
+
+    const leadershipNeeds = {
+      'local mutation': {
+        request: `rpc:applyLocalMutations:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestApplyLocalMutations(collectionId, [
+            {
+              mutationId: `needed-mutation`,
+              type: `insert`,
+              key: `needed-mutation`,
+              value: { id: `needed-mutation` },
+            },
+          ]),
+      },
+      'source commit': {
+        request: `rpc:applyCommittedTx:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestApplyCommittedTx(
+            collectionId,
+            transaction(`needed-commit`),
+          ),
+      },
+      reconciliation: {
+        request: `rpc:reconcileCommittedTx:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.reconcileCommittedTx(
+            collectionId,
+            transaction(`needed-reconcile`),
+            { latestRowVersion: 0, resetEpoch: 0 },
+          ),
+      },
+      'remote subset': {
+        request: `rpc:ensureRemoteSubset:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestEnsureRemoteSubset(collectionId, { limit: 1 }),
+      },
+      pullSince: {
+        request: `rpc:pullSince:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.pullSince(collectionId, 0),
+      },
+      'persisted index': {
+        request: `rpc:ensurePersistedIndex:req`,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.requestEnsurePersistedIndex(collectionId, `needed-idx`, {
+            expressionSql: [`id`],
+          }),
+      },
+      ensureLeadership: {
+        request: undefined,
+        run: (coordinator: BrowserCollectionCoordinator) =>
+          coordinator.ensureLeadership(collectionId),
+      },
+    } as const
+
+    const cells = Object.keys(leadershipNeeds).flatMap((kind) =>
+      (kind === `ensureLeadership`
+        ? ([`local`] as const)
+        : ([`local`, `remote`] as const)
+      ).map((requester) => ({
+        kind: kind as keyof typeof leadershipNeeds,
+        requester,
+      })),
+    )
+
+    it.each(cells)(
+      `elects for a $requester $kind while a queued read holds the scheduler`,
+      async ({ kind, requester }) => {
+        const need = leadershipNeeds[kind]
+        const { adapter, queuedRead } = createQueuedReadAdapter()
+        const holder = createCoordinator(adapter)
+        holder.registerRemoteSubsetOwner(
+          collectionId,
+          withUnusedUnloadSubset(async () => {}),
+        )
+        holder.subscribe(collectionId, () => {})
+        await flush(20)
+        const caller =
+          requester === `local` ? holder : createCoordinator(adapter)
+        if (caller !== holder) caller.subscribe(collectionId, () => {})
+        await flush(20)
+        // Premise: the holder has the Web Lock, but its term waits behind
+        // the queued read because no caller has needed a leader yet.
+        expect(durableTerms.get(collectionId)).toBeUndefined()
+        expect(holder.isLeader(collectionId)).toBe(false)
+
+        const posts: Array<{ acquisitionId?: string }> = []
+        observePostedMessage = (data) => {
+          const payload = (
+            data as { payload?: { type?: string; acquisitionId?: string } }
+          ).payload
+          if (need.request !== undefined && payload?.type === need.request) {
+            posts.push({ acquisitionId: payload.acquisitionId })
+          }
+        }
+        let settled = false
+        const pending = Promise.resolve(need.run(caller)).finally(() => {
+          settled = true
+        })
+        void pending.catch(() => undefined)
+        try {
+          await flush(50)
+          // The need ended the wait before the read finished.
+          expect(durableTerms.get(collectionId)).toBe(1)
+          expect(holder.isLeader(collectionId)).toBe(true)
+          expect(caller.isLeader(collectionId)).toBe(caller === holder)
+
+          queuedRead.resolve()
+          await Promise.race([pending, flush(1_000)])
+          expect(settled).toBe(true)
+          await pending
+          compareNeedPosts(kind, need, caller === holder, posts)
+        } finally {
+          queuedRead.resolve()
+          observePostedMessage = undefined
+          // A request stuck on an RPC timeout must not hide the assertion;
+          // disposal in afterEach rejects it.
+          await Promise.race([pending.catch(() => undefined), flush(0)])
+        }
+      },
+    )
   })
 
   /**
