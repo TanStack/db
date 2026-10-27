@@ -6480,6 +6480,8 @@ type OptimisticWindowObservation = {
     submittedRows: Array<number>
     limit: number | undefined
     direction: string | undefined
+    // The request had a limit or a predicate, so it read no full source.
+    bounded?: boolean
     appliedReceiptPending: boolean
     providerPending: boolean
   }>
@@ -6627,6 +6629,7 @@ async function checkOptimisticWindow(
     submittedRows: Array<number>
     limit: number | undefined
     direction: string | undefined
+    bounded: boolean
     appliedReceiptSettled: boolean
     providerSettled: boolean
     provider: Promise<unknown>
@@ -6676,6 +6679,8 @@ async function checkOptimisticWindow(
                   submittedRows: [] as Array<number>,
                   limit: options.limit,
                   direction: options.orderBy?.[0]?.compareOptions.direction,
+                  bounded:
+                    options.limit !== undefined || options.where !== undefined,
                   appliedReceiptSettled: false,
                   providerSettled: false,
                   provider: Promise.resolve(),
@@ -6985,6 +6990,7 @@ async function checkOptimisticWindow(
         submittedRows: [...attempt.submittedRows],
         limit: attempt.limit,
         direction: attempt.direction,
+        bounded: attempt.bounded,
         appliedReceiptPending: !attempt.appliedReceiptSettled,
         providerPending: !attempt.providerSettled,
       }))
@@ -7020,6 +7026,7 @@ async function checkOptimisticWindow(
               submittedRows: [...attempt.submittedRows],
               limit: attempt.limit,
               direction: attempt.direction,
+              bounded: attempt.bounded,
               appliedReceiptPending: !attempt.appliedReceiptSettled,
               providerPending: !attempt.providerSettled,
             }))
@@ -7203,6 +7210,22 @@ function optimisticWindowViolations(
   }
   if (testCase.acquisition === `forbidden` && observation.attempts.length > 0) {
     violations.push(`refill acquisition started with complete local extent`)
+  }
+  // A refill the case allows but does not require is still bounded: an
+  // ordered read within the refill bound, or a predicate read, never the
+  // full source.
+  if (testCase.acquisition === `allowed`) {
+    for (const attempt of observation.attempts) {
+      if (
+        attempt.bounded === false ||
+        (attempt.direction !== undefined &&
+          (attempt.limit === undefined ||
+            attempt.limit > refillBound(testCase)))
+      ) {
+        violations.push(`an allowed refill used an unbounded provider request`)
+        break
+      }
+    }
   }
   const requested = new Set<string>()
   for (const request of observation.requestHistory ?? []) {

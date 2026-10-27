@@ -2686,17 +2686,27 @@ async function checkAuthorityCase(
     command.type === `joinedIdle`
   // An unproven report whose pass pending joined work deferred: the ledger
   // index at the report and the window size it judged.
-  let owedProof: { from: number; endRank: unknown } | undefined
-  const expectProofRequest = (from: number, endRank: unknown) => {
+  let owedProof:
+    { from: number; endRank: unknown; expressible: boolean } | undefined
+  // The proof is a bounded repair or the tie of the page's end. With every
+  // installed rank expressible, a full-source read is not a repair: the
+  // bounded repair is available (ARCHITECTURE.md), and a full-source read is
+  // the cost the report path avoids.
+  const expectProofRequest = (
+    from: number,
+    endRank: unknown,
+    expressible: boolean,
+  ) => {
     const issued = ledger
       .slice(from)
       .some(
-        ({ authoritative, options }) =>
-          authoritative || tieValue(options) === endRank,
+        ({ authoritative, fullSource, options }) =>
+          (authoritative && (!fullSource || !expressible)) ||
+          tieValue(options) === endRank,
       )
     if (!issued) {
       throw new Error(
-        `unproven report: a report over a first page that no row it read proves issued no repair and no tie of its end`,
+        `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
       )
     }
   }
@@ -3001,6 +3011,7 @@ async function checkAuthorityCase(
           // The page's end is the installed row at the window's last position.
           const ranks = snapshot().map(({ value }) => value.rank)
           const endRank = ranks[windowSize - 1]
+          const expressible = ranks.every((rank) => Number.isFinite(rank))
           // The loader's coverage is its own first page with only tie
           // requests after it.
           const ownFirstPage =
@@ -3099,9 +3110,9 @@ async function checkAuthorityCase(
             !insideFirstPage
           ) {
             if (joinedPending && testCase.joined) {
-              owedProof = { from: before, endRank }
+              owedProof = { from: before, endRank, expressible }
             } else {
-              expectProofRequest(before, endRank)
+              expectProofRequest(before, endRank, expressible)
               repairedReportsOnOwnPage++
             }
           }
@@ -3197,7 +3208,11 @@ async function checkAuthorityCase(
           graphPass()
           await flush()
           if (owedProof) {
-            expectProofRequest(owedProof.from, owedProof.endRank)
+            expectProofRequest(
+              owedProof.from,
+              owedProof.endRank,
+              owedProof.expressible,
+            )
             owedProof = undefined
             repairedReportsOnOwnPage++
           }
@@ -3457,6 +3472,25 @@ async function checkAuthorityCase(
             throw new Error(
               `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
             )
+          }
+          // Each boundary is a different read: no chain reads the same
+          // prefix, tie, or page twice.
+          const reads = new Map<string, number>()
+          for (const { authoritative: owed, options } of repair) {
+            if (!owed) continue
+            const read = JSON.stringify([
+              options.limit,
+              tieValue(options),
+              options.minValues,
+            ])
+            reads.set(read, (reads.get(read) ?? 0) + 1)
+          }
+          for (const [read, count] of reads) {
+            if (count > chains) {
+              throw new Error(
+                `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+              )
+            }
           }
         }
       }
