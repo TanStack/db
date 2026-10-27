@@ -7425,6 +7425,38 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
+  // The trace from #2221. A descending, nulls-first, unindexed window behind
+  // an anti-joined marker has a NaN rank, so its boundary has no cursor.
+  // After a signalling refetch the loader read the full source twice: the
+  // short prefix took the full-source fallback. The prefix now grows, so the
+  // refetch law, which allows no full-source read here, holds.
+  it(`reads no full source after a signalling refetch past a NaN boundary`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: false },
+      ],
+      history: [
+        { type: `delete-visible` },
+        { type: `move`, offset: 0, limit: 1 },
+      ],
+    })
+  })
+
   // Found by the unindexed-refetch random campaign. A refetch report moves
   // the page's end onto a null rank, which no cursor can express. Reading
   // that end's tie would take the boundary's full-source fallback, so the

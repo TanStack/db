@@ -203,8 +203,12 @@ export class CollectionSubscriber<
       if (!Object.is(subscription.lastError, error)) throw error
       const isInitialSync =
         this.collectionConfigBuilder.liveQueryCollection?.status === `loading`
-      const generation = this.collectionConfigBuilder.beginDemand(plan.id)
-      this.collectionConfigBuilder.failDemand(plan.id, generation, error)
+      this.failDemand(
+        subscription,
+        plan.id,
+        this.collectionConfigBuilder.beginDemand(plan.id),
+        error,
+      )
       if (isInitialSync) throw error
       return
     }
@@ -232,19 +236,35 @@ export class CollectionSubscriber<
             // query.
             const replacement = subscription.pendingTruncateReplacement
             if (replacement) settleWith(replacement)
-            else
-              this.collectionConfigBuilder.failDemand(
-                plan.id,
-                generation,
-                error,
-                !this.collectionConfigBuilder.hasFailedReplay(this.collection),
-              )
+            else this.failDemand(subscription, plan.id, generation, error)
           },
         )
       settleWith(update.ready)
     } else {
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
     }
+  }
+
+  // A failure while a failed replay of this source holds the shared barrier
+  // belongs to that recovery: it does not end the query, and it holds this
+  // subscription's publication too, so retiring the other replay's failed
+  // demand cannot publish without this demand's rows.
+  private failDemand(
+    subscription: CollectionSubscription,
+    planId: string,
+    generation: number,
+    error: unknown,
+  ): void {
+    const recovering = this.collectionConfigBuilder.hasFailedReplay(
+      this.collection,
+    )
+    if (recovering) subscription.failReplacement(error)
+    this.collectionConfigBuilder.failDemand(
+      planId,
+      generation,
+      error,
+      !recovering,
+    )
   }
 
   private sendChangesToPipeline(

@@ -783,6 +783,28 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
   }
 
+  /**
+   * A lazy demand that failed outside this subscription's replay, while a
+   * failed replay of another of the graph's subscriptions to this collection
+   * holds their shared barrier, fails this subscription's replacement too.
+   * It keeps the last publication until a later replay succeeds, or until
+   * this subscription's last demand retires.
+   */
+  failReplacement(error: unknown): void {
+    if (!this.options.truncateReplayPublication || this.truncateReplayState) {
+      return
+    }
+    const replayState = this.createTruncateReplayState(
+      this.collection._sync.getSyncRunGeneration(),
+      () => new Map(),
+    )
+    replayState.pendingSetups = 0
+    replayState.failed = true
+    replayState.completion.reject(normalizeError(error))
+    this.truncateReplayState = replayState
+    this.truncateReplacementPending = true
+  }
+
   /** Drop the replay without publishing; an unfinished wait rejects as aborted. */
   private discardTruncateReplay(): void {
     const replayState = this.truncateReplayState

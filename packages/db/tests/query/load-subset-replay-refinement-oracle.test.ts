@@ -1330,6 +1330,8 @@ type OrderedReach = {
   failedSiblingDemandFailures: number
   // Lazy demand whose load threw while it started, inside its replay.
   thrownReplayDemands: number
+  // A failed demand retires while another failure still holds its barrier.
+  partialFailureRetirements: number
   preloadReplayFailures: number
   discardedReplayMoves: number
 }
@@ -1520,10 +1522,15 @@ async function checkOrderedReplay(
   ) => {
     const barrier = barriers.get(source)
     if (!barrier) return
+    const failures = barrier.failures.size
     for (const owned of [barrier.pending, barrier.failures]) {
       for (const [load, held] of owned) {
         if (held === options) owned.delete(load)
       }
+    }
+    // One failed demand retires while another still holds the barrier.
+    if (barrier.failures.size > 0 && barrier.failures.size < failures) {
+      reach.partialFailureRetirements++
     }
   }
   // A query's subscriptions to one source share one replay barrier, so a
@@ -1649,6 +1656,7 @@ async function checkOrderedReplay(
     siblingDemandFailures: 0,
     failedSiblingDemandFailures: 0,
     thrownReplayDemands: 0,
+    partialFailureRetirements: 0,
     preloadReplayFailures: 0,
     discardedReplayMoves: 0,
   }
@@ -2753,38 +2761,36 @@ describe(`Ordered windows across truncate replays`, () => {
     },
   )
 
-  // Open: found by the failed-replay random campaign at five times its run
-  // count, on this branch's code and its parent alike. A join and an include
-  // share the marker source; the replay's newest load fails, a row move
-  // starts demand whose load fails too, and a marker change then publishes
-  // an empty window while the model still retains the last publication. The
-  // witness pins the gap until it is fixed or the model is corrected.
-  it.fails(
-    `keeps the last publication when a marker change follows two failed replay loads`,
-    async () => {
-      await checkOrderedReplay(
-        [
-          { type: `hold` },
-          { type: `truncateMarkers` },
-          { type: `settle`, ok: true, keepHolding: true, newest: false },
-          { type: `settle`, ok: false, newest: true, keepHolding: true },
-          { type: `move`, id: 1, rank: 1 },
-          { type: `settle`, ok: false, newest: false },
-          { type: `hold` },
-          { type: `mark`, id: 4, on: false },
-        ],
-        {
-          ...ordinaryOrderedScenario,
-          direction: `desc`,
-          offset: 1,
-          limit: 1,
-          joined: `some`,
-          markerMode: `on-demand`,
-          includes: true,
-        },
-      )
-    },
-  )
+  // Found by the failed-replay random campaign at five times its run count.
+  // A join and an include share the marker source. One subscription's replay
+  // fails; the other's finishes, and a row move starts demand on it whose
+  // load fails too, which the shared barrier keeps from ending the query. A
+  // marker change then retires the first replay's failed demand, which
+  // discarded that replay and published an empty window while the second
+  // failure held nothing; that failure now holds its own subscription.
+  it(`keeps the last publication when a marker change follows two failed replay loads`, async () => {
+    await checkOrderedReplay(
+      [
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        { type: `settle`, ok: true, keepHolding: true, newest: false },
+        { type: `settle`, ok: false, newest: true, keepHolding: true },
+        { type: `move`, id: 1, rank: 1 },
+        { type: `settle`, ok: false, newest: false },
+        { type: `hold` },
+        { type: `mark`, id: 4, on: false },
+      ],
+      {
+        ...ordinaryOrderedScenario,
+        direction: `desc`,
+        offset: 1,
+        limit: 1,
+        joined: `some`,
+        markerMode: `on-demand`,
+        includes: true,
+      },
+    )
+  })
 
   it.each(orderedReplayCampaigns)(
     `keeps the ordered window under load and release faults (%s campaign)`,
@@ -2819,6 +2825,7 @@ describe(`Ordered windows across truncate replays`, () => {
         siblingDemandFailures: 0,
         failedSiblingDemandFailures: 0,
         thrownReplayDemands: 0,
+        partialFailureRetirements: 0,
         preloadReplayFailures: 0,
         discardedReplayMoves: 0,
       }
@@ -2856,6 +2863,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `siblingDemandFailures`,
         `failedSiblingDemandFailures`,
         `thrownReplayDemands`,
+        `partialFailureRetirements`,
         `preloadReplayFailures`,
         `discardedReplayMoves`,
       ])
@@ -3217,6 +3225,7 @@ describe(`Ordered windows across truncate replays`, () => {
           `siblingDemandFailures`,
           `failedSiblingDemandFailures`,
           `thrownReplayDemands`,
+          `partialFailureRetirements`,
         ] as const,
         { minimum: 5 },
       )
@@ -3244,6 +3253,9 @@ describe(`Ordered windows across truncate replays`, () => {
           }
           if (observed.thrownReplayDemands > 0) {
             reach.reach(`thrownReplayDemands`)
+          }
+          if (observed.partialFailureRetirements > 0) {
+            reach.reach(`partialFailureRetirements`)
           }
         }),
         campaign === `fixed`

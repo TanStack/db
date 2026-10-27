@@ -1472,7 +1472,10 @@ meanwhile joins its own open replay instead of falling outside recovery.
 A failed replay of any of them fails the barrier: until a later replay of the
 source succeeds, a lazy demand of any of them that fails keeps the last
 publication and does not end the query, even when its own subscription's
-replay finished.
+replay finished. Such a failure fails its own subscription's replacement too,
+so retiring the other replay's failed demand cannot publish without this
+demand's rows; it holds until a later replay of the source succeeds or the
+subscription's last demand retires.
 A load that throws while it starts inside an open replay fails that replay as
 a rejected load does. Its demand stays with the subscription, so the replay
 keeps the last publication, a later replay retries the demand, and its owner
