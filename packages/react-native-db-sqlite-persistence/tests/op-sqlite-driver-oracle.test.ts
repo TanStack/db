@@ -7,11 +7,9 @@ import {
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
-import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import {
   activeCleanupFns,
-  createColumnarDriverHarness,
   createTempSqlitePath,
   expectExactAliasRows,
   queryInjectedResult,
@@ -456,8 +454,3 @@ it(`reserved-alias checker shrinks and replays the same row-law violation`, () =
     originalAliases.length,
   )
 })
-
-runSQLiteDriverContractSuite(
-  `op-sqlite executeAsync columnar driver`,
-  createColumnarDriverHarness,
-)

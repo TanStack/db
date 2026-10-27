@@ -16,6 +16,7 @@ import {
 } from '../../db/tests/oracle-config.js'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
+import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import { opSQLiteProviderQueryFixtures } from './fixtures/op-sqlite-provider-results'
 import {
@@ -964,3 +965,8 @@ it(`closes the database and removes the contract directory when driver construct
   expect(tempDirectory).toBeDefined()
   expect(existsSync(tempDirectory!)).toBe(false)
 })
+
+runSQLiteDriverContractSuite(
+  `op-sqlite executeAsync columnar driver`,
+  createColumnarDriverHarness,
+)
