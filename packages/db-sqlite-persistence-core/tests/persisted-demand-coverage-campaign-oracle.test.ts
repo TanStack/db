@@ -6,7 +6,6 @@ import {
   createCollection,
   createLiveQueryCollection,
   eq,
-  getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import {
   oraclePropertyOptions,
@@ -29,7 +28,16 @@ import {
   withCleanup,
   withMacrotaskReads,
 } from './helpers/demand-coverage-driver.js'
+import { coverageViolations } from './persisted-demand-coverage-model-oracle.js'
 import type { Row } from './helpers/demand-coverage-driver.js'
+import type {
+  CoverageReach,
+  CoverageRecord,
+  OfflineUpstream,
+  QueryObservation,
+  QuerySpec,
+  SourceEvent,
+} from './persisted-demand-coverage-model-oracle.js'
 import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 import type { SQLiteDriver } from '../src/index.js'
 
@@ -75,8 +83,9 @@ import type { SQLiteDriver } from '../src/index.js'
  * that obsolete load can still settle; this is the case in which an obsolete
  * load could wrongly record coverage.
  *
- * Session 2 reopens the same database offline, with a wait of 0, and reads
- * all three demands. Its source never answers.
+ * Session 2 reopens the same database offline and reads all three demands.
+ * Each history also chooses its wait, 0 or 1000 ms, and whether its source
+ * never answers or fails every load at once.
  *
  * ## Model
  *
@@ -97,8 +106,12 @@ import type { SQLiteDriver } from '../src/index.js'
  *
  * ## Observation and checkpoint
  *
- * After session 2 has waited 300 ms of real time, each live query's status
- * and its rows (the window's in order), compared exactly with the model.
+ * Each live query's status and its rows (the window's in order), at 300 ms
+ * of real time and, after a 1000 ms wait, again at 1500 ms. The checkpoints
+ * sit well clear of the deadline, so the wait premise at each is certain. A
+ * covered load is loading before its wait and ready after it, or ready at
+ * once when its upstream fails; an uncovered load stays loading, or fails
+ * with its upstream.
  *
  * Declared reach (ORC-015): histories in which a demand is covered offline,
  * uncovered offline, covered but short of rows, ended by a truncate, settled
@@ -142,228 +155,26 @@ type History = {
   // A source that honors abort drops a load that the wrapper aborts; one
   // that ignores it may still settle that load later.
   honorsAbort: boolean
+  // The offline session's wait and how its source answers.
+  offline: { waitMs: 0 | 1000; upstream: OfflineUpstream }
   initial: Partial<Record<Id, RowState>>
   commands: ReadonlyArray<Command>
 }
 
-type Observation = Record<
-  Demand,
-  { ready: boolean; rows?: ReadonlyArray<string> }
->
+const SPECS: Record<Demand, QuerySpec> = {
+  a: { group: `a` },
+  b: { group: `b` },
+  w: { group: `a`, orderByRank: true, limit: WINDOW_LIMIT },
+}
 
 // ---------------------------------------------------------------------------
-// Model
+// Model and comparison
 //
-// The model replays the source's log of what happened, not the commands:
-// which rows the source wrote or deleted, when it truncated, and each load it
-// settled. A load is current when no truncate came between the source
-// receiving it and settling it, and obsolete otherwise (law 6). When the
-// wrapper asks for a demand again after a truncate is its own scheduling,
-// which the law leaves open, so the model does not predict it.
-//
-// Coverage is per exact demand (`getLoadSubsetDemandKey`, the law's demand
-// identity). A current load that settles records how many rows SQLite holds
-// for its demand, and for a limited load, which rows. Offline, a load is
-// covered when its demand has a record, SQLite still holds at least that
-// many of its rows, and a limited load holds the same rows. A query is ready
-// offline exactly when every load it sent in session 2 is covered. The model
-// reads those loads from session 2's log instead of predicting them: when a
-// window sends its tie-boundary load, and for which boundary, follows from
-// the restored rows and is core's scheduling.
-//
-// To read a demand's rows, the model evaluates the load's own filter, order,
-// and limit over the rows SQLite holds. Ties in an order break by key, as the
-// SQLite adapter's `ORDER BY ..., key ASC` does (an abstraction, ORC-009).
+// The judgment lives in `tests/persisted-demand-coverage-model-oracle.ts`,
+// shared with every receiving driver. It replays the online session's source
+// log and judges each offline query from the loads it sent. This file only
+// records that log and those observations at the real wrapper.
 // ---------------------------------------------------------------------------
-
-type SourceEvent =
-  | { type: `rows`; rows: ReadonlyArray<readonly [Id, RowState]> }
-  | { type: `delete`; id: Id }
-  | { type: `truncate` }
-  | { type: `settled`; load: LoadSubsetOptions; current: boolean }
-
-type ReachState =
-  | `covered offline`
-  | `uncovered offline`
-  | `covered but short of rows`
-  | `coverage ended by a truncate`
-  | `obsolete load settled`
-  | `row moved between demands`
-  | `coverage recorded twice`
-  | `window covered offline`
-  | `window holds other rows`
-  | `tie-boundary load uncovered`
-
-// The expression forms these loads carry (`packages/db/src/query/ir.ts`).
-type Expr = {
-  type?: string
-  name?: string
-  args?: ReadonlyArray<Expr>
-  path?: ReadonlyArray<string>
-  value?: unknown
-}
-type ModelRow = { id: Id; group: Group; rank: Rank }
-
-function evaluate(expr: Expr, row: ModelRow): unknown {
-  if (expr.type === `ref`) {
-    return row[expr.path![expr.path!.length - 1] as keyof ModelRow]
-  }
-  if (expr.type === `val`) return expr.value
-  const args = (expr.args ?? []).map((arg) => evaluate(arg, row))
-  const [left, right] = args as [never, never]
-  switch (expr.name) {
-    case `eq`:
-      return left === right
-    case `gt`:
-      return left > right
-    case `gte`:
-      return left >= right
-    case `lt`:
-      return left < right
-    case `lte`:
-      return left <= right
-    case `and`:
-      return args.every(Boolean)
-    case `or`:
-      return args.some(Boolean)
-    case `not`:
-      return !left
-  }
-  throw new Error(`unmodelled expression ${JSON.stringify(expr)}`)
-}
-
-// The rows a load reads from SQLite, in its order.
-function readDemand(
-  load: LoadSubsetOptions,
-  sqlite: Map<Id, RowState>,
-): Array<Id> {
-  if (load.cursor !== undefined || load.offset !== undefined) {
-    throw new Error(`unmodelled load ${demandKey(load)}`)
-  }
-  const where = load.where as Expr | undefined
-  const rows = [...sqlite]
-    .map(([id, state]): ModelRow => ({ id, ...state }))
-    .filter((row) => where === undefined || evaluate(where, row) === true)
-  const orderBy = (load.orderBy ?? []) as unknown as ReadonlyArray<{
-    expression: Expr
-    compareOptions?: { direction?: `asc` | `desc` }
-  }>
-  rows.sort((x, y) => {
-    for (const { expression, compareOptions } of orderBy) {
-      const a = evaluate(expression, x) as number
-      const b = evaluate(expression, y) as number
-      if (a !== b) {
-        return (
-          (a < b ? -1 : 1) * (compareOptions?.direction === `desc` ? -1 : 1)
-        )
-      }
-    }
-    return x.id < y.id ? -1 : x.id > y.id ? 1 : 0
-  })
-  const ids = rows.map((row) => row.id)
-  return load.limit === undefined ? ids : ids.slice(0, load.limit)
-}
-
-// The demand identity the law uses: two loads cover each other only with
-// the same key.
-const demandKey = (load: LoadSubsetOptions): string =>
-  String(getLoadSubsetDemandKey(load))
-const rowsKey = (ids: ReadonlyArray<Id>) => JSON.stringify([...ids].sort())
-const windowRows = (sqlite: Map<Id, RowState>): Array<Id> =>
-  [...sqlite]
-    .filter(([, state]) => state.group === `a`)
-    .sort(([x, a], [y, b]) => a.rank - b.rank || (x < y ? -1 : 1))
-    .slice(0, WINDOW_LIMIT)
-    .map(([id]) => id)
-
-function expectedObservation(
-  events: ReadonlyArray<SourceEvent>,
-  sent: Record<Demand, ReadonlyArray<LoadSubsetOptions>>,
-  reach: (state: ReachState) => void,
-): Observation {
-  // SQLite holds every row the source wrote since its last truncate; a
-  // source write reaches it whether or not a load asked for the row.
-  const sqlite = new Map<Id, RowState>()
-  // Each demand's record: its row count and, for a limited load, its rows.
-  const records = new Map<string, { count: number; rows?: string }>()
-  for (const event of events) {
-    switch (event.type) {
-      case `rows`:
-        for (const [id, state] of event.rows) {
-          const before = sqlite.get(id)
-          if (before !== undefined && before.group !== state.group) {
-            reach(`row moved between demands`)
-          }
-          sqlite.set(id, state)
-        }
-        break
-      case `delete`:
-        sqlite.delete(event.id)
-        break
-      case `truncate`:
-        if (records.size > 0) reach(`coverage ended by a truncate`)
-        sqlite.clear()
-        records.clear()
-        break
-      case `settled`: {
-        if (!event.current) {
-          reach(`obsolete load settled`)
-          break
-        }
-        const key = demandKey(event.load)
-        if (records.has(key)) reach(`coverage recorded twice`)
-        const rows = readDemand(event.load, sqlite)
-        records.set(key, {
-          count: rows.length,
-          rows: event.load.limit === undefined ? undefined : rowsKey(rows),
-        })
-      }
-    }
-  }
-  const covered = (load: LoadSubsetOptions): boolean => {
-    const record = records.get(demandKey(load))
-    if (record === undefined) return false
-    const rows = readDemand(load, sqlite)
-    if (rows.length < record.count) {
-      reach(`covered but short of rows`)
-      return false
-    }
-    if (record.rows !== undefined && record.rows !== rowsKey(rows)) {
-      reach(`window holds other rows`)
-      return false
-    }
-    return true
-  }
-  const observation = {} as Observation
-  for (const demand of DEMANDS) {
-    const loads = sent[demand]
-    // Positive witness: session 2 asked the offline source for the demand.
-    if (loads.length === 0) {
-      throw new Error(`session 2 sent no load for demand ${demand}`)
-    }
-    const coverage = loads.map(covered)
-    if (demand === `w` && coverage[0] && coverage.includes(false)) {
-      reach(`tie-boundary load uncovered`)
-    }
-    if (!coverage.every(Boolean)) {
-      reach(`uncovered offline`)
-      observation[demand] = { ready: false }
-      continue
-    }
-    reach(demand === `w` ? `window covered offline` : `covered offline`)
-    observation[demand] = {
-      ready: true,
-      rows:
-        demand === `w`
-          ? windowRows(sqlite)
-          : [...sqlite]
-              .filter(([, state]) => state.group === demand)
-              .map(([id]) => id)
-              .sort(),
-    }
-  }
-  return observation
-}
 
 // ---------------------------------------------------------------------------
 // Production driver
@@ -411,7 +222,7 @@ type Pending = {
 // the last truncate, so it never deletes a row the Collection lacks.
 function campaignSource(
   driver: SQLiteDriver,
-  online: boolean,
+  online: boolean | OfflineUpstream,
   waitMs: number,
   honorsAbort = true,
 ) {
@@ -442,7 +253,10 @@ function campaignSource(
             loadSubset: (options: LoadSubsetOptions) => {
               const demand = demandOf(options)
               sent[demand].push(options)
-              if (!online) return new Promise<void>(() => {})
+              if (online === `fails at once`) {
+                return Promise.reject(new Error(`offline`))
+              }
+              if (online !== true) return new Promise<void>(() => {})
               return new Promise<void>((resolve, reject) => {
                 const entry = { resolve, reject, options, epoch }
                 pending.set(demand, [...(pending.get(demand) ?? []), entry])
@@ -527,11 +341,11 @@ function campaignSource(
 
 const settle = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function runHistory(history: History): Promise<{
-  observation: Observation
-  events: ReadonlyArray<SourceEvent>
-  sent: Record<Demand, ReadonlyArray<LoadSubsetOptions>>
-}> {
+// One record per offline checkpoint: before the wait (with a nonzero wait)
+// and after it.
+async function runHistory(
+  history: History,
+): Promise<ReadonlyArray<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   const truth = new Map(
     Object.entries(history.initial) as Array<[Id, RowState]>,
@@ -636,22 +450,42 @@ async function runHistory(history: History): Promise<{
     ])
   }
 
-  // Session 2 is offline.
-  const source = campaignSource(driver, false, 0)
+  // Session 2 is offline. Checkpoints sit well clear of the deadline: at
+  // 300 ms, and after a nonzero wait, at 1500 ms.
+  const { waitMs, upstream } = history.offline
+  const source = campaignSource(driver, upstream, waitMs)
   const queries = DEMANDS.map((demand) => queryFor(source.collection, demand))
+  const observed = (index: number): QueryObservation => {
+    const query = queries[index]!
+    return query.status === `ready`
+      ? { status: `ready`, rows: query.toArray.map((row) => row.id) }
+      : { status: query.status === `error` ? `error` : `loading` }
+  }
+  const checkpoint = (waitPassed: boolean): CoverageRecord => ({
+    events,
+    queries: Object.fromEntries(
+      DEMANDS.map((demand, index) => [
+        demand,
+        {
+          spec: SPECS[demand],
+          sent: [...source.sent[demand]],
+          observed: observed(index),
+        },
+      ]),
+    ),
+    upstream,
+    waitPassed,
+  })
   return withCleanup(async () => {
     for (const query of queries) void query.preload().catch(() => undefined)
+    const records: Array<CoverageRecord> = []
     await settle(300)
-    const observation = {} as Observation
-    DEMANDS.forEach((demand, index) => {
-      const query = queries[index]!
-      const ids = query.toArray.map((row) => row.id)
-      observation[demand] =
-        query.status === `ready`
-          ? { ready: true, rows: demand === `w` ? ids : ids.sort() }
-          : { ready: false }
-    })
-    return { observation, events, sent: source.sent }
+    records.push(checkpoint(waitMs === 0))
+    if (waitMs > 0) {
+      await settle(1200)
+      records.push(checkpoint(true))
+    }
+    return records
   }, [
     ...queries.map((query) => () => query.cleanup()),
     () => source.collection.cleanup(),
@@ -1049,6 +883,13 @@ const stepArb: fc.Arbitrary<ReadonlyArray<Command>> = fc.oneof(
 )
 const historyArb: fc.Arbitrary<History> = fc.record({
   honorsAbort: fc.boolean(),
+  offline: fc.record({
+    waitMs: fc.constantFrom<0 | 1000>(0, 1000),
+    upstream: fc.constantFrom<OfflineUpstream>(
+      `never answers`,
+      `fails at once`,
+    ),
+  }),
   initial: fc
     .record(
       Object.fromEntries(
@@ -1073,7 +914,7 @@ const historyArb: fc.Arbitrary<History> = fc.record({
 
 const PROPERTY = `persisted-demand-coverage.history`
 const RUNS = 40
-const REACH_STATES: ReadonlyArray<ReachState> = [
+const REACH_STATES: ReadonlyArray<CoverageReach> = [
   `covered offline`,
   `uncovered offline`,
   `covered but short of rows`,
@@ -1084,17 +925,20 @@ const REACH_STATES: ReadonlyArray<ReachState> = [
   `window covered offline`,
   `window holds other rows`,
   `tie-boundary load uncovered`,
+  `covered load waits for the deadline`,
+  `uncovered load fails with its upstream`,
 ]
 
 async function campaign(options: Parameters<typeof fc.assert>[1]) {
-  const reach = createOracleReach<ReachState>(PROPERTY, REACH_STATES)
+  const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES)
   await fc.assert(
     fc.asyncProperty(historyArb, async (history) => {
       reach.beginHistory()
-      const { observation, events, sent } = await runHistory(history)
-      expect(observation).toEqual(
-        expectedObservation(events, sent, (state) => reach.reach(state)),
-      )
+      for (const record of await runHistory(history)) {
+        expect(
+          coverageViolations(record, (state) => reach.reach(state)),
+        ).toEqual([])
+      }
     }),
     options,
   )
@@ -1161,10 +1005,10 @@ describe(`persisted demand coverage over generated histories`, () => {
     reach.assertReached()
   }, 300_000)
 
-  it(`rejects a model that ignores lost rows, obsolete loads, or other window rows`, () => {
-    // Calibration over the source log alone. A load covers a over two rows;
-    // deleting one ends coverage; an obsolete load never covers; a window
-    // that holds other rows than it recorded is not covered.
+  it(`rejects observations that ignore lost rows, obsolete loads, or other window rows`, () => {
+    // Checker calibration (ORC-006): the shared judgment must reject a wrong
+    // observation of each kind. Each record below states what production
+    // would wrongly show; the comparison must report it.
     const loadA: LoadSubsetOptions = {
       where: new IR.Func(`eq`, [new IR.PropRef([`group`]), new IR.Value(`a`)]),
     }
@@ -1176,7 +1020,7 @@ describe(`persisted demand coverage over generated histories`, () => {
           compareOptions: { direction: `asc`, nulls: `first` },
         },
       ],
-      limit: 2,
+      limit: WINDOW_LIMIT,
     } as unknown as LoadSubsetOptions
     const rows: SourceEvent = {
       type: `rows`,
@@ -1185,29 +1029,71 @@ describe(`persisted demand coverage over generated histories`, () => {
         [`r2`, { group: `a`, rank: 2 }],
       ],
     }
-    const sent = { a: [loadA], b: [], w: [loadW] }
-    const ignore = () => {}
-    const covered: ReadonlyArray<SourceEvent> = [
+    const covered: Array<SourceEvent> = [
       rows,
       { type: `settled`, load: loadA, current: true },
       { type: `settled`, load: loadW, current: true },
     ]
-    const observe = (events: ReadonlyArray<SourceEvent>) =>
-      expectedObservation(events, { ...sent, b: [loadA] }, ignore)
-    expect(observe(covered).a).toEqual({ ready: true, rows: [`r1`, `r2`] })
-    expect(observe([...covered, { type: `delete`, id: `r1` }]).a).toEqual({
-      ready: false,
+    const ready = (ids: Array<string>): QueryObservation => ({
+      status: `ready`,
+      rows: ids,
     })
+    const record = (
+      events: ReadonlyArray<SourceEvent>,
+      a: QueryObservation,
+      w: QueryObservation,
+    ): CoverageRecord => ({
+      events,
+      queries: {
+        a: { spec: SPECS.a, sent: [loadA], observed: a },
+        w: { spec: SPECS.w, sent: [loadW], observed: w },
+      },
+      upstream: `never answers`,
+      waitPassed: true,
+    })
+    // The right observations pass.
     expect(
-      observe([rows, { type: `settled`, load: loadA, current: false }]).a,
-    ).toEqual({ ready: false })
-    expect(observe(covered).w).toEqual({ ready: true, rows: [`r1`, `r2`] })
+      coverageViolations(
+        record(covered, ready([`r1`, `r2`]), ready([`r1`, `r2`])),
+      ),
+    ).toEqual([])
+    // A demand that lost a row, settled anyway.
     expect(
-      observe([
-        ...covered,
-        { type: `rows`, rows: [[`r3`, { group: `a`, rank: 0 as Rank }]] },
-      ]).w,
-    ).toEqual({ ready: false })
+      coverageViolations(
+        record([...covered, { type: `delete`, id: `r1` }], ready([`r2`]), {
+          status: `loading`,
+        }),
+      ),
+    ).toHaveLength(1)
+    // An obsolete load treated as coverage.
+    expect(
+      coverageViolations(
+        record(
+          [rows, { type: `settled`, load: loadA, current: false }],
+          ready([`r1`, `r2`]),
+          { status: `loading` },
+        ),
+      ),
+    ).toHaveLength(1)
+    // A window that holds another row, settled anyway.
+    expect(
+      coverageViolations(
+        record(
+          [
+            ...covered,
+            { type: `rows`, rows: [[`r3`, { group: `a`, rank: 0 }]] },
+          ],
+          ready([`r1`, `r2`, `r3`]),
+          ready([`r3`, `r1`]),
+        ),
+      ),
+    ).toHaveLength(1)
+    // A window shown out of order.
+    expect(
+      coverageViolations(
+        record(covered, ready([`r1`, `r2`]), ready([`r2`, `r1`])),
+      ),
+    ).toHaveLength(1)
   })
 
   it.skipIf(oracleReplayRequested())(
