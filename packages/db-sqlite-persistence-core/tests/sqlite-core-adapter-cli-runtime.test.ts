@@ -3,11 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter } from '../src'
-import {
-  SqliteCliDriver,
-  runSQLiteBindingCapacityOracleSuite,
-  runSQLiteCoreAdapterContractSuite,
-} from './sqlite-core-adapter-oracle.test'
+import { runSQLiteCoreAdapterContractSuite } from './sqlite-core-adapter-contract-suite'
+import { runSQLiteBindingCapacityOracleSuite } from './sqlite-core-adapter-oracle.test'
+import { SqliteCliDriver } from './sqlite-core-adapter-support'
 
 // A managed physical storage ID must travel through the real sqlite3 CLI
 // driver, which passes SQL as a process argument. A NUL in that ID prevents
