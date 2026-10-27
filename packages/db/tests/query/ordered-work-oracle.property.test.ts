@@ -7425,6 +7425,44 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
+  // Found by the unindexed-refetch random campaign. A refetch report moves
+  // the page's end onto a null rank, which no cursor can express. Reading
+  // that end's tie would take the boundary's full-source fallback, so the
+  // loader repairs with its bounded prefix instead; a loader that read the
+  // tie broke the refetch law.
+  it(`repairs instead of reading an unexpressible end's tie after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 1,
+      initial: [
+        { id: 0, rank: null as unknown as number, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 3, rank: 0, eligible: true },
+      ],
+      history: [
+        {
+          type: `upsert`,
+          id: 10,
+          rank: null as unknown as number,
+          eligible: false,
+        },
+        { type: `dup`, id: 0 },
+      ],
+    })
+  })
+
   // A peer's tie answer changes, so the provider reports, but the first
   // query's page and tie answers stay the same and the peer installed the
   // row after its page. That page proves the window, so the report must

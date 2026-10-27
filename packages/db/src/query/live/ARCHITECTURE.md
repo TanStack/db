@@ -1018,7 +1018,8 @@ tie completes the proof without a repair. It then releases the older tie,
 whose rows sort after the end and outside the window, and the deletes that
 release causes are not an order change. A loader that already owes a repair,
 has other work in flight, or has an end that no cursor can express repairs
-instead. A window that needs a row
+instead: reading that end's tie would take the boundary's full-source
+fallback, while the repair's bounded prefix can prove the window. A window that needs a row
 past the page, such as one whose page
 holds rows a joined filter rejects, still repairs. So does any loader while
 its source holds accepted sync rows back, as behind a persisting optimistic

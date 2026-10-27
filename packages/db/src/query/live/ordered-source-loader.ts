@@ -684,8 +684,10 @@ export class OrderedSourceLoader {
    */
   revalidateLoadedCoverage(): void {
     // A `requiresFullSource` plan's coverage is its full-source read: nothing
-    // has settled before it, and it covers the source after.
-    if (!this.hasSettledSourceRequest || this.coversSource()) return
+    // has settled before it. Coverage that one full-source read completed
+    // holds the work slot, so the end's tie below defers to it, and an
+    // ordering invalidation owes it nothing.
+    if (!this.hasSettledSourceRequest) return
     const end = this.ownPrefixEnd()
     if (end === undefined) {
       this.invalidateSourceOrdering()
@@ -709,9 +711,12 @@ export class OrderedSourceLoader {
   // tie completes the proof without a repair. The older tie's rows sort
   // after the end and outside the window, and they prove nothing now.
   private loadMovedEndTie(end: Record<string, unknown>): void {
-    // Other work owns the boundary, a repair is already owed, a replay owns
-    // the leases, or no cursor can express the end's tie, so only the
-    // repair's full-source fallback can read it.
+    // Other work owns the boundary, a repair is already owed, or a replay
+    // owns the leases, so the repair reads it. A staged continuation is
+    // replaced: the window needs no more rows, and a staged repair step owes
+    // a repair. No cursor can express some ends' ties; reading one would
+    // take the boundary's full-source fallback, while the repair's bounded
+    // prefix can prove the window without it.
     if (
       !canExpressCursorOrder(
         normalizeOrderByPaths(this.info.orderBy, this.alias).slice(0, 1),
@@ -720,7 +725,6 @@ export class OrderedSourceLoader {
       this.debt !== `none` ||
       this.work.kind !== `idle` ||
       this.pending ||
-      this.stagedContinuation ||
       this.subscription.hasPendingTruncateReplacement
     ) {
       this.invalidateSourceOrdering()
