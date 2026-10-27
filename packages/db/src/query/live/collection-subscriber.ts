@@ -48,7 +48,8 @@ export class CollectionSubscriber<
   // of the key succeeds or the query no longer needs it.
   private readonly demand = new SubsetDemandController((planId, key, error) => {
     const request = `${planId}:${key}`
-    if (error) this.collectionConfigBuilder.reportFailedRequest(request, error)
+    if (error)
+      this.collectionConfigBuilder.reportFailedRequest(request, [error])
     else this.collectionConfigBuilder.clearFailedRequest(request)
   })
 
@@ -139,7 +140,13 @@ export class CollectionSubscriber<
           this.collectionConfigBuilder.liveQueryCollection?._lifecycle
             .inFirstLoad === true,
       )
-      if (!this.collectionConfigBuilder.isLazySource(this.sourceId)) {
+      // A replay in flight decides the loads it replays or that join it:
+      // their failures show in its verdict, in failure order (law 16).
+      if (
+        !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
+        !(event.subscription as CollectionSubscription)
+          .pendingTruncateReplacement
+      ) {
         this.collectionConfigBuilder.failRootLoad(this.sourceId, error)
       }
     }
@@ -446,12 +453,14 @@ export class CollectionSubscriber<
       },
       // The query keeps its last snapshot, which no longer updates: a
       // request error, or a failed first load before readiness.
-      fail: (error) => {
+      fail: (errors) => {
         if (
-          syncRunGeneration ===
+          syncRunGeneration !==
           this.collectionConfigBuilder.getSyncRunGeneration()
         )
-          this.collectionConfigBuilder.failReplay(this.sourceId, error)
+          return
+        this.collectionConfigBuilder.failReplay(this.sourceId, errors)
+        this.demand.failReplay()
       },
       holdsDemand: () => this.demand.holdsDemand(),
     }

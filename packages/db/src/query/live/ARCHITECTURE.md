@@ -1826,10 +1826,16 @@ every row before the top-K (a recorded limit).
     request error belongs to the request that failed: once a demand change
     retires that request, the replay's load of its key decides the key, so
     the error goes when the replay succeeds. When several request errors are
-    open, the query's node shows the newest, as TanStack Query's `error`;
-    two requests that fail with one error show one problem, which keeps the
-    place of its first failure, and a failed replay shows the subscription's
-    replay error. A replay request that throws leaves
+    open, the query's node shows the newest, as TanStack Query's `error`,
+    and its `errors` lists every request failure still open, oldest first;
+    two requests that fail with one error are one failure, which keeps the
+    place of its first failure, and a failed replay lists every load it
+    failed for, in failure order. A replay in flight decides the loads it
+    replays or that join it, so their failures show in its verdict, not
+    as separate failures of the root Collection's load. A failed key whose
+    pending retry the replay replaced takes the replay's failure, so its
+    earlier failure leaves the list; a failed request without a retry keeps
+    its own failure next to the replay's. A replay request that throws leaves
     its key to that replay's verdict: a demand change during the replay does
     not request the key by itself, and only a replacement for fragmented
     coverage (law 10) requests it again, inside the whole current key union.
@@ -1849,7 +1855,11 @@ every row before the top-K (a recorded limit).
     through nested live queries. A node shows at most one problem:
     `failureReason` (the sync adapter still tries) or `error` (the first load
     failed, the sync adapter stopped, the Collection crashed, or, on a
-    query's own node, a request for more data failed). An include's source
+    query's own node, a request for more data failed). A problem shows its
+    newest failure and lists every failure of its frame in `errors`: a
+    failure reason's frame is its sync run's reports since the slot was last
+    clear, an `error` from `fail()`, a failed first load, or a crash is one
+    failure, and a request error lists the request failures still open. An include's source
     has `kind: 'include'`; its per-row child Collections are not in the tree,
     so adding a child changes nothing. Every change to the tree is announced
     by `health:change`, so readers can keep a tree until the next event. A pooled live query's tree is the tree a live-query Collection
@@ -1859,7 +1869,9 @@ every row before the top-K (a recorded limit).
     Collection's status changes, its `status:change` fires first and its
     `health:change` follows at once; the tree is current when either fires.
     A node keeps its object identity until something in its subtree changes,
-    and a change replaces only the nodes on its path.
+    and a change replaces only the nodes on its path. Adding or removing a
+    failure in a problem's `errors` is a change, announced once, also for a
+    Collection the query reads under several aliases.
 
 ## Glossary
 

@@ -52,7 +52,15 @@
  *
  * The model keeps, for each Collection, its status and its problem after
  * readiness (none, a failure reason, or an error), with a serial for each
- * reported problem. It also keeps the Collection's rows (key and the tag of
+ * reported failure. A problem shows its newest failure and lists its frame,
+ * oldest first, in `errors` (maintainer decision). The failure reason's
+ * frame is every `reportError()` of the sync run since the slot was last
+ * clear: `reportHealthy()` empties it, and a reload's new run that reports
+ * starts a new one, which its first commit keeps. An error is once per sync
+ * run, so its frame is one failure. A live query's request error lists every
+ * request failure still open on its node, once per cause, in the order each
+ * was shown; a failed replay adds every failed load it was judged on. It
+ * also keeps the Collection's rows (key and the tag of
  * the write that produced each), the sync run's open transaction, and
  * whether a reload's replacement is armed. A reload's first transaction
  * replaces every row; until the run begins it, a diffing adapter reads no
@@ -119,7 +127,10 @@
  * question. A history that does not settle within 10 seconds fails. A query whose first load failed stays in `error` until its
  * own reload: `reload-query` calls the observed query's `reload()`, which
  * reloads every Collection below it that shows an error, through a nested
- * live query, and then the query itself. `restart` cleans up the
+ * live query, and then the query itself. A nested query that a cascade
+ * ended is one of those Collections when A shows an error: its own reload
+ * reloads A and starts it, also when another source's reload rejects and
+ * the outer query does not start. `restart` cleans up the
  * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
  * for `markReady()` after `fail()`, for any report after `fail()`, and for a
@@ -134,7 +145,12 @@
  * each Collection's rows and tags, the baseline a diffing adapter reads, the
  * query's row count while ready, whether the Effect ended and how often it
  * reported a source error, the full projected health tree, and the thrown
- * error class. An Effect that ends as it is created leaves A's listener count
+ * error class. Each problem in the tree projects with its listed failures:
+ * their messages, their order, and, for a cause the driver reported, which
+ * report it is (the same object, by the model's serial); a problem whose
+ * `message`, `cause`, and `at` are not its newest failure's projects as a
+ * mismatch. A legal `report` or `healthy` that changes the tree announces
+ * one `health:change`. An Effect that ends as it is created leaves A's listener count
  * where it was. While a Collection is cleaning up or cleaned up, no sync run
  * of it is live at the adapter (every run it started has had its cleanup
  * called), and a cleanup during a reload leaves that reload settled. It also checks identity: reading twice gives the same tree,
@@ -291,18 +307,24 @@ type ReloadNotice =
 // ---------------------------------------------------------------------------
 
 type Gate = `loading` | `ready` | `error` | `crashed` | `cleaned-up`
-// `serial` names one reported problem. A new report is a new problem even
-// when it has the same field, so the node that shows it is a new node.
-type Problem = null | { message: string; serial: number }
+// `serial` names one reported failure. A new report is a new failure even
+// when it has the same message, so the node that shows it is a new node.
+type Failure = { message: string; serial: number }
+type Problem = null | Failure
 // `cause` is the message of what put the gate in `error` or `crashed`.
 // `reloading`: a reload's new sync run (or a query's restart) has not
 // committed yet, so everything visible is the previous run's.
 type GateModel = { gate: Gate; cause: string | null; reloading: boolean }
-// The node shows `stopped` (from fail() after readiness) over `failure`
+// The node shows `stopped` (from fail() after readiness) over `failures`
 // (from reportError()); a reload's new run can report while the previous
 // run's error still shows.
-// `failureFromReload`: the new run reported `failure` itself, so its first
-// commit keeps it.
+// `failures` is the failure reason's frame (maintainer decision): every
+// reportError() of the sync run since the slot was last clear, oldest first.
+// The node's `failureReason` is the newest of them, and its `errors` lists
+// them all. `reportHealthy()` empties the frame. A frame belongs to one sync
+// run, so a reload's new run that reports starts a new frame.
+// `failureFromReload`: the new run reported `failures` itself, so its first
+// commit keeps them.
 // `rows` are the applied synced rows; `open` is the run's open transaction.
 // `armed`: a reload started and its run has not begun a transaction yet, so
 // the next transaction it begins replaces every row, and until then a diffing
@@ -316,7 +338,7 @@ type SourceModel = GateModel & {
   cleaning: boolean
   retired: boolean
   retiredCleanup: boolean
-  failure: Problem
+  failures: Array<Failure>
   stopped: Problem
   failureFromReload: boolean
   rows: Rows
@@ -447,7 +469,7 @@ function restartSource(source: SourceModel): void {
     gate: `loading`,
     cause: null,
     reloading: false,
-    failure: null,
+    failures: [],
     stopped: null,
     failureFromReload: false,
     cleaning: false,
@@ -494,7 +516,7 @@ function applyCleanup(
     cleaning: true,
     retired: true,
     reloading: false,
-    failure: null,
+    failures: [],
     stopped: null,
     failureFromReload: false,
     rows: new Map(),
@@ -548,7 +570,7 @@ function crashSource(source: SourceModel, cause: string): void {
   if (source.gate !== `crashed`) {
     source.gate = `crashed`
     source.cause = cause
-    source.failure = null
+    source.failures = []
     source.stopped = null
     source.reloading = false
   }
@@ -586,7 +608,7 @@ function completeReload(source: SourceModel): void {
   source.reloading = false
   source.gate = `ready`
   source.cause = null
-  if (!source.failureFromReload) source.failure = null
+  if (!source.failureFromReload) source.failures = []
   source.failureFromReload = false
   source.stopped = null
 }
@@ -637,7 +659,7 @@ function freshSource(): SourceModel {
     gate: `loading`,
     cause: null,
     reloading: false,
-    failure: null,
+    failures: [],
     stopped: null,
     failureFromReload: false,
     cleaning: false,
@@ -812,14 +834,16 @@ function applyModel(
         source.open = null
       }
       // A nested query reloads its inner query too, which reloads A, then
-      // itself.
+      // itself. An inner query the cascade ended is a Collection below the
+      // query that shows A's error, so it is one of the reloads that run
+      // together: once A reloads, it starts, as any Collection's reload
+      // starts a cleaned-up one, also when another reload rejects and the
+      // outer query then does not start.
       const waits = new Set<SourceName | `inner`>(reloaded)
-      if (
-        shape === `nested` &&
-        !model.innerEnded &&
-        model.inner.gate === `error` &&
-        !rejects.includes(`A`)
-      ) {
+      const viaInner = model.innerEnded
+        ? reloaded.includes(`A`)
+        : model.inner.gate === `error` && !rejects.includes(`A`)
+      if (shape === `nested` && viaInner) {
         model.selfReloads.push({
           target: `inner`,
           waits: new Set(reloaded.includes(`A`) ? [`A`] : []),
@@ -1041,7 +1065,7 @@ function applySourceStep(
       source.open = null
       source.gate = `crashed`
       source.cause = `${label} cleanup failed`
-      source.failure = null
+      source.failures = []
       source.stopped = null
       source.reloading = false
       break
@@ -1063,7 +1087,7 @@ function applySourceStep(
         source.reloading = false
       } else {
         source.reloading = false
-        source.failure = null
+        source.failures = []
         source.stopped = {
           message: `${label} gave up`,
           serial: ++counter.serial,
@@ -1073,17 +1097,20 @@ function applySourceStep(
     case `report`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
       else {
-        source.failure = {
+        // A reload's new run that reports starts its own frame; the
+        // retired run's failures leave with that run.
+        if (source.reloading && !source.failureFromReload) source.failures = []
+        source.failures.push({
           message: `${label} problem`,
           serial: ++counter.serial,
-        }
+        })
         source.failureFromReload = source.reloading
       }
       break
     case `healthy`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
       else {
-        source.failure = null
+        source.failures = []
         source.failureFromReload = false
       }
       break
@@ -1156,6 +1183,15 @@ function settleSelfReloads(shape: Shape, model: Model): void {
         if (!pending.failed && model.queryEnded) restartEndedQuery(shape, model)
         continue
       }
+      // The reload of an inner query a cascade ended starts it once A
+      // reloaded.
+      if (pending.target === `inner` && model.innerEnded) {
+        if (pending.failed) continue
+        model.innerEnded = false
+        model.inner = startQuery(model, [`A`])
+        deriveQueries(shape, model)
+        continue
+      }
       const current = model[pending.target]
       if (pending.failed || current.gate !== `error`) continue
       // The restarted run fails at once on an input that still failed, and
@@ -1180,8 +1216,37 @@ function settleSelfReloads(shape: Shape, model: Model): void {
 }
 
 // A problem's message says which cause the node shows; `serial` (identity
-// only) says which report.
-type ExpectedProblem = null | { message: string; serial?: number }
+// only) says which report. `errors` is the problem's frame, oldest first:
+// each failure's message and, when the driver reported its cause, that
+// report's serial (see `reportedSerials`). The problem shows the newest.
+type ExpectedFailure = { message: string; cause?: number }
+type ExpectedProblem = null | {
+  message: string
+  serial?: number
+  errors: Array<ExpectedFailure>
+}
+// A status cause (a failed first load or a crash) is one failure: its frame
+// is the sync run, and nothing adds to it.
+function statusCause(message: string): NonNullable<ExpectedProblem> {
+  return { message, errors: [{ message }] }
+}
+// The newest failure of a frame shows, and the frame lists them all.
+function framed(
+  frame: ReadonlyArray<Failure>,
+  identity: boolean,
+): ExpectedProblem {
+  const newest = frame.at(-1)
+  return newest
+    ? {
+        message: newest.message,
+        ...(identity ? { serial: newest.serial } : {}),
+        errors: frame.map(({ message, serial }) => ({
+          message,
+          cause: serial,
+        })),
+      }
+    : null
+}
 type ExpectedNode = {
   alias: string
   kind: `source` | `live-query` | `include`
@@ -1201,18 +1266,13 @@ function sourceNode(
   identity: boolean,
   kind: ExpectedNode[`kind`] = `source`,
 ): ExpectedNode {
-  const reported = (problem: Problem): ExpectedProblem =>
-    problem
-      ? {
-          message: problem.message,
-          ...(identity ? { serial: problem.serial } : {}),
-        }
-      : null
+  // fail() after readiness is once per sync run, so its frame is one
+  // failure.
   const error =
     source.gate === `error` || source.gate === `crashed`
-      ? { message: source.cause! }
-      : reported(source.stopped)
-  const failureReason = error ? null : reported(source.failure)
+      ? statusCause(source.cause!)
+      : framed(source.stopped ? [source.stopped] : [], identity)
+  const failureReason = error ? null : framed(source.failures, identity)
   return {
     alias,
     kind,
@@ -1231,7 +1291,7 @@ function queryNode(
   sources: Array<ExpectedNode>,
 ): ExpectedNode {
   const error =
-    gate === `error` || gate === `crashed` ? { message: cause! } : null
+    gate === `error` || gate === `crashed` ? statusCause(cause!) : null
   return {
     alias,
     kind: `live-query`,
@@ -1471,15 +1531,43 @@ const cleanupPrefix = /^Collection ".*" sync cleanup function threw an error: /
 const cleanedUnderQueryMessage =
   /^Source collection '.*' was manually cleaned up while live query '.*' depends on it\..*$/s
 
+// The model's serial of each cause the main grammar's driver reported
+// through `reportError()` or `fail()`, so the projection can say which
+// report each listed failure is: the same object, not only the same message.
+const reportedSerials = new WeakMap<object, number>()
+const projectedCauseNotNewest = `the problem does not show its newest failure`
+
 function project(node: HealthNode): ExpectedNode {
-  const problem = (info: HealthNode[`error`]): ExpectedProblem =>
-    info
-      ? {
-          message: info.message
-            .replace(cleanupPrefix, ``)
-            .replace(cleanedUnderQueryMessage, cleanedUnderQuery),
-        }
-      : null
+  const message = (text: string) =>
+    text
+      .replace(cleanupPrefix, ``)
+      .replace(cleanedUnderQueryMessage, cleanedUnderQuery)
+  // A problem shows its newest failure: its `message`, `cause`, and `at` are
+  // the last listed failure's, and the list is oldest first. A problem that
+  // breaks this projects a message no model predicts.
+  const problem = (info: HealthNode[`error`]): ExpectedProblem => {
+    if (!info) return null
+    const newest = info.errors.at(-1)
+    const showsNewest =
+      newest !== undefined &&
+      newest.message === info.message &&
+      newest.cause === info.cause &&
+      newest.at === info.at &&
+      info.errors.every(
+        (failure, index) =>
+          index === 0 || info.errors[index - 1]!.at <= failure.at,
+      )
+    return {
+      message: showsNewest ? message(info.message) : projectedCauseNotNewest,
+      errors: info.errors.map((failure) => ({
+        message: message(failure.message),
+        cause:
+          typeof failure.cause === `object` && failure.cause !== null
+            ? reportedSerials.get(failure.cause)
+            : undefined,
+      })),
+    }
+  }
   return {
     alias: node.alias,
     kind: node.kind,
@@ -1649,6 +1737,9 @@ const historyReachStates = [
   `cleanup from the Collection's health:change during a reload`,
   `cleanup from the query's health:change during a reload`,
   `fresh run commits after a cleanup during a reload`,
+  `report adds a failure to an open frame`,
+  `reload's new run reports over the retired run's frame`,
+  `failure frame clears with failures listed`,
 ] as const
 type HistoryReach = ReturnType<
   typeof createOracleReach<(typeof historyReachStates)[number]>
@@ -1859,6 +1950,22 @@ async function runHistory(
           (source.gate === `error` || source.stopped !== null)
         )
           reach.reach(`fail on a stopped source`)
+        const reports =
+          step.kind === `report` &&
+          source.gate === `ready` &&
+          !source.stopped &&
+          source.failures.length > 0
+        if (reports && !source.reloading)
+          reach.reach(`report adds a failure to an open frame`)
+        if (reports && source.reloading && !source.failureFromReload)
+          reach.reach(`reload's new run reports over the retired run's frame`)
+        if (
+          step.kind === `healthy` &&
+          source.gate === `ready` &&
+          !source.stopped &&
+          source.failures.length > 1
+        )
+          reach.reach(`failure frame clears with failures listed`)
         if (
           (step.kind === `ready` || step.kind === `commit`) &&
           !source.retired &&
@@ -1880,9 +1987,16 @@ async function runHistory(
         for (const name of [`A`, `B`] as const)
           if (model.sources[name].retiredCleanup) freshSinceRetire[name] = true
       const queryEndedBefore = model.queryEnded
+      const serialBefore = model.serial
       const expected = applyModel(shape, model, step)
       // The write tag the model gave this step, if it wrote.
       const tag = model.serial
+      // A report the model numbered is that failure: its cause projects as
+      // the model's serial.
+      const reported = (error: Error) => {
+        if (model.serial !== serialBefore) reportedSerials.set(error, tag)
+        return error
+      }
       events = []
       let thrown: unknown
       reloadCleanup = undefined
@@ -2044,7 +2158,7 @@ async function runHistory(
             }
             await flushPromises()
           } else if (step.kind === `fail`) {
-            params.fail(new Error(`${step.source} gave up`))
+            params.fail(reported(new Error(`${step.source} gave up`)))
           } else if (step.kind === `healthy`) {
             params.reportHealthy()
           } else if (step.kind === `crash`) {
@@ -2052,7 +2166,7 @@ async function runHistory(
               new Error(`${step.source} crashed`),
             )
           } else {
-            params.reportError(new Error(`${step.source} problem`))
+            params.reportError(reported(new Error(`${step.source} problem`)))
           }
         }
       } catch (error) {
@@ -2175,6 +2289,17 @@ async function runHistory(
             events.at(-1)?.tree,
             `${label}: last event is current`,
           ).toEqual(tree)
+          // Law 17: a report or a healthy call is one change, also when it
+          // only adds a failure to the frame or empties it, so the query
+          // announces it once.
+          if (
+            expected === `ok` &&
+            (step.kind === `report` || step.kind === `healthy`)
+          )
+            expect(
+              events.filter((event) => event.kind === `health`).length,
+              `${label}: one health:change`,
+            ).toBe(1)
         }
       }
     }
@@ -2607,6 +2732,23 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     { kind: `cleanup-hold`, source: `B` },
     { kind: `cleanup-during-reload`, source: `B`, at: `query-health` },
   ],
+  // The query's reload passes through the nested query that a cascade ended:
+  // that inner query is a Collection below it that shows A's error, so its
+  // own reload reloads A and then starts it, while B's reload rejects and
+  // the outer query does not start (a 30-times counterexample of the model,
+  // which reloaded A past the ended inner query).
+  'a query reload starts an ended nested query even when another source rejects':
+    [
+      on(`ready`, `A`),
+      on(`ready`, `B`),
+      { kind: `cleanup-during-reload`, source: `A`, at: `source-health` },
+      on(`reload`, `A`),
+      on(`ready`, `A`),
+      on(`reload-cleanup-fails`, `B`),
+      on(`fail`, `A`),
+      { kind: `reload-query` },
+      { kind: `commit`, source: `A` },
+    ],
   'a report before Collection readiness throws': [
     on(`report`, `A`),
     on(`healthy`, `B`),
@@ -2710,12 +2852,21 @@ describe(`source failure and health oracle`, () => {
   // Prefixes that enter a declared reach state that random steps alone rarely
   // reach at the base run count; random steps follow each one.
   const reachPrefixes: ReadonlyArray<ReadonlyArray<Step>> = [
-    // A reload's open insert of a row the Collection keeps.
+    // A reload's open insert of a row the Collection keeps. Before it, a
+    // failure reason's frame grows and clears with failures listed, and the
+    // reload's new run reports while the retired run's frame shows. The
+    // reload then ends before its first commit.
     [
       on(`ready`, `A`),
       on(`ready`, `B`),
+      on(`report`, `A`),
+      on(`report`, `A`),
+      on(`healthy`, `A`),
+      on(`report`, `A`),
       on(`reload`, `A`),
+      on(`report`, `A`),
       { kind: `write`, source: `A`, key: 1, untagged: true },
+      on(`fail`, `A`),
     ],
     // A retired run's cleanup that rejects after a cleanup and a fresh start.
     [
@@ -2887,6 +3038,16 @@ describe(`problem values`, () => {
     )
     expect(shown?.cause, `the node keeps the value`).toBe(problem)
     expect(typeof shown?.message).toBe(`string`)
+    // One call is one failure in the problem's frame, and it is the one the
+    // problem shows. JSON keeps every failure's facts and leaves out causes.
+    expect(shown?.errors.length, `one failure listed`).toBe(1)
+    expect(shown?.errors[0]?.cause, `the listed failure's value`).toBe(problem)
+    const facts = JSON.parse(JSON.stringify(shown!.errors[0]))
+    expect(facts, `JSON leaves out the cause`).not.toHaveProperty(`cause`)
+    expect(JSON.parse(JSON.stringify(shown))).toEqual({
+      ...facts,
+      errors: [facts],
+    })
     if (reload)
       await expect(reload, `a failed reload settles`).rejects.toBe(problem)
     await collection.cleanup()
@@ -4463,7 +4624,9 @@ describe(`on-demand first load after query readiness`, () => {
  * and the glossary's request-error entry:
  *
  * - **Law 10.** A key's latest load that the query did not abort decides
- *   it; an older load that settles later decides nothing. Before
+ *   it; an older load that settles later decides nothing. A failed load
+ *   covers nothing, so the next demand change retires it, also one that
+ *   threw, and an older load that still covers the key then decides it. Before
  *   initial-query readiness, a failed load of a held key fails the query's
  *   first load. After it, the failure is a request error on the query's own
  *   node (law 16) until a later load of that key succeeds or the query
@@ -4474,17 +4637,32 @@ describe(`on-demand first load after query readiness`, () => {
  *   before the loads it retires stop counting. The replay is judged once all
  *   its loads have settled, against the demand held then. A failure belongs
  *   to the logical demand that failed: if that demand retired, the replay
- *   succeeds for the rest. A replay whose demand all retired with nothing
+ *   succeeds for the rest. A replay load counts for the verdict only while
+ *   the query holds it: what a load the query released loaded before its
+ *   release does not count. A replay whose demand all retired with nothing
  *   loaded is aborted, and its error stays. Older overlapping replay work
- *   holds the replay and decides nothing. Replacing an acquisition does not
- *   release its owner: a demand parked behind a Collection whose first load
- *   failed is still held, so the replay waits for it.
+ *   holds the replay and decides nothing. Releasing an owner removes its
+ *   older work from readiness, also when the query asks for its keys again
+ *   (a new owner). Replacing an acquisition does not release its owner: a
+ *   demand parked behind a Collection whose first load failed is still
+ *   held, so the replay waits for it.
  * - **Law 16.** A failed replay is a request error until a replay succeeds.
- *   Its error is the subscription's replay error, the earliest of the
- *   failures it was judged on (the subscription lifecycle oracle owns that
- *   choice), and it is reported once per attempt. A replay in flight defers the error of a load
- *   that fails meanwhile: that load fails with its own error once the replay
- *   settles. A replay whose attempt already failed defers nothing, so a load
+ *   It lists every failure it was judged on, in failure order, and shows the
+ *   newest (maintainer decision: a failed replay's problem lists all its
+ *   failed loads); the subscription's own replay error, the earliest of
+ *   them, belongs to the subscription lifecycle oracle. It is reported once
+ *   per attempt, and a later attempt's failure replaces it. A failed load
+ *   that a later load replaced (a replay load that loaded its key, or the
+ *   query's own load that requested it again) leaves the list (law 10). A
+ *   failed key whose pending retry the replay replaced takes the replay's
+ *   failure, so its earlier failure leaves, and a later replay's failure
+ *   replaces it in turn; a failed key without a retry keeps its own
+ *   failure next to the replay's (a request error belongs to the request
+ *   that failed). A replay in flight defers the error of a load that fails
+ *   meanwhile: that load fails with its own error once the replay settles.
+ *   The replay decides the loads it replaced at its verdict, also one that
+ *   an adapter which ignores aborts still serves. A replay whose attempt
+ *   already failed defers nothing, so a load
  *   that joins it and fails shows its own error at once (maintainer
  *   decision). A replay's success clears the errors of the keys it loaded
  *   again, also a key whose earlier load threw (maintainer decision). A load
@@ -4497,9 +4675,11 @@ describe(`on-demand first load after query readiness`, () => {
  *   decides it, and the error goes when the replay succeeds.
  * - **Which error shows** (maintainer decision, as TanStack Query's
  *   `error`): when several request errors are open, the node shows the
- *   newest, the one reported last. Two requests that fail with one error
- *   show one problem, and an unchanged shown problem keeps its identity
- *   (law 17).
+ *   newest, the one reported last, and its `errors` lists every open
+ *   failure, oldest first; a failure that clears leaves the list. Two
+ *   requests that fail with one error are one failure, which keeps the
+ *   place of its first failure while another request still shows it, and a
+ *   problem whose failures did not change keeps its identity (law 17).
  *
  * Which loads the query requests is the loader's choice, so the model does
  * not predict requests. The driver reports each request as the adapter saw
@@ -4554,8 +4734,8 @@ type Demand = {
   // A replay failed. The query keeps its last complete publication, and the
   // error shows until a replay succeeds or the query holds nothing.
   replayFailed: boolean
-  // The serial of the latest replay load whose failure the replay shows.
-  replayError: number
+  // The failed loads the failed replay shows, by serial, in failure order.
+  replayErrors: Array<number>
   pending: Array<DemandLoad>
   // Held keys a replay failed for when it was judged, with the serial of the
   // failed load.
@@ -4563,9 +4743,10 @@ type Demand = {
   // Replay loads that failed in the current attempt, by serial; the replay
   // judges them when it settles.
   replayFailedLoads: Map<number, Set<number>>
-  // The keys that loads of the open replay loaded, in any attempt, with the
-  // serial of each key's latest such load.
-  replayLoadedKeys: Map<number, number>
+  // The loads of the open replay that loaded their keys, in any attempt, by
+  // serial. A load the query released leaves: it loaded nothing for the
+  // replay's verdict (law 9).
+  replayLoads: Map<number, Set<number>>
   // Loads that a replay retired and the adapter still serves. As for a
   // truncate, a load started before a replay still holds the query's first
   // load until it settles, while the query holds one of its keys; it decides
@@ -4603,6 +4784,14 @@ type Demand = {
   deferredFailures: Set<number>
   // Failures, by serial, whose request a later demand change retired.
   retiredFailures: Set<number>
+  // Requests the replay issued, by serial; every other request is the
+  // query's own, such as a demand change's.
+  replayRequests: Set<number>
+  // When each request was made, on the failure clock.
+  requestedAt: Map<number, number>
+  // Failed keys whose later retry the current replay replaced: the replay
+  // decides that retry (law 16), so a failed replay is the key's failure.
+  retriedByReplay: Set<number>
   // Rules the model applied, for the drivers' declared reach (ORC-015).
   applied: Set<AppliedRule>
 }
@@ -4631,11 +4820,11 @@ function freshOnDemandModel(held: Iterable<number>): OnDemandModel {
       failed: new Map(),
       replayActive: false,
       replayFailed: false,
-      replayError: 0,
+      replayErrors: [],
       pending: [],
       replayFailedKeys: new Map(),
       replayFailedLoads: new Map(),
-      replayLoadedKeys: new Map(),
+      replayLoads: new Map(),
       retiredInFlight: new Map(),
       requested: new Map(),
       replayAtFirstCommit: false,
@@ -4650,6 +4839,9 @@ function freshOnDemandModel(held: Iterable<number>): OnDemandModel {
       replayAttemptFailed: false,
       deferredFailures: new Set(),
       retiredFailures: new Set(),
+      retriedByReplay: new Set(),
+      replayRequests: new Set(),
+      requestedAt: new Map(),
       applied: new Set(),
     },
     source: freshSource(),
@@ -4713,15 +4905,11 @@ function settleDemandLoad(
           .every((key) => load.keys.has(key)),
     )
   if (succeeded) {
+    // A replay load counts for the replay's own judgment. One that the
+    // replay itself issued replaces an earlier acquisition, so the replay
+    // decides its key (law 9): its error clears when the replay succeeds.
+    if (load.replay) demand.replayLoads.set(load.serial, load.keys)
     for (const key of load.keys) {
-      // A replay load counts for the replay's own judgment. One that the
-      // replay itself issued replaces an earlier acquisition, so the replay
-      // decides its key (law 9): its error clears when the replay succeeds.
-      if (load.replay)
-        demand.replayLoadedKeys.set(
-          key,
-          Math.max(demand.replayLoadedKeys.get(key) ?? 0, load.serial),
-        )
       if (load.fromReplay) continue
       // A demand's own load: its key's request error clears (the glossary: a
       // later subset load for that demand fulfills), unless a newer load of
@@ -4765,15 +4953,22 @@ function settleDemandLoad(
   settleReplay(model)
 }
 
-// A failed load's error shows for the held keys it still decides.
+// A failed load's error shows for the held keys it still decides. Two
+// requests that fail with one error are one failure: while another request
+// still shows it, it keeps the place of its first failure.
 function showFailure(
   demand: Demand,
   serial: number,
   keys: ReadonlyArray<number>,
 ): void {
   if (keys.length === 0) return
+  const shownElsewhere =
+    [...demand.failed].some(
+      ([key, failure]) => failure === serial && !keys.includes(key),
+    ) ||
+    (demand.replayFailed && demand.replayErrors.includes(serial))
   for (const key of keys) demand.failed.set(key, serial)
-  demand.shownAt.set(serial, ++demand.clock)
+  if (!shownElsewhere) demand.shownAt.set(serial, ++demand.clock)
 }
 
 // A replay settles once none of its loads is pending. One that failed for a
@@ -4786,13 +4981,22 @@ function settleReplay(model: OnDemandModel): void {
     entry.replay &&
     (!entry.superseded || [...entry.keys].some((key) => demand.held.has(key)))
   if (demand.pending.some(holds)) return
+  // Each key the replay loaded, with the serial of its latest replay load
+  // the query still holds.
+  const replayLoadedKeys = new Map<number, number>()
+  for (const [serial, keys] of demand.replayLoads)
+    for (const key of keys)
+      replayLoadedKeys.set(
+        key,
+        Math.max(replayLoadedKeys.get(key) ?? 0, serial),
+      )
   // Law 10: a key's latest load decides it, so a replay load that loaded a
   // key after its failed load replaces that failure. A failure whose request
   // a demand change retired no longer decides its key (maintainer decision:
   // a request error belongs to the request that failed), so the replay's
   // load of that key decides it, even an older one.
   const replayDecides = (key: number, failure: number) => {
-    const loaded = demand.replayLoadedKeys.get(key)
+    const loaded = replayLoadedKeys.get(key)
     return (
       loaded !== undefined &&
       (loaded > failure || demand.retiredFailures.has(failure))
@@ -4801,7 +5005,7 @@ function settleReplay(model: OnDemandModel): void {
   for (const [key, serial] of demand.replayFailedKeys) {
     if (!replayDecides(key, serial)) continue
     demand.replayFailedKeys.delete(key)
-    if (demand.replayLoadedKeys.get(key)! < serial)
+    if (replayLoadedKeys.get(key)! < serial)
       demand.applied.add(`replay clears a retired failure`)
   }
   const failedLoads = demand.replayFailedLoads
@@ -4827,7 +5031,7 @@ function settleReplay(model: OnDemandModel): void {
     // with none loaded is aborted instead, and its error stays.
     // It succeeds as a replacement for the demand that remains (law 9), so
     // it must have loaded some of that demand.
-    const loadedHeld = [...demand.replayLoadedKeys.keys()].some((key) =>
+    const loadedHeld = [...replayLoadedKeys.keys()].some((key) =>
       demand.held.has(key),
     )
     if (open && loadedHeld) {
@@ -4836,7 +5040,7 @@ function settleReplay(model: OnDemandModel): void {
       // A key whose earlier load threw clears too, but a key's failure after
       // its replay load stays while the query holds the failed request: the
       // later load decides.
-      for (const [key, loaded] of demand.replayLoadedKeys) {
+      for (const [key, loaded] of replayLoadedKeys) {
         const failure = demand.failed.get(key)
         if (failure === undefined || !replayDecides(key, failure)) continue
         demand.failed.delete(key)
@@ -4845,7 +5049,7 @@ function settleReplay(model: OnDemandModel): void {
         else if (demand.thrown.has(failure))
           demand.applied.add(`replay clears an earlier thrown failure`)
       }
-      demand.replayLoadedKeys = new Map()
+      demand.replayLoads = new Map()
       return
     }
     // A replay that loaded nothing, while the query still holds demand whose
@@ -4859,30 +5063,54 @@ function settleReplay(model: OnDemandModel): void {
     return
   }
   demand.replayFailed = true
-  // The attempt's error is reported once: the subscription's replay error.
-  // That is the earliest failure of a load whose demand the query still
-  // holds and no later replay load replaced, whether or not it is its keys'
-  // latest load (the subscription lifecycle oracle: a replay retains an
-  // earlier peer failure). Then each load that failed while the replay was
-  // in flight fails with its own error, for the keys it still decides, in
-  // failure order.
+  // The attempt's failure is reported once. It lists every failed load it
+  // was judged on whose demand the query still holds and that no later load
+  // replaced: a later replay load that loaded its key, or a load of the
+  // query's own, such as a demand change's, that requested its key again
+  // after it failed (law 10: a failed load covers nothing, so that request
+  // is the key's acquisition now). A load still pending when the query
+  // asked again is replaced only once the replacement loads. It lists them
+  // in failure order and shows the newest (maintainer decision: a failed
+  // replay's problem lists all its failed loads). The subscription's own
+  // replay error, the earliest of them, belongs to the subscription
+  // lifecycle oracle. Then each load that
+  // failed while the replay was in flight fails with its own error, for the
+  // keys it still decides, in failure order.
   if (demand.replayAttemptFailed) return
   demand.replayAttemptFailed = true
+  // Law 10 and law 16: a failed key's later retry is its latest request,
+  // and the replay that replaced the retry decides it. When the replay
+  // fails, the retry fails with it, so the key's earlier failure leaves the
+  // list: the replay's failure is the key's now. A failed key without a
+  // retry keeps its own failure, which belongs to its request (maintainer
+  // decision).
+  for (const key of demand.retriedByReplay) demand.failed.delete(key)
+  const requestedAgain = (key: number, serial: number) =>
+    [...demand.requested].some(
+      ([later, keys]) =>
+        keys.has(key) &&
+        !demand.replayRequests.has(later) &&
+        (demand.requestedAt.get(later) ?? 0) >
+          (demand.failedAt.get(serial) ?? 0),
+    )
   const failures = [...failedLoads]
     .filter(([serial, keys]) =>
       [...keys].some(
         (key) =>
           demand.held.has(key) &&
-          !((demand.replayLoadedKeys.get(key) ?? 0) > serial),
+          !((replayLoadedKeys.get(key) ?? 0) > serial) &&
+          !requestedAgain(key, serial),
       ),
     )
     .map(([serial]) => serial)
   if (failures.length === 0) failures.push(...demand.replayFailedKeys.values())
   const at = (serial: number) => demand.failedAt.get(serial) ?? 0
-  demand.replayError = failures.reduce((earliest, serial) =>
-    at(serial) < at(earliest) ? serial : earliest,
-  )
-  demand.shownAt.set(demand.replayError, ++demand.clock)
+  // A new attempt's failure replaces the previous attempt's: a failure keeps
+  // its place only while one of the held keys' failed requests shows it.
+  demand.replayErrors = [...new Set(failures)].sort((a, b) => at(a) - at(b))
+  for (const serial of demand.replayErrors)
+    if (![...demand.failed.values()].includes(serial))
+      demand.shownAt.set(serial, ++demand.clock)
   for (const serial of deferred)
     showFailure(
       demand,
@@ -4909,6 +5137,18 @@ function startReplay(model: OnDemandModel, cause: `reload` | `truncate`): void {
       !demand.thrown.has(serial) &&
       [...keys].some((key) => demand.held.has(key)),
   )
+  // A failed key with a retry still pending, parked or requested: the
+  // replay replaces that retry (law 16).
+  demand.retriedByReplay = new Set(
+    [...demand.failed]
+      .filter(([key, failure]) =>
+        demand.pending.some(
+          (load) =>
+            !load.fromReplay && load.serial > failure && load.keys.has(key),
+        ),
+      )
+      .map(([key]) => key),
+  )
   // A replay requests parked demand too: its requests replace the parked
   // acquisitions.
   for (const load of demand.pending)
@@ -4924,7 +5164,7 @@ function startReplay(model: OnDemandModel, cause: `reload` | `truncate`): void {
   // new attempt is in flight.
   demand.replayFailedKeys = new Map()
   demand.replayFailedLoads = new Map()
-  demand.replayLoadedKeys = new Map()
+  demand.replayLoads = new Map()
   demand.deferredFailures = new Set()
   demand.replayAttemptFailed = false
   demand.pending =
@@ -4966,6 +5206,15 @@ function changeDemand(
     demand.held.delete(key)
     demand.failed.delete(key)
   }
+  // Law 10: a failed load covers nothing, so a demand change keeps none of
+  // the query's failed requests, and an older live load of a key then
+  // decides it. A load that throws fails its keys as one that rejects does,
+  // so the change retires it too. The driver sees the abort of a rejected
+  // request, but a thrown one never became a load the adapter serves, so
+  // the model retires it here. A thrown replay request stays: it waits for
+  // its replay's verdict (law 16).
+  for (const serial of demand.thrown)
+    if (!demand.replayRequests.has(serial)) demand.requested.delete(serial)
   // Releasing an owner removes both its current and its older work from
   // readiness (law 9): older replay work for keys the query no longer holds
   // holds nothing, even if the query asks for those keys again.
@@ -4978,6 +5227,12 @@ function changeDemand(
   for (const load of demand.pending)
     if (load.parked && released(load)) demand.requested.delete(load.serial)
   demand.pending = demand.pending.filter((load) => !released(load))
+  // The same holds for a load a replay retired that the adapter still
+  // serves: once the query releases every key of it, it no longer holds the
+  // first load, also when the query asks for a key again (a new owner).
+  for (const [serial, keys] of demand.retiredInFlight)
+    if ([...keys].every((held) => !demand.held.has(held)))
+      demand.retiredInFlight.delete(serial)
   if (demand.held.size === 0) demand.replayFailed = false
 }
 
@@ -5008,9 +5263,12 @@ function parkDemandChange(
     (key) => !covered.has(key) || demand.failed.has(key),
   )
   // A failed replay request that did not throw is live, so only thrown
-  // replay requests are judged here.
+  // replay requests are judged here; one the query released holds nothing
+  // (law 9), also when the query asks for its key again.
   const judged = new Set(
-    [...demand.replayFailedLoads.values()].flatMap((keys) => [...keys]),
+    [...demand.replayFailedLoads]
+      .filter(([serial]) => demand.requested.has(serial))
+      .flatMap(([, keys]) => [...keys]),
   )
   const toRequest = uncovered.filter((key) => !judged.has(key))
   const churn =
@@ -5089,6 +5347,8 @@ function reportRequests(
       superseded: false,
     }
     demand.requested.set(load.serial, load.keys)
+    if (fromReplay) demand.replayRequests.add(load.serial)
+    demand.requestedAt.set(load.serial, ++demand.clock)
     demand.pending.push(load)
     if (load.replay) demand.replayActive = true
     return { load, thrown: request.thrown }
@@ -5099,7 +5359,14 @@ function reportRequests(
       settleDemandLoad(model, load, false)
     }
   demand.pending = demand.pending.filter((load) => !retired(load))
-  for (const serial of aborted) demand.requested.delete(serial)
+  // A request the query aborted no longer holds its keys. Releasing the
+  // owner removes its work from the replay too (law 9): the replay succeeds
+  // only as a replacement for the demand that remains, so what a released
+  // load loaded before its release does not count for the verdict.
+  for (const serial of aborted) {
+    demand.requested.delete(serial)
+    demand.replayLoads.delete(serial)
+  }
   settleReplay(model)
 }
 
@@ -5133,21 +5400,55 @@ function deriveDemandGate(model: OnDemandModel): void {
   if (!blocking) model.gate = `ready`
 }
 
-// The request error the query's node shows, by the serial of the failed
-// load whose error it is: of the open failures (its held keys' failed loads
-// and a failed replay), the one shown last, or none (maintainer decision:
-// the newest open failure).
-function expectedRequestError(demand: Demand): number | null {
-  const open = [
+// The request error's frame on the query's node, by the serials of the
+// failed loads: every open failure (its held keys' failed loads and a failed
+// replay's), once each, in the order each was shown (maintainer decision:
+// the problem lists the failures still open, oldest first). A failure that
+// clears leaves the list.
+function expectedRequestErrors(demand: Demand): Array<number> {
+  const open = new Set([
     ...demand.failed.values(),
-    ...(demand.replayFailed ? [demand.replayError] : []),
-  ]
+    ...(demand.replayFailed ? demand.replayErrors : []),
+  ])
   const at = (serial: number) => demand.shownAt.get(serial) ?? 0
-  return open.length === 0
-    ? null
-    : open.reduce((newest, serial) =>
-        at(serial) > at(newest) ? serial : newest,
-      )
+  return [...open].sort((a, b) => at(a) - at(b))
+}
+
+// The request error the node shows: the newest open failure, or none
+// (maintainer decision, as TanStack Query's `error`).
+function expectedRequestError(demand: Demand): number | null {
+  return expectedRequestErrors(demand).at(-1) ?? null
+}
+
+// The query's own node against the model's request-error frame: the newest
+// open failure shows (`message`, `cause`), and `errors` lists every open
+// failure once, oldest first, each as the very value the adapter failed with.
+function expectRequestErrors(
+  node: HealthNode,
+  frame: ReadonlyArray<number>,
+  causes: ReadonlyMap<number, Error>,
+  label: string,
+): void {
+  const error = node.error
+  expect(
+    {
+      message: error?.message ?? null,
+      errors: error?.errors.map((failure) => failure.message) ?? [],
+    },
+    `${label}: request error`,
+  ).toEqual({
+    message: frame.length > 0 ? causes.get(frame.at(-1)!)!.message : null,
+    errors: frame.map((serial) => causes.get(serial)!.message),
+  })
+  if (!error) return
+  expect(error.cause, `${label}: request error cause`).toBe(
+    causes.get(frame.at(-1)!),
+  )
+  error.errors.forEach((failure, index) =>
+    expect(failure.cause, `${label}: request error ${index} cause`).toBe(
+      causes.get(frame[index]!),
+    ),
+  )
 }
 
 // The coverage law (laws 9 and 10): once the query is ready, every key it
@@ -5370,8 +5671,8 @@ async function runDemandHistory(
   const aborted = new Set<number>()
   // The sync run each load belongs to; a retired run's load commits nothing.
   const loadRuns = new Map<number, number>()
-  // Each failed load's message, by serial.
-  const messages = new Map<number, string>()
+  // Each failed load's cause, by serial.
+  const causes = new Map<number, Error>()
   let serials = 0
   let run = 0
   let failures = 0
@@ -5439,11 +5740,12 @@ async function runDemandHistory(
           commitLoad(model, model.source, [windowDemand]),
         )
       const load = model.demand.pending.find((entry) => entry.serial === serial)
-      if (!succeeded) messages.set(serial, message)
+      const cause = new Error(message)
+      if (!succeeded) causes.set(serial, cause)
       if (load) settleDemandLoad(model, load, succeeded)
       model.demand.retiredInFlight.delete(serial)
       if (succeeded) deferred.resolve()
-      else deferred.reject(new Error(message))
+      else deferred.reject(cause)
     }
     return picked.length
   }
@@ -5506,12 +5808,13 @@ async function runDemandHistory(
       expect(query.status, `${label}: query status`).toBe(model.gate)
       watcher?.check(label)
       const shownError = expectedRequestError(model.demand)
-      if (model.gate === `ready`) {
-        expect(
-          query.health.error?.message ?? null,
-          `${label}: request error`,
-        ).toBe(shownError === null ? null : messages.get(shownError))
-      }
+      if (model.gate === `ready`)
+        expectRequestErrors(
+          query.health,
+          expectedRequestErrors(model.demand),
+          causes,
+          label,
+        )
       expectHeldDemandCovered(
         model,
         loads.map(() => new Set([windowDemand])),
@@ -5524,7 +5827,9 @@ async function runDemandHistory(
           sourceNode.failureReason?.message ?? null,
           `${label}: source failureReason`,
         ).toBe(
-          model.source.stopped ? null : (model.source.failure?.message ?? null),
+          model.source.stopped
+            ? null
+            : (model.source.failures.at(-1)?.message ?? null),
         )
         expect(
           sourceNode.error?.message ?? null,
@@ -5581,6 +5886,16 @@ describe(`on-demand demand grammar`, () => {
       `window`,
       `reload`,
       `settle-ok`,
+    ],
+    // A replay that fails after an earlier failed window load with no retry:
+    // that failure belongs to its request, which no later load settled, so
+    // the problem lists it before the replay's failures.
+    'a failed replay after a failed window load lists both failures': [
+      `settle-ok`,
+      `window`,
+      `settle-fail`,
+      `reload`,
+      `settle-fail`,
     ],
     "a successful replay clears the replay's request error": [
       `settle-ok`,
@@ -5826,6 +6141,8 @@ const lazyReachStates = [
   `replay clears a retired failure`,
   `load fails after joining a failed replay`,
   `replaced load settles after its replay failed`,
+  `failed replay lists several failed loads`,
+  `replay failed while a load it replaced is still served`,
 ] as const
 type LazyReach = ReturnType<
   typeof createOracleReach<(typeof lazyReachStates)[number]>
@@ -5933,9 +6250,9 @@ async function runLazyHistory(
   let querySubscription: unknown
   // Loads that threw, by serial.
   const thrownLoads = new Set<number>()
-  // Each failed or thrown load's message, by serial: every failure has its
+  // Each failed or thrown load's cause, by serial: every failure has its
   // own message, so the node's message names the failure it shows.
-  const messages = new Map<number, string>()
+  const causes = new Map<number, Error>()
   const parents = createCollection<Row, number>({
     id: `health-lazy-parents-${Math.random().toString(36).slice(2)}`,
     getKey: (row) => row.id,
@@ -6003,9 +6320,9 @@ async function runLazyHistory(
             loadKeys.set(serial, keys)
             loadRuns.set(serial, thisRun)
             if (thrown) {
-              const message = `child load ${++failures} threw`
-              messages.set(serial, message)
-              throw new Error(message)
+              const cause = new Error(`child load ${++failures} threw`)
+              causes.set(serial, cause)
+              throw cause
             }
             const deferred = createDeferred<void>()
             loads.push({ serial, deferred })
@@ -6093,9 +6410,9 @@ async function runLazyHistory(
       model.demand.retiredInFlight.delete(serial)
       if (succeeded) deferred.resolve()
       else {
-        const message = `child load ${++failures} failed`
-        messages.set(serial, message)
-        deferred.reject(new Error(message))
+        const cause = new Error(`child load ${++failures} failed`)
+        causes.set(serial, cause)
+        deferred.reject(cause)
       }
     }
   }
@@ -6356,7 +6673,7 @@ async function runLazyHistory(
         model.gate === `ready` &&
         new Set([
           ...demand.failed.values(),
-          ...(demand.replayFailed ? [demand.replayError] : []),
+          ...(demand.replayFailed ? demand.replayErrors : []),
         ]).size > 1
       )
         reach?.reach(`several request errors open`)
@@ -6375,8 +6692,25 @@ async function runLazyHistory(
           `${label}: unchanged tree announces nothing`,
         ).toBe(announcedBefore)
       }
+      // Law 17: a step that leaves different facts, such as a failure added
+      // to or gone from the request error's list, gives a new tree and
+      // announces it.
+      if (JSON.stringify(project(query.health)) !== factsBefore) {
+        expect(query.health, `${label}: changed tree is new`).not.toBe(
+          treeBefore,
+        )
+        expect(
+          announcements,
+          `${label}: changed tree is announced`,
+        ).toBeGreaterThan(announcedBefore)
+      }
       if (model.gate === `ready` && demand.replayActive)
         reach?.reach(`coverage checked during an open replay`)
+      if (
+        demand.replayAttemptFailed &&
+        loads.some((load) => demand.retiredInFlight.has(load.serial))
+      )
+        reach?.reach(`replay failed while a load it replaced is still served`)
       if (model.source.gate === `error` && demand.replayActive)
         reach?.reach(`parked demand during a replay`)
       expectHeldDemandCovered(
@@ -6388,13 +6722,17 @@ async function runLazyHistory(
       // Law 16: the query's node shows a request error exactly while the
       // model holds one, also while a replay is open or after one failed,
       // and it is the newest open failure (maintainer decision): its message
-      // names the failed load the model expects.
+      // names the failed load the model expects. Its `errors` lists every
+      // open failure, oldest first.
       if (model.gate === `ready`) {
-        const shown = expectedRequestError(demand)
-        expect(
-          query.health.error?.message ?? null,
-          `${label}: request error`,
-        ).toBe(shown === null ? null : messages.get(shown))
+        const frame = expectedRequestErrors(demand)
+        if (
+          demand.replayFailed &&
+          demand.replayErrors.filter((serial) => frame.includes(serial))
+            .length > 1
+        )
+          reach?.reach(`failed replay lists several failed loads`)
+        expectRequestErrors(query.health, frame, causes, label)
       }
       // After a failed replay the query keeps its last complete snapshot
       // private, which the model does not track.
@@ -7193,6 +7531,81 @@ describe(`lazy join demand grammar`, () => {
   // shows the newest. The load of key 3 fails first and the older load of
   // key 2 fails after it, so key 2's error shows; once key 2 retires, key
   // 3's error is the newest open one.
+  // A 30-times counterexample: key 2's load failed, so its request error
+  // shows, and a replay then fails for keys 2 and 3. The replay's problem
+  // lists both failed loads in failure order after key 2's earlier failure,
+  // which stays open, and shows the newest.
+  it(`a failed replay lists its failed loads after an earlier open failure`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `reload` },
+      { kind: `settle-fail` },
+    ]))
+  it(`a failed truncate replay lists its failed loads after an earlier open failure`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `truncate` },
+      { kind: `settle-fail` },
+    ]))
+  // 30-times counterexamples. A failed key without a retry keeps its own
+  // failure next to the failed replay's (a request error belongs to the
+  // request that failed); a replay load that a later demand-change load of
+  // its key replaced leaves the replay's list (law 10).
+  it(`a failed key without a retry keeps its failure next to a failed replay`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+        { kind: `unparent`, key: 1 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+      ],
+      { honorsAbort: false },
+    ))
+  it(`a replay load replaced by a later load of its key leaves the replay's list`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `truncate` },
+      { kind: `settle-last-fail` },
+      { kind: `unparent`, key: 1 },
+      { kind: `settle-last-fail` },
+    ]))
+  it(`a failed replay decides a failed key's retry even when that key loaded`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `parent`, key: 3 },
+      { kind: `truncate` },
+      { kind: `settle-first-fail` },
+      { kind: `settle-ok` },
+    ]))
+  it(`a failed replay lists loads that failed with the replacement for them`, () =>
+    runLazyHistory([
+      { kind: `settle-ok` },
+      { kind: `parent`, key: 2 },
+      { kind: `settle-fail` },
+      { kind: `reload` },
+      { kind: `parent`, key: 3 },
+      { kind: `unparent`, key: 3 },
+      { kind: `settle-fail` },
+    ]))
   it(`the node shows the newest open request error`, () =>
     runLazyHistory([
       { kind: `settle-ok` },
@@ -7338,6 +7751,211 @@ describe(`lazy join demand grammar`, () => {
         ],
         { honorsAbort: false },
       ))
+  // A thrown churn replacement fails its keys as a rejected one does (law
+  // 10: a failed load covers nothing), so the next demand change retires
+  // it, and the older load that still covers the held key decides it: its
+  // failure is the key's request error now (a 30-times counterexample of
+  // the model, which kept the thrown replacement as the key's latest load;
+  // the rejected twin always passed).
+  for (const replacement of [`throws`, `rejects`] as const)
+    it(`a churn replacement that ${replacement} leaves its key to the older load after the next demand change`, () =>
+      runLazyHistory([
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        ...(replacement === `throws`
+          ? [
+              { kind: `throw-next` } as const,
+              { kind: `unparent`, key: 2 } as const,
+            ]
+          : [
+              { kind: `unparent`, key: 2 } as const,
+              { kind: `settle-last-fail` } as const,
+            ]),
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-first-fail` },
+      ]))
+  // Law 9: the replay succeeds only as a replacement for the demand that
+  // remains. A replay load of the churn replacement for {1, 2} loads both
+  // keys, then the replay load of {2} fails, and the query releases the
+  // replacement: what it loaded before its release does not count, so the
+  // replay fails for key 2 (a 30-times counterexample of the model, which
+  // let the released load decide key 2).
+  it(`a released replay load's success does not count for the replay's verdict`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+        { kind: `truncate` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-ok` },
+      ],
+      { honorsAbort: false },
+    ))
+  // Law 16: the replay decides every load it replaces, at its verdict. A
+  // failed key's retry that the reload replaced takes the replay's failure
+  // when the replay fails, also while an adapter that ignores aborts still
+  // serves the retry, and the retry's late success then decides nothing (a
+  // 30-times counterexample of production, which waited for the retry's
+  // transport; it passed when replayed with an adapter that honors aborts).
+  for (const cause of [`reload`, `truncate`] as const)
+    it(`a failed ${cause} replay decides the retry it replaced while the adapter still serves it`, () =>
+      runLazyHistory(
+        [
+          { kind: `settle-ok` },
+          { kind: `parent`, key: 2 },
+          { kind: `settle-fail` },
+          { kind: `unparent`, key: 1 },
+          { kind: cause },
+          { kind: `settle-last-fail` },
+          { kind: `settle-first-ok` },
+        ],
+        { honorsAbort: false },
+      ))
+  // Law 16: a replay decides the retry it replaced, and its failure is that
+  // key's failure; a later replay's failure replaces it. So the earlier
+  // replay's error leaves when a later replay fails, by a load that rejects
+  // or by one that throws (30-times counterexamples of production, which
+  // kept the earlier replay's error as the key's own failure).
+  for (const honorsAbort of [true, false])
+    for (const [later, steps] of [
+      [`fails`, [{ kind: `truncate` }, { kind: `settle-first-fail` }]],
+      [`throws`, [{ kind: `throw-next` }, { kind: `reload` }]],
+    ] as const)
+      it(`a failed replay's error leaves the key whose retry it replaced when a later replay ${later}${honorsAbort ? `` : `, also when the adapter ignores aborts`}`, () =>
+        runLazyHistory(
+          [
+            { kind: `settle-ok` },
+            { kind: `parent`, key: 2 },
+            { kind: `settle-fail` },
+            { kind: `unparent`, key: 1 },
+            { kind: `reload` },
+            { kind: `settle-last-fail` },
+            { kind: `settle-ok` },
+            ...steps,
+          ],
+          { honorsAbort },
+        ))
+  // Law 10: a failed load covers nothing, so a replacement that asks for its
+  // keys again after it failed is their acquisition now. A failed replay
+  // lists a failed replay load only until such a request, also when the
+  // replacement fails too (maintainer decision; 30-times counterexamples of
+  // production, which listed every replay load whose replacement failed).
+  for (const [name, steps] of [
+    [
+      `a contraction`,
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-first-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-fail` },
+      ],
+    ],
+    [
+      `a churn after a failed reload`,
+      [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-fail` },
+      ],
+    ],
+  ] as const)
+    it(`a failed replay does not list a failed load that ${name} asked for again`, () =>
+      runLazyHistory(steps))
+  // Law 16: a parked acquisition that retries a failed key is that key's
+  // pending retry, so the replay that requests it replaces it, and the key
+  // takes the replay's failure (a 30-times counterexample of the model,
+  // which dropped the parked retry before it judged the retries).
+  it(`a failed replay replaces a parked retry of a failed key`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `truncate` },
+        { kind: `settle-first-fail` },
+      ],
+      { honorsAbort: false, holdChildReady: true },
+    ))
+  // Law 9: a failed replay request the query released holds nothing, so a
+  // parked demand change that asks for its key again parks it, and the key
+  // stays covered (a 30-times counterexample of the model, which left it to
+  // the released request's verdict).
+  it(`a parked growth asks again for a key whose released replay request failed`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 1 },
+        { kind: `unparent`, key: 2 },
+      ],
+      { honorsAbort: false, holdChildReady: true },
+    ))
+  // Law 9: a failed replay with no logical demand left ends, and its error
+  // goes, also when the last demand's only request threw, so no acquisition
+  // was left to release (a 30-times counterexample of production, which
+  // kept the failed replay open).
+  for (const honorsAbort of [true, false])
+    it(`a failed replay ends when the last demand, whose request threw, retires${honorsAbort ? `` : `, also when the adapter ignores aborts`}`, () =>
+      runLazyHistory(
+        [
+          { kind: `settle-ok` },
+          { kind: `parent`, key: 2 },
+          { kind: `settle-fail` },
+          { kind: `unparent`, key: 1 },
+          { kind: `reload` },
+          { kind: `settle-last-fail` },
+          { kind: `parent`, key: 1 },
+          { kind: `throw-next` },
+          { kind: `settle-fail` },
+          { kind: `unparent`, key: 1 },
+          { kind: `unparent`, key: 2 },
+        ],
+        { honorsAbort },
+      ))
+  // Law 9: releasing the owner removes its older work from readiness. A
+  // first-load request that a truncate retired, and that an adapter which
+  // ignores aborts still serves, stops holding the first load once the
+  // query releases its key, also when the query asks for the key again: the
+  // new demand is a new owner (a 30-times counterexample of the model).
+  it(`a retired first load released and asked for again no longer holds the first load`, () =>
+    runLazyHistory(
+      [
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 1 },
+        { kind: `settle-last-ok` },
+        { kind: `unparent`, key: 3 },
+      ],
+      { honorsAbort: false },
+    ))
   // Q1 (review 2): an ordered window over the join. A lazy load that fails
   // after readiness is a request error, and the query still publishes the
   // window's rows (law 16: a failed request does not hold publication).
@@ -7552,6 +8170,20 @@ describe(`lazy join demand grammar`, () => {
       ],
       holdChildReady: false,
       honorsAbort: true,
+    },
+    // A failed key's retry that a reload replaced is still served when the
+    // replay fails.
+    {
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `reload` },
+        { kind: `settle-last-fail` },
+      ],
+      holdChildReady: false,
+      honorsAbort: false,
     },
     // Several request errors open: a replay failed, and a load that joined
     // it failed with its own error; then a load the replay replaced settles
@@ -8285,65 +8917,95 @@ describe(`include nodes`, () => {
 
 /**
  * A live query or Effect can have several failed requests at once, one per
- * issuer (a needed key of a lazy demand, a replay, or a root source). Its
- * node shows one of them: the most recent failure among the requests still
- * failing (maintainer decision: the newest open failure). Two requests that
- * fail with one error show one problem, the same object, and it keeps the
- * place of its first failure: a load that the replay decided fails with the
- * replay's error, and that is not a newer failure (law 16). Reporting it
- * again changes nothing the node shows (law 17). When the last one settles,
- * the node is healthy again. The model is a list of failing issuers, each
- * with its cause and the order of the cause's first failure; the production
- * driver is the shared `RequestErrors` tracker, and the check compares the
- * shown cause after every step, plus whether a report or a settle changed
- * the shown problem. `fail-shared` fails an issuer with the cause another
- * issuer still fails with.
+ * issuer (a needed key of a lazy demand, a replay, or a root source), and a
+ * failed replay is one request with every failed load it was judged on. Its
+ * node shows one problem: the most recent failure among the requests still
+ * failing (maintainer decision: the newest open failure), and the problem's
+ * `errors` lists every failure still failing, once each, oldest first
+ * (maintainer decision: a problem lists the failures of its frame). Two
+ * requests that fail with one error are one failure, and it keeps the place
+ * of its first failure: a load that the replay decided fails with the
+ * replay's error, and that is not a newer failure (law 16). When the last
+ * one settles, the node is healthy again. The problem keeps its identity
+ * until its failures change: adding or removing one, also one that is not
+ * the newest, is a change (law 17). The model is a list of failures, each
+ * with its issuer, its cause, and the order of the cause's first failure;
+ * the production driver is the shared `RequestErrors` tracker, and the check
+ * compares the shown cause and the listed causes after every step, plus
+ * whether a report or a settle changed the problem. `fail-shared` fails an
+ * issuer with the cause another issuer still fails with; `fail-several`
+ * fails an issuer with two new causes, as a failed replay does.
  */
 describe(`request error bookkeeping`, () => {
   const key = fc.constantFrom(`a`, `b`, `c`)
   const step = fc.oneof(
     fc.record({ kind: fc.constant(`fail` as const), key }),
     fc.record({ kind: fc.constant(`fail-shared` as const), key }),
+    fc.record({ kind: fc.constant(`fail-several` as const), key }),
     fc.record({ kind: fc.constant(`settle` as const), key }),
   )
   fcTest.prop(
     [fc.array(step, { maxLength: 12 })],
     oraclePropertyOptions(100, `source-health.request-errors`),
-  )(`a node shows the latest failure still failing`, (steps) => {
-    const tracker = new RequestErrors()
-    const failing: Array<{ key: string; cause: Error; order: number }> = []
-    let failures = 0
-    const shownCause = () =>
-      failing.reduce<{ cause: Error | null; order: number }>(
-        (newest, entry) => (entry.order > newest.order ? entry : newest),
-        { cause: null, order: 0 },
-      ).cause
-    for (const { kind, key: issuer } of steps) {
-      const before = shownCause()
-      const shownBefore = tracker.problem
-      const index = failing.findIndex((entry) => entry.key === issuer)
-      if (index !== -1) failing.splice(index, 1)
-      if (kind === `settle`) {
-        const changed = tracker.settle(issuer)
-        expect(changed, `settle ${issuer} reports a change`).toBe(
-          shownCause() !== before,
+  )(
+    `a node shows the latest failure still failing and lists them all`,
+    (steps) => {
+      const tracker = new RequestErrors()
+      const failing: Array<{ key: string; cause: Error; order: number }> = []
+      let failures = 0
+      // The failures still failing, once per cause, oldest first.
+      const listed = () => [
+        ...new Set(
+          [...failing]
+            .sort((a, b) => a.order - b.order)
+            .map(({ cause }) => cause),
+        ),
+      ]
+      const same = (a: Array<Error>, b: Array<Error>) =>
+        a.length === b.length && a.every((cause, index) => cause === b[index])
+      for (const { kind, key: issuer } of steps) {
+        const before = listed()
+        const shownBefore = tracker.problem
+        for (let index = failing.length - 1; index >= 0; index--)
+          if (failing[index]!.key === issuer) failing.splice(index, 1)
+        let changed: boolean
+        if (kind === `settle`) changed = tracker.settle(issuer)
+        else {
+          const causes =
+            kind === `fail-several`
+              ? [
+                  new Error(`${issuer} failed`),
+                  new Error(`${issuer} failed again`),
+                ]
+              : [
+                  (kind === `fail-shared` ? failing[0]?.cause : undefined) ??
+                    new Error(`${issuer} failed`),
+                ]
+          for (const cause of causes)
+            failing.push({
+              key: issuer,
+              cause,
+              order:
+                failing.find((entry) => entry.cause === cause)?.order ??
+                ++failures,
+            })
+          changed = tracker.fail(issuer, causes)
+        }
+        const after = listed()
+        expect(changed, `${kind} ${issuer} reports a change`).toBe(
+          !same(before, after),
         )
-      } else {
-        const shared = kind === `fail-shared` ? failing[0] : undefined
-        const cause = shared?.cause ?? new Error(`${issuer} failed`)
-        failing.push({
-          key: issuer,
-          cause,
-          order: shared?.order ?? ++failures,
-        })
-        const changed = tracker.fail(issuer, cause)
-        expect(changed, `fail ${issuer} reports a change`).toBe(
-          shownCause() !== before,
-        )
-        // The problem that already shows this cause stays, the same object.
-        if (cause === before) expect(tracker.problem).toBe(shownBefore)
+        // A problem whose failures did not change stays, the same object.
+        if (same(before, after)) expect(tracker.problem).toBe(shownBefore)
+        expect(tracker.problem?.cause ?? null).toBe(after.at(-1) ?? null)
+        expect(
+          same(
+            (tracker.problem?.errors ?? []).map(({ cause }) => cause as Error),
+            after,
+          ),
+          `${kind} ${issuer}: listed failures`,
+        ).toBe(true)
       }
-      expect(tracker.problem?.cause ?? null).toBe(shownCause())
-    }
-  })
+    },
+  )
 })

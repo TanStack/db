@@ -801,6 +801,20 @@ export interface CollectionErrorInfo {
 }
 
 /**
+ * A problem on a health node. Its own fields are its newest failure's, and
+ * `errors` lists every failure of its frame that is still open, oldest
+ * first; the last entry is the newest. A source's `failureReason` lists each
+ * `reportError()` of the sync run since the problem began; `reportHealthy()`
+ * ends it. An `error` from `fail()`, a failed first load, or a crash is one
+ * failure. A query's request error lists every request failure still open
+ * on its node, once per error value, and a failed replay adds each load it
+ * failed for.
+ */
+export interface HealthProblem extends CollectionErrorInfo {
+  readonly errors: ReadonlyArray<CollectionErrorInfo>
+}
+
+/**
  * One node of a health tree. A Collection's tree is one node; a live query's
  * has one node for itself and one for each source alias in query order. The
  * shape is fixed by the query, and nodes without a problem are present too.
@@ -819,8 +833,8 @@ export interface HealthNode {
   readonly status: CollectionStatus
   /** This node or any node below it has a `failureReason` or an `error`. */
   readonly hasErrors: boolean
-  readonly failureReason: CollectionErrorInfo | null
-  readonly error: CollectionErrorInfo | null
+  readonly failureReason: HealthProblem | null
+  readonly error: HealthProblem | null
   /**
    * A reload's new sync run is in flight: the rows, status, and problem shown
    * are the previous run's until it commits or fails.
@@ -1279,8 +1293,8 @@ export interface SubscribeChangesOptions<
   truncateReplayPublication?: {
     readonly start: () => void
     readonly succeed: () => void
-    /** The replay could not load every active demand again. */
-    readonly fail?: (error: Error) => void
+    /** The replay could not load every active demand again: its failures, in failure order. */
+    readonly fail?: (errors: Array<Error>) => void
     /** The live query still holds logical demand. */
     readonly holdsDemand?: () => boolean
   }

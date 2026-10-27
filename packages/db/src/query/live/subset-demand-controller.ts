@@ -87,6 +87,21 @@ export class SubsetDemandController {
     }
   }
 
+  /**
+   * A replay failed. It decides every load it replaced (law 16): such a load
+   * is still pending, also one that an adapter which ignores its abort still
+   * serves, and its keys take the replay's failure, which the replay's own
+   * request error shows, so their earlier failures go now. That load's own
+   * late outcome then decides nothing (see followReplay). Every load that
+   * joined the replay settled before its verdict.
+   */
+  failReplay(): void {
+    for (const [planId, state] of this.states)
+      for (const segment of state.segments)
+        if (segment.state === `pending`)
+          this.recordOutcome(planId, segment, undefined, true)
+  }
+
   /** Whether any plan still holds demand. */
   holdsDemand(): boolean {
     return this.states.size > 0
@@ -229,11 +244,14 @@ export class SubsetDemandController {
   // The outcome of a segment the plan still holds decides its needed keys: a
   // success (no `error`) loaded them, and a failure leaves them missing,
   // unless a later segment loads the key (law 10: a key's latest load
-  // decides it). A released segment's late outcome decides nothing.
+  // decides it). A released segment's late outcome decides nothing. A
+  // failure that a failed replay shows (`failed` without `error`) leaves the
+  // key no error of its own.
   private recordOutcome(
     planId: string,
     segment: DemandSegment,
     error?: Error,
+    failed = error !== undefined,
   ): void {
     const state = this.states.get(planId)
     if (!state?.segments.includes(segment)) return
@@ -241,7 +259,7 @@ export class SubsetDemandController {
     for (const key of segment.keys.keys())
       if (
         state.keys.has(key) &&
-        !(error && later.some((loader) => loader.keys.has(key)))
+        !(failed && later.some((loader) => loader.keys.has(key)))
       )
         this.onKeyOutcome?.(planId, key, error)
   }
@@ -398,11 +416,16 @@ function followReplay(
   // The replay this load joins, read when it starts: the load whose failure
   // settles the replay still waits for it, after the loads that failed first.
   const joined = subscription.pendingTruncateReplacement
-  const replaced = () => {
+  // The replay decides the load: its failure resolves `true`, as the
+  // controller applied it at the verdict, unless a newer replay replaced it.
+  const replaced = (): Promise<boolean | undefined> | boolean => {
     const replay = subscription.pendingTruncateReplacement
-    return replay
-      ? followReplay(subscription, replay)
-      : subscription.hasFailedTruncateReplacement
+    if (!replay) return subscription.hasFailedTruncateReplacement
+    const count = subscription.replacementCount
+    return replay.then(
+      () => undefined,
+      () => count === subscription.replacementCount || replaced(),
+    )
   }
   const decide = (
     error: unknown,

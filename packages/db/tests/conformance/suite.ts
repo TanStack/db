@@ -1951,8 +1951,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     // docs/contributing/designs/source-failure-and-health/error-surface).
     //
     // The model below is the whole expectation: one optional problem with a
-    // field and a serial number. A report is a new problem with a new serial,
-    // so the tree must be a new object; a call that changes nothing keeps the
+    // field, its frame of failures (oldest first), and a serial number. The
+    // problem shows its newest failure and lists the frame in `errors`
+    // (maintainer decision): each `reportError()` adds a failure, and
+    // `fail()` is one failure for the sync run. A report is a new serial, so
+    // the tree must be a new object; a call that changes nothing keeps the
     // serial, so the tree must be the same object. Row writes do not touch
     // the model. Each step is observed after the driver's `flush` cut.
     scenario(
@@ -1961,7 +1964,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       async () => {
         type Problem = {
           field: `failureReason` | `error`
-          cause: Error
+          causes: Array<Error>
           serial: number
         }
         let problem: Problem | null = null
@@ -1992,8 +1995,25 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           expectUnorderedRows(result.data, rows)
           expect(tree, step).toBeDefined()
           const node = tree!.sources.find(({ alias }) => alias === `items`)
-          const shown = (info: { message: string } | null | undefined) =>
-            info ? { message: info.message } : null
+          const shown = (
+            info:
+              | { message: string; errors: ReadonlyArray<{ message: string }> }
+              | null
+              | undefined,
+          ) =>
+            info
+              ? {
+                  message: info.message,
+                  errors: info.errors.map(({ message }) => message),
+                }
+              : null
+          const expected = (field: Problem[`field`]) =>
+            problem?.field === field
+              ? {
+                  message: problem.causes.at(-1)!.message,
+                  errors: problem.causes.map(({ message }) => message),
+                }
+              : null
           expect(
             {
               rootError: tree!.error,
@@ -2012,19 +2032,21 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             node: {
               kind: `source`,
               status: `ready`,
-              failureReason:
-                problem?.field === `failureReason`
-                  ? { message: problem.cause.message }
-                  : null,
-              error:
-                problem?.field === `error`
-                  ? { message: problem.cause.message }
-                  : null,
+              failureReason: expected(`failureReason`),
+              error: expected(`error`),
             },
           })
-          // The binding exposes the exact value the sync adapter reported.
+          // The binding exposes the exact values the sync adapter reported.
           const info = node?.failureReason ?? node?.error
-          expect(info?.cause, `${step}: error cause`).toBe(problem?.cause)
+          expect(info?.cause, `${step}: error cause`).toBe(
+            problem?.causes.at(-1),
+          )
+          expect(
+            info?.errors.every(
+              (failure, at) => failure.cause === problem?.causes[at],
+            ) ?? true,
+            `${step}: each listed failure is the reported value`,
+          ).toBe(true)
           const current = { tree, serial: problem?.serial ?? null }
           if (previous) {
             if (previous.serial === current.serial)
@@ -2057,7 +2079,19 @@ export function runSuite(rawDriver: LiveQueryDriver) {
               source.reportError(stalled)
               problem = {
                 field: `failureReason`,
-                cause: stalled,
+                causes: [stalled],
+                serial: ++serial,
+              }
+            },
+          ],
+          [
+            `a second failure reason joins the list`,
+            () => {
+              const retried = new Error(`retry failed`)
+              source.reportError(retried)
+              problem = {
+                field: `failureReason`,
+                causes: [...problem!.causes, retried],
                 serial: ++serial,
               }
             },
@@ -2078,7 +2112,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             () => {
               const ended = new Error(`stream ended`)
               source.fail(ended)
-              problem = { field: `error`, cause: ended, serial: ++serial }
+              problem = { field: `error`, causes: [ended], serial: ++serial }
             },
           ],
           [`reportHealthy after fail throws`, () => source.reportHealthy()],

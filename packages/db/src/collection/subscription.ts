@@ -96,8 +96,8 @@ type TruncateReplayPublicationControl = Readonly<{
   start: () => void
   succeed: () => void
   // The replay could not load every active demand again; a live query
-  // reports it on its node.
-  fail?: (error: Error) => void
+  // reports each failure on its node, in failure order.
+  fail?: (errors: Array<Error>) => void
   // The live query still holds logical demand, even when no acquisition of
   // it is left here, such as one whose load threw.
   holdsDemand?: () => boolean
@@ -149,6 +149,12 @@ type TruncateReplayState = {
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
   failures: Map<SubsetDemand, Error>
+  /**
+   * Failed demands of the current attempt that a later replacement asks for
+   * again, by that replacement: while it is held, their failures no longer
+   * count, even if it fails too (law 10: a failed load covers nothing).
+   */
+  retries: Map<SubsetDemand, SubsetDemand>
   /** The current attempt failed, even if its failed demand was released since. */
   failed: boolean
   completion: Deferred<void>
@@ -492,6 +498,7 @@ export class CollectionSubscription
       // before a request returns its promise and joins the pending set.
       replayState.pendingSetups++
       replayState.failures.clear()
+      replayState.retries.clear()
       replayState.failed = false
       replayState.currentAttempt = { pendingCount: 0, setupComplete: false }
     } else {
@@ -701,18 +708,21 @@ export class CollectionSubscription
     if (this.keepsFailedReplayOpen(replayState)) return
 
     // A held replacement that loaded decides the demands it replaces.
-    const activeFailure = [...replayState.failures].find(
-      ([demand]) =>
-        this.subsetDemands.includes(demand) &&
-        !this.subsetDemands.some(
-          (replacement) =>
-            replacement.replaces?.includes(demand) &&
-            !replayState.failures.has(replacement),
-        ),
-    )
+    const activeFailures = [...replayState.failures]
+      .filter(
+        ([demand]) =>
+          this.subsetDemands.includes(demand) &&
+          !this.subsetDemands.includes(replayState.retries.get(demand)!) &&
+          !this.subsetDemands.some(
+            (replacement) =>
+              replacement.replaces?.includes(demand) &&
+              !replayState.failures.has(replacement),
+          ),
+      )
+      .map(([, error]) => error)
     try {
-      if (activeFailure) {
-        this.abandonTruncateReplay(replayState, activeFailure[1])
+      if (activeFailures.length > 0) {
+        this.abandonTruncateReplay(replayState, activeFailures)
       } else {
         this.flushTruncateReplay(replayState)
       }
@@ -727,13 +737,14 @@ export class CollectionSubscription
    */
   private abandonTruncateReplay(
     replayState: TruncateReplayState,
-    failure: Error,
+    failures: Array<Error>,
   ): void {
     if (this.truncateReplayState !== replayState) return
-    // A later check of the same failed attempt reports nothing new.
+    // A later check of the same failed attempt reports nothing new. The
+    // replay's own error is its earliest failure.
     const first = replayState.completion.isPending()
-    replayState.completion.reject(failure)
-    if (first) this.options.truncateReplayPublication?.fail?.(failure)
+    replayState.completion.reject(failures[0])
+    if (first) this.options.truncateReplayPublication?.fail?.(failures)
     // Delegated publication already delivered its rows. Only a private buffer
     // returns the caller's pagination position to the public snapshot; the
     // private rows and their sent-key tracking stay together for a retry.
@@ -885,6 +896,7 @@ export class CollectionSubscription
       pendingSetups: 1,
       currentAttempt: { pendingCount: 0, setupComplete: false },
       failures: new Map(),
+      retries: new Map(),
       failed: false,
       completion: createReplayCompletion(),
     }
@@ -1427,6 +1439,11 @@ export class CollectionSubscription
       if (demand) demands.push(demand)
     }
     if (demands.length > 0) this.releaseDemands(demands)
+    // A release can retire the owner's last logical demand without a held
+    // acquisition, such as one whose load threw: an open replay then has no
+    // demand left to load.
+    else if (this.options.truncateReplayPublication?.holdsDemand?.() === false)
+      this.retireEmptyReplay()
   }
 
   /**
@@ -1441,10 +1458,14 @@ export class CollectionSubscription
     const replacement = this.subsetDemands.find((demand) =>
       this.requestedWhere(demand, where),
     )
-    if (replacement)
-      replacement.replaces = this.subsetDemands.filter((demand) =>
-        replaced.some((other) => this.requestedWhere(demand, other)),
-      )
+    if (!replacement) return
+    replacement.replaces = this.subsetDemands.filter((demand) =>
+      replaced.some((other) => this.requestedWhere(demand, other)),
+    )
+    const replayState = this.truncateReplayState
+    for (const demand of replacement.replaces)
+      if (replayState?.failures.has(demand))
+        replayState.retries.set(demand, replacement)
   }
 
   private requestedWhere(
