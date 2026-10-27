@@ -33,7 +33,7 @@ export class CollectionSubscriber<
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
-    { resolve: () => void }
+    () => void
   >()
 
   // Exact row last contributed to D2 for each source key.
@@ -106,11 +106,7 @@ export class CollectionSubscriber<
         this.ensureLoadingPromise(subscription)
       } else {
         // status is 'ready'
-        const deferred = this.subscriptionLoadingPromises.get(subscription)
-        if (deferred) {
-          this.subscriptionLoadingPromises.delete(subscription)
-          deferred.resolve()
-        }
+        this.resolveLoadingPromise(subscription)
       }
     }
     const onLoadSubsetError = (event: SubscriptionLoadSubsetErrorEvent) => {
@@ -168,11 +164,7 @@ export class CollectionSubscriber<
   ): void {
     const unsubscribe = () => {
       // If subscription has a pending promise, resolve it before unsubscribing
-      const deferred = this.subscriptionLoadingPromises.get(subscription)
-      if (deferred) {
-        this.subscriptionLoadingPromises.delete(subscription)
-        deferred.resolve()
-      }
+      this.resolveLoadingPromise(subscription)
 
       try {
         this.demand.clear()
@@ -502,9 +494,14 @@ export class CollectionSubscriber<
       resolve = res
     })
 
-    this.subscriptionLoadingPromises.set(subscription, {
-      resolve: resolve!,
-    })
+    this.subscriptionLoadingPromises.set(subscription, resolve!)
     this.collectionConfigBuilder.trackSubsetLoadPromise(promise)
+  }
+
+  private resolveLoadingPromise(subscription: CollectionSubscription): void {
+    const resolve = this.subscriptionLoadingPromises.get(subscription)
+    if (!resolve) return
+    this.subscriptionLoadingPromises.delete(subscription)
+    resolve()
   }
 }

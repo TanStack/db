@@ -119,10 +119,14 @@ export class CollectionConfigBuilder<
   public currentSyncState: FullSyncState | undefined
 
   // Error state tracking
-  private isInErrorState = false
   private fatalQueryError = false
   private readonly erroredSourceIds = new Set<string>()
   private lastSubsetError: unknown | undefined
+
+  // A fatal error or any unrecovered source error puts the live query in error.
+  private get isInErrorState(): boolean {
+    return this.fatalQueryError || this.erroredSourceIds.size > 0
+  }
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
@@ -834,7 +838,6 @@ export class CollectionConfigBuilder<
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
     // Reset error state from any previous sync run so a restarted sync can become ready again.
-    this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
     this.lastSubsetError = undefined
@@ -917,7 +920,6 @@ export class CollectionConfigBuilder<
     this.loadMoreFn = undefined
     this.currentWindow = undefined
     this.settledWindow = this.initialWindow
-    this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
 
@@ -1244,7 +1246,6 @@ export class CollectionConfigBuilder<
         !this.fatalQueryError &&
         this.erroredSourceIds.size === 0
       ) {
-        this.isInErrorState = false
         this.maybeRunGraphFn?.()
       }
       if (
@@ -1310,8 +1311,6 @@ export class CollectionConfigBuilder<
   }
 
   private setErrorState(message: string, error?: unknown) {
-    this.isInErrorState = true
-
     // Log error to console for debugging
     console.error(
       devBuild() && process.env.NODE_ENV !== `production`
