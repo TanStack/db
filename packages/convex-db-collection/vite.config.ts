@@ -9,7 +9,11 @@ const config = defineConfig({
     include: [`tests/**/*.test.ts`],
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
-    typecheck: { enabled: true, include: [`tests/**/*.test-d.ts`] },
+    typecheck: {
+      enabled: true,
+      include: [`tests/**/*.test-d.ts`],
+      tsconfig: `./tsconfig.test.json`,
+    },
   },
 })
 

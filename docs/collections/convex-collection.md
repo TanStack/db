@@ -41,7 +41,7 @@ Create fresh adapter options for each direct `createCollection` call. Reusing th
 
 Each result replaces the subscribed query's rows. Missing documents are deleted, and missing fields are removed. An empty array is a ready, empty collection. Keys must be unique strings or finite numbers. Duplicate keys reject the complete result and preserve the last valid snapshot.
 
-The adapter uses eager sync. DB filters, ordering, and limits apply locally to the subscribed result. They do not change your Convex query or fetch documents outside its result. To change the query arguments, create a new collection with a distinct ID.
+`convexCollectionOptions` uses eager sync. DB filters, ordering, and limits apply locally to the subscribed result. They do not change your Convex query or fetch documents outside its result. To change the query arguments, create a new collection with a distinct ID.
 
 ## Write through Convex mutations
 
@@ -171,9 +171,45 @@ The adapter keeps each loaded cursor range subscribed. Fixed `endCursor` boundar
 
 The cap does not limit the bytes in a server response or guarantee peak memory use. A single reactive page can already exceed it. `pageSize` does not bound total memory or initial load time. Initial acquisition can inspect earlier cached pages repeatedly as it extends the cursor chain.
 
-This factory uses eager sync; `syncMode: 'on-demand'` and DB's `loadSubset` protocol are not currently implemented. Convex cursor pagination can support lazy acquisition for a fixed query, but each load must establish the requested subset before reporting success. DB filters and ordering are not automatically translated into your server function arguments. An incomplete source page cannot stand in for a complete filtered or differently ordered result. Scope the server query when using this eager mirror.
+In eager mode, `select` receives the complete row array. DB applies local filters, joins, ordering, and limits to that mirror.
 
-For paginated collections, `select` receives the complete row array. DB still applies local filters, joins, ordering, and limits. Pagination loads a finite query completely into memory, it does not push DB predicates to your server.
+## Lazy pagination for a fixed query
+
+Set `syncMode: 'on-demand'` on the same paginated factory to acquire pages as an ordered DB query needs them. Declare the server query's leading numeric order with `queryOrder`. The server function must always paginate that same query in that direction.
+
+```ts
+const tasks = createCollection(
+  convexPaginatedCollectionOptions({
+    client,
+    query: api.tasks.paginatedByRank,
+    queryArgs: { projectId },
+    syncMode: 'on-demand',
+    queryOrder: { field: 'rank', direction: 'asc' },
+    autoIndex: 'eager',
+    defaultIndexType: BTreeIndex,
+    pageSize: 100,
+    getKey: (task) => task._id,
+  }),
+)
+
+const window = createLiveQueryCollection((q) =>
+  q.from({ task: tasks })
+    .orderBy(({ task }) => task.rank)
+    .orderBy(({ task }) => task._id)
+    .select(({ task }) => task)
+    .limit(25),
+)
+await window.preload()
+await window.utils.setWindow({ offset: 25, limit: 25 })
+```
+
+Import `createLiveQueryCollection` and `BTreeIndex` from `@tanstack/db`. The leading DB order must match `queryOrder`; trailing order terms run locally. Each load acquires a contiguous prefix with every row tied at its leading boundary. This may load more rows than the displayed window. Offset windows acquire the preceding prefix too. An unlimited source request, including `tasks.preload()`, loads the whole query. With no demand or a zero limit, no page is started.
+
+The initial profile supports finite numeric leading fields, aligned ordered windows, core boundary-tie requests, and forward continuations. It rejects other source filters and differently ordered requests. Put application filters in the fixed server query's arguments. `select` on the collection options is unavailable in on-demand mode; use DB query projections as shown above. This API does not translate general DB queries into Convex functions.
+
+Loaded ranges stay subscribed until collection cleanup. Later inserts, deletes, moves, splits, and reconnects repair the active windows. While more coverage is pending, a public live query retains its last complete window. A successful subset load waits for its accepted writes to become visible, including when optimistic writes hold them. `utils.awaitSync()` waits for source acceptance and remains safe inside mutation handlers.
+
+`maxRows` also caps the retained lazy prefix. It does not bound requests, network bytes, scans, or peak memory. A boundary tie or a whole-source request can still require the complete query. Use server-side scoping and a suitable finite cap for your application.
 
 ## Durable offline writes
 

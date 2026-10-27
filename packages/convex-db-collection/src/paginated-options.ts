@@ -17,6 +17,16 @@ type PaginatedRow<TQuery extends FunctionReference<`query`>> =
     ? TRow
     : never
 
+/** Leading numeric order of the fixed server query. Trailing DB order terms
+ * are local: each acquisition establishes the complete leading-value tie. */
+export type ConvexQueryOrder<TRow> = {
+  field: {
+    [K in keyof TRow]-?: TRow[K] extends number ? K : never
+  }[keyof TRow] &
+    string
+  direction: `asc` | `desc`
+}
+
 export type ConvexPaginatedCollectionConfig<
   TQuery extends FunctionReference<`query`>,
   TItem extends object = PaginatedRow<TQuery>,
@@ -30,7 +40,7 @@ export type ConvexPaginatedCollectionConfig<
   query: TQuery
   queryArgs: Omit<FunctionArgs<TQuery>, `paginationOpts`>
   pageSize?: number
-  /** Maximum accepted rows in the complete eager mirror. Defaults to 10,000. */
+  /** Maximum accepted rows in the retained query prefix. Defaults to 10,000. */
   maxRows?: number
   onError?: (error: unknown) => void
 } & ([TSchema] extends [never] ? { schema?: never } : { schema: TSchema }) &
@@ -41,15 +51,22 @@ export type ConvexPaginatedCollectionConfig<
     ? unknown
     : never) &
   (
-    | {
-        select: (
-          rows: ReadonlyArray<PaginatedRow<TQuery>>,
-        ) => ReadonlyArray<TItem>
-      }
-    | (PaginatedRow<TQuery> extends TItem ? { select?: never } : never)
+    | ({ syncMode?: `eager`; queryOrder?: never } & (
+        | {
+            select: (
+              rows: ReadonlyArray<PaginatedRow<TQuery>>,
+            ) => ReadonlyArray<TItem>
+          }
+        | (PaginatedRow<TQuery> extends TItem ? { select?: never } : never)
+      ))
+    | ({
+        syncMode: `on-demand`
+        queryOrder: ConvexQueryOrder<PaginatedRow<TQuery>>
+        select?: never
+      } & (PaginatedRow<TQuery> extends TItem ? unknown : never))
   )
 
-/** Automatically subscribe to every page, retaining fixed reactive cursor ranges. */
+/** Retain reactive cursor ranges; on-demand mode acquires only the prefix needed by active subsets. */
 export function convexPaginatedCollectionOptions<
   TQuery extends FunctionReference<`query`>,
   TItem extends object = PaginatedRow<TQuery>,
@@ -62,14 +79,41 @@ export function convexPaginatedCollectionOptions<
     queryArgs,
     pageSize = 100,
     maxRows = 10_000,
+    queryOrder,
     ...options
   } = config
+  if (options.syncMode === `on-demand` && (options.select || !queryOrder)) {
+    throw new TypeError(
+      `Convex on-demand paging requires queryOrder and does not support select.`,
+    )
+  }
+  const declaredOrder: { field: unknown; direction: unknown } | undefined =
+    queryOrder
+  if (
+    declaredOrder &&
+    (typeof declaredOrder.field !== `string` ||
+      !declaredOrder.field ||
+      (declaredOrder.direction !== `asc` && declaredOrder.direction !== `desc`))
+  ) {
+    throw new TypeError(
+      `Convex queryOrder requires a numeric field and asc or desc direction.`,
+    )
+  }
   return createConvexOptions<
     ReadonlyArray<PaginatedRow<TQuery>>,
     TItem,
     TKey,
     TSchema
   >(options, (receive, fail) =>
-    subscribePages(client, query, queryArgs, pageSize, maxRows, receive, fail),
+    subscribePages(
+      client,
+      query,
+      queryArgs,
+      pageSize,
+      maxRows,
+      receive,
+      fail,
+      options.syncMode === `on-demand` ? queryOrder : undefined,
+    ),
   )
 }

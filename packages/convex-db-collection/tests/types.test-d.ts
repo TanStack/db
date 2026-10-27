@@ -152,3 +152,40 @@ it(`requires a projection for changed paginated row types and server pagination 
     getKey: (row: Row) => row._id,
   })
 })
+
+it(`requires a declared numeric query order for lazy paging`, () => {
+  const client = {} as ConvexClient
+  const paginated = makeFunctionReference<
+    `query`,
+    { paginationOpts: PaginationOptions },
+    PaginationResult<{ id: string; rank: number; text: string }>
+  >(`tasks:lazy`)
+  const base = {
+    client,
+    query: paginated,
+    queryArgs: {},
+    getKey: (row: { id: string; rank: number; text: string }) => row.id,
+  }
+  const options = convexPaginatedCollectionOptions({
+    ...base,
+    syncMode: `on-demand`,
+    queryOrder: { field: `rank`, direction: `asc` },
+  })
+  expectTypeOf(createCollection(options).get(`a`)!.rank).toEqualTypeOf<number>()
+  // @ts-expect-error On-demand pagination needs the fixed server query's order.
+  convexPaginatedCollectionOptions({ ...base, syncMode: `on-demand` })
+  convexPaginatedCollectionOptions({
+    ...base,
+    syncMode: `on-demand`,
+    // @ts-expect-error String fields are outside the numeric-order profile.
+    queryOrder: { field: `text`, direction: `asc` },
+  })
+  // @ts-expect-error Array select cannot preserve arbitrary lazy coverage.
+  convexPaginatedCollectionOptions({
+    ...base,
+    syncMode: `on-demand`,
+    queryOrder: { field: `rank`, direction: `asc` },
+    select: (rows: ReadonlyArray<{ id: string; rank: number; text: string }>) =>
+      rows,
+  })
+})

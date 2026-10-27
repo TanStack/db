@@ -21,9 +21,10 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
-    "test:oracles": "vitest run tests/snapshot-oracle.property.test.ts tests/ownership-oracle.property.test.ts tests/pagination-oracle.property.test.ts tests/offline-oracle.property.test.ts tests/values-oracle.property.test.ts",
+    "test:oracles": "vitest run tests/snapshot-oracle.property.test.ts tests/ownership-oracle.property.test.ts tests/pagination-oracle.property.test.ts tests/offline-oracle.property.test.ts tests/values-oracle.property.test.ts tests/lazy-paging-oracle.property.test.ts tests/lazy-paging-history-oracle.property.test.ts tests/lazy-paging-receipt-oracle.property.test.ts tests/sdk-cache-oracle.test.ts tests/lazy-paging-interleaving-oracle.property.test.ts tests/lazy-paging-native-receipt-oracle.property.test.ts tests/lazy-paging-version-oracle.property.test.ts tests/lazy-paging-failure-history-oracle.property.test.ts tests/lazy-paging-revalidation-oracle.property.test.ts tests/lazy-paging-load-outcome-oracle.property.test.ts tests/lazy-paging-abort-replay-oracle.property.test.ts tests/lazy-paging-write-model-oracle.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:lazy": "vitest run --config vitest.lazy.e2e.config.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

@@ -64,4 +64,5 @@ export function convexCollectionOptions<
 export {
   convexPaginatedCollectionOptions,
   type ConvexPaginatedCollectionConfig,
+  type ConvexQueryOrder,
 } from './paginated-options'

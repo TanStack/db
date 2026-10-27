@@ -1,3 +1,4 @@
+import type { LoadSubsetFn, UnloadSubsetFn } from '@tanstack/db'
 import type { ConvexClient } from 'convex/browser'
 import type { ConvexReactClient } from 'convex/react'
 import type {
@@ -10,6 +11,8 @@ export type ConvexCollectionClient =
   Pick<ConvexClient, `onUpdate`> | Pick<ConvexReactClient, `watchQuery`>
 
 export interface ConvexSubscription<T> {
+  loadSubset?: LoadSubsetFn
+  unloadSubset?: UnloadSubsetFn
   getCurrentValue: () => T | undefined
   unsubscribe: () => void
   /** Wait for a complete authoritative snapshot, without waiting for DB visibility. */
@@ -23,6 +26,11 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
   receive: (result: FunctionReturnType<TQuery>) => void,
   fail: (error: unknown) => void,
 ): ConvexSubscription<FunctionReturnType<TQuery>> {
+  let active = true
+  const stop = (unsubscribe: () => void) => () => {
+    active = false
+    unsubscribe()
+  }
   if (`disabled` in client && client.disabled === true) {
     throw new Error(`A disabled Convex client cannot sync a collection.`)
   }
@@ -30,14 +38,24 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
     if (`closed` in client && client.closed === true) {
       throw new Error(`A closed Convex client cannot sync a collection.`)
     }
-    const subscription = client.onUpdate(query, args, receive, fail)
+    const subscription = client.onUpdate(
+      query,
+      args,
+      (value) => {
+        if (active) receive(value)
+      },
+      (error) => {
+        if (active) fail(error)
+      },
+    )
     return {
       getCurrentValue: () => subscription.getCurrentValue(),
-      unsubscribe: subscription,
+      unsubscribe: stop(subscription),
     }
   }
   const watch = client.watchQuery(query, args)
   const unsubscribe = watch.onUpdate(() => {
+    if (!active) return
     try {
       const result = watch.localQueryResult()
       if (result !== undefined) receive(result)
@@ -45,5 +63,8 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
       fail(error)
     }
   })
-  return { getCurrentValue: () => watch.localQueryResult(), unsubscribe }
+  return {
+    getCurrentValue: () => watch.localQueryResult(),
+    unsubscribe: stop(unsubscribe),
+  }
 }

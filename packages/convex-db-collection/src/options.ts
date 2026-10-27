@@ -26,7 +26,7 @@ export function createConvexOptions<
 >(
   config: Omit<
     BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils, unknown>,
-    `syncMode` | `utils`
+    `utils`
   > & {
     select?: (result: TResult) => ReadonlyArray<TItem>
     onError?: (error: unknown) => void
@@ -38,7 +38,7 @@ export function createConvexOptions<
 ): CollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils> & {
   utils: ConvexCollectionUtils
 } & ([TSchema] extends [never] ? unknown : { schema: TSchema }) {
-  const { select, onError, ...baseConfig } = config
+  const { select, onError, syncMode = `eager`, ...baseConfig } = config
   let syncError: unknown
   let readCurrent: (() => Promise<void>) | undefined
 
@@ -159,7 +159,7 @@ export function createConvexOptions<
         if (receipt === true) markReady()
         else
           void receipt.then(() => {
-            if (active) {
+            if (active && visible === receipt) {
               visible = true
               markReady()
             }
@@ -198,16 +198,46 @@ export function createConvexOptions<
       readCurrent = refresh
       try {
         subscription = subscribe(receive, fail)
+        // Validate subscription construction before readiness. The empty lazy
+        // run still precedes subset activation, avoiding first-page replay.
+        if (syncMode === `on-demand`) receive([] as TResult)
         const value = subscription.getCurrentValue()
         if (value !== undefined) receive(value)
       } catch (error) {
         fail(error)
       }
-      return () => {
-        active = false
-        rejectFirst(new Error(`Convex sync ended before source acceptance.`))
-        if (readCurrent === refresh) readCurrent = undefined
-        subscription?.unsubscribe()
+      const loadSubset = subscription?.loadSubset
+      return {
+        ...(loadSubset
+          ? {
+              loadSubset: async (request) => {
+                let failure: { error: unknown } | undefined
+                try {
+                  await loadSubset(request)
+                } catch (error) {
+                  failure = { error }
+                }
+                // The pager publishes coherent batches. Its latest establishing
+                // receipt follows every earlier accepted batch in core's FIFO.
+                // Cancellation after acceptance cannot withdraw those writes.
+                if (visible !== true) await visible
+                if (failure) throw failure.error
+                if (!active || request.signal?.aborted) {
+                  const error = new Error(`Convex subset was canceled.`)
+                  error.name = `AbortError`
+                  throw error
+                }
+                if (syncError !== undefined) throw syncError
+              },
+              unloadSubset: subscription?.unloadSubset,
+            }
+          : {}),
+        cleanup: () => {
+          active = false
+          rejectFirst(new Error(`Convex sync ended before source acceptance.`))
+          if (readCurrent === refresh) readCurrent = undefined
+          subscription?.unsubscribe()
+        },
       }
     },
   }
@@ -236,7 +266,7 @@ export function createConvexOptions<
     ConvexCollectionUtils
   > & { utils: ConvexCollectionUtils } = {
     ...baseConfig,
-    syncMode: `eager` as const,
+    syncMode,
     sync: withCollectionSyncConfigFactory(
       sync,
       (source, utils, startSyncIfIdle) => {

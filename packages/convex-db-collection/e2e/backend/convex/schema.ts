@@ -11,5 +11,6 @@ export default defineSchema({
     .index('by_rank', ['rank'])
     .index('by_clientId', ['clientId']),
   applications: defineTable({ count: v.number() }),
+  oracleControl: defineTable({ failQuery: v.boolean() }),
   receipts: defineTable({ key: v.string() }).index('by_key', ['key']),
 })

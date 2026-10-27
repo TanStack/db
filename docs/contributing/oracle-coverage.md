@@ -180,7 +180,249 @@ storage are requirements of each application's server mutation.
 
 The October 23 review adds real-Collection source-acceptance histories to the offline bridge owner: idle, pending first result, failed startup, provider failure, and cleanup. Successful empty or nonempty snapshots must actually be accepted. Original idle acceptance fails seed 20261023/path 0:0:0, the repaired fixed/random campaigns and direct replay pass. The same file keeps its ordered-stage model separate from the source-settlement and rejected-acceptance judgments. A rejected durable acceptance stays terminal for that sync run, same or changed cached rows cannot falsely certify a retry, and cleanup/restart with a fresh accepted snapshot recovers. The nonterminal mutant fails seed 20261023/path 0:0 under CONVEX_OFFLINE_ACCEPTANCE_ORACLE_SEED/PATH. Ordinary provider errors retain same-run valid-result recovery. Dedicated codec replay uses OFFLINE_CODEC_ORACLE_SEED/PATH/RUNS; legacy serializer properties keep OFFLINE_ORACLE selectors.
 
-The bounded eager API defaults maxRows to 10,000. It is not an on-demand window, a network-byte bound, a strict peak-memory bound, or a lifetime subscription-count bound. Cursor ranges remain subscribed, and cache scans still grow quadratically during acquisition. Lazy cursor acquisition for a fixed Convex query could use DB's on-demand protocol; no separate factory is inherently required. Such support is not implemented here, and each load would still need to establish its requested subset rather than treating one partial source page as complete.
+The paginated factory now also supports `syncMode: 'on-demand'` for one fixed
+query with an explicitly aligned finite numeric leading order. The
+[lazy paging implementation record](oracle-reviews/2026-10-26-convex-lazy-paging.md)
+records the approved law, semantic RED/GREEN, review repairs, checked mutant
+replays, source hashes and limits. `tests/lazy-paging-model-oracle.ts` owns the
+independent exact-window, complete-leading-tie, delivered-evidence successor-work
+and public-publication comparisons. `tests/lazy-paging-oracle.property.test.ts`
+runs five fixed/random 60-history families through real Collection controls and
+ordered live queries. Each current reach state was observed in all 60 histories
+per campaign. It covers finite/offset/whole/tie/continuation/empty scopes,
+short nonterminal pages, both splits, no-demand/zero/growth/cached-peer work,
+rejected acquisition/unload, held initial/moved/repaired windows, cache-before-
+callback refetch, abort before/after acceptance, held cleanup/restart, and two
+real applied receipts across publication reentry. Duplicate pending request
+objects retain both waiters. An invalid lazy startup never publishes readiness.
+
+The [October 27 strengthening record](oracle-reviews/2026-10-27-convex-lazy-paging.md)
+supersedes those historical source bindings for the current files. The native
+`lazy-paging-history-oracle.property.test.ts` adds generated acquisition,
+retirement, abort, delivery, source-change, application-hold, cleanup and restart
+actions. Its constructive prefix retires or aborts the wider authorizer while
+work remains pending, then cleans up with a real accepted receipt held. Both
+SDK subscription shapes receive stale success/error callbacks. Every source
+publication is checked against the provider facts available at that publication;
+optimistic overlays are excluded. Paired hidden suffixes compare actual discovery
+traces before revealing the suffix. Retain/reacquire alternatives are positive
+scientific-comparator calibrations, not claims about native retention strategy.
+
+`lazy-paging-receipt-model.ts` independently owns the exact many-to-many
+attempt/establishing-receipt relation. Its controlled real-Collection receiver
+varies response groups and commit partitions independently, checks cached zero,
+one/shared/multiple receipts, held idempotent writes, true with zero/one/multiple
+synchronous receipts, Promise rejection and synchronous throw. Six faulty
+adapters distinguish borrowed receipts, first-only waits, skipped provider
+completion, content-only application, premature canceled settlement and a
+quiescent stranded caller. Native lifecycle checks trace every source/dependent
+publication and status transition during stale injection at cleanup start,
+held cleanup and restart; a fresh dependent succeeds while the old one remains
+terminal. A stale provider-error RED preceded the subscription fencing repair.
+
+The [interleaving follow-up](oracle-reviews/2026-10-27-convex-lazy-interleavings.md)
+adds four receiving families and supplies the current source binding for the
+shared receipt model/driver. `lazy-paging-interleaving-oracle.property.test.ts`
+varies legal response delivery, actual acceptance/application, and cancellation
+orders independently. An authored uncancelable in-flight obligation distinguishes
+abort before acceptance from withdrawal of already accepted work. Previously
+initiated work may establish a receipt after abort. The generic core model
+permits fulfillment after abort once facts, obligations and receipts apply;
+native/controlled receivers separately check their cancellation outcome policy.
+Borrowed/first-only receipts and premature in-flight cancellation fail promised
+observations. Extra waiting on a future peer receipt is contract-permitted;
+the earlier injected-edge control is not claimed as a rejected waiting strategy.
+
+`lazy-paging-native-receipt-oracle.property.test.ts` feeds actual native batches
+and core receipts into that same scientific model. Independently authored
+required versions absent at acquisition have unique supplying batches, which
+can establish two callers. It covers cached zero new edges, a shallow cached
+caller behind a deeper held peer, canceled/successful shared callers, and explicit
+cache revalidation to a new version. Early or delayed cached settlement is
+permitted; responsive post-drain completion is required. Its hostile native
+receiver returns the already applied startup receipt instead of the actual
+held receipt. Native attribution here excludes idempotent/superseding facts,
+reentrant commit observations and cleanup abandonment; the older controlled
+receiver retains idempotent receipt coverage and its all-responses-first profile.
+
+`lazy-paging-version-model-oracle.ts` owns coherent authored revisions and their
+monotone public frontier. `lazy-paging-version-oracle.property.test.ts` checks
+every source publication after full lazy acquisition, with multiple accepted
+revisions held behind real optimistic transactions, both SDK shapes and skipped
+intermediate revisions. Old complete values may remain while held; rollback
+and mixed versions fail even when final values are correct. The two hostile
+controls inject wrong public observations; they calibrate the recorder/model,
+not a production pager mutation. This profile keeps keys/order stable. General
+membership changes and partial-prefix retention retain their existing owners.
+
+`lazy-paging-failure-history-oracle.property.test.ts` composes preacceptance
+failure, two owners' shared held batch, cancellation, peer retirement, provider
+error, held cleanup, stale callbacks and restart. Every old dependent value and
+status event is checked for terminality; a fresh graph succeeds. Ordinary
+native errors may recover on a valid coherent result. It does not require an
+ordinary rejected attempt to wait its receipts. Its terminal controls calibrate
+the model; production stale-callback mutants remain in the prior repair record.
+
+Core `tests/query/load-subset-joint-replay-oracle.property.test.ts` receives the
+authoritative truncate law through real source commits and two live owners.
+It composes older uncancelable participants, held receipts, failure followed by
+ordinary writes, owner retirement, retry and held cleanup/restart. Newest-only
+publication and ordinary-write reopening production mutants fail the public
+snapshot comparison. Native Convex does not issue same-run authoritative
+truncates; these are distinct receiving profiles. Scientific models hold facts,
+obligations and allowed publications; transport/pager mechanics stay in drivers.
+No bounded campaign establishes arbitrary nonquiescent temporal progress or
+every formal schedule product.
+
+`e2e/lazy-concurrency-oracle.test.ts` now receives the same receipt and version
+models at the actual isolated Convex backend through both real SDK clients.
+Each generated history runs both SDKs, with independently authored stable
+rows/ranks, varied page sizes/text, shared full acquisitions, real optimistic
+application holds, post-acceptance cancellation and a cached shallow peer.
+Before cancellation, unique required facts establish the actual shared held
+receipt and both callers' missing-fact sets are empty. Cached extra waiting is
+permitted. After full acquisition, atomic test-server full-relation mutations
+offer revisions before writing; two distinct accepted revision witnesses are
+held before application, and the independent writer advances during reader TCP
+loss. Every active source publication feeds the unchanged version/provenance
+comparisons. Actual callback snapshots must contain the drained and reconnected
+revisions; manual checkpoints cannot supply that reach evidence. Actual receipt
+fulfillment supplies application, even when a newer FIFO revision is already
+public before the Promise callback runs. The normal family has matching fixed
+and random four-history campaigns, with both SDK receivers in every history;
+`CONVEX_BACKEND_CONCURRENCY_ORACLE_SEED/PATH` replays directly. Removing applied
+waiting and dropping the first updated row are production mutants rejected by
+the receipt and version laws respectively through both SDKs, with shrink/replay
+and byte-for-byte restoration. The [backend concurrency record](oracle-reviews/2026-10-27-convex-lazy-backend-concurrency.md)
+binds sources, commands and results.
+
+This backend receiver preserves the stable-key, fully acquired revision profile.
+It does not claim arbitrary acceptance/application orders, idempotent receipt
+attribution, accepted cleanup abandonment or native application/provider errors.
+TCP loss tests transport recovery; it does not promise a provider-error callback.
+The broader combined failure grammar retains its controlled receiving profile;
+the boundary receiver below adds the after-acceptance query-error/cleanup subset.
+Other real backend source/window mutation and framework boundaries retain their
+existing owners.
+
+The [boundary-strengthening record](oracle-reviews/2026-10-27-convex-lazy-boundaries.md)
+extends these receiving profiles without importing pager mechanics into the
+scientific models. `lazy-paging-revalidation-oracle.property.test.ts` attributes
+actual native commits made inside isolated explicit revalidation calls, including
+equal-valued accepted writes and later supersession. Actual receipt fulfillment
+proves application; a historical value need not remain visible at its Promise
+callback. Cached reuse may accept another receipt or owe zero new receipts.
+Every history exercises both controlled SDK shapes, then an unheld reactive
+revision, with callback-only publication witnesses and retained semantic errors.
+This is not evidence that a real Convex backend emits equal-valued query results,
+nor general attribution of asynchronous/reentrant native receipt edges.
+
+`e2e/lazy-boundary-oracle.test.ts` receives ordered windows computed by
+`expectedLazyRows` and the sequence-observation mode of `LazyVersionModel`.
+It never compares the whole retained partial source to a full server revision.
+Every base publication separately receives the real SDK provenance judgment.
+Generated histories keep an actually unread suffix while atomic server edits
+insert, delete and move rows across the window. Window growth remains pending
+on a real held application receipt while two or three later revisions arrive.
+The same episode then composes two full callers' shared held acceptance, caller
+abort, a genuine reactive server query error, cleanup-abandoned actual receipts,
+and a fresh graph while the old graph stays terminal. `LazyReceiptModel` now
+distinguishes pending, applied and cleanup-abandoned receipts; cleanup authority alone
+does not discharge an unobserved receipt. The shared `LazyTerminalGraphModel`
+supplies the old graph judgment to both controlled and backend receivers.
+
+Both new families run matching fixed/random campaigns, direct seed/path replay,
+and both SDKs in every history. Selectors are `CONVEX_REVALIDATION_ORACLE_SEED/PATH`
+and `CONVEX_BOUNDARY_ORACLE_SEED/PATH`; `CONVEX_LAZY_ORACLE_RUNS_MULTIPLIER`
+expands both campaign budgets equally. Standard package oracle scripts discover
+them; the existing browser CI lane runs the backend receiver via `test:e2e`.
+Calibration distinguishes unchanged-content application shortcuts, lost native
+deletions, and a separate stale-publication perturbation that ends with correct
+rows. Exact commands, source hashes and outcome classifications are in the
+record. This does not close arbitrary scheduling, rank ties in the new backend
+family, provider errors before acceptance, adversarial stale real-SDK callbacks,
+same-run authoritative truncate, or React rendering boundaries. Those retain
+their existing owners; the controlled failure family remains broader than its
+new backend receiving subset.
+
+The [application/cancellation follow-up](oracle-reviews/2026-10-27-convex-lazy-app-abort.md)
+adds three receiving families motivated by issue #2269. `LazyWriteModel` in
+`tests/lazy-paging-write-model-oracle.ts` independently owns the authored backend
+ledger and the composition of source revisions, requested windows and one
+optimistic operation. Backend acknowledgment and optimistic settlement are
+different boundaries. The publication relation retains every compatible
+monotone source/window explanation; rejecting an optimistic operation may reveal
+an older applied source without permitting source rollback after a newer view.
+Its comparator controls accept that legal history and reject atomic mixing,
+source rollback, lost confirmed writes and remote effects of atomic rejection.
+
+`e2e/lazy-app-write-oracle.test.ts` receives that model through both actual SDKs
+and the isolated backend. Each history includes confirmed/rejected Collection
+insert, update and delete handlers, independent visible/unread remote edits,
+demand growth behind a real held receipt, and an unread suffix. Successful
+handlers must expose the correct source key at application settlement while
+real SDK caches are current and notifications are withheld. Every graph
+publication is judged; the backend is independently checked against the ledger,
+and drained windows against its exact projection. Rejected server transactions
+throw after attempting their writes, exercising real atomic rollback. This is
+not a promise to undo arbitrary handler side effects after a remote commit.
+Limits: unique ascending numeric ranks, one application operation at a time,
+bounded strings, no rich-value/reload/health API coverage.
+
+`tests/lazy-paging-load-outcome-oracle.property.test.ts` compares the same
+generated failed-replay/ordinary-write/retry history under synchronous throw and
+Promise rejection, through direct subscriptions and live queries. It checks
+original error identity, every public value, failed-publication retention and
+successful recovery. The comparison permits their different acquisition lease
+lifetimes. Initial-load equivalence and arbitrary reentry retain the core
+lifecycle owners; this new family claims the replay boundary only.
+
+`tests/lazy-paging-abort-replay-oracle.property.test.ts` receives preacceptance
+cancellation through both controlled native SDK shapes, followed by two real
+same-run core truncate replays with disjoint source keys. Abort settles before
+withheld delivery; no-demand delivery accepts no rows. Retired success/error
+callbacks after each successful replay cannot resurrect rows, poison current
+sync or read a retired React watch. Native Convex does not initiate these
+truncates; the driver supplies that core input. This is no claim about actual
+SDKs emitting adversarial stale callbacks or about bounded work during replay.
+The existing receipt model still owns accepted writes. This checkout's older
+core waits for uncancelable baselines; #2269's immediate-core-abort decision
+belongs to integration with unmerged #2168. The new family exercises their
+shared cancellable-adapter obligation without silently changing either law.
+
+All three families run fixed/random campaigns with direct seed/path replay and
+declared reach. The follow-up records three rejected production decisions
+(early handler confirmation, swallowed throws, missing retirement fencing),
+a misdirected-write driver calibration, shrunk replays and restored GREENs.
+
+`tests/sdk-cache-oracle.test.ts` supplies both real SDKs' coherent cache-before-
+callback premise through legal controlled multi-query wire transitions.
+`e2e/lazy-paging-oracle.test.ts` receives shared value/coverage/work judgments
+through both SDKs and the isolated local backend: unread finite tails, window
+movement, live delete/move, real required/recommended splits, native leading ties
+with a local trailing order, and same-run TCP reconnect. Native work checking is
+limited to stable-source acquisitions; mutation/reconnect phases compare values
+and coverage at settled cuts. `packages/react-db/tests/convex-lazy-paging-oracle.test.tsx`
+receives exact data, every page, page parameters and lookahead through
+`useLiveInfiniteQuery`, checking every committed ready tuple, across provider
+page sizes 1–4. Other framework receiving paths are untested under these owners.
+
+The eager mirror and retained lazy prefix default to maxRows 10,000. Retained
+ranges stay subscribed until cleanup; this is no network-byte, peak-memory,
+total-call, scan or lifetime subscription-count bound. Whole-source requests
+may exhaust the query. Core can issue such a request after source restart even
+for a terminal dependent: the graph remains terminal but its source subscription
+can survive. The cleanup driver accounts for that actual demand. Terminal graph
+publication is covered; zero post-error acquisition is not promised here.
+General query translation, arbitrary application filters/orders, nullable/string
+leading orders and array select in lazy mode are excluded by the public profile.
+An incompatible external truncate wrapper is not a Convex reset mechanism.
+The existing core load-subset replay, transaction, ordered lifecycle and cleanup
+owners remain primary for replay/failure gates and delayed cancellation. Their
+458-test delegated run is distinct from native Convex coverage. Responsive-
+provider quiescent stalls fail a named progress comparison; continuously
+nonquiescent work remains a diagnostic limit. The frozen TLA+ design projections
+are analytical evidence, not proof of this production implementation.
 
 Validation at the initial review: 43 adapter checks, 302 offline-engine tests, and seven real-backend tests passed. The October 23 strengthened backend suite passes nine tests with 36 generated crash histories. Final local validation passes 62 adapter checks and 302 offline-engine tests. Exact-head review records accompany this follow-up. The native-value receiving oracle rejects a
 scalar-as-JSON decoder at the typed-value comparison (seed 20261022/path 0:0);

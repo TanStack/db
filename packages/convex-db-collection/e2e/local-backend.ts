@@ -19,6 +19,9 @@ export async function startLocalBackend(directory: URL, port?: number) {
         new URL(`../node_modules/convex/bin/main.js`, import.meta.url),
       ),
       `dev`,
+      ...(process.env.CONVEX_TEST_BACKEND_VERSION
+        ? [`--local-backend-version`, process.env.CONVEX_TEST_BACKEND_VERSION]
+        : []),
       `--typecheck`,
       `disable`,
       `--tail-logs`,
