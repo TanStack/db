@@ -165,3 +165,22 @@ SortedMap does not promise the items listed under scope. Shipped-byte effects
 were measured with a local esbuild approximation of `pnpm size:compare`,
 because a registry 403 prevented the install that `size:compare` needs; they
 are not part of this oracle verdict.
+
+## Update: merge with `origin/main` at `7e46f81ad`
+
+The branch merged `origin/main` at `7e46f81ad` in `26896c42a`. That change
+(#2237) requires each registered property to name its owner, so
+`group-result-key.groups` now has an owner entry and a replay test name in
+`oracle-replay-manifest.ts`. No law, model, grammar, or comparison changed.
+The replay manifest tests (40) and both oracles pass after the merge.
+
+A third CodeRabbit finding, on `ea4cf8792`, was valid: the guide note did not
+say that a string with the reserved `\u0000tanstack-db:` prefix gets an
+escaped key, or that a live query's `getKey` replaces grouped keys. The note
+now says both.
+
+Shipped bytes: `pnpm size:compare` against the merge-base `b8d8ee07c` now
+runs, with a local-only override for one dependency that the registry proxy
+blocks. The gzip difference is -56 bytes for `app`, -38 to -61 bytes for the
+other scenarios, and -2 bytes for the `@tanstack/db` package bundle. These
+numbers replace the esbuild approximation in the limits above.
