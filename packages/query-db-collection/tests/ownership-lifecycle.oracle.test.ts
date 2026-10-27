@@ -1047,6 +1047,99 @@ function recordMetadata(
   }
 }
 
+/**
+ * Diagnosis for a race seen only on CI: the held-cleanup retention witnesses
+ * sometimes see no expiry transaction staged. A fixture with a retention
+ * time-to-live records each timer that Query DB sets during the test, where
+ * it was set, whether it fired, and what cleared it, and each Query fetch. A
+ * failed retention wait reports that trace.
+ */
+type RetentionTrace = {
+  started: number
+  timers: Array<{
+    delay: number
+    set: string
+    fired?: number
+    cleared?: string
+  }>
+  fetches: Array<string>
+}
+let retentionTrace: RetentionTrace | undefined
+
+const queryDbCaller = () =>
+  (new Error().stack ?? ``)
+    .split(`\n`)
+    .filter((line) => line.includes(`query-db-collection/src/`))
+    .slice(0, 3)
+    .map((line) => line.trim().replace(/^at /, ``))
+    .join(` < `)
+
+function traceRetentionTimers(): RetentionTrace {
+  const trace: RetentionTrace = { started: Date.now(), timers: [], fetches: [] }
+  const elapsed = () => `+${Date.now() - trace.started}ms`
+  const realSetTimeout = globalThis.setTimeout
+  const realClearTimeout = globalThis.clearTimeout
+  const traced = new Map<unknown, RetentionTrace[`timers`][number]>()
+  const setSpy = vi.spyOn(globalThis, `setTimeout`).mockImplementation(((
+    callback: (...args: Array<unknown>) => void,
+    delay?: number,
+    ...args: Array<unknown>
+  ) => {
+    const caller = queryDbCaller()
+    if (!caller) return realSetTimeout(callback, delay, ...args)
+    const timer: RetentionTrace[`timers`][number] = {
+      delay: delay ?? 0,
+      set: `${elapsed()} ${caller}`,
+    }
+    trace.timers.push(timer)
+    const handle = realSetTimeout(
+      (...callbackArgs: Array<unknown>) => {
+        timer.fired = Date.now() - trace.started
+        callback(...callbackArgs)
+      },
+      delay,
+      ...args,
+    )
+    traced.set(handle, timer)
+    return handle
+  }) as typeof setTimeout)
+  const clearSpy = vi.spyOn(globalThis, `clearTimeout`).mockImplementation(((
+    handle?: Parameters<typeof clearTimeout>[0],
+  ) => {
+    const timer = traced.get(handle)
+    if (timer) timer.cleared = `${elapsed()} ${queryDbCaller()}`
+    realClearTimeout(handle)
+  }) as typeof clearTimeout)
+  retentionTrace = trace
+  cleanups.push(() => {
+    setSpy.mockRestore()
+    clearSpy.mockRestore()
+    if (retentionTrace === trace) retentionTrace = undefined
+    return Promise.resolve()
+  })
+  return trace
+}
+
+async function waitForRetention(
+  check: () => void,
+  options: { timeout: number },
+) {
+  try {
+    await vi.waitFor(check, options)
+  } catch (error) {
+    const trace = retentionTrace
+    const report = trace
+      ? [
+          `Query DB timers:`,
+          ...trace.timers.map((timer) => `  ${JSON.stringify(timer)}`),
+          `Query fetches: ${JSON.stringify(trace.fetches)}`,
+        ].join(`\n`)
+      : `no retention trace`
+    if (error instanceof Error) error.message = `${error.message}\n${report}`
+    throw error
+  }
+}
+
 function createOwnershipFixture({
   id,
   results,
@@ -1060,11 +1153,19 @@ function createOwnershipFixture({
   persistedGcTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient(customHash, staleTime)
+  const trace =
+    persistedGcTime === undefined ? undefined : traceRetentionTimers()
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
-  results.forEach((result) =>
-    queryFn.mockImplementationOnce(() => Promise.resolve(result)),
+  results.forEach((result, index) =>
+    queryFn.mockImplementationOnce(() => {
+      trace?.fetches.push(`+${Date.now() - trace.started}ms result ${index}`)
+      return Promise.resolve(result)
+    }),
   )
-  queryFn.mockRejectedValue(new Error(`Unexpected ownership refetch`))
+  queryFn.mockImplementation(() => {
+    trace?.fetches.push(`+${Date.now() - trace.started}ms unexpected`)
+    return Promise.reject(new Error(`Unexpected ownership refetch`))
+  })
   const baseOptions = queryCollectionOptions<Item>({
     id,
     queryClient,
@@ -6502,7 +6603,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection._sync.loadSubset(detail)
       // Earlier result transactions apply first, so the count below grows only
       // with the expiry's held transaction.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
         retentionWait,
@@ -6512,7 +6613,7 @@ describe(`query collection ownership lifecycle`, () => {
       const pendingBeforeExpiry =
         collection._state.pendingSyncedTransactions.length
       // The expiry's owner release is accepted but held behind the blocker.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(
             collection._state.pendingSyncedTransactions.length,
@@ -6596,7 +6697,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection._sync.loadSubset(detail)
       // Earlier result transactions apply first, so the count below grows only
       // with the expiry's held transaction.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
         retentionWait,
@@ -6605,7 +6706,7 @@ describe(`query collection ownership lifecycle`, () => {
       collection._sync.unloadSubset(detail)
       const pendingBeforeExpiry =
         collection._state.pendingSyncedTransactions.length
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(
             collection._state.pendingSyncedTransactions.length,
@@ -6621,7 +6722,7 @@ describe(`query collection ownership lifecycle`, () => {
       await claimed
 
       collection._sync.unloadSubset(list)
-      await vi.waitFor(
+      await waitForRetention(
         () => expect(rows(collection)).toEqual([]),
         retentionWait,
       )
@@ -6664,7 +6765,7 @@ describe(`query collection ownership lifecycle`, () => {
       expect(rows(collection)).toEqual([shared.id])
 
       collection._sync.unloadSubset(list)
-      await vi.waitFor(
+      await waitForRetention(
         () => expect(rows(collection)).toEqual([]),
         retentionWait,
       )
@@ -6742,7 +6843,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection._sync.loadSubset(peer)
       // Earlier result transactions apply first, so the count below grows only
       // with the expiry's held transaction.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
         retentionWait,
@@ -6752,7 +6853,7 @@ describe(`query collection ownership lifecycle`, () => {
       const pendingBeforeExpiry =
         collection._state.pendingSyncedTransactions.length
       // The expiry's owner release is accepted but held behind the blocker.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(
             collection._state.pendingSyncedTransactions.length,
@@ -6844,7 +6945,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection._sync.loadSubset(peer)
       // Earlier result transactions apply first, so the count below grows only
       // with the expiry's held transaction.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
         retentionWait,
@@ -6853,7 +6954,7 @@ describe(`query collection ownership lifecycle`, () => {
       collection._sync.unloadSubset(detail)
       const pendingBeforeExpiry =
         collection._state.pendingSyncedTransactions.length
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(
             collection._state.pendingSyncedTransactions.length,
@@ -6894,7 +6995,10 @@ describe(`query collection ownership lifecycle`, () => {
       await hydrated._sync.loadSubset(list)
       hydrated._sync.unloadSubset(peer)
       hydrated._sync.unloadSubset(list)
-      await vi.waitFor(() => expect(rows(hydrated)).toEqual([]), retentionWait)
+      await waitForRetention(
+        () => expect(rows(hydrated)).toEqual([]),
+        retentionWait,
+      )
     },
     retentionTestTimeout,
   )
@@ -7664,7 +7768,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection._sync.loadSubset(detail)
       // Earlier result transactions apply first, so the count below grows only
       // with the expiry's held transaction.
-      await vi.waitFor(
+      await waitForRetention(
         () =>
           expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
         retentionWait,
