@@ -552,16 +552,38 @@ const witnesses = {
   },
 } satisfies Record<string, { lane: SessionLane; history: Array<SessionAction> }>
 
+/**
+ * Each lane's replay names: its campaign, and the paired formulations that
+ * apply to it (key independence without full row updates, seed order with
+ * seeds).
+ */
 const lanes = [
-  { lane: flatLane, property: `sync-metadata-session.flat`, seed: 2_220_001 },
+  {
+    lane: flatLane,
+    property: `sync-metadata-session.flat`,
+    paired: {
+      'hold-invariance': `sync-metadata-session.flat.hold-invariance`,
+      'key-independence': `sync-metadata-session.flat.key-independence`,
+    },
+    seed: 2_220_001,
+  },
   {
     lane: nestedLane,
     property: `sync-metadata-session.nested`,
+    paired: {
+      'hold-invariance': `sync-metadata-session.nested.hold-invariance`,
+      'key-independence': `sync-metadata-session.nested.key-independence`,
+    },
     seed: 2_220_002,
   },
   {
     lane: seedLane,
     property: `sync-metadata-session.seeds`,
+    paired: {
+      'hold-invariance': `sync-metadata-session.seeds.hold-invariance`,
+      'key-independence': `sync-metadata-session.seeds.key-independence`,
+      'seed-order': `sync-metadata-session.seeds.seed-order`,
+    },
     seed: 2_220_003,
     // A seed beneath an open update needs both on one row, and duplicate
     // inserts share the lane's weight, so it runs more fixed histories.
@@ -570,16 +592,29 @@ const lanes = [
   {
     lane: seedFullLane,
     property: `sync-metadata-session.seeds-full`,
+    paired: {
+      'hold-invariance': `sync-metadata-session.seeds-full.hold-invariance`,
+      'seed-order': `sync-metadata-session.seeds-full.seed-order`,
+    },
     seed: 2_220_004,
   },
   {
     lane: nestedSeedLane,
     property: `sync-metadata-session.nested-seeds`,
+    paired: {
+      'hold-invariance': `sync-metadata-session.nested-seeds.hold-invariance`,
+      'key-independence': `sync-metadata-session.nested-seeds.key-independence`,
+      'seed-order': `sync-metadata-session.nested-seeds.seed-order`,
+    },
     seed: 2_220_005,
   },
   {
     lane: nestedConflictLane,
     property: `sync-metadata-session.nested-conflicts`,
+    paired: {
+      'hold-invariance': `sync-metadata-session.nested-conflicts.hold-invariance`,
+      'key-independence': `sync-metadata-session.nested-conflicts.key-independence`,
+    },
     seed: 2_220_006,
     // Invalidation needs an outer insert, an inner write to the same row,
     // and the inner commit, so this lane runs more fixed histories.
@@ -977,8 +1012,8 @@ describe(`sync metadata session boundaries`, () => {
  * It does not consult the model's reads, so it cannot share a fault in them.
  */
 describe(`sync metadata session hold invariance`, () => {
-  for (const { lane, property, seed } of lanes) {
-    const invariance = `${property}.hold-invariance`
+  for (const { lane, paired, seed } of lanes) {
+    const invariance = paired[`hold-invariance`]
     const run = async (history: Array<SessionAction>) => {
       const mismatch = await runHoldInvariance(lane, history, () =>
         createCoreDriver(lane.fullRows),
@@ -1014,20 +1049,20 @@ const pairedFormulations = [
     suffix: `key-independence`,
     title: `keeps row 1 independent of row 2`,
     run: runKeyIndependence,
-    lanes: lanes.filter(({ lane }) => !lane.fullRows),
+    lanes: lanes.filter((entry) => `key-independence` in entry.paired),
   },
   {
     suffix: `seed-order`,
     title: `keeps outcomes independent of seed arrival`,
     run: runSeedOrderInvariance,
-    lanes: lanes.filter(({ lane }) => lane.seeds),
+    lanes: lanes.filter((entry) => `seed-order` in entry.paired),
   },
 ] as const
 
 describe(`sync metadata session paired formulations`, () => {
   for (const formulation of pairedFormulations)
-    for (const { lane, property, seed } of formulation.lanes) {
-      const name = `${property}.${formulation.suffix}`
+    for (const { lane, paired, seed } of formulation.lanes) {
+      const name = (paired as Record<string, string>)[formulation.suffix]!
       const run = async (history: Array<SessionAction>) => {
         const mismatch = await formulation.run(lane, history, () =>
           createCoreDriver(lane.fullRows),

@@ -647,24 +647,28 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
  */
 const extraLanes: Array<{
   lane: SessionLane
+  property: string
   seed: number
   runs: number
   reach: Array<string>
 }> = [
   {
     lane: persistedNestedLane,
+    property: `sync-metadata-session.persisted-nested`,
     seed: 2_220_012,
     runs: 50,
     reach: [`nested commit`, `nested commit during a hold`, `store hold`],
   },
   {
     lane: persistedSeedLane,
+    property: `sync-metadata-session.persisted-seeds`,
     seed: 2_220_013,
     runs: 50,
     reach: [`seed`, `store hold`],
   },
   {
     lane: persistedCachedLane,
+    property: `sync-metadata-session.persisted-cached`,
     seed: 2_220_015,
     runs: 80,
     reach: [
@@ -675,6 +679,7 @@ const extraLanes: Array<{
   },
   {
     lane: persistedConflictLane,
+    property: `sync-metadata-session.persisted-conflicts`,
     seed: 2_220_014,
     runs: 150,
     reach: [
@@ -688,6 +693,7 @@ const extraLanes: Array<{
   // wrapper buffers their transactions until the read ends.
   {
     lane: persistedReadLane,
+    property: `sync-metadata-session.persisted-reads`,
     seed: 2_220_017,
     runs: 150,
     reach: [
@@ -702,6 +708,7 @@ const extraLanes: Array<{
   // enclosing transaction whose row it re-inserted.
   {
     lane: persistedNestedSeedLane,
+    property: `sync-metadata-session.persisted-nested-seeds`,
     seed: 2_220_016,
     runs: 300,
     reach: [
@@ -715,8 +722,13 @@ const extraLanes: Array<{
 ]
 
 describe(`sync metadata session oracle through the persisted wrapper: nesting and seeds`, () => {
-  for (const { lane, seed, runs, reach: states } of extraLanes) {
-    const lanePropertyName = `sync-metadata-session.${lane.name}`
+  for (const {
+    lane,
+    property: lanePropertyName,
+    seed,
+    runs,
+    reach: states,
+  } of extraLanes) {
     const runLane = (history: Array<SessionAction>) =>
       assertPersistedHistory(history, lane)
     if (requestedReplayProperty === undefined) {
