@@ -832,8 +832,8 @@ async function runPaginationScenario(
  * one history, and `referenceWindowRows` predicts each window from the rows.
  */
 declareOracle({
-  check: [runPaginationScenario],
-  model: [referenceWindowRows],
+  check: [runPaginationScenario, runMultiOrderScenario],
+  model: [referenceWindowRows, referenceMultiOrder],
 })
 
 async function expectMultiOrderBoundaryMatches(): Promise<void> {
