@@ -23,6 +23,8 @@ import { flushPromises, withOracleCleanup } from './utils.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
+  oracleReplayRequested,
+  oracleReplayTest,
   readOracleRunConfig,
 } from './oracle-config.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
@@ -37,12 +39,9 @@ import type {
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 
 const { multiplier, ...replay } = readOracleRunConfig()
-const it = replay.replayPath === undefined ? vitestIt : vitestIt.skip
-const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
-const randomCampaign = (property: string) =>
-  replay.replayPath === undefined || replay.replayProperty === property
-    ? fcTest
-    : fcTest.skip
+const it = oracleReplayTest(vitestIt)
+const fixedCampaign = oracleReplayTest(fcTest)
+const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 /**
  * # What settles a demand created while a Collection is cleaned up?
@@ -853,7 +852,7 @@ async function runHistory(
 }
 
 if (
-  replay.replayPath === undefined &&
+  !oracleReplayRequested() &&
   process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`
 ) {
   fc.statistics(
