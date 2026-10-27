@@ -14,22 +14,33 @@
  * differ in the value and lifecycle facts visible there. The suite tracks all
  * handles, sources, and pending fetches so cleanup is itself part of the tested
  * history instead of test-runner housekeeping.
+ *
+ * This module keeps the scenarios that compare production with the source rows
+ * or with a model. Scenarios whose only comparison is a value written down by
+ * hand are in infinite-suite-cases.ts. The shared machinery is in
+ * infinite-suite-harness.ts.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { declareOracle } from '../oracle-config.js'
+import { registerInfiniteQueryCaseScenarios } from './infinite-suite-cases'
+import {
+  createScenarioState,
+  registerRegistrySelfTest,
+  rows,
+  runScenario,
+  scenarioLifetime,
+  trackScenarioPromise,
+  waitFor,
+  waitForAsync,
+  wrapDriver,
+} from './infinite-suite-harness'
 import { expectPageRows } from './page-laws-oracle'
-import { ScenarioLifetime } from './scenario-lifetime'
-import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
+import type { InfiniteRow } from './infinite-suite-harness'
 import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
 } from './infinite-contract'
-
-interface InfiniteRow {
-  id: string
-  label: string
-  rank: number
-}
 
 /**
  * A fulfilled page fetch advances the committed prefix. A failed request leaves
@@ -127,77 +138,24 @@ function expectFirstOnDemandValue(
   }
 }
 
-function rows(count: number, prefix = ``): Array<InfiniteRow> {
-  return Array.from({ length: count }, (_, index) => ({
-    id: `${prefix}${index + 1}`,
-    label: `${prefix || `row`}-${index + 1}`,
-    rank: count - index,
-  }))
-}
-
-async function captureError(fn: () => InfiniteQueryHandle): Promise<unknown> {
-  try {
-    const handle = fn()
-    await handle.flush()
-    handle.unmount()
-    return undefined
-  } catch (error) {
-    return error
-  }
-}
-
-async function waitFor(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    if (check()) return
-    await Promise.resolve()
-  }
-  throw new Error(`Condition did not become true`)
-}
-
-async function waitForAsync(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    if (check()) return
-    await new Promise((resolve) => setTimeout(resolve, 5))
-  }
-  throw new Error(`Condition did not become true`)
-}
+/**
+ * The two laws that this suite's scenarios compare with. The publication law
+ * checks every ready value against the source prefix for its page count. The
+ * overlapping-window model predicts the committed prefix, its continuation, and
+ * the retained error after overlapping window outcomes.
+ */
+declareOracle({
+  check: [expectReadyObservationsMatchSource],
+  model: [expectedOverlappingWindow],
+})
 
 export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
   const registry = scenarioRegistry(rawDriver.knownGaps)
-  let lifetime: ScenarioLifetime | null = null
-  let sources: ScenarioSources | null = null
-
-  const track = <H extends InfiniteQueryHandle>(handle: H): H => {
-    const unmount = handle.unmount.bind(handle)
-    if (lifetime) handle.unmount = lifetime.defer(unmount)
-    return handle
-  }
-  const trackPromise = (promise: Promise<void>): Promise<void> => {
-    void promise.catch(() => undefined)
-    lifetime!.defer(() => promise)
-    return promise
-  }
-  const driver: InfiniteQueryDriver = {
-    ...rawDriver,
-    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
-    makeOnDemandSource: (data, delay) =>
-      sources!.track(rawDriver.makeOnDemandSource(data, delay)),
-    makeLaggingOnDemandSource: (data) =>
-      sources!.track(rawDriver.makeLaggingOnDemandSource(data)),
-    makePrecreated: (build) => sources!.track(rawDriver.makePrecreated(build)),
-    mount: (build, config) => track(rawDriver.mount(build, config)),
-    mountControllable: (build, initial, config) =>
-      track(rawDriver.mountControllable(build, initial, config)),
-    mountCollection: (collection, config) =>
-      track(rawDriver.mountCollection(collection, config)),
-    mountCollectionControllable: (collection, config) =>
-      track(rawDriver.mountCollectionControllable(collection, config)),
-    mountConfigControllable: (build, config) =>
-      track(rawDriver.mountConfigControllable(build, config)),
-    mountInputControllable: (collection, build, config) =>
-      track(rawDriver.mountInputControllable(collection, build, config)),
-  }
-
+  const state = createScenarioState()
+  const driver = wrapDriver(rawDriver, state)
+  const lifetime = scenarioLifetime(state)
+  const trackPromise = (promise: Promise<void>): Promise<void> =>
+    trackScenarioPromise(state, promise)
   const scenario = (
     key: string,
     name: string,
@@ -205,28 +163,12 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
-    const run = async () => {
-      const resources = new ScenarioLifetime()
-      const ownedSources = new ScenarioSources()
-      lifetime = resources
-      sources = ownedSources
-      try {
-        await resources.run(async () => {
-          try {
-            await fn()
-          } finally {
-            ownedSources.defer(resources)
-          }
-        })
-      } finally {
-        lifetime = null
-        sources = null
-      }
-    }
-    it(label, run)
+    it(label, () => runScenario(state, fn))
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
+    registerInfiniteQueryCaseScenarios({ driver, registry, state })
+
     scenario(
       `first-paint-ready`,
       `publishes the ready first page on the first paint for a synchronous source`,
@@ -610,54 +552,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             3, 3,
           ])
           expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
-        } finally {
-          utils.setWindow = originalSetWindow
-        }
-      },
-    )
-
-    scenario(
-      `fetch-settlement`,
-      `fulfills the driver operation only after the window request fulfills`,
-      async () => {
-        const source = driver.makeSource(rows(8))
-        const handle = driver.mount(
-          (q) =>
-            q
-              .from({ items: source.collection })
-              .orderBy(({ items }: any) => items.rank, `desc`),
-          { pageSize: 3 },
-        )
-        await handle.flush()
-
-        const utils = handle.current().collection.utils as {
-          setWindow: (window: {
-            offset: number
-            limit: number
-          }) => true | Promise<void>
-        }
-        const originalSetWindow = utils.setWindow.bind(utils)
-        let resolveWindow: (() => void) | undefined
-        lifetime!.defer(() => resolveWindow?.())
-        utils.setWindow = (window) => {
-          originalSetWindow(window)
-          return new Promise<void>((resolve) => {
-            resolveWindow = resolve
-          })
-        }
-
-        try {
-          let fetchFulfilled = false
-          const fetch = trackPromise(handle.fetchNextPage()).then(() => {
-            fetchFulfilled = true
-          })
-          void fetch.catch(() => undefined)
-          await waitFor(() => resolveWindow !== undefined)
-          await Promise.resolve()
-          expect(fetchFulfilled).toBe(false)
-          resolveWindow?.()
-          await fetch
-          expect(fetchFulfilled).toBe(true)
         } finally {
           utils.setWindow = originalSetWindow
         }
@@ -1435,108 +1329,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
-      `callback-error`,
-      `surfaces an error thrown while constructing the query`,
-      async () => {
-        const failure = new Error(`query construction failed`)
-        const error = await captureError(() =>
-          driver.mount(
-            ((..._args: Array<any>) => {
-              throw failure
-            }) as any,
-            { pageSize: 3 },
-          ),
-        )
-        expect(error).toBe(failure)
-      },
-    )
-
-    scenario(
-      `disabled-callback`,
-      `rejects a nullable query callback through the shared input policy`,
-      async () => {
-        const error = await captureError(() =>
-          driver.mount((() => null) as any, { pageSize: 3 }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(
-          `Disabled null or undefined queries are not supported`,
-        )
-      },
-    )
-
-    scenario(
-      `findone-runtime`,
-      `rejects a single-result query at runtime`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const error = await captureError(() =>
-          driver.mount(
-            ((q: any) =>
-              q
-                .from({ items: source.collection })
-                .orderBy(({ items }: any) => items.rank, `desc`)
-                .findOne()) as any,
-            { pageSize: 3 },
-          ),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(`Remove .findOne()`)
-        // A rejected query must not have started: its source stays unread.
-        expect(source.collection.subscriberCount).toBe(0)
-      },
-    )
-
-    scenario(
-      `unordered-collection`,
-      `rejects a pre-created collection without orderBy`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const unordered = driver.makePrecreated((q) =>
-          q.from({ items: source.collection }),
-        ).collection
-        const error = await captureError(() =>
-          driver.mountCollection(unordered, { pageSize: 3 }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toMatch(/orderBy|ORDER BY/)
-      },
-    )
-
-    scenario(
-      `unordered-query`,
-      `rejects a query callback without orderBy`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const error = await captureError(() =>
-          driver.mount((q) => q.from({ items: source.collection }), {
-            pageSize: 3,
-          }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toMatch(/orderBy|ORDER BY/)
-      },
-    )
-
-    scenario(
-      `findone-collection`,
-      `rejects a pre-created single-result collection`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const single = driver.makePrecreated(((q: any) =>
-          q
-            .from({ items: source.collection })
-            .orderBy(({ items }: any) => items.rank, `desc`)
-            .findOne()) as any).collection
-        const error = await captureError(() =>
-          driver.mountCollection(single, { pageSize: 3 }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(`Remove .findOne()`)
-      },
-    )
-
-    scenario(
       `collection-window-normalization`,
       `normalizes a pre-created collection to the first peek-ahead window`,
       async () => {
@@ -1603,20 +1395,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
-      `invalid-input`,
-      `rejects a first argument that is neither a query nor a collection`,
-      async () => {
-        const error = await captureError(() =>
-          driver.mount(null as unknown as Parameters<typeof driver.mount>[0], {
-            pageSize: 3,
-          }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(`First argument`)
-      },
-    )
-
-    scenario(
       `shared-window-release`,
       `releases shared window leases and restores the initial window`,
       async () => {
@@ -1655,8 +1433,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       },
     )
 
-    it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(39)
-    })
+    registerRegistrySelfTest(registry)
   })
 }
