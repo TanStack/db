@@ -14,7 +14,7 @@ type CollectionBase<TKey, TOutput> = Pick<SortedMap<TKey, TOutput>,
 | typeof Symbol.iterator>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L54)
+Defined in: [packages/db/src/collection/index.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L60)
 
 ## Type Parameters
 

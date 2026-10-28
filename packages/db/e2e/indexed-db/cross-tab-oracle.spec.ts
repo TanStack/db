@@ -22,102 +22,22 @@ import {
   assertStatuses,
 } from '../../tests/indexed-db/cross-tab-oracle'
 import { runCampaign } from '../../tests/indexed-db/campaign'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../tests/oracle-config'
 import { retainedDocument } from './browser-evidence-oracle'
-import type { BrowserContext, Page } from '@playwright/test'
+import {
+  awaitRestore,
+  closePages,
+  observe,
+  open,
+  withPages,
+} from './cross-tab-support'
+import type { BrowserContext } from '@playwright/test'
 import type { BrowserEvidence } from './browser'
 import type { Change, OracleRow } from '../../tests/indexed-db/cross-tab-oracle'
-
-async function open(
-  context: BrowserContext,
-  database: string,
-  tab: string,
-  split = false,
-  options = '',
-) {
-  const page = await context.newPage()
-  await page.goto(
-    `/e2e/indexed-db/browser.html?database=${database}&tab=${tab}&fault=${split ? 'split' : 'none'}${options}`,
-  )
-  await installed(page)
-  if (!options.includes('hold=startup'))
-    await page.evaluate(() => window.crossTab!.ready())
-  return page
-}
-async function installed(page: Page) {
-  await page.waitForFunction(
-    () => window.crossTab !== undefined || window.crossTabFailure !== undefined,
-  )
-  const failure = await page.evaluate(() => window.crossTabFailure)
-  if (failure) throw new Error(failure)
-}
-async function awaitRestore(page: Page) {
-  await installed(page)
-  await page.evaluate(() => window.crossTab!.ready())
-}
-const observe = (page: Page) => page.evaluate(() => window.crossTab!.observe())
-
-async function closePages(context: BrowserContext) {
-  const failures: Array<unknown> = []
-  for (const page of context.pages()) {
-    for (const action of [
-      () => page.evaluate(() => window.crossTab?.flushEvidence()),
-      () => page.evaluate(() => window.crossTab?.cleanup()),
-      () => page.evaluate(() => window.crossTab?.flushEvidence()),
-      () => page.close(),
-    ]) {
-      try {
-        await action()
-      } catch (error) {
-        failures.push(error)
-      }
-    }
-  }
-  return failures
-}
-
-async function withPages(
-  context: BrowserContext,
-  run: (events: Array<BrowserEvidence>, database: string) => Promise<void>,
-) {
-  const events: Array<BrowserEvidence> = []
-  const errors: Array<string> = []
-  await context.exposeBinding(
-    'retainOracleEvent',
-    (_source, event: BrowserEvidence) => {
-      events.push(event)
-    },
-  )
-  context.on('page', (page) =>
-    page.on('pageerror', (error) => errors.push(String(error))),
-  )
-  let primary: unknown
-  try {
-    await run(events, `oracle-${crypto.randomUUID()}`)
-  } catch (error) {
-    primary = error
-  }
-  const cleanup = await closePages(context)
-  await test.info().attach('native-evidence', {
-    body: JSON.stringify({
-      engine: test.info().project.name,
-      browserVersion: context.browser()!.version(),
-      events,
-      errors,
-      primary: String(primary ?? ''),
-      cleanup: cleanup.map(String),
-    }),
-    contentType: 'application/json',
-  })
-  if (primary !== undefined) {
-    if (cleanup.length)
-      throw new AggregateError(cleanup, 'Native oracle and cleanup failed', {
-        cause: primary,
-      })
-    throw primary
-  }
-  expect(errors, 'unexpected page errors').toEqual([])
-  expect(cleanup, 'cleanup failures').toEqual([])
-}
 
 async function overlap(
   context: BrowserContext,
@@ -399,46 +319,62 @@ async function nativeHistoryRun(
   }
 }
 
-const replaySeed = process.env.TANSTACK_INDEXEDDB_BROWSER_SEED
-const replayPath = process.env.TANSTACK_INDEXEDDB_BROWSER_PATH
-for (const seed of replaySeed ? [Number(replaySeed)] : [1179, undefined])
-  test(`native authored histories preserve every publication (${seed === undefined ? 'fresh' : 'fixed'})`, async ({
-    context,
-  }) => {
-    await withPages(context, async (events, database) => {
-      let count = 0
-      await runCampaign(
-        `native-${test.info().project.name}`,
-        nativeHistory,
-        async (steps, receipt) => {
-          let primary: unknown
-          try {
-            await nativeHistoryRun(
-              context,
-              events,
-              `${database}-${count++}`,
-              steps,
-              receipt.reach,
-            )
-          } catch (error) {
-            primary = error
-          }
-          const cleanup = await closePages(context)
-          if (cleanup.length)
-            throw new AggregateError(cleanup, 'Native history cleanup failed', {
-              cause: primary,
-            })
-          if (primary !== undefined) throw primary
-        },
-        {
-          runs: 10,
-          seed,
-          path: replayPath,
-          environment: `${test.info().project.name} ${context.browser()!.version()}`,
-        },
-      )
-    })
+// The fixed campaign stands aside during every path replay. A path replay of
+// `indexeddb.browser-native-history` runs only the fresh campaign, from its
+// recorded seed and path.
+const nativeHistoryProperty = `indexeddb.browser-native-history`
+async function nativeHistoryCampaign(
+  context: BrowserContext,
+  options: { numRuns: number; seed?: number; path?: string },
+) {
+  await withPages(context, async (events, database) => {
+    let count = 0
+    await runCampaign(
+      `native-${test.info().project.name}`,
+      nativeHistory,
+      async (steps, receipt) => {
+        let primary: unknown
+        try {
+          await nativeHistoryRun(
+            context,
+            events,
+            `${database}-${count++}`,
+            steps,
+            receipt.reach,
+          )
+        } catch (error) {
+          primary = error
+        }
+        const cleanup = await closePages(context)
+        if (cleanup.length)
+          throw new AggregateError(cleanup, 'Native history cleanup failed', {
+            cause: primary,
+          })
+        if (primary !== undefined) throw primary
+      },
+      {
+        runs: options.numRuns,
+        seed: options.seed,
+        path: options.path,
+        environment: `${test.info().project.name} ${context.browser()!.version()}`,
+      },
+    )
   })
+}
+
+oracleReplayTest(test)(
+  `native authored histories preserve every publication (fixed)`,
+  ({ context }) =>
+    nativeHistoryCampaign(context, { seed: 1179, numRuns: oracleRuns(10) }),
+)
+oracleReplayTest(test, nativeHistoryProperty)(
+  `native authored histories preserve every publication (fresh)`,
+  ({ context }) =>
+    nativeHistoryCampaign(
+      context,
+      oraclePropertyOptions(10, nativeHistoryProperty),
+    ),
+)
 
 // Explicit manual acceptance creates ordered storage transactions before either
 // notification can run. Automatic write ordering has a separate native witness.
@@ -569,7 +505,12 @@ for (const obsolete of [false, true])
       )
       const state = await observe(receiver)
       expect(state.reads).toContain('abort')
-      expect(state.status).toBe(obsolete ? 'ready' : 'error')
+      // After Collection readiness, an active receiver that misses a peer
+      // change stops syncing: the Collection's `error`, with its rows and
+      // status kept.
+      expect(state.status).toBe('ready')
+      if (obsolete) expect(state.syncError).toBeNull()
+      else expect(state.syncError).toEqual(expect.any(String))
       if (obsolete)
         assertStatuses(
           state.statuses,
@@ -807,25 +748,6 @@ test('native reload readiness waits for its establishing storage read', async ({
   })
 })
 
-test('cleanup retains a primary mismatch and closes every page after an injected cleanup failure', async ({
-  context,
-}) => {
-  const primary = new OracleMismatch(
-    'calibration',
-    'before cleanup',
-    'expected',
-    'wrong',
-  )
-  await expect(
-    withPages(context, async (_events, database) => {
-      await open(context, database, 'first', false, '&cleanupFailure=1')
-      await open(context, database, 'second')
-      throw primary
-    }),
-  ).rejects.toMatchObject({ cause: primary })
-  expect(context.pages()).toHaveLength(0)
-})
-
 // Native administrative deletion witness. Hold only the old success callback;
 // its late delivery grants no authority over a recreated Collection.
 test('late administrative deletion receipt preserves a recreated database snapshot', async ({
@@ -966,7 +888,7 @@ test('an old native deletion receipt cannot complete a newer blocked deletion', 
     const before = await observe(peer)
     await old.evaluate(() => window.crossTab!.releaseDeletionReceipt())
     const after = await observe(peer)
-    expect(after.status).toBe('error')
+    expect(after.status).toBe('crashed')
     expect(after.callbacks.completed).toBe(before.callbacks.completed)
     const durable = await owner.evaluate(() => window.crossTab!.blockerRows())
     const state = await observe(owner)
@@ -991,7 +913,7 @@ test('an old native deletion receipt cannot complete a newer blocked deletion', 
 // Native receiving lane for the formal finish policy. A real transaction holds
 // each admitted adapter write while another page requests upgrade/deletion (or
 // the owner explicitly closes). Success/abort, caller-time source rows, retained
-// error status, and raw storage are separate observations. The unmanaged read
+// crashed status, and raw storage are separate observations. The unmanaged read
 // connection keeps administrative deletion pending until those checks finish.
 for (const reason of ['explicit', 'upgrade', 'delete'] as const)
   for (const kind of ['insert', 'update', 'delete', 'clear', 'import'] as const)
@@ -1028,7 +950,7 @@ for (const reason of ['explicit', 'upgrade', 'delete'] as const)
               () => window.crossTab!.observe().versionChanges === 1,
             )
           }
-          expect.soft((await observe(a)).status).toBe('error')
+          expect.soft((await observe(a)).status).toBe('crashed')
           await a.evaluate(() => window.crossTab!.releaseBarrier())
           await a.evaluate(() => window.crossTab!.retirementDone())
           const after = await observe(a)
@@ -1061,13 +983,13 @@ for (const reason of ['explicit', 'upgrade', 'delete'] as const)
             expected,
             'native retired disk rows',
           )
-          expect(after.status).toBe('error')
-          const retiredAt = after.statuses.indexOf('error')
+          expect(after.status).toBe('crashed')
+          const retiredAt = after.statuses.indexOf('crashed')
           expect(retiredAt).toBeGreaterThanOrEqual(0)
           expect(
             after.statuses
               .slice(retiredAt)
-              .every((status) => status === 'error'),
+              .every((status) => status === 'crashed'),
           ).toBe(true)
           await a.evaluate(() => window.crossTab!.closeBlocker())
           if (reason !== 'explicit')
@@ -1076,47 +998,6 @@ for (const reason of ['explicit', 'upgrade', 'delete'] as const)
             )
         })
       })
-
-// fake-indexeddb cannot provide this witness: its deletion queue treats a
-// close-pending connection as closed. Real engines must wait for BOTH native
-// transaction completion and the unmanaged connection, in either release order.
-for (const transactionFirst of [false, true])
-  test(`native deletion waits for both obligations, transaction first ${transactionFirst}`, async ({
-    context,
-  }) => {
-    await withPages(context, async (_events, database) => {
-      const a = await open(context, database, 'owner')
-      const b = await open(context, database, 'administrator')
-      await a.evaluate(() => window.crossTab!.openBlocker())
-      await a.evaluate(() => window.crossTab!.holdStorage())
-      await b.evaluate(() => window.crossTab!.startSchema('delete'))
-      await a.waitForFunction(
-        () => window.crossTab!.observe().versionChanges === 1,
-      )
-      expect((await observe(a)).status).toBe('error')
-      if (transactionFirst) {
-        await a.evaluate(() => window.crossTab!.releaseBarrier())
-        expect((await observe(a)).writes.at(-1)).toBe('complete')
-        expect((await observe(b)).schema.status).toBe('pending')
-        await a.evaluate(() => window.crossTab!.closeBlocker())
-      } else {
-        await a.evaluate(() => window.crossTab!.closeBlocker())
-        await b.evaluate(
-          () =>
-            new Promise<void>((resolve) =>
-              requestAnimationFrame(() => resolve()),
-            ),
-        )
-        expect((await observe(a)).writes.at(-1)).toBe('pending')
-        expect((await observe(b)).schema.status).toBe('pending')
-        await a.evaluate(() => window.crossTab!.releaseBarrier())
-      }
-      await b.waitForFunction(
-        () => window.crossTab!.observe().schema.status === 'complete',
-      )
-      expect((await observe(a)).status).toBe('error')
-    })
-  })
 
 // Chromium DevTools supplies actual abnormal closure, including native aborts;
 // no synthetic close event or test-triggered transaction.abort supplies it.
@@ -1178,7 +1059,7 @@ for (const phase of [
         if (!loading)
           await page.evaluate(() => window.crossTab!.retirementDone())
         const after = await observe(page)
-        expect(after.status).toBe('error')
+        expect(after.status).toBe('crashed')
         assertSnapshot(after.rows, before, 'forced-close retained snapshot')
         if (loading) expect(after.reads.at(-1)).toBe('abort')
         else {

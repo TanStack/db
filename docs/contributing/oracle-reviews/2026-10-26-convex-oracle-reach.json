@@ -1,0 +1,495 @@
+{
+  "reviewParent": "de7cf8de13f14dfa0d4ce6676452eb231ef215e2",
+  "minimumPerNormalLane": 1,
+  "reports": [
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_VALUES_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "insert": 35,
+        "update": 31,
+        "delete": 34,
+        "different-operands": 66,
+        "equal-payload-update": 21,
+        "changed-payload-update": 10,
+        "removed-field-update": 14,
+        "int64": 14,
+        "special-float": 19,
+        "binary": 19,
+        "nested-container": 70,
+        "undefined": 39
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OFFLINE_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "none": 60,
+        "args": 60,
+        "mutation": 60,
+        "sync": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OFFLINE_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "none": 60,
+        "args": 60,
+        "mutation": 60,
+        "sync": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_VALUES_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "insert": 39,
+        "update": 26,
+        "delete": 35,
+        "different-operands": 65,
+        "equal-payload-update": 13,
+        "changed-payload-update": 12,
+        "removed-field-update": 15,
+        "int64": 22,
+        "special-float": 22,
+        "binary": 21,
+        "nested-container": 68,
+        "undefined": 29
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OFFLINE_SOURCE_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "idle": 60,
+        "pending": 60,
+        "startup-error": 60,
+        "empty": 60,
+        "rows": 60,
+        "error": 60,
+        "cleanup": 60,
+        "provider-recovery": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_PAGINATION_ROWS",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "complete-nonempty-snapshot": 60,
+        "complete-empty-snapshot": 60,
+        "required-split": 60,
+        "recommended-split": 60,
+        "pending-range-with-prior-snapshot": 60,
+        "public-snapshot-publication": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OFFLINE_SOURCE_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "idle": 60,
+        "pending": 60,
+        "startup-error": 60,
+        "empty": 60,
+        "rows": 60,
+        "error": 60,
+        "cleanup": 60,
+        "provider-recovery": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_PAGINATION_ROWS",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "complete-nonempty-snapshot": 60,
+        "complete-empty-snapshot": 60,
+        "required-split": 60,
+        "recommended-split": 60,
+        "pending-range-with-prior-snapshot": 60,
+        "public-snapshot-publication": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_PAGINATION_WORK",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "initial-multi-range-exhaustion": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_PAGINATION_WORK",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "initial-multi-range-exhaustion": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_PAGINATION_BOUND",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "accepted-at-cap": 60,
+        "overflow-preserves-prior": 60,
+        "recovered-after-shrink": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_PAGINATION_BOUND",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "accepted-at-cap": 60,
+        "overflow-preserves-prior": 60,
+        "recovered-after-shrink": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OFFLINE_ACCEPTANCE_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "first-empty": 60,
+        "first-rows": 60,
+        "accepted-empty-insert": 60,
+        "accepted-row-insert": 60,
+        "accepted-row-update": 60,
+        "accepted-row-delete": 60,
+        "accepted-row-replacement": 60,
+        "unchanged-cache-retry": 60,
+        "changed-cache-retry": 60,
+        "restart-recovery": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OWNERSHIP_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "direct:idle": 60,
+        "direct:ready": 60,
+        "direct:cleaned-up": 60,
+        "shallow:idle": 60,
+        "shallow:ready": 60,
+        "shallow:cleaned-up": 60,
+        "fresh:idle": 60,
+        "fresh:ready": 60,
+        "fresh:cleaned-up": 60,
+        "descriptor:idle": 60,
+        "descriptor:ready": 60,
+        "descriptor:cleaned-up": 60,
+        "independent-confirmation": 60,
+        "rightful-after-rejected-reuse": 60,
+        "rightful-after-sibling-cleanup": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OWNERSHIP_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "direct:idle": 60,
+        "direct:ready": 60,
+        "direct:cleaned-up": 60,
+        "shallow:idle": 60,
+        "shallow:ready": 60,
+        "shallow:cleaned-up": 60,
+        "fresh:idle": 60,
+        "fresh:ready": 60,
+        "fresh:cleaned-up": 60,
+        "descriptor:idle": 60,
+        "descriptor:ready": 60,
+        "descriptor:cleaned-up": 60,
+        "independent-confirmation": 60,
+        "rightful-after-rejected-reuse": 60,
+        "rightful-after-sibling-cleanup": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_OFFLINE_ACCEPTANCE_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "first-empty": 60,
+        "first-rows": 60,
+        "accepted-empty-insert": 60,
+        "accepted-row-insert": 60,
+        "accepted-row-update": 60,
+        "accepted-row-delete": 60,
+        "accepted-row-replacement": 60,
+        "unchanged-cache-retry": 60,
+        "changed-cache-retry": 60,
+        "restart-recovery": 60
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_SNAPSHOT_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "string-keys": 150,
+        "numeric-keys": 150,
+        "mixed-key-types": 150,
+        "equal-looking-typed-keys": 150,
+        "selected-key-representation": 150,
+        "omitted-key": 150,
+        "omitted-field": 150,
+        "empty-result": 150,
+        "reintroduced-key": 150,
+        "duplicate-rejected": 150,
+        "valid-after-error": 150,
+        "initial-valid": 150,
+        "initial-duplicate-rejected": 150
+      }
+    },
+    {
+      "log": "adapter-final.log",
+      "property": "CONVEX_SNAPSHOT_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "string-keys": 150,
+        "numeric-keys": 150,
+        "mixed-key-types": 150,
+        "equal-looking-typed-keys": 150,
+        "selected-key-representation": 150,
+        "omitted-key": 150,
+        "omitted-field": 150,
+        "empty-result": 150,
+        "reintroduced-key": 150,
+        "duplicate-rejected": 150,
+        "valid-after-error": 150,
+        "initial-valid": 150,
+        "initial-duplicate-rejected": 150
+      }
+    },
+    {
+      "log": "offline-final.log",
+      "property": "OFFLINE_CODEC_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "insert": 19,
+        "update": 19,
+        "delete": 22,
+        "different-operands": 38,
+        "equal-payload-update": 6,
+        "changed-payload-update": 13,
+        "removed-field-update": 9,
+        "int64": 35,
+        "special-float": 46,
+        "binary": 41
+      }
+    },
+    {
+      "log": "offline-final.log",
+      "property": "OFFLINE_CODEC_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "insert": 17,
+        "update": 19,
+        "delete": 24,
+        "different-operands": 36,
+        "equal-payload-update": 9,
+        "changed-payload-update": 10,
+        "removed-field-update": 9,
+        "int64": 44,
+        "special-float": 35,
+        "binary": 45
+      }
+    },
+    {
+      "log": "backend-e2e-repaired.log",
+      "property": "CONVEX_BACKEND_INSERT_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "disk-admission": 6,
+        "replay": 6,
+        "known-acknowledgement": 3,
+        "uncertain-acknowledgement": 3,
+        "payload-int64": 2,
+        "payload-special-float": 2,
+        "payload-bytes": 2
+      }
+    },
+    {
+      "log": "backend-e2e-repaired.log",
+      "property": "CONVEX_BACKEND_INSERT_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "disk-admission": 6,
+        "replay": 6,
+        "known-acknowledgement": 3,
+        "uncertain-acknowledgement": 3,
+        "payload-int64": 2,
+        "payload-special-float": 2,
+        "payload-bytes": 2
+      }
+    },
+    {
+      "log": "backend-e2e-repaired.log",
+      "property": "CONVEX_BACKEND_UPDATE_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "disk-admission": 6,
+        "replay": 6,
+        "known-acknowledgement": 3,
+        "uncertain-acknowledgement": 3,
+        "payload-int64": 2,
+        "payload-special-float": 2,
+        "payload-bytes": 2
+      }
+    },
+    {
+      "log": "backend-e2e-repaired.log",
+      "property": "CONVEX_BACKEND_UPDATE_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "disk-admission": 6,
+        "replay": 6,
+        "known-acknowledgement": 3,
+        "uncertain-acknowledgement": 3,
+        "payload-int64": 2,
+        "payload-special-float": 2,
+        "payload-bytes": 2
+      }
+    },
+    {
+      "log": "backend-e2e-repaired.log",
+      "property": "CONVEX_BACKEND_DELETE_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "disk-admission": 6,
+        "replay": 6,
+        "known-acknowledgement": 3,
+        "uncertain-acknowledgement": 3
+      }
+    },
+    {
+      "log": "backend-e2e-repaired.log",
+      "property": "CONVEX_BACKEND_DELETE_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "disk-admission": 6,
+        "replay": 6,
+        "known-acknowledgement": 3,
+        "uncertain-acknowledgement": 3
+      }
+    },
+    {
+      "log": "values-followup-final.log",
+      "property": "CONVEX_VALUES_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "insert": 35,
+        "update": 31,
+        "delete": 34,
+        "different-operands": 66,
+        "equal-payload-update": 21,
+        "changed-payload-update": 10,
+        "removed-field-update": 14,
+        "int64": 14,
+        "special-float": 19,
+        "binary": 19,
+        "nested-container": 70,
+        "undefined": 39
+      }
+    },
+    {
+      "log": "values-followup-final.log",
+      "property": "CONVEX_VALUES_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "insert": 40,
+        "update": 41,
+        "delete": 19,
+        "different-operands": 81,
+        "equal-payload-update": 25,
+        "changed-payload-update": 15,
+        "removed-field-update": 22,
+        "int64": 19,
+        "special-float": 25,
+        "binary": 24,
+        "nested-container": 75,
+        "undefined": 39
+      }
+    },
+    {
+      "log": "serializer-followup-final.log",
+      "property": "OFFLINE_CODEC_ORACLE",
+      "campaign": "fixed",
+      "minimum": 1,
+      "counts": {
+        "insert": 19,
+        "update": 19,
+        "delete": 22,
+        "different-operands": 38,
+        "equal-payload-update": 6,
+        "changed-payload-update": 13,
+        "removed-field-update": 9,
+        "int64": 35,
+        "special-float": 46,
+        "binary": 41
+      }
+    },
+    {
+      "log": "serializer-followup-final.log",
+      "property": "OFFLINE_CODEC_ORACLE",
+      "campaign": "random",
+      "minimum": 1,
+      "counts": {
+        "insert": 22,
+        "update": 16,
+        "delete": 22,
+        "different-operands": 38,
+        "equal-payload-update": 9,
+        "changed-payload-update": 7,
+        "removed-field-update": 11,
+        "int64": 44,
+        "special-float": 39,
+        "binary": 40
+      }
+    }
+  ],
+  "validationStages": {
+    "full-suites": "Before final expected-original capture; normal grammar and comparisons otherwise unchanged.",
+    "codec-followup": "Final captured-original sources, complete serializer file and Convex values owner."
+  },
+  "reviewedImplementationRevision": "5aebb71f90919697b459b38673a0aa5fef00a0b2"
+}

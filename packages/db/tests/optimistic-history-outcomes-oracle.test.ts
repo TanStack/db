@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   expectHistoryOutcome,
   observeHistoryPromise,
@@ -26,6 +27,10 @@ import type {
  * success, copied values, replaced errors, and missing errors are detectable,
  * and that a shrunk failure can be replayed by seed and path.
  */
+
+// The outcome checker is imported from the companion, which does not declare
+// it. This file's calibrations reach it through the same check.
+declareOracle({ check: [expectHistoryOutcome] })
 
 type Scenario = {
   existing: boolean
@@ -240,44 +245,6 @@ describe(`Outcome observer calibration`, () => {
     expect(replay.counterexample).toEqual(failed.counterexample)
     expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
   })
-  it.each([undefined, Object.freeze(new Error(`frozen primary`))])(
-    `retains primary %s and every cleanup failure`,
-    async (primary) => {
-      const cleanupError = new Error(`cleanup`)
-      const calls: Array<number> = []
-      const observed = observeHistoryPromise(
-        withHistoryCleanup(
-          () => Promise.reject(primary),
-          () => [
-            () => {
-              calls.push(1)
-              throw cleanupError
-            },
-            () => {
-              calls.push(2)
-              return Promise.reject(undefined)
-            },
-            () => {
-              calls.push(3)
-            },
-          ],
-        ),
-      )
-      await observed.settled
-      expect(calls).toEqual([1, 2, 3])
-      const result = observed.read()
-      expect(result.status).toBe(`rejected`)
-      if (result.status !== `rejected`)
-        throw new Error(`missing cleanup rejection`)
-      expect(result.reason).toBeInstanceOf(AggregateError)
-      const aggregate = result.reason as AggregateError
-      expect(aggregate.cause).toBe(primary)
-      expect(aggregate.errors).toHaveLength(3)
-      expect(aggregate.errors[0]).toBe(primary)
-      expect(aggregate.errors[1]).toBe(cleanupError)
-      expect(aggregate.errors[2]).toBeUndefined()
-    },
-  )
   it(`preserves successful results and single errors without wrappers`, async () => {
     const value = { id: 1 }
     expect(

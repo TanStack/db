@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  groupKeys,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -196,7 +200,7 @@ describe(`Optional Fields - Runtime Tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .groupBy(({ user }) => user.department_id)
+          .groupBy(groupKeys(({ user }) => user.department_id))
           .select(({ user }) => ({
             department_id: user.department_id,
           })),

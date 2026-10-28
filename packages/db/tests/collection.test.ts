@@ -14,6 +14,7 @@ import {
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
+  UndefinedKeyError,
 } from '../src/errors'
 import { createTransaction } from '../src/transactions'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
@@ -1272,6 +1273,48 @@ describe(`Collection`, () => {
       tx.mutate(() => collection.insert({ id: true, value: `test` }))
     }).toThrow(InvalidKeyError)
   })
+
+  it.each([
+    [`undefined`, undefined, UndefinedKeyError],
+    [`null`, null, InvalidKeyError],
+    [`a boolean`, true, InvalidKeyError],
+    [`a bigint`, 10n, InvalidKeyError],
+  ])(
+    `rejects a sync write whose key is %s before staging it`,
+    async (_name, badKey, error) => {
+      // Collection keys are strings or numbers. A sync adapter that writes
+      // another key breaks that contract, so the write throws at the sync
+      // boundary instead of reaching ordered Collection state.
+      type Row = { id: unknown; value: string }
+      let sync!: Parameters<SyncConfig<Row, string | number>[`sync`]>[0]
+      const collection = createCollection<Row, string | number>({
+        id: `sync-invalid-key-${String(badKey)}`,
+        getKey: (item) => item.id as string | number,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.markReady()
+          },
+        },
+      })
+      await collection.stateWhenReady()
+      sync.begin()
+      expect(() =>
+        sync.write({ type: `insert`, value: { id: badKey, value: `bad` } }),
+      ).toThrow(error)
+      expect(() =>
+        sync.write({
+          type: `delete`,
+          key: badKey as unknown as string | number,
+        }),
+      ).toThrow(error)
+      sync.write({ type: `insert`, value: { id: 1, value: `good` } })
+      sync.commit()
+      expect([...collection.keys()]).toEqual([1])
+      await collection.cleanup()
+    },
+  )
 
   it(`should accept valid string and number keys`, async () => {
     const stringKeyCollection = createCollection<{ id: string; value: string }>(

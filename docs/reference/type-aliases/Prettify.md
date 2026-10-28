@@ -7,7 +7,7 @@ title: Prettify
 type Prettify<T> = { [K in keyof T]: T[K] } & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1370](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1370)
+Defined in: [packages/db/src/query/builder/types.ts:1408](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1408)
 
 Prettify - Utility type for clean IDE display
 

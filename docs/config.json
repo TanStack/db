@@ -68,6 +68,10 @@
       "label": "Collections",
       "children": [
         {
+          "label": "Convex Collection",
+          "to": "collections/convex-collection"
+        },
+        {
           "label": "Query Collection",
           "to": "collections/query-collection"
         },
@@ -107,6 +111,10 @@
         {
           "label": "React",
           "to": "framework/react/overview"
+        },
+        {
+          "label": "Preact",
+          "to": "framework/preact/overview"
         },
         {
           "label": "Vue",
@@ -218,6 +226,23 @@
             {
               "label": "useLiveQuery",
               "to": "framework/react/reference/functions/useLiveQuery"
+            }
+          ]
+        },
+        {
+          "label": "preact",
+          "children": [
+            {
+              "label": "Preact Hooks",
+              "to": "framework/preact/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/preact/reference/functions/useLiveQuery"
+            },
+            {
+              "label": "useLiveInfiniteQuery",
+              "to": "framework/preact/reference/functions/useLiveInfiniteQuery"
             }
           ]
         },

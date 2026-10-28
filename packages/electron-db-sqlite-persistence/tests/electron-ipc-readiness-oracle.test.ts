@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   IR,
   createCollection,
@@ -386,13 +387,26 @@ async function observeIpcReadinessHistory(
   return observed
 }
 
+// The law of initial readiness: the observed checkpoints of each composed load
+// equal the model's prediction for that history.
+async function compareIpcReadinessHistory(
+  history: IpcReadinessHistory,
+): Promise<void> {
+  expect(await observeIpcReadinessHistory(history)).toEqual(
+    expectedCheckpoints(history),
+  )
+}
+
+declareOracle({
+  check: [compareIpcReadinessHistory],
+  model: [expectedCheckpoints],
+})
+
 describe(`Electron renderer initial readiness follows the composed load`, () => {
   it.each(ipcReadinessHistories)(
     `matches the model: $renderer renderer, hydration $hydration, then $next`,
     async (history) => {
-      expect(await observeIpcReadinessHistory(history)).toEqual(
-        expectedCheckpoints(history),
-      )
+      await compareIpcReadinessHistory(history)
     },
     historyTimeout,
   )
@@ -406,8 +420,9 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
  * The first renderer owns the Collection and runs the source; the second is a
  * follower and routes its demand to the owner. Law 7 owes the follower: its
  * load, and its query's first ready, settle only once the owner's rows are
- * visible in the follower, and they reject, with the follower source in
- * error, if applying the owner's commit fails here.
+ * visible in the follower, and they reject if applying the owner's commit
+ * fails here. That failure is a local persistence failure, so the follower
+ * source crashes.
  *
  * The model knows only whether the owner's commit applies in the follower.
  * The grammar crosses that outcome with the consumer: a live query over the
@@ -429,7 +444,7 @@ function expectedCoordinatedRenderer(history: CoordinatedRendererHistory) {
     settledWhileApplyHeld: false,
     outcome: applied ? `fulfilled` : `rejected`,
     rows: applied ? [`remote`] : undefined,
-    source: applied ? `ready` : `error`,
+    source: applied ? `ready` : `crashed`,
   }
 }
 
@@ -603,6 +618,21 @@ async function observeCoordinatedRendererHistory(
   }
 }
 
+// The law of follower settlement: the observed follower checkpoints equal the
+// model's prediction for each apply outcome and consumer.
+async function compareCoordinatedRendererHistory(
+  history: CoordinatedRendererHistory,
+): Promise<void> {
+  expect(await observeCoordinatedRendererHistory(history)).toEqual(
+    expectedCoordinatedRenderer(history),
+  )
+}
+
+declareOracle({
+  check: [compareCoordinatedRendererHistory],
+  model: [expectedCoordinatedRenderer],
+})
+
 describe(`Electron follower renderer settles with its owner's rows`, () => {
   it.each(
     ([`ok`, `fails`] as const).flatMap((apply) =>
@@ -614,9 +644,7 @@ describe(`Electron follower renderer settles with its owner's rows`, () => {
   )(
     `matches the model: apply $apply, consumer $consumer`,
     async (history) => {
-      expect(await observeCoordinatedRendererHistory(history)).toEqual(
-        expectedCoordinatedRenderer(history),
-      )
+      await compareCoordinatedRendererHistory(history)
     },
     isElectronFullE2EEnabled() ? 180_000 : 20_000,
   )

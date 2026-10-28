@@ -3,10 +3,13 @@ id: InjectLiveQueryResult
 title: InjectLiveQueryResult
 ---
 
-Defined in: [index.ts:41](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L41)
+Defined in: [angular-db/src/index.ts:65](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L65)
 
-The result of calling `injectLiveQuery`.
-Contains reactive signals for the query state and data.
+Status, persistence, and health signals every `injectLiveQuery` result has.
+
+## Extends
+
+- [`InjectLiveQueryFlags`](InjectLiveQueryFlags.md)
 
 ## Type Parameters
 
@@ -25,7 +28,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [index.ts:47](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L47)
+Defined in: [angular-db/src/index.ts:73](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L73)
 
 A signal containing the underlying collection instance (null for disabled queries)
 
@@ -37,9 +40,25 @@ A signal containing the underlying collection instance (null for disabled querie
 data: Signal<InferResultType<TContext>>;
 ```
 
-Defined in: [index.ts:45](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L45)
+Defined in: [angular-db/src/index.ts:71](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L71)
 
 A signal containing the results as an array, or single result for findOne queries
+
+***
+
+### health
+
+```ts
+health: Signal<HealthNode | undefined>;
+```
+
+Defined in: [angular-db/src/index.ts:62](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L62)
+
+A signal containing the health tree for the query and its dependencies
+
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`health`](InjectLiveQueryFlags.md#health)
 
 ***
 
@@ -49,21 +68,29 @@ A signal containing the results as an array, or single result for findOne querie
 isCleanedUp: Signal<boolean>;
 ```
 
-Defined in: [index.ts:66](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L66)
+Defined in: [angular-db/src/index.ts:58](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L58)
 
 A signal indicating whether the collection has been cleaned up
 
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isCleanedUp`](InjectLiveQueryFlags.md#iscleanedup)
+
 ***
 
-### isError
+### isCrashed
 
 ```ts
-isError: Signal<boolean>;
+isCrashed: Signal<boolean>;
 ```
 
-Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L64)
+Defined in: [angular-db/src/index.ts:56](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L56)
 
-A signal indicating whether the collection has an error
+Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover.
+
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isCrashed`](InjectLiveQueryFlags.md#iscrashed)
 
 ***
 
@@ -73,9 +100,13 @@ A signal indicating whether the collection has an error
 isIdle: Signal<boolean>;
 ```
 
-Defined in: [index.ts:62](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L62)
+Defined in: [angular-db/src/index.ts:52](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L52)
 
 A signal indicating whether the collection is idle
+
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isIdle`](InjectLiveQueryFlags.md#isidle)
 
 ***
 
@@ -85,19 +116,29 @@ A signal indicating whether the collection is idle
 isLoading: Signal<boolean>;
 ```
 
-Defined in: [index.ts:55](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L55)
+Defined in: [angular-db/src/index.ts:48](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L48)
 
 A signal indicating whether the collection is currently loading
 
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isLoading`](InjectLiveQueryFlags.md#isloading)
+
 ***
 
-### isPersistedReady
+### isLoadingError
 
 ```ts
-isPersistedReady: Signal<boolean>;
+isLoadingError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:59](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L59)
+Defined in: [angular-db/src/index.ts:54](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L54)
+
+The first load failed: there is nothing to show.
+
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isLoadingError`](InjectLiveQueryFlags.md#isloadingerror)
 
 ***
 
@@ -107,29 +148,29 @@ Defined in: [index.ts:59](https://github.com/TanStack/db/blob/main/packages/angu
 isReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:57](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L57)
+Defined in: [angular-db/src/index.ts:50](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L50)
 
 A signal indicating whether the collection is ready
 
-***
+#### Inherited from
 
-### persistedError
-
-```ts
-persistedError: Signal<unknown>;
-```
-
-Defined in: [index.ts:60](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L60)
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isReady`](InjectLiveQueryFlags.md#isready)
 
 ***
 
-### persistedStatus
+### isSyncError
 
 ```ts
-persistedStatus: Signal<LiveQueryPersistedStatus>;
+isSyncError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:58](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L58)
+Defined in: [angular-db/src/index.ts:60](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L60)
+
+The data is shown, and a sync problem or failed request is in `health`.
+
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`isSyncError`](InjectLiveQueryFlags.md#issyncerror)
 
 ***
 
@@ -139,7 +180,7 @@ Defined in: [index.ts:58](https://github.com/TanStack/db/blob/main/packages/angu
 state: Signal<Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>>;
 ```
 
-Defined in: [index.ts:43](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L43)
+Defined in: [angular-db/src/index.ts:69](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L69)
 
 A signal containing the complete state map of results keyed by their ID
 
@@ -151,6 +192,10 @@ A signal containing the complete state map of results keyed by their ID
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [index.ts:53](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L53)
+Defined in: [angular-db/src/index.ts:46](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L46)
 
 A signal containing the current status of the collection
+
+#### Inherited from
+
+[`InjectLiveQueryFlags`](InjectLiveQueryFlags.md).[`status`](InjectLiveQueryFlags.md#status)

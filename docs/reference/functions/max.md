@@ -9,7 +9,7 @@ title: max
 function max<T>(arg): Aggregate<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:695](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L695)
+Defined in: [packages/db/src/query/builder/functions.ts:694](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L694)
 
 ### Type Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:695](https://github.com/
 function max<T>(arg): Aggregate<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:696](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L696)
+Defined in: [packages/db/src/query/builder/functions.ts:695](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L695)
 
 ### Type Parameters
 
@@ -57,7 +57,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:696](https://github.com/
 function max<T>(arg): Aggregate<ExtractType<T>>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:697](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L697)
+Defined in: [packages/db/src/query/builder/functions.ts:696](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L696)
 
 ### Type Parameters
 

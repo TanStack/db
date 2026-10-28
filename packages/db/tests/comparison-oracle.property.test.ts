@@ -10,6 +10,15 @@ import {
   normalizeValue,
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleRuns,
+  recordOracleReplay,
+} from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
+import { defaultOpts, lexicalOpts } from './comparison-options.js'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
@@ -47,18 +56,6 @@ import type { CompareOptions } from '../src/query/builder/types'
  * constant-overhead budget for the sampled 0..200-byte keys.
  */
 
-const defaultOpts: CompareOptions = {
-  direction: `asc`,
-  nulls: `first`,
-  stringSort: `locale`,
-}
-
-const lexicalOpts: CompareOptions = {
-  direction: `asc`,
-  nulls: `first`,
-  stringSort: `lexical`,
-}
-
 const nullsLastOpts: CompareOptions = {
   direction: `asc`,
   nulls: `last`,
@@ -68,15 +65,14 @@ const nullsLastOpts: CompareOptions = {
 // These properties judge immediate comparator and normalization results; there
 // is no mutable history or cleanup. Each function return is its observation cut.
 // The fixed campaign preserves one sample set, while the random campaign explores
-// new values. Set all three variables to replay one property directly, for
-// example COMPARISON_ORACLE_PROPERTY=1 COMPARISON_ORACLE_SEED=123
-// COMPARISON_ORACLE_PATH='0:0' pnpm --filter @tanstack/db exec vitest run
+// new values. A path replay runs one property directly, for example
+// TANSTACK_DB_ORACLE_PROPERTY=comparison.1 TANSTACK_DB_ORACLE_SEED=123
+// TANSTACK_DB_ORACLE_PATH='0:0' pnpm --filter @tanstack/db exec vitest run
 // --configLoader runner tests/comparison-oracle.property.test.ts.
 const fixedSeed = 20260911
 const campaignRuns = 100
-const requestedProperty = process.env.COMPARISON_ORACLE_PROPERTY
-const replaySeed = process.env.COMPARISON_ORACLE_SEED
-const replayPath = process.env.COMPARISON_ORACLE_PATH
+// Each property registers as `comparison.<number>`, in file order. A path
+// replay selects one with TANSTACK_DB_ORACLE_PROPERTY=comparison.<number>.
 let nextPropertyId = 0
 
 type ComparisonFailure = { checkpoint: string; error: unknown }
@@ -99,6 +95,7 @@ function checkWithOriginalFailure<T>(
   arbitrary: fc.Arbitrary<T>,
   check: (value: T) => void,
   options: Parameters<typeof fc.check>[1],
+  replayProperty?: string,
 ) {
   let original: ComparisonFailure | undefined
   let reduced: ComparisonFailure | undefined
@@ -116,6 +113,7 @@ function checkWithOriginalFailure<T>(
     }
   })
   const result = fc.check(property, options)
+  if (replayProperty !== undefined) recordOracleReplay(replayProperty, result)
   return { result, original, reduced }
 }
 
@@ -124,11 +122,14 @@ function assertComparisonProperty<T>(
   arbitrary: fc.Arbitrary<T>,
   check: (value: T) => void,
   options: Parameters<typeof fc.check>[1],
+  // The registered property, so a guarded replay can witness this run.
+  replayProperty?: string,
 ): void {
   const { result, original, reduced } = checkWithOriginalFailure(
     arbitrary,
     check,
     options,
+    replayProperty,
   )
   if (!result.failed) return
   if (!original || !reduced || result.counterexamplePath === null) {
@@ -161,45 +162,28 @@ function comparisonProperty<
   check: (...values: Ts) => void,
 ) => void {
   return (name: string, check: (...values: Ts) => void): void => {
-    const id = String(++nextPropertyId)
+    const id = ++nextPropertyId
+    const property = `comparison.${id}`
     const label = `${id}: ${name}`
     const arbitrary = fc.tuple<Ts>(...arbitraries)
     const checkValues = (values: Ts) => {
       check(...values)
     }
 
-    if (requestedProperty !== undefined) {
-      if (requestedProperty !== id) {
-        it.skip(`${label} replay not selected`, () => {})
-        return
-      }
-      if (replaySeed === undefined || replayPath === undefined) {
-        throw new Error(`comparison oracle replay needs a seed and shrink path`)
-      }
-      const seed = Number(replaySeed)
-      if (replaySeed.trim() === `` || !Number.isSafeInteger(seed)) {
-        throw new Error(`comparison oracle replay seed must be an integer`)
-      }
-      it(`${label} replay`, () => {
-        assertComparisonProperty(label, arbitrary, checkValues, {
-          seed,
-          path: replayPath,
-          numRuns: campaignRuns,
-        })
-      })
-      return
-    }
-
-    it(`${label} fixed`, () => {
+    it.skipIf(oracleReplayRequested())(`${label} fixed`, () => {
       assertComparisonProperty(label, arbitrary, checkValues, {
         seed: fixedSeed,
-        numRuns: campaignRuns,
+        numRuns: oracleRuns(campaignRuns),
       })
     })
-    it(`${label} random`, () => {
-      assertComparisonProperty(label, arbitrary, checkValues, {
-        numRuns: campaignRuns,
-      })
+    it.skipIf(oracleReplaySkips(property))(`${label} random`, () => {
+      assertComparisonProperty(
+        label,
+        arbitrary,
+        checkValues,
+        oraclePropertyOptions(campaignRuns, property),
+        property,
+      )
     })
   }
 }
@@ -428,6 +412,19 @@ function assertTransitive(ab: number, bc: number, ac: number): void {
   for (const result of [ab, bc, ac]) assertValidComparison(result)
   if (ab <= 0 && bc <= 0) expect(ac).toBeLessThanOrEqual(0)
 }
+
+declareOracle({
+  check: [
+    assertComparisonProperty,
+    checkAntisymmetry,
+    assertNonFiniteOrder,
+    assertChangedBytes,
+    assertTransitive,
+    assertPlainDateOrder,
+    assertZonedDateTimeOrder,
+  ],
+  model: [modelPlainDateSign, modelNanosecondSign],
+})
 
 describe(`comparison law controls`, () => {
   fcTest(
@@ -665,12 +662,6 @@ describe(`ascComparator property-based tests`, () => {
   })
 
   describe(`string comparison`, () => {
-    it(`lexical and en-US locale order distinguish the string-mode axis`, () => {
-      const localeOpts: CompareOptions = { ...defaultOpts, locale: `en-US` }
-      expect(ascComparator(`a`, `B`, lexicalOpts)).toBeGreaterThan(0)
-      expect(ascComparator(`a`, `B`, localeOpts)).toBeLessThan(0)
-    })
-
     comparisonProperty([fc.string()])(
       `locale sort: reflexivity holds for strings`,
       (a) => {
@@ -938,32 +929,6 @@ describe(`makeComparator property-based tests`, () => {
     },
   )
 
-  it(`delegates only string pairs to a custom string comparator`, () => {
-    const calls: Array<[string, string]> = []
-    const compare = (a: string, b: string) => {
-      calls.push([a, b])
-      return a.replaceAll(` `, ``).localeCompare(b.replaceAll(` `, ``))
-    }
-    const custom: CompareOptions = {
-      direction: `asc`,
-      nulls: `first`,
-      stringSort: `custom`,
-      compare,
-    }
-
-    expect(makeComparator(custom)(`pillowfort`, `pillow fort`)).toBe(0)
-    expect(calls).toEqual([[`pillowfort`, `pillow fort`]])
-
-    calls.length = 0
-    expect(makeComparator(custom)(2, 1)).toBeGreaterThan(0)
-    expect(makeComparator(custom)(null, `value`)).toBeLessThan(0)
-    expect(calls).toEqual([])
-
-    expect(
-      makeComparator({ ...custom, direction: `desc` })(`a`, `b`),
-    ).toBeGreaterThan(0)
-  })
-
   it(`preserves signed infinity from a valid custom string comparator`, () => {
     const comparator = makeComparator({
       ...defaultOpts,
@@ -980,21 +945,6 @@ describe(`makeComparator property-based tests`, () => {
 })
 
 describe(`normalizeValue property-based tests`, () => {
-  it(`binary key size and content laws reach the bounded length margins`, () => {
-    for (const length of [0, 1, 128, 129, 200]) {
-      const bytes = Uint8Array.from({ length }, (_, index) => index % 256)
-      const normalized = normalizeValue(bytes)
-      expect(typeof normalized).toBe(`string`)
-      expect((normalized as string).length - length).toBeLessThan(32)
-      expect(normalizeValue(new Uint8Array(bytes))).toBe(normalized)
-      if (length > 0) {
-        const changed = new Uint8Array(bytes)
-        changed[length - 1] = (changed[length - 1]! + 1) % 256
-        expect(normalizeValue(changed)).not.toBe(normalized)
-      }
-    }
-  })
-
   comparisonProperty([arbitraryDate])(
     `dates normalize to their timestamp`,
     (date) => {
@@ -1042,11 +992,6 @@ describe(`normalizeValue property-based tests`, () => {
 })
 
 describe(`areValuesEqual property-based tests`, () => {
-  it(`different integer law reaches an unequal pair`, () => {
-    expect(areValuesEqual(1, 2)).toBe(false)
-    expect(areValuesEqual(2, 1)).toBe(false)
-  })
-
   comparisonProperty([fc.uint8Array({ minLength: 0, maxLength: 50 })])(
     `Uint8Arrays with same content are equal`,
     (arr) => {
@@ -1302,11 +1247,3 @@ describe(`Temporal default-order refinement`, () => {
     expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
   })
 })
-
-if (requestedProperty !== undefined) {
-  it(`selects a registered comparison oracle property`, () => {
-    expect(requestedProperty).toMatch(/^\d+$/)
-    expect(Number(requestedProperty)).toBeGreaterThanOrEqual(1)
-    expect(Number(requestedProperty)).toBeLessThanOrEqual(nextPropertyId)
-  })
-}

@@ -79,7 +79,7 @@ function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
-  const { begin, write, commit, markReady, markError, collection } = params
+  const { begin, write, commit, markReady, fail } = params
   
   // 1. Initialize connection to your sync engine
   const connection = initializeConnection(config)
@@ -147,10 +147,9 @@ const sync: SyncConfig<T>['sync'] = (params) => {
     } catch (error) {
       if (initialSyncAbort.signal.aborted) return
       console.error('Initial sync failed:', error)
-      // No usable initial snapshot exists.
-      // Only initial startup owns collection readiness. A later refetch
-      // failure must keep the last ready snapshot usable.
-      if (collection.status === 'loading') markError(error)
+      // No usable initial snapshot exists in this run, and this example does
+      // not retry. After readiness, report failures with reportError() instead.
+      fail(error)
     }
   }
 
@@ -174,8 +173,52 @@ The sync process follows this lifecycle:
 1. **begin()** - Start collecting changes
 2. **write()** - Add changes to the pending transaction (buffered until commit)
 3. **commit()** - Apply all changes atomically to the collection state
-4. **markReady()** - Signal that a usable initial or recovered snapshot exists
-5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
+4. **markReady()** - Signal that a usable initial snapshot exists
+5. **fail(error)** - Signal that you stopped trying. Before the Collection is ready, this fails the first load: the status becomes `error`, readiness waits reject with the cause, and `markReady()` afterward throws. After it, the node shows an `error`: the status and rows stay. Every later call in this sync run throws. Only `reload()` starts a new run
+6. **reportError(error)** - After the Collection is ready, report a sync problem while you keep trying. It sets the node's `failureReason` without changing its status or rows
+7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears the `failureReason`, and does nothing when nothing is wrong
+
+### Reporting failures
+
+Users see two separate signals: whether data can be shown, and whether it is
+still kept up to date. Follow these rules so both stay truthful:
+
+1. While you retry the initial sync, call nothing. The Collection stays
+   `loading`.
+2. Call `fail(error)` when you give up, before or after the first
+   `markReady()`. Do not call anything after it.
+3. After the first `markReady()`, call `reportError(error)` for a problem
+   while you keep trying, and `reportHealthy()` when sync works again. Never
+   discard rows because sync failed.
+4. Track the run's readiness in your `sync` function, as `ready` does below.
+   A reload calls `sync` again while `collection.status` still shows the
+   previous run, so status cannot tell you whether this run is ready. Write a
+   full snapshot on the run's first commit: a reload replaces every row then.
+
+```ts
+sync: ({ begin, write, commit, markReady, fail, reportError, reportHealthy }) => {
+  let ready = false
+  const stream = connect({
+    onData: (rows) => {
+      begin()
+      rows.forEach((row) => write({ type: "insert", value: row }))
+      commit()
+      if (!ready) {
+        markReady()
+        ready = true
+      } else {
+        reportHealthy()
+      }
+    },
+    onError: (error, { willRetry }) => {
+      if (!willRetry) fail(error)
+      else if (ready) reportError(error)
+    },
+  })
+  return () => stream.close()
+}
+```
+
 
 `commit()` accepts the transaction and returns `true`. An accepted transaction
 always applies, in commit order. While an optimistic transaction is persisting,
@@ -998,8 +1041,8 @@ const collection = createCollection(
 
 ## Best Practices
 
-1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `markError(error)` if initial sync fails
-2. **Recover explicitly** - After an error, call `markReady()` only when a later sync has produced a usable snapshot
+1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `fail(error)` when you give up on the initial sync
+2. **Report health after readiness** - Use `reportError()` and `reportHealthy()` once the Collection is ready; recovery from an initial error is a restart, not a later `markReady()`
 3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
 4. **Batch operations** - Use begin/commit to batch multiple changes for better performance
 5. **Race Conditions** - Start listeners before initial fetch and buffer events

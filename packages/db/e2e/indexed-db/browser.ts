@@ -263,6 +263,7 @@ async function setup() {
       tab,
       rows: snapshot(collection.values()),
       status: collection.status,
+      syncError: collection.health.error?.message ?? null,
       callbacks: { ...callbacks },
       reads: [...reads],
       writes: [...nativeWrites],

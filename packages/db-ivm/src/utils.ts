@@ -37,26 +37,6 @@ export function binarySearch<T>(
   return low
 }
 
-/**
- * A string identity within one consolidation: primitives by value, objects,
- * functions, and symbols by identity.
- */
-export function getStringId(
-  value: unknown,
-  referenceIds: Map<object | symbol, number>,
-): string {
-  if (value === null) return `null`
-  if (value === undefined) return `undefined`
-  const type = typeof value
-  if (type === `object` || type === `function` || type === `symbol`) {
-    const reference = value as object | symbol
-    let id = referenceIds.get(reference)
-    if (id === undefined) referenceIds.set(reference, (id = referenceIds.size))
-    return `ref_${id}`
-  }
-  return `${type}_${String(value)}`
-}
-
 export type HRange = [number, number] // half-open [start, end[ i.e. end is exclusive
 
 /**

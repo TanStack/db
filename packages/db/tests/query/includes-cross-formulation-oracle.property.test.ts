@@ -1,7 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
@@ -16,16 +15,41 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import {
+  oracleCalibrationTest,
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises } from '../utils.js'
-import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
+import {
+  assertArrayKeys,
+  assertGroupedRouteCounts,
+  captureCounts,
+  captureGroupedRows,
+  captureOrderedNested,
+  captureReferenceRows,
+  compareChildren,
+  compareParents,
+  createControlledCollection,
+  normalizeChild,
+  normalizeFlat,
+  normalizeNested,
+  withCleanup,
+} from './includes-cross-formulation-support.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
-import type { BasicExpression } from '../../src/query/ir.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
+import type {
+  ChildRow,
+  NormalizedParent,
+  ParentRow,
+  ReferenceChild,
+  ReferenceKey,
+  ReferenceParent,
+} from './includes-cross-formulation-support.js'
 
 /**
  * # Why ask the same relationship question five ways?
@@ -57,19 +81,6 @@ import type { ControlledCollection } from './includes-oracle-helpers.js'
  * demand, publication, or facade lifecycle contracts.
  */
 
-type ParentRow = {
-  id: number
-  group: number
-  position: number
-}
-
-type ChildRow = {
-  id: number
-  parentGroup: number
-  score: number | null
-  position: number
-}
-
 type CrossFormulationAction =
   // `put` is model shorthand for a Collection insert when the id is absent
   // and a Collection update when it is present. Deletes of absent ids are
@@ -86,96 +97,6 @@ type CrossFormulationScenario = {
   actions: Array<CrossFormulationAction>
 }
 
-type NormalizedParent = ParentRow & {
-  children: Array<ChildRow>
-}
-
-type FlatRow = {
-  parentId: number
-  parentGroup: number
-  parentPosition: number
-  child: ChildRow | undefined
-}
-
-// Opaque reference routes form a second value domain. Equal object shapes do
-// not make two reference-sensitive correlation keys equal.
-type ReferenceKey = { code: number }
-
-type ReferenceParent = {
-  id: number
-  group: ReferenceKey
-}
-
-type ReferenceChild = {
-  id: number
-  parentGroup: ReferenceKey
-}
-
-type ReferenceRequest =
-  | { readonly type: `ref`; readonly path: ReadonlyArray<string> }
-  | { readonly type: `val`; readonly value: unknown }
-  | {
-      readonly type: `func`
-      readonly name: string
-      readonly args: ReadonlyArray<ReferenceRequest>
-    }
-
-// Copy request structure, but preserve opaque key identities. This finite
-// provider accepts only unbounded parentGroup eq/in predicates and conjunctions.
-function captureReferenceRequest(
-  expression: BasicExpression,
-): ReferenceRequest {
-  switch (expression.type) {
-    case `ref`:
-      return Object.freeze({
-        type: `ref`,
-        path: Object.freeze([...expression.path]),
-      })
-    case `val`: {
-      const value: unknown = expression.value
-      return Object.freeze({
-        type: `val`,
-        value: Array.isArray(value) ? Object.freeze([...value]) : value,
-      })
-    }
-    case `func`:
-      return Object.freeze({
-        type: `func`,
-        name: expression.name,
-        args: Object.freeze(expression.args.map(captureReferenceRequest)),
-      })
-  }
-}
-
-function referenceRequestPredicate(
-  request: ReferenceRequest | undefined,
-): (row: ReferenceChild) => boolean {
-  if (!request) return () => true
-  if (request.type === `func`) {
-    if (request.name === `and` && request.args.length > 0) {
-      const predicates = request.args.map(referenceRequestPredicate)
-      return (row) => predicates.every((predicate) => predicate(row))
-    }
-    let [reference, constant] = request.args
-    if (request.name === `eq` && reference?.type === `val`) {
-      ;[reference, constant] = [constant, reference]
-    }
-    if (
-      request.args.length === 2 &&
-      reference?.type === `ref` &&
-      reference.path.length === 1 &&
-      reference.path[0] === `parentGroup` &&
-      constant?.type === `val`
-    ) {
-      const value = constant.value
-      if (request.name === `eq`) return (row) => row.parentGroup === value
-      if (request.name === `in` && Array.isArray(value))
-        return (row) => value.some((key: unknown) => row.parentGroup === key)
-    }
-  }
-  throw new Error(`Unsupported cold reference fixture predicate`)
-}
-
 type ReferenceContextParent = {
   id: number
   group: number
@@ -187,220 +108,6 @@ type ReferenceContextChild = {
   id: number
   group: number
   token: ReferenceKey
-}
-
-// Public VirtualRowProps and docs/guides/live-queries.md name only these keys.
-// Their values and presence are a separate metadata law. They are not part of
-// this projection.
-const virtualKeys = new Set<string>([
-  `$hasPendingWrites`,
-  `$synced`,
-  `$origin`,
-  `$key`,
-  `$collectionId`,
-])
-
-function assertSelectedKeys(
-  value: object,
-  keys: ReadonlyArray<string>,
-  context: string,
-): void {
-  expect(value, context).not.toBeNull()
-  const actual = Reflect.ownKeys(value).filter(
-    (key) => typeof key !== `string` || !virtualKeys.has(key),
-  )
-  expect(new Set(actual), context).toEqual(new Set(keys))
-}
-
-function assertArrayKeys(value: ReadonlyArray<unknown>, context: string): void {
-  expect(new Set(Reflect.ownKeys(value)), context).toEqual(
-    new Set([
-      `length`,
-      ...Array.from({ length: value.length }, (_, index) => String(index)),
-    ]),
-  )
-}
-
-async function withCleanup(
-  work: () => Promise<void>,
-  cleanups: ReadonlyArray<() => Promise<void>>,
-): Promise<void> {
-  let primary: { error: unknown } | undefined
-  try {
-    await work()
-  } catch (error) {
-    primary = { error }
-  }
-  const results = await Promise.allSettled(
-    cleanups.map(async (cleanup) => {
-      await cleanup()
-    }),
-  )
-  const errors = results.flatMap((result) =>
-    result.status === `rejected` ? [result.reason as unknown] : [],
-  )
-  if (errors.length > 0) {
-    if (primary)
-      throw new AggregateError(
-        [primary.error, ...errors],
-        `Oracle and cleanup failed`,
-        { cause: primary.error },
-      )
-    if (errors.length === 1) throw errors[0]
-    throw new AggregateError(errors, `Oracle cleanup failed`)
-  }
-  if (primary) throw primary.error
-}
-
-function captureCounts(
-  rows: Array<{ count: number }>,
-): Array<{ count: number }> {
-  assertArrayKeys(rows, `group counts`)
-  return rows.map((row) => {
-    assertSelectedKeys(row, [`count`], `group count`)
-    return { count: row.count }
-  })
-}
-
-function captureGroupedRows(
-  observed: Array<{ id: number; summaries: Array<{ count: number }> }>,
-): Array<{ id: number; summaries: Array<{ count: number }> }> {
-  assertArrayKeys(observed, `grouped roots`)
-  return observed.map((row) => {
-    assertSelectedKeys(row, [`id`, `summaries`], `grouped parent ${row.id}`)
-    return { id: row.id, summaries: captureCounts(row.summaries) }
-  })
-}
-
-function captureReferenceRows(
-  rows: Array<{ id: number; children: Array<number> }>,
-): Array<{ id: number; children: Array<number> }> {
-  assertArrayKeys(rows, `reference roots`)
-  return rows.map((row) => {
-    assertSelectedKeys(row, [`id`, `children`], `reference parent ${row.id}`)
-    assertArrayKeys(row.children, `reference children ${row.id}`)
-    return { id: row.id, children: [...row.children] }
-  })
-}
-
-function assertGroupedRouteCounts(
-  observed: Array<{ id: number; summaries: Array<{ count: number }> }>,
-  counts: ReadonlyArray<number>,
-): void {
-  expect(captureGroupedRows(observed), `group-route checkpoint`).toEqual(
-    counts.map((childCount, index) => ({
-      id: index + 1,
-      summaries: childCount === 0 ? [] : [{ count: childCount }],
-    })),
-  )
-}
-
-function createControlledCollection<T extends { id: number }>(
-  name: string,
-  initialData: ReadonlyArray<T>,
-): ControlledCollection<T> {
-  return createOracleControlledCollection(name, initialData, {
-    autoIndex: `eager`,
-    rowUpdateMode: `full`,
-  })
-}
-
-function compareParents(left: ParentRow, right: ParentRow): number {
-  return left.position - right.position || left.id - right.id
-}
-
-function compareChildren(left: ChildRow, right: ChildRow): number {
-  return left.position - right.position || left.id - right.id
-}
-
-function normalizeChild(child: ChildRow, context = `child`): ChildRow {
-  assertSelectedKeys(child, [`id`, `parentGroup`, `score`, `position`], context)
-  return {
-    id: child.id,
-    parentGroup: child.parentGroup,
-    score: child.score,
-    position: child.position,
-  }
-}
-
-function captureOrderedNested(
-  rows: ReadonlyArray<NormalizedParent>,
-  context = `nested`,
-): Array<NormalizedParent> {
-  assertArrayKeys(rows, `${context} roots`)
-  return rows.map((parent) => {
-    assertSelectedKeys(
-      parent,
-      [`id`, `group`, `position`, `children`],
-      `${context} parent ${parent.id}`,
-    )
-    assertArrayKeys(parent.children, `${context} children ${parent.id}`)
-    return {
-      id: parent.id,
-      group: parent.group,
-      position: parent.position,
-      children: parent.children.map((child) =>
-        normalizeChild(
-          child,
-          `${context} parent ${parent.id} child ${child.id}`,
-        ),
-      ),
-    }
-  })
-}
-
-// Canonicalize only model rows and formulations with no common result order.
-// Ordered production observations use `captureOrderedNested` directly.
-function normalizeNested(
-  rows: ReadonlyArray<NormalizedParent>,
-): Array<NormalizedParent> {
-  return captureOrderedNested(rows)
-    .map((parent) => ({
-      ...parent,
-      children: parent.children.sort(compareChildren),
-    }))
-    .sort(compareParents)
-}
-
-function normalizeFlat(
-  rows: ReadonlyArray<FlatRow>,
-  context = `flat`,
-): Array<NormalizedParent> {
-  assertArrayKeys(rows, `${context} rows`)
-  const parents = new Map<number, NormalizedParent>()
-  const placeholders = new Set<number>()
-  for (const row of rows) {
-    assertSelectedKeys(
-      row,
-      [`parentId`, `parentGroup`, `parentPosition`, `child`],
-      context,
-    )
-    const parent = parents.get(row.parentId) ?? {
-      id: row.parentId,
-      group: row.parentGroup,
-      position: row.parentPosition,
-      children: [],
-    }
-    expect(
-      [row.parentGroup, row.parentPosition],
-      `${context} parent ${row.parentId}`,
-    ).toEqual([parent.group, parent.position])
-    expect(
-      placeholders.has(row.parentId),
-      `${context} duplicate or mixed placeholder ${row.parentId}`,
-    ).toBe(false)
-    if (row.child === undefined) {
-      expect(
-        parent.children,
-        `${context} mixed placeholder ${row.parentId}`,
-      ).toEqual([])
-      placeholders.add(row.parentId)
-    } else {
-      parent.children.push(normalizeChild(row.child, `${context} child`))
-    }
-    parents.set(row.parentId, parent)
-  }
-  return normalizeNested([...parents.values()])
 }
 
 // This is the independent relationship model. It uses only current source
@@ -840,6 +547,19 @@ async function expectWindowedIncludeMatches(
   ])
 }
 
+// The nested include's group counts for a route must equal the counts of the
+// standalone grouped query over the same route. The standalone query is a
+// second formulation, so this compares query equality for the route with an
+// independent answer.
+function expectNestedCountsMatchStandalone(
+  nested: Array<{ id: number; summaries: Array<{ count: number }> }>,
+  standalone: Array<{ count: number }>,
+): Array<{ count: number }> | undefined {
+  const nestedCounts = captureGroupedRows(nested)[0]?.summaries
+  expect(nestedCounts).toEqual(captureCounts(standalone))
+  return nestedCounts
+}
+
 const parentRowArbitrary = (id: number) =>
   fc.record({
     id: fc.constant(id),
@@ -981,19 +701,34 @@ const windowedExamples: Array<
   [{ scenario: partitionAndRouteScenario, offset: 2, limit: 3 }],
 ]
 
+// The parts this file declares. The equivalence check compares the nested,
+// flat, per-parent, and TLP formulations with the recomputed model, and the
+// window check does the same for ordered child windows. The TLP check compares
+// each partition with a direct relation over source rows. The grouped check
+// compares a nested route's counts with the standalone grouped query.
+declareOracle({
+  check: [
+    expectFormulationsEquivalent,
+    expectWindowedIncludeMatches,
+    assertTlpPartitions,
+    expectNestedCountsMatchStandalone,
+  ],
+  model: [recomputeNestedModel, recomputeWindowedModel],
+})
+
 describe(`includes cross-formulation oracle`, () => {
   const replay = readOracleRunConfig()
-  const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
-  const randomCampaign = (property: string) =>
-    replay.replayPath === undefined || replay.replayProperty === property
-      ? fcTest
-      : fcTest.skip
-  const calibrationTest = (property: string, fault: string) =>
-    replay.replayPath === undefined ||
-    (replay.replayProperty === property &&
-      process.env.TANSTACK_DB_ORACLE_CALIBRATION === fault)
-      ? test
-      : test.skip
+
+  // The reference-sensitive and symbol-route checks compare a lazy or nested
+  // formulation with a fully loaded or standalone one. Each generated seed runs
+  // its own parent and child history.
+  declareOracle({
+    check: [
+      checkReferenceContextRouting,
+      checkReferenceKeyRouting,
+      checkSymbolGroupRouting,
+    ],
+  })
 
   test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
     const parents = new Map(
@@ -1103,416 +838,6 @@ describe(`includes cross-formulation oracle`, () => {
     ).toThrow(`TLP calibration predicate partition`)
   })
 
-  test(`cold provider predicates preserve opaque reference membership`, () => {
-    const first = { code: 0 }
-    const second = { code: 0 }
-    const rows = [
-      { id: 10, parentGroup: first },
-      { id: 20, parentGroup: second },
-      { id: 30, parentGroup: { code: 0 } },
-    ]
-    const ref = new PropRef([`parentGroup`])
-    const cases: Array<[BasicExpression | undefined, Array<number>]> = [
-      [undefined, [10, 20, 30]],
-      [new Func(`eq`, [ref, new Value(first)]), [10]],
-      [new Func(`eq`, [new Value(second), ref]), [20]],
-      [new Func(`eq`, [ref, new Value({ code: 0 })]), []],
-      [new Func(`in`, [ref, new Value([first, second])]), [10, 20]],
-      [new Func(`in`, [ref, new Value([])]), []],
-      [
-        new Func(`and`, [
-          new Func(`in`, [ref, new Value([first, second])]),
-          new Func(`eq`, [ref, new Value(second)]),
-        ]),
-        [20],
-      ],
-    ]
-    for (const [expression, ids] of cases) {
-      const predicate = referenceRequestPredicate(
-        expression && captureReferenceRequest(expression),
-      )
-      expect(rows.filter(predicate).map((row) => row.id)).toEqual(ids)
-    }
-    // These are fixture-domain failures, not claims about runtime support.
-    for (const expression of [
-      new Func(`lt`, [ref, new Value(first)]),
-      new Func(`eq`, [new PropRef([`id`]), new Value(first)]),
-      new Func(`eq`, [ref]),
-      new Func(`in`, [ref, new Value(first)]),
-    ]) {
-      expect(() =>
-        referenceRequestPredicate(captureReferenceRequest(expression)),
-      ).toThrow(`Unsupported cold reference fixture predicate`)
-    }
-  })
-
-  test(`request snapshots copy paths and membership arrays without cloning keys`, () => {
-    const first = { code: 0 }
-    const second = { code: 0 }
-    const path = [`parentGroup`]
-    const keys = [first, second]
-    const snapshot = captureReferenceRequest(
-      new Func(`in`, [new PropRef(path), new Value(keys)]),
-    )
-    // Mutate only test-owned input, never a submitted runtime request.
-    path[0] = `changed`
-    keys.splice(0, 2, { code: 0 })
-    expect(snapshot.type).toBe(`func`)
-    if (snapshot.type !== `func`) throw new Error(`Expected function snapshot`)
-    expect(Object.isFrozen(snapshot.args)).toBe(true)
-    expect(snapshot.args[0]).toEqual({ type: `ref`, path: [`parentGroup`] })
-    const membership = snapshot.args[1]
-    if (membership?.type !== `val` || !Array.isArray(membership.value))
-      throw new Error(`Expected membership snapshot`)
-    expect(Object.isFrozen(membership.value)).toBe(true)
-    expect(membership.value[0]).toBe(first)
-    expect(membership.value[1]).toBe(second)
-    expect(membership.value).toHaveLength(2)
-  })
-
-  test(`cold grouped-only loading keeps equal-shaped reference routes distinct`, async () => {
-    const first = Object.freeze({ code: 0 })
-    const second = Object.freeze({ code: 0 })
-    const unmatched = Object.freeze({ code: 0 })
-    const rows: Array<ReferenceChild> = [
-      { id: 10, parentGroup: first },
-      { id: 11, parentGroup: first },
-      { id: 20, parentGroup: second },
-      { id: 30, parentGroup: unmatched },
-    ]
-    const parents = createControlledCollection<ReferenceParent>(
-      `cold-grouped-parents`,
-      [
-        { id: 1, group: first },
-        { id: 2, group: second },
-      ],
-    )
-    const requests: Array<ReferenceRequest | undefined> = []
-    const loaded = new Set<number>()
-    const children = createCollection<ReferenceChild>({
-      id: `cold-grouped-children`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => ({
-          loadSubset: (options: LoadSubsetOptions) => {
-            const request =
-              options.where && captureReferenceRequest(options.where)
-            requests.push(request)
-            if (
-              options.orderBy?.length ||
-              options.cursor !== undefined ||
-              options.limit !== undefined ||
-              (options.offset ?? 0) !== 0
-            )
-              throw new Error(
-                `Unsupported bounded cold reference fixture request`,
-              )
-            const matches = referenceRequestPredicate(request)
-            begin()
-            for (const row of rows) {
-              if (!loaded.has(row.id) && matches(row)) {
-                write({ type: `insert`, value: { ...row } })
-                loaded.add(row.id)
-              }
-            }
-            const receipt = commit()
-            if (receipt !== true) return receipt.then(() => markReady())
-            markReady()
-            return true
-          },
-        }),
-      },
-    })
-    const grouped = createLiveQueryCollection({
-      getKey: (row) => row.id,
-      query: (q) =>
-        q
-          .from({ parent: parents.collection })
-          .orderBy(({ parent }) => parent.id, `asc`)
-          .select(({ parent }) => ({
-            id: parent.id,
-            summaries: toArray(
-              q
-                .from({ child: children })
-                .where(({ child }) => eq(child.parentGroup, parent.group))
-                .groupBy(({ child }) => child.parentGroup)
-                .select(({ child }) => ({ count: count(child.id) })),
-            ),
-          })),
-    })
-    await withCleanup(async () => {
-      expect(loaded.size).toBe(0)
-      await grouped.preload()
-      expect(requests.length).toBeGreaterThan(0)
-      expect(loaded.size).toBeGreaterThan(0)
-      // Full-source or broader requests are legal. Counts alone decide routing.
-      assertGroupedRouteCounts(grouped.toArray, [2, 1])
-    }, [
-      () => grouped.cleanup(),
-      () => parents.collection.cleanup(),
-      () => children.cleanup(),
-    ])
-  })
-
-  test.each([
-    { name: `success`, failWork: false, cleanupFailures: 0 },
-    { name: `primary only`, failWork: true, cleanupFailures: 0 },
-    { name: `cleanup only`, failWork: false, cleanupFailures: 1 },
-    { name: `multiple cleanups`, failWork: false, cleanupFailures: 2 },
-    { name: `primary and cleanups`, failWork: true, cleanupFailures: 2 },
-  ])(
-    `retains $name outcomes while attempting every cleanup`,
-    async ({ failWork, cleanupFailures }) => {
-      const primary = new Error(`primary`)
-      const first = new Error(`synchronous cleanup`)
-      const second = new Error(`asynchronous cleanup`)
-      const calls: Array<number> = []
-      const run = withCleanup(() => {
-        if (failWork) throw primary
-        return Promise.resolve()
-      }, [
-        () => {
-          calls.push(1)
-          if (cleanupFailures > 0) throw first
-          return Promise.resolve()
-        },
-        () => {
-          calls.push(2)
-          return cleanupFailures > 1
-            ? Promise.reject(second)
-            : Promise.resolve()
-        },
-        () => {
-          calls.push(3)
-          return Promise.resolve()
-        },
-      ])
-      if (failWork && cleanupFailures > 0) {
-        await expect(run).rejects.toMatchObject({
-          cause: primary,
-          errors: [primary, first, second],
-        })
-      } else if (failWork) {
-        await expect(run).rejects.toBe(primary)
-      } else if (cleanupFailures === 1) {
-        await expect(run).rejects.toBe(first)
-      } else if (cleanupFailures === 2) {
-        await expect(run).rejects.toMatchObject({ errors: [first, second] })
-      } else {
-        await run
-      }
-      expect(calls).toEqual([1, 2, 3])
-    },
-  )
-
-  test.each([
-    `field`,
-    `dollar`,
-    `symbol`,
-    `child symbol`,
-    `array symbol`,
-    `missing field`,
-  ] as const)(
-    `raw capture rejects %s before selected-field projection`,
-    (fault) => {
-      const expected: Array<NormalizedParent> = [
-        {
-          id: 0,
-          group: 0,
-          position: 0,
-          children: [{ id: 10, parentGroup: 0, score: null, position: 0 }],
-        },
-      ]
-      const rows = captureOrderedNested(expected)
-      Object.assign(rows[0]!, {
-        $hasPendingWrites: false,
-        $synced: true,
-        $origin: `remote`,
-        $key: 0,
-        $collectionId: `source`,
-      })
-      expect(captureOrderedNested(rows)).toEqual(expected)
-      if (fault === `missing field`)
-        Reflect.deleteProperty(rows[0]!, `position`)
-      else {
-        const target =
-          fault === `child symbol`
-            ? rows[0]!.children[0]!
-            : fault === `array symbol`
-              ? rows[0]!.children
-              : rows[0]!
-        const key =
-          fault === `field`
-            ? `unexpected`
-            : fault === `dollar`
-              ? `$unexpected`
-              : Symbol(`private`)
-        Object.defineProperty(target, key, { value: undefined })
-      }
-      expect(() => captureOrderedNested(rows)).toThrowError(
-        expect.objectContaining({ name: `AssertionError` }),
-      )
-    },
-  )
-
-  test.each([
-    `metadata`,
-    `placeholder after child`,
-    `placeholder before child`,
-    `duplicate placeholder`,
-    `null child`,
-  ] as const)(`raw flat capture rejects %s`, (fault) => {
-    const row: FlatRow = {
-      parentId: 0,
-      parentGroup: 0,
-      parentPosition: 0,
-      child: { id: 10, parentGroup: 0, score: null, position: 0 },
-    }
-    const second: FlatRow = { ...row, child: { ...row.child!, id: 11 } }
-    const empty: FlatRow = { ...row, child: undefined }
-    expect(
-      normalizeFlat([row, second])[0]?.children.map((child) => child.id),
-    ).toEqual([10, 11])
-    expect(normalizeFlat([empty])[0]?.children).toEqual([])
-    const wrong =
-      fault === `metadata`
-        ? [row, { ...second, parentPosition: 1 }]
-        : fault === `placeholder after child`
-          ? [row, empty]
-          : fault === `placeholder before child`
-            ? [empty, row]
-            : fault === `duplicate placeholder`
-              ? [empty, empty]
-              : [row]
-    if (fault === `null child`) Reflect.set(row, `child`, null)
-    expect(() => normalizeFlat(wrong)).toThrowError(
-      expect.objectContaining({ name: `AssertionError` }),
-    )
-  })
-
-  test(`literal group counts reject common-mode missing, merged and stale groups`, () => {
-    const initial = [
-      { id: 1, summaries: [{ count: 2 }] },
-      { id: 2, summaries: [{ count: 1 }] },
-    ]
-    assertGroupedRouteCounts(initial, [2, 1])
-    for (const wrong of [
-      [],
-      [
-        { id: 1, summaries: [{ count: 3 }] },
-        { id: 2, summaries: [{ count: 3 }] },
-      ],
-      initial,
-    ]) {
-      expect(() => assertGroupedRouteCounts(wrong, [1, 2])).toThrowError(
-        expect.objectContaining({ name: `AssertionError` }),
-      )
-    }
-    assertGroupedRouteCounts(
-      [
-        { id: 1, summaries: [{ count: 1 }] },
-        { id: 2, summaries: [{ count: 2 }] },
-      ],
-      [1, 2],
-    )
-  })
-
-  // These synthetic wrong answers calibrate the local comparisons (ORC-006).
-  // ORC-007 direct-command evidence belongs to the production drivers below.
-  test(`reference-identity checker rejects a wrong answer after shrinking`, () => {
-    const property = fc.property(fc.integer(), (code) => {
-      const first = { code }
-      const second = { code }
-      expect(first).not.toBe(second)
-      const merged = [
-        { id: 1, children: [10, 20] },
-        { id: 2, children: [10, 20] },
-      ]
-      expect(
-        captureReferenceRows(merged),
-        `reference route checkpoint`,
-      ).toEqual([
-        { id: 1, children: [10] },
-        { id: 2, children: [20] },
-      ])
-    })
-    const failure = fc.check(property, { seed: 1_658_002, numRuns: 4 })
-    expect(failure.failed).toBe(true)
-    expect(failure.numShrinks).toBeGreaterThan(0)
-    expect(failure.error).toContain(`reference route checkpoint`)
-    if (failure.counterexamplePath === null)
-      throw new Error(`reference-route mutant did not produce a replay path`)
-    const replayResult = fc.check(property, {
-      seed: failure.seed,
-      path: failure.counterexamplePath,
-      numRuns: 1,
-      endOnFailure: true,
-    })
-    expect(replayResult.failed).toBe(true)
-    expect(replayResult.error).toContain(`reference route checkpoint`)
-    expect(replayResult.counterexample).toEqual(failure.counterexample)
-  })
-
-  test(`symbol-group checker rejects a wrong answer after shrinking`, () => {
-    const property = fc.property(fc.integer(), (code) => {
-      const first = Symbol(`group-${code}`)
-      const second = Symbol(`group-${code}`)
-      expect(first).not.toBe(second)
-      assertGroupedRouteCounts(
-        [
-          { id: 1, summaries: [{ count: 2 }] },
-          { id: 2, summaries: [{ count: 2 }] },
-        ],
-        [1, 1],
-      )
-    })
-    const failure = fc.check(property, { seed: 1_658_003, numRuns: 4 })
-    expect(failure.failed).toBe(true)
-    expect(failure.numShrinks).toBeGreaterThan(0)
-    expect(failure.error).toContain(`group-route checkpoint`)
-    if (failure.counterexamplePath === null)
-      throw new Error(`symbol-group mutant did not produce a replay path`)
-    const replayResult = fc.check(property, {
-      seed: failure.seed,
-      path: failure.counterexamplePath,
-      numRuns: 1,
-      endOnFailure: true,
-    })
-    expect(replayResult.failed).toBe(true)
-    expect(replayResult.error).toContain(`group-route checkpoint`)
-    expect(replayResult.counterexample).toEqual(failure.counterexample)
-  })
-
-  test.each([`root`, `child`] as const)(
-    `retains wrong %s order that unordered normalization would erase`,
-    (level) => {
-      const expected: Array<NormalizedParent> = [
-        {
-          id: 1,
-          group: 0,
-          position: 0,
-          children: [
-            { id: 11, parentGroup: 0, score: null, position: 0 },
-            { id: 10, parentGroup: 0, score: 1, position: 1 },
-          ],
-        },
-        { id: 0, group: 1, position: 1, children: [] },
-      ]
-      const wrong = captureOrderedNested(expected)
-      if (level === `root`) wrong.reverse()
-      else wrong[0]!.children.reverse()
-
-      // The old checker was false green. The new observation retains the
-      // violation.
-      expect(normalizeNested(wrong)).toEqual(expected)
-      expect(captureOrderedNested(expected)).toEqual(expected)
-      expect(() =>
-        expect(captureOrderedNested(wrong)).toEqual(expected),
-      ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
-    },
-  )
-
   // The next three properties have fixed route-transition histories. Their
   // generated integer is only a user token label: values span FastCheck's
   // default integer domain, while zero is reconstructed by the cold fixed
@@ -1523,7 +848,7 @@ describe(`includes cross-formulation oracle`, () => {
   // The literal wrong-result and captured replay controls above distinguish
   // merged reference routes and symbol groups at their public checkpoints.
 
-  fixedCampaign.prop([fc.integer()], {
+  oracleReplayTest(fcTest).prop([fc.integer()], {
     numRuns: oracleRuns(4),
     seed: 1_658_001,
   })(
@@ -1533,7 +858,7 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  randomCampaign(`includes-cross-formulation.reference-context`).prop(
+  oracleReplayTest(fcTest, `includes-cross-formulation.reference-context`).prop(
     [fc.integer()],
     oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
   )(
@@ -1745,9 +1070,10 @@ describe(`includes cross-formulation oracle`, () => {
 
       const assertCounts = (expectedCount: number) => {
         assertGroupedRouteCounts(nested.toArray, [expectedCount])
-        const nestedCounts = captureGroupedRows(nested.toArray)[0]?.summaries
-        const standaloneCounts = captureCounts(standalone.toArray)
-        expect(nestedCounts).toEqual(standaloneCounts)
+        const nestedCounts = expectNestedCountsMatchStandalone(
+          nested.toArray,
+          standalone.toArray,
+        )
         expect(nestedCounts).toEqual(
           expectedCount === 0 ? [] : [{ count: expectedCount }],
         )
@@ -1775,60 +1101,7 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  test.each([`__correlationKey`, `__tanstack_group_correlation_key`])(
-    `grouped includes preserve internal-looking aggregate alias %s`,
-    async (alias) => {
-      const parents = createControlledCollection(`aggregate-alias-parents`, [
-        { id: 1, group: 1 },
-      ])
-      const children = createControlledCollection(`aggregate-alias-children`, [
-        { id: 10, parentGroup: 1 },
-        { id: 11, parentGroup: 1 },
-      ])
-      const nested = createLiveQueryCollection({
-        query: (q) =>
-          q.from({ parent: parents.collection }).select(({ parent }) => ({
-            id: parent.id,
-            summaries: toArray(
-              q
-                .from({ child: children.collection })
-                .where(({ child }) => eq(child.parentGroup, parent.group))
-                .groupBy(({ child }) => child.parentGroup)
-                .select(({ child }) => ({ [alias]: count(child.id) })),
-            ),
-          })),
-      })
-
-      await withCleanup(async () => {
-        await nested.preload()
-        assertArrayKeys(nested.toArray, `aggregate alias roots`)
-        expect(
-          nested.toArray.map((row) => {
-            assertSelectedKeys(
-              row,
-              [`id`, `summaries`],
-              `aggregate alias parent`,
-            )
-            assertArrayKeys(row.summaries, `aggregate alias summaries`)
-            return {
-              id: row.id,
-              summaries: row.summaries.map((summary) => {
-                assertSelectedKeys(summary, [alias], `aggregate alias summary`)
-                return { [alias]: summary[alias] }
-              }),
-            }
-          }),
-        ).toEqual([{ id: 1, summaries: [{ [alias]: 2 }] }])
-        expect(nested.get(1)?.summaries.map((row) => row[alias])).toEqual([2])
-      }, [
-        () => nested.cleanup(),
-        () => parents.collection.cleanup(),
-        () => children.collection.cleanup(),
-      ])
-    },
-  )
-
-  fixedCampaign.prop([fc.integer()], {
+  oracleReplayTest(fcTest).prop([fc.integer()], {
     numRuns: oracleRuns(4),
     seed: 1_658_002,
   })(
@@ -1836,7 +1109,7 @@ describe(`includes cross-formulation oracle`, () => {
     checkReferenceKeyRouting,
   )
 
-  randomCampaign(`includes-cross-formulation.reference-key`).prop(
+  oracleReplayTest(fcTest, `includes-cross-formulation.reference-key`).prop(
     [fc.integer()],
     oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
   )(
@@ -1989,7 +1262,7 @@ describe(`includes cross-formulation oracle`, () => {
     ])
   }
 
-  fixedCampaign.prop([fc.integer()], {
+  oracleReplayTest(fcTest).prop([fc.integer()], {
     numRuns: oracleRuns(4),
     seed: 1_658_003,
   })(
@@ -1997,7 +1270,10 @@ describe(`includes cross-formulation oracle`, () => {
     checkSymbolGroupRouting,
   )
 
-  randomCampaign(`includes-cross-formulation.symbol-group-route`).prop(
+  oracleReplayTest(
+    fcTest,
+    `includes-cross-formulation.symbol-group-route`,
+  ).prop(
     [fc.integer()],
     oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
   )(
@@ -2171,7 +1447,11 @@ describe(`includes cross-formulation oracle`, () => {
   // tests/query/includes-cross-formulation-oracle.property.test.ts
   // -t 'agrees across nested includes'
   // Expected: one main-property failure at cross-formulation checkpoint 0.
-  calibrationTest(`includes-cross-formulation.equivalence`, `missing-parent`)(
+  oracleCalibrationTest(
+    test,
+    `includes-cross-formulation.equivalence`,
+    `missing-parent`,
+  )(
     `generated equivalence rejects a missing production parent and replays its checkpoint`,
     async () => {
       // The hostile observation is injected after the real nested query is
@@ -2181,7 +1461,7 @@ describe(`includes cross-formulation oracle`, () => {
         await expectFormulationsEquivalent(scenario, (rows) => rows.slice(1))
       })
       const propertyId = `includes-cross-formulation.equivalence`
-      const directReplay = replay.replayPath !== undefined
+      const directReplay = oracleReplayRequested()
       const failure = await fc.check(
         property,
         directReplay
@@ -2222,7 +1502,11 @@ describe(`includes cross-formulation oracle`, () => {
   // tests/query/includes-cross-formulation-oracle.property.test.ts
   // -t 'matches recomputation for ordered offset and limit child windows for a random'
   // Expected: one main-property failure at ordered-window checkpoint 0.
-  calibrationTest(`includes-cross-formulation.ordered-window`, `extra-child`)(
+  oracleCalibrationTest(
+    test,
+    `includes-cross-formulation.ordered-window`,
+    `extra-child`,
+  )(
     `generated window rejects an extra production child and replays its checkpoint`,
     async () => {
       const property = fc.asyncProperty(
@@ -2242,7 +1526,7 @@ describe(`includes cross-formulation oracle`, () => {
         },
       )
       const propertyId = `includes-cross-formulation.ordered-window`
-      const directReplay = replay.replayPath !== undefined
+      const directReplay = oracleReplayRequested()
       const failure = await fc.check(
         property,
         directReplay
@@ -2286,7 +1570,7 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  fixedCampaign.prop([scenarioArbitrary], {
+  oracleReplayTest(fcTest).prop([scenarioArbitrary], {
     numRuns: oracleRuns(8),
     seed: 1_658_004,
     examples: scenarioExamples,
@@ -2295,11 +1579,11 @@ describe(`includes cross-formulation oracle`, () => {
     checkEquivalenceScenario,
   )
 
-  randomCampaign(`includes-cross-formulation.equivalence`).prop(
+  oracleReplayTest(fcTest, `includes-cross-formulation.equivalence`).prop(
     [scenarioArbitrary],
     {
       ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
-      examples: replay.replayPath === undefined ? scenarioExamples : [],
+      examples: oracleReplayRequested() ? [] : scenarioExamples,
     },
   )(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
@@ -2334,7 +1618,7 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  fixedCampaign.prop([windowedScenarioArbitrary], {
+  oracleReplayTest(fcTest).prop([windowedScenarioArbitrary], {
     numRuns: oracleRuns(12),
     seed: 1_658_005,
     examples: windowedExamples,
@@ -2343,11 +1627,11 @@ describe(`includes cross-formulation oracle`, () => {
     checkWindowedScenario,
   )
 
-  randomCampaign(`includes-cross-formulation.ordered-window`).prop(
+  oracleReplayTest(fcTest, `includes-cross-formulation.ordered-window`).prop(
     [windowedScenarioArbitrary],
     {
       ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
-      examples: replay.replayPath === undefined ? windowedExamples : [],
+      examples: oracleReplayRequested() ? [] : windowedExamples,
     },
   )(
     `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,

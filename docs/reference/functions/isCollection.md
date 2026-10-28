@@ -7,7 +7,7 @@ title: isCollection
 function isCollection(value): value is Collection<any, any, any, StandardSchemaV1<unknown, unknown>, any>;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L22)
+Defined in: [packages/db/src/live-query-primitives.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L15)
 
 Structural check for a live-query/`Collection` instance.
 

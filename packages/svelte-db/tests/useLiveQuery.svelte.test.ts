@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it } from 'vitest'
 import {
   BaseQueryBuilder,
   DbClient,
@@ -10,6 +9,7 @@ import {
   getStableValueHash,
   gt,
 } from '@tanstack/db'
+import { afterEach, describe, expect, it } from 'vitest'
 import { flushSync } from 'svelte'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'

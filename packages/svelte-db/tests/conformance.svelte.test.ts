@@ -15,6 +15,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -26,8 +27,12 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -50,10 +55,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-svelte-${sourceSeq++}`,
+      id: collectionId ?? `conformance-svelte-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -104,27 +110,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-svelte-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-svelte-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 async function settle() {
@@ -143,10 +134,10 @@ function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
         state: query?.state,
         status: query?.status,
         isReady: query?.isReady,
-        persistedStatus: query?.persistedStatus,
-        isPersistedReady: query?.isPersistedReady,
-        persistedError: query?.persistedError,
-        isError: query?.isError,
+        isLoadingError: query?.isLoadingError,
+        isCrashed: query?.isCrashed,
+        isSyncError: query?.isSyncError,
+        health: query?.health,
         // svelte-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: query?.status !== `disabled`,
       })
@@ -178,7 +169,10 @@ function mountCollection(collection: any) {
   return makeHandle(() => query, dispose)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   let query: any
   const dispose = $effect.root(() => {
     query = useLiveQuery({ query: build, ...opts } as any)
@@ -198,17 +192,35 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   let param = $state(initial)
   let query: any
+  const published = createPublicationLog()
   const dispose = $effect.root(() => {
-    query = useLiveQuery((q: any) => build(q, param), [() => param])
+    query =
+      opts?.pool !== undefined
+        ? useLiveQuery(
+            { query: (q: any) => build(q, param), pool: opts.pool } as any,
+            [() => param],
+          )
+        : useLiveQuery((q: any) => build(q, param), [() => param])
+    // Svelte renders the value each pre-effect run reads.
+    $effect.pre(() => {
+      published.record(query.data, query.state)
+    })
   })
   const handle = makeHandle(() => query, dispose)
   return {
     ...handle,
+    publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param = next
+      // The first paint after the change: the framework has flushed its
+      // reactive work, but no later task has run.
+      flushSync()
+      published.record(query.data, query.state)
       await settle()
     },
   }
@@ -216,14 +228,22 @@ function mountControllable<P>(
 
 const svelteDriver: LiveQueryDriver = {
   name: `svelte`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(
       createCollection,
       `conformance-svelte-lagging-${sourceSeq++}`,
+    ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-svelte-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,
@@ -243,7 +263,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
   }
   const handle = makeHandle(
@@ -255,9 +277,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

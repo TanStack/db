@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "AfterTool": [
+      {
+        "matcher": "write_file|replace",
+        "hooks": [
+          {
+            "type": "command",
+            "name": "oracle-lint-edit",
+            "command": "node \"$GEMINI_PROJECT_DIR/scripts/agent-lint-feedback.mjs\" --format=gemini --event=edit",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "oracle-lint-turn",
+            "command": "node \"$GEMINI_PROJECT_DIR/scripts/agent-lint-feedback.mjs\" --format=gemini --event=stop",
+            "timeout": 120000
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -15,7 +15,7 @@ import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 const collection = createCollection(
   electricCollectionOptions({
     shapeOptions: { url: '/api/todos' },
-    getKey: (item) => item.id,
+    getKey: (item: { id: string }) => item.id,
   }),
 )
 ```
@@ -140,6 +140,8 @@ When using Electric with a schema, data enters the collection via **two independ
 For types that need transformation (e.g., `timestamptz`), you need BOTH configured:
 
 ```typescript
+import { z } from 'zod'
+
 const todosCollection = createCollection(
   electricCollectionOptions({
     schema: z.object({
@@ -154,7 +156,7 @@ const todosCollection = createCollection(
         timestamptz: (value: string) => new Date(value), // sync path: parse incoming strings
       },
     },
-    getKey: (item) => item.id,
+    getKey: (item: { id: string }) => item.id,
   }),
 )
 ```

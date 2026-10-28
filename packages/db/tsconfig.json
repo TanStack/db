@@ -26,6 +26,7 @@
     "vite.config.ts",
     "vitest.dist.config.ts",
     "playwright.indexed-db.config.ts",
+    "playwright.collection-gc.config.ts",
     "vite.indexed-db.browser.config.ts",
     "vitest.indexed-db.package.config.ts"
   ],

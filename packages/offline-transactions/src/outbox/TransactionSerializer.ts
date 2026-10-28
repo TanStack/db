@@ -1,4 +1,5 @@
 import type {
+  MutationValueCodec,
   OfflineTransaction,
   SerializedError,
   SerializedMutation,
@@ -79,6 +80,8 @@ function mayBeNativeScalar(value: object): boolean {
 
 export class MissingTemporalConstructorError extends Error {}
 
+export class MutationCodecError extends Error {}
+
 function setDataProperty(
   object: Record<string, unknown>,
   key: string,
@@ -111,6 +114,7 @@ export class TransactionSerializer {
 
   constructor(
     collections: Record<string, Collection<any, any, any, any, any>>,
+    private readonly mutationCodec?: MutationValueCodec,
   ) {
     this.collections = collections
     // Create reverse lookup from collection.id to registry key
@@ -124,7 +128,10 @@ export class TransactionSerializer {
     assertOutboxPhase(transaction.outboxPhase)
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
-      valueEncoding: 3,
+      valueEncoding: this.mutationCodec ? 4 : 3,
+      ...(this.mutationCodec
+        ? { mutationEncoding: this.mutationCodec.id }
+        : {}),
       createdAt: transaction.createdAt.toISOString(),
       metadata: this.serializeValue(transaction.metadata, `metadata`),
       mutations: transaction.mutations.map((mutation) =>
@@ -139,20 +146,32 @@ export class TransactionSerializer {
     // marker-shaped user objects; the encoding tag is not application metadata.
     const {
       valueEncoding,
+      mutationEncoding,
       outboxPhase,
       ...parsed
-    }: Omit<SerializedOfflineTransaction, `valueEncoding` | `outboxPhase`> & {
+    }: Omit<
+      SerializedOfflineTransaction,
+      `valueEncoding` | `mutationEncoding` | `outboxPhase`
+    > & {
       valueEncoding?: unknown
+      mutationEncoding?: unknown
       outboxPhase?: unknown
     } = JSON.parse(data)
     if (
       valueEncoding !== undefined &&
       valueEncoding !== 2 &&
-      valueEncoding !== 3
+      valueEncoding !== 3 &&
+      valueEncoding !== 4
     ) {
       throw new Error(
         `Unsupported transaction value encoding: ${valueEncoding}`,
       )
+    }
+    if (
+      valueEncoding === 4 &&
+      (!this.mutationCodec || mutationEncoding !== this.mutationCodec.id)
+    ) {
+      throw new MutationCodecError(`Unsupported mutation codec`)
     }
     assertOutboxPhase(outboxPhase)
 
@@ -168,8 +187,8 @@ export class TransactionSerializer {
       ...(outboxPhase === undefined ? {} : { outboxPhase }),
       createdAt,
       metadata:
-        valueEncoding === 3
-          ? this.deserializeValue(parsed.metadata, valueEncoding)
+        valueEncoding === 3 || valueEncoding === 4
+          ? this.deserializeValue(parsed.metadata, 3)
           : parsed.metadata,
       mutations: parsed.mutations.map((mutationData) =>
         this.deserializeMutation(mutationData, valueEncoding),
@@ -188,23 +207,44 @@ export class TransactionSerializer {
     return {
       globalKey: mutation.globalKey,
       type: mutation.type,
-      modified: this.serializeValue(mutation.modified),
-      original: this.serializeValue(mutation.original),
-      changes: this.serializeValue(mutation.changes),
+      modified: this.encodeMutationValue(mutation.modified),
+      original: this.encodeMutationValue(mutation.original),
+      changes: this.encodeMutationValue(mutation.changes),
       collectionId: registryKey, // Store registry key instead of collection.id
     }
   }
 
+  private encodeMutationValue(value: unknown): unknown {
+    if (!this.mutationCodec) return this.serializeValue(value)
+    const encoded = this.mutationCodec.encode(value)
+    if (typeof encoded !== `string`)
+      throw new MutationCodecError(`Mutation codec encode must return a string`)
+    return encoded
+  }
+
   private deserializeMutation(
     data: SerializedMutation,
-    valueEncoding: 2 | 3 | undefined,
+    valueEncoding: 2 | 3 | 4 | undefined,
   ): PendingMutation {
     const collection = this.collections[data.collectionId]
     if (!collection) {
       throw new Error(`Collection with id ${data.collectionId} not found`)
     }
 
-    const modified = this.deserializeValue(data.modified, valueEncoding)
+    const decode = (value: unknown): unknown => {
+      if (valueEncoding !== 4)
+        return this.deserializeValue(value, valueEncoding)
+      try {
+        if (typeof value !== `string`)
+          throw new TypeError(`Expected a mutation codec string`)
+        return this.mutationCodec!.decode(value)
+      } catch (cause) {
+        throw new MutationCodecError(`Failed to decode mutation codec`, {
+          cause,
+        })
+      }
+    }
+    const modified = decode(data.modified)
 
     // Extract the key from the modified data using the collection's getKey function
     // This is needed for optimistic state restoration to work correctly
@@ -216,8 +256,8 @@ export class TransactionSerializer {
       globalKey: data.globalKey,
       type: data.type as any,
       modified,
-      original: this.deserializeValue(data.original, valueEncoding),
-      changes: this.deserializeValue(data.changes, valueEncoding) ?? {},
+      original: decode(data.original),
+      changes: decode(data.changes) ?? {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated

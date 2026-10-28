@@ -346,7 +346,7 @@ describe(`localStorage collection`, () => {
       try {
         await expect(collection.preload()).rejects.toThrow(SyntaxError)
         expect(reads).toHaveBeenCalledWith(`todos`)
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
         expect(mockStorage.getItem(`todos`)).toBe(`invalid json data`)
         expect([...collection.values()]).toEqual([])
         collection.utils.clearStorage()

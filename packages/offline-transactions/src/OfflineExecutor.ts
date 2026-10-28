@@ -299,7 +299,11 @@ export class OfflineExecutor {
       }
 
       // Storage available - set up offline components
-      this.outbox = new OutboxManager(storage, this.config.collections)
+      this.outbox = new OutboxManager(
+        storage,
+        this.config.collections,
+        this.config.mutationCodec,
+      )
       this.executor = new TransactionExecutor(
         this.scheduler,
         this.outbox,

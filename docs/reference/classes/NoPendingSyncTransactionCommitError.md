@@ -3,7 +3,7 @@ id: NoPendingSyncTransactionCommitError
 title: NoPendingSyncTransactionCommitError
 ---
 
-Defined in: [packages/db/src/errors.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L540)
+Defined in: [packages/db/src/errors.ts:570](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L570)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:540](https://github.com/TanStack/db/blob/
 new NoPendingSyncTransactionCommitError(): NoPendingSyncTransactionCommitError;
 ```
 
-Defined in: [packages/db/src/errors.ts:541](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L541)
+Defined in: [packages/db/src/errors.ts:571](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L571)
 
 #### Returns
 

@@ -3,8 +3,9 @@ import { expect, it, vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { OutboxManager } from '../src/outbox/OutboxManager'
+import { oracleReplayTest } from '../../db/tests/oracle-config'
 import { FakeStorageAdapter } from './harness'
-import { readOfflineOracleConfig } from './oracle-config'
+import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
 /**
@@ -48,17 +49,11 @@ type ExpectedState = {
   outboxCount: number
 }
 
-const {
-  runs: replayRuns,
-  seed: replaySeed,
-  path: replayPath,
-} = readOfflineOracleConfig({
-  prefix: `OFFLINE_ORACLE`,
+const FIFO_RETRY_PROPERTY = `offline.fifo-retry`
+const fifoRetryOracle = readOfflineOracleConfig({
+  property: FIFO_RETRY_PROPERTY,
   defaultRuns: 30,
 })
-
-const campaignSeeds =
-  replayPath === undefined ? [20260916, undefined] : [undefined]
 
 function expectedStateAt(
   elapsed: number,
@@ -77,149 +72,144 @@ function expectState(actual: ExpectedState, expected: ExpectedState): void {
   expect(actual.outboxCount).toBe(expected.outboxCount)
 }
 
-it.each(campaignSeeds)(
-  `waits for the FIFO head and executes eligible work at its deadline (seed %s)`,
-  async (fixedSeed) => {
-    const seed = fixedSeed ?? replaySeed
-    await fc.assert(
-      fc.asyncProperty(
-        fc.integer({ min: 2, max: 5 }),
-        fc.integer({ min: 2, max: 10000 }),
-        async (count, delay) => {
-          let clearExecutor: (() => void) | undefined
-          let primaryFailure: unknown
-          let failed = false
-          try {
-            vi.useFakeTimers()
-            const scheduler = new KeyScheduler()
-            const outbox = new OutboxManager(new FakeStorageAdapter(), {})
-            const calls: Array<string> = []
+// The fixed lane stands aside during any path replay. The random lane runs in
+// ordinary and seed-only runs, and it is the replay of FIFO_RETRY_PROPERTY.
+async function checkFifoRetry(seed: number | undefined): Promise<void> {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({ min: 2, max: 5 }),
+      fc.integer({ min: 2, max: 10000 }),
+      async (count, delay) => {
+        let clearExecutor: (() => void) | undefined
+        let primaryFailure: unknown
+        let failed = false
+        try {
+          vi.useFakeTimers()
+          const scheduler = new KeyScheduler()
+          const outbox = new OutboxManager(new FakeStorageAdapter(), {})
+          const calls: Array<string> = []
 
-            // Record each transaction when the production executor runs it.
-            const executor = new TransactionExecutor(
-              scheduler,
-              outbox,
-              {
-                collections: {},
-                mutationFns: {
-                  persist: ({ transaction }) => {
-                    calls.push(transaction.id)
-                    return Promise.resolve()
-                  },
+          // Record each transaction when the production executor runs it.
+          const executor = new TransactionExecutor(
+            scheduler,
+            outbox,
+            {
+              collections: {},
+              mutationFns: {
+                persist: ({ transaction }) => {
+                  calls.push(transaction.id)
+                  return Promise.resolve()
                 },
               },
-              {
-                isOfflineEnabled: true,
-                resolveTransaction: () => {},
-                rejectTransaction: () => {},
-                registerRestorationTransaction: () => {},
-                isOnline: () => true,
-              },
-            )
-            clearExecutor = () => executor.clear()
-            const transactions: Array<OfflineTransaction> = Array.from(
-              { length: count },
-              (_unused, index) => ({
-                id: `tx-${index}`,
-                mutationFnName: `persist`,
-                mutations: [],
-                keys: [],
-                idempotencyKey: `key-${index}`,
-                createdAt: new Date(index),
-                nextAttemptAt: Date.now() + (index === 0 ? delay : 0),
-                retryCount: 0,
-                version: 1,
-              }),
-            )
-            const transactionIds = transactions.map(
-              (transaction) => transaction.id,
-            )
+            },
+            {
+              isOfflineEnabled: true,
+              resolveTransaction: () => {},
+              rejectTransaction: () => {},
+              registerRestorationTransaction: () => {},
+              isOnline: () => true,
+            },
+          )
+          clearExecutor = () => executor.clear()
+          const transactions: Array<OfflineTransaction> = Array.from(
+            { length: count },
+            (_unused, index) => ({
+              id: `tx-${index}`,
+              mutationFnName: `persist`,
+              mutations: [],
+              keys: [],
+              idempotencyKey: `key-${index}`,
+              createdAt: new Date(index),
+              nextAttemptAt: Date.now() + (index === 0 ? delay : 0),
+              retryCount: 0,
+              version: 1,
+            }),
+          )
+          const transactionIds = transactions.map(
+            (transaction) => transaction.id,
+          )
 
-            for (const transaction of transactions) {
-              await outbox.add(transaction)
-              scheduler.schedule(transaction)
-            }
-            await executor.executeAll()
+          for (const transaction of transactions) {
+            await outbox.add(transaction)
+            scheduler.schedule(transaction)
+          }
+          await executor.executeAll()
 
-            // A ready tail waits for the delayed head. The virtual-clock cuts
-            // distinguish early execution from failure to wake when eligible.
-            const beforeDeadline = expectedStateAt(0, delay, transactionIds)
-            const observedBeforeDeadline = {
-              calls: [...calls],
-              outboxCount: await outbox.count(),
-            }
-            expectState(observedBeforeDeadline, beforeDeadline)
-            // A scheduler that lets a ready tail bypass the delayed head
-            // reaches this checkpoint with an extra call. Calibrate the same
-            // comparison against that plausible wrong observation.
-            expect(() =>
-              expectState(
-                { ...observedBeforeDeadline, calls: [transactionIds[1]!] },
-                beforeDeadline,
-              ),
-            ).toThrow()
-            await vi.advanceTimersByTimeAsync(delay - 1)
-            const nearDeadline = expectedStateAt(
-              delay - 1,
-              delay,
-              transactionIds,
-            )
+          // A ready tail waits for the delayed head. The virtual-clock cuts
+          // distinguish early execution from failure to wake when eligible.
+          const beforeDeadline = expectedStateAt(0, delay, transactionIds)
+          const observedBeforeDeadline = {
+            calls: [...calls],
+            outboxCount: await outbox.count(),
+          }
+          expectState(observedBeforeDeadline, beforeDeadline)
+          // A scheduler that lets a ready tail bypass the delayed head
+          // reaches this checkpoint with an extra call. Calibrate the same
+          // comparison against that plausible wrong observation.
+          expect(() =>
             expectState(
-              { calls: [...calls], outboxCount: await outbox.count() },
-              nearDeadline,
-            )
-            await vi.advanceTimersByTimeAsync(1)
-            const atDeadline = expectedStateAt(delay, delay, transactionIds)
-            const observedAtDeadline = {
-              calls: [...calls],
-              outboxCount: await outbox.count(),
-            }
-            expectState(observedAtDeadline, atDeadline)
-            // A scheduler that never wakes at eligibility leaves the whole
-            // queue untouched at this controlled-clock checkpoint.
-            expect(() =>
-              expectState(
-                { calls: [], outboxCount: transactionIds.length },
-                atDeadline,
-              ),
-            ).toThrow()
-          } catch (error) {
-            primaryFailure = error
-            failed = true
+              { ...observedBeforeDeadline, calls: [transactionIds[1]!] },
+              beforeDeadline,
+            ),
+          ).toThrow()
+          await vi.advanceTimersByTimeAsync(delay - 1)
+          const nearDeadline = expectedStateAt(delay - 1, delay, transactionIds)
+          expectState(
+            { calls: [...calls], outboxCount: await outbox.count() },
+            nearDeadline,
+          )
+          await vi.advanceTimersByTimeAsync(1)
+          const atDeadline = expectedStateAt(delay, delay, transactionIds)
+          const observedAtDeadline = {
+            calls: [...calls],
+            outboxCount: await outbox.count(),
           }
+          expectState(observedAtDeadline, atDeadline)
+          // A scheduler that never wakes at eligibility leaves the whole
+          // queue untouched at this controlled-clock checkpoint.
+          expect(() =>
+            expectState(
+              { calls: [], outboxCount: transactionIds.length },
+              atDeadline,
+            ),
+          ).toThrow()
+        } catch (error) {
+          primaryFailure = error
+          failed = true
+        }
 
-          const cleanupFailures: Array<Error> = []
-          const cleanups: Array<[string, (() => void) | undefined]> = [
-            [`executor.clear`, clearExecutor],
-            [`real timer restore`, () => vi.useRealTimers()],
-          ]
-          for (const [name, cleanup] of cleanups) {
-            if (!cleanup) continue
-            try {
-              cleanup()
-            } catch (error) {
-              cleanupFailures.push(
-                new Error(`${name} failed`, { cause: error }),
-              )
-            }
+        const cleanupFailures: Array<Error> = []
+        const cleanups: Array<[string, (() => void) | undefined]> = [
+          [`executor.clear`, clearExecutor],
+          [`real timer restore`, () => vi.useRealTimers()],
+        ]
+        for (const [name, cleanup] of cleanups) {
+          if (!cleanup) continue
+          try {
+            cleanup()
+          } catch (error) {
+            cleanupFailures.push(new Error(`${name} failed`, { cause: error }))
           }
-          if (cleanupFailures.length > 0) {
-            throw new AggregateError(
-              cleanupFailures,
-              `FIFO retry oracle cleanup failed`,
-              { cause: failed ? primaryFailure : undefined },
-            )
-          }
-          if (failed) throw primaryFailure
-        },
-      ),
-      {
-        numRuns: replayRuns,
-        ...(seed === undefined ? {} : { seed }),
-        ...(fixedSeed === undefined && replayPath !== undefined
-          ? { path: replayPath }
-          : {}),
+        }
+        if (cleanupFailures.length > 0) {
+          throw new AggregateError(
+            cleanupFailures,
+            `FIFO retry oracle cleanup failed`,
+            { cause: failed ? primaryFailure : undefined },
+          )
+        }
+        if (failed) throw primaryFailure
       },
-    )
-  },
+    ),
+    oracleLaneOptions(fifoRetryOracle, seed),
+  )
+}
+
+oracleReplayTest(it).each([20260916])(
+  `waits for the FIFO head and executes eligible work at its deadline (seed %s)`,
+  checkFifoRetry,
+)
+oracleReplayTest(it, FIFO_RETRY_PROPERTY).each([undefined])(
+  `waits for the FIFO head and executes eligible work at its deadline (seed %s)`,
+  checkFifoRetry,
 )

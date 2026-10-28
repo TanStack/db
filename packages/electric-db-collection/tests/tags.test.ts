@@ -20,6 +20,7 @@ const mockRequestSnapshot = vi.fn()
 const mockFetchSnapshot = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
+  unsubscribeAll: vi.fn(),
   requestSnapshot: mockRequestSnapshot,
   fetchSnapshot: mockFetchSnapshot,
 }

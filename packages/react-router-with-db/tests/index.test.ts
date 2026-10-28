@@ -142,6 +142,49 @@ describe(`routerWithDbClient`, () => {
     })
   })
 
+  it(`streams a completed preload after an earlier loading render`, async () => {
+    const dbClient = new DbClient()
+    let isDehydrated = false
+    let finishRender = () => {}
+    const router = {
+      options: { context: { dbClient } },
+      isServer: true,
+      serverSsr: {
+        isDehydrated: () => isDehydrated,
+        onRenderFinished: (callback: () => void) => {
+          finishRender = callback
+        },
+      },
+    } as unknown as AnyRouter
+    adaptRouter(router, dbClient)
+    const state =
+      (await router.options.dehydrate?.()) as DehydratedRouterDbState
+    const reader = state.dbStream.getReader()
+    isDehydrated = true
+    try {
+      dbClient._captureServerQuery(`shared`, { rows: [], status: `loading` })
+      const first = await reader.read()
+      const initial = first.value!.liveQueries![0]!
+      expect(initial.snapshot ?? (await initial.promise)).toEqual({
+        rows: [],
+        status: `loading`,
+      })
+      const rows = [{ key: `1`, value: { id: `1`, text: `Ready` } }]
+      await dbClient._registerLiveQuery(`shared`, Promise.resolve({ rows }))
+      finishRender()
+      const next = await reader.read()
+      expect(next.done, `a later preload must reach the browser`).toBe(false)
+      const completed = next.value!.liveQueries![0]!
+      expect(completed.dehydratedAt).toBeGreaterThan(initial.dehydratedAt)
+      expect(completed.snapshot ?? (await completed.promise)).toEqual({ rows })
+      await expect(reader.read()).resolves.toMatchObject({ done: true })
+    } finally {
+      finishRender()
+      reader.releaseLock()
+      await dbClient.cleanup()
+    }
+  })
+
   it(`includes queries registered while critical dehydration is pending`, async () => {
     const dbClient = new DbClient()
     let releaseOriginalDehydrate!: () => void

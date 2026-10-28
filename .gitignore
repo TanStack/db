@@ -48,3 +48,7 @@ examples/react-native/shopping-list/ios/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 tsconfig.vitest-temp.json
+
+# The part-reach oracle lints scratch programs inside the repository; an
+# interrupted run can leave them behind.
+/part-reach-scratch-*/

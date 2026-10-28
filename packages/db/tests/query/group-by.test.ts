@@ -8,8 +8,15 @@
  */
 import { beforeEach, describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { createLiveQueryCollection, toArray } from '../../src/query/index.js'
-import { NonAggregateExpressionNotInGroupByError } from '../../src/errors.js'
+import {
+  createLiveQueryCollection,
+  groupKeys,
+  toArray,
+} from '../../src/query/index.js'
+import {
+  GroupingOperatorRequiredError,
+  NonAggregateExpressionNotInGroupByError,
+} from '../../src/errors.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
@@ -1558,8 +1565,13 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(salesRep2?.total_amount).toBe(850) // 150+300+400
         expect(salesRep2?.order_count).toBe(3)
 
-        // No sales rep (null): order 5 - null becomes the direct value as key
-        const noSalesRep = salesRepSummary.get(null as any)
+        // No sales rep (null): order 5. Collection keys are strings or
+        // numbers, so the null group gets a string key.
+        const nullGroup = salesRepSummary.toArray.find(
+          (row) => row.sales_rep_id === null,
+        )
+        expect(typeof nullGroup?.$key).toBe(`string`)
+        const noSalesRep = salesRepSummary.get(nullGroup!.$key)
         expect(noSalesRep?.sales_rep_id).toBeNull()
         expect(noSalesRep?.total_amount).toBe(250)
         expect(noSalesRep?.order_count).toBe(1)
@@ -2717,7 +2729,7 @@ describe(`group value among equal instances`, () => {
       const grouped = createLiveQueryCollection((q) =>
         q
           .from({ row: source })
-          .groupBy(({ row }) => row.v)
+          .groupBy(groupKeys(({ row }) => row.v))
           .select(({ row }) => ({ v: row.v })),
       )
       const write = (type: `insert` | `delete`, id: number) => {
@@ -2891,5 +2903,64 @@ describe(`non-aggregate fields of an aggregate without groupBy`, () => {
         })),
       ),
     ).toThrow(NonAggregateExpressionNotInGroupByError)
+  })
+})
+
+describe(`grouping without an aggregate`, () => {
+  type Row = { id: number; v: string }
+  const rows = () =>
+    createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `grouping-operator`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 1, v: `a` },
+          { id: 2, v: `a` },
+          { id: 3, v: `b` },
+        ],
+      }),
+    )
+
+  test(`needs groupKeys and names it`, () => {
+    const source = rows()
+    expect(() =>
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ row: source })
+            .groupBy(({ row }) => row.v)
+            .select(({ row }) => ({ v: row.v })),
+      }),
+    ).toThrow(GroupingOperatorRequiredError)
+  })
+
+  test(`groups by keys with groupKeys, and an aggregate needs nothing extra`, async () => {
+    const source = rows()
+    const keysOnly = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .groupBy(groupKeys(({ row }) => row.v))
+          .select(({ row }) => ({ v: row.v })),
+    })
+    const counted = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .groupBy(({ row }) => row.v)
+          .select(({ row }) => ({ v: row.v, n: count(row.id) })),
+    })
+    await Promise.all([keysOnly.preload(), counted.preload()])
+    expect(keysOnly.toArray.map(stripVirtualProps)).toEqual([
+      { v: `a` },
+      { v: `b` },
+    ])
+    expect(counted.toArray.map(stripVirtualProps)).toEqual([
+      { v: `a`, n: 2 },
+      { v: `b`, n: 1 },
+    ])
   })
 })

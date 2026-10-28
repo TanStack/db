@@ -7,7 +7,7 @@ title: useOptionalDbClient
 function useOptionalDbClient(): DbClient | undefined;
 ```
 
-Defined in: [packages/svelte-db/src/db-context.ts:19](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/db-context.ts#L19)
+Defined in: [packages/svelte-db/src/db-context.ts:27](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/db-context.ts#L27)
 
 ## Returns
 

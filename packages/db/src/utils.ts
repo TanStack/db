@@ -2,6 +2,7 @@
  * Generic utility functions
  */
 
+import { InvalidKeyError, UndefinedKeyError } from './errors'
 import type { CompareOptions } from './query/builder/types'
 
 interface TypedArray {
@@ -446,4 +447,13 @@ export function warnOnce(key: string, message: string): void {
  */
 export function resetWarnings(): void {
   warnedKeys.clear()
+}
+
+/** Throws unless a key has the Collection key type: a string or a number. */
+export function assertCollectionKey(key: unknown, item: unknown): void {
+  if (typeof key !== `string` && typeof key !== `number`) {
+    throw key === undefined
+      ? new UndefinedKeyError(item)
+      : new InvalidKeyError(key, item)
+  }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { pooledLiveQueries } from '../../src/query/pooled-live-query.js'
 import { createCollection } from '../../src/collection/index.js'
 import { getPreparedLiveQueryIdentity } from '../../src/live-query-options.js'
 import { Query } from '../../src/query/builder/index.js'
@@ -23,7 +24,7 @@ const makeSource = () =>
     }),
   )
 const identity = (build: (q: any) => unknown) =>
-  getPreparedLiveQueryIdentity(build(new Query()))
+  getPreparedLiveQueryIdentity(build(new Query()), pooledLiveQueries)
 
 describe(`pooled query identity`, () => {
   const source = makeSource()

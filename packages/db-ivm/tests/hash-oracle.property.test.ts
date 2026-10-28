@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { expectEqualHashes } from './hash-support.js'
+import type { HashValue } from './hash-support.js'
 import type { Arbitrary } from 'fast-check'
 
 /**
@@ -40,16 +48,6 @@ const arbitrarySimpleObject = fc.dictionary(fc.string(), fc.integer(), {
 
 const arbitrarySimpleArray = fc.array(fc.integer(), { maxLength: 10 })
 
-type HashValue = (value: unknown) => number
-
-function expectEqualHashes(
-  value: unknown,
-  equivalent: unknown,
-  hashValue: HashValue = hash,
-): void {
-  expect(hashValue(value)).toBe(hashValue(equivalent))
-}
-
 // Prefixing preserves arbitrary string content while excluding integer-index
 // keys. Unique keys and at least two entries make reversal consequential.
 // Canonically equivalent spellings are distinct keys that locale collation
@@ -76,49 +74,28 @@ function expectPermutedHashes(
   expect(original).toEqual(reversed)
   expectEqualHashes(original, reversed, hashValue)
 }
+// The key-order law: permuting the keys of an object leaves its hash unchanged.
+declareOracle({ check: [expectPermutedHashes] })
 
 // The reusable value laws run with identical generators and checks in a
-// stable campaign and a fresh campaign. Select a single test name with Vitest
-// when replaying, for example:
-// TANSTACK_DB_IVM_HASH_SEED=123 TANSTACK_DB_IVM_HASH_PATH=0:1 \
+// fixed campaign and a random campaign. A path replay of `ivm.hash-value`
+// selects only its random campaign. Replay it with Vitest, for example:
+// TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 \
+//   TANSTACK_DB_ORACLE_PROPERTY=ivm.hash-value \
 //   pnpm exec vitest --run tests/hash-oracle.property.test.ts -t 'cloned arrays have same hash'
-const valueReplaySeedText = process.env.TANSTACK_DB_IVM_HASH_SEED
-const valueReplayPath = process.env.TANSTACK_DB_IVM_HASH_PATH
-const valueReplaySeed =
-  valueReplaySeedText === undefined ? undefined : Number(valueReplaySeedText)
-const valueCampaigns =
-  valueReplaySeedText === undefined && valueReplayPath === undefined
-    ? [
-        { name: `fixed`, seed: 1657021 },
-        { name: `random`, seed: undefined },
-      ]
-    : [{ name: `replay`, seed: valueReplaySeed }]
+const valueProperty = `ivm.hash-value`
 
 function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   [K in keyof Ts]: Arbitrary<Ts[K]>
 }) {
   return (name: string, check: (...values: Ts) => void): void => {
     const property = fc.property(...arbitraries, check)
-    for (const { name: campaign, seed } of valueCampaigns) {
-      it(`${name} (${campaign})`, () => {
-        if (valueReplayPath !== undefined && valueReplaySeedText === undefined)
-          throw new Error(`TANSTACK_DB_IVM_HASH_PATH requires a seed`)
-        if (
-          valueReplaySeedText !== undefined &&
-          (valueReplaySeedText.trim() === `` ||
-            typeof seed !== `number` ||
-            !Number.isSafeInteger(seed) ||
-            seed < -2147483648 ||
-            seed > 2147483647)
-        )
-          throw new Error(`TANSTACK_DB_IVM_HASH_SEED must be a 32-bit integer`)
-        fc.assert(property, {
-          numRuns: 100,
-          ...(seed === undefined ? {} : { seed }),
-          ...(valueReplayPath === undefined ? {} : { path: valueReplayPath }),
-        })
-      })
-    }
+    oracleReplayTest(it)(`${name} (fixed)`, () => {
+      fc.assert(property, { numRuns: oracleRuns(100), seed: 1657021 })
+    })
+    oracleReplayTest(it, valueProperty)(`${name} (random)`, () => {
+      fc.assert(property, oraclePropertyOptions(100, valueProperty))
+    })
   }
 }
 
@@ -214,23 +191,6 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`property order independence`, () => {
-    it(`hashes an array with holes and extra keys the same in any key order`, () => {
-      // Only a dense array keeps its index order unsorted; this one sorts.
-      const first = [] as unknown as Array<number> & Record<string, number>
-      first.length = 4
-      first[1] = 1
-      first[3] = 3
-      first.x = 1
-      first.y = 2
-      const second = [] as unknown as Array<number> & Record<string, number>
-      second.length = 4
-      second[1] = 1
-      second[3] = 3
-      second.y = 2
-      second.x = 1
-      expectEqualHashes(first, second)
-    })
-
     hashProp([
       fc.uniqueArray(
         fc.string().filter((s) => s !== `` && s !== `__proto__`),
@@ -367,16 +327,6 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`law checker calibration`, () => {
-    it.each([0, 42, ``, `reconstructed`])(
-      `rejects inconsistent equal-value hashes for %j`,
-      (value) => {
-        let calls = 0
-        expect(() => expectEqualHashes(value, value, () => ++calls)).toThrow()
-        expect(calls).toBe(2)
-        expectEqualHashes(value, value)
-      },
-    )
-
     it(`rejects an insertion-order-sensitive result but accepts equal structures`, () => {
       const entries: Array<[string, number]> = [
         [`key:left`, 1],

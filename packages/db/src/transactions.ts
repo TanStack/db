@@ -198,20 +198,18 @@ function mergePendingMutations<T extends object>(
   existing: PendingMutation<T>,
   incoming: PendingMutation<T>,
 ): PendingMutation<T> | null {
-  // Truth table implementation
-  switch (`${existing.type}-${incoming.type}` as const) {
-    case `insert-update`: {
-      // Update after insert: keep as insert but merge changes
-      // For insert-update, the key should remain the same since collections don't allow key changes
+  // Dispatch on the arriving operation without constructing a composite key.
+  switch (incoming.type) {
+    case `update`: {
+      if (existing.type === `delete`) break
+      // An insert keeps its identity and optimistic policy. An update uses
+      // the newest envelope. Both merge fields and keep the first original.
+      const inserted = existing.type === `insert`
       return {
-        ...existing,
-        type: `insert` as const,
-        original: {},
+        ...(inserted ? existing : incoming),
+        original: inserted ? {} : existing.original,
         modified: incoming.modified,
         changes: { ...existing.changes, ...incoming.changes },
-        // Keep existing keys (key changes not allowed in updates)
-        key: existing.key,
-        globalKey: existing.globalKey,
         // Merge metadata (last-write-wins)
         metadata: incoming.metadata ?? existing.metadata,
         syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
@@ -221,34 +219,13 @@ function mergePendingMutations<T extends object>(
       }
     }
 
-    case `insert-delete`:
-      // Delete after insert: cancel both mutations
-      return null
+    case `delete`:
+      // An insert followed by a delete cancels. Otherwise the delete dominates.
+      return existing.type === `insert` ? null : incoming
 
-    case `update-delete`:
-    case `delete-delete`:
-      // Delete dominates an update or earlier delete.
-      return incoming
-
-    case `update-update`: {
-      // Update after update: replace with latest, union changes
-      return {
-        ...incoming,
-        // Keep original from first update
-        original: existing.original,
-        // Union the changes from both updates
-        changes: { ...existing.changes, ...incoming.changes },
-        // Merge metadata
-        metadata: incoming.metadata ?? existing.metadata,
-        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
-      }
-    }
-
-    case `insert-insert`:
-      // Same type: replace with latest
-      return incoming
-
-    case `delete-insert`: {
+    case `insert`: {
+      if (existing.type === `insert`) return incoming
+      if (existing.type !== `delete`) break
       const original = existing.collection._state.syncedData.get(existing.key)
       if (original === undefined) return incoming
       if (deepEquals(original, incoming.modified)) {
@@ -276,17 +253,15 @@ function mergePendingMutations<T extends object>(
         syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
       }
     }
-
-    default: {
-      // Exhaustiveness check
-      const _exhaustive: never = `${existing.type}-${incoming.type}` as never
-      throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `Unhandled mutation combination: ${_exhaustive}`
-          : codedMessage(165, { combination: _exhaustive }),
-      )
-    }
   }
+
+  // Reject combinations that mutation admission does not allow.
+  const _exhaustive = `${existing.type}-${incoming.type}`
+  throw new Error(
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Unhandled mutation combination: ${_exhaustive}`
+      : codedMessage(165, { combination: _exhaustive }),
+  )
 }
 
 /**
@@ -599,21 +574,18 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     for (const newMutation of mutations) {
-      const existingMutation = merged.get(newMutation.globalKey)
+      const globalKey = newMutation.globalKey
+      const existingMutation = merged.get(globalKey)
 
-      if (existingMutation) {
-        const mergeResult = mergePendingMutations(existingMutation, newMutation)
-
-        if (mergeResult === null) {
-          // Remove the mutation (e.g., delete after insert cancels both)
-          merged.delete(newMutation.globalKey)
-        } else {
-          // Replace with merged mutation
-          merged.set(newMutation.globalKey, mergeResult)
-        }
+      const mergeResult = existingMutation
+        ? mergePendingMutations(existingMutation, newMutation)
+        : newMutation
+      if (mergeResult === null) {
+        // Remove the mutation (e.g., delete after insert cancels both).
+        merged.delete(globalKey)
       } else {
-        // Insert new mutation
-        merged.set(newMutation.globalKey, newMutation)
+        // Insert the new mutation or replace it with the merged result.
+        merged.set(globalKey, mergeResult)
       }
     }
 
@@ -676,6 +648,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       this.error = { message: config.error.message, error: config.error }
     }
 
+    const wasPersisting = this.state === `persisting`
     this.setState(`failed`)
 
     // A failing subscriber cannot leave this transaction unsettled.
@@ -694,7 +667,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     } finally {
       // Reject the promise
       this.isPersisted.reject(this.error?.error)
-      this.touchCollection()
+      this.touchCollection(wasPersisting)
     }
 
     return this
@@ -707,15 +680,16 @@ class Transaction<T extends object = Record<string, unknown>> {
    * first error is thrown. A settled transaction then empties its set of
    * tracking Collections. Its mutations still name their Collection.
    */
-  touchCollection(): void {
+  touchCollection(releasedHold = false): void {
     const collections = new Set(this.collections)
     for (const mutation of this.mutations) collections.add(mutation.collection)
-    if (this.state === `completed` || this.state === `failed`)
-      this.collections.clear()
+    const settled = this.state === `completed` || this.state === `failed`
+    if (settled) this.collections.clear()
     const errors: Array<unknown> = []
     for (const collection of collections) {
       try {
         collection._state.onTransactionStateChange()
+        if (releasedHold) collection._lifecycle.startGCTimer(true)
 
         // Only call commitPendingTransactions if there are pending sync transactions
         if (collection._state.pendingSyncedTransactions.length > 0) {
@@ -774,66 +748,58 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     this.setState(`persisting`)
 
-    if (this.mutations.length === 0) {
-      this.setState(`completed`)
-      // A Collection whose mutations merged away still tracks this transaction.
+    // An empty transaction completes in this tick without invoking its handler.
+    // Both paths still notify Collections whose mutations merged away.
+    if (this.mutations.length > 0) {
+      // Run mutationFn
       try {
-        this.touchCollection()
-      } finally {
-        this.isPersisted.resolve(this)
+        // At this point we know there's at least one mutation
+        // We've already verified mutations is non-empty, so this cast is safe
+        // Use a direct type assertion instead of object spreading to preserve the original type
+        await this.mutationFn({
+          transaction: this as unknown as TransactionWithMutations<T>,
+        })
+        const commitWork = takeTransactionCommitWork(this)
+        if (commitWork) await commitWork
+      } catch (error) {
+        if ((this.state as TransactionState) !== `persisting`) return this
+
+        // Preserve the original error for rethrowing
+        const originalError = normalizeError(error)
+
+        // A mutationFn can accept local work and then fail. That work remains
+        // accepted, so its storage effect must settle before this receipt does.
+        try {
+          await takeTransactionCommitWork(this)
+        } catch {
+          // The mutationFn error remains the transaction's reported cause.
+        }
+
+        // Update transaction with error information
+        this.error = {
+          message: originalError.message,
+          error: originalError,
+        }
+
+        // Roll back. The mutation error stays the reported cause.
+        try {
+          this.rollback()
+        } catch {
+          // Settlement still ran every step.
+        }
+
+        // Re-throw the original error to preserve identity and stack
+        throw originalError
       }
 
-      return this
-    }
-
-    // Run mutationFn
-    try {
-      // At this point we know there's at least one mutation
-      // We've already verified mutations is non-empty, so this cast is safe
-      // Use a direct type assertion instead of object spreading to preserve the original type
-      await this.mutationFn({
-        transaction: this as unknown as TransactionWithMutations<T>,
-      })
-      const commitWork = takeTransactionCommitWork(this)
-      if (commitWork) await commitWork
-    } catch (error) {
       if ((this.state as TransactionState) !== `persisting`) return this
-
-      // Preserve the original error for rethrowing
-      const originalError = normalizeError(error)
-
-      // A mutationFn can accept local work and then fail. That work remains
-      // accepted, so its storage effect must settle before this receipt does.
-      try {
-        await takeTransactionCommitWork(this)
-      } catch {
-        // The mutationFn error remains the transaction's reported cause.
-      }
-
-      // Update transaction with error information
-      this.error = {
-        message: originalError.message,
-        error: originalError,
-      }
-
-      // Roll back. The mutation error stays the reported cause.
-      try {
-        this.rollback()
-      } catch {
-        // Settlement still ran every step.
-      }
-
-      // Re-throw the original error to preserve identity and stack
-      throw originalError
     }
-
-    if ((this.state as TransactionState) !== `persisting`) return this
 
     this.setState(`completed`)
     // Publication errors cannot undo persistence or leave its receipt pending.
     // Keep normal publication queued before callers resume from the receipt.
     try {
-      this.touchCollection()
+      this.touchCollection(true)
     } finally {
       this.isPersisted.resolve(this)
     }

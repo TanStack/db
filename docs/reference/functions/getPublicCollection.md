@@ -7,7 +7,7 @@ title: getPublicCollection
 function getPublicCollection<T>(collection): T;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L38)
+Defined in: [packages/db/src/live-query-primitives.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L31)
 
 The Collection an adapter hands users as `collection`. A pooled live query
 stands in for its live-query Collection and builds it only when touched.

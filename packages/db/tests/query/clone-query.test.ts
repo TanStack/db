@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { grouping } from '../../src/query/compiler/grouping.js'
 import { cloneQueryForPlacement } from '../../src/query/builder/clone-query.js'
 import {
   Aggregate,
@@ -14,7 +15,7 @@ describe(`cloneQueryForPlacement`, () => {
   it.each([
     new PropRef([`u`, `name`]),
     new Func(`upper`, [new PropRef([`u`, `name`])]),
-    new Aggregate(`count`, [new PropRef([`u`, `id`])]),
+    new Aggregate(`count`, [new PropRef([`u`, `id`])], grouping),
     new ConditionalSelect(
       [
         {

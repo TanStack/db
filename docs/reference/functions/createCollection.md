@@ -9,7 +9,7 @@ title: createCollection
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L241)
+Defined in: [packages/db/src/collection/index.ts:247](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L247)
 
 ### Type Parameters
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/collection/index.ts:241](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, Exclude<TUtils, undefined>, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L258)
+Defined in: [packages/db/src/collection/index.ts:264](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L264)
 
 ### Type Parameters
 
@@ -73,7 +73,7 @@ Defined in: [packages/db/src/collection/index.ts:258](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:276](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L276)
+Defined in: [packages/db/src/collection/index.ts:282](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L282)
 
 ### Type Parameters
 
@@ -105,7 +105,7 @@ Defined in: [packages/db/src/collection/index.ts:276](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:292](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L292)
+Defined in: [packages/db/src/collection/index.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L298)
 
 ### Type Parameters
 
@@ -137,7 +137,7 @@ Defined in: [packages/db/src/collection/index.ts:292](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:305](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L305)
+Defined in: [packages/db/src/collection/index.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L311)
 
 ### Type Parameters
 
@@ -169,7 +169,7 @@ Defined in: [packages/db/src/collection/index.ts:305](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L318)
+Defined in: [packages/db/src/collection/index.ts:324](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L324)
 
 ### Type Parameters
 
@@ -201,7 +201,7 @@ Defined in: [packages/db/src/collection/index.ts:318](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:330](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L330)
+Defined in: [packages/db/src/collection/index.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L336)
 
 ### Type Parameters
 
@@ -233,7 +233,7 @@ Defined in: [packages/db/src/collection/index.ts:330](https://github.com/TanStac
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:343](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L343)
+Defined in: [packages/db/src/collection/index.ts:349](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L349)
 
 ### Type Parameters
 

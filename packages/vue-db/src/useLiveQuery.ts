@@ -11,6 +11,7 @@ import {
 import {
   BaseQueryBuilder,
   createLiveQueryObserver,
+  getLiveQueryStatusFlags,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
@@ -22,11 +23,12 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
+  LiveQueryHookConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
+  LiveQueryStatusFlags,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -50,22 +52,22 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isLoading - True while initial query data is loading
  * @property isReady - True when query has received first data and is ready
  * @property isIdle - True when query hasn't started yet
- * @property isError - True when query encountered an error
+ * @property isLoadingError - True when the first load failed
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<TContext extends Context> {
+/** The status and flag refs every `useLiveQuery` result has. */
+export type UseLiveQueryFlags = {
+  status: ComputedRef<CollectionStatus>
+} & {
+  [K in keyof LiveQueryStatusFlags]: ComputedRef<LiveQueryStatusFlags[K]>
+}
+
+export interface UseLiveQueryReturn<
+  TContext extends Context,
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<string | number, GetResult<TContext>>>
   data: ComputedRef<InferResultType<TContext>>
   collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -90,38 +92,20 @@ export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, TKey, TUtils>>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
 }
 
 export interface UseLiveQueryReturnWithSingleResultCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<T | undefined>
   collection: ComputedRef<Collection<T, TKey, TUtils> & SingleResult>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
 }
 
 /**
@@ -162,13 +146,13 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
  *
  * @example
  * // Handle loading and error states in template
- * const { data, isLoading, isError, status } = useLiveQuery((q) =>
+ * const { data, isLoading, isLoadingError, status } = useLiveQuery((q) =>
  *   q.from({ todos: todoCollection })
  * )
  *
  * // In template:
  * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Error: {{ status }}</div>
+ * // <div v-else-if="isLoadingError">Error: {{ status }}</div>
  * // <ul v-else>
  * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
  * // </ul>
@@ -209,19 +193,19 @@ export function useLiveQuery<TContext extends Context>(
  *
  * @example
  * // Handle all states uniformly
- * const { data, isLoading, isReady, isError } = useLiveQuery({
+ * const { data, isLoading, isReady, isLoadingError } = useLiveQuery({
  *   query: (q) => q.from({ items: itemCollection })
  * })
  *
  * // In template:
  * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Something went wrong</div>
+ * // <div v-else-if="isLoadingError">Something went wrong</div>
  * // <div v-else-if="!isReady">Preparing...</div>
  * // <div v-else>{{ data.length }} items loaded</div>
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
+  config: LiveQueryHookConfig<TContext>,
   deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveQueryReturn<TContext>
 
@@ -255,11 +239,11 @@ export function useLiveQuery<TContext extends Context>(
  *
  * @example
  * // Handle states consistently
- * const { data, isLoading, isError } = useLiveQuery(sharedQuery)
+ * const { data, isLoading, isLoadingError } = useLiveQuery(sharedQuery)
  *
  * // In template:
  * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Error loading data</div>
+ * // <div v-else-if="isLoadingError">Error loading data</div>
  * // <div v-else>
  * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
  * // </div>
@@ -291,7 +275,7 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const collection = computed(() => {
+  const resolveInput = () => {
     // First check if the original parameter might be a ref/getter
     // by seeing if toValue returns something different than the original
     // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
@@ -349,6 +333,26 @@ export function useLiveQuery(
         gcTime: DEFAULT_GC_TIME_MS,
       })
     }
+  }
+  // The input's live-query Collection, or the error resolving it threw. A
+  // Vue computed that throws serves its previous value on the next read, so
+  // this one never throws; each reader rethrows the error.
+  const resolved = computed(
+    (): {
+      collection?: ReturnType<typeof resolveInput>
+      error?: unknown
+    } => {
+      try {
+        return { collection: resolveInput() }
+      } catch (error) {
+        return { error }
+      }
+    },
+  )
+  const collection = computed(() => {
+    const { collection: current, error } = resolved.value
+    if (error !== undefined) throw error
+    return current
   })
 
   // Reactive state that gets updated granularly through change events
@@ -357,24 +361,22 @@ export function useLiveQuery(
   // Reactive data array that maintains sorted order
   const internalData = ref<Array<any>>([])
 
-  // Computed wrapper for the data to match expected return type
-  // Returns single item for singleResult collections, array otherwise
-  const data = computed(() => {
-    const currentCollection = collection.value
-    if (!currentCollection) {
-      return internalData.value
-    }
-    return isSingleResultCollection(currentCollection)
-      ? internalData.value[0]
-      : internalData.value
-  })
+  // Returns single item for singleResult collections, array otherwise. The
+  // effect below sets `singleResult`, so reading data never compiles a query.
+  const singleResult = ref(false)
+  const data = computed(() =>
+    singleResult.value ? internalData.value[0] : internalData.value,
+  )
 
   // Track collection status reactively
   const status = ref(
     collection.value ? collection.value.status : (`disabled` as const),
   )
-  const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
-  const persistedError = shallowRef<unknown>(undefined)
+  const health = shallowRef<HealthNode | undefined>(undefined)
+  // Every status flag comes from the shared rule; a disabled query is ready.
+  const flags = computed(() =>
+    getLiveQueryStatusFlags(status.value as CollectionStatus, health.value),
+  )
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -383,35 +385,36 @@ export function useLiveQuery(
   const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
-    persistedStatus.value = snapshot.persistedStatus
-    persistedError.value = snapshot.persistedError
+    health.value = snapshot.health
     internalData.value = snapshotRows(snapshot.data)
   }
 
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
-    const currentCollection = collection.value
-
-    // Tear down any previous observer.
+    // Tear down any previous observer and its rows first: a query that fails
+    // to compile throws below, and Vue's computed then serves the previous
+    // collection, whose rows must not stay visible.
     currentObserver?.dispose()
     currentObserver = null
+    state.clear()
+    internalData.value = []
+
+    const { collection: currentCollection, error } = resolved.value
+    if (error !== undefined) throw error
+    singleResult.value =
+      !!currentCollection && isSingleResultCollection(currentCollection)
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
-      persistedStatus.value = `unavailable`
-      persistedError.value = undefined
-      state.clear()
-      internalData.value = []
+      health.value = undefined
       return
     }
 
-    const observer = createLiveQueryObserver(currentCollection)
-    currentObserver = observer
-
     // Initial rows arrive as the observer's first delta (includeInitialState);
     // apply them and every subsequent delta granularly to the reactive map.
-    state.clear()
+    const observer = createLiveQueryObserver(currentCollection)
+    currentObserver = observer
 
     const unsubscribe = observer.subscribe(
       (changes: Array<ChangeMessage<any>> | undefined) => {
@@ -459,15 +462,13 @@ export function useLiveQuery(
     data,
     collection: computed(() => getPublicCollection(collection.value)),
     status: computed(() => status.value),
-    isLoading: computed(() => status.value === `loading`),
-    isReady: computed(
-      () => status.value === `ready` || status.value === `disabled`,
-    ),
-    persistedStatus: computed(() => persistedStatus.value),
-    isPersistedReady: computed(() => persistedStatus.value === `ready`),
-    persistedError: computed(() => persistedError.value),
-    isIdle: computed(() => status.value === `idle`),
-    isError: computed(() => status.value === `error`),
-    isCleanedUp: computed(() => status.value === `cleaned-up`),
+    isLoading: computed(() => flags.value.isLoading),
+    isReady: computed(() => flags.value.isReady || status.value === `disabled`),
+    isIdle: computed(() => flags.value.isIdle),
+    isLoadingError: computed(() => flags.value.isLoadingError),
+    isCrashed: computed(() => flags.value.isCrashed),
+    isCleanedUp: computed(() => flags.value.isCleanedUp),
+    isSyncError: computed(() => flags.value.isSyncError),
+    health: computed(() => health.value),
   }
 }

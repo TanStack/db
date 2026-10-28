@@ -7,4 +7,4 @@ title: Join
 type Join = JoinClause[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L46)
+Defined in: [packages/db/src/query/ir.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L51)

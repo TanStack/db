@@ -3,7 +3,7 @@ id: IncludesSubquery
 title: IncludesSubquery
 ---
 
-Defined in: [packages/db/src/query/ir.ts:280](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L280)
+Defined in: [packages/db/src/query/ir.ts:287](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L287)
 
 ## Extends
 
@@ -19,13 +19,14 @@ new IncludesSubquery(
    correlationField, 
    childCorrelationField, 
    fieldName, 
+   runtime, 
    parentFilters?, 
    parentProjection?, 
    materialization?, 
    scalarField?): IncludesSubquery;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:282](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L282)
+Defined in: [packages/db/src/query/ir.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L289)
 
 #### Parameters
 
@@ -44,6 +45,16 @@ Defined in: [packages/db/src/query/ir.ts:282](https://github.com/TanStack/db/blo
 ##### fieldName
 
 `string`
+
+##### runtime
+
+###### createBucketFacades
+
+(...`args`) => `BucketFacadeAdapter` = `...`
+
+###### materializeCompilation
+
+(`compilation`, `getRootKey?`) => `MaterializedRootCompilation`
 
 ##### parentFilters?
 
@@ -79,7 +90,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L83)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 **`Internal`**
 
@@ -99,7 +110,7 @@ BaseExpression.__returnType
 childCorrelationField: PropRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:285](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L285)
+Defined in: [packages/db/src/query/ir.ts:292](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L292)
 
 ***
 
@@ -109,7 +120,7 @@ Defined in: [packages/db/src/query/ir.ts:285](https://github.com/TanStack/db/blo
 correlationField: PropRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:284](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L284)
+Defined in: [packages/db/src/query/ir.ts:291](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L291)
 
 ***
 
@@ -119,7 +130,7 @@ Defined in: [packages/db/src/query/ir.ts:284](https://github.com/TanStack/db/blo
 fieldName: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:286](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L286)
+Defined in: [packages/db/src/query/ir.ts:293](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L293)
 
 ***
 
@@ -129,7 +140,7 @@ Defined in: [packages/db/src/query/ir.ts:286](https://github.com/TanStack/db/blo
 materialization: IncludesMaterialization;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L289)
+Defined in: [packages/db/src/query/ir.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L298)
 
 ***
 
@@ -139,7 +150,7 @@ Defined in: [packages/db/src/query/ir.ts:289](https://github.com/TanStack/db/blo
 optional parentFilters: Where[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:287](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L287)
+Defined in: [packages/db/src/query/ir.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L296)
 
 ***
 
@@ -149,7 +160,7 @@ Defined in: [packages/db/src/query/ir.ts:287](https://github.com/TanStack/db/blo
 optional parentProjection: PropRef<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:288](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L288)
+Defined in: [packages/db/src/query/ir.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L297)
 
 ***
 
@@ -159,7 +170,57 @@ Defined in: [packages/db/src/query/ir.ts:288](https://github.com/TanStack/db/blo
 query: QueryIR;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:283](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L283)
+Defined in: [packages/db/src/query/ir.ts:290](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L290)
+
+***
+
+### runtime
+
+```ts
+runtime: object;
+```
+
+Defined in: [packages/db/src/query/ir.ts:295](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L295)
+
+#### createBucketFacades()
+
+```ts
+createBucketFacades: (...args) => BucketFacadeAdapter;
+```
+
+##### Parameters
+
+###### args
+
+...\[`string`, `BucketFacadeCompilation`[], (`count`) => `void`\]
+
+##### Returns
+
+`BucketFacadeAdapter`
+
+#### materializeCompilation()
+
+```ts
+materializeCompilation: (compilation, getRootKey?) => MaterializedRootCompilation;
+```
+
+Compiles inline includes into the same D2 graph as their parent relation.
+Collection-valued includes become inert bucket references. The public facade
+adapter resolves those references after the graph reaches quiescence.
+
+##### Parameters
+
+###### compilation
+
+`CompilationResult`
+
+###### getRootKey?
+
+(`row`) => `unknown`
+
+##### Returns
+
+`MaterializedRootCompilation`
 
 ***
 
@@ -169,7 +230,7 @@ Defined in: [packages/db/src/query/ir.ts:283](https://github.com/TanStack/db/blo
 optional scalarField: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:290](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L290)
+Defined in: [packages/db/src/query/ir.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L299)
 
 ***
 
@@ -179,7 +240,7 @@ Defined in: [packages/db/src/query/ir.ts:290](https://github.com/TanStack/db/blo
 type: "includesSubquery";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:281](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L281)
+Defined in: [packages/db/src/query/ir.ts:288](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L288)
 
 #### Overrides
 

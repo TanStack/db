@@ -122,7 +122,7 @@
 
 import { deepEquals } from '../utils.js'
 import { CannotCombineEmptyExpressionListError } from '../errors.js'
-import { containsAggregate } from './compiler/group-by.js'
+import { findAggregate } from './compiler/find-aggregate.js'
 import {
   Func,
   PropRef,
@@ -1088,7 +1088,7 @@ function isSafeToPushIntoExistingSubquery(
   return !(
     query.distinct ||
     (query.select &&
-      (containsAggregate(query.select) ||
+      (findAggregate(query.select) !== undefined ||
         whereReferencesComputedSelectFields(
           query.select,
           whereClause,

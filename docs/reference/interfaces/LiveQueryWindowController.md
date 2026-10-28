@@ -3,7 +3,7 @@ id: LiveQueryWindowController
 title: LiveQueryWindowController
 ---
 
-Defined in: [packages/db/src/live-query-window-controller.ts:553](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L553)
+Defined in: [packages/db/src/live-query-window-controller.ts:552](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L552)
 
 **`Internal`**
 
@@ -51,13 +51,27 @@ Load one more page, resolving only after that page is committed.
 
 ***
 
+### getServerSnapshot()
+
+```ts
+getServerSnapshot: () => LiveQueryWindowSnapshot<T, TKey>;
+```
+
+Defined in: [packages/db/src/live-query-window-controller.ts:557](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L557)
+
+#### Returns
+
+[`LiveQueryWindowSnapshot`](LiveQueryWindowSnapshot.md)\<`T`, `TKey`\>
+
+***
+
 ### getSnapshot()
 
 ```ts
 getSnapshot: () => LiveQueryWindowSnapshot<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:557](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L557)
+Defined in: [packages/db/src/live-query-window-controller.ts:556](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L556)
 
 #### Returns
 

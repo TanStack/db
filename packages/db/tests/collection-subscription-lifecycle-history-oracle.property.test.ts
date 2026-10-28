@@ -1,18 +1,22 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it as vitestIt } from 'vitest'
+import { afterAll, describe, expect, it as vitestIt } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   abortReplayHistory,
   abortedRestartHistory,
+  changeRetiresReplacementHistory,
   cleanedRestartDemandCases,
   compoundLifecycleCoverageHistories,
   createLifecycleModel,
+  demandChangeLifecycleHistoryArbitrary,
   expectedCleanedRestartDemand,
+  expectedParkedReloadDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
   mixedAbortedRestartHistory,
+  parkedReloadDemandCases,
   pendingSupersessionHistory,
   reduceLifecycle,
   settle,
@@ -20,9 +24,12 @@ import {
   syncLifecycleHistoryArbitrary,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { flushPromises, withOracleCleanup } from './utils.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
+  oracleReplayRequested,
+  oracleReplayTest,
   readOracleRunConfig,
 } from './oracle-config.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
@@ -37,12 +44,9 @@ import type {
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 
 const { multiplier, ...replay } = readOracleRunConfig()
-const it = replay.replayPath === undefined ? vitestIt : vitestIt.skip
-const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
-const randomCampaign = (property: string) =>
-  replay.replayPath === undefined || replay.replayProperty === property
-    ? fcTest
-    : fcTest.skip
+const it = oracleReplayTest(vitestIt)
+const fixedCampaign = oracleReplayTest(fcTest)
+const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 /**
  * # What settles a demand created while a Collection is cleaned up?
@@ -55,7 +59,7 @@ const randomCampaign = (property: string) =>
  * The independent model in the lifecycle grammar crosses explicit eager,
  * default eager, and on-demand configuration with empty and nonempty
  * replacements and with or without an eager loader. Eager histories may also
- * truncate the loading replacement or enter recoverable error before ready.
+ * truncate the loading replacement, or fail their first load and reload.
  * The production driver publishes an old row, creates a direct subscription,
  * cleans up its source, requests a snapshot, and restarts the real Collection.
  * It holds eager readiness to prove the cleanup-detached
@@ -169,8 +173,8 @@ describe(`demand created while its Collection is cleaned up`, () => {
             operations.truncate({ markReady: false })
             const receipt = operations.commit()
             if (receipt !== true) await receipt
-          } else if (history.interruption === `recoverable-error`) {
-            operations.markError(new Error(`recoverable restart failure`))
+          } else if (history.interruption === `failed-then-reload`) {
+            operations.fail(new Error(`restart failure`))
           }
           if (expected.afterInterruption) {
             await flushPromises()
@@ -182,6 +186,12 @@ describe(`demand created while its Collection is cleaned up`, () => {
             }).toEqual(expected.afterInterruption)
           }
 
+          // A failed first load ends its sync run; only a reload starts the
+          // run that can serve the waiting demand.
+          if (history.interruption === `failed-then-reload`) {
+            void collection.reload().catch(() => undefined)
+            await flushPromises()
+          }
           releaseEagerReady!()
           await flushPromises()
         }
@@ -196,6 +206,91 @@ describe(`demand created while its Collection is cleaned up`, () => {
       }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     },
   )
+})
+
+/**
+ * The driver of `parkedReloadDemandCases` (see the model in the lifecycle
+ * grammar). A real on-demand Collection's first sync run calls `fail()`
+ * before readiness, a direct subscription then requests a snapshot, which
+ * parks, and `reload()` starts the run that `newRun` describes. Its adapter
+ * counts every `loadSubset` and `unloadSubset` call and serves each load in
+ * a later microtask. After the history settles, the counts, the parked
+ * request's promise, and both statuses must match the model.
+ */
+describe(`demand parked behind a failed first load across a reload`, () => {
+  it.each(parkedReloadDemandCases)(`new run: $newRun`, async (history) => {
+    const expected = expectedParkedReloadDemand(history)
+    let syncRuns = 0
+    let loads = 0
+    let unloads = 0
+    let failFirstRun!: () => void
+    let laterSnapshot: (() => void) | undefined
+    const collection = createCollection<{ id: string }>({
+      id: `parked-reload-${history.newRun}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (next) => {
+          const syncRun = syncRuns++
+          const snapshot = () => {
+            next.begin({ snapshot: true })
+            next.commit()
+          }
+          if (syncRun === 0) {
+            failFirstRun = () => next.fail(new Error(`first load failed`))
+          } else if (history.newRun === `snapshot-then-ready`) {
+            snapshot()
+            next.markReady()
+          } else {
+            next.markReady()
+            if (history.newRun === `ready-then-snapshot`) snapshot()
+            if (history.newRun === `ready-then-later-snapshot`)
+              laterSnapshot = snapshot
+          }
+          return {
+            loadSubset: () => {
+              loads++
+              return Promise.resolve()
+            },
+            unloadSubset: () => {
+              unloads++
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    await withOracleCleanup(async () => {
+      collection.startSyncImmediate()
+      failFirstRun()
+      await flushPromises()
+      let result: `pending` | `fulfilled` | `rejected` = `pending`
+      subscription.requestSnapshot({
+        onLoadSubsetResult: (returned) => {
+          void Promise.resolve(returned).then(
+            () => (result = `fulfilled`),
+            () => (result = `rejected`),
+          )
+        },
+      })
+      await flushPromises()
+      void collection.reload().catch(() => undefined)
+      await flushPromises()
+      if (laterSnapshot) {
+        laterSnapshot()
+        await flushPromises()
+      }
+      expect({
+        loads,
+        unloads,
+        result,
+        status: subscription.status,
+        collectionStatus: collection.status,
+      }).toEqual(expected)
+    }, [() => subscription.unsubscribe(), () => collection.cleanup()])
+  })
 })
 
 /**
@@ -216,6 +311,15 @@ describe(`demand created while its Collection is cleaned up`, () => {
  * Generated commands cover the state after each command. The fixed retired
  * delivery cases separately settle an acquisition attempt after unsubscribe; the
  * generated grammar cannot select that obsolete attempt after unsubscribe.
+ *
+ * A demand change is one step (ARCHITECTURE law 9). The driver gives a
+ * `change` to production as one `releaseSnapshot()` call with every retired
+ * owner's predicate, and a `replace` as `replaceSnapshots()`, the internal
+ * call a lazy join's fragmented-churn replacement makes. The comparison runs
+ * after the whole change, the checkpoint at which the model judged the
+ * replay: a replay judged between the releases publishes early, so a later
+ * snapshot request publishes where the model keeps it private, and a waiting
+ * caller settles differently.
  *
  * Row contents and real-provider behavior are outside this controlled adapter
  * driver. The publication oracle checks row contents separately.
@@ -298,9 +402,29 @@ function updateCallerOutcomes(
       )
     )
       continue
-    const current = new Set(model.owners.map(({ attemptId }) => attemptId))
-    const failure = [...failedAttempts.keys()].find((attemptId) =>
-      current.has(attemptId),
+    // A failed owner that a held replacement covers does not fail the
+    // replay (law 10): the replacement loaded the whole key union. One that
+    // an abort ended before it settled loaded nothing.
+    const loaded = ({ attemptId }: (typeof model.owners)[number]) =>
+      attemptId === undefined ||
+      (!failedAttempts.has(attemptId) &&
+        !model.attempts[attemptId]!.endedByAbort)
+    const current = new Set(
+      model.owners
+        .filter(
+          (failed) =>
+            !model.owners.some(
+              (replacement) =>
+                replacement.replaces?.includes(failed.id) &&
+                loaded(replacement),
+            ),
+        )
+        .map(({ attemptId }) => attemptId),
+    )
+    // A rejection after the abort decides nothing: the abort ended the load.
+    const failure = [...failedAttempts.keys()].find(
+      (attemptId) =>
+        current.has(attemptId) && !model.attempts[attemptId]!.endedByAbort,
     )
     if (failure !== undefined) {
       const error = failedAttempts.get(failure)
@@ -363,10 +487,12 @@ async function runHistory(
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+    c: new Func(`eq`, [new PropRef([`id`]), new Value(`c`)]),
   }
   const demandForWhere = new Map<unknown, DemandName>([
     [where.a, `a`],
     [where.b, `b`],
+    [where.c, `c`],
   ])
   const runtimeAttempts = new Map<number, RuntimeAttempt>()
   const runtimeOwners: Array<RuntimeOwner> = []
@@ -411,6 +537,41 @@ async function runHistory(
   let observedUnsubscribed = false
   let syncOps:
     Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0] | undefined
+  // Law 13 (space): state does not scale with settled historical attempts.
+  // A listener on an acquisition's abort signal keeps what its closure
+  // holds, such as a replay's private rows, for as long as the acquisition
+  // lives. So once an attempt settled without an abort, core keeps no abort
+  // listener on its signal. The driver counts the listeners core adds after
+  // the adapter's `loadSubset` call, by attempt; an abort removes them all,
+  // since core adds each with `once`.
+  const coreAbortListeners = new Map<number, Set<unknown>>()
+  const watchCoreAbortListeners = (
+    attemptId: number,
+    signal: AbortSignal | undefined,
+  ) => {
+    if (!signal) return
+    const listeners = new Set<unknown>()
+    coreAbortListeners.set(attemptId, listeners)
+    const add = signal.addEventListener.bind(signal)
+    const remove = signal.removeEventListener.bind(signal)
+    add(`abort`, () => listeners.clear())
+    signal.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (type === `abort`) listeners.add(listener)
+      add(type, listener, options)
+    }) as AbortSignal[`addEventListener`]
+    signal.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      listeners.delete(listener)
+      remove(type, listener, options)
+    }) as AbortSignal[`removeEventListener`]
+  }
 
   const collection = createCollection<{ id: string }, string>({
     id: `generated-async-demand-lifecycle`,
@@ -465,6 +626,7 @@ async function runHistory(
                 { once: true },
               )
             }
+            watchCoreAbortListeners(observed.id, options.signal)
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
             observedLoads.push(observed)
@@ -562,6 +724,12 @@ async function runHistory(
       Array.from({ length: model.publications }, () => []),
     )
     check(observedTrace, context).toEqual(model.trace)
+    for (const attempt of model.attempts)
+      if (attempt.outcome !== undefined && !attempt.aborted)
+        check(
+          coreAbortListeners.get(attempt.id)?.size ?? 0,
+          `abort listeners kept by settled attempt ${attempt.id}: ${context}`,
+        ).toBe(0)
     for (const attempt of model.attempts) {
       check(
         runtimeAttempts.get(attempt.id)?.options.signal?.aborted,
@@ -714,6 +882,28 @@ async function runHistory(
           runtimeOwners.splice(runtimeOwners.indexOf(runtimeOwner), 1)
         }
         subscription.releaseSnapshot(where[command.demand])
+      } else if (command.type === `change`) {
+        const retired: Array<number> = []
+        for (const demand of command.release) {
+          const owner = runtimeOwners.find(
+            (candidate) => candidate.demand === demand,
+          )
+          if (!owner) continue
+          retired.push(owner.id)
+          if (owner.attemptId !== undefined) {
+            runtimeAttempts.get(owner.attemptId)!.current = false
+          }
+          runtimeOwners.splice(runtimeOwners.indexOf(owner), 1)
+        }
+        check(effect.ownerIds ?? []).toEqual(retired)
+        // One demand change is one release call.
+        subscription.releaseSnapshot(
+          ...command.release.map((demand) => where[demand]),
+        )
+      } else if (command.type === `replace`) {
+        subscription.replaceSnapshots(where[command.demand], [
+          where[command.replaced],
+        ])
       } else if (command.type === `settle`) {
         check(effect.attemptId).toBe(runtimeAttempt?.id)
         if (effect.attemptId === undefined) {
@@ -853,7 +1043,7 @@ async function runHistory(
 }
 
 if (
-  replay.replayPath === undefined &&
+  !oracleReplayRequested() &&
   process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`
 ) {
   fc.statistics(
@@ -1145,7 +1335,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       history: pendingSupersessionHistory,
     },
   ])(
-    `waits for delayed cancellation settlement for $name`,
+    `does not wait for an aborted load to settle for $name`,
     async ({ history }) => {
       await runHistory(history)
     },
@@ -1424,6 +1614,100 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     )
   })
 
+  // Law 9: a demand change is one step. The states below are where judging
+  // the replay between a change's releases would differ from judging it once
+  // after the change (ORC-015). The model names them; this property records
+  // them for the histories the demand-change grammar generates.
+  const demandChangeReachStates = {
+    'change:several-owners-during-replay': `a change retires several owners during a replay`,
+    'replacement-decides-failed-owner': `a held replacement covers a failed owner`,
+    'change:between-releases-would-publish': `judging between releases would publish a replay the change fails`,
+    'change:between-releases-would-fail': `judging between releases would fail a replay the change publishes`,
+  } as const
+  const demandChangeReach = createOracleReach(
+    `subscription-lifecycle.demand-change`,
+    Object.values(demandChangeReachStates),
+  )
+  let demandChangeHistoriesRan = false
+  afterAll(() => {
+    if (demandChangeHistoriesRan) demandChangeReach.assertReached()
+  })
+  const runDemandChangeHistory = async (
+    history: ReadonlyArray<LifecycleCommand>,
+    cancellation: `manual` | `reject` = `manual`,
+  ) => {
+    demandChangeReach.beginHistory()
+    const reached = await runHistory(history, { cancellation })
+    for (const [label, state] of Object.entries(demandChangeReachStates))
+      if (reached.has(label)) demandChangeReach.reach(state)
+  }
+
+  it(`judges a replay once after a change that retires a replacement and a pending owner`, async () => {
+    const reached = await runHistory(changeRetiresReplacementHistory)
+    expect(reached).toContain(`change:between-releases-would-publish`)
+  })
+
+  // Prompt cancellation of the replaced owner's replay load is a settlement:
+  // the held replacement covers it, so the replay publishes.
+  it(`publishes a replay when a covered owner's replay load is canceled`, async () => {
+    await runHistory(
+      [
+        { type: `request`, demand: `c` },
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `replace`, demand: `b`, replaced: `a` },
+        { type: `truncate` },
+        settle(`b`, `current`, `oldest`, `resolve`),
+        settle(`c`, `current`, `oldest`, `resolve`),
+        { type: `abort`, demand: `a` },
+        { type: `request`, demand: `a` },
+      ],
+      { cancellation: `reject` },
+    )
+  })
+
+  // An abort ends the load (maintainer decision), so an aborted
+  // replacement decides nothing: it never applied, so it covers none of the
+  // owners it replaces (law 10: a failed or obsolete replacement cannot
+  // retire established coverage). The replaced owner's failure stays, and
+  // the replay keeps its publication private. 30-times counterexamples of
+  // production, which counted the aborted replacement as covering.
+  it.each([
+    {
+      name: `a replacement aborted after its replaced owner failed`,
+      history: [
+        { type: `request`, demand: `c` },
+        { type: `request`, demand: `b` },
+        { type: `request`, demand: `a` },
+        { type: `replace`, demand: `a`, replaced: `c` },
+        { type: `truncate` },
+        settle(`c`, `current`, `oldest`, `reject`),
+        settle(`b`, `current`, `oldest`, `resolve`),
+        { type: `abort`, demand: `a` },
+        { type: `request`, demand: `a` },
+      ],
+    },
+    {
+      name: `a replacement aborted after a peer loaded and its replaced owner failed`,
+      history: [
+        { type: `request`, demand: `c` },
+        { type: `request`, demand: `b` },
+        { type: `request`, demand: `a` },
+        { type: `replace`, demand: `b`, replaced: `c` },
+        { type: `truncate` },
+        settle(`a`, `current`, `oldest`, `resolve`),
+        settle(`c`, `current`, `oldest`, `reject`),
+        { type: `abort`, demand: `b` },
+        { type: `request`, demand: `a` },
+      ],
+    },
+  ] satisfies Array<{ name: string; history: Array<LifecycleCommand> }>)(
+    `keeps a replay failed when $name`,
+    async ({ history }) => {
+      await runDemandChangeHistory(history)
+    },
+  )
+
   const runs = 80 * multiplier
   const cancellationArbitrary = fc.constantFrom(
     `manual` as const,
@@ -1453,6 +1737,34 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       await runHistory(history, { cancellation })
     },
     120_000,
+  )
+  fixedCampaign.prop(
+    [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
+    { numRuns: 5 * runs, seed: 1_657_005 },
+  )(
+    `judges a replay once per demand change for a fixed seed`,
+    async (history, cancellation) => {
+      demandChangeHistoriesRan = true
+      await runDemandChangeHistory(history, cancellation)
+    },
+    // Five times the base budget; a run multiplier scales its histories.
+    120_000 * multiplier,
+  )
+  randomCampaign(`subscription-lifecycle.demand-change`).prop(
+    [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
+    oracleRandomParameters(
+      5 * runs,
+      replay,
+      `subscription-lifecycle.demand-change`,
+    ),
+  )(
+    `judges a replay once per demand change for a random or replayed seed`,
+    async (history, cancellation) => {
+      demandChangeHistoriesRan = true
+      await runDemandChangeHistory(history, cancellation)
+    },
+    // Five times the base budget; a run multiplier scales its histories.
+    120_000 * multiplier,
   )
   fixedCampaign.prop([syncLifecycleHistoryArbitrary], {
     numRuns: runs,

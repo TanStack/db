@@ -33,6 +33,7 @@ vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
   ShapeStream: vi.fn(() => ({
     subscribe: mockSubscribe,
+    unsubscribeAll: vi.fn(),
     requestSnapshot: vi.fn(() => snapshotRequest?.() ?? Promise.resolve()),
     fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
     forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
@@ -570,7 +571,13 @@ async function runRace(
         })
       }
     } else {
-      await vi.waitFor(() => expect(collection!.status).toBe(`error`))
+      // A schema reset under the persisted store is a local persistence
+      // failure, so the Collection crashes; the other races fail the load.
+      await vi.waitFor(() =>
+        expect(collection!.status).toBe(
+          transition === `schema-reset` ? `crashed` : `error`,
+        ),
+      )
       await expect(readiness).rejects.toBe(collection._lifecycle.getSyncError())
       if (laterKeySetEvidence !== `unchanged`) {
         expect(collection._lifecycle.getSyncError()).toEqual(

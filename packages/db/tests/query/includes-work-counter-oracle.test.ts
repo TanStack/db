@@ -1,23 +1,33 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   createLiveQueryCollection,
   eq,
   inArray,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
-  SetWindowFindOneLimitError,
-  SetWindowRequiresOrderByError,
-} from '../../src/errors.js'
+  countSourceWork,
+  createSourceCollection,
+  expectSourceWorkBound,
+  expectedResult,
+  noFillers,
+  observeWork,
+  runCleanups,
+} from './includes-work-counter-support.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
+import type {
+  SourceWork,
+  WorkObservation,
+} from './includes-work-counter-support.js'
 
 /**
  * # Does unrelated source size increase correlated include work?
@@ -52,359 +62,6 @@ import type { LoadSubsetOptions } from '../../src/types.js'
  */
 
 let nextCollectionId = 0
-
-type TermRow = { id: string; text: string }
-type MeaningRow = { id: string; termId: string }
-type GroupRow = { id: string; meaningId: string }
-type LinkRow = { id: string; groupId: string; targetId: string }
-
-type SourceRows = {
-  terms: Array<TermRow>
-  meanings: Array<MeaningRow>
-  groups: Array<GroupRow>
-  links: Array<LinkRow>
-}
-
-type FillerCounts = {
-  terms: number
-  meanings: number
-  groups: number
-  links: number
-}
-
-type WorkScenario = {
-  filler: FillerCounts
-  joinTargets: boolean
-}
-
-type WorkCount = {
-  delivered: number
-  examined: number
-}
-
-type SourceWork = {
-  terms: WorkCount
-  meanings: WorkCount
-  groups: WorkCount
-  links: WorkCount
-}
-
-type LinkObservation =
-  { id: string; text: string } | { id: string; targetId: string }
-
-type WorkObservation = {
-  result: Array<{
-    id: string
-    meanings: Array<{
-      id: string
-      groups: Array<{
-        id: string
-        links: Array<LinkObservation>
-      }>
-    }>
-  }>
-  sourceWork: SourceWork
-}
-
-async function runCleanups(
-  cleanups: ReadonlyArray<() => void | Promise<void>>,
-  primary?: { error: unknown },
-): Promise<void> {
-  const results = await Promise.allSettled(
-    cleanups.map(async (cleanup) => cleanup()),
-  )
-  const failures = results.flatMap((result) =>
-    result.status === `rejected` ? [result.reason as unknown] : [],
-  )
-  if (failures.length > 0 && primary) {
-    throw new AggregateError(
-      [primary.error, ...failures],
-      `Oracle and cleanup failed`,
-      { cause: primary.error },
-    )
-  }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) {
-    throw new AggregateError(failures, `Oracle cleanup failed`)
-  }
-}
-
-const noFillers: FillerCounts = {
-  terms: 0,
-  meanings: 0,
-  groups: 0,
-  links: 0,
-}
-
-function createSourceCollection<T extends { id: string }>(
-  name: string,
-  initialData: Array<T>,
-) {
-  return createCollection(
-    localOnlyCollectionOptions<T>({
-      id: `${name}-${nextCollectionId++}`,
-      getKey: (row) => row.id,
-      initialData,
-    }),
-  )
-}
-
-// Count both sides of the source boundary. Delivered rows show what enters the
-// dataflow graph. entries() visits capture scans and get() calls capture keyed
-// reads, so examined work cannot hide behind a filter.
-function countSourceWork<T extends object>(collection: Collection<T>) {
-  let deliveredRows = 0
-  let examinedRows = 0
-  let readingEntry = false
-  const originalSubscribeChanges = collection.subscribeChanges.bind(collection)
-  const originalEntries = collection.entries.bind(collection)
-  const originalGet = collection.get.bind(collection)
-
-  collection.subscribeChanges = (callback, options) => {
-    return originalSubscribeChanges((changes) => {
-      deliveredRows += changes.length
-      callback(changes)
-    }, options)
-  }
-
-  collection.get = (key) => {
-    if (!readingEntry) examinedRows++
-    return originalGet(key)
-  }
-
-  collection.entries = function* () {
-    const entries = originalEntries()
-    const readNext = () => {
-      readingEntry = true
-      try {
-        return entries.next()
-      } finally {
-        readingEntry = false
-      }
-    }
-
-    for (let next = readNext(); !next.done; next = readNext()) {
-      examinedRows++
-      yield next.value
-    }
-  }
-
-  return (): WorkCount => ({ delivered: deliveredRows, examined: examinedRows })
-}
-
-function createFixtureRows(filler: FillerCounts): SourceRows {
-  return {
-    terms: [
-      { id: `term-0`, text: `selected term` },
-      { id: `term-1`, text: `first target` },
-      { id: `term-2`, text: `second target` },
-      ...Array.from({ length: filler.terms }, (_, index) => ({
-        id: `term-filler-${index}`,
-        text: `irrelevant target ${index}`,
-      })),
-    ],
-    meanings: [
-      { id: `meaning-0`, termId: `term-0` },
-      ...Array.from({ length: filler.meanings }, (_, index) => ({
-        id: `meaning-filler-${index}`,
-        termId: `term-never-selected`,
-      })),
-    ],
-    groups: [
-      { id: `group-0`, meaningId: `meaning-0` },
-      ...Array.from({ length: filler.groups }, (_, index) => ({
-        id: `group-filler-${index}`,
-        meaningId: `meaning-never-selected`,
-      })),
-    ],
-    links: [
-      // Keep filler links on one existing target key. Only the left-side input
-      // grows. The term-filler control probes right-side input growth separately.
-      { id: `link-0`, groupId: `group-0`, targetId: `term-1` },
-      {
-        id: `link-1`,
-        groupId: `group-0`,
-        targetId: `term-2`,
-      },
-      ...Array.from({ length: filler.links }, (_, index) => ({
-        id: `link-filler-${index}`,
-        groupId: `group-never-selected`,
-        targetId: `term-1`,
-      })),
-    ],
-  }
-}
-
-function observeLink(link: LinkObservation): LinkObservation {
-  if (`text` in link) return { id: link.id, text: link.text }
-  if (`targetId` in link) return { id: link.id, targetId: link.targetId }
-
-  const exhaustive: never = link
-  return exhaustive
-}
-
-function observeResult(
-  roots: ReadonlyArray<WorkObservation[`result`][number]>,
-): WorkObservation[`result`] {
-  return roots.map((root) => ({
-    id: root.id,
-    meanings: root.meanings.map((meaning) => ({
-      id: meaning.id,
-      groups: meaning.groups.map((group) => ({
-        id: group.id,
-        links: group.links.map(observeLink),
-      })),
-    })),
-  }))
-}
-
-async function observeWork({
-  filler,
-  joinTargets,
-}: WorkScenario): Promise<WorkObservation> {
-  const rows = createFixtureRows(filler)
-  const sources = {
-    terms: createSourceCollection(`work-terms`, rows.terms),
-    meanings: createSourceCollection(`work-meanings`, rows.meanings),
-    groups: createSourceCollection(`work-groups`, rows.groups),
-    links: createSourceCollection(`work-links`, rows.links),
-  }
-  let cleanupLive: (() => Promise<void>) | undefined
-  let primary: { error: unknown } | undefined
-
-  try {
-    await Promise.all(Object.values(sources).map((source) => source.preload()))
-
-    // Match the reported boundary: load first, then add a B-tree index on each
-    // correlation and join column before constructing the live query.
-    sources.terms.createIndex((row) => row.id, { indexType: BTreeIndex })
-    sources.meanings.createIndex((row) => row.termId, {
-      indexType: BTreeIndex,
-    })
-    sources.groups.createIndex((row) => row.meaningId, {
-      indexType: BTreeIndex,
-    })
-    sources.links.createIndex((row) => row.groupId, { indexType: BTreeIndex })
-    sources.links.createIndex((row) => row.targetId, {
-      indexType: BTreeIndex,
-    })
-
-    const counters = {
-      terms: countSourceWork(sources.terms),
-      meanings: countSourceWork(sources.meanings),
-      groups: countSourceWork(sources.groups),
-      links: countSourceWork(sources.links),
-    }
-
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ term: sources.terms })
-        .where(({ term }) => eq(term.id, `term-0`))
-        .select(({ term }) => ({
-          id: term.id,
-          meanings: materialize(
-            q
-              .from({ meaning: sources.meanings })
-              .where(({ meaning }) => eq(meaning.termId, term.id))
-              .select(({ meaning }) => ({
-                id: meaning.id,
-                groups: materialize(
-                  q
-                    .from({ group: sources.groups })
-                    .where(({ group }) => eq(group.meaningId, meaning.id))
-                    .select(({ group }) => {
-                      const selectedLinks = q
-                        .from({ link: sources.links })
-                        .where(({ link }) => eq(link.groupId, group.id))
-
-                      return {
-                        id: group.id,
-                        links: joinTargets
-                          ? materialize(
-                              selectedLinks
-                                .innerJoin(
-                                  { target: sources.terms },
-                                  ({ link, target }) =>
-                                    eq(link.targetId, target.id),
-                                )
-                                .select(({ link, target }) => ({
-                                  id: link.id,
-                                  text: target.text,
-                                })),
-                            )
-                          : materialize(
-                              selectedLinks.select(({ link }) => ({
-                                id: link.id,
-                                targetId: link.targetId,
-                              })),
-                            ),
-                      }
-                    }),
-                ),
-              })),
-          ),
-        })),
-    )
-    cleanupLive = () => live.cleanup()
-
-    await live.preload()
-    return {
-      result: observeResult(live.toArray),
-      sourceWork: {
-        terms: counters.terms(),
-        meanings: counters.meanings(),
-        groups: counters.groups(),
-        links: counters.links(),
-      },
-    }
-  } catch (error) {
-    primary = { error }
-    throw error
-  } finally {
-    await runCleanups(
-      [
-        async () => cleanupLive?.(),
-        ...Object.values(sources).map((source) => async () => source.cleanup()),
-      ],
-      primary,
-    )
-  }
-}
-
-function expectedResult({
-  joinTargets,
-}: Pick<WorkScenario, 'joinTargets'>): WorkObservation[`result`] {
-  return [
-    {
-      id: `term-0`,
-      meanings: [
-        {
-          id: `meaning-0`,
-          groups: [
-            {
-              id: `group-0`,
-              links: [
-                joinTargets
-                  ? { id: `link-0`, text: `first target` }
-                  : { id: `link-0`, targetId: `term-1` },
-                joinTargets
-                  ? {
-                      id: `link-1`,
-                      text: `second target`,
-                    }
-                  : {
-                      id: `link-1`,
-                      targetId: `term-2`,
-                    },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ]
-}
-
 const joinedBaselineWork: SourceWork = {
   terms: { delivered: 3, examined: 3 },
   meanings: { delivered: 1, examined: 1 },
@@ -421,10 +78,6 @@ const joinFreeBaselineWork: SourceWork = {
 
 let joinedBaselineObservation: WorkObservation
 let joinFreeBaselineObservation: WorkObservation
-
-function expectSourceWorkBound(actual: SourceWork, expected: SourceWork): void {
-  expect(actual).toEqual(expected)
-}
 
 async function expectCorrelatedJoinWorkBound(
   fillerCount: number,
@@ -496,50 +149,6 @@ function campaigns(fixedSeed: number, property: string, baseRuns = 6) {
 }
 
 describe(`includes deterministic work-counter oracle`, () => {
-  it(`preserves the primary failure and every cleanup failure`, async () => {
-    const primary = new Error(`source preload failed`)
-    const firstCleanup = new Error(`live query cleanup failed`)
-    const secondCleanup = new Error(`source cleanup failed`)
-    const attempted: Array<string> = []
-
-    await expect(
-      runCleanups(
-        [
-          () => {
-            attempted.push(`live`)
-            throw firstCleanup
-          },
-          () => {
-            attempted.push(`source`)
-            throw secondCleanup
-          },
-        ],
-        { error: primary },
-      ),
-    ).rejects.toMatchObject({
-      cause: primary,
-      errors: [primary, firstCleanup, secondCleanup],
-    })
-    expect(attempted).toEqual([`live`, `source`])
-  })
-
-  it.each([true, false])(
-    `retains and rejects extra roots with joinTargets=%s`,
-    (joinTargets) => {
-      const expected = expectedResult({ joinTargets })
-      expect(observeResult(expected)).toEqual(expected)
-      const extra = { id: `term-extra`, meanings: [] }
-      const faulty = [...expected, extra]
-      // The old first-root capture erases this violation.
-      expect(observeResult(faulty.slice(0, 1))).toEqual(expected)
-      const observed = observeResult(faulty)
-      expect(observed).toEqual(faulty)
-      expect(() => expect(observed).toEqual(expected)).toThrow()
-      expect(observeResult([])).toEqual([])
-      expect(() => expect(observeResult([])).toEqual(expected)).toThrow()
-    },
-  )
-
   beforeAll(async () => {
     const [joinedBaseline, joinFreeBaseline] = await Promise.all([
       observeWork({ filler: noFillers, joinTargets: true }),
@@ -547,22 +156,6 @@ describe(`includes deterministic work-counter oracle`, () => {
     ])
     joinedBaselineObservation = joinedBaseline
     joinFreeBaselineObservation = joinFreeBaseline
-  })
-
-  it(`rejects extra source reads at the preload checkpoint`, () => {
-    const baseline = joinedBaselineObservation
-    const faultyWork: SourceWork = {
-      ...baseline.sourceWork,
-      links: {
-        ...baseline.sourceWork.links,
-        examined: baseline.sourceWork.links.examined + 1,
-      },
-    }
-
-    expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-    expect(() =>
-      expectSourceWorkBound(faultyWork, baseline.sourceWork),
-    ).toThrow()
   })
 
   it.each([1, 2, 3])(
@@ -1117,7 +710,9 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
               groupChildren.select(({ child }) => ({ id: child.id })),
             )
           case `collection`:
-            return groupChildren.select(({ child }) => ({ id: child.id }))
+            return include(
+              groupChildren.select(({ child }) => ({ id: child.id })),
+            )
           case `nested`:
             return materialize(
               groupChildren.select(({ child }) => ({
@@ -1443,6 +1038,21 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
   }
 }
 
+// The parts this file declares. The windowed check runs each history through
+// the window model and compares the shown rows with it. The three metamorphic
+// checks compare each scaled fixture with its minimal baseline run. The grammar
+// is the windowed history generator, which the reconstruction test samples.
+declareOracle({
+  check: [
+    checkWindowedIncludeWork,
+    expectCorrelatedJoinWorkBound,
+    expectJoinTargetWorkBound,
+    expectJoinFreeWorkBound,
+  ],
+  model: [windowUnits, modelKids],
+  grammar: [windowCase],
+})
+
 // Enough runs that each dimension appears at the default multiplier; the
 // reconstruction check below counts them.
 const WINDOW_RUNS = 60
@@ -1536,41 +1146,6 @@ describe(`includes work under an ordered parent window`, () => {
       parentForm: `findOne`,
       offset: 5,
     }))
-
-  // An include child's orderBy gives the parent no window to move, so an
-  // unordered parent rejects setWindow instead of moving the child windows.
-  it(`rejects setWindow on an unordered parent with an ordered child`, async () => {
-    const parentSource = createSourceCollection(`unordered-parents`, [
-      { id: `parent-0`, group: `group-0` },
-    ])
-    const childSource = createSourceCollection(`unordered-children`, [
-      { id: `child-0`, group: `group-0`, n: 0 },
-    ])
-    const live = createLiveQueryCollection((q) =>
-      q.from({ parent: parentSource }).select(({ parent }) => ({
-        id: parent.id,
-        kids: toArray(
-          q
-            .from({ child: childSource })
-            .where(({ child }) => eq(child.group, parent.group))
-            .orderBy(({ child }) => child.n)
-            .limit(1),
-        ),
-      })),
-    )
-    try {
-      await live.preload()
-      expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(
-        SetWindowRequiresOrderByError,
-      )
-    } finally {
-      await runCleanups([
-        () => live.cleanup(),
-        () => parentSource.cleanup(),
-        () => childSource.cleanup(),
-      ])
-    }
-  })
 
   // A window requested before start can drop rows a static filter names,
   // so static child demand must not load their children.
@@ -1820,302 +1395,4 @@ describe(`includes work under an ordered parent window`, () => {
       oracleRuns(WINDOW_RUNS) * 100,
     )
   }
-})
-
-/**
- * # Static demand and window ownership
- *
- * A static parent filter that names one row of a `findOne` with no `offset`
- * leaves the window nothing to drop, so the include may create that child's
- * demand at once: a detail page starts its child acquisition attempt beside
- * its parent acquisition attempt instead of after the parent's rows arrive.
- * Each test's `loadSubset` handler stands in for both the sync adapter and the
- * provider, and records each acquisition attempt in order. Only the query's
- * own window answers `setWindow`; a window inside a `from` or a joined
- * subquery never does.
- */
-describe(`static include demand and setWindow ownership`, () => {
-  // A window requested before start at offset 0 drops nothing, so it keeps
-  // the static demand.
-  it.each([null, { offset: 0 }] as const)(
-    `starts a findOne detail page's child load beside its parent load (window before start: %o)`,
-    async (startWindow) => {
-      const calls: Array<string> = []
-      let releaseParent!: () => void
-      const parentHeld = new Promise<void>((resolve) => {
-        releaseParent = resolve
-      })
-      const parents = createCollection<{ id: string }, string>({
-        id: `detail-parents-${nextCollectionId++}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                calls.push(`parent`)
-                return parentHeld.then(() => {
-                  begin()
-                  write({ type: `insert`, value: { id: `parent-1` } })
-                  commit()
-                })
-              },
-            }
-          },
-        },
-      })
-      const children = createCollection<
-        { id: string; parentId: string },
-        string
-      >({
-        id: `detail-children-${nextCollectionId++}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                calls.push(`child`)
-                begin()
-                write({
-                  type: `insert`,
-                  value: { id: `child-1`, parentId: `parent-1` },
-                })
-                commit()
-                return true
-              },
-            }
-          },
-        },
-      })
-      const live = createLiveQueryCollection({
-        startSync: false,
-        query: (q) =>
-          q
-            .from({ parent: parents })
-            .where(({ parent }) => eq(parent.id, `parent-1`))
-            .select(({ parent }) => ({
-              id: parent.id,
-              kids: toArray(
-                q
-                  .from({ child: children })
-                  .where(({ child }) => eq(child.parentId, parent.id))
-                  .select(({ child }) => ({ id: child.id })),
-              ),
-            }))
-            .findOne(),
-      })
-      if (startWindow) {
-        const settled = live.utils.setWindow(startWindow)
-        if (settled !== true) void settled.catch(() => {})
-      }
-      try {
-        const ready = live.toArrayWhenReady()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        // The child acquisition attempt has started while the parent's is held.
-        expect(calls).toEqual([`parent`, `child`])
-        releaseParent()
-        await ready
-        expect(
-          (
-            live.toArray as unknown as Array<{
-              id: string
-              kids: Array<{ id: string }>
-            }>
-          ).map((row) => ({ id: row.id, kids: row.kids.map((kid) => kid.id) })),
-        ).toEqual([{ id: `parent-1`, kids: [`child-1`] }])
-        expect(calls).toEqual([`parent`, `child`])
-      } finally {
-        releaseParent()
-        await runCleanups([
-          () => live.cleanup(),
-          () => parents.cleanup(),
-          () => children.cleanup(),
-        ])
-      }
-    },
-  )
-
-  // A findOne with limit 0 shows no row, so its named correlation value's child must
-  // not load.
-  it(`starts no child acquisition for a findOne with limit 0`, async () => {
-    const calls: Array<string> = []
-    const onDemand = <T extends { id: string }>(name: string, rows: Array<T>) =>
-      createCollection<T, string>({
-        id: `limit-zero-${name}-${nextCollectionId++}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                calls.push(name)
-                begin()
-                for (const value of rows) write({ type: `insert`, value })
-                commit()
-                return true
-              },
-            }
-          },
-        },
-      })
-    const parents = onDemand(`parent`, [{ id: `parent-1` }])
-    const children = onDemand(`child`, [
-      { id: `child-1`, parentId: `parent-1` },
-    ])
-    const live = createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ parent: parents })
-          .where(({ parent }) => eq(parent.id, `parent-1`))
-          .select(({ parent }) => ({
-            id: parent.id,
-            kids: toArray(
-              q
-                .from({ child: children })
-                .where(({ child }) => eq(child.parentId, parent.id)),
-            ),
-          }))
-          .orderBy(({ parent }) => parent.id)
-          .limit(0)
-          .findOne(),
-    })
-    try {
-      await live.toArrayWhenReady()
-      expect(calls).not.toContain(`child`)
-      expect(live.toArray).toEqual([])
-    } finally {
-      await runCleanups([
-        () => live.cleanup(),
-        () => parents.cleanup(),
-        () => children.cleanup(),
-      ])
-    }
-  })
-
-  // A findOne keeps its compiled limit, and setWindow throws for any other
-  // limit. An ordered findOne has a movable window; an unordered one is a
-  // fixed one-row result that rejects offset moves.
-  it(`keeps a findOne's compiled limit and moves only an ordered findOne`, async () => {
-    const rows = createSourceCollection(
-      `find-one-window-rows`,
-      Array.from({ length: 4 }, (_, rank) => ({ id: `row-${rank}`, rank })),
-    )
-    const one = createLiveQueryCollection((q) =>
-      q
-        .from({ row: rows })
-        .orderBy(({ row }) => row.rank)
-        .findOne(),
-    )
-    const none = createLiveQueryCollection((q) =>
-      q
-        .from({ row: rows })
-        .orderBy(({ row }) => row.rank)
-        .limit(0)
-        .findOne(),
-    )
-    const unordered = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).findOne(),
-    )
-    try {
-      await Promise.all([one.preload(), none.preload(), unordered.preload()])
-      expect(() => one.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
-        SetWindowFindOneLimitError,
-      )
-      for (const window of [{ offset: 2 }, { offset: 1, limit: 1 }]) {
-        const settled = one.utils.setWindow(window)
-        if (settled !== true) await settled
-        expect(one.toArray.map((row) => row.id)).toEqual([
-          `row-${window.offset}`,
-        ])
-        expect(one.utils.getWindow()).toEqual({
-          offset: window.offset,
-          limit: 1,
-        })
-      }
-      const moved = none.utils.setWindow({ offset: 1 })
-      if (moved !== true) await moved
-      expect(none.toArray).toEqual([])
-      expect(none.utils.getWindow()).toEqual({ offset: 1, limit: 0 })
-      expect(() => none.utils.setWindow({ limit: 1 })).toThrow(
-        SetWindowFindOneLimitError,
-      )
-      // A window is an ordered view: an unordered findOne keeps offset 0.
-      expect(() => unordered.utils.setWindow({ offset: 1 })).toThrow(
-        SetWindowRequiresOrderByError,
-      )
-      expect(unordered.utils.setWindow({ offset: 0 })).toBe(true)
-      expect(unordered.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-    } finally {
-      await runCleanups([
-        () => one.cleanup(),
-        () => none.cleanup(),
-        () => unordered.cleanup(),
-        () => rows.cleanup(),
-      ])
-    }
-  })
-
-  it.each([`from`, `join`] as const)(
-    `rejects setWindow when only a %s subquery has a window`,
-    async (placement) => {
-      const rows = createSourceCollection(`owner-rows`, [
-        { id: `row-0`, rank: 0 },
-        { id: `row-1`, rank: 1 },
-        { id: `row-2`, rank: 2 },
-      ])
-      const live = createLiveQueryCollection((q) => {
-        const page = q
-          .from({ row: rows })
-          .orderBy(({ row }) => row.rank)
-          .limit(2)
-        return placement === `from`
-          ? q.from({ page })
-          : q
-              .from({ row: rows })
-              .join({ page }, ({ row, page: paged }) => eq(row.id, paged.id))
-      })
-      try {
-        await live.preload()
-        expect(() => live.utils.setWindow({ offset: 1, limit: 2 })).toThrow(
-          SetWindowRequiresOrderByError,
-        )
-      } finally {
-        await runCleanups([() => live.cleanup(), () => rows.cleanup()])
-      }
-    },
-  )
-
-  it(`moves the outer window, not a from subquery's`, async () => {
-    const rows = createSourceCollection(
-      `outer-owner-rows`,
-      Array.from({ length: 6 }, (_, rank) => ({ id: `row-${rank}`, rank })),
-    )
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({
-          page: q
-            .from({ row: rows })
-            .orderBy(({ row }) => row.rank)
-            .limit(4),
-        })
-        .orderBy(({ page }) => page.rank)
-        .limit(2),
-    )
-    try {
-      await live.preload()
-      const settled = live.utils.setWindow({ offset: 2, limit: 2 })
-      if (settled !== true) await settled
-      expect(live.toArray.map((row) => row.id)).toEqual([`row-2`, `row-3`])
-    } finally {
-      await runCleanups([() => live.cleanup(), () => rows.cleanup()])
-    }
-  })
 })

@@ -325,7 +325,22 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const { begin, write, collection, commit, markReady, markError } = params
+      const {
+        begin,
+        write,
+        collection,
+        commit,
+        fail,
+        reportError,
+        reportHealthy,
+      } = params
+      // Readiness of this sync run: a reload runs `sync` again while the
+      // Collection still shows the previous run's status.
+      let ready = false
+      const markReady = () => {
+        ready = true
+        params.markReady()
+      }
       const abortController = new AbortController()
 
       let disposeTracking:
@@ -409,6 +424,9 @@ function createPowerSyncCollectionConfig<
       async function createDiffTrigger(
         options: {
           setupContext?: LockContext
+          // The load reads every row and replaces the rows the Collection
+          // holds.
+          snapshot?: boolean
           when: Record<DiffTriggerOperation, string>
           writeType: (rowId: string) => OperationType
           batchQuery: (
@@ -419,7 +437,7 @@ function createPowerSyncCollectionConfig<
         },
         appliedReceipts: Array<SyncAppliedReceipt>,
       ) {
-        const { setupContext, when, writeType, batchQuery } = options
+        const { setupContext, snapshot, when, writeType, batchQuery } = options
 
         return await database.triggers.createDiffTrigger({
           source: viewName,
@@ -429,19 +447,15 @@ function createPowerSyncCollectionConfig<
           when,
           hooks: {
             beforeCreate: async (context) => {
-              let currentBatchCount = syncBatchSize
-              let cursor = 0
-              while (currentBatchCount == syncBatchSize) {
-                begin()
-
-                const batchItems = await batchQuery(
-                  context,
-                  syncBatchSize,
-                  cursor,
-                )
-                currentBatchCount = batchItems.length
-                cursor += currentBatchCount
-                for (const row of batchItems) {
+              // A load of every row is one snapshot transaction: during a
+              // reload it replaces the kept rows, so a row the table no
+              // longer has goes. A subset load commits each batch. A
+              // transaction begins only once its rows are read, so a batch
+              // that fails leaves none open.
+              const batches: Array<Array<TableType>> = []
+              const apply = () => {
+                begin({ snapshot })
+                for (const row of batches.splice(0).flat()) {
                   write({
                     type: writeType(row.id),
                     value: deserializeSyncRow(row),
@@ -449,6 +463,20 @@ function createPowerSyncCollectionConfig<
                 }
                 appliedReceipts.push(commit())
               }
+              let currentBatchCount = syncBatchSize
+              let cursor = 0
+              while (currentBatchCount == syncBatchSize) {
+                const batchItems = await batchQuery(
+                  context,
+                  syncBatchSize,
+                  cursor,
+                )
+                currentBatchCount = batchItems.length
+                cursor += currentBatchCount
+                batches.push(batchItems)
+                if (!snapshot) apply()
+              }
+              if (snapshot) apply()
               database.logger.log({
                 level: LogLevels.info,
                 message: `Sync is ready for ${viewName} into ${trackedTableName}`,
@@ -597,6 +625,9 @@ function createPowerSyncCollectionConfig<
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
             {
+              // When the Collection holds rows, such as a reload's kept rows,
+              // the load of every row replaces them.
+              snapshot: !collection._state.acceptedSyncedEntries().next().done,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,
                 [DiffTriggerOperation.UPDATE]: `TRUE`,
@@ -625,9 +656,7 @@ function createPowerSyncCollectionConfig<
             message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
           })
-          if (collection.status === `loading`) {
-            markError(error)
-          }
+          if (!ready) fail(error)
         })
 
         const invokeOnUnload = (): void | Promise<void> => {
@@ -733,6 +762,8 @@ function createPowerSyncCollectionConfig<
 
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
+        // Set while a failed rebuild may have left the source untracked.
+        let trackingOutage = false
         const reconcileTracking = async (): Promise<void> => {
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             const revision = trackingRevision
@@ -747,12 +778,11 @@ function createPowerSyncCollectionConfig<
               if (!isCurrent()) return
 
               const active = activeWhereExpressions()
-              // Tracking was absent during an error. Positive baseline rows
+              // Tracking was absent during an outage. Positive baseline rows
               // alone cannot reveal deletes or predicate exits from that gap.
-              const missing =
-                collection.status === `error`
-                  ? new Set(collection.keys())
-                  : undefined
+              const missing = trackingOutage
+                ? new Set(collection.keys())
+                : undefined
               if (active.length > 0) {
                 const combinedWhere =
                   active.length === 1
@@ -808,9 +838,12 @@ function createPowerSyncCollectionConfig<
             await Promise.all(appliedReceipts)
             if (isCurrent()) {
               reconciledTrackingRevision = revision
-              // Replacing the trigger alone is not recovery: its baseline
-              // writes must also be applied before the source is ready again.
-              if (collection.status === `error`) markReady()
+              // Replacing the trigger alone does not restore change tracking:
+              // its baseline writes must also apply before sync works again.
+              if (trackingOutage) {
+                trackingOutage = false
+                reportHealthy()
+              }
             }
           }
         }
@@ -821,9 +854,15 @@ function createPowerSyncCollectionConfig<
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             await (rebuildPromise ??= reconcileTracking()
               .catch((error) => {
-                // A rebuild may already have removed every active diff trigger.
-                // Do not leave healthy consumers ready against a stale source.
-                if (!stopped) markError(error)
+                // A rebuild may already have removed every active diff trigger,
+                // so rows can grow stale. Later demand rebuilds again, so after
+                // Collection readiness this is a failureReason, not fail().
+                if (stopped) {
+                  // Cleanup owns the outcome.
+                } else if (ready) {
+                  trackingOutage = true
+                  reportError(error)
+                } else fail(error)
                 throw error
               })
               .finally(() => {

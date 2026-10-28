@@ -13,6 +13,33 @@ await generateReferenceDocs({
       outputDir: resolve(__dirname, `../docs/reference`),
     },
     {
+      name: `convex-db-collection`,
+      entryPoints: [
+        resolve(__dirname, `../packages/convex-db-collection/src/index.ts`),
+      ],
+      tsconfig: resolve(
+        __dirname,
+        `../packages/convex-db-collection/tsconfig.docs.json`,
+      ),
+      outputDir: resolve(__dirname, `../docs/reference/convex-db-collection`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
+      name: `convex-db-collection/offline`,
+      entryPoints: [
+        resolve(__dirname, `../packages/convex-db-collection/src/offline.ts`),
+      ],
+      tsconfig: resolve(
+        __dirname,
+        `../packages/convex-db-collection/tsconfig.docs.json`,
+      ),
+      outputDir: resolve(
+        __dirname,
+        `../docs/reference/convex-db-collection/offline`,
+      ),
+      exclude: [`packages/db/**/*`, `packages/offline-transactions/**/*`],
+    },
+    {
       name: `electric-db-collection`,
       entryPoints: [
         resolve(__dirname, `../packages/electric-db-collection/src/index.ts`),
@@ -68,6 +95,13 @@ await generateReferenceDocs({
       entryPoints: [resolve(__dirname, `../packages/react-db/src/index.ts`)],
       tsconfig: resolve(__dirname, `../packages/react-db/tsconfig.docs.json`),
       outputDir: resolve(__dirname, `../docs/framework/react/reference`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
+      name: `preact-db`,
+      entryPoints: [resolve(__dirname, `../packages/preact-db/src/index.ts`)],
+      tsconfig: resolve(__dirname, `../packages/preact-db/tsconfig.docs.json`),
+      outputDir: resolve(__dirname, `../docs/framework/preact/reference`),
       exclude: [`packages/db/**/*`],
     },
     {

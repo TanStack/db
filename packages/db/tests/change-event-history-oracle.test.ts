@@ -11,7 +11,21 @@ import {
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import { captureCreatedTransactions } from './utils'
+import {
+  cases,
+  describeSequence,
+  fileIdForKey,
+  mirrorRows,
+  replacement,
+} from './change-event-history-fixture.js'
+import type {
+  Key,
+  Op,
+  OpKind,
+  TestItem,
+} from './change-event-history-fixture.js'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
@@ -56,6 +70,16 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * model. Whether a throwing subscriber may stop a later subscriber of the same
  * publication is not decided here; the throwing subscriber is always last.
  *
+ * A reload may end a history. A local-only Collection has no backend: its
+ * rows are the only copy of the user's writes, so a reload keeps them
+ * (maintainer decision; `initialData` loads only into a Collection that
+ * starts empty, at creation or after cleanup). `reload()` resolves, the
+ * Collection stays `ready`, the public rows equal the model's fold, the
+ * mirror of every delivered message, each valid for its state, equals them,
+ * and a later write through the reloaded run reaches both. The error-handling
+ * guide's adapter obligations also apply: an adapter never inserts a key the
+ * Collection holds.
+ *
  * This partial oracle does not cover failed persistence, sync-transaction
  * cancellation, general callback batch shape, callback-time index agreement, or
  * publications without change messages.
@@ -63,14 +87,6 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * cancellation histories.
  */
 
-interface TestItem extends Record<string, unknown> {
-  id: number
-  name: string
-  fileId: `f1` | `f2`
-}
-
-type OpKind = `insert` | `update` | `delete`
-type Key = 1 | 2 | 3 | 4
 type IndexType = typeof BasicIndex | typeof BTreeIndex
 type SyncActions = Parameters<SyncConfig<TestItem, number>[`sync`]>[0]
 
@@ -80,21 +96,14 @@ type EventProjection = {
   previousValue?: TestItem
 }
 
-const fileIdForKey = (key: number): TestItem[`fileId`] =>
-  key % 2 === 1 ? `f1` : `f2`
-
-interface Op {
-  kind: OpKind
-  key: Key
-  step: number
-}
-
 type GeneratedHistory = {
   initialKeys: ReadonlyArray<Key>
   sequence: ReadonlyArray<Op>
   mode: `batched` | `sequential`
   /** The operation whose publication meets a throwing subscriber. */
   throwOn?: number
+  /** The history ends with a reload. */
+  reload?: boolean
 }
 
 type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
@@ -116,36 +125,6 @@ function opsFromPresence(
     return { kind, key, step: firstStep + index }
   })
 }
-
-/**
- * Every sequence the keyed-presence model permits up to `maxLength`.
- */
-function generateSequences(
-  maxLength: number,
-  keys: ReadonlyArray<Key>,
-  sequence: ReadonlyArray<Op> = [],
-  present: ReadonlySet<Key> = new Set(),
-): Array<Array<Op>> {
-  return keys.flatMap((key) => {
-    const kinds: ReadonlyArray<OpKind> = present.has(key)
-      ? [`update`, `delete`]
-      : [`insert`]
-    return kinds.flatMap((kind) => {
-      const next = [...sequence, { kind, key, step: sequence.length + 1 }]
-      const nextPresent = new Set(present)
-      if (kind === `delete`) nextPresent.delete(key)
-      else nextPresent.add(key)
-      const rest =
-        next.length < maxLength
-          ? generateSequences(maxLength, keys, next, nextPresent)
-          : []
-      return [next, ...rest]
-    })
-  })
-}
-
-const describeSequence = (sequence: ReadonlyArray<Op>): string =>
-  sequence.map((op) => `${op.kind}(${op.key},${op.step})`).join(` -> `)
 
 function applyModelOp(rows: Map<number, TestItem>, op: Op): void {
   if (op.kind === `delete`) rows.delete(op.key)
@@ -261,17 +240,6 @@ function publicRows(
     .sort(([left], [right]) => left - right)
 }
 
-function mirrorRows(
-  mirror: ReadonlyMap<number, TestItem>,
-): Array<readonly [number, TestItem]> {
-  return [...mirror]
-    .map(
-      ([key, row]) =>
-        [key, { id: row.id, name: row.name, fileId: row.fileId }] as const,
-    )
-    .sort(([left], [right]) => left - right)
-}
-
 function assertFinalAgreement(
   collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,
   mirror: ReadonlyMap<number, TestItem>,
@@ -371,6 +339,7 @@ async function runHistory(
   id: string,
   indexType?: IndexType,
   throwOn?: number,
+  reload = false,
 ): Promise<void> {
   const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
     ([, row]) => row,
@@ -512,6 +481,19 @@ async function runHistory(
         if (index) assertIndexAgreement(index, expected)
       }
     }
+    if (reload) {
+      const kept = mirrorRows(expectedRowsAfter(initialKeys, sequence))
+      await collection.reload()
+      expect(collection.status, `status after reload`).toBe(`ready`)
+      expect(publicRows(collection), `a reload keeps the rows`).toEqual(kept)
+      expect(mirrorRows(mirror), `mirror after reload`).toEqual(kept)
+      // The histories use keys 1 to 4, so key 5 is absent.
+      const later = { id: 5, name: `after-reload`, fileId: fileIdForKey(5) }
+      await settle(collection.insert(later))
+      const expected = [...kept, [5, later] as const]
+      expect(publicRows(collection), `write after reload`).toEqual(expected)
+      expect(mirrorRows(mirror), `mirror after write`).toEqual(expected)
+    }
     if (index) {
       await assertIndexedQueryAgreement(
         collection,
@@ -561,6 +543,7 @@ async function verifyGeneratedHistory({
   sequence,
   mode,
   throwOn,
+  reload,
 }: GeneratedHistory): Promise<void> {
   await runHistory(
     sequence,
@@ -569,8 +552,46 @@ async function verifyGeneratedHistory({
     `history-oracle-generated-${initialKeys.join(``)}-${mode}-${describeSequence(sequence)}`,
     undefined,
     throwOn === undefined ? undefined : throwOn % sequence.length,
+    reload,
   )
 }
+
+interface DurationRow extends Record<string, unknown> {
+  id: number
+  duration: Temporal.Duration
+}
+
+// The model's expected field values, and the public observations that must
+// agree with them. Two Durations with the same display text but different
+// intrinsic fields must reach the row, the change message, and the mirror.
+function expectDurationFieldPublication(
+  expected: ReadonlyMap<number, DurationRow>,
+  state: ReadonlyMap<number, DurationRow>,
+  received: ReadonlyArray<ChangeMessage<DurationRow, number>>,
+  mirror: ReadonlyMap<number, DurationRow>,
+): void {
+  const expectedFields = [0, 1000]
+  const fields = (row: DurationRow | undefined) => [
+    row?.duration.seconds,
+    row?.duration.milliseconds,
+  ]
+  expect(fields(expected.get(1))).toEqual(expectedFields)
+  expect(fields(state.get(1))).toEqual(expectedFields)
+  expect(received.map((message) => message.type)).toEqual([`update`])
+  expect(fields(received[0]?.previousValue)).toEqual([1, 0])
+  expect(fields(received[0]?.value)).toEqual(expectedFields)
+  expect(fields(mirror.get(1))).toEqual(expectedFields)
+}
+
+declareOracle({
+  check: [
+    assertFinalAgreement,
+    assertIndexAgreement,
+    runHistory,
+    expectDurationFieldPublication,
+  ],
+  model: [applyModelOp, expectedRowsAfter, expectedEventTrace],
+})
 
 describe(`change-event history oracle`, () => {
   // Published #1519 keeps equivalent Duration forms distinct for query `eq`.
@@ -583,10 +604,6 @@ describe(`change-event history oracle`, () => {
   // This witness covers ordinary same-realm Durations, not altered objects or
   // a requirement to suppress events for a separately allocated equal copy.
   it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
-    interface DurationRow extends Record<string, unknown> {
-      id: number
-      duration: Temporal.Duration
-    }
     let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
     const collection = createCollection<DurationRow, number>({
       id: `duration-field-change-history`,
@@ -637,17 +654,12 @@ describe(`change-event history oracle`, () => {
           sync.write({ type: `update`, value: second })
           expect(sync.commit()).toBe(true)
 
-          const expectedFields = [0, 1000]
-          const fields = (row: DurationRow | undefined) => [
-            row?.duration.seconds,
-            row?.duration.milliseconds,
-          ]
-          expect(fields(expected.get(1))).toEqual(expectedFields)
-          expect(fields(collection.state.get(1))).toEqual(expectedFields)
-          expect(received.map((message) => message.type)).toEqual([`update`])
-          expect(fields(received[0]?.previousValue)).toEqual([1, 0])
-          expect(fields(received[0]?.value)).toEqual(expectedFields)
-          expect(fields(mirror.get(1))).toEqual(expectedFields)
+          expectDurationFieldPublication(
+            expected,
+            collection.state,
+            received,
+            mirror,
+          )
         } finally {
           subscription.unsubscribe()
         }
@@ -751,40 +763,6 @@ describe(`change-event history oracle`, () => {
     [`BasicIndex`, BasicIndex],
     [`BTreeIndex`, BTreeIndex],
   ]
-  const replacement: ReadonlyArray<Op> = [
-    { kind: `delete`, key: 1, step: 1 },
-    { kind: `delete`, key: 2, step: 2 },
-    { kind: `insert`, key: 1, step: 3 },
-    { kind: `insert`, key: 2, step: 4 },
-  ]
-  const oneKeyCases = generateSequences(4, [1]).flatMap((sequence, index) =>
-    ([`batched`, `sequential`] as const).map((mode) => ({
-      mode,
-      sequence,
-      initialKeys: [] as ReadonlyArray<Key>,
-      label: describeSequence(sequence),
-      id: `one-key-${mode}-${index}`,
-    })),
-  )
-  const initialPresence: ReadonlyArray<ReadonlyArray<Key>> = [
-    [],
-    [1],
-    [2],
-    [1, 2],
-  ]
-  const twoKeyCases = initialPresence.flatMap((initialKeys, initialIndex) =>
-    generateSequences(3, [1, 2], [], new Set(initialKeys)).flatMap(
-      (sequence, index) =>
-        ([`batched`, `sequential`] as const).map((mode) => ({
-          mode,
-          sequence,
-          initialKeys,
-          label: describeSequence(sequence),
-          id: `two-key-${initialIndex}-${mode}-${index}`,
-        })),
-    ),
-  )
-  const cases = [...oneKeyCases, ...twoKeyCases]
 
   const generatedHistory = fc
     .record({
@@ -800,10 +778,11 @@ describe(`change-event history oracle`, () => {
       // About two histories in three arm a throwing subscriber; about one in
       // four reaches the operation it throws on.
       throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
+      reload: fc.boolean(),
     })
-    .map(({ initialKeys, steps, mode, throwOn }) => {
+    .map(({ initialKeys, steps, mode, throwOn, reload }) => {
       const sequence = opsFromPresence(initialKeys, steps, 1)
-      return { initialKeys, sequence, mode, throwOn }
+      return { initialKeys, sequence, mode, throwOn, reload }
     })
 
   // The fixed prefix forces reused keys through an already-built index.
@@ -823,39 +802,6 @@ describe(`change-event history oracle`, () => {
       const tail = opsFromPresence([1, 2], steps, replacement.length + 1)
       return { initialKeys: [1, 2], sequence: [...replacement, ...tail], mode }
     })
-
-  it(`reaches reinsertion and rejects missing or extra mirrored rows`, () => {
-    const witness: Array<Op> = [
-      { kind: `insert`, key: 1, step: 1 },
-      { kind: `delete`, key: 1, step: 2 },
-      { kind: `insert`, key: 1, step: 3 },
-    ]
-    expect(generateSequences(4, [1])).toContainEqual(witness)
-    expect(oneKeyCases).toHaveLength(22)
-    expect(twoKeyCases).toHaveLength(344)
-    expect(generateSequences(3, [1, 2], [], new Set<Key>([1]))).toContainEqual([
-      { kind: `update`, key: 1, step: 1 },
-      { kind: `insert`, key: 2, step: 2 },
-      { kind: `delete`, key: 1, step: 3 },
-    ])
-    expect(
-      generateSequences(3, [1, 2], [], new Set<Key>([1])),
-    ).not.toContainEqual([{ kind: `insert`, key: 1, step: 1 }])
-    expect(new Set(cases.map(({ id }) => id)).size).toBe(cases.length)
-    const expected = [[1, { id: 1, name: `v3`, fileId: `f1` }]]
-    expect(mirrorRows(new Map())).not.toEqual(expected)
-    expect(
-      mirrorRows(new Map([[1, { id: 1, name: `wrong`, fileId: `f1` }]])),
-    ).not.toEqual(expected)
-    expect(
-      mirrorRows(
-        new Map([
-          [1, { id: 1, name: `v3`, fileId: `f1` }],
-          [2, { id: 2, name: `ghost`, fileId: `f2` }],
-        ]),
-      ),
-    ).not.toEqual(expected)
-  })
 
   it(`rejects a deferred message with the right name but wrong row fields`, () => {
     const sequence: Array<Op> = [
@@ -942,6 +888,23 @@ describe(`change-event history oracle`, () => {
     `$id: $label reconstructs every public row`,
     async ({ mode, sequence, initialKeys, id }) => {
       await runHistory(sequence, initialKeys, mode, `history-oracle-${id}`)
+    },
+  )
+
+  // Every bounded history again, ending with a reload. It includes the
+  // reported trace: initialData [1], update 1, reload.
+  it.each(cases)(
+    `$id: $label then reload reconstructs every public row`,
+    async ({ mode, sequence, initialKeys, id }) => {
+      await runHistory(
+        sequence,
+        initialKeys,
+        mode,
+        `history-oracle-reload-${id}`,
+        undefined,
+        undefined,
+        true,
+      )
     },
   )
 

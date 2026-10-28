@@ -7,7 +7,7 @@ title: LiveInfiniteQueryConfig
 type LiveInfiniteQueryConfig<_TRow> = InfiniteQueryOptions;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:42](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L42)
+Defined in: [useLiveInfiniteQuery.ts:29](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L29)
 
 ## Type Parameters
 

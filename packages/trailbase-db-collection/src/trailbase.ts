@@ -185,7 +185,7 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, fail, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
@@ -240,7 +240,8 @@ export function trailBaseCollectionOptions<
       // Load (more) data.
       // A caller that aborts sees `AbortError`. Pages a commit accepted still
       // apply, and the load waits until they are visible; cleanup is quiet.
-      async function load(opts: LoadSubsetOptions) {
+      // `everyRow` marks the eager load, which lists every row.
+      async function load(opts: LoadSubsetOptions, everyRow = false) {
         if (cancelled) return
         if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
         if (!listening) {
@@ -269,6 +270,7 @@ export function trailBaseCollectionOptions<
           return
         }
         const appliedPages: Array<Promise<void>> = []
+        const listed = new Set<TKey>()
 
         loadsInFlight++
         try {
@@ -307,6 +309,7 @@ export function trailBaseCollectionOptions<
             for (let i = 0; i < Math.min(length, remaining); ++i) {
               const value = parse(response.records[i]!)
               const key = getKey(value)
+              listed.add(key)
               // The listener already applied a newer change for this row.
               if ((eventSequenceByKey.get(key) ?? 0) > listedAfter) continue
               // A page row is a full row. An update creates a missing row and
@@ -346,6 +349,22 @@ export function trailBaseCollectionOptions<
             } else {
               cursor = response.cursor
             }
+          }
+          // A reload keeps the retired run's rows, and the pages update them.
+          // The eager load lists every row, so a held row that it did not
+          // list and that no change event touched is gone.
+          // Only the gone keys are collected, since a write during the walk
+          // would change the entries it reads.
+          const gone: Array<TKey> = []
+          if (everyRow)
+            for (const [key] of collection._state.acceptedSyncedEntries())
+              if (!listed.has(key) && !eventSequenceByKey.has(key))
+                gone.push(key)
+          if (gone.length > 0) {
+            begin()
+            for (const key of gone) write({ type: `delete`, key })
+            const applied = commit()
+            if (applied !== true) appliedPages.push(applied)
           }
         } finally {
           if (--loadsInFlight === 0) eventSequenceByKey.clear()
@@ -397,6 +416,20 @@ export function trailBaseCollectionOptions<
         }
       }
 
+      // The adapter does not resubscribe, so it stops when its stream ends;
+      // the first end reports why, and core ignores a later fail() in the same
+      // run. A later stream failure is only logged. These flags belong to this
+      // sync run: a reload runs `sync` again while the Collection still shows
+      // the previous run's status.
+      let streamEnded = false
+      function reportStreamEnd(error: unknown, closed = false) {
+        if (cancelled) return
+        if (streamEnded && !closed)
+          console.error(`TrailBase subscription failed`, error)
+        streamEnded = true
+        fail(error)
+      }
+
       async function start() {
         let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
@@ -421,34 +454,32 @@ export function trailBaseCollectionOptions<
               subscribedReader.releaseLock()
               if (eventReader === subscribedReader) eventReader = undefined
             })
-            .catch((error: unknown) => {
-              if (!cancelled && collection.status === `loading`) {
-                markError(error)
-              } else if (!cancelled) {
-                console.error(`TrailBase subscription failed`, error)
-              }
-            })
+            .then(
+              () =>
+                reportStreamEnd(
+                  new Error(`TrailBase change stream closed`),
+                  true,
+                ),
+              (error: unknown) => reportStreamEnd(error),
+            )
           listening = true
           settleListener()
 
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
-            await load({})
+            await load({}, true)
             if (cancelled) return
             fullSyncCompleted = true
           }
-          if (!cancelled && collection.status === `loading`) {
-            markReady()
-          }
+          // After this run's fail(), markReady() does nothing.
+          if (!cancelled) markReady()
         } catch (error) {
-          // An abandoned startup must not cancel a replacement session's reader.
+          // An abandoned startup must not cancel a replacement provider session's reader.
           if (cancelled) return
           settleListener({ error })
           cancelEventReader()
-          if (collection.status === `loading`) {
-            markError(error)
-          }
+          reportStreamEnd(error, true)
           return
         }
 

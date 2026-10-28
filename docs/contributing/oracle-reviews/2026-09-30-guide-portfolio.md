@@ -115,7 +115,7 @@ Revised means changed in executable revision 7e4266bb; retained means the assign
 | packages/db/tests/live-query-observer-history.property.test.ts | revised |
 | packages/db/tests/mutation-handler-type-oracle.test-d.ts | revised |
 | packages/db/tests/optimistic-transaction-oracle.property.test.ts | revised |
-| packages/db/tests/oracle-replay.fixture.test.ts | retained |
+| packages/db/tests/replay-guard-calibration.fixture.test.ts | retained |
 | packages/db/tests/oracle-replay.test.ts | revised |
 | packages/db/tests/paced-mutations-oracle.test.ts | retained |
 | packages/db/tests/query/cold-join-reconciliation-oracle.test.ts | revised |

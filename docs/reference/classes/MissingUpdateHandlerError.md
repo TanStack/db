@@ -3,7 +3,7 @@ id: MissingUpdateHandlerError
 title: MissingUpdateHandlerError
 ---
 
-Defined in: [packages/db/src/errors.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L364)
+Defined in: [packages/db/src/errors.ts:394](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L394)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:364](https://github.com/TanStack/db/blob/
 new MissingUpdateHandlerError(): MissingUpdateHandlerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L365)
+Defined in: [packages/db/src/errors.ts:395](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L395)
 
 #### Returns
 

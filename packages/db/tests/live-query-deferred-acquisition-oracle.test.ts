@@ -36,8 +36,13 @@
  * asynchronously. Over eager source Collections that resumption is
  * synchronous.
  *
+ * A committed subscriber, including one that resumes deferred acquisition,
+ * owns its demand independently of an abandoned render's sync-start deferral.
+ * Its admission releases that deferral. A failed sync start remains an error
+ * in that run; releasing the old render handle does not implicitly retry it.
+ *
  * Limits: source Collections load synchronously, so every checkpoint is
- * settled. The grammar crosses five source states, two query shapes, and one or
+ * settled. The grammar crosses seven source states, two query shapes, and one or
  * two live-query levels, with one peer consumer and one truncate before the
  * first subscriber. It does not generate source failure, asynchronous loads,
  * or several live-query consumers; the subscription lifecycle oracle owns
@@ -45,67 +50,39 @@
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
-import { describe, expect, it, vi } from 'vitest'
-import {
-  BTreeIndex,
-  DbClient,
-  collectionOptions,
-  createCollection,
-  createLiveQueryCollection,
-  createLiveQueryObserver,
-  eq,
-  getLiveQueryHash,
-  prepareLiveQueryValue,
-} from '../src'
+import { describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { createCollection } from '../src'
+import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
-import type { Collection, LiveQueryObserver } from '../src'
-
-type Row = { id: string; rank: number; group: string }
-const ROWS: Array<Row> = [
-  { id: `a`, rank: 1, group: `g` },
-  { id: `b`, rank: 2, group: `g` },
-  { id: `c`, rank: 3, group: `g` },
-]
-
-/**
- * ## Source states
- *
- * `-running` and `-holding` source Collections already started their sync
- * run, by `startSync: true`, before any live-query Collection exists. An eager
- * source Collection writes every row when its sync run starts. An on-demand
- * source Collection writes rows only for an acquisition attempt, except that
- * `on-demand-holding` already holds every row, as it would after another
- * consumer's acquisition. Each fixture counts sync-run starts and acquisition
- * attempts: those are its provider work.
- */
-type SourceState =
-  | `eager-idle`
-  | `eager-running`
-  | `on-demand-idle`
-  | `on-demand-running`
-  | `on-demand-holding`
+import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { createOracleReach } from './oracle-reach.js'
+import { declareOracle } from './oracle-declaration.js'
+import {
+  EXPECTED_IDS,
+  QUERY_SHAPES,
+  makeLiveQuery,
+  makeSource,
+  pooledQuery,
+  settle,
+} from './live-query-deferred-acquisition-support.js'
+import type {
+  QueryShape,
+  Row,
+  SourceState,
+} from './live-query-deferred-acquisition-support.js'
 
 const SOURCE_STATES: Array<SourceState> = [
   `eager-idle`,
   `eager-running`,
+  `eager-render-deferred`,
   `on-demand-idle`,
   `on-demand-running`,
   `on-demand-holding`,
+  `on-demand-render-deferred`,
 ]
-
-/**
- * ## Query shapes
- *
- * `all` reads every row. `window` orders by rank and keeps a limit of two,
- * which uses the ordered loading path.
- */
-type QueryShape = `all` | `window`
-const QUERY_SHAPES: Array<QueryShape> = [`all`, `window`]
-const EXPECTED_IDS: Record<QueryShape, Array<string>> = {
-  all: [`a`, `b`, `c`],
-  window: [`a`, `b`],
-}
 
 /**
  * ## History grammar
@@ -113,6 +90,8 @@ const EXPECTED_IDS: Record<QueryShape, Array<string>> = {
  * Commands act on the outermost live-query Collection, which is the only
  * public Collection in the history. `start` starts its sync run, as a
  * framework render or `startSync: true` does. `subscribe` adds a subscriber.
+ * `defer-subscribe` adds logical demand without acquisition; `resume` makes
+ * that subscription ask for data independently of an earlier render.
  * `preload` asks for its data. `cleanup` ends its sync run. Two commands act
  * on the source Collection instead, and neither is a subscriber or a preload
  * of the live-query Collection: `peer` adds another consumer that subscribes
@@ -124,6 +103,8 @@ type Command =
   | `start`
   | `read`
   | `subscribe`
+  | `defer-subscribe`
+  | `resume`
   | `unsubscribe`
   | `preload`
   | `cleanup`
@@ -135,6 +116,19 @@ const HISTORIES: Record<string, Array<Command>> = {
   'subscribe after start': [`start`, `read`, `subscribe`],
   'preload after start': [`start`, `preload`],
   'subscribe without a prior start': [`subscribe`],
+  'resume deferred acquisition after start': [
+    `start`,
+    `defer-subscribe`,
+    `read`,
+    `resume`,
+    `read`,
+  ],
+  'resume deferred acquisition without a prior start': [
+    `defer-subscribe`,
+    `read`,
+    `resume`,
+    `read`,
+  ],
   'preload without a prior start': [`preload`],
   'cleanup before a subscriber, then subscribe': [
     `start`,
@@ -227,6 +221,7 @@ function applyModel(
   const next = { ...model }
   switch (command) {
     case `start`:
+    case `defer-subscribe`:
       next.syncRunning = true
       break
     case `read`:
@@ -235,6 +230,7 @@ function applyModel(
       // subscription, so unsubscribing does not defer acquisition again.
       break
     case `subscribe`:
+    case `resume`:
     case `preload`:
       next.syncRunning = true
       next.subscriberOrPreload = true
@@ -300,94 +296,6 @@ function applyModel(
 }
 
 /**
- * ## Production driver
- *
- * Real Collections only. The source Collection counts its own provider work.
- * The driver reads the outer live-query Collection's status right after each
- * command returns, for the synchronous observation cut, and its status and
- * rows again after the history settles.
- */
-let sequence = 0
-
-function makeSource(state: SourceState) {
-  const counts = { starts: 0, acquisitions: 0 }
-  const onDemand = state.startsWith(`on-demand`)
-  const written = new Set<string>()
-  // Set while a sync run is active: replaces the source's rows, as a
-  // must-refetch does. An eager source writes every row again.
-  let truncateRows: (() => void) | undefined
-  const collection = createCollection<Row>({
-    id: `deferred-acquisition-${sequence++}`,
-    getKey: (row) => row.id,
-    syncMode: onDemand ? `on-demand` : `eager`,
-    startSync: state !== `eager-idle` && state !== `on-demand-idle`,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    gcTime: 0,
-    sync: {
-      sync: ({ begin, write, commit, markReady, truncate }) => {
-        counts.starts++
-        const writeAll = () => {
-          begin()
-          for (const row of ROWS) {
-            if (written.has(row.id)) continue
-            written.add(row.id)
-            write({ type: `insert`, value: row })
-          }
-          commit()
-        }
-        if (!onDemand || state === `on-demand-holding`) writeAll()
-        truncateRows = () => {
-          begin()
-          truncate()
-          commit()
-          written.clear()
-          if (!onDemand) writeAll()
-        }
-        markReady()
-        if (!onDemand) return
-        return {
-          loadSubset: () => {
-            counts.acquisitions++
-            writeAll()
-            return true
-          },
-        }
-      },
-    },
-  })
-  return { collection, counts, truncate: () => truncateRows?.() }
-}
-
-function makeLiveQuery(
-  source: Collection<Row, string | number, any>,
-  shape: QueryShape,
-  depth: 1 | 2,
-) {
-  const read = (q: any, from: unknown) => {
-    const base = q
-      .from({ row: from })
-      .orderBy(({ row }: any) => row.rank, `asc`)
-    return shape === `window` ? base.limit(2) : base
-  }
-  const inner = createLiveQueryCollection({
-    query: (q) => read(q, source),
-    gcTime: 0,
-  })
-  if (depth === 1) return { outer: inner, collections: [inner] }
-  const outer = createLiveQueryCollection({
-    query: (q) => read(q, inner),
-    gcTime: 0,
-  })
-  return { outer, collections: [outer, inner] }
-}
-
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 4; turn++) await Promise.resolve()
-  await new Promise((resolve) => setTimeout(resolve, 0))
-}
-
-/**
  * ## Refinement check
  *
  * After every command the driver compares the source Collection's added
@@ -395,101 +303,115 @@ async function settle(): Promise<void> {
  * rows with the model. A failure names the source state, query shape, depth,
  * history, and step.
  */
+async function runAcquisitionHistory(
+  state: SourceState,
+  shape: QueryShape,
+  depth: 1 | 2,
+  commands: ReadonlyArray<Command>,
+): Promise<void> {
+  const {
+    collection: source,
+    counts,
+    truncate: truncateSource,
+  } = makeSource(state)
+  const { outer, collections } = makeLiveQuery(source, shape, depth)
+  let peer: { unsubscribe: () => void } | undefined
+  let model = initialModel(state)
+  let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
+  try {
+    for (const [step, command] of commands.entries()) {
+      const before = { ...counts }
+      let pending: Promise<void> | undefined
+      switch (command) {
+        case `start`:
+          outer.startSyncImmediate()
+          break
+        case `read`:
+          break
+        case `subscribe`:
+          subscription = outer.subscribeChanges(() => {}, {
+            includeInitialState: true,
+          })
+          break
+        case `defer-subscribe`:
+          subscription = outer.subscribeChanges(() => {}, {
+            includeInitialState: true,
+            deferAcquisition: true,
+          })
+          break
+        case `resume`:
+          subscription!.resumeDeferredAcquisition()
+          break
+        case `unsubscribe`:
+          subscription?.unsubscribe()
+          subscription = undefined
+          break
+        case `preload`:
+          pending = outer.preload()
+          break
+        case `cleanup`:
+          subscription?.unsubscribe()
+          subscription = undefined
+          pending = outer.cleanup()
+          break
+        case `peer`:
+          peer = source.subscribeChanges(() => {})
+          break
+        case `truncate`:
+          truncateSource()
+          break
+      }
+      const statusAtCall = outer.status
+      await pending
+      await settle()
+      const result = applyModel(state, shape, depth, model, command)
+      model = result.next
+      const { expected } = result
+      const where = `${command} at step ${step}`
+
+      expect(
+        counts.starts - before.starts,
+        `${where}: source sync-run starts`,
+      ).toBe(expected.startsAdded)
+      const attempts = counts.acquisitions - before.acquisitions
+      if (expected.acquisitions === `none`) {
+        expect(attempts, `${where}: acquisition attempts`).toBe(0)
+      } else {
+        expect(attempts, `${where}: acquisition attempts`).toBeGreaterThan(0)
+      }
+      if (expected.readyAtCall) {
+        expect(statusAtCall, `${where}: ready before the call returns`).toBe(
+          `ready`,
+        )
+      }
+      if (expected.ready !== `unchecked`) {
+        expect(
+          outer.status === `ready`,
+          `${where}: initial-query readiness (status ${outer.status})`,
+        ).toBe(expected.ready)
+      }
+      if (expected.ids !== `unchecked`) {
+        expect(
+          outer.toArray.map((row) => row.id),
+          `${where}: rows`,
+        ).toEqual(expected.ids)
+      }
+    }
+  } finally {
+    subscription?.unsubscribe()
+    peer?.unsubscribe()
+    for (const collection of collections) await collection.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`live-query deferred acquisition`, () => {
   for (const state of SOURCE_STATES) {
     for (const shape of QUERY_SHAPES) {
       for (const depth of [1, 2] as const) {
         for (const [name, commands] of Object.entries(HISTORIES)) {
           it(`${state}, ${shape}, depth ${depth}: ${name}`, async () => {
-            const {
-              collection: source,
-              counts,
-              truncate: truncateSource,
-            } = makeSource(state)
-            const { outer, collections } = makeLiveQuery(source, shape, depth)
-            let peer: { unsubscribe: () => void } | undefined
-            let model = initialModel(state)
-            let subscription: { unsubscribe: () => void } | undefined
-            try {
-              for (const [step, command] of commands.entries()) {
-                const before = { ...counts }
-                let pending: Promise<void> | undefined
-                switch (command) {
-                  case `start`:
-                    outer.startSyncImmediate()
-                    break
-                  case `read`:
-                    break
-                  case `subscribe`:
-                    subscription = outer.subscribeChanges(() => {}, {
-                      includeInitialState: true,
-                    })
-                    break
-                  case `unsubscribe`:
-                    subscription?.unsubscribe()
-                    subscription = undefined
-                    break
-                  case `preload`:
-                    pending = outer.preload()
-                    break
-                  case `cleanup`:
-                    subscription?.unsubscribe()
-                    subscription = undefined
-                    pending = outer.cleanup()
-                    break
-                  case `peer`:
-                    peer = source.subscribeChanges(() => {})
-                    break
-                  case `truncate`:
-                    truncateSource()
-                    break
-                }
-                const statusAtCall = outer.status
-                await pending
-                await settle()
-                const result = applyModel(state, shape, depth, model, command)
-                model = result.next
-                const { expected } = result
-                const where = `${command} at step ${step}`
-
-                expect(
-                  counts.starts - before.starts,
-                  `${where}: source sync-run starts`,
-                ).toBe(expected.startsAdded)
-                const attempts = counts.acquisitions - before.acquisitions
-                if (expected.acquisitions === `none`) {
-                  expect(attempts, `${where}: acquisition attempts`).toBe(0)
-                } else {
-                  expect(
-                    attempts,
-                    `${where}: acquisition attempts`,
-                  ).toBeGreaterThan(0)
-                }
-                if (expected.readyAtCall) {
-                  expect(
-                    statusAtCall,
-                    `${where}: ready before the call returns`,
-                  ).toBe(`ready`)
-                }
-                if (expected.ready !== `unchecked`) {
-                  expect(
-                    outer.status === `ready`,
-                    `${where}: initial-query readiness (status ${outer.status})`,
-                  ).toBe(expected.ready)
-                }
-                if (expected.ids !== `unchecked`) {
-                  expect(
-                    outer.toArray.map((row) => row.id),
-                    `${where}: rows`,
-                  ).toEqual(expected.ids)
-                }
-              }
-            } finally {
-              subscription?.unsubscribe()
-              peer?.unsubscribe()
-              for (const collection of collections) await collection.cleanup()
-              await source.cleanup()
-            }
+            return runAcquisitionHistory(state, shape, depth, commands)
           })
         }
       }
@@ -512,69 +434,70 @@ describe(`live-query deferred acquisition`, () => {
  * client, which must not mistake the absent config for a live-query builder.
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
-const pooledQuery =
-  (source: Collection<Row, string | number, any>) => (q: any) =>
-    q
-      .from({ row: source })
-      .where(({ row }: any) => eq(row.group, `g`))
-      .orderBy(({ row }: any) => row.rank, `asc`)
+declareOracle({
+  check: [runAcquisitionHistory, runPooledHistory],
+  model: [initialModel, applyModel, expectedReplacementRun],
+})
+
+async function runPooledHistory(
+  state: SourceState,
+  commands: ReadonlyArray<Command>,
+): Promise<void> {
+  const { collection: source, counts } = makeSource(state)
+  let view: any
+  let model = initialModel(state)
+  let subscription: { unsubscribe: () => void } | undefined
+  try {
+    for (const [step, command] of commands.entries()) {
+      const before = { ...counts }
+      switch (command) {
+        case `start`:
+          view = createPooledLiveQuery(pooledQuery(source)(new Query()), {
+            gcTime: 0,
+          })
+          expect(view, `the query is poolable`).toBeDefined()
+          break
+        case `read`:
+          break
+        case `subscribe`:
+          subscription = view.subscribeChanges(() => {})
+          break
+        case `preload`:
+          await view.preload()
+          break
+        default:
+          throw new Error(`pooled history uses no ${command}`)
+      }
+      await settle()
+      const result = applyModel(state, `all`, 1, model, command)
+      model = result.next
+      const { expected } = result
+      const where = `${command} at step ${step}`
+      expect(
+        counts.starts - before.starts,
+        `${where}: source sync-run starts`,
+      ).toBe(expected.startsAdded)
+      if (expected.ready !== `unchecked`) {
+        expect(
+          view.status === `ready`,
+          `${where}: initial-query readiness (status ${view.status})`,
+        ).toBe(expected.ready)
+      }
+      if (expected.ids !== `unchecked`) {
+        expect(
+          Array.from(view.entries(), ([, row]: [unknown, Row]) => row.id),
+          `${where}: rows`,
+        ).toEqual(expected.ids)
+      }
+    }
+  } finally {
+    subscription?.unsubscribe()
+    await view?.cleanup()
+    await source.cleanup({ dependents: true })
+  }
+}
 
 describe(`pooled live-query deferred acquisition`, () => {
-  it.each([
-    [`eager-idle`, `no SSR cleanup client`],
-    [`eager-running`, `no SSR cleanup client`],
-    [`eager-idle`, `an SSR cleanup client`],
-    [`eager-running`, `an SSR cleanup client`],
-  ] as const)(
-    `an observer preload reaches a config-free pooled view from %s with %s`,
-    async (state, clientMode) => {
-      const { collection: source, counts } = makeSource(state)
-      const view = createPooledLiveQuery(pooledQuery(source)(new Query()), {
-        gcTime: 0,
-      })
-      expect(view, `the query is poolable`).toBeDefined()
-      const client =
-        clientMode === `an SSR cleanup client` ? new DbClient() : undefined
-      client?._setSsrServerCleanupEnabled(true)
-      let observer: LiveQueryObserver<Row, string | number> | undefined
-      let constructionError: unknown
-      try {
-        observer = createLiveQueryObserver(view as Collection<Row>, {
-          client,
-          queryHash: `config-free-pooled-view`,
-        })
-      } catch (error) {
-        constructionError = error
-      }
-      try {
-        expect(
-          constructionError,
-          `observer construction succeeds`,
-        ).toBeUndefined()
-        if (!observer) throw new Error(`missing observer after construction`)
-        // Model: explicit demand starts an idle source once. An already
-        // running source needs no second start for the same public rows.
-        const startsBefore = counts.starts
-        await expect(
-          Promise.resolve().then(() => observer.preload()),
-          `observer preload succeeds`,
-        ).resolves.toBeUndefined()
-        await settle()
-        expect(counts.starts - startsBefore, `new source starts`).toBe(
-          state === `eager-idle` ? 1 : 0,
-        )
-        expect(observer.getSnapshot().status).toBe(`ready`)
-        const rows = observer.getSnapshot().data as ReadonlyArray<Row>
-        expect(rows.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
-      } finally {
-        observer?.dispose()
-        await view?.cleanup()
-        await source.cleanup()
-        await client?.cleanup()
-      }
-    },
-  )
-
   const pooledHistories: Record<string, Array<Command>> = {
     'build and read without a subscriber': [`start`, `read`],
     'subscribe after build': [`start`, `read`, `subscribe`],
@@ -583,756 +506,244 @@ describe(`pooled live-query deferred acquisition`, () => {
   for (const state of [`eager-idle`, `eager-running`] as const) {
     for (const [name, commands] of Object.entries(pooledHistories)) {
       it(`${state}: ${name}`, async () => {
-        const { collection: source, counts } = makeSource(state)
-        let view: any
-        let model = initialModel(state)
-        let subscription: { unsubscribe: () => void } | undefined
-        try {
-          for (const [step, command] of commands.entries()) {
-            const before = { ...counts }
-            switch (command) {
-              case `start`:
-                view = createPooledLiveQuery(pooledQuery(source)(new Query()), {
-                  gcTime: 0,
-                })
-                expect(view, `the query is poolable`).toBeDefined()
-                break
-              case `read`:
-                break
-              case `subscribe`:
-                subscription = view.subscribeChanges(() => {})
-                break
-              case `preload`:
-                await view.preload()
-                break
-              default:
-                throw new Error(`pooled history uses no ${command}`)
-            }
-            await settle()
-            const result = applyModel(state, `all`, 1, model, command)
-            model = result.next
-            const { expected } = result
-            const where = `${command} at step ${step}`
-            expect(
-              counts.starts - before.starts,
-              `${where}: source sync-run starts`,
-            ).toBe(expected.startsAdded)
-            if (expected.ready !== `unchecked`) {
-              expect(
-                view.status === `ready`,
-                `${where}: initial-query readiness (status ${view.status})`,
-              ).toBe(expected.ready)
-            }
-            if (expected.ids !== `unchecked`) {
-              expect(
-                Array.from(view.entries(), ([, row]: [unknown, Row]) => row.id),
-                `${where}: rows`,
-              ).toEqual(expected.ids)
-            }
-          }
-        } finally {
-          subscription?.unsubscribe()
-          await view?.cleanup()
-          await source.cleanup()
-        }
+        return runPooledHistory(state, commands)
       })
     }
   }
 })
 
 /**
- * ## A preload answered by a DbClient stream
- *
- * During SSR streaming, a DbClient may already hold a pending or settled
- * stream for a query. The observer's preload then returns that stream instead
- * of preloading the live-query Collection. It is still a request for the
- * Collection's data, so it counts as a preload: deferred acquisition resumes
- * and the idle source Collection starts its sync run.
+ * After cleanup during admission, the replacement run's subscriber count,
+ * readiness, and acquisition follow from how the surviving subscriber read.
+ * Only a handle that returned as acquiring is demand for the next run; a
+ * still-deferred handle contributes none. So a deferred reader leaves the
+ * replacement unready unless the source is eager and idle, and the replacement
+ * acquires only for an on-demand idle source that a non-deferred reader keeps.
  */
-describe(`preload answered by a DbClient stream`, () => {
-  for (const stream of [`pending`, `success`] as const) {
-    it(`a ${stream} stream still resumes deferred acquisition`, async () => {
-      const { collection: source, counts } = makeSource(`eager-idle`)
-      const { outer } = makeLiveQuery(source, `all`, 1)
-      const client = new DbClient()
-      const queryHash = `deferred-acquisition-stream-${stream}`
-      const registered = client._registerLiveQuery(
-        queryHash,
-        stream === `pending`
-          ? new Promise<never>(() => {})
-          : Promise.resolve(undefined as never),
-      )
-      if (stream === `success`) await registered
-      const observer = createLiveQueryObserver(outer, { client, queryHash })
-      try {
-        outer.startSyncImmediate()
-        await settle()
-        expect(counts.starts, `before the preload`).toBe(0)
-        void observer.preload()
-        await settle()
-        expect(counts.starts, `after the preload`).toBe(1)
-        expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
-      } finally {
-        observer.dispose()
-        await outer.cleanup()
-        await source.cleanup()
-      }
-    })
+function expectedReplacementRun(
+  state: SourceState,
+  reader: `ordinary` | `resumed` | `deferred`,
+) {
+  return {
+    acquiring: reader === `deferred` ? 0 : 1,
+    ready: reader !== `deferred` || state === `eager-idle`,
+    acquires: reader !== `deferred` && state === `on-demand-idle`,
   }
-})
+}
 
-/**
- * A DbClient preload owns the release of every source it prepared. If the
- * first source's sync run throws, that error belongs to the failed query;
- * the later healthy source still gets its release and can serve a direct
- * reader. The model needs only two independent start counts: zero before
- * preload, one for each after release. The public checkpoint is the failed
- * preload followed by readiness of the second source Collection.
- * The failed call has no result to stream. A dehydration request at the
- * synchronous error cut must not publish its pending query promise, even when
- * the caller opts to stream pending queries.
- * A later same-hash preload over a healthy replacement source must publish
- * that source's row; the failed attempt has no result to reuse.
- * The same options can be retried, but the failed source Collection remains
- * in error until explicitly restarted. That retry must report the source error
- * rather than wait on the failed query's former pending stream. A controlled
- * later `markError` crosses the asynchronous failure cut: the pending preload
- * rejects, its stream disappears, and a healthy replacement of the same
- * query hash can publish its own row while the peer source remains ready. A
- * failed stream has no reusable result, so a replacement observer may attach
- * through the same hash before a new preload. Its public snapshot must show
- * the replacement row as ready, with no stale stream error. The active-stream
- * identity rule also applies before that failure: a different same-hash
- * preload rejects while the original stream is pending. A synchronous source
- * throw crosses the same recovery law at a different cut. After the peer source
- * becomes ready, a replacement observer may attach before a new client preload
- * and must read only the replacement row. These fixed histories do not claim
- * all failure schedules or concurrent replacement observers.
- */
-describe(`DbClient preload releases independent source starts`, () => {
-  it(`retire a pending stream after asynchronous source startup failure`, async () => {
-    const failure = new Error(`late source startup failure`)
-    let failFirst!: () => void
-    let firstStarts = 0
-    let secondStarts = 0
-    const first = collectionOptions(`preload-async-first`, () => ({
-      id: `preload-async-first`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ markError }) => {
-          firstStarts++
-          failFirst = () => markError(failure)
-        },
-      },
-    }))
-    const second = collectionOptions(`preload-async-second`, () => ({
-      id: `preload-async-second`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ markReady }) => {
-          secondStarts++
-          markReady()
-        },
-      },
-    }))
-    const replacement = createCollection({
-      id: `preload-async-first`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: `recovered` } })
-          commit()
-          markReady()
-        },
-      },
-    })
-    const secondBranch = () =>
-      new Query().from({ second }).select(({ second: row }) => ({ id: row.id }))
-    const failedQuery = new Query().unionAll(
-      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
-      secondBranch(),
-    )
-    const recoveredQuery = new Query().unionAll(
-      new Query()
-        .from({ first: replacement })
-        .select(({ first: row }) => ({ id: row.id })),
-      secondBranch(),
-    )
-    const client = new DbClient()
-
-    try {
-      const pending = client.preloadLiveQuery({ query: failedQuery })
-      expect([firstStarts, secondStarts]).toEqual([1, 1])
-      expect(
-        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
-      ).toHaveLength(1)
-      // Model: the pending result still belongs to the original sources.
-      // The replacement becomes legal only after this stream fails.
-      expect(() => client.preloadLiveQuery({ query: recoveredQuery })).toThrow(
-        /different source Collections/,
-      )
-      expect(
-        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
-      ).toHaveLength(1)
-
-      failFirst()
-      await expect(pending).rejects.toThrow(/entered error state/)
-      expect(
-        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
-      ).toBeUndefined()
-      expect(client.collection(second).status).toBe(`ready`)
-
-      // Model: failure retired the first result. The observer's subscription
-      // is a new local demand for the healthy replacement, so it may attach
-      // and must show that source's row at the settled-read checkpoint.
-      const queryHash = getLiveQueryHash({ query: failedQuery })
-      expect(getLiveQueryHash({ query: recoveredQuery })).toBe(queryHash)
-      const prepared = prepareLiveQueryValue(recoveredQuery, client)
-      const view = createLiveQueryCollection({
-        query: prepared as typeof recoveredQuery,
-        startSync: false,
-      })
-      const observer = createLiveQueryObserver(view, {
-        client,
-        queryHash,
-        mode: `wholesale`,
-      })
-      try {
-        let unsubscribe!: () => void
-        expect(() => {
-          unsubscribe = observer.subscribe(() => {})
-        }, `replacement observer attaches after the failed stream`).not.toThrow()
-        try {
-          await observer.preload()
-          expect(observer.getSnapshot().data).toEqual([
-            expect.objectContaining({ id: `recovered` }),
-          ])
-          expect(observer.getSnapshot().status).toBe(`ready`)
-          expect(observer.getError()).toBeUndefined()
-        } finally {
-          unsubscribe()
-        }
-      } finally {
-        observer.dispose()
-        await view.cleanup()
-      }
-
-      await client.preloadLiveQuery({ query: recoveredQuery })
-      expect(
-        client
-          .dehydrate()
-          .liveQueries?.[0]?.snapshot?.rows.map(
-            ({ value }) => (value as { id: string }).id,
-          ),
-      ).toEqual([`recovered`])
-    } finally {
-      await client.cleanup()
-      await replacement.cleanup()
-    }
-  })
-
-  it(`reports source error instead of reusing a failed query stream`, async () => {
-    const failure = new Error(`source start failed`)
-    let starts = 0
-    const source = collectionOptions(`preload-transient-start`, () => ({
-      id: `preload-transient-start`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: () => {
-          starts++
-          throw failure
-        },
-      },
-    }))
-    const client = new DbClient()
-    const options = {
-      query: new Query()
-        .from({ item: source })
-        .select(({ item }) => ({ id: item.id })),
-    }
-
-    try {
-      expect(() => client.preloadLiveQuery(options)).toThrow(failure)
-      expect(
-        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
-      ).toBeUndefined()
-      await expect(client.preloadLiveQuery(options)).rejects.toThrow(
-        /entered error state/,
-      )
-      expect(starts).toBe(1)
-      expect(
-        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
-      ).toBeUndefined()
-    } finally {
-      await client.cleanup()
-    }
-  })
-
-  it(`releases a peer source and permits replacement after a synchronous throw`, async () => {
-    const failure = new Error(`first source failed`)
-    let firstStarts = 0
-    let secondStarts = 0
-    const first = collectionOptions(`preload-release-first`, () => ({
-      id: `preload-release-first`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: () => {
-          firstStarts++
-          throw failure
-        },
-      },
-    }))
-    const second = collectionOptions(`preload-release-second`, () => ({
-      id: `preload-release-second`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ markReady }) => {
-          secondStarts++
-          markReady()
-        },
-      },
-    }))
-    const client = new DbClient()
-    const query = new Query().unionAll(
-      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
-      new Query()
-        .from({ second })
-        .select(({ second: row }) => ({ id: row.id })),
-    )
-    const replacement = createCollection({
-      id: `preload-release-first`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: `recovered` } })
-          commit()
-          markReady()
-        },
-      },
-    })
-    const recoveredQuery = new Query().unionAll(
-      new Query()
-        .from({ first: replacement })
-        .select(({ first: row }) => ({ id: row.id })),
-      new Query()
-        .from({ second })
-        .select(({ second: row }) => ({ id: row.id })),
-    )
-
-    try {
-      let thrown: unknown
-      try {
-        client.preloadLiveQuery({ query })
-      } catch (error) {
-        thrown = error
-      }
-      expect(thrown).toBe(failure)
-      expect(firstStarts).toBe(1)
-      expect(secondStarts).toBe(1)
-      expect(
-        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
-      ).toBeUndefined()
-      const healthy = client.collection(second)
-      await healthy.preload()
-      expect(healthy.status).toBe(`ready`)
-
-      // The synchronous throw left no reusable result. A replacement observer
-      // may therefore attach under this hash before another client preload.
-      const queryHash = getLiveQueryHash({ query })
-      expect(getLiveQueryHash({ query: recoveredQuery })).toBe(queryHash)
-      const prepared = prepareLiveQueryValue(recoveredQuery, client)
-      const view = createLiveQueryCollection({
-        query: prepared as typeof recoveredQuery,
-        startSync: false,
-      })
-      const observer = createLiveQueryObserver(view, {
-        client,
-        queryHash,
-        mode: `wholesale`,
-      })
-      try {
-        let unsubscribe!: () => void
-        expect(() => {
-          unsubscribe = observer.subscribe(() => {})
-        }, `replacement observer attaches after a synchronous throw`).not.toThrow()
-        try {
-          await observer.preload()
-          expect(observer.getSnapshot().data).toEqual([
-            expect.objectContaining({ id: `recovered` }),
-          ])
-          expect(observer.getSnapshot().status).toBe(`ready`)
-          expect(observer.getError()).toBeUndefined()
-        } finally {
-          unsubscribe()
-        }
-      } finally {
-        observer.dispose()
-        await view.cleanup()
-      }
-
-      await client.preloadLiveQuery({ query: recoveredQuery })
-      expect(
-        client
-          .dehydrate()
-          .liveQueries?.[0]?.snapshot?.rows.map(
-            ({ value }) => (value as { id: string }).id,
-          ),
-      ).toEqual([`recovered`])
-    } finally {
-      await client.cleanup()
-      await replacement.cleanup()
-    }
-  })
-
-  it(`reports a preparation error even if a deferred source also throws`, async () => {
-    const preparationFailure = new Error(`second source factory failed`)
-    const startFailure = new Error(`first source start failed`)
-    let firstStarts = 0
-    const first = collectionOptions(`preload-primary-first`, () => ({
-      id: `preload-primary-first`,
-      getKey: (row: { id: string }) => row.id,
-      startSync: true,
-      sync: {
-        sync: () => {
-          firstStarts++
-          throw startFailure
-        },
-      },
-    }))
-    const second = collectionOptions(
-      `preload-primary-second`,
-      (): {
-        id: string
-        getKey: (row: { id: string }) => string
-        sync: { sync: () => void }
-      } => {
-        throw preparationFailure
-      },
-    )
-    const client = new DbClient()
-    const query = new Query().unionAll(
-      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
-      new Query()
-        .from({ second })
-        .select(({ second: row }) => ({ id: row.id })),
-    )
-
-    try {
-      expect(() => client.preloadLiveQuery({ query })).toThrow(
-        preparationFailure,
-      )
-      expect(firstStarts).toBe(1)
-    } finally {
-      await client.cleanup()
-    }
-  })
-})
-
-/**
- * ## A subscriber that outlives cleanup
- *
- * Cleanup ends a live-query Collection's sync run but keeps its subscriptions.
- * A subscriber that survives is still a subscriber in the next sync run, so a
- * restarted live-query Collection acquires for it at once instead of
- * deferring until another subscriber or preload arrives. The generated grammar
- * unsubscribes before cleanup, so this block pins the history: subscribe,
- * clean up while subscribed, restart, then settle.
- */
 describe(`a subscriber that outlives cleanup`, () => {
-  for (const state of [
-    `eager-idle`,
-    `on-demand-idle`,
-    `on-demand-running`,
-  ] as const) {
-    for (const shape of QUERY_SHAPES) {
-      it(`${state}, ${shape}: the restarted live query serves its subscriber`, async () => {
-        const { collection: source, counts } = makeSource(state)
-        const { outer } = makeLiveQuery(source, shape, 1)
-        const subscription = outer.subscribeChanges(() => {}, {
-          includeInitialState: true,
+  // Admission may still be transferring ownership when a source status callback
+  // cleans up the live-query Collection. Cleanup retires that start, not the
+  // surviving logical subscription. It must not restart before an explicit restart request.
+  // The model counts a returned acquiring handle as demand for the next run;
+  // a still-deferred handle contributes none. This extends the settled-cleanup
+  // histories below with the construction boundary, both shapes and depths.
+  it.each(
+    ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
+      QUERY_SHAPES.flatMap((shape) =>
+        ([1, 2] as const).flatMap((depth) =>
+          ([`ordinary`, `resumed`, `deferred`] as const).flatMap((reader) =>
+            [false, true].flatMap((renderGate) =>
+              ([`loading`, `ready`] as const).flatMap((cleanupAt) =>
+                [false, true].map((restartFromCleanup) => ({
+                  state,
+                  shape,
+                  depth,
+                  reader,
+                  renderGate,
+                  cleanupAt,
+                  restartFromCleanup,
+                })),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  )(
+    `$state $shape depth=$depth $reader gate=$renderGate survives $cleanupAt cleanup during admission (restart=$restartFromCleanup)`,
+    async ({
+      state,
+      shape,
+      depth,
+      reader,
+      renderGate,
+      cleanupAt,
+      restartFromCleanup,
+    }) => {
+      const expected = expectedReplacementRun(state, reader)
+      const { collection: source, counts } = makeSource(state)
+      const { outer, collections } = makeLiveQuery(source, shape, depth)
+      if (renderGate) expect(outer._deferSyncStart()).toBe(true)
+      let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
+      if (reader !== `ordinary`) {
+        subscription = outer.subscribeChanges(() => {}, {
+          deferAcquisition: true,
         })
-        try {
-          await settle()
-          expect(outer.status, `before cleanup`).toBe(`ready`)
-          await outer.cleanup()
-          const before = counts.acquisitions
-          outer.startSyncImmediate()
-          await settle()
-          if (state.startsWith(`on-demand`)) {
-            expect(
-              counts.acquisitions - before,
-              `the restart acquires for the surviving subscriber`,
-            ).toBeGreaterThan(0)
-          }
-          expect(outer.status, `after restart`).toBe(`ready`)
-          expect(outer.toArray.map((row) => row.id)).toEqual(
-            EXPECTED_IDS[shape],
-          )
-        } finally {
-          subscription.unsubscribe()
-          await outer.cleanup()
-          await source.cleanup()
+      }
+      let pending: Promise<void> | undefined
+      let reached = false
+      const retiredStatuses: Array<string> = []
+      const stopTarget = outer.on(`status:change`, ({ status }) => {
+        if (reached) {
+          retiredStatuses.push(status)
+          if (restartFromCleanup && status === `cleaned-up`)
+            outer.startSyncImmediate()
         }
       })
-    }
-  }
-
-  // A surviving subscriber that itself defers is not a request for data: an
-  // unsubscribed outer live query keeps its deferring subscription to the
-  // inner one across the inner one's cleanup.
-  it(`on-demand-idle: a surviving deferring subscriber does not resume a restart`, async () => {
-    const { collection: source, counts } = makeSource(`on-demand-idle`)
-    const { outer, collections } = makeLiveQuery(source, `window`, 2)
-    const inner = collections[1]!
-    try {
-      outer.startSyncImmediate()
-      await settle()
-      await inner.cleanup()
-      inner.startSyncImmediate()
-      await settle()
-      expect(counts.starts, `source sync-run starts`).toBe(0)
-      expect(counts.acquisitions, `acquisition attempts`).toBe(0)
-    } finally {
-      for (const collection of collections) await collection.cleanup()
-      await source.cleanup()
-    }
-  })
-})
-
-/**
- * ## Reads that wait for readiness
- *
- * `toArrayWhenReady()` and `stateWhenReady()` ask for a Collection's data:
- * when it holds no rows they preload it. They are requests for data in either
- * branch, so they count as a preload. A deferring live-query Collection that
- * already shows its source's local rows returns those rows at once and resumes
- * acquisition for the rest.
- */
-describe(`reads that wait for readiness`, () => {
-  for (const read of [`toArrayWhenReady`, `stateWhenReady`] as const) {
-    it(`${read} resumes a deferring live query that already shows local rows`, async () => {
-      const { collection: source, counts } = makeSource(`on-demand-holding`)
-      const { outer } = makeLiveQuery(source, `all`, 1)
-      try {
-        outer.startSyncImmediate()
-        await settle()
-        expect(outer.toArray.length, `local rows before the read`).toBe(3)
-        expect(counts.acquisitions, `no request before the read`).toBe(0)
-        await outer[read]()
-        await settle()
-        expect(counts.acquisitions, `the read requests data`).toBeGreaterThan(0)
-        expect(outer.status).toBe(`ready`)
-      } finally {
-        await outer.cleanup()
-        await source.cleanup()
-      }
-    })
-  }
-})
-
-/**
- * ## A source whose start throws on resumption
- *
- * The first subscriber or preload resumes every deferred source subscription.
- * One source's start can throw synchronously. That failure is reported, as a
- * rejected preload, but it does not keep the other sources deferred: each is
- * resumed before the first error surfaces. `preload()` keeps its promise
- * contract and never throws.
- */
-describe(`a source whose start throws on resumption`, () => {
-  it(`a retried preload resumes a source whose first start failed`, async () => {
-    let attempts = 0
-    let loads = 0
-    const flaky = createCollection<Row>({
-      id: `deferred-acquisition-flaky-${sequence++}`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      gcTime: 0,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          if (++attempts === 1) throw new Error(`transient start failure`)
-          markReady()
-          return {
-            loadSubset: () => {
-              loads++
-              begin()
-              for (const row of ROWS) write({ type: `insert`, value: row })
-              commit()
-              return true
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection({
-      query: (q) => q.from({ row: flaky }).orderBy(({ row }) => row.rank),
-      gcTime: 0,
-    })
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    try {
-      live.startSyncImmediate()
-      await expect(live.preload(), `the first preload fails`).rejects.toThrow(
-        `transient start failure`,
-      )
-      // The failed start puts the source and its live query in error, so the
-      // supported recovery is cleanup and a new sync run, not a retry in place.
-      expect(live.status).toBe(`error`)
-      await live.cleanup()
-      await flaky.cleanup()
-      // A new preload after cleanup starts a new sync run and must resume.
-      await live.preload()
-      await settle()
-      expect(attempts, `the source started again`).toBe(2)
-      expect(loads, `the retry loaded the source`).toBeGreaterThan(0)
-      expect(live.status).toBe(`ready`)
-    } finally {
-      consoleError.mockRestore()
-      await live.cleanup()
-      await flaky.cleanup()
-    }
-  })
-
-  it(`rejects the preload and still resumes the other source`, async () => {
-    const failing = createCollection<Row>({
-      id: `deferred-acquisition-throwing-${sequence++}`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      gcTime: 0,
-      sync: {
-        sync: () => {
-          throw new Error(`source start failed`)
-        },
-      },
-    })
-    const { collection: healthy, counts } = makeSource(`on-demand-idle`)
-    const live = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ a: failing })
-          .join({ b: healthy }, ({ a, b }) => eq(a.id, b.id)),
-      gcTime: 0,
-    })
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    try {
-      live.startSyncImmediate()
-      let pending: Promise<void> | undefined
-      expect(() => {
-        pending = live.preload()
-      }, `preload returns a promise`).not.toThrow()
-      await expect(pending, `the preload rejects`).rejects.toThrow(
-        `source start failed`,
-      )
-      await settle()
-      expect(counts.starts, `the other source was resumed`).toBe(1)
-    } finally {
-      consoleError.mockRestore()
-      await live.cleanup()
-      await healthy.cleanup()
-      await failing.cleanup()
-    }
-  })
-})
-
-/**
- * ## A deferring live query is not a subscriber of its sources
- *
- * Adapters read a source Collection's `subscriberCount` and
- * `subscribers:change` as a request for live data: Query Collection
- * resubscribes its observers, which can refetch. A live-query Collection that
- * defers asks for no data, so it does not count there. It still keeps its
- * source Collections from garbage collection, because it reads their rows.
- * Its first subscriber or preload makes it count.
- */
-describe(`a deferring live query is not a subscriber of its sources`, () => {
-  for (const state of [`eager-running`, `on-demand-running`] as const) {
-    it(`${state}: counts only once a subscriber asks for data`, async () => {
-      const { collection: source } = makeSource(state)
-      const { outer } = makeLiveQuery(source, `all`, 1)
-      const counts: Array<number> = []
-      const stop = source.on(`subscribers:change`, ({ subscriberCount }) =>
-        counts.push(subscriberCount),
-      )
-      let subscription: { unsubscribe: () => void } | undefined
-      try {
-        outer.startSyncImmediate()
-        await settle()
-        await new Promise((resolve) => setTimeout(resolve, 20))
-        expect(source.subscriberCount, `while deferring`).toBe(0)
-        expect(counts, `no change event while deferring`).toEqual([])
-        expect(source.status, `kept from garbage collection`).not.toBe(
-          `cleaned-up`,
-        )
-        subscription = outer.subscribeChanges(() => {})
-        await settle()
-        expect(source.subscriberCount, `after the first subscriber`).toBe(1)
-        expect(counts).toEqual([1])
-        subscription.unsubscribe()
-        subscription = undefined
-        await settle()
-        expect(
-          counts.at(-1),
-          `the live query keeps its claim until cleanup`,
-        ).toBe(1)
-      } finally {
-        stop()
-        subscription?.unsubscribe()
-        await outer.cleanup()
-        await source.cleanup()
-      }
-    })
-  }
-})
-
-/**
- * ## A request that arrives while a source subscription is created
- *
- * A live-query Collection decides that a source subscription defers when it
- * creates it. Creating it can run user code: subscribing to an inner
- * live-query Collection starts that Collection, whose status handlers run
- * before the outer subscription returns. If such a handler preloads or
- * subscribes to the outer live query, the request arrives after the decision
- * but before the outer one listens for it. It still resumes the source.
- */
-describe(`a request that arrives while a source subscription is created`, () => {
-  for (const request of [`preload`, `subscribe`] as const) {
-    it(`an inner status handler that ${request}s the outer live query resumes it`, async () => {
-      const { collection: source, counts } = makeSource(`on-demand-idle`)
-      const { outer, collections } = makeLiveQuery(source, `window`, 2)
-      const inner = collections[1]!
-      let subscription: { unsubscribe: () => void } | undefined
-      let requested = false
-      const stop = inner.on(`status:change`, () => {
-        if (requested) return
-        requested = true
-        if (request === `preload`) void outer.preload()
-        else subscription = outer.subscribeChanges(() => {})
+      const stopSource = source.on(`status:change`, ({ status }) => {
+        if (status === cleanupAt && !reached) {
+          reached = true
+          pending = outer.cleanup()
+        }
       })
       try {
+        if (reader === `ordinary`)
+          subscription = outer.subscribeChanges(() => {})
+        else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
+        else source.startSyncImmediate()
+        expect(reached, `source startup reached cleanup`).toBe(true)
+        await pending
+        if (!restartFromCleanup) {
+          expect(outer.status, `cleanup must not retry admission`).toBe(
+            `cleaned-up`,
+          )
+          expect(retiredStatuses).toEqual([`cleaned-up`])
+        } else {
+          expect(retiredStatuses[0]).toBe(`cleaned-up`)
+          expect(
+            retiredStatuses.filter((status) => status === `loading`),
+          ).toHaveLength(1)
+        }
+        expect(outer.subscriberCount).toBe(expected.acquiring)
+        stopSource()
+        stopTarget()
         outer.startSyncImmediate()
         await settle()
-        expect(requested, `the handler ran`).toBe(true)
-        expect(counts.acquisitions, `acquisition attempts`).toBeGreaterThan(0)
-        expect(outer.status).toBe(`ready`)
-        expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.window)
+        expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
+          expected.acquires,
+        )
+        expect(outer.status === `ready`, `replacement readiness`).toBe(
+          expected.ready,
+        )
+        expect(outer.toArray.map((row) => row.id)).toEqual(
+          expected.ready ? EXPECTED_IDS[shape] : [],
+        )
+        expect(outer.subscriberCount).toBe(expected.acquiring)
       } finally {
-        stop()
+        stopSource()
+        stopTarget()
         subscription?.unsubscribe()
         for (const collection of collections) await collection.cleanup()
         await source.cleanup()
       }
+    },
+  )
+})
+
+/**
+ * Source errors remain readable through a handoff that did not throw. This
+ * extends the primary demand oracle at its previously omitted failure cut.
+ * The grammar crosses callback return/throw, independent/owned start, and an
+ * optional error cause. Removing timing confuses another reader's failure
+ * with ours; removing outcome confuses fail() (a loading error, status
+ * `error`) with a throwing sync function (a crash, status `crashed`). An
+ * independent reader's earlier start can leave either status before the
+ * release, so both are declared reach states. No second start
+ * without cleanup is legal. The shared judgment also feeds the React driver.
+ */
+describe(`render sync-start handoff error provenance`, () => {
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`reports only its own thrown starts (${campaign})`, async () => {
+      const reach = createOracleReach(`start-handoff`, [
+        `prior-error`,
+        `prior-crash`,
+        `failed`,
+        `own-throw`,
+        `undefined-cause`,
+        `healthy`,
+      ])
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            outcome: fc.constantFrom(
+              `ready` as const,
+              `fail` as const,
+              `throw` as const,
+            ),
+            timing: fc.constantFrom(
+              `before-release` as const,
+              `during-release` as const,
+            ),
+            cause: fc.constantFrom(`error` as const, `undefined` as const),
+          }),
+          async (history) => {
+            reach.beginHistory()
+            const expected = expectedStartHandoff(history)
+            const failure =
+              history.cause === `error`
+                ? new Error(`source failure`)
+                : undefined
+            let starts = 0
+            const source = createCollection<{ id: string }>({
+              getKey: (row) => row.id,
+              gcTime: 0,
+              sync: {
+                sync: ({ markReady, fail }) => {
+                  starts++
+                  if (history.outcome === `throw`) throw failure
+                  if (history.outcome === `fail`) fail(failure)
+                  else markReady()
+                },
+              },
+            })
+            source._deferSyncStart()
+            source.startSyncImmediate()
+            try {
+              if (history.timing === `before-release`) {
+                try {
+                  source._resumeSyncStart()
+                } catch {
+                  /* Independent reader owns this error. */
+                }
+              }
+              if (source.status === `error`) reach.reach(`prior-error`)
+              if (source.status === `crashed`) reach.reach(`prior-crash`)
+              if (history.outcome === `fail`) reach.reach(`failed`)
+              if (expected.throws) reach.reach(`own-throw`)
+              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
+              if (history.outcome === `ready`) reach.reach(`healthy`)
+              const pending = new Set([source])
+              let result: { threw: boolean; error?: unknown } = { threw: false }
+              try {
+                resumeDeferredLiveQueryCollections(pending)
+              } catch (error) {
+                result = { threw: true, error }
+              }
+              expect(result.threw, JSON.stringify(history)).toBe(
+                expected.throws,
+              )
+              if (expected.throws) expect(result.error).toBe(failure)
+              expect(source.status).toBe(expected.status)
+              expect(starts).toBe(expected.starts)
+              expect(pending.size).toBe(0)
+              resumeDeferredLiveQueryCollections(pending)
+              source._resumeSyncStart()
+              expect(starts, `old render handles never retry`).toBe(1)
+            } finally {
+              await source.cleanup()
+            }
+          },
+        ),
+        campaign === `fixed`
+          ? { numRuns: oracleRuns(100), seed: 2229 }
+          : oraclePropertyOptions(100, `live-query.start-handoff`),
+      )
+      reach.assertReached()
+      console.info(
+        `start-handoff ${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
     })
   }
 })

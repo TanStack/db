@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest'
 import { MultiSet } from '@tanstack/db-ivm'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
@@ -184,11 +184,11 @@ it.each([`depth`, `cycle`] as const)(
           : `Cannot hash cyclic structural values`,
       )
       expect(source.has(1)).toBe(true)
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       sync.begin()
       sync.write({ type: `insert`, value: { id: 2, nested: {} } })
       sync.commit()
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       expect(live.toArray).toEqual(before)
     } finally {
       await live.cleanup()

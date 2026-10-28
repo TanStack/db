@@ -1,12 +1,13 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   caseWhen,
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
 
@@ -189,12 +190,14 @@ describe(`caseWhen types`, () => {
         id: user.id,
         adultProfile: caseWhen(gt(user.age, 18), {
           id: user.id,
-          posts: q
-            .from({ post: posts })
-            .where(({ post }) => eq(post.userId, user.id))
-            .select(({ post }) => ({
-              title: post.title,
-            })),
+          posts: include(
+            q
+              .from({ post: posts })
+              .where(({ post }) => eq(post.userId, user.id))
+              .select(({ post }) => ({
+                title: post.title,
+              })),
+          ),
         }),
       })),
     )
@@ -317,5 +320,33 @@ describe(`caseWhen types`, () => {
           | undefined
       }>
     >()
+  })
+})
+
+describe(`caseWhen include branches`, () => {
+  test(`rejects a bare subquery branch and accepts include()`, () => {
+    const users = createUsers()
+    const posts = createPosts()
+    createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        posts: caseWhen(
+          gt(user.age, 18),
+          // @ts-expect-error A subquery branch needs include().
+          q.from({ post: posts }).where(({ post }) => eq(post.userId, user.id)),
+        ),
+      })),
+    )
+    createLiveQueryCollection((q) =>
+      q.from({ user: users }).select(({ user }) => ({
+        posts: caseWhen(
+          gt(user.age, 18),
+          include(
+            q
+              .from({ post: posts })
+              .where(({ post }) => eq(post.userId, user.id)),
+          ),
+        ),
+      })),
+    )
   })
 })

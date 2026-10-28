@@ -27,8 +27,7 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run",
-    "test:oracles": "vitest --run tests/correctness-oracle.test.ts"
+    "test": "vitest --run"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

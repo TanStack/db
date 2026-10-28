@@ -7,7 +7,7 @@ title: InjectConditionalLiveQueryResult
 type InjectConditionalLiveQueryResult<TContext> = Omit<InjectLiveQueryResult<TContext>, "data"> & object;
 ```
 
-Defined in: [index.ts:74](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L74)
+Defined in: [angular-db/src/index.ts:85](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L85)
 
 ## Type Declaration
 

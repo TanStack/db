@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { grouping } from '../../../src/query/compiler/grouping.js'
 import {
   createRefProxy,
   createRefProxyWithSelected,
@@ -257,7 +258,7 @@ describe(`ref-proxy`, () => {
 
     it(`preserves constructed functions and aggregates`, () => {
       const funcExpr = new Func(`upper`, [])
-      const aggExpr = new Aggregate(`count`, [])
+      const aggExpr = new Aggregate(`count`, [], grouping)
 
       expect(toExpression(funcExpr)).toBe(funcExpr)
       expect(toExpression(aggExpr)).toBe(aggExpr)
@@ -280,9 +281,9 @@ describe(`ref-proxy`, () => {
         expect(expression).toBeInstanceOf(Value)
         expect((expression as Value).value).toBe(literal)
       }
-      expect(() => toExpression(new MaterializeWrapper({} as any))).toThrow(
-        /materialize\(\) cannot be used inside expressions/,
-      )
+      expect(() =>
+        toExpression(new MaterializeWrapper({} as any, {} as any)),
+      ).toThrow(/materialize\(\) cannot be used inside expressions/)
     })
   })
 

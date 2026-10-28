@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * Mixed-carrier graphs extend the established structural-hash graph law across
@@ -71,28 +78,7 @@ const graphArbitrary = fc
     ),
   )
 
-const replaySeedText = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_SEED
-const replayPath = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_PATH
-const replayFault = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_FAULT
-if (replayPath !== undefined && replaySeedText === undefined)
-  throw new Error(`Mixed graph replay path requires a seed`)
-if (replayFault !== undefined && replayFault !== `accept-cycles`)
-  throw new Error(`Unknown mixed graph replay fault`)
-const replaySeed =
-  replaySeedText === undefined ? undefined : Number(replaySeedText)
-if (
-  replaySeedText !== undefined &&
-  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-)
-  throw new Error(`Mixed graph replay seed must be an integer`)
-
-const campaigns =
-  replaySeed === undefined
-    ? [
-        { name: `fixed seed 205203`, seed: 205203, path: undefined },
-        { name: `random`, seed: undefined, path: undefined },
-      ]
-    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
+const mixedGraphPropertyId = `ivm.hash-mixed-graph`
 
 // Reachable indegrees are a topology authority, not the hasher's recursion
 // stack. Payloads and carrier allocation never enter this decision.
@@ -131,6 +117,17 @@ function carry(carrier: Carrier, target: unknown, symbol: symbol): unknown {
   }
 }
 
+// Model: the value that an acyclic graph denotes from node `id`. Sharing is
+// unfolded into distinct equal values, and each edge keeps its carrier.
+function unfoldGraph(graph: Graph, id: number, symbol: symbol): unknown {
+  return {
+    label: graph[id]!.label,
+    edges: graph[id]!.edges.map((edge) =>
+      carry(edge.carrier, unfoldGraph(graph, edge.target, symbol), symbol),
+    ),
+  }
+}
+
 function expectMixedGraph(
   graph: Graph,
   hashValue: (value: unknown) => number = hash,
@@ -155,14 +152,13 @@ function expectMixedGraph(
     }
     return
   }
-  const unfold = (id: number): unknown => ({
-    label: graph[id]!.label,
-    edges: graph[id]!.edges.map((edge) =>
-      carry(edge.carrier, unfold(edge.target), symbol),
-    ),
-  })
-  expect(hashValue(nodes[0])).toBe(hashValue(unfold(0)))
+  expect(hashValue(nodes[0])).toBe(hashValue(unfoldGraph(graph, 0, symbol)))
 }
+
+declareOracle({
+  check: [expectMixedGraph],
+  model: [isAcyclic, unfoldGraph],
+})
 
 function mixedGraphProperty(
   hashValue: (value: unknown) => number = hash,
@@ -264,22 +260,34 @@ describe(`mixed-carrier structural graph laws`, () => {
     expect(() => expectMixedGraph(diamond, rejectsAll)).toThrow()
   })
 
-  for (const campaign of campaigns) {
-    it(`matches independent labels and mixed-carrier topology (${campaign.name})`, () => {
-      let checked = 0
-      // The fault option is a test-only wrong-result control for CLI replay.
-      const hashValue = replayFault === `accept-cycles` ? () => 0 : hash
-      const property = mixedGraphProperty(hashValue, () => checked++)
-      fc.assert(property, {
-        numRuns: 150,
-        ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-        ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      })
-      // A green normal campaign must reach the graph check for every run.
-      if (campaign.path === undefined) expect(checked).toBe(150)
-      else expect(checked).toBeGreaterThan(0)
-    })
+  // A calibration replay of this property runs its wrong-result control.
+  function expectMixedGraphCampaign(
+    parameters: ReturnType<typeof oraclePropertyOptions>,
+  ): void {
+    let checked = 0
+    const hashValue =
+      oracleReplayRequested() &&
+      process.env.TANSTACK_DB_ORACLE_CALIBRATION === `accept-cycles`
+        ? () => 0
+        : hash
+    const property = mixedGraphProperty(hashValue, () => checked++)
+    fc.assert(property, parameters)
+    // A green normal campaign must reach the graph check for every run.
+    if (parameters.path === undefined) expect(checked).toBe(parameters.numRuns)
+    else expect(checked).toBeGreaterThan(0)
   }
+
+  oracleReplayTest(it)(
+    `matches independent labels and mixed-carrier topology (fixed seed 205203)`,
+    () => expectMixedGraphCampaign({ numRuns: oracleRuns(150), seed: 205203 }),
+  )
+  oracleReplayTest(it, mixedGraphPropertyId)(
+    `matches independent labels and mixed-carrier topology (random)`,
+    () =>
+      expectMixedGraphCampaign(
+        oraclePropertyOptions(150, mixedGraphPropertyId),
+      ),
+  )
 
   it(`replays a generated cycle-acceptance mismatch at the same law`, () => {
     const acceptsCycles = (): number => 0

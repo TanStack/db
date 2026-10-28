@@ -146,6 +146,7 @@ export class OrderedSourceLoader {
       result: LoadSubsetRequestResult,
       holdPublication: boolean,
       settlesAsync: boolean,
+      options?: LoadSubsetOptions,
     ) => void = () => {},
     private readonly canRetryRepair: () => boolean = () => false,
     private readonly getGraphInputRevision?: () => number,
@@ -1337,6 +1338,7 @@ export class OrderedSourceLoader {
         tracked,
         isAuthoritativeRequest && this.needsOrderingRepair,
         settlesAsync,
+        options,
       )
       return tracked
     } catch (error) {

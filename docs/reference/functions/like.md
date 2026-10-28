@@ -7,7 +7,7 @@ title: like
 function like(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L273)
+Defined in: [packages/db/src/query/builder/functions.ts:270](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L270)
 
 ## Parameters
 

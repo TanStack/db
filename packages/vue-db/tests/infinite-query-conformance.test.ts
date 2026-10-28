@@ -10,6 +10,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import {
@@ -24,6 +25,7 @@ import {
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
@@ -42,11 +44,12 @@ let sourceSequence = 0
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
-      id: `infinite-conformance-vue-${sourceSequence++}`,
+      id: collectionId ?? `infinite-conformance-vue-${sourceSequence++}`,
       getKey: (row) => row.id,
       initialData: [...initialData],
     }),
@@ -130,7 +133,7 @@ function makeHandle(
         pageParams: result.pageParams.value,
         hasNextPage: result.hasNextPage.value,
         isFetchingNextPage: result.isFetchingNextPage.value,
-        error: result.error.value,
+        isLoadingError: result.isLoadingError.value,
         status: result.status.value,
         collection: result.collection.value,
       }
@@ -253,7 +256,10 @@ function mountInputControllable(
 
 const vueInfiniteDriver: InfiniteQueryDriver = {
   name: `vue`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
@@ -275,7 +281,7 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(vueInfiniteDriver)
+runInfiniteQuerySuite(vueInfiniteDriver, registerInfiniteQueryUnitScenarios)
 
 describe(`infinite driver scope ownership`, () => {
   it(`retains successful scope until its owner disposes`, () => {

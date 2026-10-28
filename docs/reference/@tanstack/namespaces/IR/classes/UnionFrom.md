@@ -3,7 +3,7 @@ id: UnionFrom
 title: UnionFrom
 ---
 
-Defined in: [packages/db/src/query/ir.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L172)
+Defined in: [packages/db/src/query/ir.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L177)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:172](https://github.com/TanStack/db/blo
 new UnionFrom(sources): UnionFrom;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L174)
+Defined in: [packages/db/src/query/ir.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L179)
 
 #### Parameters
 
@@ -45,7 +45,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L83)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 **`Internal`**
 
@@ -67,7 +67,7 @@ sources: (
   | QueryRef)[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L174)
+Defined in: [packages/db/src/query/ir.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L179)
 
 ***
 
@@ -77,7 +77,7 @@ Defined in: [packages/db/src/query/ir.ts:174](https://github.com/TanStack/db/blo
 type: "unionFrom";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L173)
+Defined in: [packages/db/src/query/ir.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L178)
 
 #### Overrides
 
@@ -95,7 +95,7 @@ BaseExpression.type
 get alias(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L178)
+Defined in: [packages/db/src/query/ir.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L183)
 
 ##### Returns
 

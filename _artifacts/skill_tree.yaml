@@ -163,6 +163,23 @@ skills:
       - 'TanStack/db:packages/react-db/src/useLiveInfiniteQuery.ts'
       - 'TanStack/db:packages/react-db/src/usePacedMutations.ts'
 
+  - name: 'Preact DB'
+    slug: 'preact-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/preact-db/SKILL.md'
+    package: 'packages/preact-db'
+    description: >
+      Preact bindings for TanStack DB. useLiveQuery and useLiveInfiniteQuery
+      hooks with identity derived from query IR; functional variants need
+      queryKey.
+    requires:
+      - 'db-core'
+    sources:
+      - 'TanStack/db:docs/framework/preact/overview.md'
+      - 'TanStack/db:packages/preact-db/src/useLiveQuery.ts'
+      - 'TanStack/db:packages/preact-db/src/useLiveInfiniteQuery.ts'
+
   - name: 'Vue DB'
     slug: 'vue-db'
     type: 'framework'

@@ -18,6 +18,7 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import {
+  IncludeOperatorRequiredError,
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
@@ -38,10 +39,13 @@ import {
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
 import type { CollectionResolver } from './clone-query.js'
+import type { GroupKeys } from './group-keys.js'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
@@ -80,6 +84,7 @@ import type {
   Source,
   WhereCallback,
   WithResult,
+  WithoutBareSubquery,
 } from './types.js'
 
 const UNION_ALL_SOURCE_CONTEXT = `unionAll clause` satisfies SourceClauseContext
@@ -634,7 +639,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     ) => NonScalarSelectObject<TSelectObject>,
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>>
   select<TSelectValue extends ScalarSelectValue>(
-    callback: (refs: RefsForContext<TContext>) => TSelectValue,
+    callback: (
+      refs: RefsForContext<TContext>,
+    ) => WithoutBareSubquery<TSelectValue>,
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>>>
   select(
     callback: (
@@ -754,7 +761,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   /**
    * Group rows by one or more columns for aggregation
    *
-   * @param callback - A function that receives table references and returns the field(s) to group by
+   * @param keys - A function that receives table references and returns the
+   *   field(s) to group by. A query with no aggregate wraps it in `groupKeys()`;
+   *   aggregates such as `count()` bring the grouping code themselves.
    * @returns A QueryBuilder with grouping applied (enables aggregate functions in SELECT and HAVING)
    *
    * @example
@@ -777,9 +786,18 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *     category: sales.category,
    *     totalSales: sum(sales.amount)
    *   }))
+   *
+   * // Group without an aggregate
+   * query
+   *   .from({ orders: ordersCollection })
+   *   .groupBy(groupKeys(({orders}) => orders.status))
+   *   .select(({orders}) => ({ status: orders.status }))
    * ```
    */
-  groupBy(callback: GroupByCallback<TContext>): QueryBuilder<TContext> {
+  groupBy(
+    keys: GroupByCallback<TContext> | GroupKeys<TContext>,
+  ): QueryBuilder<TContext> {
+    const callback = typeof keys === `function` ? keys : keys.callback
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(
       aliases,
@@ -796,6 +814,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     return this._clone({
       ...this.query,
       groupBy: [...existingGroupBy, ...newExpressions],
+      ...(typeof keys === `function` ? {} : { grouping: keys.grouping }),
     }) as any
   }
 
@@ -1107,7 +1126,7 @@ function buildNestedSelect(
         )
       : toExpr(obj)
   }
-  if (obj instanceof BaseQueryBuilder) {
+  if (obj instanceof BaseQueryBuilder || obj instanceof IncludeWrapper) {
     if (!fieldName) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -1115,7 +1134,22 @@ function buildNestedSelect(
           : codedMessage(114),
       )
     }
-    return buildIncludesSubquery(obj, fieldName, parentScope, `collection`)
+    if (obj instanceof BaseQueryBuilder)
+      throw new IncludeOperatorRequiredError(fieldName)
+    if (!(obj.query instanceof BaseQueryBuilder)) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `include() must wrap a subquery builder`
+          : codedMessage(249),
+      )
+    }
+    return buildIncludesSubquery(
+      obj.query,
+      fieldName,
+      parentScope,
+      `collection`,
+      obj.runtime,
+    )
   }
   if (obj instanceof ToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1132,7 +1166,13 @@ function buildNestedSelect(
           : codedMessage(116),
       )
     }
-    return buildIncludesSubquery(obj.query, fieldName, parentScope, `array`)
+    return buildIncludesSubquery(
+      obj.query,
+      fieldName,
+      parentScope,
+      `array`,
+      obj.runtime,
+    )
   }
   if (obj instanceof ConcatToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1149,7 +1189,13 @@ function buildNestedSelect(
           : codedMessage(118),
       )
     }
-    return buildIncludesSubquery(obj.query, fieldName, parentScope, `concat`)
+    return buildIncludesSubquery(
+      obj.query,
+      fieldName,
+      parentScope,
+      `concat`,
+      obj.runtime,
+    )
   }
   if (obj instanceof CaseWhenWrapper) {
     return buildConditionalSelect(obj, parentScope, fieldName)
@@ -1166,8 +1212,22 @@ function buildNestedSelect(
       out[`${base}__${++spreadIndex}`] = v
       continue
     }
-    if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(v, k, parentScope, `collection`)
+    if (v instanceof BaseQueryBuilder) throw new IncludeOperatorRequiredError(k)
+    if (v instanceof IncludeWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `include() must wrap a subquery builder`
+            : codedMessage(250),
+        )
+      }
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        `collection`,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof ToArrayWrapper) {
@@ -1178,7 +1238,13 @@ function buildNestedSelect(
             : codedMessage(119),
         )
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentScope, `array`)
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        `array`,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof ConcatToArrayWrapper) {
@@ -1189,7 +1255,13 @@ function buildNestedSelect(
             : codedMessage(120),
         )
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentScope, `concat`)
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        `concat`,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof MaterializeWrapper) {
@@ -1204,7 +1276,13 @@ function buildNestedSelect(
       const materialization: IncludesMaterialization = childQuery.singleResult
         ? `singleton`
         : `array`
-      out[k] = buildIncludesSubquery(v.query, k, parentScope, materialization)
+      out[k] = buildIncludesSubquery(
+        v.query,
+        k,
+        parentScope,
+        materialization,
+        v.runtime,
+      )
       continue
     }
     if (v instanceof CaseWhenWrapper) {
@@ -1486,6 +1564,7 @@ function buildIncludesSubquery(
   fieldName: string,
   parentScope: ParentScope,
   materialization: IncludesMaterialization,
+  runtime: IncludesRuntime,
 ): IncludesSubquery {
   const sourceQuery = childBuilder._getQuery()
   if (reusesAncestorBinding(sourceQuery, parentScope.bindingIds)) {
@@ -1683,6 +1762,7 @@ function buildIncludesSubquery(
     parentRef,
     childRef,
     fieldName,
+    runtime,
     parentFilters.length > 0 ? parentFilters : undefined,
     parentProjection,
     materialization,

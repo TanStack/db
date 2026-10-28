@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   caseWhen,
   count,
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 type User = {
@@ -657,13 +658,15 @@ describe(`caseWhen`, () => {
             id: user.id,
             name: user.name,
             label: `adult`,
-            posts: q
-              .from({ post: posts })
-              .where(({ post }) => eq(post.userId, user.id))
-              .orderBy(({ post }) => post.id)
-              .select(({ post }) => ({
-                title: post.title,
-              })),
+            posts: include(
+              q
+                .from({ post: posts })
+                .where(({ post }) => eq(post.userId, user.id))
+                .orderBy(({ post }) => post.id)
+                .select(({ post }) => ({
+                  title: post.title,
+                })),
+            ),
           }
 
           return {

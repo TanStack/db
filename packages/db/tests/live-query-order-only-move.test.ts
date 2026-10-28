@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { include } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
@@ -392,11 +393,13 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     const lq = createLiveQueryCollection((q) =>
       q.from({ parent: parents }).select(({ parent }) => ({
         id: parent.id,
-        children: q
-          .from({ child: children })
-          .where(({ child }) => eq(child.parentId, parent.id))
-          .orderBy(({ child }) => child.position)
-          .select(({ child }) => ({ id: child.id, name: child.name })),
+        children: include(
+          q
+            .from({ child: children })
+            .where(({ child }) => eq(child.parentId, parent.id))
+            .orderBy(({ child }) => child.position)
+            .select(({ child }) => ({ id: child.id, name: child.name })),
+        ),
       })),
     )
     await lq.preload()
@@ -463,18 +466,25 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     const lq = createLiveQueryCollection((q) =>
       q.from({ org: orgs }).select(({ org }) => ({
         id: org.id,
-        teams: q
-          .from({ team: teams })
-          .where(({ team }) => eq(team.orgId, org.id))
-          .orderBy(({ team }) => team.position)
-          .select(({ team }) => ({
-            id: team.id,
-            members: q
-              .from({ member: members })
-              .where(({ member }) => eq(member.teamId, team.id))
-              .orderBy(({ member }) => member.position)
-              .select(({ member }) => ({ id: member.id, name: member.name })),
-          })),
+        teams: include(
+          q
+            .from({ team: teams })
+            .where(({ team }) => eq(team.orgId, org.id))
+            .orderBy(({ team }) => team.position)
+            .select(({ team }) => ({
+              id: team.id,
+              members: include(
+                q
+                  .from({ member: members })
+                  .where(({ member }) => eq(member.teamId, team.id))
+                  .orderBy(({ member }) => member.position)
+                  .select(({ member }) => ({
+                    id: member.id,
+                    name: member.name,
+                  })),
+              ),
+            })),
+        ),
       })),
     )
     await lq.preload()

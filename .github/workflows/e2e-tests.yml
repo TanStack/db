@@ -56,6 +56,7 @@ jobs:
           --filter '@tanstack/react-router-with-db...'
           --filter '@tanstack/electric-db-collection...'
           --filter '@tanstack/query-db-collection...'
+          --filter '@tanstack/convex-db-collection...'
           --filter '@tanstack/db...'
           build
 
@@ -88,6 +89,10 @@ jobs:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: e2e_test
 
+      - name: Run Convex backend E2E tests
+        if: matrix.group == 'browser'
+        run: pnpm --filter @tanstack/convex-db-collection test:e2e
+
       - name: Run Query E2E tests
         if: matrix.group == 'browser'
         run: |
@@ -114,6 +119,11 @@ jobs:
         working-directory: packages/db
         run: pnpm test:indexed-db:browser
 
+      - name: Run Collection GC native idle oracle
+        if: matrix.group == 'browser'
+        working-directory: packages/db
+        run: pnpm test:collection-gc:browser
+
       - name: Upload IndexedDB oracle evidence
         if: always() && matrix.group == 'browser'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -121,6 +131,7 @@ jobs:
           name: indexeddb-oracle-evidence
           path: |
             packages/db/test-results/indexed-db/
+            packages/db/test-results/collection-gc/
             packages/db/test-results/oracles/
           retention-days: 7
 
@@ -129,6 +140,15 @@ jobs:
         run: |
           cd packages/browser-db-sqlite-persistence
           pnpm test:opfs-fairness
+
+      - name: Run Browser SQLite packaged consumer E2E tests
+        if: matrix.group == 'browser'
+        # Build browser dependencies already built this package's workspace
+        # dependencies; test:e2e would rebuild them.
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm build
+          pnpm exec vitest --config vitest.e2e.config.ts --run
 
       - name: Run Browser SQLite OPFS with live Electric E2E tests
         if: matrix.group == 'browser'

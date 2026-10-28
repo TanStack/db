@@ -10,7 +10,7 @@ function withCollectionConfigFactory<TConfig>(
 claim?): CollectionConfigWithFactory<TConfig>;
 ```
 
-Defined in: [packages/db/src/client.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L96)
+Defined in: [packages/db/src/client.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L99)
 
 Adds a fresh-config materializer to an adapter options object.
 

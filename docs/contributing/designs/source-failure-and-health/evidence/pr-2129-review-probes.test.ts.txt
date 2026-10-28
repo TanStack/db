@@ -1,0 +1,329 @@
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
+import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
+import {
+  createLiveQueryCollection,
+  eq,
+} from '../../src/query/index.js'
+import { flushPromises } from '../utils.js'
+import type { Deferred } from '../../src/deferred.js'
+
+type Post = { id: number; userId: number; title: string }
+type User = { id: number; name: string }
+
+let seq = 0
+function makeSource(opts: { readyAtStart?: boolean } = {}) {
+  const acquisitions: Array<Deferred<void>> = []
+  let s: any
+  const collection = createCollection<Post>({
+    id: `scratch-src-${++seq}`,
+    getKey: (p) => p.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: (params: any) => {
+        s = params
+        if (opts.readyAtStart) params.markReady()
+        return {
+          loadSubset: ({ signal }: { signal?: AbortSignal }) => {
+            const d = createDeferred<void>()
+            acquisitions.push(d)
+            signal?.addEventListener(`abort`, () =>
+              d.reject(new LoadSubsetOperationAbortedError()),
+            )
+            return d.promise
+          },
+        }
+      },
+    },
+  })
+  return {
+    collection,
+    acquisitions,
+    pending: () => acquisitions.filter((a) => a.isPending()).length,
+    write: (p: Post) => {
+      s.begin()
+      s.write({ type: `insert`, value: p })
+      s.commit()
+    },
+    truncate: () => {
+      s.begin()
+      s.truncate()
+      s.commit()
+    },
+    markReady: () => s.markReady(),
+    markError: (e: unknown) => s.markError(e),
+    rejectPending: (e: unknown) => {
+      for (const a of acquisitions) if (a.isPending()) a.reject(e)
+    },
+    resolvePending: () => {
+      for (const a of acquisitions) if (a.isPending()) a.resolve()
+    },
+  }
+}
+
+function makeUsers() {
+  return createCollection<User>({
+    id: `scratch-users-${++seq}`,
+    getKey: (u) => u.id,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }: any) => {
+        begin()
+        write({ type: `insert`, value: { id: 1, name: `u1` } })
+        commit()
+        markReady()
+      },
+    },
+  })
+}
+
+const direct = (src: ReturnType<typeof makeSource>) =>
+  createLiveQueryCollection((q) =>
+    q.from({ p: src.collection }).where(({ p }) => eq(p.userId, 1)),
+  )
+
+const joined = (src: ReturnType<typeof makeSource>) => {
+  const users = makeUsers()
+  return createLiveQueryCollection((q) =>
+    q
+      .from({ u: users })
+      .leftJoin({ p: src.collection }, ({ u, p }) => eq(u.id, p.userId))
+      .select(({ u, p }) => ({ uid: u.id, pid: p?.id })),
+  )
+}
+
+const err = new Error(`source failed`)
+
+async function errorThenRecover(
+  src: ReturnType<typeof makeSource>,
+  between: () => void = () => {},
+) {
+  src.rejectPending(err)
+  src.markError(err)
+  await flushPromises()
+  between()
+  await flushPromises()
+}
+
+describe(`scratch #2129 evaluation`, () => {
+  it(`baseline: direct recovers after error → ready`, async () => {
+    const src = makeSource()
+    const live = direct(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src)
+    src.markReady()
+    await flushPromises()
+    const before = live.status
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    console.log(`BASELINE direct before=${before} after=${live.status} rows=${live.size} acq=${src.acquisitions.length}`)
+    expect(live.status).toBe(`ready`)
+  })
+
+  it(`C1a: truncate during source error, then markReady`, async () => {
+    const src = makeSource()
+    const live = direct(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src, () => src.truncate())
+    src.markReady()
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    src.resolvePending()
+    await flushPromises()
+    console.log(`C1a direct status=${live.status} rows=${live.size} acq=${src.acquisitions.length} pending=${src.pending()}`)
+    expect(live.status).toBe(`ready`)
+  })
+
+  it(`C1b: truncate right after markReady (before restart microtask)`, async () => {
+    const src = makeSource()
+    const live = direct(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src)
+    src.markReady()
+    src.truncate()
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    src.resolvePending()
+    await flushPromises()
+    console.log(`C1b direct status=${live.status} rows=${live.size} acq=${src.acquisitions.length} pending=${src.pending()}`)
+    expect(live.status).toBe(`ready`)
+  })
+
+  it(`C2: join with truncate during error`, async () => {
+    const src = makeSource()
+    const live = joined(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src, () => src.truncate())
+    src.markReady()
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    src.resolvePending()
+    await flushPromises()
+    console.log(`C2 join status=${live.status} rows=${JSON.stringify(live.toArray.map((r: any) => r.pid))} acq=${src.acquisitions.length}`)
+    expect(live.status).toBe(`ready`)
+  })
+
+  it(`C3: query starts while source already in error; recovery holds load`, async () => {
+    const src = makeSource()
+    src.markError(err)
+    await flushPromises()
+    const live = direct(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    const statusDuringError = live.status
+    src.markReady()
+    await flushPromises()
+    const readyBeforeLoad = live.status
+    const pendingAtCheck = src.pending()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    console.log(`C3 duringError=${statusDuringError} afterRecoverHeld=${readyBeforeLoad} pending=${pendingAtCheck} final=${live.status} rows=${live.size}`)
+    expect(readyBeforeLoad).not.toBe(`ready`)
+  })
+
+  it(`C3b: query starts while source in error, markReady synchronously checked`, async () => {
+    const src = makeSource()
+    src.markError(err)
+    await flushPromises()
+    const live = direct(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    let readyAtMarkReady: string | undefined
+    live.on(`status:change`, ({ status }: any) => {
+      if (status === `ready` && readyAtMarkReady === undefined)
+        readyAtMarkReady = `pending=${src.pending()} acq=${src.acquisitions.length}`
+    })
+    src.markReady()
+    await flushPromises()
+    console.log(`C3b firstReady=${readyAtMarkReady} status=${live.status}`)
+    expect(readyAtMarkReady).toBeUndefined()
+  })
+
+  it(`C7: second error during recovery replay, then recover`, async () => {
+    const src = makeSource()
+    const live = joined(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src)
+    src.markReady()
+    await flushPromises()
+    const acqAfterFirst = src.acquisitions.length
+    await errorThenRecover(src)
+    const midStatus = live.status
+    src.markReady()
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    console.log(`C7 join acqAfterFirst=${acqAfterFirst} mid=${midStatus} final=${live.status} acq=${src.acquisitions.length} rows=${JSON.stringify(live.toArray.map((r: any) => r.pid))}`)
+    expect(live.status).toBe(`ready`)
+  })
+
+  it(`C7 direct: second error during recovery replay, then recover`, async () => {
+    const src = makeSource()
+    const live = direct(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src)
+    src.markReady()
+    await flushPromises()
+    await errorThenRecover(src)
+    src.markReady()
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    console.log(`C7d final=${live.status} acq=${src.acquisitions.length} rows=${live.size}`)
+    expect(live.status).toBe(`ready`)
+  })
+
+  it(`ready→error→ready: error after first ready, then recover`, async () => {
+    const src = makeSource()
+    const live = joined(src)
+    void live.preload().catch(() => {})
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.resolvePending()
+    await flushPromises()
+    const s1 = live.status
+    src.markReady()
+    await flushPromises()
+    // A later lazy demand pending when error hits: change nothing; just error
+    src.markError(err)
+    await flushPromises()
+    const s2 = live.status
+    src.markReady()
+    await flushPromises()
+    console.log(`RER join s1=${s1} s2=${s2} final=${live.status}`)
+  })
+
+  it(`C8: plain subscribeChanges + requestSnapshot loadSubsetError during source error`, async () => {
+    const src = makeSource()
+    const events: Array<string> = []
+    const sub = src.collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    } as any)
+    ;(sub as any).on?.(`loadSubsetError`, () => events.push(`loadSubsetError`))
+    ;(sub as any).requestSnapshot?.({ where: undefined })
+    await flushPromises()
+    src.rejectPending(err)
+    src.markError(err)
+    await flushPromises()
+    console.log(`C8 events=${JSON.stringify(events)} lastError=${String((sub as any).lastError?.message)} acq=${src.acquisitions.length}`)
+    sub.unsubscribe()
+  })
+
+  it(`C8b: ordered window source error then recover`, async () => {
+    const src = makeSource()
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ p: src.collection })
+        .orderBy(({ p }) => p.id, `desc`)
+        .limit(1),
+    )
+    void live.preload().catch(() => {})
+    await flushPromises()
+    await errorThenRecover(src)
+    src.markReady()
+    await flushPromises()
+    src.write({ id: 1, userId: 1, title: `a` })
+    src.write({ id: 2, userId: 1, title: `b` })
+    for (let i = 0; i < 5; i++) {
+      src.resolvePending()
+      await flushPromises()
+    }
+    console.log(`C8b ordered status=${live.status} rows=${JSON.stringify(live.toArray.map((r: any) => r.id))} acq=${src.acquisitions.length}`)
+    expect(live.status).toBe(`ready`)
+    expect(live.toArray.map((r: any) => r.id)).toEqual([2])
+  })
+
+  it(`C8c: subscription load error event during source error`, async () => {
+    const src = makeSource()
+    const events: Array<string> = []
+    const sub = src.collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+      onLoadSubsetError: () => events.push(`error`),
+    } as any)
+    ;(sub as any).requestSnapshot({})
+    await flushPromises()
+    src.rejectPending(err)
+    src.markError(err)
+    await flushPromises()
+    console.log(`C8c events=${JSON.stringify(events)} lastError=${String((sub as any).lastError?.message)}`)
+    sub.unsubscribe()
+  })
+})

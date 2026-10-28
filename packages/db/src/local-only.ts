@@ -30,8 +30,9 @@ export interface LocalOnlyCollectionConfig<
   `gcTime` | `startSync`
 > {
   /**
-   * Optional initial data to populate the collection with on creation
-   * This data will be applied during the initial sync process
+   * Optional initial data to populate the collection with on creation.
+   * It loads when the Collection starts empty: at creation, or after
+   * cleanup. `reload()` keeps the rows, including the user's writes.
    */
   initialData?: Array<T>
 }
@@ -340,16 +341,13 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
         write: confirmOperationsSync,
       }
 
-      // Apply initial data if provided
-      if (initialData && initialData.length > 0) {
-        // Mark initial data as local so $origin is 'local' for local-only collections
-        for (const item of initialData) {
-          const key = params.collection.getKeyFromItem(item)
-          params.collection._state.pendingLocalChanges.add(key)
-        }
-
+      // initialData loads only into an empty Collection: at creation or
+      // after cleanup. A reload's run starts while the Collection is ready,
+      // and its rows are the only copy of the user's writes, so it keeps
+      // them. `isLocalOnly` makes the rows' $origin 'local'.
+      if (params.collection.status !== `ready`) {
         begin()
-        initialData.forEach((item) => {
+        initialData?.forEach((item) => {
           write({
             type: `insert`,
             value: item,

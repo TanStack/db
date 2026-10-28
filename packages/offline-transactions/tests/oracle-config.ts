@@ -1,44 +1,50 @@
-type OracleEnvironment = Record<string, string | undefined>
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 
 type OfflineOracleConfigOptions = {
-  prefix: `OFFLINE_ORACLE` | `TANSTACK_DB_OFFLINE_ORACLE`
+  /** A property registered in packages/db/tests/oracle-config.ts. */
+  property: string
+  /** The random campaign's budget before TANSTACK_DB_ORACLE_RUNS_MULTIPLIER. */
   defaultRuns: number
-  defaultSeed?: number
-  environment?: OracleEnvironment
+  /** Fixed examples that fast-check counts against the same run budget. */
+  reservedRuns?: number
 }
 
+/**
+ * The budgets of one offline oracle property. `runs` sizes its fixed-seed
+ * lane. `random` holds the shared property options for its random lane: a seed
+ * alone reseeds it, and a path replay of `property` runs its recorded history
+ * once.
+ */
 export function readOfflineOracleConfig({
-  prefix,
+  property,
   defaultRuns,
-  defaultSeed,
-  environment = process.env,
+  reservedRuns = 0,
 }: OfflineOracleConfigOptions): {
   runs: number
-  seed: number | undefined
-  path: string | undefined
+  random: ReturnType<typeof oraclePropertyOptions>
 } {
-  const runsText = environment[`${prefix}_RUNS`] ?? String(defaultRuns)
-  const runs = Number(runsText)
-  if (runsText.trim() === `` || !Number.isSafeInteger(runs) || runs < 1) {
-    throw new Error(`Invalid ${prefix}_RUNS`)
+  // Both lanes share one budget: the scaled base plus the reserved fixed
+  // examples. A path replay keeps its single run.
+  const runs = oracleRuns(defaultRuns) + reservedRuns
+  const random = oraclePropertyOptions(defaultRuns, property)
+  return {
+    runs,
+    random: random.path === undefined ? { ...random, numRuns: runs } : random,
   }
+}
 
-  const seedText = environment[`${prefix}_SEED`]
-  const seed = seedText === undefined ? defaultSeed : Number(seedText)
-  if (
-    seedText !== undefined &&
-    (seedText.trim() === `` || !Number.isSafeInteger(seed))
-  ) {
-    throw new Error(`Invalid ${prefix}_SEED`)
-  }
-
-  const path = environment[`${prefix}_PATH`]
-  if (
-    path !== undefined &&
-    (seed === undefined || !/^\d+(?::\d+)*$/.test(path))
-  ) {
-    throw new Error(`${prefix}_PATH requires a seed and numeric shrink path`)
-  }
-
-  return { runs, seed, path }
+/**
+ * A lane that passes fixed `examples` keeps them during a path replay.
+ * fast-check counts the examples in the recorded path, so a replay without
+ * them would select a different value.
+ *
+ * The fast-check options for one lane. An `undefined` seed selects the random
+ * lane. A number selects the fixed lane, which keeps its ordinary budget.
+ */
+export function oracleLaneOptions(
+  config: ReturnType<typeof readOfflineOracleConfig>,
+  seed: number | undefined,
+):
+  ReturnType<typeof oraclePropertyOptions> | { numRuns: number; seed: number } {
+  return seed === undefined ? config.random : { numRuns: config.runs, seed }
 }

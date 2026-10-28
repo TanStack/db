@@ -169,7 +169,38 @@ duplicates inside that horizon remain idempotent.
 
 - `openBrowserWASQLiteOPFSDatabase(...)` starts a dedicated Web Worker and
   routes SQL operations through it. OPFS sync access handle APIs are used in
-  that worker context.
+  that worker context. The package includes the worker and a separate
+  `wa-sqlite.wasm` asset. Vite, webpack 5, and Next.js with Turbopack or
+  webpack include both automatically, with no asset copying or WASM URL
+  configuration required.
+- In Vite development, a pre-bundled copy of this package asks the dev server
+  for its assets by package name, from the app root. Production builds drop
+  this lookup:
+  - If the app reaches the package only through another library or through an
+    npm alias, the root cannot resolve that name. The open rejects with
+    `PersistenceUnavailableError`.
+  - If more than one copy is installed, the pre-bundled copy loads the assets
+    of the copy that the root resolves. When that copy is another version, its
+    worker refuses the opener and the open rejects with
+    `PersistenceUnavailableError`.
+  - The copy finds the dev server through the page's Vite client script. If
+    the database opens inside a worker, or the page loads the Vite client
+    without a script `src`, the copy cannot find its assets and the open
+    rejects with `PersistenceUnavailableError`.
+
+  In those cases, exclude the package from pre-bundling so Vite serves it
+  beside its own assets. List the name that the importing code uses, which is
+  the alias name for an npm alias:
+
+  ```ts
+  // vite.config.ts
+  export default defineConfig({
+    optimizeDeps: {
+      exclude: [`@tanstack/browser-db-sqlite-persistence`],
+    },
+  })
+  ```
+
 - Opening has a 30-second deadline by default. `timeoutMs` changes it; `0`
   explicitly disables the deadline. A timed-out open rejects with
   `TimeoutError` and terminates its pending worker, so it cannot acquire the

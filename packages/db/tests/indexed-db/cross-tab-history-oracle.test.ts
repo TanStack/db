@@ -18,6 +18,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fc } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplaySkips,
+  oracleRuns,
+} from '../oracle-config.js'
 import { runCampaign } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
 import {
@@ -59,7 +65,7 @@ const action = (
 ): TransportStep => ({ kind, tab, key, value: 2, optional: true })
 const stores = stress ? [0, 0, 1, 0, 1] : [0, 0, 1]
 
-async function campaign(seed?: number, path?: string) {
+async function campaign(numRuns: number, seed?: number, path?: string) {
   await runCampaign(
     'transport',
     history,
@@ -72,30 +78,30 @@ async function campaign(seed?: number, path?: string) {
           'registered campaign calibration',
         )
     },
-    { runs, seed, path },
+    { runs: numRuns, seed, path },
   )
 }
 
-if (process.env.TANSTACK_INDEXEDDB_ORACLE_SEED) {
-  const seed = Number(process.env.TANSTACK_INDEXEDDB_ORACLE_SEED)
-  if (!Number.isInteger(seed)) throw new Error('Invalid oracle replay seed')
-  it(
-    'replays the selected cross-tab history',
-    () => campaign(seed, process.env.TANSTACK_INDEXEDDB_ORACLE_PATH),
-    120_000,
-  )
-} else {
-  it(
-    'refines independent per-Collection snapshots with fixed histories',
-    () => campaign(11792026),
-    120_000,
-  )
-  it(
-    'refines independent per-Collection snapshots with fresh histories',
-    () => campaign(),
-    120_000,
-  )
-}
+// A path replay of this property runs only the fresh campaign, from the
+// recorded seed and path. A seed without a path reseeds the fresh campaign.
+const crossTabProperty = `indexeddb.cross-tab-history`
+
+it.skipIf(oracleReplayRequested())(
+  'refines independent per-Collection snapshots with fixed histories',
+  () => campaign(oracleRuns(runs), 11792026),
+  120_000,
+)
+it.skipIf(oracleReplaySkips(crossTabProperty))(
+  'refines independent per-Collection snapshots with fresh histories',
+  () => {
+    const { numRuns, seed, path } = oraclePropertyOptions(
+      runs,
+      crossTabProperty,
+    )
+    return campaign(numRuns, seed, path)
+  },
+  120_000,
+)
 
 it('reconstructs every action and overlapping receiver reads', async () => {
   const reached = await runTransportHistory([

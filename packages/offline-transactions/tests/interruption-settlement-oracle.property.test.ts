@@ -1,13 +1,17 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+} from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   atOracleCheckpoint,
   captureUnhandledRejections,
   cleanupOfflineOracle,
 } from './oracle-lifecycle'
-import { readOfflineOracleConfig } from './oracle-config'
 import type { OnlineDetector } from '../src/types'
 import type { TestItem } from './harness'
 
@@ -79,10 +83,9 @@ type History = {
   turn: number
 }
 
-const config = readOfflineOracleConfig({
-  prefix: `TANSTACK_DB_OFFLINE_ORACLE`,
-  defaultRuns: 60,
-})
+// A path replay of this property runs only the generated campaign, from its
+// recorded seed and path.
+const interruptionProperty = `offline.interruption-settlement`
 
 const history: fc.Arbitrary<History> = fc.record({
   outcomes: fc.array(fc.constantFrom<Outcome>(`fulfil`, `reject`), {
@@ -308,6 +311,8 @@ async function checkInterruption({
   }
 }
 
+declareOracle({ check: [checkInterruption] })
+
 /**
  * Fixed histories designed to reach each interruption landing deterministically.
  * Each named history specifies: a specific turn, outcomes, and transaction count
@@ -410,24 +415,24 @@ it.each(fixedLandings)(
   60_000,
 )
 
-it(`keeps settlement and ownership for an interruption at any microtask turn`, async () => {
-  // A permanent provider failure logs once by design; this law ignores logs.
-  const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
-  try {
-    await fc.assert(
-      fc.asyncProperty(history, async (generated) => {
-        // Settlement and ownership must hold for every generated history,
-        // regardless of which landing it reaches. Coverage is verified by the
-        // fixed tests above; this campaign proves the core law.
-        await checkInterruption(generated)
-      }),
-      {
-        numRuns: config.runs,
-        ...(config.seed === undefined ? {} : { seed: config.seed }),
-        ...(config.path === undefined ? {} : { path: config.path }),
-      },
-    )
-  } finally {
-    warn.mockRestore()
-  }
-}, 120_000)
+oracleReplayTest(it, interruptionProperty)(
+  `keeps settlement and ownership for an interruption at any microtask turn`,
+  async () => {
+    // A permanent provider failure logs once by design; this law ignores logs.
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    try {
+      await fc.assert(
+        fc.asyncProperty(history, async (generated) => {
+          // Settlement and ownership must hold for every generated history,
+          // regardless of which landing it reaches. Coverage is verified by the
+          // fixed tests above; this campaign proves the core law.
+          await checkInterruption(generated)
+        }),
+        oraclePropertyOptions(60, interruptionProperty),
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  },
+  120_000,
+)

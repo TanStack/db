@@ -280,3 +280,15 @@ function requireTestItem(value: unknown, mutationKey: string): TestItem {
   }
   return value
 }
+
+/** A promise that a test resolves to release one controlled step. */
+export function gate() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+/** Yields one macrotask, after the microtasks that the step queued. */
+export const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))

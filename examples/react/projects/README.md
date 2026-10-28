@@ -242,20 +242,21 @@ const AddTodo = () => {
 Use live queries to read data reactively across collections:
 
 ```tsx
-import { useLiveQuery } from '@tanstack/react-db'
+import { eq, useLiveQuery } from '@tanstack/react-db'
 
 const Todos = () => {
   // Read data using live queries with cross-collection joins
   const { data: todos } = useLiveQuery((query) =>
     query
       .from({ t: todoCollection })
-      .join({
-        type: 'inner',
-        from: { l: listCollection },
-        on: [`@l.id`, `=`, `@t.list_id`],
-      })
-      .where('@l.active', '=', true)
-      .select('@t.id', '@t.text', '@t.status', '@l.name')
+      .innerJoin({ l: listCollection }, ({ t, l }) => eq(l.id, t.list_id))
+      .where(({ l }) => eq(l.active, true))
+      .select(({ t, l }) => ({
+        id: t.id,
+        text: t.text,
+        status: t.status,
+        name: l.name,
+      }))
   )
 
   return (

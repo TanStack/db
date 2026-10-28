@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   and,
   coalesce,
@@ -14,6 +13,7 @@ import {
   not,
   or,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { PropRef, Value } from '../../src/query/ir.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {

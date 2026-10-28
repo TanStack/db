@@ -290,6 +290,11 @@ function canonicalizeQueryInScope(
     )
   }
 
+  // Operator code decides whether a query compiles, so it is part of the
+  // query's identity. Only groupKeys() and hand-built IR without operator
+  // code mark it; other identities stay as they were.
+  if (query.grouping) result.grouping = true
+
   if (query.groupBy) {
     result.groupBy = query.groupBy.map((expression, index) =>
       canonicalizeExpression(
@@ -730,6 +735,8 @@ function canonicalizeExpression(
   if (expression.type === `agg`) {
     return {
       type: `agg`,
+      // The types require operator code; IR built by hand may lack it.
+      ...((expression.grouping as unknown) ? {} : { withoutOperator: true }),
       name: expression.name,
       args: expression.args.map((arg, index) =>
         canonicalizeExpression(
@@ -778,6 +785,7 @@ function canonicalizeExpression(
   const childScope = createAliasScope(expression.query, scope)
   const result: Record<string, StableIdentityValue> = {
     type: `includesSubquery`,
+    ...((expression.runtime as unknown) ? {} : { withoutOperator: true }),
     query: canonicalizeQueryInScope(
       expression.query,
       `${path}.query`,

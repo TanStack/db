@@ -23,6 +23,7 @@ import {
   expectNotificationsStopped,
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
+import { oracleRuns } from './oracle-config'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 
 type Row = { id: string; count: number }
@@ -110,7 +111,7 @@ it.each([20260913, undefined])(
       ),
       {
         seed,
-        numRuns: 30,
+        numRuns: oracleRuns(30),
         examples: [
           [1, [2, null]],
           [1, [null]],
@@ -176,7 +177,7 @@ it.each([20260913, undefined])(
           ).toThrow()
         },
       ),
-      { seed, numRuns: 100 },
+      { seed, numRuns: oracleRuns(100) },
     )
   },
 )
@@ -250,7 +251,7 @@ it.each([20260913, undefined])(
           expectNotificationHistory([], [...callbacks, callbacks[1]!], [next]),
         ).toThrow()
       }),
-      { seed, numRuns: 50 },
+      { seed, numRuns: oracleRuns(50) },
     )
   },
 )

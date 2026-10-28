@@ -17,19 +17,29 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
-import { createRoot, createSignal, onCleanup } from 'solid-js'
+import {
+  createRenderEffect,
+  createRoot,
+  createSignal,
+  onCleanup,
+} from 'solid-js'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -52,10 +62,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-solid-${sourceSeq++}`,
+      id: collectionId ?? `conformance-solid-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -106,27 +117,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-solid-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-solid-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 async function settle() {
@@ -146,13 +142,26 @@ function makeHandle(
         state: result?.state,
         status: result?.status,
         isReady: result?.isReady,
-        persistedStatus: result?.persistedStatus,
-        isPersistedReady: result?.isPersistedReady,
-        persistedError: result?.persistedError,
-        isError: result?.isError,
+        isLoadingError: result?.isLoadingError,
+        isCrashed: result?.isCrashed,
+        isSyncError: result?.isSyncError,
         // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,
+        health: result?.health,
       })
+    },
+    // The hook's flags are getters that do not read the resource, so they
+    // stay readable when reading `data` throws for an <ErrorBoundary>.
+    statusSurface() {
+      const result = getResult()
+      return {
+        status: result?.status,
+        isReady: result?.isReady,
+        isLoadingError: result?.isLoadingError,
+        isCrashed: result?.isCrashed,
+        isSyncError: result?.isSyncError,
+        health: result?.health,
+      }
     },
     flush: settle,
     async apply(fn: () => void) {
@@ -190,7 +199,10 @@ function mountCollection(collection: any) {
   return makeHandle(getResult, dispose)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   // Solid accepts the config-object form via an accessor.
   const { getResult, dispose } = inRoot(() =>
     useLiveQuery(() => ({ query: build, ...opts })),
@@ -207,17 +219,34 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const [param, setParam] = createSignal<P>(initial)
-  const { getResult, dispose } = inRoot(() =>
-    // Reading param() inside the query fn makes Solid recompute on change.
-    useLiveQuery((q: any) => build(q, param())),
-  )
+  const published = createPublicationLog()
+  const { getResult, dispose } = inRoot(() => {
+    const query =
+      opts?.pool !== undefined
+        ? // Reading param() in the config accessor makes Solid recompute on change.
+          useLiveQuery(() => {
+            const value = param()
+            return { query: (q: any) => build(q, value), pool: opts.pool }
+          })
+        : // Reading param() inside the query fn makes Solid recompute on change.
+          useLiveQuery((q: any) => build(q, param()))
+    // Solid renders the value each render effect reads.
+    createRenderEffect(() => published.record(query.data, query.state))
+    return query
+  })
   const handle = makeHandle(getResult, dispose)
   return {
     ...handle,
+    publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       setParam(() => next)
+      // The first paint after the change: the framework ran its reactive
+      // work synchronously, but no later task has run.
+      published.record(getResult().data, getResult().state)
       await settle()
     },
   }
@@ -225,14 +254,22 @@ function mountControllable<P>(
 
 const solidDriver: LiveQueryDriver = {
   name: `solid`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(
       createCollection,
       `conformance-solid-lagging-${sourceSeq++}`,
+    ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-solid-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,
@@ -243,7 +280,7 @@ const solidDriver: LiveQueryDriver = {
   mountDisabled,
   // solid-db routes errors through its createResource/Suspense path: reading an
   // errored query throws (CollectionStateError) for an <ErrorBoundary> to catch,
-  // rather than exposing a readable isError flag. That's a framework idiom, not a
+  // rather than exposing a readable isLoadingError flag. That's a framework idiom, not a
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,
   knownGaps: [],
@@ -299,7 +336,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
   }
   const handle = makeHandle(
@@ -311,9 +350,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

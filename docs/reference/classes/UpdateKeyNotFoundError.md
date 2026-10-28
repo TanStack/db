@@ -3,7 +3,7 @@ id: UpdateKeyNotFoundError
 title: UpdateKeyNotFoundError
 ---
 
-Defined in: [packages/db/src/errors.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L306)
+Defined in: [packages/db/src/errors.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L336)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:306](https://github.com/TanStack/db/blob/
 new UpdateKeyNotFoundError(key): UpdateKeyNotFoundError;
 ```
 
-Defined in: [packages/db/src/errors.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L307)
+Defined in: [packages/db/src/errors.ts:337](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L337)
 
 #### Parameters
 

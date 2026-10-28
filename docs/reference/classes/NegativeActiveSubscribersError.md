@@ -3,7 +3,7 @@ id: NegativeActiveSubscribersError
 title: NegativeActiveSubscribersError
 ---
 
-Defined in: [packages/db/src/errors.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L172)
+Defined in: [packages/db/src/errors.ts:202](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L202)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:172](https://github.com/TanStack/db/blob/
 new NegativeActiveSubscribersError(): NegativeActiveSubscribersError;
 ```
 
-Defined in: [packages/db/src/errors.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L173)
+Defined in: [packages/db/src/errors.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L203)
 
 #### Returns
 

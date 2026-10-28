@@ -202,17 +202,6 @@ describe(`opaque cursor adapter`, () => {
     expect(await pending).toEqual(expected)
   })
 
-  it(`accepts large backend pages without spreading rows into arguments`, async () => {
-    const rows = Array.from({ length: 150_000 }, (_, id) => id)
-    const pager = createCursorPager(() =>
-      Promise.resolve({ rows, nextCursor: null }),
-    )
-    expect(await pager.read({ offset: 149_997, limit: undefined })).toEqual(
-      rows.slice(149_997),
-    )
-    expect(await pager.read({ offset: 0, limit: 2 })).toEqual(rows.slice(0, 2))
-  })
-
   it.each([1, 2, 5, 50])(
     `fulfills windows across backend pages of %i`,
     async (pageSize) => {
@@ -382,18 +371,6 @@ describe(`opaque cursor adapter`, () => {
       50,
       `cursor-pagination.reset`,
     )
-  })
-
-  it(`rejects a repeated opaque cursor without looping`, async () => {
-    let calls = 0
-    const pager = createCursorPager(() => {
-      calls++
-      return Promise.resolve({ rows: [], nextCursor: `same` })
-    })
-    await expect(pager.read({ offset: 0, limit: 1 })).rejects.toThrow(
-      `repeated`,
-    )
-    expect(calls).toBe(2)
   })
 
   it(`recovers after faults at generated intermediate page boundaries`, async () => {

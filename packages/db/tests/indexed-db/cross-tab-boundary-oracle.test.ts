@@ -4,7 +4,8 @@
  * The omission history uses delete/reinsert via public APIs, so a partial-row
  * mutant cannot hide behind draft undefined values or import truncation.
  * The status history observes caught receiver failure independently of promise
- * fulfillment. Cleanup histories keep old native reads alive after retirement.
+ * fulfillment. After the first ready, that failure is the Collection's
+ * `error` with its rows kept, which the recorder adds to the status history. Cleanup histories keep old native reads alive after retirement.
  * Native scheduling itself is received separately by the browser suite.
  */
 import { expect, it } from 'vitest'
@@ -55,7 +56,7 @@ async function omission(fault: 'none' | 'partial' | 'error') {
             commit: (...args) => {
               const result = params.commit(...args)
               if (++commits > 1 && fault === 'error')
-                params.markError(new Error('spurious receiver error control'))
+                params.fail(new Error('spurious receiver error control'))
               return result
             },
           }),
@@ -205,7 +206,7 @@ for (const abort of [false, true]) {
   })
 }
 
-it('reports an active receiver abort through Collection status while its callback fulfills', async () => {
+it('reports an active receiver abort as the Collection error while its callback fulfills', async () => {
   await withHarness(async (h) => {
     const writer = await h.open()
     const descriptor = await h.connect()
@@ -224,8 +225,11 @@ it('reports an active receiver abort through Collection status while its callbac
     await gate.release()
     await receipt.completion
     expect(receipt.status).toBe('fulfilled')
-    expect(record.statuses).toContain('error')
-    expect(receiver.status).toBe('error')
+    // After the first ready a receiver failure stops sync but keeps status.
+    expect(record.statuses).toContain('sync-error')
+    expect(receiver.status).toBe('ready')
+    expect(receiver.health.error).toBeTruthy()
+    expect(receiver.health.failureReason).toBeNull()
     assertSnapshot(
       receiver.values(),
       [],

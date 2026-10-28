@@ -42,13 +42,10 @@ it.each(
                 value: { id: 1, version: generation },
               })
               operations.commit()
-              if (generation === 2 && outcome === `throw`) {
-                // The adapter, not unloadSubset, owns rollback of a throw.
-                liveLeases.delete(options)
-                if (liveLeases.size === 0) stops++
-                throw failure
-              }
               loads.push(options)
+              // A throw is a rejection (maintainer decision): the lease is
+              // an acquisition that core releases with unloadSubset.
+              if (generation === 2 && outcome === `throw`) throw failure
               if (generation !== 2) return true
               const result = createDeferred<void>()
               pending.push(result)
@@ -96,10 +93,10 @@ it.each(
       for (const view of views) expect([...view.values()]).toEqual([1])
       // Distinct logical owners may share one adapter resource. Retiring one
       // must never stop it while another successful owner still holds a lease.
-      if (owners === 2 && outcome !== `throw`) expect(stops).toBe(0)
+      if (owners === 2) expect(stops).toBe(0)
       if (owners === 1) {
         expect(starts).toBe(2)
-        expect(stops).toBe(outcome === `throw` ? 2 : 1)
+        expect(stops).toBe(1)
       }
       for (const result of pending) {
         if (outcome === `reject`) result.reject(failure)

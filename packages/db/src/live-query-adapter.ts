@@ -1,81 +1,155 @@
-import type { Collection } from './collection/index.js'
-import type { CollectionStatus } from './types.js'
+import { SourceCollectionIdReuseError } from './errors.js'
+import { isCollection } from './live-query-primitives.js'
+import {
+  getPreparedLiveQueryIdentity,
+  getPreparedLiveQuerySources,
+} from './live-query-options.js'
+import type { DbClient } from './client.js'
+import type { LiveQueryKey } from './live-query-options.js'
 
 /**
- * Shared helpers for the first-party framework adapters (`@tanstack/react-db`,
- * `@tanstack/vue-db`, `@tanstack/svelte-db`, `@tanstack/solid-db`,
- * `@tanstack/angular-db`).
+ * The adapter layer: what the first-party framework adapters
+ * (`@tanstack/react-db`, `@tanstack/preact-db`, `@tanstack/vue-db`,
+ * `@tanstack/svelte-db`, `@tanstack/solid-db`, `@tanstack/angular-db`) build
+ * their bindings from. It centralizes logic every adapter used to duplicate,
+ * so they stay consistent across frameworks.
  *
- * These centralize small pieces of logic every adapter used to duplicate, so
- * they stay consistent across frameworks. They are intended for the official
- * adapters; treat them as unstable for external use.
+ * Application code should use an adapter instead. Everything exported here is
+ * unstable for external use and changes with the adapters that share it.
  */
 
+export * from './live-query-primitives.js'
+export * from './live-query-observer.js'
+export * from './live-query-window-binding.js'
+export {
+  configPool,
+  getLiveQueryHash,
+  getPreparedLiveQueryIdentity,
+  getPreparedLiveQuerySources,
+  prepareLiveQueryValue,
+  rejectLiveQueryInput,
+  releaseDeferredOnReclaim,
+  resolveLiveQueryValue,
+  resumeDeferredLiveQueryCollections,
+} from './live-query-options.js'
+export type { DeferredLiveQueryCollections } from './live-query-options.js'
+export {
+  createLiveQueryWindowController,
+  fetchNextLiveQueryWindowPage,
+} from './live-query-window-controller.js'
+export type {
+  CreateLiveQueryWindowControllerOptions,
+  LiveQueryWindowController,
+  LiveQueryWindowSnapshot,
+} from './live-query-window-controller.js'
+
 /**
- * Structural check for a live-query/`Collection` instance.
+ * The `queryKey` of a config-object query input, if it supplies one. An empty
+ * key is absent, as it is for `getLiveQueryHash`, so a hook and a `DbClient`
+ * preload agree on the query's identity.
+ */
+export function getLiveQueryKey(input: unknown): LiveQueryKey | undefined {
+  const queryKey =
+    input && typeof input === `object` && !isCollection(input)
+      ? (input as { queryKey?: unknown }).queryKey
+      : undefined
+  return Array.isArray(queryKey) && queryKey.length > 0 ? queryKey : undefined
+}
+
+/*
+ * Query identity and source Collection ID claims.
  *
- * Uses duck typing rather than `instanceof CollectionImpl` on purpose: adapters
- * and core can resolve to different copies of `@tanstack/db` (dual-package /
- * multi-realm), where `instanceof` gives false negatives. The three methods
- * below uniquely identify a Collection.
+ * A binding that compares derived query identity decides from it whether to
+ * compile again: React and Preact compare it on every render, and a `DbClient`
+ * matches preloaded and hydrated queries by its hash. That identity names each
+ * source by its Collection ID. While such a binding is mounted, an ID must
+ * keep naming one source object in each client scope, or the binding could
+ * reuse a live query that reads the old source. A binding that compiles again
+ * whenever its reactive reads change compares no identity, so neither check
+ * applies to it.
  */
-export function isCollection(
-  value: unknown,
-): value is Collection<any, any, any> {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    typeof (value as any).subscribeChanges === `function` &&
-    typeof (value as any).startSyncImmediate === `function` &&
-    typeof (value as any).id === `string`
-  )
-}
 
-/**
- * The Collection an adapter hands users as `collection`. A pooled live query
- * stands in for its live-query Collection and builds it only when touched.
- */
-export function getPublicCollection<
-  T extends Collection<any, any, any> | null | undefined,
->(collection: T): T {
-  return (
-    (collection as { publicCollection?: T } | null | undefined)
-      ?.publicCollection ?? collection
-  )
-}
+const sourceObjectTokens = new WeakMap<object, number>()
+let nextSourceObjectToken = 0
 
-/** Whether a collection yields a single result (`findOne`) rather than an array. */
-export function isSingleResultCollection(
-  collection: Collection<any, any, any>,
-): boolean {
-  return (
-    (collection.config as { singleResult?: boolean } | undefined)
-      ?.singleResult === true
-  )
-}
-
-/** The derived boolean status flags every adapter exposes for a query. */
-export interface LiveQueryStatusFlags {
-  isLoading: boolean
-  isReady: boolean
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
-
-/**
- * Derive the boolean status flags from a collection status. Adapters represent
- * a disabled query separately (with `isReady: true`); this covers the real
- * `CollectionStatus` values.
- */
-export function getLiveQueryStatusFlags(
-  status: CollectionStatus,
-): LiveQueryStatusFlags {
-  return {
-    isLoading: status === `loading`,
-    isReady: status === `ready`,
-    isIdle: status === `idle`,
-    isError: status === `error`,
-    isCleanedUp: status === `cleaned-up`,
+/** A process-unique number for a source object, without retaining it. */
+export function getSourceObjectToken(source: object): number {
+  let token = sourceObjectTokens.get(source)
+  if (token === undefined) {
+    token = ++nextSourceObjectToken
+    sourceObjectTokens.set(source, token)
   }
+  return token
+}
+
+// The client scope of a binding that reads no DbClient.
+const unscopedClaims = {}
+
+/**
+ * The source object each Collection ID named while one binding is mounted,
+ * per client scope.
+ */
+export type LiveQuerySourceIdClaims = WeakMap<object, Map<string, number>>
+
+export function createLiveQuerySourceIdClaims(): LiveQuerySourceIdClaims {
+  return new WeakMap()
+}
+
+/** Record a query's sources, or throw before recording any. */
+export function claimLiveQuerySourceIds(
+  claims: LiveQuerySourceIdClaims,
+  sources: ReadonlyArray<{ id: string }>,
+  client: DbClient | undefined,
+  bindingName: string,
+): void {
+  const scope = client ?? unscopedClaims
+  const prior = claims.get(scope)
+  const seen = new Map<string, number>()
+  for (const source of sources) {
+    const token = getSourceObjectToken(source)
+    const previous = seen.get(source.id) ?? prior?.get(source.id)
+    if (previous !== undefined && previous !== token) {
+      throw new SourceCollectionIdReuseError(bindingName, source.id)
+    }
+    seen.set(source.id, token)
+  }
+  const claimed = prior ?? new Map<string, number>()
+  for (const [id, token] of seen) claimed.set(id, token)
+  claims.set(scope, claimed)
+}
+
+/** Where a binding that compares query identity checks a prepared query. */
+export interface LiveQueryIdentityScope {
+  /** This binding's source Collection ID claims. */
+  claims: LiveQuerySourceIdClaims
+  client: DbClient | undefined
+  bindingName: string
+  /** Report a descriptor source that no client bound. */
+  onUnboundDescriptor?: (alias: string) => never
+}
+
+/**
+ * Identify a prepared query for a binding that compares query identity. The
+ * identity throws `UnhashableQueryIRError` for IR without a stable identity,
+ * then the query's sources claim their Collection IDs. The binding's render
+ * boundary releases the sync starts a rejected render deferred; see
+ * `rejectLiveQueryInput`.
+ */
+export function identifyLiveQuery<TIdentity = unknown>(
+  preparedValue: unknown,
+  scope: LiveQueryIdentityScope,
+  identify: (
+    preparedValue: unknown,
+  ) => TIdentity = getPreparedLiveQueryIdentity as (
+    preparedValue: unknown,
+  ) => TIdentity,
+): TIdentity {
+  const identity = identify(preparedValue)
+  claimLiveQuerySourceIds(
+    scope.claims,
+    getPreparedLiveQuerySources(preparedValue, scope.onUnboundDescriptor),
+    scope.client,
+    scope.bindingName,
+  )
+  return identity
 }

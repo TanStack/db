@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import {
   add,
   avg,

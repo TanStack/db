@@ -1,3 +1,5 @@
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+
 export type Row = { id: number; rank: number; group: number }
 export type Scope = { group: number | undefined; descending: boolean }
 export type Window = { offset: number; limit: number | undefined }
@@ -34,3 +36,5 @@ export function expectedWindow(
   const all = expectedRows(source, scope, { offset: 0, limit: undefined })
   return { rows: all.slice(0, n), hasNextPage: all.length > n }
 }
+
+declareOracle({ model: [expectedRows, expectedWindow] })

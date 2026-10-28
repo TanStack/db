@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest'
 import {
   count,
   createCollection,
@@ -7,6 +6,7 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
+import { describe, expect, it } from 'vitest'
 import { nextTick, ref, watchEffect } from 'vue'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'

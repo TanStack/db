@@ -7,6 +7,14 @@ export type Person = {
   sourcePayload: string
 }
 
+export type SsrHookFlags = {
+  isReady: boolean
+  isLoadingError: boolean
+  isCrashed: boolean
+  isLoading: boolean
+  isIdle: boolean
+}
+
 export const serverPerson: Person = {
   id: `server`,
   name: `Server snapshot`,

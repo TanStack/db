@@ -4,6 +4,7 @@ import { Temporal } from 'temporal-polyfill'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
+import { declareOracle } from '../../oracle-declaration.js'
 
 /**
  * # Which values does `in` find in a list?
@@ -221,6 +222,8 @@ function describeCase(testCase: InCase): string {
                   : String(value)
   return `value=${show(testCase.value)} list=[${testCase.list.map(show).join(`, `)}] listFromRow=${testCase.listFromRow}`
 }
+
+declareOracle({ check: [check], model: [referenceIn] })
 
 describe(`in evaluator`, () => {
   const property = fc.property(inCase, (testCase) =>

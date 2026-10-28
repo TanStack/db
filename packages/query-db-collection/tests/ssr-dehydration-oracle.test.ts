@@ -9,6 +9,7 @@ import {
 import { crossSerializeStream, getCrossReferenceHeader } from 'seroval'
 import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { DehydratedState } from '@tanstack/query-core'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
@@ -116,6 +117,8 @@ function expectHydratedRow(
   if (expectedMeta) expect(hydratedMeta).toEqual(expectedMeta)
   browserClient.clear()
 }
+
+declareOracle({ check: [expectHydratedRow] })
 
 async function checkWithCleanup(
   check: () => Promise<void>,

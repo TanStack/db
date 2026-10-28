@@ -7,11 +7,7 @@ title: createEffect
 function createEffect<TRow, TKey>(config): Effect;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:202](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L202)
-
-Creates a reactive effect that fires handlers when rows enter, exit, or
-update within a query result. Effects process deltas only — they do not
-maintain or require the full materialised query result.
+Defined in: [packages/db/src/query/effect.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L226)
 
 ## Type Parameters
 
@@ -32,18 +28,3 @@ maintain or require the full materialised query result.
 ## Returns
 
 [`Effect`](../interfaces/Effect.md)
-
-## Example
-
-```typescript
-const effect = createEffect({
-  query: (q) => q.from({ msg: messagesCollection })
-    .where(({ msg }) => eq(msg.role, 'user')),
-  onEnter: async (event) => {
-    await generateResponse(event.value)
-  },
-})
-
-// Later: stop the effect
-await effect.dispose()
-```

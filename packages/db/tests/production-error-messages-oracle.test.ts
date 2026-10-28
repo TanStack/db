@@ -66,7 +66,9 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
 import { codedWarning } from '../src/error-message'
+import { declareOracle } from './oracle-declaration.js'
 import { errorSampleArguments } from './error-sample-arguments'
+import { exportedErrorClasses } from './production-error-messages-fixture'
 import { findErrorSites } from './error-sites-oracle'
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url))
@@ -131,11 +133,6 @@ const hostileInputs: Array<unknown> = [
   [undefined],
 ]
 
-const exportedErrorClasses = Object.entries(Errors).filter(
-  ([, value]) =>
-    typeof value === `function` && value.prototype instanceof Error,
-)
-
 function construct(name: string, args: Array<unknown>, mode: string): Error {
   vi.stubEnv(`NODE_ENV`, mode)
   try {
@@ -169,112 +166,200 @@ function shownInputs(args: Array<unknown>, devMessage: string): Array<string> {
     .map((arg) => JSON.stringify(arg))
 }
 
+// The check: the production outputs match the expected record for this claim.
+function expectEveryClassCoded(): void {
+  const codes: Record<string, number> = JSON.parse(
+    readFileSync(codesPath, `utf8`),
+  )
+  const uncoded = exportedErrorClasses
+    .map(([name]) => name)
+    .filter(
+      (name) =>
+        !(name in codes) &&
+        !callerMessageClasses.has(name) &&
+        !fullMessageClasses.has(name),
+    )
+  expect(uncoded).toEqual([])
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectFullTextInProduction(): void {
+  for (const name of fullMessageClasses)
+    errorSampleArguments[name]!.forEach((args, index) => {
+      expect(construct(name, args, `production`).message, name).toBe(
+        devMessages[name]![index],
+      )
+    })
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectDevelopmentMessages(): void {
+  for (const [name, argSets] of Object.entries(errorSampleArguments))
+    argSets.forEach((args, index) => {
+      expect(
+        construct(name, args, `development`).message,
+        `${name} sample ${index}`,
+      ).toBe(devMessages[name]![index])
+    })
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectClassShapeInBothModes(): void {
+  for (const [name, argSets] of Object.entries(errorSampleArguments))
+    for (const args of argSets) {
+      const dev = construct(name, args, `development`)
+      const prod = construct(name, args, `production`)
+      expect(shape(prod), name).toEqual(shape(dev))
+      expect(prod, name).toBeInstanceOf(
+        (Errors as unknown as Record<string, ErrorConstructor>)[name]!,
+      )
+    }
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectCodedProductionLines(): void {
+  const codes: Record<string, number> = JSON.parse(
+    readFileSync(codesPath, `utf8`),
+  )
+  const seen = new Map<number, string>()
+  for (const [name, argSets] of Object.entries(errorSampleArguments)) {
+    if (!(name in codes)) continue
+    argSets.forEach((args, index) => {
+      const message = construct(name, args, `production`).message
+      const match = productionLine.exec(message)
+      expect(match, `${name}: ${message}`).not.toBeNull()
+      const code = Number(match![1])
+      expect(Number(match![3]), `${name} anchor`).toBe(code)
+      expect(code, `${name} code`).toBe(codes[name])
+      for (const input of shownInputs(args, devMessages[name]![index]!))
+        expect(match![2] ?? ``, `${name} keeps ${input}`).toContain(input)
+    })
+    const owner = seen.get(codes[name]!)
+    expect(owner, `code ${codes[name]} reused by ${name}`).toBeUndefined()
+    seen.set(codes[name]!, name)
+  }
+  expect(seen.size).toBeGreaterThan(80)
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectHostileInputsCoded(): void {
+  const codes: Record<string, number> = JSON.parse(
+    readFileSync(codesPath, `utf8`),
+  )
+  for (const [name, argSets] of Object.entries(errorSampleArguments)) {
+    if (!(name in codes)) continue
+    for (const args of argSets)
+      args.forEach((_, position) => {
+        for (const hostile of hostileInputs) {
+          const replaced = args.map((arg, index) =>
+            index === position ? hostile : arg,
+          )
+          let message: string
+          try {
+            message = construct(name, replaced, `production`).message
+          } catch (error) {
+            throw new Error(`${name} argument ${position} threw: ${error}`)
+          }
+          const match = productionLine.exec(message)
+          expect(match, `${name}: ${message}`).not.toBeNull()
+          expect(Number(match![1]), name).toBe(codes[name])
+          // A plain object never reaches the line, not even inside an array.
+          expect(message, name).not.toContain(`secret`)
+        }
+      })
+  }
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectUnencodableValuesShown(): void {
+  const codes: Record<string, number> = JSON.parse(
+    readFileSync(codesPath, `utf8`),
+  )
+  for (const [name, argSets] of Object.entries(errorSampleArguments)) {
+    if (!(name in codes)) continue
+    argSets.forEach((args, index) => {
+      args.forEach((arg, position) => {
+        if (typeof arg !== `string` || arg.length < 3) return
+        if (!devMessages[name]![index]!.includes(arg)) return
+        for (const [value, shown] of [
+          [Symbol(`probe`), `"Symbol(probe)"`],
+          [7n, `"7"`],
+          [undefined, `=undefined`],
+          [NaN, `=NaN`],
+          [-Infinity, `=-Infinity`],
+          [[7n, undefined, NaN], `=["7","undefined","NaN"]`],
+        ] as const) {
+          const replaced = args.map((original, at) =>
+            at === position ? value : original,
+          )
+          const message = construct(name, replaced, `production`).message
+          expect(message, `${name} argument ${position}`).toContain(shown)
+        }
+      })
+    })
+  }
+}
+
+// The check: the production outputs match the expected record for this claim.
+function expectCodesDocumented(): void {
+  const codes: Record<string, number> = JSON.parse(
+    readFileSync(codesPath, `utf8`),
+  )
+  const docs = readFileSync(docsPath, `utf8`)
+  for (const [name, code] of Object.entries(codes)) {
+    const heading = new RegExp(`^## Error ${code}\\b.*${name}`, `m`)
+    expect(docs, `${name} (${code})`).toMatch(heading)
+  }
+  const sites: Record<string, { file: string; kind?: string }> = JSON.parse(
+    readFileSync(sitesPath, `utf8`),
+  )
+  for (const [code, { file, kind }] of Object.entries(sites)) {
+    const title = kind === `warning` ? `Warning` : `Error`
+    const anchor = `<a id="${kind ?? `error`}-${code}"></a>`
+    const heading = new RegExp(`^## ${title} ${code}\\b.*${file}`, `m`)
+    expect(docs, `${title} ${code} (${file})`).toMatch(heading)
+    expect(docs, `${title} ${code} anchor`).toContain(anchor)
+  }
+}
+
+declareOracle({
+  check: [
+    expectEveryClassCoded,
+    expectFullTextInProduction,
+    expectDevelopmentMessages,
+    expectClassShapeInBothModes,
+    expectCodedProductionLines,
+    expectHostileInputsCoded,
+    expectUnencodableValuesShown,
+    expectCodesDocumented,
+  ],
+})
+
 describe(`production error messages`, () => {
   afterEach(() => vi.unstubAllEnvs())
 
   it(`codes every exported class except the caller-message bases`, () => {
-    const codes: Record<string, number> = JSON.parse(
-      readFileSync(codesPath, `utf8`),
-    )
-    const uncoded = exportedErrorClasses
-      .map(([name]) => name)
-      .filter(
-        (name) =>
-          !(name in codes) &&
-          !callerMessageClasses.has(name) &&
-          !fullMessageClasses.has(name),
-      )
-    expect(uncoded).toEqual([])
+    expectEveryClassCoded()
   })
 
   it(`keeps the full message in production for full-text classes`, () => {
-    for (const name of fullMessageClasses)
-      errorSampleArguments[name]!.forEach((args, index) => {
-        expect(construct(name, args, `production`).message, name).toBe(
-          devMessages[name]![index],
-        )
-      })
-  })
-
-  it(`has sample inputs for every exported error class`, () => {
-    const missing = exportedErrorClasses
-      .map(([name]) => name)
-      .filter((name) => !(name in errorSampleArguments))
-    expect(missing).toEqual([])
+    expectFullTextInProduction()
   })
 
   it(`keeps every development message unchanged`, () => {
-    for (const [name, argSets] of Object.entries(errorSampleArguments))
-      argSets.forEach((args, index) => {
-        expect(
-          construct(name, args, `development`).message,
-          `${name} sample ${index}`,
-        ).toBe(devMessages[name]![index])
-      })
+    expectDevelopmentMessages()
   })
 
   it(`keeps class, name, instanceof, and fields in both modes`, () => {
-    for (const [name, argSets] of Object.entries(errorSampleArguments))
-      for (const args of argSets) {
-        const dev = construct(name, args, `development`)
-        const prod = construct(name, args, `production`)
-        expect(shape(prod), name).toEqual(shape(dev))
-        expect(prod, name).toBeInstanceOf(
-          (Errors as unknown as Record<string, ErrorConstructor>)[name]!,
-        )
-      }
+    expectClassShapeInBothModes()
   })
 
   it(`writes a coded production line with the shown inputs`, () => {
-    const codes: Record<string, number> = JSON.parse(
-      readFileSync(codesPath, `utf8`),
-    )
-    const seen = new Map<number, string>()
-    for (const [name, argSets] of Object.entries(errorSampleArguments)) {
-      if (!(name in codes)) continue
-      argSets.forEach((args, index) => {
-        const message = construct(name, args, `production`).message
-        const match = productionLine.exec(message)
-        expect(match, `${name}: ${message}`).not.toBeNull()
-        const code = Number(match![1])
-        expect(Number(match![3]), `${name} anchor`).toBe(code)
-        expect(code, `${name} code`).toBe(codes[name])
-        for (const input of shownInputs(args, devMessages[name]![index]!))
-          expect(match![2] ?? ``, `${name} keeps ${input}`).toContain(input)
-      })
-      const owner = seen.get(codes[name]!)
-      expect(owner, `code ${codes[name]} reused by ${name}`).toBeUndefined()
-      seen.set(codes[name]!, name)
-    }
-    expect(seen.size).toBeGreaterThan(80)
+    expectCodedProductionLines()
   })
 
   it(`writes one coded line for hostile inputs`, () => {
-    const codes: Record<string, number> = JSON.parse(
-      readFileSync(codesPath, `utf8`),
-    )
-    for (const [name, argSets] of Object.entries(errorSampleArguments)) {
-      if (!(name in codes)) continue
-      for (const args of argSets)
-        args.forEach((_, position) => {
-          for (const hostile of hostileInputs) {
-            const replaced = args.map((arg, index) =>
-              index === position ? hostile : arg,
-            )
-            let message: string
-            try {
-              message = construct(name, replaced, `production`).message
-            } catch (error) {
-              throw new Error(`${name} argument ${position} threw: ${error}`)
-            }
-            const match = productionLine.exec(message)
-            expect(match, `${name}: ${message}`).not.toBeNull()
-            expect(Number(match![1]), name).toBe(codes[name])
-            // A plain object never reaches the line, not even inside an array.
-            expect(message, name).not.toContain(`secret`)
-          }
-        })
-    }
+    expectHostileInputsCoded()
   })
 
   describe(`error sites`, () => {
@@ -430,52 +515,10 @@ describe(`production error messages`, () => {
   // a symbol or bigint shows as a quoted string, and `undefined`, `NaN`, and
   // the infinities show as themselves rather than as `null` or nothing.
   it(`shows values that JSON cannot encode in a shown position`, () => {
-    const codes: Record<string, number> = JSON.parse(
-      readFileSync(codesPath, `utf8`),
-    )
-    for (const [name, argSets] of Object.entries(errorSampleArguments)) {
-      if (!(name in codes)) continue
-      argSets.forEach((args, index) => {
-        args.forEach((arg, position) => {
-          if (typeof arg !== `string` || arg.length < 3) return
-          if (!devMessages[name]![index]!.includes(arg)) return
-          for (const [value, shown] of [
-            [Symbol(`probe`), `"Symbol(probe)"`],
-            [7n, `"7"`],
-            [undefined, `=undefined`],
-            [NaN, `=NaN`],
-            [-Infinity, `=-Infinity`],
-            [[7n, undefined, NaN], `=["7","undefined","NaN"]`],
-          ] as const) {
-            const replaced = args.map((original, at) =>
-              at === position ? value : original,
-            )
-            const message = construct(name, replaced, `production`).message
-            expect(message, `${name} argument ${position}`).toContain(shown)
-          }
-        })
-      })
-    }
+    expectUnencodableValuesShown()
   })
 
   it(`documents every code with its class`, () => {
-    const codes: Record<string, number> = JSON.parse(
-      readFileSync(codesPath, `utf8`),
-    )
-    const docs = readFileSync(docsPath, `utf8`)
-    for (const [name, code] of Object.entries(codes)) {
-      const heading = new RegExp(`^## Error ${code}\\b.*${name}`, `m`)
-      expect(docs, `${name} (${code})`).toMatch(heading)
-    }
-    const sites: Record<string, { file: string; kind?: string }> = JSON.parse(
-      readFileSync(sitesPath, `utf8`),
-    )
-    for (const [code, { file, kind }] of Object.entries(sites)) {
-      const title = kind === `warning` ? `Warning` : `Error`
-      const anchor = `<a id="${kind ?? `error`}-${code}"></a>`
-      const heading = new RegExp(`^## ${title} ${code}\\b.*${file}`, `m`)
-      expect(docs, `${title} ${code} (${file})`).toMatch(heading)
-      expect(docs, `${title} ${code} anchor`).toContain(anchor)
-    }
+    expectCodesDocumented()
   })
 })

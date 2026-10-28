@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src'
+import { declareOracle } from './oracle-declaration.js'
 import type { Collection, SyncConfig } from '../src'
 import type { ChangeMessage } from '../src/types'
 
@@ -267,6 +268,8 @@ async function runHistory(
     })
 }
 
+declareOracle({ check: [runHistory], model: [referenceRows] })
+
 describe(`DbClient hydration authority oracle`, () => {
   const cases: Array<{
     decisions: ReadonlyArray<AdapterDecision>
@@ -335,12 +338,51 @@ describe(`DbClient hydration authority oracle`, () => {
  * key after the chunk, and persisting with a source transaction open before
  * the chunk.
  */
+type Interleaving = {
+  persisting: boolean
+  source: `none` | `open-before-chunk` | `after-chunk`
+  sourceKey: `seed` | `other`
+}
+
+// Reference: the seed row, then the source row; a later write to the same
+// key wins.
+function expectedInterleavedRows({
+  source,
+  sourceKey,
+}: Interleaving): Array<Row> {
+  const rows = new Map<string, Row>([[`seed`, { id: `seed`, name: `seed` }]])
+  if (source !== `none`) rows.set(sourceKey, { id: sourceKey, name: `source` })
+  return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+// The model: an accepted reader sees the source's staged write for the seed
+// key only when that transaction was opened before the chunk and names it.
+function expectedAcceptedSeedRow(history: Interleaving): Row {
+  return history.source === `open-before-chunk` && history.sourceKey === `seed`
+    ? { id: `seed`, name: `source` }
+    : { id: `seed`, name: `seed` }
+}
+
+// The check: accepted readers and the settled publication match the model.
+function expectAcceptedSeedRow(accepted: unknown, history: Interleaving): void {
+  expect(accepted, `accepted readers see the chunk`).toEqual(
+    expectedAcceptedSeedRow(history),
+  )
+}
+
+function expectInterleavedRows(
+  rows: ReadonlyArray<Row>,
+  history: Interleaving,
+): void {
+  expect(rows).toEqual(expectedInterleavedRows(history))
+}
+
+declareOracle({
+  check: [expectAcceptedSeedRow, expectInterleavedRows],
+  model: [expectedInterleavedRows, expectedAcceptedSeedRow],
+})
+
 describe(`DbClient hydration interleaving oracle`, () => {
-  type Interleaving = {
-    persisting: boolean
-    source: `none` | `open-before-chunk` | `after-chunk`
-    sourceKey: `seed` | `other`
-  }
   const interleavings: Array<Interleaving> = [false, true].flatMap(
     (persisting) =>
       ([`none`, `open-before-chunk`, `after-chunk`] as const).flatMap(
@@ -352,15 +394,6 @@ describe(`DbClient hydration interleaving oracle`, () => {
           })),
       ),
   )
-
-  // Reference: the seed row, then the source row; a later write to the same
-  // key wins.
-  const expectedRows = ({ source, sourceKey }: Interleaving) => {
-    const rows = new Map<string, Row>([[`seed`, { id: `seed`, name: `seed` }]])
-    if (source !== `none`)
-      rows.set(sourceKey, { id: sourceKey, name: `source` })
-    return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
-  }
 
   it.each(interleavings)(
     `accepts a chunk with persisting=$persisting and source $source writing $sourceKey`,
@@ -405,13 +438,9 @@ describe(`DbClient hydration interleaving oracle`, () => {
         })
         // The accepted-row view also includes an open transaction's staged
         // writes, which follow the chunk in commit order.
-        expect(
+        expectAcceptedSeedRow(
           collection._state.getAcceptedSyncedRow(`seed`),
-          `accepted readers see the chunk`,
-        ).toEqual(
-          history.source === `open-before-chunk` && history.sourceKey === `seed`
-            ? { id: `seed`, name: `source` }
-            : { id: `seed`, name: `seed` },
+          history,
         )
         if (history.source === `after-chunk`) {
           sync.begin()
@@ -423,9 +452,10 @@ describe(`DbClient hydration interleaving oracle`, () => {
         }
         release()
         await mutation?.isPersisted.promise.catch(() => undefined)
-        expect(
+        expectInterleavedRows(
           observedRows(collection.values()).filter((row) => row.id !== `local`),
-        ).toEqual(expectedRows(history))
+          history,
+        )
       } finally {
         release()
         await collection.cleanup()

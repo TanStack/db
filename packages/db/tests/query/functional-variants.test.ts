@@ -5,6 +5,7 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
@@ -303,6 +304,22 @@ describe(`Functional Variants Query`, () => {
               ),
         }),
       ).toThrow(`fn.select() cannot return a child query builder`)
+
+      expect(() =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).fn.select(
+              (row) =>
+                ({
+                  id: row.user.id,
+                  departments: include(
+                    q.from({ department: departmentsCollection }),
+                  ),
+                }) as any,
+            ),
+        }),
+      ).toThrow(`fn.select() cannot return include()`)
 
       const departments = Symbol(`departments`)
       expect(() =>

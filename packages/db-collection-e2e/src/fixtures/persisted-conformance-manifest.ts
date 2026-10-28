@@ -122,8 +122,8 @@ export const persistedConformanceLaws = [
   'Live Updates Suite > Reactive Updates > should receive updates when backend data changes',
   'Live Updates Suite > Reactive Updates > should add new records that match query predicate',
   'Live Updates Suite > Reactive Updates > should remove records that no longer match predicate',
-  'Live Updates Suite > Subscription Lifecycle > should receive updates when subscribed',
   'Live Updates Suite > Update Existing Records > should update existing records in query results',
+  'Live Updates Suite > Subscription Lifecycle > should receive updates when subscribed',
 ] as const
 
 export function getPersistedConformanceTestNames(

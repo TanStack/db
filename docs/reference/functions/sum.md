@@ -9,7 +9,7 @@ title: sum
 function sum<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:675](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L675)
+Defined in: [packages/db/src/query/builder/functions.ts:674](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L674)
 
 ### Type Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:675](https://github.com/
 function sum<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:676](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L676)
+Defined in: [packages/db/src/query/builder/functions.ts:675](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L675)
 
 ### Type Parameters
 
@@ -57,7 +57,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:676](https://github.com/
 function sum<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:679](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L679)
+Defined in: [packages/db/src/query/builder/functions.ts:678](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L678)
 
 ### Type Parameters
 

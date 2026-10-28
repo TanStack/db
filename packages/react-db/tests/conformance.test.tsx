@@ -16,6 +16,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
@@ -26,9 +27,14 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import { rejectReadsAfterRenderError } from './rejected-binding'
 import type { RenderHookResult } from '@testing-library/react'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -47,10 +53,13 @@ function writer<T extends { id: string }>(collection: any) {
   }
 }
 
-function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
+function makeSource<T extends { id: string }>(
+  initialData: ReadonlyArray<T>,
+  collectionId?: string,
+) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-react-${sourceSeq++}`,
+      id: collectionId ?? `conformance-react-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -103,28 +112,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-react-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  // Starting sync throws → engine catches and sets status to `error`.
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-react-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 function mount(build: QueryBuild) {
@@ -137,8 +130,28 @@ function mountCollection(collection: any) {
   return makeHandle(hook)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const hook = renderHook(() => useLiveQuery({ query: build as any, ...opts }))
+  return makeHandle(hook)
+}
+
+// An empty dependency list compiles the query once, at mount, where the hook
+// checks its identity and claims its sources.
+function mountWithDependencyList(build: QueryBuild) {
+  const hook = renderHook(() => useLiveQuery(build as any, []))
+  return makeHandle(hook)
+}
+
+function mountConfigWithDependencyList(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
+  const hook = renderHook(() =>
+    useLiveQuery({ query: build as any, ...opts } as any, []),
+  )
   return makeHandle(hook)
 }
 
@@ -148,27 +161,56 @@ function mountDisabled() {
   return makeHandle(hook)
 }
 
-function mountControllable<P>(
-  build: (q: any, param: P) => any,
-  initial: P,
-): ControllableHandle<P> {
-  const hook = renderHook(
-    ({ param }: { param: P }) =>
-      // Param goes in the dependency list so the hook recompiles when it changes.
-      useLiveQuery((q: any) => build(q, param), [param]),
-    { initialProps: { param: initial } },
-  )
-  const handle = makeHandle(hook)
-  return {
-    ...handle,
-    async setParam(param: P) {
-      await act(async () => {
-        hook.rerender({ param })
-      })
-      await handle.flush()
-    },
+// React compares query identity on two production paths: the identity derived
+// from the query IR on every render (the 1.0 form), and a deprecated
+// dependency list, which decides reuse and checks identity when the query
+// compiles. The suite runs once per path.
+type IdentityPath = `derived` | `dependency list`
+
+const mountControllableWith = (path: IdentityPath) =>
+  function mountControllable<P>(
+    build: (q: any, param: P) => any,
+    initial: P,
+    opts?: { pool?: PooledLiveQueries },
+  ): ControllableHandle<P> {
+    const published = createPublicationLog()
+    const hook = renderHook(
+      ({ param }: { param: P }) => {
+        const query = (q: any) => build(q, param)
+        // A pooled query uses the config form, on either identity path.
+        const result =
+          opts?.pool !== undefined
+            ? path === `derived`
+              ? useLiveQuery({ query, pool: opts.pool })
+              : useLiveQuery({ query, pool: opts.pool }, [param])
+            : path === `derived`
+              ? // The callback captures param, so its IR identity changes with it.
+                useLiveQuery(query)
+              : useLiveQuery(query, [param])
+        // A layout effect records each committed value.
+        useLayoutEffect(() => {
+          published.record(result.data, result.state)
+        })
+        return result
+      },
+      { initialProps: { param: initial } },
+    )
+    const guard = rejectReadsAfterRenderError(hook)
+    const handle = makeHandle(hook)
+    return {
+      ...handle,
+      publications: published.values,
+      statePublications: published.stateValues,
+      async setParam(param: P) {
+        await guard(() =>
+          act(async () => {
+            hook.rerender({ param })
+          }),
+        )
+        await handle.flush()
+      },
+    }
   }
-}
 
 function makeHandle(hook: RenderHookResult<any, any>) {
   return {
@@ -180,13 +222,13 @@ function makeHandle(hook: RenderHookResult<any, any>) {
         state: r?.state,
         status: r?.status,
         isReady: r?.isReady,
-        persistedStatus: r?.persistedStatus,
-        isPersistedReady: r?.isPersistedReady,
-        persistedError: r?.persistedError,
-        isError: r?.isError,
+        isLoadingError: r?.isLoadingError,
+        isCrashed: r?.isCrashed,
+        isSyncError: r?.isSyncError,
         // Read react-db's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).
         isEnabled: r?.isEnabled,
+        health: r?.health,
       })
     },
     async flush() {
@@ -206,10 +248,55 @@ function makeHandle(hook: RenderHookResult<any, any>) {
   }
 }
 
+// The config-object form with a queryKey chosen per step; an undefined key
+// leaves the hook to derive the identity, or to follow the dependency list.
+const mountKeyedControllableWith = (path: IdentityPath) =>
+  function mountKeyedControllable<P>(
+    build: (q: any, param: P) => any,
+    key: (param: P) => ReadonlyArray<unknown> | undefined,
+    initial: P,
+  ): ControllableHandle<P> {
+    const published = createPublicationLog()
+    const hook = renderHook(
+      ({ param }: { param: P }) => {
+        const config = {
+          query: (q: any) => build(q, param),
+          queryKey: key(param),
+        } as any
+        const result =
+          path === `derived`
+            ? useLiveQuery(config)
+            : useLiveQuery(config, [param])
+        useLayoutEffect(() => {
+          published.record(result.data, result.state)
+        })
+        return result
+      },
+      { initialProps: { param: initial } },
+    )
+    const guard = rejectReadsAfterRenderError(hook)
+    const handle = makeHandle(hook)
+    return {
+      ...handle,
+      publications: published.values,
+      statePublications: published.stateValues,
+      async setParam(param: P) {
+        await guard(() =>
+          act(async () => {
+            hook.rerender({ param })
+          }),
+        )
+        await handle.flush()
+      },
+    }
+  }
+
 const reactDriver: LiveQueryDriver = {
   name: `react`,
+  // Each render re-runs the query input and compares its identity.
+  comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
@@ -217,10 +304,17 @@ const reactDriver: LiveQueryDriver = {
       createCollection,
       `conformance-react-lagging-${sourceSeq++}`,
     ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-react-health-${sourceSeq++}`,
+      data,
+    ),
   makePrecreated,
   makeErrorSource,
   mount,
-  mountControllable,
+  mountControllable: mountControllableWith(`derived`),
+  mountKeyedControllable: mountKeyedControllableWith(`derived`),
   mountCollection,
   mountConfig,
   mountDisabled,
@@ -229,6 +323,14 @@ const reactDriver: LiveQueryDriver = {
 }
 
 runSuite(reactDriver)
+runSuite({
+  ...reactDriver,
+  name: `react (dependency list)`,
+  mount: mountWithDependencyList,
+  mountConfig: mountConfigWithDependencyList,
+  mountControllable: mountControllableWith(`dependency list`),
+  mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
+})
 it(`publishes a synchronous ordered limit in the first layout commit`, async () => {
   const source = makeSource([
     { id: `1`, rank: 1 },
@@ -272,13 +374,15 @@ it(`publishes a synchronous full-source ordered limit in the first layout commit
   ])
   const commits: Array<{ ids: Array<string>; status: string }> = []
   const hook = renderHook(() => {
-    const result = useLiveQuery((q) =>
-      q
-        .from({ row: source.collection })
-        .fn.where(({ row }) => row.rank > 0)
-        .orderBy(({ row }) => row.rank)
-        .limit(2),
-    )
+    const result = useLiveQuery({
+      queryKey: [`full-source-ordered-limit`],
+      query: (q) =>
+        q
+          .from({ row: source.collection })
+          .fn.where(({ row }) => row.rank > 0)
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
+    })
     useLayoutEffect(() => {
       commits.push({
         ids: result.data.map(({ id }) => id),
@@ -347,7 +451,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
   }
   const hook = renderHook(() => raw)
@@ -357,9 +463,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`, `isEnabled`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`, `isEnabled`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

@@ -4,10 +4,10 @@ title: collectSourceRefs
 ---
 
 ```ts
-function collectSourceRefs(query): CollectionSourceRef[];
+function collectSourceRefs(query, includeSourceIds?): CollectionSourceRef[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:335](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L335)
+Defined in: [packages/db/src/query/ir.ts:344](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L344)
 
 Returns each lexical Collection or descriptor source in a query tree once.
 
@@ -16,6 +16,12 @@ Returns each lexical Collection or descriptor source in a query tree once.
 ### query
 
 [`QueryIR`](../interfaces/QueryIR.md)
+
+### includeSourceIds?
+
+`Set`\<`string`\>
+
+Receives the IDs of sources first reached through an include.
 
 ## Returns
 

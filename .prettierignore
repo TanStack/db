@@ -7,3 +7,5 @@
 **/snap
 pnpm-lock.yaml
 **/routeTree.gen.ts
+packages/convex-db-collection/e2e/backend/.convex/
+packages/convex-db-collection/e2e/backend/convex/_generated/

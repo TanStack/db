@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import { count, eq, useLiveQuery } from '@tanstack/react-db'
+import { count, eq, include, useLiveQuery } from '@tanstack/react-db'
 import { itemsCollection, listsCollection } from '../db/collections'
 import { useShopping } from '../db/ShoppingContext'
 
@@ -116,26 +116,32 @@ export function ListsScreen() {
           name: list.name,
           createdAt: list.createdAt,
           $synced: list.$synced,
-          totalItems: q
-            .from({ item: itemsCollection })
-            .where(({ item }) => eq(item.listId, list.id))
-            .select(({ item }) => ({ n: count(item.id) })),
-          uncheckedPreview: q
-            .from({ item: itemsCollection })
-            .where(({ item }) => eq(item.listId, list.id))
-            .where(({ item }) => eq(item.checked, false))
-            .select(({ item }) => ({
-              id: item.id,
-              text: item.text,
-              createdAt: item.createdAt,
-            }))
-            .orderBy(({ item }) => item.createdAt, `asc`)
-            .limit(3),
-          checkedItems: q
-            .from({ item: itemsCollection })
-            .where(({ item }) => eq(item.listId, list.id))
-            .where(({ item }) => eq(item.checked, true))
-            .select(({ item }) => ({ n: count(item.id) })),
+          totalItems: include(
+            q
+              .from({ item: itemsCollection })
+              .where(({ item }) => eq(item.listId, list.id))
+              .select(({ item }) => ({ n: count(item.id) })),
+          ),
+          uncheckedPreview: include(
+            q
+              .from({ item: itemsCollection })
+              .where(({ item }) => eq(item.listId, list.id))
+              .where(({ item }) => eq(item.checked, false))
+              .select(({ item }) => ({
+                id: item.id,
+                text: item.text,
+                createdAt: item.createdAt,
+              }))
+              .orderBy(({ item }) => item.createdAt, `asc`)
+              .limit(3),
+          ),
+          checkedItems: include(
+            q
+              .from({ item: itemsCollection })
+              .where(({ item }) => eq(item.listId, list.id))
+              .where(({ item }) => eq(item.checked, true))
+              .select(({ item }) => ({ n: count(item.id) })),
+          ),
         }))
         .orderBy(({ list }) => list.createdAt, `desc`),
   })

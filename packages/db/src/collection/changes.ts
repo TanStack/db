@@ -380,7 +380,7 @@ export class CollectionChangesManager<
 
   /** Whether this Collection had a subscriber or a preload in this sync run. */
   public hasSubscriberOrPreload(): boolean {
-    return this.subscriberOrPreload
+    return this.subscriberOrPreload || this.acquiringSubscribersCount > 0
   }
 
   /** Listen for the first subscriber or preload in the current sync run. */
@@ -410,17 +410,32 @@ export class CollectionChangesManager<
   }
 
   /** A deferring subscription resumed: it may now start this sync run. */
-  private resumeSubscriber(): void {
+  private resumeSubscriber(): () => void {
+    this.lifecycle.assertCanStartSync()
+    this.startSyncForSubscriber()
+    return () => this.changeAcquiringSubscribers(1)
+  }
+
+  private startSyncForSubscriber(): void {
+    const syncRunGeneration = this.sync.getSyncRunGeneration()
     // Mark first, so a sync run that starts now builds non-deferred demand.
     this.markSubscriberOrPreload()
+    // A first-demand callback may itself retire this start.
+    if (syncRunGeneration !== this.sync.getSyncRunGeneration()) return
     this.startSyncIfStopped()
-    this.changeAcquiringSubscribers(1)
+    // Independent demand releases even an abandoned render's sync-start gate.
+    this.sync.resumeStart()
   }
 
   private changeAcquiringSubscribers(delta: 1 | -1): void {
     const previous = this.acquiringSubscribersCount
     this.acquiringSubscribersCount += delta
     this.events.emitSubscribersChange(this.acquiringSubscribersCount, previous)
+    // Cleanup during startup can clear the earlier demand mark. Commit it for
+    // surviving owners, including a replacement started by a cleanup listener.
+    if (delta === 1 && this.acquiringSubscribersCount > 0) {
+      this.markSubscriberOrPreload()
+    }
   }
 
   private startSyncIfStopped(): void {
@@ -439,28 +454,39 @@ export class CollectionChangesManager<
    * defers its own acquisition, but no other Collection's sync run.
    */
   private addSubscriber(defersAcquisition: boolean): void {
-    const previousSubscriberCount = this.activeSubscribersCount
+    if (!defersAcquisition) this.lifecycle.assertCanStartSync()
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
+    let acquiring = false
 
     try {
       if (!defersAcquisition) {
-        // Mark first, so a sync run that starts now builds non-deferred demand.
-        this.markSubscriberOrPreload()
-        this.startSyncIfStopped()
-      } else if (getBuilderFromConfig(this.collection.config)) {
+        this.startSyncForSubscriber()
+      } else if (
+        !this.lifecycle.isCleaningUp() &&
+        getBuilderFromConfig(this.collection.config)
+      ) {
         this.startSyncIfStopped()
       }
+      // A deferring subscriber asks for no data, so adapters do not see it.
+      if (!defersAcquisition) {
+        acquiring = true
+        this.changeAcquiringSubscribers(1)
+      }
     } catch (error) {
-      this.activeSubscribersCount = previousSubscriberCount
+      this.activeSubscribersCount--
+      if (acquiring) {
+        try {
+          this.changeAcquiringSubscribers(-1)
+        } catch {
+          // Keep the setup failure primary if a release listener also throws.
+        }
+      }
       if (this.activeSubscribersCount === 0) {
         this.lifecycle.startGCTimer()
       }
       throw error
     }
-
-    // A deferring subscriber asks for no data, so adapters do not see it.
-    if (!defersAcquisition) this.changeAcquiringSubscribers(1)
   }
 
   /**

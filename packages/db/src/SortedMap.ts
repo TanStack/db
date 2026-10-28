@@ -9,8 +9,9 @@ export class SortedMap<TKey extends string | number, TValue> {
   private map: Map<TKey, TValue>
   private sortedKeys: Array<TKey>
   private comparator: ((a: TValue, b: TValue) => number) | undefined
-  private orderDirty = false
-  private runtimeKeyCount = 0
+  // Keys set or deleted with deferOrder since the last restoreOrder. A dirty
+  // key can still hold a slot in sortedKeys that its old value ordered.
+  private dirtyKeys = new Set<TKey>()
 
   /**
    * Creates a new SortedMap instance
@@ -33,17 +34,22 @@ export class SortedMap<TKey extends string | number, TValue> {
    *
    * @param key - The key to find position for (used as tie-breaker or primary sort when no comparator)
    * @param value - The value to compare against (only used if comparator is provided)
+   * @param keys - The ordered keys to search
    * @returns The index where the key should be inserted
    */
-  private indexOf(key: TKey, value: TValue): number {
+  private indexOf(
+    key: TKey,
+    value: TValue,
+    keys: Array<TKey> = this.sortedKeys,
+  ): number {
     let left = 0
-    let right = this.sortedKeys.length
+    let right = keys.length
 
     // Fast path: no comparator means sort by key only
     if (!this.comparator) {
       while (left < right) {
         const mid = Math.floor((left + right) / 2)
-        const midKey = this.sortedKeys[mid]!
+        const midKey = keys[mid]!
         const keyComparison = compareKeys(key, midKey)
         if (keyComparison < 0) {
           right = mid
@@ -59,7 +65,7 @@ export class SortedMap<TKey extends string | number, TValue> {
     // With comparator: sort by value first, then key as tie-breaker
     while (left < right) {
       const mid = Math.floor((left + right) / 2)
-      const midKey = this.sortedKeys[mid]!
+      const midKey = keys[mid]!
       const midValue = this.map.get(midKey)!
       const valueComparison = this.comparator(value, midValue)
 
@@ -84,17 +90,48 @@ export class SortedMap<TKey extends string | number, TValue> {
     return left
   }
 
-  /** Restore the ordered view after a synchronous batch of deferred writes. */
+  /**
+   * Restore the ordered view after a synchronous batch of deferred writes.
+   * Dirty keys leave their old slots by Set membership, so a deleted value or
+   * one a sync source mutated in place cannot strand a slot. The dirty keys
+   * still present are sorted and merged into the rest in one pass:
+   * O(n + k log n) for k dirty keys. The merge rewrites sortedKeys in place,
+   * so an open key iterator reads the restored order.
+   */
   restoreOrder(): void {
-    if (!this.orderDirty) return
-    this.sortedKeys.length = 0
-    for (const key of this.map.keys()) this.sortedKeys.push(key)
-    this.sortedKeys.sort((left, right) => {
-      const byValue =
-        this.comparator?.(this.map.get(left)!, this.map.get(right)!) ?? 0
-      return byValue || compareKeys(left, right)
-    })
-    this.orderDirty = false
+    if (this.dirtyKeys.size === 0) return
+    const keys = this.sortedKeys
+    const kept = keys.filter((key) => !this.dirtyKeys.has(key))
+    const placed = [...this.dirtyKeys]
+      .filter((key) => this.map.has(key))
+      .sort(
+        (left, right) =>
+          (this.comparator?.(this.map.get(left)!, this.map.get(right)!) ?? 0) ||
+          compareKeys(left, right),
+      )
+    keys.length = 0
+    let next = 0
+    for (const key of placed) {
+      const index = this.indexOf(key, this.map.get(key)!, kept)
+      while (next < index) keys.push(kept[next++]!)
+      keys.push(key)
+    }
+    while (next < kept.length) keys.push(kept[next++]!)
+    this.dirtyKeys.clear()
+  }
+
+  /** Removes a key's slot while its placed value is still mapped. */
+  private unplace(key: TKey): void {
+    // Binary search misses a value that a sync source mutated in place after
+    // it was placed, so fall back to a scan. Slots compare as Map keys do, so
+    // a NaN key matches its own slot.
+    const sameKey = (candidate: TKey) =>
+      candidate === key || (candidate !== candidate && key !== key)
+    let index = this.indexOf(key, this.map.get(key)!)
+    if (!sameKey(this.sortedKeys[index]!)) {
+      index = this.sortedKeys.findIndex(sameKey)
+    }
+    this.sortedKeys.splice(index, 1)
   }
 
   /**
@@ -111,30 +148,17 @@ export class SortedMap<TKey extends string | number, TValue> {
       this.map.set(key, value)
       return this
     }
-    // Grouped Collections can produce nullish keys at runtime. compareKeys
-    // is not a total order there, so retain the existing binary-insert path.
-    const runtimeKey = typeof key !== `string` && typeof key !== `number`
-    if (deferOrder && this.runtimeKeyCount === 0 && !runtimeKey) {
+    if (deferOrder) {
       this.map.set(key, value)
-      this.orderDirty = true
+      this.dirtyKeys.add(key)
       return this
     }
     this.restoreOrder()
-    const exists = this.map.has(key)
-    if (exists) {
-      // Need to remove the old key from the sorted keys array
-      const oldValue = this.map.get(key)!
-      const oldIndex = this.indexOf(key, oldValue)
-      this.sortedKeys.splice(oldIndex, 1)
-    }
-
-    // Insert the new key at the correct position
-    const index = this.indexOf(key, value)
-    this.sortedKeys.splice(index, 0, key)
-
+    // The old slot leaves before the search, since an in-place mutation can
+    // misorder it.
+    if (this.map.has(key)) this.unplace(key)
+    this.sortedKeys.splice(this.indexOf(key, value), 0, key)
     this.map.set(key, value)
-    if (runtimeKey && !exists) this.runtimeKeyCount++
-
     return this
   }
 
@@ -156,23 +180,14 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns True if the key was found and removed, false otherwise
    */
   delete(key: TKey, deferOrder = false): boolean {
-    if (deferOrder && this.runtimeKeyCount === 0) {
+    if (deferOrder) {
       const deleted = this.map.delete(key)
-      this.orderDirty ||= deleted
+      if (deleted) this.dirtyKeys.add(key)
       return deleted
     }
     this.restoreOrder()
-    if (this.map.has(key)) {
-      const oldValue = this.map.get(key)
-      const index = this.indexOf(key, oldValue!)
-      this.sortedKeys.splice(index, 1)
-      const deleted = this.map.delete(key)
-      if (deleted && typeof key !== `string` && typeof key !== `number`)
-        this.runtimeKeyCount--
-      return deleted
-    }
-
-    return false
+    if (this.map.has(key)) this.unplace(key)
+    return this.map.delete(key)
   }
 
   /**
@@ -191,8 +206,7 @@ export class SortedMap<TKey extends string | number, TValue> {
   clear(): void {
     this.map.clear()
     this.sortedKeys = []
-    this.orderDirty = false
-    this.runtimeKeyCount = 0
+    this.dirtyKeys.clear()
   }
 
   /**
@@ -208,10 +222,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns An iterator for the map's entries
    */
   *[Symbol.iterator](): IterableIterator<[TKey, TValue]> {
-    this.restoreOrder()
-    for (const key of this.sortedKeys) {
-      yield [key, this.map.get(key)!] as [TKey, TValue]
-    }
+    for (const key of this.keys()) yield [key, this.map.get(key)!]
   }
 
   /**
@@ -239,23 +250,6 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns An iterator for the map's values
    */
   *values(): IterableIterator<TValue> {
-    this.restoreOrder()
-    for (const key of this.sortedKeys) {
-      yield this.map.get(key)!
-    }
-  }
-
-  /**
-   * Executes a callback function for each key-value pair in the map in sorted order
-   *
-   * @param callbackfn - Function to execute for each entry
-   */
-  forEach(
-    callbackfn: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void,
-  ): void {
-    this.restoreOrder()
-    for (const key of this.sortedKeys) {
-      callbackfn(this.map.get(key)!, key, this.map)
-    }
+    for (const key of this.keys()) yield this.map.get(key)!
   }
 }

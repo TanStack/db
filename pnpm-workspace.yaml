@@ -9,6 +9,7 @@ trustPolicyExclude:
 
 packages:
   - packages/**
+  - '!packages/convex-db-collection/e2e/auth-app/runtime'
   - examples/**/*
 
 overrides:

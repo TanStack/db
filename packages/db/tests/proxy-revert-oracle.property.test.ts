@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { fc } from '@fast-check/vitest'
-import { createChangeProxy, withChangeTracking } from '../src/proxy'
+import { describe, expect, it as vitestIt } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
+import { createChangeProxy } from '../src/proxy'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
@@ -780,65 +786,76 @@ function expectHistory({ original, ops }: History): void {
 }
 
 // ---------------------------------------------------------------------------
-// Campaigns. `TANSTACK_DB_PROXY_REVERT_SEED` and
-// `TANSTACK_DB_PROXY_REVERT_PATH` select a direct replay.
+// Campaigns. Each generated property has a fixed campaign and a random
+// campaign over the same grammar and check. A path replay of one property
+// runs its recorded history once and every other test stands aside. A seed
+// alone reseeds the random campaigns.
 
-const replaySeed = process.env.TANSTACK_DB_PROXY_REVERT_SEED
-const replayPath = process.env.TANSTACK_DB_PROXY_REVERT_PATH
 const FIXED_SEED = 2026101
-const campaigns =
-  replaySeed === undefined && replayPath === undefined
-    ? [
-        { name: String(FIXED_SEED), seed: FIXED_SEED as number | undefined },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed: replaySeed === undefined ? undefined : Number(replaySeed),
-        },
-      ]
+const WRITE_HISTORY = `proxy.revert-history`
+const NESTED_ROUND_TRIPS = `proxy.revert-nested-round-trips`
+const CLASS_WRITES = `proxy.revert-class-writes`
+const PARTIAL_REVERTS = `proxy.revert-partial-reverts`
+const NATIVE_HISTORIES = `proxy.revert-native-histories`
+
+const it = oracleReplayTest(vitestIt)
 
 describe(`draft revert oracle`, () => {
-  for (const { name, seed } of campaigns) {
-    it(`matches the model across generated write histories (${name})`, () => {
-      if (replayPath !== undefined && replaySeed === undefined)
-        throw new Error(`TANSTACK_DB_PROXY_REVERT_PATH requires a seed`)
-      if (
-        replaySeed !== undefined &&
-        (replaySeed.trim() === `` ||
-          typeof seed !== `number` ||
-          !Number.isSafeInteger(seed))
-      )
-        throw new Error(`TANSTACK_DB_PROXY_REVERT_SEED must be an integer`)
-      fc.assert(fc.property(historyArb, expectHistory), {
-        numRuns: 400,
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  it(`matches the model across generated write histories (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(historyArb, expectHistory), {
+      numRuns: oracleRuns(400),
+      seed: FIXED_SEED,
     })
-    it(`matches the model across generated nested round trips (${name})`, () => {
-      fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
-        numRuns: 200,
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  })
+  oracleReplayTest(fcTest, WRITE_HISTORY).prop(
+    [historyArb],
+    oraclePropertyOptions(400, WRITE_HISTORY),
+  )(
+    `matches the model across generated write histories (random)`,
+    expectHistory,
+  )
+
+  it(`matches the model across generated nested round trips (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
+      numRuns: oracleRuns(200),
+      seed: FIXED_SEED,
     })
-    it(`matches the model across generated URL and keyless writes (${name})`, () => {
-      fc.assert(fc.property(classWriteArb, expectHistory), {
-        numRuns: 200,
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  })
+  oracleReplayTest(fcTest, NESTED_ROUND_TRIPS).prop(
+    [nestedRoundTripArb],
+    oraclePropertyOptions(200, NESTED_ROUND_TRIPS),
+  )(
+    `matches the model across generated nested round trips (random)`,
+    expectHistory,
+  )
+
+  it(`matches the model across generated URL and keyless writes (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(classWriteArb, expectHistory), {
+      numRuns: oracleRuns(200),
+      seed: FIXED_SEED,
     })
-    it(`matches the model across generated partial reverts (${name})`, () => {
-      fc.assert(fc.property(partialRevertArb, expectHistory), {
-        numRuns: 200,
-        ...(seed === undefined ? {} : { seed }),
-        ...(replayPath === undefined ? {} : { path: replayPath }),
-      })
+  })
+  oracleReplayTest(fcTest, CLASS_WRITES).prop(
+    [classWriteArb],
+    oraclePropertyOptions(200, CLASS_WRITES),
+  )(
+    `matches the model across generated URL and keyless writes (random)`,
+    expectHistory,
+  )
+
+  it(`matches the model across generated partial reverts (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(partialRevertArb, expectHistory), {
+      numRuns: oracleRuns(200),
+      seed: FIXED_SEED,
     })
-  }
+  })
+  oracleReplayTest(fcTest, PARTIAL_REVERTS).prop(
+    [partialRevertArb],
+    oraclePropertyOptions(200, PARTIAL_REVERTS),
+  )(
+    `matches the model across generated partial reverts (random)`,
+    expectHistory,
+  )
 
   // Positive execution witness: the fixed campaign reaches each operation, a
   // partial revert (some change survives one revert), a full revert, and a
@@ -1402,6 +1419,12 @@ function expectNativeHistory(history: NativeHistory): void {
   expectNativeResult(history, driveNative(history))
 }
 
+declareOracle({
+  check: [expectHistory, expectNativeResult],
+  model: [step, expectedChanges, nativeModel],
+  grammar: [nativeHistoryArb],
+})
+
 describe(`draft revert oracle: native mutators mixed with assignments`, () => {
   it(`rejects an unwritten field in the change report`, () => {
     const histories: Array<NativeHistory> = [
@@ -1426,14 +1449,19 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
     }
   })
 
-  for (const { name, seed } of campaigns) {
-    it(`matches the model across generated native histories (${name})`, () => {
-      fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
-        numRuns: 400,
-        ...(seed === undefined ? {} : { seed }),
-      })
+  it(`matches the model across generated native histories (${FIXED_SEED})`, () => {
+    fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
+      numRuns: oracleRuns(400),
+      seed: FIXED_SEED,
     })
-  }
+  })
+  oracleReplayTest(fcTest, NATIVE_HISTORIES).prop(
+    [nativeHistoryArb],
+    oraclePropertyOptions(400, NATIVE_HISTORIES),
+  )(
+    `matches the model across generated native histories (random)`,
+    expectNativeHistory,
+  )
 
   // Positive execution witness: the fixed campaign reaches a native write
   // that an assignment then replaces, and a mutator through a detached handle.
@@ -1508,93 +1536,4 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
       },
     ],
   ])(`%s`, (_name, history) => expectNativeHistory(history))
-
-  // The generated row nests the native site two levels deep. One level more
-  // checks that a report three levels up still carries the final value.
-  it(`restoring a native write three levels deep reports at most the original value`, () => {
-    const row = { f: { h: { arr: [0] }, g: { a: 0 } } }
-    const changes = withChangeTracking(structuredClone(row), (draft) => {
-      draft.f.h.arr.pop()
-      draft.f.g = {} as { a: number }
-      draft.f.h.arr = [0]
-      draft.f.g.a = 0
-    })
-    expect(Object.keys(changes).every((key) => key === `f`)).toBe(true)
-    if (`f` in changes) expect(changes.f).toEqual(row.f)
-  })
-
-  // A native write through any handle that reaches the row's value is a
-  // change, and a missed change is the error that matters. These handles share
-  // their parent's value: a Map or Set value, a typed-array view, and a value
-  // read through a frozen draft.
-  it.each<[string, Record<string, unknown>, (draft: any) => void, string]>([
-    [
-      `a Map value`,
-      { m: new Map([[`k`, [1]]]) },
-      (draft) => draft.m.get(`k`).push(2),
-      `m`,
-    ],
-    [
-      `a Map value from iteration`,
-      { m: new Map([[`k`, [1]]]) },
-      (draft) => {
-        for (const value of draft.m.values()) value.push(2)
-      },
-      `m`,
-    ],
-    [
-      `a Set value from iteration`,
-      { s: new Set([[1]]) },
-      (draft) => {
-        for (const value of draft.s) value.push(2)
-      },
-      `s`,
-    ],
-    [
-      `a typed-array view`,
-      { t: new Float64Array([1, 2, 3]) },
-      (draft) => draft.t.subarray(1).fill(9),
-      `t`,
-    ],
-    [
-      `a value read through a frozen draft`,
-      { f: { arr: [1] } },
-      (draft) => Object.freeze(draft).f.arr.push(2),
-      `f`,
-    ],
-  ])(`reports a native write through %s`, (_name, row, write, key) => {
-    const changes = withChangeTracking(row, write)
-    expect(key in changes).toBe(true)
-  })
-
-  // A nested revert inside a Map or Set value must not hide another write to
-  // the same container.
-  it.each<[string, Record<string, unknown>, (draft: any) => void, string]>([
-    [
-      `a Map`,
-      { m: new Map<string, unknown>([[`k`, { a: 0 }]]) },
-      (draft) => {
-        draft.m.set(`j`, 1)
-        draft.m.get(`k`).a = 1
-        draft.m.get(`k`).a = 0
-      },
-      `m`,
-    ],
-    [
-      `a Set`,
-      { s: new Set<unknown>([{ a: 0 }]) },
-      (draft) => {
-        draft.s.add(1)
-        for (const value of draft.s) if (typeof value === `object`) value.a = 1
-        for (const value of draft.s) if (typeof value === `object`) value.a = 0
-      },
-      `s`,
-    ],
-  ])(
-    `a nested revert in %s keeps its other write`,
-    (_name, row, write, key) => {
-      const changes = withChangeTracking(row, write)
-      expect(key in changes).toBe(true)
-    },
-  )
 })

@@ -406,7 +406,7 @@ export class CollectionIndexesManager<
     } catch (error) {
       // Callers have written rows that are not yet published. Crash the
       // collection instead of leaving it usable with unpublished rows.
-      this.lifecycle.markError(error)
+      this.lifecycle.crash(error)
       throw error
     }
   }

@@ -42,7 +42,7 @@ it.each([`cleanup`, `error`, `ready`] as const)(
     try {
       expect(collection.status).toBe(`loading`)
       if (outcome === `cleanup`) await collection.cleanup()
-      else if (outcome === `error`) collection._lifecycle.markError(failure)
+      else if (outcome === `error`) collection._lifecycle.fail(failure)
       else markSourceReady()
       // Drain promise reactions without waiting on the possibly orphaned wait.
       for (let turn = 0; turn < 10; turn++) await Promise.resolve()

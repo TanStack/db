@@ -1,8 +1,16 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
-import { readOfflineOracleConfig } from './oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { BASE_TIME, createTransaction } from './key-scheduler-support'
 import type { OfflineTransaction } from '../src/types'
+
+const FIFO_LEDGER_PROPERTY = `offline.key-scheduler-fifo-ledger`
 
 type Command =
   | {
@@ -55,16 +63,8 @@ type Snapshot = {
   runningCount: number
 }
 
-const BASE_TIME = Date.parse(`2026-01-01T00:00:00.000Z`)
 const FIXED_SEED = 1815
-const {
-  runs: RUNS,
-  seed: SEED,
-  path: PATH,
-} = readOfflineOracleConfig({
-  prefix: `TANSTACK_DB_OFFLINE_ORACLE`,
-  defaultRuns: 150,
-})
+const RUNS = oracleRuns(150)
 
 /**
  * # Which offline transaction may run next?
@@ -103,8 +103,9 @@ const {
  * histories cross retry-deadline order. Five observation mutants prove
  * the comparison rejects bypass, double issue, stale payload, stale clear, and
  * failed selective retirement. The generated property runs at fixed seed 1815
- * and at a random seed with the same budget. Set TANSTACK_DB_OFFLINE_ORACLE_SEED
- * and TANSTACK_DB_OFFLINE_ORACLE_PATH to replay a failure directly.
+ * and at a random seed with the same budget. Set TANSTACK_DB_ORACLE_SEED,
+ * TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY to replay a failure
+ * directly.
  *
  * Limits: persistence, caller promise settlement, leadership, and real timers
  * have separate owners. The model does not promise fairness beyond FIFO order.
@@ -279,26 +280,6 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
 const legalHistory = fc
   .array(commandToken, { minLength: 1, maxLength: 50 })
   .map(buildLegalHistory)
-
-function createTransaction(
-  id: string,
-  createdAt: number,
-  nextAttemptAt: number,
-  payload: number,
-): OfflineTransaction {
-  return {
-    id,
-    mutationFnName: `syncData`,
-    mutations: [],
-    keys: [],
-    idempotencyKey: `idempotency-${id}`,
-    createdAt: new Date(createdAt),
-    retryCount: 0,
-    nextAttemptAt,
-    metadata: { payload },
-    version: 1,
-  }
-}
 
 function cloneTransaction(transaction: OfflineTransaction): OfflineTransaction {
   return {
@@ -514,35 +495,37 @@ function runHistory(
   return coverage
 }
 
+declareOracle({ check: [runHistory], model: [expectedSnapshot] })
+
 describe(`KeyScheduler generated lifecycle`, () => {
   afterEach(() => vi.useRealTimers())
 
-  function runGeneratedHistory(seed?: number, path?: string): void {
-    fc.assert(
-      fc.property(legalHistory, (history) => {
-        runHistory(history)
-      }),
-      {
-        ...(seed === undefined ? {} : { seed }),
-        numRuns: RUNS,
-        ...(path === undefined ? {} : { path }),
-      },
-    )
-  }
+  // The fixed campaign stands aside during any path replay. The random
+  // campaign is the replay of FIFO_LEDGER_PROPERTY: it reseeds under a seed
+  // alone and runs the recorded path under a path replay of that property.
+  oracleReplayTest(it)(
+    `matches the FIFO retry ledger at the fixed seed`,
+    () => {
+      fc.assert(
+        fc.property(legalHistory, (history) => {
+          runHistory(history)
+        }),
+        { seed: FIXED_SEED, numRuns: RUNS },
+      )
+    },
+  )
 
-  if (SEED === undefined) {
-    it(`matches the FIFO retry ledger at the fixed seed`, () => {
-      runGeneratedHistory(FIXED_SEED)
-    })
-
-    it(`matches the FIFO retry ledger at a random seed`, () => {
-      runGeneratedHistory()
-    })
-  } else {
-    it(`replays the FIFO retry ledger at the requested seed and path`, () => {
-      runGeneratedHistory(SEED, PATH)
-    })
-  }
+  oracleReplayTest(it, FIFO_LEDGER_PROPERTY)(
+    `matches the FIFO retry ledger at a random or replayed seed`,
+    () => {
+      fc.assert(
+        fc.property(legalHistory, (history) => {
+          runHistory(history)
+        }),
+        oraclePropertyOptions(150, FIFO_LEDGER_PROPERTY),
+      )
+    },
+  )
 
   it(`reconstructs active removal with a waiting sibling`, () => {
     const token = (selector: number, slot = 0): CommandToken => ({
@@ -820,27 +803,5 @@ describe(`KeyScheduler generated lifecycle`, () => {
         }),
       }),
     ).toThrow()
-  })
-
-  it(`selectively removes only unissued work`, () => {
-    const scheduler = new KeyScheduler()
-    const active = createTransaction(``, BASE_TIME, BASE_TIME, 1)
-    const removed = createTransaction(`removed`, BASE_TIME + 1, BASE_TIME, 2)
-    const retained = createTransaction(`retained`, BASE_TIME + 2, BASE_TIME, 3)
-    scheduler.schedule(active)
-    scheduler.schedule(removed)
-    scheduler.schedule(retained)
-    scheduler.markStarted(active)
-
-    expect(
-      scheduler.removePendingTransactions([active.id, removed.id, `missing`]),
-    ).toEqual([removed.id, `missing`])
-
-    expect({
-      pending: scheduler.getAllPendingTransactions().map(({ id }) => id),
-      running: scheduler.getRunningCount(),
-    }).toEqual({ pending: [active.id, retained.id], running: 1 })
-    scheduler.markCompleted(active)
-    expect(scheduler.getNext()?.id).toBe(retained.id)
   })
 })

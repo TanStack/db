@@ -16,12 +16,17 @@ it(`checks declared result types without copying or repairing the surface`, () =
   const raw = {
     status: `ready`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
     isEnabled: false,
     data: [{ value: undefined }],
   }
   expect(expectResultSurface(raw)).toBe(raw)
-  for (const key of [`status`, `isReady`, `isError`, `isEnabled`] as const) {
+  for (const key of [
+    `status`,
+    `isReady`,
+    `isLoadingError`,
+    `isEnabled`,
+  ] as const) {
     const malformed = { ...raw, [key]: undefined }
     expect(() => expectResultSurface(malformed)).toThrowError(
       new RegExp(`raw ${key}`),

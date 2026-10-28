@@ -3,10 +3,11 @@
  *
  * Tests multi-collection joins with various syncMode combinations
  */
-
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
+
+import { describe, expect, it, vi } from 'vitest'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { waitFor, waitForQueryData } from '../utils/helpers'
 import type {
   Comment,
@@ -951,3 +952,5 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
     })
   })
 }
+
+declareOracle({ check: [withJoinHistory], model: [createJoinOracle] })

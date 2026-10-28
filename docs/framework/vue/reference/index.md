@@ -7,6 +7,7 @@ title: "@tanstack/vue-db"
 
 - [UseLiveInfiniteQueryReturn](interfaces/UseLiveInfiniteQueryReturn.md)
 - [UseLiveInfiniteQueryReturnWithCollection](interfaces/UseLiveInfiniteQueryReturnWithCollection.md)
+- [UseLiveQueryFlags](interfaces/UseLiveQueryFlags.md)
 - [UseLiveQueryReturn](interfaces/UseLiveQueryReturn.md)
 - [UseLiveQueryReturnWithCollection](interfaces/UseLiveQueryReturnWithCollection.md)
 - [UseLiveQueryReturnWithSingleResultCollection](interfaces/UseLiveQueryReturnWithSingleResultCollection.md)

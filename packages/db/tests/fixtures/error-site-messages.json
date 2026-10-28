@@ -310,8 +310,8 @@
   },
   "135": {
     "file": "query/effect.ts",
-    "template": "Source collection '${collectionId}' entered error state",
-    "literals": ["Source collection '", "' entered error state"]
+    "template": "Source collection '${collectionId}' entered ${status} state",
+    "literals": ["Source collection '", "' entered ", " state"]
   },
   "136": {
     "file": "query/expression-helpers.ts",
@@ -440,17 +440,17 @@
     ]
   },
   "154": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Canonical query row has negative multiplicity",
     "literals": ["Canonical query row has negative multiplicity"]
   },
   "155": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Canonical query row has no positive contributor",
     "literals": ["Canonical query row has no positive contributor"]
   },
   "156": {
-    "file": "query/live/materialized-pipeline.ts",
+    "file": "query/live/public-key-reduction.ts",
     "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent",
     "literals": ["Query contributors for public key ", " are not congruent"]
   },
@@ -535,8 +535,8 @@
   },
   "172": {
     "file": "query/live/collection-config-builder.ts",
-    "template": "Source collection '${collectionId}' entered error state",
-    "literals": ["Source collection '", "' entered error state"]
+    "template": "Source collection '${collectionId}' crashed",
+    "literals": ["Source collection '", "' crashed"]
   },
   "173": {
     "file": "collection/lifecycle.ts",
@@ -928,5 +928,63 @@
     "file": "query/compiler/index.ts",
     "template": "A windowed or findOne result row has no include route",
     "literals": ["A windowed or findOne result row has no include route"]
+  },
+  "246": {
+    "file": "live-query-window-binding.ts",
+    "template": "getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.",
+    "literals": [
+      "getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination."
+    ]
+  },
+  "253": {
+    "file": "client.ts",
+    "template": "The DB stream ended before the server-rendered query snapshot arrived.",
+    "literals": [
+      "The DB stream ended before the server-rendered query snapshot arrived."
+    ]
+  },
+  "252": {
+    "file": "live-query-observer-client.ts",
+    "template": "SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey.",
+    "literals": [
+      "SSR cannot render server-only live-query rows or readiness. Await DbClient.preloadLiveQuery() for this query, or explicitly preload its source Collections for hydration. Opaque queries require an explicit serializable queryKey."
+    ]
+  },
+  "249": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
+  },
+  "250": {
+    "file": "query/builder/index.ts",
+    "template": "include() must wrap a subquery builder",
+    "literals": ["include() must wrap a subquery builder"]
+  },
+  "257": {
+    "file": "collection/lifecycle.ts",
+    "template": "${operation}() reports on sync after the first ready, but Collection \"${this.id}\" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.",
+    "literals": [
+      "() reports on sync after the first ready, but Collection \"",
+      "\" is ",
+      ". Before the first ready, retry without reporting, or call fail() when the sync adapter stops."
+    ]
+  },
+  "258": {
+    "file": "query/pooled-live-query.ts",
+    "template": "The pooled live query's source ended",
+    "literals": ["The pooled live query's source ended"]
+  },
+  "259": {
+    "file": "collection/lifecycle.ts",
+    "template": "${operation}() was called after fail() in the same sync run of Collection \"${this.id}\". fail() means the sync adapter stopped; a reload starts a new sync run.",
+    "literals": [
+      "() was called after fail() in the same sync run of Collection \"",
+      "\". fail() means the sync adapter stopped; a reload starts a new sync run."
+    ]
+  },
+  "260": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Source collection '${collectionId}' failed its first load",
+    "literals": ["Source collection '", "' failed its first load"]
   }
 }

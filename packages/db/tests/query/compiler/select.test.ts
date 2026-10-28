@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { grouping } from '../../../src/query/compiler/grouping.js'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 
@@ -33,7 +34,11 @@ describe(`select compiler`, () => {
     })
 
     it(`throws error for aggregate expressions`, () => {
-      const arg = new Aggregate(`count`, [new PropRef([`users`, `id`])])
+      const arg = new Aggregate(
+        `count`,
+        [new PropRef([`users`, `id`])],
+        grouping,
+      )
       const namespacedRow = { users: { id: 1 } }
 
       expect(() => {
@@ -161,11 +166,11 @@ describe(`select compiler`, () => {
     // Test the helper function that can be imported and tested directly
     it(`rejects aggregate IR at the single-row compiler boundary`, () => {
       const aggregateExpressions = [
-        new Aggregate(`count`, [new PropRef([`users`, `id`])]),
-        new Aggregate(`sum`, [new PropRef([`orders`, `amount`])]),
-        new Aggregate(`avg`, [new PropRef([`products`, `price`])]),
-        new Aggregate(`min`, [new PropRef([`dates`, `created`])]),
-        new Aggregate(`max`, [new PropRef([`dates`, `updated`])]),
+        new Aggregate(`count`, [new PropRef([`users`, `id`])], grouping),
+        new Aggregate(`sum`, [new PropRef([`orders`, `amount`])], grouping),
+        new Aggregate(`avg`, [new PropRef([`products`, `price`])], grouping),
+        new Aggregate(`min`, [new PropRef([`dates`, `created`])], grouping),
+        new Aggregate(`max`, [new PropRef([`dates`, `updated`])], grouping),
       ]
 
       const namespacedRow = {
