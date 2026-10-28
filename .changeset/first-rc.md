@@ -3,6 +3,7 @@
 '@tanstack/browser-db-sqlite-persistence': major
 '@tanstack/capacitor-db-sqlite-persistence': major
 '@tanstack/cloudflare-durable-objects-db-sqlite-persistence': major
+'@tanstack/convex-db-collection': major
 '@tanstack/db': major
 '@tanstack/db-ivm': major
 '@tanstack/db-sqlite-persistence-core': major
@@ -12,6 +13,7 @@
 '@tanstack/node-db-sqlite-persistence': major
 '@tanstack/offline-transactions': patch
 '@tanstack/powersync-db-collection': major
+'@tanstack/preact-db': major
 '@tanstack/query-db-collection': minor
 '@tanstack/react-db': major
 '@tanstack/react-native-db-sqlite-persistence': major
