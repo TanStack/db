@@ -47,9 +47,9 @@
  * admission failures, including cancellation on release and disposal.
  *
  * Fixed scenarios with literal expectations live in
- * `browser-coordinator.test.ts`. This file keeps the generated histories and
- * the per-election need cells, which check their laws against a model or a
- * generated history.
+ * `browser-coordinator.test.ts`. That includes the per-election need cells,
+ * whose expected posts come from a written need table; an oracle owner for
+ * them is tracked in TanStack/db#2264. This file keeps the generated histories.
  */
 
 import fc from 'fast-check'
