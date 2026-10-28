@@ -3386,13 +3386,22 @@ budget a helper computes and passes in as parameters.
 
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
-and the Claude edit hook. Its model is a fixed-point closure over the drawn
-import graph, independent of the script's forward search. It covers
+and the Claude edit and stop hooks. Its model is a fixed-point closure over the
+drawn import graph, independent of the script's forward search. It covers
 oracle-to-oracle imports, untracked oracle files, and `.js` oracle files. It
-does not draw `.js` support modules or drivers, although the rule now resolves
-a `.js` test module when no TypeScript source exists for it (the part-reach
-oracle owns that resolution). It passes file names in their real-path spelling:
-a name given through a symlinked path is not covered.
+also covers the checkout rule from #2280. A session works in the launch
+checkout or in a worktree nested under its `.worktrees/`. The hooks run the
+launch checkout's script with the session checkout as the input's `cwd`. They
+must select that checkout's files, and they must report through that
+checkout's own copy of the rule. A plain scratch directory under `.worktrees/`
+must produce no report. The repository's `.gitignore` is part of the tested
+configuration. It does not draw `.js` support modules or drivers, although the
+rule now resolves a `.js` test module when no TypeScript source exists for it
+(the part-reach oracle owns that resolution). It passes file names in their
+real-path spelling: a name given through a symlinked path is not covered. It
+does not generate a hook input without `cwd`, a worktree outside the launch
+checkout, or a worktree branch that has no copy of the script. In that last
+case the launch checkout's rule lints the worktree.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
