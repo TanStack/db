@@ -15,7 +15,9 @@ import config from '../eslint.config.mjs'
  * Moving a callback definition before an alias cannot change that alias's value
  * when the callback runs after initialization.
  *
- * This finite syntax oracle covers the bindings, call forms, and scopes below.
+ * These are fixed tests, not an oracle: each expected diagnostic count is a
+ * written value, chosen by the method under test (the operations table). They
+ * cover the bindings, call forms, and scopes below.
  * It does not model execution paths, inter-module re-exports, function arguments,
  * factory returns, dynamic method names, or aliases stored in new containers.
  * Mutable aliases conservatively retain their Collection classification.

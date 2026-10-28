@@ -2797,12 +2797,15 @@ does not let the worker process its progress messages.
 
 ## Action enforcement example
 
-`examples/react/action-enforcement/eslint-rules/no-direct-collection-mutations-oracle.test.js`
-owns the example's file-local lint boundary. Its finite grammar covers 12 binding
+`examples/react/action-enforcement/eslint-rules/no-direct-collection-mutations.test.js`
+(fixed tests; no oracle owner (tracked in #2264)) covers the example's
+file-local lint boundary. Its finite crossing covers 12 binding
 forms, six methods, six call forms, and two callback definition orders, plus
 lexical shadowing, sibling scopes, configurable imports/methods, and alias cycles.
-The independent model labels the constructed receiver as a Collection and
-predicts one diagnostic for writes and none for reads. The checkpoint is the
+Each expected count is written: a table gives one diagnostic for each write
+method and none for each read, so the crossing is fixed tests, not a model
+(maintainer decision 2026-10-27: a table of written expected values selected by
+a test's parameters is not a model). The checkpoint is the
 complete diagnostic list from the real ESLint `Linter.verify` call. A receiving
 check runs the actual ESLint configuration on feature writes, feature reads,
 and action writes. The import-source dimension checks eight alias/relative/barrel
