@@ -1354,7 +1354,9 @@ applies only after its replacement is complete. A failed replay rejects the
 move without advancing the reported window. A replay that a newer truncate or
 the retirement of its last demand discards did not fail, even though its
 completion rejects with `AbortError`: the move waits for any replay that still
-holds publication and then applies. When a replay it waits on is discarded and
+holds publication and then applies. If a replay it waits on fails, the move
+rejects with that replay's own error, its earliest failure that still decides
+it (maintainer decision). When a replay it waits on is discarded and
 the query's or a source's sync run changed meanwhile, as a reload changes it,
 the move rejects with that replay's `AbortError`. The move compares the sync
 runs only when a replay it waits on rejects, so a reload of another source

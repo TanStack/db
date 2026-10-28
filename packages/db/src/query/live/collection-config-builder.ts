@@ -415,7 +415,11 @@ export class CollectionConfigBuilder<
           try {
             await recovery
           } catch (error) {
-            if (syncRuns !== this.syncRuns()) throw error
+            if (
+              !(error instanceof LoadSubsetOperationAbortedError) ||
+              syncRuns !== this.syncRuns()
+            )
+              throw error
           }
         }
         // A newer call wins, even if this deferred one resumes after it.

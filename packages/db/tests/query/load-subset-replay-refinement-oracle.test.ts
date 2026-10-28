@@ -1195,9 +1195,10 @@ describe(`loadSubset replay refinement`, () => {
  * model's replay across a query's subscriptions to a source, so it owes a
  * failure in a replay only after every load of that source settled; it does
  * not judge one subscription's request error while another load is held. It
- * reads only the query's own node and permits extra listed failures. Which
- * failure a deferred window move rejects with, when its replay has several,
- * is not judged.
+ * reads only the query's own node and permits extra listed failures. The
+ * replay-error identity law judges only rejections with a failure of a replay
+ * the move waited on; a move that resumes into another failed replay is not
+ * judged.
  */
 type OrderedFailureState =
   `initiating-keyed-request-failed` | `keyed-reacquisition-failed`
@@ -1342,6 +1343,9 @@ type OrderedReach = {
   requestErrors: number
   // Cuts where the request-error account owed a request error.
   requestErrorChecks: number
+  // Deferred window moves that rejected with a failure of a replay they
+  // waited on.
+  deferredMoveRejections: number
   replayLoads: number
   abortRejections: number
   preloadChecks: number
@@ -1423,6 +1427,7 @@ async function checkOrderedReplay(
     return false
   }
   let moveOrderViolation: string | undefined
+  let moveErrorViolation: string | undefined
   const settleMove = (move: number) => {
     if (move !== latestMove && !settledMoves.has(latestMove)) {
       moveOrderViolation ??= `window move ${move} settled before the newest move ${latestMove}`
@@ -1486,6 +1491,10 @@ async function checkOrderedReplay(
     outcome: `pending` | `ok` | `failed`
     // The error this history injected when the load failed.
     error?: Error
+    // Its source, the keys it asked for, and whether it is an ordered read.
+    source?: BarrierSource
+    keys?: Set<number>
+    ordered?: boolean
   }
   const loads: Array<Load> = []
   // Retention model. Each source with an open or failed replay has a
@@ -1497,6 +1506,9 @@ async function checkOrderedReplay(
   type BarrierSource = `rows` | `markers`
   type Barrier = {
     failures: Map<Load, LoadSubsetOptions>
+    // Every failure of this replay, in failure order, including failures
+    // whose demand later retired.
+    history: Array<Load>
     // When the barrier rose, on the request-error account's clock.
     raisedAt: number
     // A release threw while this replay started, which may fail it.
@@ -1505,6 +1517,8 @@ async function checkOrderedReplay(
     own: Set<Load>
   }
   const barriers = new Map<BarrierSource, Barrier>()
+  // Every barrier this history raised, in raise order.
+  const raisedBarriers: Array<Barrier> = []
   // The rows the query showed when the first barrier rose, if it had
   // published by then. Before the first ready there is no complete
   // publication to keep, and the initial-readiness law governs.
@@ -1523,6 +1537,7 @@ async function checkOrderedReplay(
     }
     const barrier: Barrier = {
       failures: new Map(),
+      history: [],
       raisedAt: ++requestClock,
       // The retained publication dates from the first barrier, so an
       // ambiguous barrier earlier in this episode leaves it ambiguous.
@@ -1531,6 +1546,7 @@ async function checkOrderedReplay(
       own: new Set(),
     }
     barriers.set(source, barrier)
+    raisedBarriers.push(barrier)
   }
   // A replay whose participants all settled without a failure publishes.
   const lowerSettledBarriers = () => {
@@ -1576,6 +1592,7 @@ async function checkOrderedReplay(
       !options.signal?.aborted
     ) {
       barrier.failures.set(load, options)
+      barrier.history.push(load)
     }
     barrier?.pending.delete(load)
     // A replay completes when its last participant settles, so demand that
@@ -1691,6 +1708,11 @@ async function checkOrderedReplay(
   // request error on the query's own node. The error stays until one of these
   // meets it:
   // - its demand retires, which aborts its request and unloads it;
+  // - a later load of the source asks for some of its keys: that newer
+  //   request of the demand decides them, and keys it no longer asks for
+  //   left the demand (ARCHITECTURE.md law 16: a lazy demand's error clears
+  //   when that demand settles or is released; a key's latest load decides
+  //   it);
   // - a later load of the same source covers its keys;
   // - a replay of its source that rose after the failure completes, since a
   //   replay asks again for every held demand.
@@ -1763,6 +1785,15 @@ async function checkOrderedReplay(
       barrier.pending.size > 0
     )
       return false
+    const at = loads.indexOf(failure.load)
+    const askedLater = loads.some(
+      (later, index) =>
+        index > at &&
+        later.source === failure.source &&
+        !later.ordered &&
+        [...failure.keys].some((key) => later.keys?.has(key)),
+    )
+    if (askedLater) return false
     const covered = loadedKeys.some(
       (loaded) =>
         loaded.source === failure.source &&
@@ -1848,6 +1879,7 @@ async function checkOrderedReplay(
     terminalErrors: 0,
     requestErrors: 0,
     requestErrorChecks: 0,
+    deferredMoveRejections: 0,
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
@@ -1899,7 +1931,12 @@ async function checkOrderedReplay(
               // A throw is a rejection (ARCHITECTURE.md): the load holds its
               // owner, whose release unloads it.
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
-              const load: Load = { epoch: truncates, outcome: `failed` }
+              const load: Load = {
+                epoch: truncates,
+                outcome: `failed`,
+                source: `markers`,
+                keys: requestedKeys(`markers`, options),
+              }
               loads.push(load)
               reach.markerLoads++
               // The throw happens while the subscription registers the
@@ -1942,7 +1979,12 @@ async function checkOrderedReplay(
             return (async () => {
               const startedReady = allReady()
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
-              const load: Load = { epoch: truncates, outcome: `pending` }
+              const load: Load = {
+                epoch: truncates,
+                outcome: `pending`,
+                source: `markers`,
+                keys: requestedKeys(`markers`, options),
+              }
               loads.push(load)
               reach.markerLoads++
               const participant = joinBarrier(`markers`, load, options)
@@ -2089,7 +2131,13 @@ async function checkOrderedReplay(
           loadSubset: async (options) => {
             const startedReady = allReady()
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
-            const load: Load = { epoch: truncates, outcome: `pending` }
+            const load: Load = {
+              epoch: truncates,
+              outcome: `pending`,
+              source: `rows`,
+              keys: requestedKeys(`rows`, options),
+              ordered: options.orderBy !== undefined,
+            }
             loads.push(load)
             const participant = joinBarrier(`rows`, load, options)
             belongsToRecovery(options, truncates, truncating)
@@ -2295,6 +2343,51 @@ async function checkOrderedReplay(
       ).toBe(true)
     }
   }
+  // Replay error identity (ARCHITECTURE.md, "Replay participants and
+  // failure"; maintainer decision): a deferred window move whose replay
+  // fails rejects with that replay's own error, its earliest failure that
+  // still decides it. Law 17 decides which failures count: one whose demand
+  // retired, one that a later failure of the same request replaced, as a
+  // retry does, and one whose keys a later load of the replay covers without
+  // failing, as a demand's replacement does, no longer count. A failure of a
+  // load in no waited replay is the move's own window failure after it
+  // resumed, which this law does not judge.
+  const covers = (later: Load, earlier: Load) =>
+    later.ordered === earlier.ordered &&
+    later.keys !== undefined &&
+    earlier.keys !== undefined &&
+    [...earlier.keys].every((key) => later.keys!.has(key))
+  const stillDecides = (barrier: Barrier, earlier: Load, at: number) =>
+    barrier.failures.has(earlier) &&
+    barrier.history.slice(at + 1).every((later) => !covers(later, earlier)) &&
+    [...barrier.own].every(
+      (later) =>
+        loads.indexOf(later) < loads.indexOf(earlier) ||
+        later === earlier ||
+        later.outcome === `failed` ||
+        !covers(later, earlier),
+    )
+  const checkReplayError = (
+    move: number,
+    error: Error,
+    waitedReplays: Array<Barrier>,
+  ) => {
+    const candidates = waitedReplays.filter(({ history }) =>
+      history.some((load) => load.error === error),
+    )
+    if (candidates.length === 0) return
+    reach.deferredMoveRejections++
+    const earliest = candidates.some((barrier) =>
+      barrier.history
+        .slice(
+          0,
+          barrier.history.findIndex((load) => load.error === error),
+        )
+        .every((earlier, at) => !stillDecides(barrier, earlier, at)),
+    )
+    if (!earliest)
+      moveErrorViolation ??= `move ${move} rejected with "${error.message}", not its replay's earliest failure that still decides it`
+  }
   // A subscriber keeps each live query from garbage collection while a
   // history waits on held loads.
   // A history during preload starts with every load held, including the
@@ -2484,6 +2577,18 @@ async function checkOrderedReplay(
             const requested = { offset: command.offset, limit: command.limit }
             reach.windowMoves++
             const move = ++latestMove
+            // A move that starts before a replay's verdict waits for it, and
+            // for any replay that rises before it resumes. The identity law
+            // judges a move that starts before any failure of the replays it
+            // waits on. A move that starts after one already failed may meet
+            // a failed replay of the source at once, and that rule
+            // (ARCHITECTURE.md: a failed replay rejects the move) names no
+            // particular failure.
+            const waited = [...barriers.values()].filter(
+              ({ pending }) => pending.size > 0,
+            )
+            const judged = waited.every(({ failures }) => failures.size === 0)
+            const raisedBefore = raisedBarriers.length
             // A load that throws while it starts is a rejection
             // (ARCHITECTURE.md), so a move never throws: a throw here is an
             // escaped error.
@@ -2511,6 +2616,15 @@ async function checkOrderedReplay(
                 // reject it either.
                 if (error instanceof Error && cleanupFaults.has(error)) {
                   escaped ??= error
+                }
+                if (error instanceof Error && injectedLoadFaults.has(error)) {
+                  checkReplayError(
+                    move,
+                    error,
+                    waited.length > 0 && judged
+                      ? [...waited, ...raisedBarriers.slice(raisedBefore)]
+                      : [],
+                  )
                 }
                 // A truncate never aborts a move: the move waits for any
                 // replay that holds publication and then applies
@@ -2562,6 +2676,9 @@ async function checkOrderedReplay(
     if (violation) throw new Error(`adapter release: ${violation}`)
     if (moveOrderViolation) {
       throw new Error(`newest move wins: ${moveOrderViolation}`)
+    }
+    if (moveErrorViolation) {
+      throw new Error(`replay error identity: ${moveErrorViolation}`)
     }
     if (escapedError() !== undefined) {
       throw new Error(`escaped error: only injected faults may surface`, {
@@ -3166,6 +3283,28 @@ describe(`Ordered windows across truncate replays`, () => {
       reaches: `failedLoads`,
     },
     {
+      // A window move waits behind a source replay whose two loads then
+      // fail. The move rejects with the replay's own error, its earliest
+      // failure (maintainer decision). It rejected with the later failure,
+      // which the query had last recorded.
+      name: `a window move behind a replay with two failed loads`,
+      history: [
+        { type: `hold` },
+        { type: `truncate`, armAfterStart: false },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `settle`, ok: false, newest: true },
+        { type: `settle`, ok: false, keepHolding: false, newest: false },
+      ],
+      scenario: {
+        ...ordinaryOrderedScenario,
+        offset: 1,
+        limit: 1,
+        joined: `none`,
+        markerMode: `eager`,
+      },
+      reaches: `deferredMoveRejections`,
+    },
+    {
       name: `an established marker replay after a fresh include succeeds`,
       history: [
         { type: `hold` },
@@ -3287,6 +3426,7 @@ describe(`Ordered windows across truncate replays`, () => {
         terminalErrors: 0,
         requestErrors: 0,
         requestErrorChecks: 0,
+        deferredMoveRejections: 0,
         replayLoads: 0,
         abortRejections: 0,
         preloadChecks: 0,
@@ -3324,6 +3464,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `preloadReplayFailures`,
         `discardedReplayMoves`,
         `requestErrorChecks`,
+        `deferredMoveRejections`,
       ])
       // Counts are histories, rather than repeated events in one trace.
       const dimensions = (
@@ -3779,6 +3920,7 @@ describe(`Ordered windows across truncate replays`, () => {
           `thrownReplayDemands`,
           `partialFailureRetirements`,
           `requestErrorChecks`,
+          `deferredMoveRejections`,
         ] as const,
         { minimum: 5 },
       )
@@ -3812,6 +3954,9 @@ describe(`Ordered windows across truncate replays`, () => {
           }
           if (observed.requestErrorChecks > 0) {
             reach.reach(`requestErrorChecks`)
+          }
+          if (observed.deferredMoveRejections > 0) {
+            reach.reach(`deferredMoveRejections`)
           }
         }),
         campaign === `fixed`
