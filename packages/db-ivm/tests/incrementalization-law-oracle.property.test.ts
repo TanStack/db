@@ -20,6 +20,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   assertBinaryIncrementalization,
   assertUnaryIncrementalization,
@@ -539,6 +540,10 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
     }
     return worlds
   })
+
+// The grammar of legal ordered histories. Its calibration test checks that the
+// generated steps reach row promotions, which the ordered laws need.
+declareOracle({ grammar: [orderedHistory] })
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)

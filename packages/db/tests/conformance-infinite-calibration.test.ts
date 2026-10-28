@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { runInfiniteQuerySuite } from './conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from './conformance/infinite-suite-cases'
 import type { InfiniteQueryDriver } from './conformance/infinite-contract'
 import type * as Vitest from 'vitest'
 
@@ -81,7 +82,7 @@ it.each(
         },
       }),
     } as unknown as InfiniteQueryDriver
-    runInfiniteQuerySuite(driver)
+    runInfiniteQuerySuite(driver, registerInfiniteQueryUnitScenarios)
     const run = [...scenarios.entries()].find(([name]) =>
       name.startsWith(`[concurrent-fetch]`),
     )?.[1]

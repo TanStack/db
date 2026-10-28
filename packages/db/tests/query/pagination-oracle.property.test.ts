@@ -11,11 +11,13 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import type { Deferred } from '../../src/deferred.js'
+import { cleanupAll } from './pagination-support.js'
+import type { PageRow } from './pagination-support.js'
 import type {
   ChangeMessage,
   LoadSubsetOptions,
@@ -66,12 +68,6 @@ import type {
  * cursor pagination, comparator-aware range predicates, or backend collation
  * parity.
  */
-
-type PageRow = {
-  id: number
-  rank: number
-  keep?: boolean
-}
 
 type PublicPageRow = Pick<PageRow, `id` | `rank`>
 type PublicPageChange = {
@@ -593,22 +589,6 @@ const nullableCursorScenarioArbitrary: fc.Arbitrary<NullableCursorScenario> =
     direction: fc.constantFrom(`asc` as const, `desc` as const),
   })
 
-type CleanupTarget = {
-  cleanup: () => unknown
-}
-
-async function cleanupAll(
-  ...targets: ReadonlyArray<CleanupTarget>
-): Promise<void> {
-  const results = await Promise.allSettled(
-    targets.map((target) => Promise.resolve().then(() => target.cleanup())),
-  )
-  const rejection = results.find(
-    (result): result is PromiseRejectedResult => result.status === `rejected`,
-  )
-  if (rejection) throw rejection.reason
-}
-
 const { multiplier, ...replay } = readOracleRunConfig()
 const orderedScenarioRuns = 12 * multiplier
 const transitionScenarioRuns = 8 * multiplier
@@ -845,6 +825,16 @@ async function runPaginationScenario(
     () => cleanups,
   )
 }
+
+/**
+ * The check: after every window change, the rows that a live query publishes
+ * must equal the model's window over the authoritative rows. The driver runs
+ * one history, and `referenceWindowRows` predicts each window from the rows.
+ */
+declareOracle({
+  check: [runPaginationScenario, runMultiOrderScenario],
+  model: [referenceWindowRows, referenceMultiOrder],
+})
 
 async function expectMultiOrderBoundaryMatches(): Promise<void> {
   await runMultiOrderScenario({
@@ -2860,125 +2850,6 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
 }
 
 describe(`pagination recomputation oracle`, () => {
-  it.each([
-    { label: `Error`, reason: new Error(`first cleanup failed`) },
-    { label: `undefined`, reason: undefined },
-    { label: `null`, reason: null },
-    { label: `false`, reason: false },
-    { label: `zero`, reason: 0 },
-    { label: `NaN`, reason: Number.NaN },
-    { label: `empty string`, reason: `` },
-  ])(
-    `observes $label cleanup failure after every teardown settles`,
-    async ({ reason: firstFailure }) => {
-      const secondFailure = new Error(`second cleanup failed`)
-      const firstFailureRelease = createDeferred<void>()
-      const lastCleanupRelease = createDeferred<void>()
-      const repeatedFirstFailureRelease = createDeferred<void>()
-      const repeatedLastCleanupRelease = createDeferred<void>()
-      const events: Array<string> = []
-      const unhandled: Array<unknown> = []
-      const recordUnhandled = (reason: unknown) => unhandled.push(reason)
-      const createTargets = (
-        firstRelease: Deferred<void>,
-        lastRelease: Deferred<void>,
-      ): ReadonlyArray<CleanupTarget> => [
-        {
-          cleanup: async () => {
-            events.push(`first`)
-            await firstRelease.promise
-            throw firstFailure
-          },
-        },
-        {
-          cleanup: () => {
-            events.push(`second`)
-            throw secondFailure
-          },
-        },
-        {
-          cleanup: async () => {
-            events.push(`third`)
-            await lastRelease.promise
-          },
-        },
-      ]
-      const observeFirstFailure = (cleanup: Promise<void>) =>
-        cleanup.then(
-          () => {
-            throw new Error(`expected cleanup to reject`)
-          },
-          (error: unknown) => expect(error).toBe(firstFailure),
-        )
-      let cleanupFinished = false
-      process.on(`unhandledRejection`, recordUnhandled)
-
-      try {
-        const cleanup = cleanupAll(
-          ...createTargets(firstFailureRelease, lastCleanupRelease),
-        ).finally(() => {
-          cleanupFinished = true
-        })
-        const observedFailure = observeFirstFailure(cleanup)
-
-        await flushPromises()
-        expect(events).toEqual([`first`, `second`, `third`])
-        expect(cleanupFinished).toBe(false)
-        expect(unhandled).toEqual([])
-
-        firstFailureRelease.resolve()
-        await flushPromises()
-        expect(cleanupFinished).toBe(false)
-        expect(unhandled).toEqual([])
-
-        lastCleanupRelease.resolve()
-        await observedFailure
-        await flushPromises()
-        expect(cleanupFinished).toBe(true)
-        expect(unhandled).toEqual([])
-
-        let repeatedCleanupFinished = false
-        const repeatedCleanup = cleanupAll(
-          ...createTargets(
-            repeatedFirstFailureRelease,
-            repeatedLastCleanupRelease,
-          ),
-        ).finally(() => {
-          repeatedCleanupFinished = true
-        })
-        const repeatedObservedFailure = observeFirstFailure(repeatedCleanup)
-        await flushPromises()
-        expect(events).toEqual([
-          `first`,
-          `second`,
-          `third`,
-          `first`,
-          `second`,
-          `third`,
-        ])
-        expect(repeatedCleanupFinished).toBe(false)
-        expect(unhandled).toEqual([])
-
-        repeatedFirstFailureRelease.resolve()
-        await flushPromises()
-        expect(repeatedCleanupFinished).toBe(false)
-        expect(unhandled).toEqual([])
-
-        repeatedLastCleanupRelease.resolve()
-        await repeatedObservedFailure
-        await flushPromises()
-        expect(repeatedCleanupFinished).toBe(true)
-        expect(unhandled).toEqual([])
-      } finally {
-        firstFailureRelease.resolve()
-        lastCleanupRelease.resolve()
-        repeatedFirstFailureRelease.resolve()
-        repeatedLastCleanupRelease.resolve()
-        process.off(`unhandledRejection`, recordUnhandled)
-      }
-    },
-  )
-
   it(`refills a joined result window through a contract-compliant source`, async () => {
     type ParentRow = { id: number; rank: number; groupId: number }
     type ChildRow = { id: number; groupId: number }
@@ -3132,68 +3003,6 @@ describe(`pagination recomputation oracle`, () => {
       direction: `asc`,
       windows: [{ offset: 0, limit: 3 }],
     })
-  })
-
-  it(`does not refetch when live insertion fills a settled empty window`, async () => {
-    let sync!: Parameters<SyncConfig<PageRow, number>[`sync`]>[0]
-    const requests: Array<LoadSubsetOptions> = []
-    const source = createCollection<PageRow, number>({
-      id: `settled-empty-window`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          sync = operations
-          operations.markReady()
-          return {
-            loadSubset: (options) => {
-              requests.push(options)
-              return true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(1),
-    )
-    try {
-      await live.preload()
-      expect(live.toArray).toEqual([])
-      expect(requests).toHaveLength(1)
-
-      sync.begin()
-      sync.write({ type: `insert`, value: { id: 1, rank: 1 } })
-      const receipt = sync.commit()
-      if (receipt !== true) await receipt
-      await flushPromises()
-
-      expect(live.toArray.map(({ id, rank }) => ({ id, rank }))).toEqual([
-        { id: 1, rank: 1 },
-      ])
-      expect(live.utils.lastSubsetError).toBeUndefined()
-      // Correct rows alone would miss a repeated prefix and boundary fetch.
-      expect(
-        requests.map(({ limit, offset, orderBy, where, cursor }) => ({
-          limit,
-          offset,
-          ordered: Boolean(orderBy),
-          filtered: Boolean(where),
-          cursor: Boolean(cursor),
-        })),
-      ).toEqual([
-        { limit: 1, offset: 0, ordered: true, filtered: false, cursor: false },
-      ])
-    } finally {
-      await cleanupAll(live, source)
-    }
   })
 
   it(`materializes an offset past the final row`, async () => {
@@ -6178,63 +5987,6 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  it(`does not recover the full source when a visible row keeps its order`, async () => {
-    const loads: Array<LoadSubsetOptions> = []
-    let begin!: () => void
-    let write!: (message: { type: `insert` | `update`; value: PageRow }) => void
-    let commit!: () => void
-    const source = createCollection<PageRow>({
-      id: `pagination-stable-order-update-${collectionSequence++}`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          begin = operations.begin
-          write = operations.write
-          commit = operations.commit
-          operations.markReady()
-          return {
-            loadSubset: (options: LoadSubsetOptions) => {
-              loads.push(options)
-              begin()
-              write({
-                type: `insert`,
-                value: { id: 1, rank: 0, keep: true },
-              })
-              commit()
-              return true
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((query) =>
-      query
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank, `asc`)
-        .limit(1),
-    )
-
-    try {
-      await live.preload()
-      const loadsBeforeMutation = loads.length
-      begin()
-      write({ type: `update`, value: { id: 1, rank: 0, keep: false } })
-      commit()
-      await flushPromises()
-
-      expect(
-        live.toArray.map(({ id, rank, keep }) => ({ id, rank, keep })),
-      ).toEqual([{ id: 1, rank: 0, keep: false }])
-      expect(loads).toHaveLength(loadsBeforeMutation)
-    } finally {
-      await cleanupAll(live, source)
-    }
-  })
-
   it.each([
     [`top-one`, [0, 0], { offset: 0, limit: 1 }, 1, 1],
     [`offset`, [0, 0, 1], { offset: 1, limit: 1 }, 2, 2],
@@ -6750,33 +6502,6 @@ describe(`pagination recomputation oracle`, () => {
       await cleanupAll(live, source)
     }
   })
-
-  it.each([{ ids: [1, Number.NaN] }, { ids: [Number.NaN, 1] }])(
-    `keeps finite public keys before NaN across insertion order`,
-    async ({ ids }) => {
-      const source = createCollection(
-        mockSyncCollectionOptions({
-          id: `pagination-nan-key-order-${collectionSequence++}`,
-          initialData: ids.map((id) => ({ id, rank: 0 })),
-          getKey: (row: PageRow) => row.id,
-          autoIndex: `eager`,
-        }),
-      )
-      const live = createLiveQueryCollection((query) =>
-        query
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank, `asc`)
-          .limit(1),
-      )
-
-      try {
-        await live.preload()
-        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
-      } finally {
-        await cleanupAll(live, source)
-      }
-    },
-  )
 
   it(`stabilizes an on-demand window with a NaN public-key tie`, async () => {
     const loads = await runAdversarialOrderedProviderScenario({

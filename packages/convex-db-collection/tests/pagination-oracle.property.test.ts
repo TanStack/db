@@ -23,138 +23,14 @@
  */
 import fc from 'fast-check'
 import { createCollection } from '@tanstack/db'
-import { makeFunctionReference } from 'convex/server'
 import { expect, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
-import type { PaginationOptions, PaginationResult } from 'convex/server'
-import type { ConvexCollectionClient } from '../src/index'
-
-type Row = { id: string; rank: number; text: string }
-const query = makeFunctionReference<
-  `query`,
-  { paginationOpts: PaginationOptions },
-  PaginationResult<Row>
->(`rows:list`)
-type Slot = {
-  options: PaginationOptions
-  current?: PaginationResult<Row>
-  callback: (value: PaginationResult<Row>) => void
-  active: boolean
-}
-function provider(
-  reverse: boolean,
-  split: `none` | `required` | `recommended`,
-) {
-  const slots: Array<Slot> = []
-  let rowVisits = 0
-  const client = {
-    onUpdate: (
-      _query: unknown,
-      args: { paginationOpts: PaginationOptions },
-      callback: Slot[`callback`],
-    ) => {
-      const slot: Slot = {
-        options: args.paginationOpts,
-        callback,
-        active: true,
-      }
-      slots.push(slot)
-      return Object.assign(
-        () => {
-          slot.active = false
-        },
-        { getCurrentValue: () => slot.current },
-      )
-    },
-  } as ConvexCollectionClient
-  return {
-    client,
-    slots,
-    get rowVisits() {
-      return rowVisits
-    },
-    publish: async (rows: Array<Row>, checkpoint?: () => void) => {
-      const served = new Set<Slot>()
-      for (let turn = 0; turn < 100; turn++) {
-        const pending = slots.filter((slot) => slot.active && !served.has(slot))
-        if (reverse) pending.reverse()
-        for (const slot of pending) {
-          served.add(slot)
-          const { cursor, endCursor, numItems } = slot.options
-          const from = cursor === null ? -Infinity : Number(cursor)
-          const to = endCursor == null ? Infinity : Number(endCursor)
-          const interval = rows
-            .filter((row) => row.rank > from && row.rank <= to)
-            .sort((a, b) => a.rank - b.rank)
-          const page =
-            endCursor == null ? interval.slice(0, numItems) : interval
-          const boundary = endCursor ?? String(page.at(-1)?.rank ?? from)
-          // A split belongs strictly inside the returned cursor range. For an
-          // unbounded query that range ends at the returned page's boundary,
-          // not at the end of all rows matching the query.
-          const needsSplit = split !== `none` && page.length > 2
-          const splitCursor = needsSplit
-            ? String(page[Math.floor((page.length - 1) / 2)]!.rank)
-            : undefined
-          if (splitCursor !== undefined) {
-            expect(Number(splitCursor)).toBeGreaterThan(from)
-            expect(Number(splitCursor)).toBeLessThan(Number(boundary))
-          }
-          slot.current = {
-            page: new Proxy(needsSplit && split === `required` ? [] : page, {
-              get(target, key, receiver) {
-                if (typeof key === `string` && /^\d+$/.test(key)) rowVisits++
-                return Reflect.get(target, key, receiver)
-              },
-            }),
-            continueCursor: boundary,
-            isDone: endCursor == null && page.length === interval.length,
-            ...(needsSplit
-              ? {
-                  pageStatus:
-                    split === `required`
-                      ? (`SplitRequired` as const)
-                      : (`SplitRecommended` as const),
-                  splitCursor,
-                }
-              : {}),
-          }
-          slot.callback(slot.current)
-        }
-        await Promise.resolve()
-        if (slots.some((slot) => slot.active && slot.current === undefined)) {
-          // Drain the acquisition's scheduled flush before checking. Otherwise
-          // the fixture could fill its new subscriptions before production ever
-          // reaches the incomplete-range path, hiding partial publication.
-          await Promise.resolve()
-          checkpoint?.()
-        }
-        if (slots.every((slot) => !slot.active || served.has(slot))) return
-      }
-      throw new Error(`Pagination did not exhaust finite fixture`)
-    },
-  }
-}
-
-// Shrinking must retain the law mismatch even when disposal also fails.
-it(`retains the primary comparison when cleanup also fails`, async () => {
-  const primary = new Error(`row mismatch`)
-  const cleanup = new Error(`release mismatch`)
-  let lastReleased = false
-  await expect(
-    withTestCleanup(
-      () => Promise.reject(primary),
-      () => Promise.reject(cleanup),
-      () => {
-        lastReleased = true
-      },
-    ),
-  ).rejects.toMatchObject({ cause: primary, errors: [primary, cleanup] })
-  expect(lastReleased).toBe(true)
-})
+import { copyRows, keyedRows, provider, query } from './pagination-support'
+import type { Row } from './pagination-support'
 
 const snapshot = fc.shuffledSubarray([0, 1, 2, 3, 4, 5, 6, 7]).chain((ids) =>
   fc
@@ -193,12 +69,6 @@ const rowStates = [
   `public-snapshot-publication`,
 ] as const
 
-function copyRows(rows: ReadonlyArray<Row>): Array<Row> {
-  return rows.map(({ id, rank, text }) => ({ id, rank, text }))
-}
-function keyedRows(rows: ReadonlyArray<Row>): Array<Row> {
-  return copyRows(rows).sort((a, b) => a.id.localeCompare(b.id))
-}
 function sameRows(
   left: ReadonlyArray<Row>,
   right: ReadonlyArray<Row>,
@@ -235,6 +105,10 @@ function expectRevisionTrace(
       ).toEqual(currentSeen ? current : prior)
   }
 }
+
+// The check below compares each observed snapshot with the model's prior and
+// current complete snapshots; the grammar draws the source histories.
+declareOracle({ check: [expectRevisionTrace], grammar: [history, snapshot] })
 
 // Calibrate both recorders' shared trace relation without imposing one callback
 // per revision. Repeated old/new snapshots are legal; prefixes and rollback
@@ -542,68 +416,5 @@ it(`rejects an oversized eager mirror before continuing and preserves accepted r
       await fc.assert(rowBound, { numRuns: oracleRuns(60), ...parameters })
     },
     { fixedSeed: 20261023 },
-  )
-})
-
-it.each([0, -1, 1.5, Infinity, NaN])(
-  `rejects invalid maxRows %s`,
-  async (maxRows) => {
-    const source = provider(false, `none`)
-    const collection = createCollection(
-      convexPaginatedCollectionOptions({
-        client: source.client,
-        query,
-        queryArgs: {},
-        maxRows,
-        getKey: (row) => row.id,
-      }),
-    )
-    try {
-      await expect(collection.preload()).rejects.toThrow(`maxRows`)
-      expect(source.slots).toHaveLength(0)
-    } finally {
-      await collection.cleanup()
-    }
-  },
-)
-
-// The omitted default needs both adjacent observations. Rejection at 10,001
-// alone also accepts a wrong default of 9,999; acceptance at 10,000 rejects it.
-// Calibration: defaults of 9,999 and 10,001 fail the accepted-error and
-// over-cap-error comparisons respectively; the documented default passes both.
-it(`accepts ten thousand rows and rejects the next row under the default cap`, async () => {
-  const source = provider(false, `none`)
-  const collection = createCollection(
-    convexPaginatedCollectionOptions({
-      client: source.client,
-      query,
-      queryArgs: {},
-      pageSize: 10_001,
-      getKey: (row) => row.id,
-    }),
-  )
-  collection.startSyncImmediate()
-  await withTestCleanup(
-    async () => {
-      const rows = Array.from({ length: 10_001 }, (_, rank) => ({
-        id: String(rank),
-        rank,
-        text: String(rank),
-      }))
-      const accepted = rows.slice(0, 10_000)
-      await source.publish(accepted)
-      expect(collection.utils.getSyncError()).toBeUndefined()
-      await collection.utils.awaitSync()
-      expect(collection.status).toBe(`ready`)
-      expect(keyedRows([...collection.values()])).toEqual(keyedRows(accepted))
-      await source.publish(rows)
-      expect(collection.utils.getSyncError()).toBeInstanceOf(RangeError)
-      expect(keyedRows([...collection.values()])).toEqual(keyedRows(accepted))
-      expect(source.slots).toHaveLength(1)
-      await expect(collection.utils.awaitSync()).rejects.toBeInstanceOf(
-        RangeError,
-      )
-    },
-    () => collection.cleanup(),
   )
 })

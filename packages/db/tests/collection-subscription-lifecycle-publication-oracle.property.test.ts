@@ -14,8 +14,22 @@ import {
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
-import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
+import {
+  assertTerminalPublication,
+  clonePublicationBatches,
+  cloneRow,
+  normalizePublicationOrder,
+} from './collection-subscription-lifecycle-publication-support'
+import type {
+  PublicationChange,
+  PublicationPhase,
+  Row,
+  RowKey,
+  SyncOperations,
+  TerminalPublicationSnapshot,
+} from './collection-subscription-lifecycle-publication-support'
 import type {
   DeferralLifecycleCommand,
   DemandName,
@@ -80,25 +94,18 @@ import type {
  * still exercises their real dependency edge.
  */
 
-type RowKey = DemandName | `c` | `d`
-type Row = { id: RowKey; value: number }
-type PublicationChange = {
-  type: `insert` | `update` | `delete`
-  key: RowKey
-  value: Row
-  previousValue?: Row
-}
 type SourceMutation = {
   type: `source`
   key: RowKey
   action: `upsert` | `delete`
   value: number
 }
+
 type PublicationCommand =
   | Exclude<LifecycleCommand, { type: `truncate` }>
   | { type: `truncate`; replacement?: Row }
   | SourceMutation
-type SyncOperations = Parameters<SyncConfig<Row, RowKey>[`sync`]>[0]
+
 type RuntimeAttempt = {
   id: number
   ownerId: number
@@ -110,6 +117,7 @@ type RuntimeAttempt = {
   settled: boolean
   current: boolean
 }
+
 type RuntimeOwner = {
   id: number
   demand: DemandName
@@ -117,6 +125,7 @@ type RuntimeOwner = {
   aborted: boolean
   attemptId?: number
 }
+
 type Replacement = {
   syncRunGeneration: number
   replayGeneration: number
@@ -127,6 +136,7 @@ type Replacement = {
   // failure cannot stop a successful replacement.
   everFailed: boolean
 }
+
 type PublicationModel = {
   source: Map<RowKey, Row>
   visible: Map<RowKey, Row>
@@ -136,9 +146,9 @@ type PublicationModel = {
   batches: Array<Array<PublicationChange>>
   sentKeys: Set<RowKey>
 }
-type PublicationPhase =
-  `public` | `private-pending` | `private-settling` | `private-failed`
+
 type SourceEffect = `insert` | `update` | `delete`
+
 type PublicationObservation = {
   index: number
   command: PublicationCommand[`type`]
@@ -152,6 +162,7 @@ type PublicationObservation = {
   syncRuns: number
   collectionStatus: string
 }
+
 type PublicationMismatch = {
   history: string
   commandIndex: number
@@ -159,6 +170,7 @@ type PublicationMismatch = {
   expected: Array<Array<PublicationChange>>
   observed: Array<Array<PublicationChange>>
 }
+
 type PublicationRunOptions = {
   withoutLoader?: boolean
   continueAfterMismatch?: boolean
@@ -170,29 +182,6 @@ type PublicationRunOptions = {
     expectedPending: number
     reached: Array<number>
   }
-}
-
-type TerminalPublicationSnapshot = {
-  batches: Array<Array<PublicationChange>>
-  visible: Array<Row>
-  statusEvents: Array<{ previousStatus: string; status: string }>
-  errors: Array<unknown>
-  status: string
-  subscriberCount: number
-  attempts: number
-  unloads: Array<number>
-  syncRuns: number
-}
-
-function assertTerminalPublication(
-  actual: TerminalPublicationSnapshot,
-  retired: TerminalPublicationSnapshot,
-): void {
-  expect(actual).toEqual(retired)
-  expect(actual.subscriberCount).toBe(0)
-  actual.errors.forEach((error, index) =>
-    expect(error).toBe(retired.errors[index]),
-  )
 }
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
@@ -224,34 +213,6 @@ const mapsEqual = (
 ): boolean =>
   left.size === right.size &&
   [...left].every(([id, row]) => right.get(id)?.value === row.value)
-
-function cloneRow(row: Row): Row {
-  return { id: row.id, value: row.value }
-}
-
-function clonePublicationBatches(
-  batches: ReadonlyArray<ReadonlyArray<PublicationChange>>,
-): Array<Array<PublicationChange>> {
-  return batches.map((batch) =>
-    batch.map((change) => ({
-      ...change,
-      value: cloneRow(change.value),
-      ...(change.previousValue
-        ? { previousValue: cloneRow(change.previousValue) }
-        : {}),
-    })),
-  )
-}
-
-function normalizePublicationOrder(
-  batches: ReadonlyArray<ReadonlyArray<PublicationChange>>,
-): Array<Array<PublicationChange>> {
-  // Distinct keys have no canonical delivery order within one callback.
-  // Keep callback boundaries and stable order among changes to the same key.
-  return clonePublicationBatches(batches).map((batch) =>
-    batch.sort((left, right) => left.key.localeCompare(right.key)),
-  )
-}
 
 function publicationPhase(
   publication: PublicationModel,
@@ -1089,8 +1050,11 @@ async function runPublicationHistory(
 }
 
 type ProductSettlement = `none` | `resolve` | `reject`
+
 type ProductSuffix = `release` | `cleanup` | `restart` | `unsubscribe`
+
 type PriorIndependentRow = `absent` | `present`
+
 type PublicationProductCase = {
   name: string
   phase: PublicationPhase
@@ -1203,14 +1167,18 @@ const publicationPhases = [
   `private-settling`,
   `private-failed`,
 ] as const
+
 const sourceEffects = [`insert`, `update`, `delete`] as const
+
 const productSettlements = [`none`, `resolve`, `reject`] as const
+
 const productSuffixes = [
   `release`,
   `cleanup`,
   `restart`,
   `unsubscribe`,
 ] as const
+
 const priorIndependentRows = [`absent`, `present`] as const
 
 const publicationProductCases = publicationPhases.flatMap((phase) =>
@@ -1237,6 +1205,7 @@ const successfulReplacementCases = publicationProductCases.filter(
     sourceEffect !== `delete` &&
     settlement === `resolve`,
 )
+
 const replacementOrderingCases = publicationProductCases.filter(
   ({ phase, sourceEffect, settlement, suffix, priorIndependentRow }) =>
     (phase === `private-pending` || phase === `private-settling`) &&
@@ -1245,6 +1214,7 @@ const replacementOrderingCases = publicationProductCases.filter(
     suffix !== `release` &&
     priorIndependentRow === `present`,
 )
+
 const replacementRetirementCases = publicationProductCases.filter(
   (scenario) =>
     scenario.phase !== `public` &&
@@ -1252,12 +1222,14 @@ const replacementRetirementCases = publicationProductCases.filter(
     !successfulReplacementCases.includes(scenario) &&
     !replacementOrderingCases.includes(scenario),
 )
+
 const publicationControlCases = publicationProductCases.filter(
   (scenario) =>
     !successfulReplacementCases.includes(scenario) &&
     !replacementOrderingCases.includes(scenario) &&
     !replacementRetirementCases.includes(scenario),
 )
+
 // Keep each semantic cell intact while giving the aggregate campaign several
 // scheduler cuts. One 204-history test can exceed Vitest's per-test deadline
 // when the full oracle portfolio runs concurrently, even though no history is
@@ -1448,6 +1420,56 @@ async function runDeferralCleanupHistory(
     })
 }
 
+// The selection model: each local choice selects only the keys not yet
+// selected, and records the batch that a callback consumer should observe.
+// Both snapshot methods make the same choices, so `first` only changes the
+// rows of the first full or explicit snapshot.
+function expectedSelection(
+  first: `full` | `explicit` | `one` | `none`,
+  snapshotRows: ReadonlyArray<{ id: string; value: number }>,
+): {
+  batches: Array<Array<string>>
+  selected: Set<string>
+} {
+  const selected = new Set<string>()
+  const expectedBatches: Array<Array<string>> = []
+  const firstRows =
+    first === `one`
+      ? snapshotRows.filter(({ id }) => id === `one`)
+      : first === `none`
+        ? []
+        : snapshotRows
+  const choose = (rows: ReadonlyArray<{ id: string; value: number }>) => {
+    const batch = rows
+      .filter(({ id }) => !selected.has(id))
+      .map(({ id }) => `insert:${id}`)
+    for (const row of rows) selected.add(row.id)
+    if (batch.length > 0) expectedBatches.push(batch)
+  }
+  choose(firstRows)
+  const orderedChoice = snapshotRows.find(({ id }) => !selected.has(id))
+  choose(orderedChoice ? [orderedChoice] : [])
+  const nextOrderedChoice = snapshotRows.find(({ id }) => !selected.has(id))
+  choose(nextOrderedChoice ? [nextOrderedChoice] : [])
+  return { batches: expectedBatches, selected }
+}
+
+// The publication check compares each command's batches, visible rows, status,
+// and unloads with the model. The model predicts the publication step by
+// step, and the selection model predicts which keys local snapshots select.
+declareOracle({
+  check: [runPublicationHistory, runPublicationProduct],
+  model: [
+    projectPublication,
+    publicationDiff,
+    publishIfChanged,
+    recordSourceWrite,
+    finishReplacement,
+    expectedSelection,
+  ],
+  grammar: [deferralCleanupHistories, publicationProductCases],
+})
+
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // A local snapshot selects source rows for this subscriber. Selection and
   // publication are distinct: replay can hold a selection privately, while
@@ -1482,32 +1504,15 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     first: FirstSnapshot
     reenter: boolean
   }>
-
   it.each(selectionCases)(
     `selects each local key once across $first then ordered, includeInitialState=$includeInitialState, reenter=$reenter`,
     async ({ includeInitialState, first, reenter }) => {
-      // The model's selected set is an abstraction of local choices by both
-      // methods; visible is the independent callback consumer's row set.
-      const selected = new Set<string>()
-      const expectedBatches: Array<Array<string>> = []
-      const firstRows =
-        first === `one`
-          ? snapshotRows.filter(({ id }) => id === `one`)
-          : first === `none`
-            ? []
-            : snapshotRows
-      const choose = (rows: ReadonlyArray<SnapshotRow>) => {
-        const batch = rows
-          .filter(({ id }) => !selected.has(id))
-          .map(({ id }) => `insert:${id}`)
-        for (const row of rows) selected.add(row.id)
-        if (batch.length > 0) expectedBatches.push(batch)
-      }
-      choose(firstRows)
-      const orderedChoice = snapshotRows.find(({ id }) => !selected.has(id))
-      choose(orderedChoice ? [orderedChoice] : [])
-      const nextOrderedChoice = snapshotRows.find(({ id }) => !selected.has(id))
-      choose(nextOrderedChoice ? [nextOrderedChoice] : [])
+      // Local selections are modeled by expectedSelection; visible is the
+      // independent callback consumer's row set.
+      const { batches: expectedBatches, selected } = expectedSelection(
+        first,
+        snapshotRows,
+      )
 
       const observedBatches: Array<Array<string>> = []
       const visible = new Set<string>()
@@ -1607,695 +1612,18 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       }
     },
   )
-
-  it(`reselects a key only after its deletion and next publication`, async () => {
-    let operations!: Parameters<SyncConfig<SnapshotRow, string>[`sync`]>[0]
-    const loads: Array<{ cursor?: { lastKey?: string | number } }> = []
-    const collection = createCollection<SnapshotRow, string>({
-      id: `snapshot-selection-after-delete`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (sync) => {
-          operations = sync
-          sync.begin()
-          sync.write({ type: `insert`, value: { id: `one`, value: 1 } })
-          sync.write({ type: `insert`, value: { id: `two`, value: 2 } })
-          sync.commit()
-          sync.markReady()
-          return {
-            loadSubset: (options) => {
-              loads.push(options)
-              return true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const index = collection.createIndex((row) => row.value, {
-      indexType: BTreeIndex,
-    })
-    const orderBy = valueOrderBy()
-    const batches: Array<Array<string>> = []
-    const visible = new Set<string>()
-    const invalidChanges: Array<string> = []
-    const subscription = collection.subscribeChanges((changes) => {
-      const batch: Array<string> = []
-      for (const change of changes) {
-        batch.push(`${change.type}:${change.key}`)
-        if (change.type === `insert`) {
-          if (visible.has(String(change.key)))
-            invalidChanges.push(`duplicate insert:${change.key}`)
-          visible.add(String(change.key))
-        } else if (change.type === `delete`) {
-          if (!visible.delete(String(change.key)))
-            invalidChanges.push(`delete absent:${change.key}`)
-        }
-      }
-      if (batch.length > 0) batches.push(batch)
-    })
-    subscription.setOrderByIndex(index)
-    try {
-      subscription.requestSnapshot({
-        where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
-      })
-      operations.begin()
-      operations.write({ type: `delete`, key: `one` })
-      await operations.commit()
-      operations.begin()
-      operations.write({ type: `insert`, value: { id: `one`, value: 1 } })
-      await operations.commit()
-      subscription.requestLimitedSnapshot({
-        orderBy,
-        limit: 1,
-        minValues: [1],
-      })
-
-      // The independent fold is select(one), remove(one), publish(one), then
-      // select the first remaining ranked row. A permanent reservation loses
-      // the source reinsert; a missing reservation repeats it in the window.
-      expect(batches).toEqual([
-        [`insert:one`],
-        [`delete:one`],
-        [`insert:one`],
-        [`insert:two`],
-      ])
-      expect(invalidChanges).toEqual([])
-      expect([...visible].sort()).toEqual([`one`, `two`])
-      expect(loads.at(-1)).toMatchObject({ offset: 0 })
-      expect(loads.at(-1)?.cursor?.lastKey).toBeUndefined()
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  // A subscriber's callback has already published each inserted key, whether
-  // it filters source changes or passes them through. The model keeps source
-  // rows in a plain Map and public keys in a Set. Source deletes remove public
-  // keys; source inserts add them. An ordered snapshot may choose only an
-  // absent public key. These legal histories cross callback insertion,
-  // deletion, reinsert, and local selection in every filtering mode and ordered
-  // index path. Each callback is an observation cut. Retained-key count checks
-  // the long-lived tracking cost after deletion separately.
-  const callbackSelectionHistories = [
-    {
-      name: `new-insert`,
-      actions: [{ type: `insert`, row: { id: `two`, value: 2 } }],
-    },
-    {
-      name: `delete-reinsert`,
-      actions: [
-        { type: `delete`, id: `one` },
-        { type: `insert`, row: { id: `one`, value: 1 } },
-        { type: `insert`, row: { id: `two`, value: 2 } },
-      ],
-    },
-  ] as const
-  it.each(
-    ([`filtered`, `full`, `skip`] as const).flatMap((mode) =>
-      ([false, true] as const).flatMap((withCursor) =>
-        callbackSelectionHistories.map((history) => ({
-          mode,
-          withCursor,
-          history,
-        })),
-      ),
-    ),
-  )(
-    `does not reselect callback rows after $history.name: $mode, cursor=$withCursor`,
-    async ({ mode, withCursor, history }) => {
-      let operations!: Parameters<SyncConfig<SnapshotRow, string>[`sync`]>[0]
-      const collection = createCollection<SnapshotRow, string>({
-        id: `snapshot-callback-selection-${mode}-${withCursor}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (sync) => {
-            operations = sync
-            sync.begin()
-            sync.write({ type: `insert`, value: { id: `one`, value: 1 } })
-            sync.commit()
-            sync.markReady()
-            return { loadSubset: () => true, unloadSubset: () => {} }
-          },
-        },
-      })
-      const index = collection.createIndex((row) => row.value, {
-        indexType: BTreeIndex,
-      })
-      const orderBy = valueOrderBy()
-      const batches: Array<Array<string>> = []
-      const visible = new Set<string>()
-      const invalidChanges: Array<string> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          const batch = changes.map(({ type, key }) => `${type}:${key}`)
-          for (const change of changes) {
-            if (change.type === `insert`) {
-              if (visible.has(String(change.key)))
-                invalidChanges.push(`duplicate insert:${change.key}`)
-              visible.add(String(change.key))
-            } else if (change.type === `delete`) {
-              if (!visible.delete(String(change.key)))
-                invalidChanges.push(`delete absent:${change.key}`)
-            }
-          }
-          if (batch.length > 0) batches.push(batch)
-        },
-        { includeInitialState: mode === `skip` ? false : undefined },
-      )
-      subscription.setOrderByIndex(index)
-      try {
-        if (mode === `full`) subscription.requestSnapshot()
-        else
-          subscription.requestSnapshot({
-            where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
-          })
-        // The first snapshot selects the sole source row. From here the model
-        // folds source actions without reading subscription tracking state.
-        const expectedSource = new Map<string, SnapshotRow>([
-          [`one`, { id: `one`, value: 1 }],
-        ])
-        const expectedVisible = new Set(expectedSource.keys())
-        const expectedBatches = [[`insert:one`]]
-        expect(batches).toEqual(expectedBatches)
-        let retainedAfterDelete: number | undefined
-        for (const action of history.actions) {
-          operations.begin()
-          if (action.type === `delete`) {
-            expectedSource.delete(action.id)
-            expectedVisible.delete(action.id)
-            expectedBatches.push([`delete:${action.id}`])
-            operations.write({ type: `delete`, key: action.id })
-          } else {
-            expectedSource.set(action.row.id, action.row)
-            expectedVisible.add(action.row.id)
-            expectedBatches.push([`insert:${action.row.id}`])
-            operations.write({ type: `insert`, value: action.row })
-          }
-          await operations.commit()
-          expect(batches).toEqual(expectedBatches)
-          if (action.type === `delete`) {
-            retainedAfterDelete = (
-              subscription as unknown as { sentKeys: ReadonlySet<string> }
-            ).sentKeys.size
-          }
-        }
-        const nextOrdered = [...expectedSource.values()]
-          .sort((left, right) => left.value - right.value)
-          .find(({ id }) => !expectedVisible.has(id))
-        if (nextOrdered) {
-          expectedVisible.add(nextOrdered.id)
-          expectedBatches.push([`insert:${nextOrdered.id}`])
-        }
-        subscription.requestLimitedSnapshot({
-          orderBy,
-          limit: 1,
-          ...(withCursor ? { minValues: [1] } : {}),
-        })
-
-        expect.soft(batches).toEqual(expectedBatches)
-        expect.soft(invalidChanges).toEqual([])
-        expect([...visible].sort()).toEqual([...expectedVisible].sort())
-        if (retainedAfterDelete !== undefined)
-          expect.soft(retainedAfterDelete).toBe(0)
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
-  // Selected keys and provider coverage answer different questions. A key
-  // delivered by a callback must not be selected again, but it does not prove
-  // that every lower-ranked provider row was fetched. These two legal histories
-  // challenge both directions: a sparse callback leaves a lower rank unseen,
-  // and an ordered callback may reenter before its outer request acquires a
-  // provider page. The plain remote array is the independent source model; the
-  // controlled adapter honors a key cursor when supplied and otherwise
-  // returns exactly the requested offset page. After a bounded sequence of
-  // requests, every remote key must be public once.
-  it.each(
-    ([undefined, false] as const).flatMap((includeInitialState) =>
-      ([`sparse-callback`, `ordered-reentry`] as const).flatMap((history) =>
-        ([false, true] as const).map((withCursor) => ({
-          includeInitialState,
-          history,
-          withCursor,
-        })),
-      ),
-    ),
-  )(
-    `loads unseen ordered rows after $history, includeInitialState=$includeInitialState, cursor=$withCursor`,
-    async ({ includeInitialState, history, withCursor }) => {
-      type ProviderRow = { id: string; value: number }
-      const remote: Array<ProviderRow> = [
-        { id: `one`, value: 1 },
-        { id: `two`, value: 2 },
-        { id: `three`, value: 3 },
-      ]
-      const initial =
-        history === `ordered-reentry` ? remote.slice(0, 2) : remote.slice(0, 1)
-      let operations!: Parameters<SyncConfig<ProviderRow, string>[`sync`]>[0]
-      const requests: Array<LoadSubsetOptions> = []
-      const collection = createCollection<ProviderRow, string>({
-        id: `snapshot-selection-provider-${history}-${includeInitialState}-${withCursor}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (sync) => {
-            operations = sync
-            sync.begin()
-            for (const value of initial) sync.write({ type: `insert`, value })
-            sync.commit()
-            sync.markReady()
-            return {
-              loadSubset: (options) => {
-                requests.push(options)
-                if (options.orderBy) {
-                  const cursorKey = options.cursor?.lastKey
-                  const start =
-                    cursorKey === undefined
-                      ? (options.offset ?? 0)
-                      : remote.findIndex(({ id }) => id === cursorKey) + 1
-                  const page = remote.slice(
-                    start,
-                    options.limit === undefined
-                      ? undefined
-                      : start + options.limit,
-                  )
-                  const missing = page.filter(({ id }) => !collection.has(id))
-                  if (missing.length > 0) {
-                    operations.begin()
-                    for (const value of missing)
-                      operations.write({ type: `insert`, value })
-                    operations.commit()
-                  }
-                }
-                return true
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const index = collection.createIndex((row) => row.value, {
-        indexType: BTreeIndex,
-      })
-      const orderBy = valueOrderBy()
-      const visible = new Map<string, ProviderRow>()
-      const violations: Array<string> = []
-      let reentered = false
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            if (change.type === `delete`) {
-              if (!visible.delete(String(change.key)))
-                violations.push(`delete absent:${change.key}`)
-            } else {
-              if (change.type === `insert` && visible.has(String(change.key)))
-                violations.push(`duplicate insert:${change.key}`)
-              visible.set(String(change.key), change.value)
-            }
-          }
-          if (
-            history === `ordered-reentry` &&
-            !reentered &&
-            changes.some(({ type, key }) => type === `insert` && key === `one`)
-          ) {
-            reentered = true
-            subscription.requestLimitedSnapshot({
-              orderBy,
-              limit: 1,
-              ...(withCursor ? { minValues: [0] } : {}),
-            })
-          }
-        },
-        { includeInitialState },
-      )
-      subscription.setOrderByIndex(index)
-      try {
-        if (history === `sparse-callback`) {
-          subscription.requestSnapshot({
-            where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
-          })
-          operations.begin()
-          operations.write({ type: `insert`, value: remote[2]! })
-          await operations.commit()
-        }
-        for (const expectedRow of remote) {
-          subscription.requestLimitedSnapshot({
-            orderBy,
-            limit: 1,
-            ...(withCursor ? { minValues: [0] } : {}),
-          })
-          expect(visible.has(expectedRow.id)).toBe(true)
-        }
-        await flushPromises()
-
-        const orderedRequests = requests.filter(
-          ({ orderBy: requestedOrder }) => requestedOrder !== undefined,
-        )
-        expect(orderedRequests.length).toBeGreaterThan(0)
-        expect(
-          orderedRequests.every(({ limit }) =>
-            withCursor ? limit === undefined : limit !== undefined,
-          ),
-        ).toBe(true)
-        expect(violations).toEqual([])
-        expect([...visible.keys()].sort()).toEqual(
-          remote.map(({ id }) => id).sort(),
-        )
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
-  // A cursor expression alone does not move an offset-only provider. Here the
-  // cursor value is just before the last remote row, while the Collection has
-  // only the first row. The plain remote array defines the expected target.
-  // An adapter that ignores cursor expressions returns an offset page, so a
-  // finite prefix based only on local selections cannot guarantee progress.
-  it.each(
-    ([undefined, false] as const).flatMap((includeInitialState) =>
-      [3, 7].map((rowCount) => ({ includeInitialState, rowCount })),
-    ),
-  )(
-    `loads a high cursor boundary through an offset provider, includeInitialState=$includeInitialState, rows=$rowCount`,
-    async ({ includeInitialState, rowCount }) => {
-      type ProviderRow = { id: number; value: number }
-      const remote = Array.from({ length: rowCount }, (_, index) => ({
-        id: index + 1,
-        value: index + 1,
-      }))
-      let operations!: Parameters<SyncConfig<ProviderRow, number>[`sync`]>[0]
-      const requests: Array<{ offset?: number; limit?: number }> = []
-      const collection = createCollection<ProviderRow, number>({
-        id: `snapshot-high-cursor-offset-${includeInitialState}-${rowCount}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (sync) => {
-            operations = sync
-            sync.begin()
-            sync.write({ type: `insert`, value: remote[0]! })
-            sync.commit()
-            sync.markReady()
-            return {
-              loadSubset: (options) => {
-                requests.push(options)
-                const start = options.offset ?? 0
-                const page = remote.slice(
-                  start,
-                  start + (options.limit ?? remote.length),
-                )
-                const missing = page.filter(({ id }) => !collection.has(id))
-                if (missing.length > 0) {
-                  operations.begin()
-                  for (const value of missing)
-                    operations.write({ type: `insert`, value })
-                  operations.commit()
-                }
-                return true
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const index = collection.createIndex((row) => row.value, {
-        indexType: BTreeIndex,
-      })
-      const visible = new Set<number>()
-      const violations: Array<string> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            if (change.type === `delete`) visible.delete(change.key)
-            else {
-              if (change.type === `insert` && visible.has(change.key))
-                violations.push(`duplicate insert:${change.key}`)
-              visible.add(change.key)
-            }
-          }
-        },
-        { includeInitialState },
-      )
-      subscription.setOrderByIndex(index)
-      try {
-        subscription.requestLimitedSnapshot({
-          orderBy: valueOrderBy(),
-          limit: 1,
-          minValues: [rowCount - 1],
-        })
-        await flushPromises()
-
-        expect(requests).toHaveLength(1)
-        expect(requests[0]).toMatchObject({ offset: 0 })
-        expect(requests[0]?.limit).toBeUndefined()
-        expect(visible.has(remote.at(-1)!.id)).toBe(true)
-        expect(violations).toEqual([])
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
-  // A provider page is ranked in authoritative source state, while the local
-  // Collection is an optimistic projection of it. A pending delete or update
-  // can hide a source row without reserving its key for this subscriber. The
-  // plain remote array and the pending local changes define the next visible
-  // rank independently of the subscription's request arithmetic. At request
-  // submission, its provider page must reach that rank. A source commit may
-  // remain queued behind the optimistic transaction, so this cut judges the
-  // request rather than claiming that the page is already public.
-  it.each(
-    ([`delete`, `update-out-of-filter`] as const).flatMap((mutation) =>
-      [1, 2].map((hiddenCount) => ({ mutation, hiddenCount })),
-    ),
-  )(
-    `loads past $hiddenCount pending optimistic $mutation row(s)`,
-    async ({ mutation, hiddenCount }) => {
-      type ProviderRow = { id: number; value: number; status: string }
-      const remote = [1, 2, 3].map((id) => ({
-        id,
-        value: id,
-        status: `visible`,
-      }))
-      const heldMutation = createDeferred<void>()
-      const delivered = new Set<number>()
-      const requests: Array<LoadSubsetOptions> = []
-      let operations!: Parameters<SyncConfig<ProviderRow, number>[`sync`]>[0]
-      const collection = createCollection<ProviderRow, number>({
-        id: `snapshot-optimistic-prefix-${mutation}-${hiddenCount}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        onDelete: async () => heldMutation.promise,
-        onUpdate: async () => heldMutation.promise,
-        sync: {
-          sync: (sync) => {
-            operations = sync
-            sync.markReady()
-            return {
-              loadSubset: (options) => {
-                requests.push(options)
-                const start = options.offset ?? 0
-                const page = remote.slice(
-                  start,
-                  options.limit === undefined
-                    ? undefined
-                    : start + options.limit,
-                )
-                const fresh = page.filter(({ id }) => !delivered.has(id))
-                if (fresh.length > 0) {
-                  operations.begin()
-                  for (const row of fresh) {
-                    delivered.add(row.id)
-                    operations.write({ type: `insert`, value: row })
-                  }
-                  return operations.commit(options.signal)
-                }
-                return true
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const index = collection.createIndex((row) => row.value, {
-        indexType: BTreeIndex,
-      })
-      const visible = new Set<number>()
-      const invalidChanges: Array<string> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            if (change.type === `delete`) {
-              if (!visible.delete(change.key))
-                invalidChanges.push(`delete absent:${change.key}`)
-            } else {
-              if (change.type === `insert` && visible.has(change.key))
-                invalidChanges.push(`duplicate insert:${change.key}`)
-              visible.add(change.key)
-            }
-          }
-        },
-        mutation === `update-out-of-filter`
-          ? {
-              whereExpression: new Func(`eq`, [
-                new PropRef([`status`]),
-                new Value(`visible`),
-              ]),
-            }
-          : undefined,
-      )
-      subscription.setOrderByIndex(index)
-      try {
-        subscription.requestLimitedSnapshot({
-          orderBy: valueOrderBy(),
-          limit: hiddenCount,
-        })
-        expect([...visible].sort()).toEqual(
-          remote.slice(0, hiddenCount).map(({ id }) => id),
-        )
-        for (const { id } of remote.slice(0, hiddenCount)) {
-          if (mutation === `delete`) collection.delete(id)
-          else
-            collection.update(id, (draft) => {
-              draft.status = `hidden`
-            })
-        }
-        expect(visible.size).toBe(0)
-        expect(collection._optimisticOverlaySize()).toBe(hiddenCount)
-
-        subscription.requestLimitedSnapshot({
-          orderBy: valueOrderBy(),
-          limit: 1,
-        })
-        const nextRequest = requests.at(-1)!
-        const start = nextRequest.offset ?? 0
-        const requested = remote.slice(
-          start,
-          nextRequest.limit === undefined
-            ? undefined
-            : start + nextRequest.limit,
-        )
-        expect(invalidChanges).toEqual([])
-        expect(requests).toHaveLength(2)
-        expect(requested.map(({ id }) => id)).toContain(remote[hiddenCount]!.id)
-      } finally {
-        heldMutation.resolve()
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
-  // A callback insertion is public before user code runs. If that code asks
-  // for the next local ordered row, the callback key is excluded and another
-  // eligible key still advances selection. This crosses the positive and
-  // negative halves of the law at the callback observation cut.
-  it.each([undefined, false] as const)(
-    `selects an unseen row during a source callback, includeInitialState=%s`,
-    async (includeInitialState) => {
-      type SelectionRow = { id: string; value: number }
-      let operations!: Parameters<SyncConfig<SelectionRow, string>[`sync`]>[0]
-      const collection = createCollection<SelectionRow, string>({
-        id: `snapshot-source-callback-reentry-${includeInitialState}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (sync) => {
-            operations = sync
-            sync.begin()
-            sync.write({ type: `insert`, value: { id: `one`, value: 1 } })
-            sync.write({ type: `insert`, value: { id: `three`, value: 3 } })
-            sync.commit()
-            sync.markReady()
-            return { loadSubset: () => true, unloadSubset: () => {} }
-          },
-        },
-      })
-      const index = collection.createIndex((row) => row.value, {
-        indexType: BTreeIndex,
-      })
-      const orderBy = valueOrderBy()
-      const batches: Array<Array<string>> = []
-      const visible = new Set<string>()
-      const violations: Array<string> = []
-      let reentered = false
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          if (changes.length > 0)
-            batches.push(changes.map(({ type, key }) => `${type}:${key}`))
-          for (const change of changes) {
-            if (change.type === `insert`) {
-              if (visible.has(String(change.key)))
-                violations.push(`duplicate insert:${change.key}`)
-              visible.add(String(change.key))
-            } else if (change.type === `delete`) {
-              visible.delete(String(change.key))
-            }
-          }
-          if (
-            !reentered &&
-            changes.some(({ type, key }) => type === `insert` && key === `two`)
-          ) {
-            reentered = true
-            subscription.requestLimitedSnapshot({
-              orderBy,
-              limit: 1,
-              minValues: [1],
-            })
-          }
-        },
-        { includeInitialState },
-      )
-      subscription.setOrderByIndex(index)
-      try {
-        subscription.requestSnapshot({
-          where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
-        })
-        operations.begin()
-        operations.write({ type: `insert`, value: { id: `two`, value: 2 } })
-        await operations.commit()
-
-        // The independent fold is: select one, publish source two, then choose
-        // the lowest ordered source row absent from {one, two}, namely three.
-        expect(reentered).toBe(true)
-        expect(batches).toEqual([
-          [`insert:one`],
-          [`insert:two`],
-          [`insert:three`],
-        ])
-        expect(violations).toEqual([])
-        expect([...visible].sort()).toEqual([`one`, `three`, `two`])
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
   it(`reconstructs every bounded deferral cleanup history`, () => {
     expect(deferralCleanupHistories).toHaveLength(32)
     expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
       32,
     )
   })
-
   it.each(deferralCleanupHistories)(
     `publishes independent batches after deferral cleanup: $name`,
     async ({ commands }) => {
       await runDeferralCleanupHistory(commands)
     },
   )
-
   it.each(
     ([`initial`, `replay`, `restart`] as const).flatMap((phase) =>
       [1, 2].flatMap((demandCount) =>
@@ -2338,118 +1666,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       )
     },
   )
-
-  it.each([`row`, `status`, `error`, `acquisition`] as const)(
-    `rejects a terminal %s observation with an unchanged-retired neighbor`,
-    (fault) => {
-      const retired: TerminalPublicationSnapshot = {
-        batches: [],
-        visible: [{ id: `c`, value: 42 }],
-        statusEvents: [],
-        errors: [],
-        status: `ready`,
-        subscriberCount: 0,
-        attempts: 2,
-        unloads: [0, 1],
-        syncRuns: 1,
-      }
-      const actual: TerminalPublicationSnapshot = {
-        ...retired,
-        batches: [],
-        visible: retired.visible.map(cloneRow),
-        statusEvents: [],
-        errors: [],
-        unloads: [...retired.unloads],
-      }
-      assertTerminalPublication(actual, retired)
-      if (fault === `row`)
-        actual.batches.push([
-          { type: `insert`, key: `a`, value: { id: `a`, value: 9 } },
-        ])
-      if (fault === `status`)
-        actual.statusEvents.push({
-          previousStatus: `ready`,
-          status: `loadingSubset`,
-        })
-      if (fault === `error`) actual.errors.push(new Error(`late transport`))
-      if (fault === `acquisition`) actual.attempts++
-      expect(() => assertTerminalPublication(actual, retired)).toThrowError(
-        /expected/,
-      )
-    },
-  )
-
-  it.each(
-    ([undefined, false] as const).flatMap((includeInitialState) =>
-      ([`update`, `delete`, `truncate`] as const).map((operation) => ({
-        includeInitialState,
-        operation,
-      })),
-    ),
-  )(
-    `distinguishes unseen-row $operation with includeInitialState=$includeInitialState`,
-    async ({ includeInitialState, operation }) => {
-      let operations!: SyncOperations
-      const collection = createCollection<Row, RowKey>({
-        getKey: ({ id }) => id,
-        startSync: true,
-        sync: {
-          sync: (sync) => {
-            operations = sync
-            sync.begin()
-            sync.write({ type: `insert`, value: { id: `d`, value: 0 } })
-            sync.commit()
-            sync.markReady()
-          },
-        },
-      })
-      const changes: Array<PublicationChange> = []
-      const subscription = collection.subscribeChanges(
-        (batch) => {
-          for (const change of batch) {
-            changes.push({
-              type: change.type,
-              key: change.value.id,
-              value: cloneRow(change.value),
-              ...(change.previousValue
-                ? { previousValue: cloneRow(change.previousValue) }
-                : {}),
-            })
-          }
-        },
-        { includeInitialState },
-      )
-      try {
-        expect(changes).toEqual([])
-        operations.begin()
-        if (operation === `truncate`) operations.truncate()
-        else if (operation === `delete`)
-          operations.write({ type: `delete`, key: `d` })
-        else operations.write({ type: `update`, value: { id: `d`, value: 4 } })
-        await operations.commit()
-        expect(changes).toEqual(
-          operation === `update`
-            ? [
-                {
-                  type: includeInitialState === false ? `update` : `insert`,
-                  key: `d`,
-                  value: { id: `d`, value: 4 },
-                  ...(includeInitialState === false
-                    ? { previousValue: { id: `d`, value: 0 } }
-                    : {}),
-                },
-              ]
-            : includeInitialState === false
-              ? [{ type: `delete`, key: `d`, value: { id: `d`, value: 0 } }]
-              : [],
-        )
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
-
   it(`keeps raw source updates after retiring the final replay owner`, async () => {
     await runPublicationHistory([
       { type: `cleanup` },
@@ -2466,7 +1682,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-
   it(`keeps raw truncate deletes after retiring the final replay owner`, async () => {
     await runPublicationHistory([
       {
@@ -2492,7 +1707,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `truncate` },
     ])
   })
-
   it(`records requested snapshot rows before a canceled reset`, async () => {
     await runPublicationHistory([
       { type: `request`, demand: `b` },
@@ -2510,7 +1724,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `release`, demand: `b` },
     ])
   })
-
   it(`does not invent a publication for an unchanged private row`, async () => {
     await runPublicationHistory([
       { type: `request`, demand: `a` },
@@ -2522,7 +1735,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-
   it.each(
     ([`none`, `retained`, `refreshed`, `new`] as const).flatMap((baseline) =>
       ([`delete`, `empty`, `same`, `other`] as const).map((reset) => ({
@@ -2559,7 +1771,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ])
     },
   )
-
   it(`reconciles a repeated reset after the last replay owner aborts`, async () => {
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2577,7 +1788,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `cleanup` },
     ])
   })
-
   it(`keeps independent source rows when a replay settles after redundant restart calls`, async () => {
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2612,68 +1822,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `cleanup` },
     ])
   })
-
-  it.each([
-    `none`,
-    `missing`,
-    `duplicate`,
-    `value`,
-    `previous-value`,
-    `split`,
-    `merge`,
-    `same-key-order`,
-  ] as const)(
-    `normalizes only independent change order with corruption: %s`,
-    (corruption) => {
-      const baseline: Array<Array<PublicationChange>> = [
-        [
-          {
-            type: `update`,
-            key: `a`,
-            value: { id: `a`, value: 1 },
-            previousValue: { id: `a`, value: 0 },
-          },
-          { type: `delete`, key: `b`, value: { id: `b`, value: 0 } },
-          { type: `insert`, key: `c`, value: { id: `c`, value: 1 } },
-        ],
-        [
-          {
-            type: `update`,
-            key: `a`,
-            value: { id: `a`, value: 2 },
-            previousValue: { id: `a`, value: 1 },
-          },
-          { type: `delete`, key: `a`, value: { id: `a`, value: 2 } },
-        ],
-      ]
-      const permutations = [
-        [0, 1, 2],
-        [0, 2, 1],
-        [1, 0, 2],
-        [1, 2, 0],
-        [2, 0, 1],
-        [2, 1, 0],
-      ]
-      for (const permutation of permutations) {
-        const candidate = clonePublicationBatches(baseline)
-        const changes = candidate[0]!
-        if (corruption === `value`) changes[0]!.value.value++
-        if (corruption === `previous-value`) changes[0]!.previousValue!.value++
-        candidate[0] = permutation.map((index) => changes[index]!)
-        if (corruption === `missing`) candidate[0].pop()
-        if (corruption === `duplicate`) candidate[0].push(changes[0]!)
-        if (corruption === `split`)
-          candidate.splice(1, 0, candidate[0].splice(1))
-        if (corruption === `merge`) candidate.splice(0, 2, candidate.flat())
-        if (corruption === `same-key-order`) candidate[1]!.reverse()
-        const actual = normalizePublicationOrder(candidate)
-        const expected = normalizePublicationOrder(baseline)
-        if (corruption === `none`) expect(actual).toEqual(expected)
-        else expect(actual).not.toEqual(expected)
-      }
-    },
-  )
-
   it(`defines all 288 unique row-publication lifecycle cells`, () => {
     expect(publicationProductCases).toHaveLength(288)
     expect(new Set(publicationProductCases.map(({ name }) => name)).size).toBe(
@@ -2684,38 +1832,32 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     expect(replacementRetirementCases).toHaveLength(46)
     expect(publicationControlCases).toHaveLength(204)
   })
-
   it.each(publicationControlSlices)(
     `matches row publications for lifecycle control cells $name`,
     async ({ scenarios }) => {
       expectNoPublicationMismatches(await runPublicationProduct(scenarios))
     },
   )
-
   it(`preserves independent source work when a successful replay publishes`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(successfulReplacementCases),
     )
   })
-
   it(`publishes complete replacement batches regardless of independent key order`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementOrderingCases),
     )
   })
-
   it(`retires incomplete or failed replacement without changing independent public rows`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementRetirementCases),
     )
   })
-
   it(`maps every canonical green lifecycle history to public rows`, async () => {
     for (const history of greenLifecycleHistories) {
       await runPublicationHistory(history)
     }
   })
-
   it(`suppresses canceled source writes when a released acquisition settles`, async () => {
     await runPublicationHistory(
       [
@@ -2737,7 +1879,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`publishes an authoritative truncate after the final demand is released`, async () => {
     await runPublicationHistory([
       { type: `request`, demand: `b` },
@@ -2753,7 +1894,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-
   it(`publishes independent source changes with a successful replay`, async () => {
     await runPublicationHistory(
       [
@@ -2782,7 +1922,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`does not republish a row already delivered by a live change`, async () => {
     await runPublicationHistory(
       [
@@ -2799,7 +1938,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`suppresses canceled source writes when an aborted acquisition settles`, async () => {
     await runPublicationHistory(
       [
@@ -2820,7 +1958,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`keeps later source changes private after a failed replay`, async () => {
     await runPublicationHistory([
       { type: `request`, demand: `a` },
@@ -2842,7 +1979,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `source`, key: `b`, action: `upsert`, value: 51 },
     ])
   })
-
   // Releasing the final owner retires a replay that has not failed; it
   // publishes the rows it holds, so none of these rows stays stale.
   it.each([
@@ -2967,7 +2103,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       await runPublicationHistory(history)
     },
   )
-
   // Law 9: a failed replay stays private until an authoritative replay
   // succeeds, even after its failed owner is released and nothing remains.
   it(`keeps a failed replay private when its final owner releases`, async () => {
@@ -2993,7 +2128,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `release`, demand: `a` },
     ])
   })
-
   it(`retires failed private replacement rows when its final owner releases`, async () => {
     await runPublicationHistory(
       [
@@ -3024,7 +2158,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`does not delete an independent public row when releasing a restarted demand`, async () => {
     await runPublicationHistory(
       [
@@ -3039,7 +2172,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`keeps a restarted snapshot private while canceled replay work settles`, async () => {
     // Seed 2018803696, path 65:10:2:10:13:12:12:0:0:0. A canceled-only
     // truncate does not discharge the earlier replay's publication wait.
@@ -3073,7 +2205,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it(`matches retained rows across an empty restart and canceled-only truncates`, async () => {
     // Seed 2018803696, path 65:29:0:0:0 exposed the model's missing retained-row
     // deletion: an authoritative empty reset is not limited to resident rows.
@@ -3111,7 +2242,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
-
   it.each(
     [false, true].flatMap((restart) =>
       [false, true].map((canceledOwner) => ({ restart, canceledOwner })),
@@ -3146,7 +2276,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ])
     },
   )
-
   it.each(
     [false, true].flatMap((canceledOwner) =>
       (
@@ -3177,7 +2306,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ])
     },
   )
-
   it.each([
     undefined,
     { id: `a`, value: 0 },
@@ -3199,7 +2327,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       )
     },
   )
-
   it(`resets retained rows after no-op cleanup and release commands`, async () => {
     // Seed 1657005, path 164:18 after removing the visible-row request omission.
     await runPublicationHistory([
@@ -3223,7 +2350,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-
   it(`resets retained rows after the last replay owner retires`, async () => {
     // Seed 333468655, path 59:13:0:0:0.
     await runPublicationHistory([
@@ -3246,7 +2372,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-
   it(`does not restore source rows when the final replay owner retires`, async () => {
     // Seed 1337491191, path 591:20:1:8:8:8:7:7.
     await runPublicationHistory([
@@ -3262,10 +2387,8 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
-
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 60 * multiplier
-
   fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,
     seed: 1_657_005,

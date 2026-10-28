@@ -50,6 +50,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 const property = `join-result-key.pairs`
@@ -258,6 +259,8 @@ async function runHistory(history: History): Promise<void> {
     () => Promise.all([left.cleanup(), right.cleanup()]),
   ])
 }
+
+declareOracle({ check: [runHistory], model: [expectedPairs] })
 
 describe(`joined result key oracle`, () => {
   // The pinned histories and the fixed campaign stand aside during any path

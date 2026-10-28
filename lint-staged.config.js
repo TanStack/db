@@ -5,9 +5,19 @@
 const chunkSize = 40
 
 export default {
-  // The oracle rules, without inline directives. lint-staged appends the
-  // staged oracle files as arguments.
-  '*oracle*.{ts,tsx}': `node scripts/agent-lint-feedback.mjs`,
+  // The oracle rules, without inline directives. The script lints the oracle
+  // files that each staged test or support module affects, so every module
+  // that an oracle can import is passed. It selects the oracle files itself.
+  '*.{ts,tsx,js,mjs}': (files) => {
+    const commands = []
+    for (let start = 0; start < files.length; start += chunkSize) {
+      const chunk = files.slice(start, start + chunkSize)
+      commands.push(
+        `node scripts/agent-lint-feedback.mjs ${chunk.map((file) => `"${file}"`).join(` `)}`,
+      )
+    }
+    return commands
+  },
   '*.{ts,tsx}': (files) => {
     const commands = []
     for (let start = 0; start < files.length; start += chunkSize) {

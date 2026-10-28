@@ -8,7 +8,9 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
+import { cleanupQuery } from './includes-query-shape-support.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
 /**
@@ -65,30 +67,6 @@ function stripVirtualProperties(value: unknown): unknown {
 function assertRowsEqual(observed: unknown, expected: unknown): undefined {
   expect(observed).toEqual(expected)
   return undefined
-}
-
-type Cleanable = { cleanup: () => Promise<void> }
-
-async function cleanupQuery(
-  live: Cleanable,
-  sources: Array<{ collection: Cleanable }>,
-): Promise<void> {
-  const failures: Array<unknown> = []
-  try {
-    await live.cleanup()
-  } catch (error) {
-    failures.push(error)
-  }
-  const results = await Promise.allSettled(
-    sources.map(({ collection }) => collection.cleanup()),
-  )
-  for (const result of results) {
-    if (result.status === `rejected`) failures.push(result.reason)
-  }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) {
-    throw new AggregateError(failures, `Query cleanup failed`)
-  }
 }
 
 type ParentRow = { id: number }
@@ -167,6 +145,22 @@ function createMultiplicityDriver(
   }
 }
 
+/**
+ * The multiplicity model: a parent row is visible while at least one child
+ * names it, however many children do. It scans plain Maps and keeps no join
+ * state, so it predicts the row set that the joined query must publish.
+ */
+function expectedMultiplicityRows({
+  children,
+  parents,
+}: Pick<MultiplicityContext, 'children' | 'parents'>): Array<ParentRow> {
+  return [...parents.values()]
+    .filter((parent) =>
+      [...children.values()].some((child) => child.parentId === parent.id),
+    )
+    .sort((left, right) => left.id - right.id)
+}
+
 const multiplicityProjection: TraceProjection<
   MultiplicityContext,
   unknown,
@@ -174,12 +168,7 @@ const multiplicityProjection: TraceProjection<
 > = {
   // A join projects one parent row for any positive contributor count.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
-  recompute: ({ children, parents }) =>
-    [...parents.values()]
-      .filter((parent) =>
-        [...children.values()].some((child) => child.parentId === parent.id),
-      )
-      .sort((left, right) => left.id - right.id),
+  recompute: expectedMultiplicityRows,
   assertEqual: assertRowsEqual,
 }
 
@@ -304,6 +293,37 @@ type CorrelationResult = Array<{
   productions: Array<ProductionRow>
 }>
 
+/**
+ * The correlation model: each part's route holds the productions whose order
+ * matches the correlation alias the target names. The joined alias routes by
+ * `order.partId`, and the source alias routes by `production.orderId`. Plain
+ * scans over Maps predict the published rows.
+ */
+function expectedCorrelationRows({
+  orders,
+  parts,
+  productions,
+  target,
+}: Pick<
+  CorrelationContext,
+  'orders' | 'parts' | 'productions' | 'target'
+>): CorrelationResult {
+  return [...parts.values()]
+    .sort((left, right) => left.id - right.id)
+    .map((part) => ({
+      id: part.id,
+      productions: [...productions.values()]
+        .filter((production) => {
+          const order = orders.get(production.orderId)
+          if (!order) return false
+          return target === `joined`
+            ? order.partId === part.id
+            : production.orderId === part.id
+        })
+        .sort((left, right) => left.id - right.id),
+    }))
+}
+
 const correlationProjection: TraceProjection<
   CorrelationContext,
   unknown,
@@ -311,21 +331,7 @@ const correlationProjection: TraceProjection<
 > = {
   // Correlation chooses a route. Join identity only decides which rows meet.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
-  recompute: ({ orders, parts, productions, target }) =>
-    [...parts.values()]
-      .sort((left, right) => left.id - right.id)
-      .map((part) => ({
-        id: part.id,
-        productions: [...productions.values()]
-          .filter((production) => {
-            const order = orders.get(production.orderId)
-            if (!order) return false
-            return target === `joined`
-              ? order.partId === part.id
-              : production.orderId === part.id
-          })
-          .sort((left, right) => left.id - right.id),
-      })),
+  recompute: expectedCorrelationRows,
   assertEqual: assertRowsEqual,
 }
 
@@ -406,6 +412,23 @@ type NullableResult = Array<{
   author: AuthorRow | undefined
 }>
 
+/**
+ * The nullable model: each post shows the author its key names, and a null key
+ * or an unmatched key shows no author. The model reads the Maps directly, so it
+ * never routes through a join.
+ */
+function expectedNullableRows({
+  authors,
+  posts,
+}: Pick<NullableContext, 'authors' | 'posts'>): NullableResult {
+  return [...posts.values()]
+    .sort((left, right) => left.id - right.id)
+    .map((post) => ({
+      id: post.id,
+      author: post.authorId === null ? undefined : authors.get(post.authorId),
+    }))
+}
+
 const nullableProjection: TraceProjection<
   NullableContext,
   unknown,
@@ -413,15 +436,23 @@ const nullableProjection: TraceProjection<
 > = {
   // SQL equality never matches null. A later non-null key starts a fresh route.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
-  recompute: ({ authors, posts }) =>
-    [...posts.values()]
-      .sort((left, right) => left.id - right.id)
-      .map((post) => ({
-        id: post.id,
-        author: post.authorId === null ? undefined : authors.get(post.authorId),
-      })),
+  recompute: expectedNullableRows,
   assertEqual: assertRowsEqual,
 }
+
+/**
+ * The check is `runTrace`. After preload and after every source write, it
+ * compares the live query's rows with the projection's model, and it reports
+ * the first divergent checkpoint. The models are the three recomputations above,
+ * each computed from the driver's own Maps.
+ */
+declareOracle({
+  model: [
+    expectedMultiplicityRows,
+    expectedCorrelationRows,
+    expectedNullableRows,
+  ],
+})
 
 function campaigns(fixedSeed: number, property: string) {
   // Grammar controls: the pinned 1-child case reconstructs final retirement,
@@ -443,40 +474,6 @@ function campaigns(fixedSeed: number, property: string) {
 }
 
 describe(`includes query-shape recompute oracle`, () => {
-  fcTest(`releases every source and retains cleanup errors`, async () => {
-    const liveError = new Error(`live cleanup`)
-    const sourceError = new Error(`source cleanup`)
-    const released: Array<string> = []
-    await expect(
-      cleanupQuery(
-        {
-          cleanup: async () => {
-            released.push(`live`)
-            throw liveError
-          },
-        },
-        [
-          {
-            collection: {
-              cleanup: async () => {
-                released.push(`first source`)
-                throw sourceError
-              },
-            },
-          },
-          {
-            collection: {
-              cleanup: async () => {
-                released.push(`second source`)
-              },
-            },
-          },
-        ],
-      ),
-    ).rejects.toMatchObject({ errors: [liveError, sourceError] })
-    expect(released).toEqual([`live`, `first source`, `second source`])
-  })
-
   for (const campaign of campaigns(1703, `includes-query-shape.multiplicity`)) {
     fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
       `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,

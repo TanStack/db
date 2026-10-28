@@ -1,4 +1,5 @@
 import { fc } from '@fast-check/vitest'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * SSR may expose only a snapshot the first browser render can reproduce.
@@ -88,6 +89,8 @@ export function expectedSsrSnapshot(history: SsrSnapshotHistory) {
         : `loading`,
   } as const
 }
+
+declareOracle({ model: [expectedSsrSnapshot, expectedSsrRuntimeErrorViews] })
 
 // Named replays reconstruct the admission boundary before random shrinking can
 // stop a campaign at its first mismatch. They use the same driver and judgment.
