@@ -3690,13 +3690,15 @@ describe(`Electric adapter laws`, () => {
     const heldAcceptance = createDeferred<void>()
     const holdAcceptance = <TParams>(params: TParams): TParams => {
       const syncParams = params as unknown as {
-        commit: () => true | Promise<void>
+        commit: (signal?: AbortSignal) => true | Promise<void>
       }
       const commit = syncParams.commit
       return {
         ...params,
-        commit: () => {
-          const receipt = commit()
+        // A wrapper passes the source's signal through, so an abandoned
+        // transaction stays abandoned.
+        commit: (signal?: AbortSignal) => {
+          const receipt = commit(signal)
           if (!armAcceptance) return receipt
           return withAcceptedReceipt(
             receipt === true ? Promise.resolve() : receipt,

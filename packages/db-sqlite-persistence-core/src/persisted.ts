@@ -964,7 +964,9 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
       ) => void)
     | null
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
-  truncate: ((options?: { markReady?: boolean }) => void) | null
+  // A runtime truncate replaces rows from durable state. It never changes
+  // Collection status: only the Collection's own source does.
+  truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
   fail: ((error: unknown) => void) | null
 }
@@ -1307,13 +1309,13 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   applicationReceipt?: SyncAppliedReceipt
   operationKeys: Set<TKey>
   queuedBecauseHydrating: boolean
-  // Set by `reserveCommitTurn`: subset hydration waits for this commit.
+  // Set by `reserveCommitTurn`: every hydration waits for this commit.
   reservesCommitTurn?: boolean
+  // Settles once the reservation ends; every wait shares it.
+  reservationEnded?: Promise<void>
   hasDependentSuccessor: boolean
-  publicationAdmissionWaiters?: Set<{
-    resolve: () => void
-    reject: (error: unknown) => void
-  }>
+  // Every outcome of the transaction releases its admission waiters.
+  publicationAdmissionWaiters?: Set<() => void>
   terminalFailure?: { error: unknown }
   // Each key's row as this transaction leaves it: a whole row, or the merged
   // fields of partial updates to apply over the row before the transaction.
@@ -1341,6 +1343,24 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
   operation: NormalizedSyncOperation<T, TKey>
 }
+
+/**
+ * Returns undefined when no reserved sync transaction (`reserveCommitTurn`)
+ * is open. Otherwise returns a promise that settles when it commits or ends.
+ * No hydration may start while one is open: a new hydration cycle would make
+ * its commit fail.
+ */
+type WaitForReservedCommit = () => Promise<void> | undefined
+
+/**
+ * Thrown where a hydration would start while a reserved sync transaction is
+ * open, before the hydration changes any state. Its apply-mutex turn ends,
+ * waits for the commit outside the mutex, and retries: the commit's own
+ * durable write needs the mutex.
+ */
+class ReservedCommitPending extends Error {}
+// One instance signals every deferral; callers compare it by identity.
+const reservedCommitPending = new ReservedCommitPending()
 
 class ApplyMutex {
   private queue: Promise<void> = Promise.resolve()
@@ -1575,6 +1595,9 @@ class PersistedCollectionRuntime<
   private readonly activeSubsets = new Map<string, LoadSubsetOptions>()
   private activeHydrationContext: object | undefined
   private hydrationSequence = 0
+  private waitForReservedCommit: WaitForReservedCommit | undefined
+  private abandonReservedCommit: (() => void) | undefined
+  private reservedCommitFlush: Promise<void> | undefined
   // An unscheduled startup read may finish after a coordinator reset publishes.
   private resetSequence = 0
   private readonly pendingRemoteSubsetEnsures = new Map<
@@ -1595,10 +1618,13 @@ class PersistedCollectionRuntime<
   private readonly queuedHydrationTransactions: Array<
     BufferedSyncTransaction<T, TKey>
   > = []
+  // Peer commits and resets, in arrival order.
   private readonly queuedTxCommitted: Array<{
-    txCommitted: TxCommitted
+    notice: TxCommitted | CollectionReset
     lifecycleGeneration: number
     storageCollectionId: string
+    // Set when the notice met an open reservation; it retries after that ends.
+    waitsForReservedCommit?: boolean
   }> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
   private readonly hydratedDemands = new Set<string | undefined>()
@@ -1958,6 +1984,60 @@ class PersistedCollectionRuntime<
     this.restartSourceAfterScopedRecovery = restart ?? null
   }
 
+  setReservedCommitControls(
+    wait: WaitForReservedCommit,
+    abandon: () => void,
+  ): void {
+    this.waitForReservedCommit = wait
+    this.abandonReservedCommit = abandon
+  }
+
+  // Every hydration start calls this before it changes state. The check runs
+  // inside the hydration's own scope, because a shared scheduler can hold the
+  // scope long after its apply-mutex turn began.
+  // A hydration cycle begins: it waits for an open reservation, then moves
+  // the sequence that open sync transactions are bound to.
+  private beginHydrationCycle(): void {
+    this.throwIfReservedCommitOpen()
+    this.hydrationSequence++
+  }
+
+  private throwIfReservedCommitOpen(): void {
+    if (this.waitForReservedCommit?.()) throw reservedCommitPending
+  }
+
+  /** Runs a hydration turn, retrying it after a reserved commit it met. */
+  private async runHydrationTurn<TResult>(
+    turn: () => Promise<TResult>,
+  ): Promise<TResult> {
+    for (;;) {
+      try {
+        return await this.applyMutex.run(turn)
+      } catch (error) {
+        if (error !== reservedCommitPending) throw error
+        await this.waitForReservedCommit?.()
+      }
+    }
+  }
+
+  // A deferred notice stays at the head of the queue, so later notices still
+  // apply in arrival order once the reserved transaction commits.
+  private flushAfterReservedCommit(): void {
+    const lifecycleGeneration = this.lifecycleGeneration
+    const ended = this.waitForReservedCommit?.()
+    // One deferred flush per reservation drains every notice behind it.
+    if (ended && ended === this.reservedCommitFlush) return
+    this.reservedCommitFlush = ended
+    void Promise.resolve(ended)
+      .then(() => {
+        if (lifecycleGeneration !== this.lifecycleGeneration) return
+        return this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      })
+      .catch((error) => {
+        this.markTerminalFailure(error, lifecycleGeneration)
+      })
+  }
+
   clearSourceRestartAfterScopedRecovery(): void {
     this.restartSourceAfterScopedRecovery = undefined
   }
@@ -2082,6 +2162,24 @@ class PersistedCollectionRuntime<
         await this.ensureCacheClaimActive()
       }
       await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      // A broadcast whose reload waits for a reserved commit has not applied
+      // yet, so the load waits with it, including when the reservation ends
+      // before this check. Notices behind a head that does not wait arrived
+      // after this flush and are not the owner's.
+      for (;;) {
+        const head = this.queuedTxCommitted[0]
+        if (!head?.waitsForReservedCommit) break
+        const reservation = this.waitForReservedCommit?.()
+        await reservation
+        await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+        // With no reservation left, a head still queued is held by other work,
+        // such as a claim recovery, which flushes it.
+        if (
+          this.queuedTxCommitted[0] === head &&
+          !this.waitForReservedCommit?.()
+        )
+          break
+      }
       // A broadcast that failed to apply made the runtime terminal; its rows
       // are not visible, so the load must not settle successfully.
       this.throwIfTerminal()
@@ -2428,7 +2526,7 @@ class PersistedCollectionRuntime<
       if (this.syncMode !== `on-demand`) return
       if (this.scopedRecovery) return
 
-      const appliedCursor = await this.applyMutex.run(async () => {
+      const appliedCursor = await this.runHydrationTurn(async () => {
         const result = await this.runInHydrationScope((adapter) =>
           this.hydrateBaseline(lifecycleGeneration, adapter),
         )
@@ -2606,7 +2704,7 @@ class PersistedCollectionRuntime<
         if (this.syncControls.begin && this.syncControls.commit) {
           const applied = this.withInternalApply(() => {
             this.syncControls.begin?.()
-            this.syncControls.truncate?.({ markReady: false })
+            this.syncControls.truncate?.()
             if (resetMetadata) {
               this.syncControls.metadata?.collection.set(
                 resetMetadata.key,
@@ -2863,17 +2961,36 @@ class PersistedCollectionRuntime<
     // Wire admission failures are permanent input errors, not transport retries.
     if (routeRemoteDemandDuringHydration) validateRemoteSubsetOptions(options)
     this.activeSubsets.set(subsetKey, options)
+    // An aborted demand is not active, even while it waits for its turn.
+    const retireAbortedDemand = () => {
+      if (this.activeSubsets.get(subsetKey) === options) {
+        this.activeSubsets.delete(subsetKey)
+      }
+    }
+    options.signal?.addEventListener(`abort`, retireAbortedDemand, {
+      once: true,
+    })
     const appliedCursor = this.appliedReceiptSequence
     try {
-      const hydrated = await this.applyMutex.run(
+      const hydrated = await this.runHydrationTurn(
         async (): Promise<boolean | `aborted`> => {
-          if (options.signal?.aborted) return `aborted`
+          // The turn may start long after admission, behind other work or a
+          // reserved commit; demand retired or cleaned up meanwhile reads
+          // nothing.
+          if (
+            options.signal?.aborted ||
+            (isDemandRetained !== undefined && !isDemandRetained())
+          ) {
+            return `aborted`
+          }
           try {
             return await this.runInHydrationScope<boolean | `aborted`>(
               (adapter) => {
                 if (options.signal?.aborted) {
                   return Promise.resolve(`aborted`)
                 }
+                // Until the reserved commit lands, the load can still abort.
+                this.throwIfReservedCommitOpen()
                 onHydrationStarted?.()
                 return this.hydrateSubsetUnsafe(
                   options,
@@ -2934,6 +3051,8 @@ class PersistedCollectionRuntime<
         this.activeSubsets.delete(subsetKey)
       }
       throw error
+    } finally {
+      options.signal?.removeEventListener(`abort`, retireAbortedDemand)
     }
 
     if (
@@ -3090,6 +3209,7 @@ class PersistedCollectionRuntime<
     await this.ensureCacheClaimActive()
     const lifecycleGeneration = this.lifecycleGeneration
     // A one-shot refresh does not acquire an enduring subscription lease.
+    // Only a sync-absent Collection exposes it, so no reservation can be open.
     const hydrated = await this.applyMutex.run(async () => {
       const result = await this.runInHydrationScope((adapter) =>
         this.hydrateSubsetUnsafe(
@@ -3591,11 +3711,11 @@ class PersistedCollectionRuntime<
     },
     adapter: HydrationPersistenceAdapter,
   ): Promise<boolean> {
+    this.beginHydrationCycle()
     let rowsLoaded = false
     let boundRowVersion: number | undefined
     let replayFailure: { reason: unknown } | undefined
     const resetSequence = this.resetSequence
-    this.hydrationSequence++
     const hydrationContext = {}
     this.activeHydrationContext = hydrationContext
     try {
@@ -4885,7 +5005,7 @@ class PersistedCollectionRuntime<
       // a renewed generation still owes its rows. A hydration flushes the
       // queue when it ends.
       this.queuedTxCommitted.push({
-        txCommitted: payload,
+        notice: payload,
         lifecycleGeneration,
         storageCollectionId: message.collectionId,
       })
@@ -4907,30 +5027,42 @@ class PersistedCollectionRuntime<
     }
 
     if (isCollectionResetPayload(payload)) {
-      void this.applyMutex
-        .run(async () => {
-          if (message.collectionId !== this.storageCollectionId) return
-          await this.runInHydrationScope(async (adapter) => {
-            await this.truncateAndReloadUnsafe(adapter, lifecycleGeneration)
-            await this.rebaseDurableStreamFromSnapshotUnsafe(
-              adapter,
-              lifecycleGeneration,
-            )
-            if (lifecycleGeneration === this.lifecycleGeneration) {
-              // Reloaded rows and the later position-only read are separate
-              // cuts. Zero is the conservative public version in the new epoch.
-              this.publicRowVersion = 0
-              this.resetTermFence = this.latestTerm
-            }
+      // A reservation built before the reset cannot commit into it
+      // (maintainer decision on PR #2265).
+      this.abandonReservedCommit?.()
+      // A reset queues with peer commits, so a commit that arrived after it
+      // applies after it, behind its term fence.
+      this.queuedTxCommitted.push({
+        notice: payload,
+        lifecycleGeneration,
+        storageCollectionId: message.collectionId,
+      })
+      if (!this.isHydratingNow()) {
+        void this.applyMutex
+          .run(() => this.flushQueuedTxCommittedUnsafe())
+          .catch((error) => {
+            this.markTerminalFailure(error, lifecycleGeneration)
           })
-          if (lifecycleGeneration === this.lifecycleGeneration) {
-            await this.flushQueuedTxCommittedUnsafe()
-          }
-        })
-        .catch((error) => {
-          this.markTerminalFailure(error, lifecycleGeneration)
-        })
+      }
     }
+  }
+
+  private async applyCollectionResetUnsafe(
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    await this.runInHydrationScope(async (adapter) => {
+      await this.truncateAndReloadUnsafe(adapter, lifecycleGeneration)
+      await this.rebaseDurableStreamFromSnapshotUnsafe(
+        adapter,
+        lifecycleGeneration,
+      )
+      if (lifecycleGeneration === this.lifecycleGeneration) {
+        // Reloaded rows and the later position-only read are separate
+        // cuts. Zero is the conservative public version in the new epoch.
+        this.publicRowVersion = 0
+        this.resetTermFence = this.latestTerm
+      }
+    })
   }
 
   private async flushQueuedTxCommittedUnsafe(): Promise<void> {
@@ -4940,19 +5072,39 @@ class PersistedCollectionRuntime<
         this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
         return
       }
-      const queued = this.queuedTxCommitted.shift()
-      if (!queued) {
-        continue
+      // A notice that waited retries only after the reservation ends, so
+      // notices that arrive meanwhile neither retry it nor overtake it.
+      if (
+        this.queuedTxCommitted[0]!.waitsForReservedCommit &&
+        this.waitForReservedCommit?.()
+      ) {
+        this.flushAfterReservedCommit()
+        return
       }
+      const queued = this.queuedTxCommitted.shift()!
       if (queued.storageCollectionId !== this.storageCollectionId) continue
-      // A queued commit has left the queue, so a failure must be terminal,
-      // as it is for a commit applied when it arrives.
       try {
-        await this.processCommittedTxUnsafe(
-          queued.txCommitted,
-          queued.lifecycleGeneration,
-        )
+        if (isCollectionResetPayload(queued.notice)) {
+          await this.applyCollectionResetUnsafe(queued.lifecycleGeneration)
+        } else {
+          await this.processCommittedTxUnsafe(
+            queued.notice,
+            queued.lifecycleGeneration,
+          )
+        }
       } catch (error) {
+        if (error === reservedCommitPending) {
+          // Only a notice that reaches a hydration waits; later notices stay
+          // queued behind it. The reserved commit lands first and takes the
+          // next stream position, so the retry may run as gap recovery, which
+          // rereads durable rows (maintainer decision on #2226).
+          queued.waitsForReservedCommit = true
+          this.queuedTxCommitted.unshift(queued)
+          this.flushAfterReservedCommit()
+          return
+        }
+        // A queued commit has left the queue, so a failure must be terminal,
+        // as it is for a commit applied when it arrives.
         throw this.markTerminalFailure(error, queued.lifecycleGeneration)
       }
     }
@@ -5061,6 +5213,14 @@ class PersistedCollectionRuntime<
     lifecycleGeneration: number,
   ): Promise<boolean> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return false
+    // Gap recovery waits for a reserved commit before it asks the leader. It
+    // is a hydration cycle only from the point where it will change rows
+    // (maintainer decision on PR #2265): after pullSince answers, and before
+    // it moves the stream position. A sync transaction that begins later
+    // straddles it; one that ends before then never crosses it.
+    this.throwIfReservedCommitOpen()
+    // Every reload in this recovery continues its hydration cycle, under
+    // unknown writes: the missed notices named no keys.
     if (this.persistence.coordinator.pullSince && this.latestRowVersion >= 0) {
       let pullResponse: PullSinceResponse | undefined
       try {
@@ -5090,6 +5250,7 @@ class PersistedCollectionRuntime<
         if (lifecycleGeneration !== this.lifecycleGeneration) return false
 
         if (pullResponse.ok) {
+          this.beginHydrationCycle()
           this.observeStreamPosition(
             pullResponse.latestTerm,
             pullResponse.latestSeq,
@@ -5097,7 +5258,7 @@ class PersistedCollectionRuntime<
           )
           if (pullResponse.requiresFullReload) {
             await this.runInHydrationScope((adapter) =>
-              this.reloadUnknownWritesUnsafe(adapter),
+              this.reloadUnknownWritesUnsafe(adapter, false, true),
             )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
@@ -5108,7 +5269,7 @@ class PersistedCollectionRuntime<
           const deltas = pullResponse.deltas
           if (!deltas) {
             await this.runInHydrationScope((adapter) =>
-              this.reloadUnknownWritesUnsafe(adapter),
+              this.reloadUnknownWritesUnsafe(adapter, false, true),
             )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
@@ -5135,6 +5296,7 @@ class PersistedCollectionRuntime<
                     delta.collectionMetadataMutations,
                 },
                 adapter,
+                true,
               )
               if (lifecycleGeneration !== this.lifecycleGeneration) return
             }
@@ -5215,6 +5377,30 @@ class PersistedCollectionRuntime<
       this.refreshScopedSubsets()
       return
     }
+    // The reset is one hydration cycle from here, before its eager truncate
+    // publishes. It abandons a reservation that opened before it, instead of
+    // waiting for it; a sync transaction that begins during the reset
+    // straddles it, so readers never wait on a truncated Collection.
+    this.abandonReservedCommit?.()
+    this.hydrationSequence++
+    this.hydratingGeneration = lifecycleGeneration
+    try {
+      await this.truncateThenReloadUnsafe(adapter, lifecycleGeneration)
+    } finally {
+      // The reload ends the cycle; this covers an early return before it.
+      if (
+        this.hydratingGeneration === lifecycleGeneration &&
+        this.activeHydrationContext === undefined
+      ) {
+        this.hydratingGeneration = null
+      }
+    }
+  }
+
+  private async truncateThenReloadUnsafe(
+    adapter: HydrationPersistenceAdapter,
+    lifecycleGeneration: number,
+  ): Promise<void> {
     // A subscriber may reacquire reentrantly from the truncate commit.
     this.hydratedDemands.clear()
     this.resetSequence++
@@ -5239,15 +5425,17 @@ class PersistedCollectionRuntime<
     // follower requests its demand again.
     await this.reloadActiveSubsetsUnsafe(
       adapter,
-      false,
-      this.syncMode === `eager`,
-      true,
+      /* skipUnchangedReplace */ false,
+      /* restoreResetBaseline */ this.syncMode === `eager`,
+      /* replayDemand */ true,
+      /* continuesHydrationCycle */ true,
     )
   }
 
   private async invalidateFromCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
+    continuesHydrationCycle = false,
   ): Promise<void> {
     if (!txCommitted.requiresFullReload) {
       for (const key of [
@@ -5273,7 +5461,13 @@ class PersistedCollectionRuntime<
     const reloadActiveSubsets = (skipUnchangedReplace = false) =>
       this.runInHydrationScope(
         (scopedAdapter) =>
-          this.reloadActiveSubsetsUnsafe(scopedAdapter, skipUnchangedReplace),
+          this.reloadActiveSubsetsUnsafe(
+            scopedAdapter,
+            skipUnchangedReplace,
+            /* restoreResetBaseline */ false,
+            /* replayDemand */ false,
+            continuesHydrationCycle,
+          ),
         adapter,
       )
 
@@ -5419,10 +5613,17 @@ class PersistedCollectionRuntime<
   private async reloadUnknownWritesUnsafe(
     adapter: HydrationPersistenceAdapter,
     skipUnchangedReplace = false,
+    continuesHydrationCycle = false,
   ): Promise<void> {
     this.peerWritesUnknown = true
     this.keysKnownSincePeerWrites.clear()
-    await this.reloadActiveSubsetsUnsafe(adapter, skipUnchangedReplace)
+    await this.reloadActiveSubsetsUnsafe(
+      adapter,
+      skipUnchangedReplace,
+      /* restoreResetBaseline */ false,
+      /* replayDemand */ false,
+      continuesHydrationCycle,
+    )
   }
 
   private async reloadActiveSubsetsUnsafe(
@@ -5430,11 +5631,14 @@ class PersistedCollectionRuntime<
     skipUnchangedReplace = false,
     restoreResetBaseline = false,
     replayDemand = false,
+    // A reset's reload continues the cycle its truncate began.
+    continuesHydrationCycle = false,
   ): Promise<void> {
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
       return
     }
+    if (!continuesHydrationCycle) this.beginHydrationCycle()
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
     const activeSubsetOptions = Array.from(this.activeSubsets.values())
@@ -5463,7 +5667,6 @@ class PersistedCollectionRuntime<
           .map(([key]) => key)
 
     this.hydratedDemands.clear()
-    this.hydrationSequence++
     const hydrationContext = {}
     this.activeHydrationContext = hydrationContext
     this.hydratingGeneration = lifecycleGeneration
@@ -5864,15 +6067,10 @@ function createWrappedSyncConfig<
         transactionStack[transactionStack.length - 1]
       const settlePublicationAdmissionWaiters = (
         transaction: OpenSyncTransaction<T, TKey>,
-        error?: unknown,
       ) => {
         const waiters = transaction.publicationAdmissionWaiters
         transaction.publicationAdmissionWaiters = undefined
-        if (!waiters) return
-        for (const waiter of waiters) {
-          if (error === undefined) waiter.resolve()
-          else waiter.reject(error)
-        }
+        waiters?.forEach((release) => release())
       }
       const bindToCurrentHydration = (
         transaction: OpenSyncTransaction<T, TKey>,
@@ -6082,7 +6280,7 @@ function createWrappedSyncConfig<
         error: unknown,
       ) => {
         removePendingPublicationTransaction(transaction)
-        settlePublicationAdmissionWaiters(transaction, error)
+        settlePublicationAdmissionWaiters(transaction)
         return createHandledRejection(error)
       }
       const updateMetadataWrite = <K>(
@@ -6118,42 +6316,29 @@ function createWrappedSyncConfig<
         cancelAdmissionWait?: () => void
       }
       const acquisitions = new Map<LoadSubsetOptions, SubsetAcquisition>()
+      // Resolves when the reservation ends (committed, abandoned, or
+      // discarded by cleanup; maintainer decision on PR #2265) or when the
+      // load's own demand aborts. The load then runs, or rejects through its
+      // own signal.
       const waitForPublicationAdmission = (
         transaction: OpenSyncTransaction<T, TKey>,
         options: LoadSubsetOptions,
         acquisition: SubsetAcquisition,
-      ): Promise<void> => {
-        if (options.signal?.aborted) {
-          return Promise.reject(
-            options.signal.reason ?? new SyncTransactionAbortedError(),
-          )
-        }
-        return new Promise<void>((resolve, reject) => {
-          const waiters =
-            transaction.publicationAdmissionWaiters ??
-            (transaction.publicationAdmissionWaiters = new Set())
-          let settled = false
-          const settle = (action: () => void) => {
-            if (settled) return
-            settled = true
-            waiters.delete(waiter)
-            options.signal?.removeEventListener(`abort`, abort)
+      ): Promise<void> =>
+        new Promise<void>((resolve) => {
+          const waiters = (transaction.publicationAdmissionWaiters ??=
+            new Set())
+          const settle = () => {
+            waiters.delete(settle)
+            options.signal?.removeEventListener(`abort`, settle)
             acquisition.cancelAdmissionWait = undefined
-            action()
+            resolve()
           }
-          const waiter = {
-            resolve: () => settle(resolve),
-            reject: (error: unknown) => settle(() => reject(error)),
-          }
-          const abort = () =>
-            waiter.reject(
-              options.signal?.reason ?? new SyncTransactionAbortedError(),
-            )
-          waiters.add(waiter)
-          options.signal?.addEventListener(`abort`, abort, { once: true })
-          acquisition.cancelAdmissionWait = waiter.resolve
+          if (options.signal?.aborted) return settle()
+          waiters.add(settle)
+          options.signal?.addEventListener(`abort`, settle, { once: true })
+          acquisition.cancelAdmissionWait = settle
         })
-      }
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
       // Network-first initial rendering: once the deadline passes, or the
       // remote fails, a completed restore that installed rows opens the
@@ -6277,7 +6462,7 @@ function createWrappedSyncConfig<
           begin: params.begin,
           write: params.write as SyncControlFns<T, TKey>[`write`],
           commit: params.commit,
-          truncate: params.truncate,
+          truncate: () => params.truncate({ markReady: false }),
           metadata: params.metadata ?? null,
           fail: params.fail,
         },
@@ -6285,6 +6470,38 @@ function createWrappedSyncConfig<
       // Rows a storage read or a peer's notice lands in the Collection come
       // ahead of the open source transactions (decisions 7, 10, and 11).
       runtime.setInternalApplyListener(rejudgeEnclosing)
+
+      const findReservedTransaction = () =>
+        transactionStack.find(
+          (transaction) => transaction.reservesCommitTurn === true,
+        )
+      runtime.setReservedCommitControls(
+        () => {
+          const transaction = findReservedTransaction()
+          if (!transaction) return undefined
+          // Admission waiters settle when the transaction commits, aborts, or
+          // cleanup discards it. Every outcome closes the reservation.
+          return (transaction.reservationEnded ??= new Promise<void>(
+            (resolve) => {
+              ;(transaction.publicationAdmissionWaiters ??= new Set()).add(
+                resolve,
+              )
+            },
+          ))
+        },
+        // A peer reset abandons every reservation built before it: later writes
+        // are dropped, the commit rejects, and its waiters run.
+        () => {
+          for (const transaction of transactionStack) {
+            if (!transaction.reservesCommitTurn) continue
+            transaction.reservesCommitTurn = false
+            transaction.terminalFailure ??= {
+              error: new SyncTransactionAbortedError(),
+            }
+            settlePublicationAdmissionWaiters(transaction)
+          }
+        },
+      )
 
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
         protocol: SYNC_PERSISTENCE_PROTOCOL,
@@ -6297,11 +6514,23 @@ function createWrappedSyncConfig<
         },
         reserveCommitTurn: () => {
           const openTransaction = getOpenTransaction()
-          if (openTransaction && !openTransaction.internal)
+          // A transaction a reset abandoned cannot reserve again.
+          if (
+            openTransaction &&
+            !openTransaction.internal &&
+            !openTransaction.terminalFailure
+          )
             openTransaction.reservesCommitTurn = true
         },
         hydrateBaseline: async () => {
           if (startupState.cleanedUp) return
+          // The source holds this reservation itself, so waiting for its
+          // commit here would wait for the caller.
+          if (findReservedTransaction()) {
+            throw new InvalidPersistedCollectionConfigError(
+              `hydrateBaseline cannot run while this source's reserved sync transaction is open`,
+            )
+          }
           try {
             await runtime.ensureResumeBaselineHydrated()
           } catch (error) {
@@ -6755,11 +6984,9 @@ function createWrappedSyncConfig<
           let applied: Promise<void>
           try {
             applied = runtime.applyHydrationBufferedTransaction(transaction)
-          } catch (error) {
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            throw error
+          } finally {
+            settlePublicationAdmissionWaiters(openTransaction)
           }
-          settlePublicationAdmissionWaiters(openTransaction)
           settleRuntimeTransaction(openTransaction, applied)
           return visibleAfterDurable(openTransaction, applied)
         },
@@ -6934,9 +7161,8 @@ function createWrappedSyncConfig<
         // open old-source transaction is abandoned before the new cache binds.
         if (!sourceCleanupPromise) {
           sourceSession++
-          const abortError = new SyncTransactionAbortedError()
           for (const transaction of transactionStack) {
-            settlePublicationAdmissionWaiters(transaction, abortError)
+            settlePublicationAdmissionWaiters(transaction)
           }
           transactionStack.length = 0
           const retiredResult = sourceResult
@@ -7012,7 +7238,6 @@ function createWrappedSyncConfig<
           // reenters cleanup before returning, wait for that exact synchronous
           // entry to publish its cleanup callback before sampling the result.
           const sourceSyncEntry = activeSourceSyncEntry
-          const cleanupError = new SyncTransactionAbortedError()
           for (const acquisition of acquisitions.values()) {
             acquisition.cancelAdmissionWait?.()
           }
@@ -7020,7 +7245,7 @@ function createWrappedSyncConfig<
           acquisitions.clear()
           pendingPublicationTransactions.length = 0
           for (const transaction of transactionStack) {
-            settlePublicationAdmissionWaiters(transaction, cleanupError)
+            settlePublicationAdmissionWaiters(transaction)
           }
           transactionStack.length = 0
           let sourceCleanup: Promise<void>
@@ -7085,9 +7310,8 @@ function createWrappedSyncConfig<
             }
           }
 
-          const openTransaction = getOpenTransaction()
           const needsPublicationAdmission =
-            openTransaction?.reservesCommitTurn === true
+            findReservedTransaction() !== undefined
           let hydrationStarted = false
           const raceRetainedLoad = (
             work: Promise<void>,
@@ -7148,10 +7372,14 @@ function createWrappedSyncConfig<
             ) {
               return
             }
-            const currentTransaction = getOpenTransaction()
-            // A source transaction that reserved its FIFO turn commits before
+            const currentTransaction = findReservedTransaction()
+            // A sync transaction that reserved its FIFO turn commits before
             // subset hydration advances the generation it was built against.
-            if (currentTransaction?.reservesCommitTurn) {
+            // A load admitted during the reservation waits here, before it
+            // takes an apply-mutex turn, so it runs after the commit's durable
+            // write. The runtime's deferral covers hydrations whose turn
+            // began earlier; it cannot keep that FIFO order.
+            if (currentTransaction) {
               await waitForPublicationAdmission(
                 currentTransaction,
                 options,
@@ -7205,7 +7433,7 @@ function createLoopbackSyncConfig<
           begin: params.begin,
           write: params.write as SyncControlFns<T, TKey>[`write`],
           commit: params.commit,
-          truncate: params.truncate,
+          truncate: () => params.truncate({ markReady: false }),
           metadata: params.metadata ?? null,
           fail: params.fail,
         },

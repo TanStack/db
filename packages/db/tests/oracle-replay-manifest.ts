@@ -398,6 +398,11 @@ const ownerGroups: ReadonlyArray<
     `class`,
   ],
   [
+    `browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts`,
+    `browser`,
+    `multi-tab-reserved-history`,
+  ],
+  [
     `electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
     `sqlite-reload`,
     `class.electron`,

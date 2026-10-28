@@ -157,6 +157,7 @@ const staticOracleProperties = [
   `sqlite-resume.managed-claim-read`,
   `sqlite-resume.retired-storage`,
   `sqlite-reload.class`,
+  `browser.multi-tab-reserved-history`,
   `sqlite-reload.class.electron`,
   `persistence.generation-notice`,
   `persistence.follower-remote-demand`,

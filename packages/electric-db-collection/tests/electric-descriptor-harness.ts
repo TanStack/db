@@ -31,6 +31,7 @@ export function expectWholeTagRecovery(
 
 export type StreamHarness = {
   send: (messages: Array<Message<TestRow>>) => void
+  giveUp: (error: Error) => void
   unsubscribe: ReturnType<typeof vi.fn>
   holdSnapshots: boolean
   ignoreAbort: boolean
@@ -71,11 +72,15 @@ export async function createMockedElectricClient() {
       )
       let harness: StreamHarness | undefined
       return {
-        subscribe: (send: StreamHarness[`send`]) => {
+        subscribe: (
+          send: StreamHarness[`send`],
+          giveUp: StreamHarness[`giveUp`],
+        ) => {
           harness = {
             // Deliberately retain the raw callback for late-delivery tests.
             // Release calls are observed separately from these injections.
             send,
+            giveUp,
             unsubscribe,
             holdSnapshots: harnessState.holdNewSnapshots,
             ignoreAbort: false,
