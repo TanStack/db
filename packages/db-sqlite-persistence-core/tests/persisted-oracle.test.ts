@@ -17670,7 +17670,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // aborted`); with `source awaits own baseline` the source also awaits
   // `hydrateBaseline` inside its reservation. A follow-up delivers, while
   // the route waits, a peer reset and then a pre-reset peer commit whose row
-  // the reset superseded.
+  // the reset superseded. After an aborted demand, the follow-up
+  // `peer change after the abort` delivers a peer's targeted change while the aborted
+  // load still waits for its turn. No live demand covers that row, so it
+  // stays out of the Collection and nothing reads for it.
   //
   // Two registrations share this one driver and model: the row-algebra cross
   // (every operation and truncate replay; committed endings; the original
@@ -17718,6 +17721,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       | `reset then pre-reset commit`
       | `reset, re-reserve, then pre-reset commit`
       | `retired-storage reset`
+      | `peer change after the abort`
   }
   type PersistedReadReach =
     | `route performed a persisted read`
@@ -17731,6 +17735,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     | `peer change announced while reserved`
     | `reset and pre-reset commit announced while waiting`
     | `retired-storage reset announced while reserved`
+    | `peer change announced after the demand aborted`
 
   // The rows of the persisted-reads histories. Each history gets fresh
   // objects, so no history can observe another's.
@@ -17830,7 +17835,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     // Rows the route adds durably. The owner's row for a routed subset lands
     // after the follower's own read, so reads never see it.
     const routeRows =
-      route === `targeted` || route === `seq-gap deltas`
+      route === `targeted` ||
+      route === `seq-gap deltas` ||
+      followUp === `peer change after the abort`
         ? [peerRow]
         : route === `routed subset`
           ? [remoteRow]
@@ -18324,6 +18331,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ...(followUp === `retired-storage reset`
           ? ([`retired-storage reset announced while reserved`] as const)
           : []),
+        ...(followUp === `peer change after the abort`
+          ? ([`peer change announced after the demand aborted`] as const)
+          : []),
       ],
     )
     reach.beginHistory()
@@ -18768,7 +18778,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             )
             // A reset after the abort reloads only demand that is still
             // active, so the aborted demand loads nothing.
-            if (followUp !== `none`) {
+            if (followUp === `peer change after the abort`) {
+              await peerCommit(peerRow, `peer-change`)
+              reach.reach(`peer change announced after the demand aborted`)
+              await persistenceQuiesced(`peer change after the abort applied`)
+            } else if (followUp !== `none`) {
               announceFollowUp()
               await persistenceQuiesced(`follow-up after the abort applied`)
             }
@@ -18817,8 +18831,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
       if (followUp !== `none`) await persistenceQuiesced(`follow-up settled`)
       subscription.unsubscribe()
-      if (routeReads.length > 0) reach.reach(`route performed a persisted read`)
-      reach.assertReached()
 
       // Observations and the values the model owes. The trace records durable
       // completions (source steps and the owner's commit) beside persisted
@@ -18989,6 +19001,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           : {}),
       }
       expect(observed).toEqual(expected)
+      // Reach is judged after the comparison, so an unexpected read fails on
+      // the read count rather than as an undeclared reach state.
+      if (routeReads.length > 0) reach.reach(`route performed a persisted read`)
+      reach.assertReached()
     } catch (error) {
       hasPrimaryFailure = true
       throw error
@@ -19153,6 +19169,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                     `reset then pre-reset commit`,
                     `reset, re-reserve, then pre-reset commit`,
                   ] as const)
+                : []),
+              ...(ending === `demand aborted`
+                ? ([`peer change after the abort`] as const)
                 : []),
               ...(syncMode === `eager` &&
               waits &&

@@ -2999,9 +2999,14 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       reset, a new reservation, and then the pre-reset commit. A reservation
       that a reset abandoned cannot reserve again; on `7a6f32fd7` 8
       re-reserve cells failed because a later hydration waited for the
-      abandoned transaction. An aborted demand still waiting for its turn
-      also receives the reset follow-up; on `7a6f32fd7` the reset's reload
-      read for it, and 4 cells failed on the read count.
+      abandoned transaction. An aborted demand still waiting for its turn is
+      no longer active demand. It receives the reset follow-up, or a peer's
+      targeted change for a row no live demand covers; nothing reads or asks
+      the leader for it. On `7a6f32fd7`, 12 of the 24 aborted-demand cells
+      fail: the reset's reload read for it, and the peer change sent a
+      pullSince past the bound. Filtering aborted demand only from reloads
+      still fails the 4 peer-change cells that wait at the mutex turn or
+      scope entry.
       Observations: receipts, final rows, row metadata, cursor, status,
       reads during the reservation, upstream requests, pullSince count,
       rows while waiting, and every read against the fold of the durable
@@ -3023,7 +3028,14 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       opens between the loop's wait and its flush defers the owner's
       broadcast again. The loop checks for a reservation after each flush; a
       temporary hook that opened one there showed the loop on `7a6f32fd7`
-      settling the routed load in 2 cells before the owner's row was public. A peer reset for a
+      settling the routed load in 2 cells before the owner's row was public.
+      Not reached by a public timing: that history needs the reservation to
+      end in the same microtask window, between the loop's first flush and
+      its check. A reservation lasts through its own durable write, so a
+      held write after the commit does not open the window; a follow-up that
+      held an unreserved write and then reserved again passed on both loops.
+      The missing witness is a source that ends its reservation in a
+      microtask after a publication from the follower's first flush. A peer reset for a
       storage generation this Collection no longer uses abandons nothing.
       Known limit (maintainer decision on PR #2265): Electric publishes a
       transaction's txids as stream evidence before persistence accepts its

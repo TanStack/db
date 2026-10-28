@@ -2902,6 +2902,15 @@ class PersistedCollectionRuntime<
     // Wire admission failures are permanent input errors, not transport retries.
     if (routeRemoteDemandDuringHydration) validateRemoteSubsetOptions(options)
     this.activeSubsets.set(subsetKey, options)
+    // An aborted demand is not active, even while it waits for its turn.
+    const retireAbortedDemand = () => {
+      if (this.activeSubsets.get(subsetKey) === options) {
+        this.activeSubsets.delete(subsetKey)
+      }
+    }
+    options.signal?.addEventListener(`abort`, retireAbortedDemand, {
+      once: true,
+    })
     const appliedCursor = this.appliedReceiptSequence
     try {
       const hydrated = await this.runHydrationTurn(
@@ -2983,6 +2992,8 @@ class PersistedCollectionRuntime<
         this.activeSubsets.delete(subsetKey)
       }
       throw error
+    } finally {
+      options.signal?.removeEventListener(`abort`, retireAbortedDemand)
     }
 
     if (
@@ -5358,10 +5369,7 @@ class PersistedCollectionRuntime<
     if (!continuesHydrationCycle) this.beginHydrationCycle()
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
-    // An aborted demand still waiting for its turn loads nothing.
-    const activeSubsetOptions = Array.from(this.activeSubsets.values()).filter(
-      (options) => !options.signal?.aborted,
-    )
+    const activeSubsetOptions = Array.from(this.activeSubsets.values())
     if (restoreResetBaseline && activeSubsetOptions.length === 0) {
       activeSubsetOptions.push({})
     }
