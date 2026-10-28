@@ -64,7 +64,15 @@
  * up-to-date stays `loading`, and a tab whose initial sync failed stays in
  * `error` until it restarts.
  *
- * The generated histories below judge Laws 1, 3, and 4 over interleaved
+ * Law 5, a peer reset abandons an older reservation, and Electric fails
+ * loudly. Authority: maintainer decisions on PR #2265. A peer
+ * `collection:reset` abandons every reserved transaction that began before
+ * it. Electric still holds that transaction, so its next commit rejects and
+ * puts the Collection in `error`; the app recovers by restarting the tab.
+ * No shipped host sends `collection:reset` yet, so the histories post it on
+ * the tabs' coordinator channel as a peer would (a controlled premise).
+ *
+ * The generated histories below judge Laws 1, 3, 4, and 5 over interleaved
  * server changes, deploys, deliveries, stops, and recoveries, against a
  * model of the durable rows. One known gap is left out of them and pinned:
  * a resumed tab that lags behind a peer can receive an update for a row the
@@ -226,15 +234,19 @@ function openHost() {
   // notices, read from the coordinator's own channel.
   let activity = 0
   let commitNotices = 0
+  let storageCollectionId: string | undefined
+  let resetEpoch = 0
   const channel = new BroadcastChannel(`tsdb:coord:${dbName}`)
   channel.onmessage = (event: MessageEvent) => {
     activity++
     const envelope = event.data as {
       senderId?: string
+      collectionId?: string
       payload?: { type?: string }
     }
     if (envelope.payload?.type === `tx:committed` && envelope.senderId) {
       commitNotices++
+      storageCollectionId ??= envelope.collectionId
     }
   }
 
@@ -372,6 +384,27 @@ function openHost() {
     openTab,
     quiesce,
     commitNotices: () => commitNotices,
+    // A peer tab's collection reset, posted on the tabs' coordinator channel
+    // as a peer would post it. No shipped host sends this notice yet, so
+    // the premise is controlled; the tabs, their coordinators, and Electric
+    // receive it through production.
+    broadcastPeerReset: () => {
+      if (!storageCollectionId) {
+        throw new Error(`no commit notice named the storage collection yet`)
+      }
+      channel.postMessage({
+        v: 1,
+        dbName,
+        collectionId: storageCollectionId,
+        senderId: `peer-reset-tab`,
+        ts: Date.now(),
+        payload: {
+          type: `collection:reset`,
+          schemaVersion: 1,
+          resetEpoch: ++resetEpoch,
+        },
+      })
+    },
     // The durable rows of the shared Collection, read through a connection of
     // its own so the read counts as no host activity.
     durableRows: async (): Promise<Array<Item>> => {
@@ -422,7 +455,7 @@ async function openWarmTabs(host: Host, count: number, syncMode: SyncMode) {
 // TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the budget.
 const GENERATED_PROPERTY = `browser.multi-tab-reserved-history`
 const GENERATED_FIXED_SEED = 952051961
-const GENERATED_RUNS = 60
+const GENERATED_RUNS = 80
 
 async function waitForStream(tab: Tab, count: number) {
   for (let task = 0; task < 400 && tab.streamCount() < count; task++) {
@@ -721,6 +754,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   //
   // - server changes (insert, update, or delete of one of four rows);
   // - deploys, after which every stream must refetch;
+  // - a peer reset, which abandons every open reserved transaction (Law 5);
   // - deliveries to one tab: part of what its stream still owes, with no
   //   up-to-date, which leaves a reserved transaction open, or everything it
   //   owes and up-to-date, which commits it;
@@ -758,6 +792,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   type HistoryStep =
     | { kind: `server change`; key: number; pick: number }
     | { kind: `deploy` }
+    | { kind: `peer reset` }
     | { kind: `advance`; tab: number; pick: number }
     | { kind: `catch up`; tab: number; pick: number }
     // A tab that closes for good. Generated histories never close a tab;
@@ -777,6 +812,10 @@ describe(`multi-tab Electric over one persisted database`, () => {
     {
       weight: 1,
       arbitrary: fc.record({ kind: fc.constant(`deploy` as const) }),
+    },
+    {
+      weight: 1,
+      arbitrary: fc.record({ kind: fc.constant(`peer reset` as const) }),
     },
     {
       weight: 3,
@@ -850,6 +889,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
     // peer commit in that interval is the premise of the abandon law.
     stoppedMidTransaction: StreamStop | undefined
     closed: boolean
+    // A peer reset abandoned this tab's open transaction. Electric still
+    // holds it, so its next commit rejects and puts the Collection in
+    // `error` (maintainer decision on PR #2265); the app then restarts it.
+    abandonedByReset: boolean
+    failedByReset: boolean
   }
   const stops: ReadonlyArray<StreamStop> = [
     `error without retry`,
@@ -905,6 +949,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
       resumed: false,
       stoppedMidTransaction: undefined,
       closed: false,
+      abandonedByReset: false,
+      failedByReset: false,
     }))
     let serverVersion = 0
     generatedReach.beginHistory()
@@ -991,7 +1037,14 @@ describe(`multi-tab Electric over one persisted database`, () => {
         complete ? [...messages, upToDate] : messages,
         position(log, model.version),
       )
-      if (complete) {
+      if (complete && model.abandonedByReset) {
+        generatedReach.reach(
+          `reset-abandoned commit put the Collection in error`,
+        )
+        abandon(model)
+        model.abandonedByReset = false
+        model.failedByReset = true
+      } else if (complete) {
         commit(model)
         model.ready = true
       }
@@ -1018,6 +1071,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
         failedInitialSync: false,
         resumed: requested.handle !== undefined,
         stoppedMidTransaction: undefined,
+        abandonedByReset: false,
+        failedByReset: false,
         ...requested,
       })
       await activeHost.quiesce(`tab ${recovered.tab} recovered`)
@@ -1033,7 +1088,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       const expectedStatus = (index: number) =>
         models[index]!.stopped === `cleanup` || models[index]!.closed
           ? `cleaned-up`
-          : models[index]!.failedInitialSync
+          : models[index]!.failedInitialSync || models[index]!.failedByReset
             ? `error`
             : models[index]!.ready
               ? `ready`
@@ -1109,6 +1164,21 @@ describe(`multi-tab Electric over one persisted database`, () => {
         abandon(models[index]!)
         models[index]!.closed = true
         await activeHost.quiesce(`tab ${tabs[index]!.tab} closed for good`)
+      } else if (step.kind === `peer reset`) {
+        // A peer reset abandons every open reserved transaction that began
+        // before it (maintainer decision on PR #2265). It changes no durable
+        // row, so every tab reloads the same durable rows.
+        if (models.some((model) => model.open !== undefined)) {
+          generatedReach.reach(`peer reset abandoned an open transaction`)
+        }
+        for (const model of models) {
+          if (model.open !== undefined && model.stopped === undefined) {
+            model.abandonedByReset = true
+          }
+          abandon(model)
+        }
+        activeHost.broadcastPeerReset()
+        await activeHost.quiesce(`peer reset applied`)
       } else if (step.kind === `deploy`) {
         log.handle++
         serverVersion = 0
@@ -1126,21 +1196,26 @@ describe(`multi-tab Electric over one persisted database`, () => {
         // stopped tab goes to a running one, so a stopped tab stays stopped
         // while its peers commit.
         const runningTabs = models.flatMap((model, index) =>
-          model.stopped === undefined ? [index] : [],
+          model.stopped === undefined && !model.failedByReset ? [index] : [],
         )
         const index =
           step.kind === `stop` && openTabs.length > 0
             ? openTabs[step.tab % openTabs.length]!
             : step.kind !== `recover` &&
-                models[step.tab % tabs.length]!.stopped !== undefined &&
+                (models[step.tab % tabs.length]!.stopped !== undefined ||
+                  models[step.tab % tabs.length]!.failedByReset) &&
                 runningTabs.length > 0
               ? runningTabs[step.tab % runningTabs.length]!
               : step.tab % tabs.length
         const model = models[index]!
-        if (model.stopped !== undefined || step.kind === `recover`) {
+        if (
+          model.stopped !== undefined ||
+          model.failedByReset ||
+          step.kind === `recover`
+        ) {
           // A running tab can only reload; a stopped tab restarts or reloads.
           const how =
-            model.stopped === undefined ||
+            (model.stopped === undefined && !model.failedByReset) ||
             (step.kind === `recover` && step.pick === 1)
               ? `reload`
               : `restart`
@@ -1155,6 +1230,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
             () => undefined,
           )
           model.stopped = how
+          // Electric abandons the dead transaction itself, so nothing errors.
+          model.abandonedByReset = false
           abandon(model)
           model.failedInitialSync = how !== `cleanup` && !model.ready
           await activeHost.quiesce(`tab ${tabs[index]!.tab} stopped`)
@@ -1205,7 +1282,12 @@ describe(`multi-tab Electric over one persisted database`, () => {
     // commit survives the catch-up.
     for (const index of tabs.keys()) {
       if (models[index]!.closed) continue
-      if (models[index]!.stopped !== undefined) await recover(index, `restart`)
+      if (
+        models[index]!.stopped !== undefined ||
+        models[index]!.failedByReset
+      ) {
+        await recover(index, `restart`)
+      }
       await deliver(index, `all`, true)
     }
     await check(`after every tab caught up`, rowsOf(log.rows))
@@ -1221,6 +1303,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | `peer commit after error without retry mid-transaction`
     | `peer commit after SDK gives up mid-transaction`
     | `peer commit after signal aborted mid-transaction`
+    | `peer reset abandoned an open transaction`
+    | `reset-abandoned commit put the Collection in error`
   const createGeneratedReach = () =>
     createOracleReach<GeneratedReach>(`browser.multi-tab-reserved-history`, [
       `must-refetch delivered`,
@@ -1232,6 +1316,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `peer commit after error without retry mid-transaction`,
       `peer commit after SDK gives up mid-transaction`,
       `peer commit after signal aborted mid-transaction`,
+      `peer reset abandoned an open transaction`,
+      `reset-abandoned commit put the Collection in error`,
     ])
   let generatedReach = createGeneratedReach()
 

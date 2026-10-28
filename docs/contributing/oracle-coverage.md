@@ -3071,6 +3071,12 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       generated histories and pinned with `it.fails`: a resumed tab that lags
       behind a peer can receive an update for a row the peer already
       deleted, and Electric's resume check puts it in `error`.
+      The histories also post a peer `collection:reset` on the tabs'
+      coordinator channel; no shipped host sends one yet, so this premise is
+      controlled. The reset abandons every open reserved transaction, and
+      Electric's next commit then puts that Collection in `error` until it
+      restarts (maintainer decision on PR #2265). A reset that waits and
+      accepts the stale commit fails both campaigns.
       A delivery may also commit only a prefix of what a stream owes, as a
       server answering at an earlier moment does, so lagging commits are
       generated. The final checkpoint requires the server head (Law 2).
