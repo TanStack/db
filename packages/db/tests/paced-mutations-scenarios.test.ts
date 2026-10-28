@@ -1951,7 +1951,7 @@ for (const admission of [`admitted`, `dropped`, `queued`] as const)
     })
     try {
       expect(() => mutate(1)).toThrow(failure)
-      const scope = create.mock.instances.at(-1) as unknown as TransactionScope
+      const scope = create.mock.instances.at(-1) as TransactionScope
       const transaction = create.mock.results.at(-1)?.value as Transaction<{
         id: number
       }>

@@ -196,7 +196,11 @@ describe(`React source ID reuse`, () => {
       [first, `first`],
       [replacement, `replacement`],
     ])
-    const View = ({ current }: { current: typeof first }) => {
+    const View = ({
+      current,
+    }: {
+      current: typeof first | typeof replacement
+    }) => {
       // A hashable dependency keys the Suspense cache; a Collection cannot.
       const { data } = useLiveSuspenseQuery(
         (q) => q.from({ settings: current }),

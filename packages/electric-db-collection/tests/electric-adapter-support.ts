@@ -7,6 +7,7 @@ import { expect, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import { withElectricCleanup } from './electric-oracle-lifecycle'
+import type { Mock } from 'vitest'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
 import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
 import type {
@@ -21,11 +22,20 @@ export type OracleRow = Row & {
   stable: string
 }
 
-export const mockSubscribe = vi.fn()
+export const mockSubscribe: Mock = vi.fn()
 
 export const shapeId = `{"params":{"table":"test_table"},"url":"http://test-url"}`
 
-export const mockStream = {
+export const mockStream: {
+  subscribe: Mock
+  unsubscribeAll: Mock
+  requestSnapshot: Mock
+  fetchSnapshot: Mock
+  forceDisconnectAndRefresh: Mock
+  isUpToDate: boolean
+  shapeHandle: string | undefined
+  lastOffset: string
+} = {
   subscribe: mockSubscribe,
   unsubscribeAll: vi.fn(),
   requestSnapshot: vi.fn().mockResolvedValue(undefined),
@@ -211,7 +221,7 @@ export function createOracleCollection(
 ) {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
   let sdkError!: (error: unknown) => void
-  const unsubscribe = vi.fn()
+  const unsubscribe: Mock = vi.fn()
   mockSubscribe.mockImplementationOnce((callback, onSubscriberError) => {
     subscriber = callback
     sdkError = onSubscriberError

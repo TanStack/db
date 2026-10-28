@@ -65,7 +65,7 @@
     "@powersync/common": "2.0.0",
     "@powersync/node": "0.20.0",
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "better-sqlite3": "^12.6.2"
   }
 }

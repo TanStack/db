@@ -64,7 +64,7 @@
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@tanstack/config": "^0.22.2",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "arktype": "^2.1.29",
     "fake-indexeddb": "^6.0.0",
     "mitt": "^3.0.1",
