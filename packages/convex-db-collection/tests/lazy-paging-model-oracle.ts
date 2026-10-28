@@ -13,6 +13,8 @@
  * Limits: finite numeric rank, unique string IDs, one aligned query; provider
  * cache coherence, native cursor correctness and timing need receiving drivers.
  */
+import { declareOracle } from '../../db/tests/oracle-declaration'
+
 export type LazyRow = { id: string; rank: number; text: string }
 export type LazyScope = {
   offset?: number
@@ -160,3 +162,15 @@ export function assertLazyPublications(
       )
   }
 }
+
+// The row, coverage, completeness, and cleanup models predict; the assertions
+// compare production observations with them.
+declareOracle({
+  model: [
+    expectedLazyRows,
+    expectedLazyCoverage,
+    deliveredScopeComplete,
+    LazyTerminalGraphModel,
+  ],
+  check: [assertLazyCoverage, assertLazySourceFacts, assertLazyPublications],
+})

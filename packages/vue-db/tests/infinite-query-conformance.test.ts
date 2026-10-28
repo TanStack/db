@@ -25,6 +25,7 @@ import {
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
@@ -280,7 +281,7 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(vueInfiniteDriver)
+runInfiniteQuerySuite(vueInfiniteDriver, registerInfiniteQueryUnitScenarios)
 
 describe(`infinite driver scope ownership`, () => {
   it(`retains successful scope until its owner disposes`, () => {

@@ -30,6 +30,7 @@
 import { createCollection } from '@tanstack/db'
 import { effectScope, watch } from 'vue'
 import { expect, it, vi } from 'vitest'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 
@@ -74,6 +75,26 @@ const cases = histories.flatMap((history) =>
 
 function snapshot(rows: Iterable<Row>): Snapshot {
   return [...rows].map(({ id, value }) => [id, value])
+}
+
+/**
+ * The refinement check at the synchronous watcher cut: every public value the
+ * watcher saw is the preceding or the final snapshot, the source already held
+ * the final rows at each callback, the watcher fired once, and the final
+ * public result equals the final snapshot.
+ */
+function expectCoherentPublication(
+  expected: { before: Snapshot; after: Snapshot },
+  observed: ReadonlyArray<{ publicData: Snapshot; sourceAtCallback: Snapshot }>,
+  finalData: Snapshot,
+): void {
+  for (const { publicData, sourceAtCallback } of observed) {
+    expect(sourceAtCallback).toEqual(expected.after)
+    expect([expected.before, expected.after]).toContainEqual(publicData)
+  }
+  expect(observed).toHaveLength(1)
+  expect(finalData).toEqual(expected.after)
+  expect(observed.at(-1)?.publicData).toEqual(expected.after)
 }
 
 it.each(cases)(
@@ -129,13 +150,11 @@ it.each(cases)(
 
       const expectedAfter = snapshot(source.values())
       expect(expectedAfter).not.toEqual(expectedBefore)
-      for (const { publicData, sourceAtCallback } of observed) {
-        expect(sourceAtCallback).toEqual(expectedAfter)
-        expect([expectedBefore, expectedAfter]).toContainEqual(publicData)
-      }
-      expect(observed).toHaveLength(1)
-      expect(snapshot(result.data.value)).toEqual(expectedAfter)
-      expect(observed.at(-1)?.publicData).toEqual(expectedAfter)
+      expectCoherentPublication(
+        { before: expectedBefore, after: expectedAfter },
+        observed,
+        snapshot(result.data.value),
+      )
     } catch (error) {
       primaryFailure = error
     }
@@ -177,3 +196,5 @@ it.each(cases)(
     if (primaryFailure !== undefined) throw primaryFailure
   },
 )
+
+declareOracle({ check: [expectCoherentPublication] })

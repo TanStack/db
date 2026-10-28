@@ -19,6 +19,7 @@ import {
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { rejectReadsAfterRenderError } from './rejected-binding'
@@ -329,14 +330,17 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(reactInfiniteDriver)
-runInfiniteQuerySuite({
-  ...reactInfiniteDriver,
-  name: `react (dependency list)`,
-  mount: mountWithDependencyList,
-  mountControllable: mountControllableWith(`dependency list`),
-  mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
-})
+runInfiniteQuerySuite(reactInfiniteDriver, registerInfiniteQueryUnitScenarios)
+runInfiniteQuerySuite(
+  {
+    ...reactInfiniteDriver,
+    name: `react (dependency list)`,
+    mount: mountWithDependencyList,
+    mountControllable: mountControllableWith(`dependency list`),
+    mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
+  },
+  registerInfiniteQueryUnitScenarios,
+)
 
 it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {
   const source = makeSource(

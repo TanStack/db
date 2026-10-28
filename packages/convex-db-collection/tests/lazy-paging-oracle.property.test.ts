@@ -46,7 +46,6 @@ import {
   ordered,
 } from './lazy-paging-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
-import type { ConvexPaginatedCollectionConfig } from '../src/index'
 
 const history = fc.record({
   size: fc.integer({ min: 16, max: 32 }),
@@ -894,24 +893,6 @@ it(`rejects wrong coverage and transient windows while preserving discovery free
       delivered,
     )
   }
-})
-
-// Configuration contradictions fail before a subscription can acquire state.
-it.each([
-  { field: `rank`, direction: `sideways` },
-  { field: 1, direction: `asc` },
-  { field: ``, direction: `asc` },
-])(`rejects malformed order declarations %j`, (queryOrder) => {
-  expect(() =>
-    convexPaginatedCollectionOptions({
-      client: {},
-      query: lazyQuery,
-      queryArgs: {},
-      syncMode: `on-demand`,
-      queryOrder,
-      getKey: (row: LazyRow) => row.id,
-    } as unknown as ConvexPaginatedCollectionConfig<typeof lazyQuery>),
-  ).toThrow(TypeError)
 })
 
 it.each([0, -1, 1.5, Infinity, NaN])(

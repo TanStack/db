@@ -85,8 +85,9 @@ The same interpreter runs a fixed corpus and generated histories.
   `error` from the end onward, with a stream failure as its cause, and only
   `reload()` or a restart clears it. Reconnecting is left to the TrailBase
   provider. A mutant that reports the end as a `failureReason` fails 29
-  lifecycle cells. A separate lane checks that a reload after a failed startup
-  settles on the new subscription's outcome while the Collection still shows
+  lifecycle cells. Fixed tests in `lifecycle.test.ts` (no oracle owner
+  (tracked in #2264)) cover the reload and aborted-load scenarios below. One
+  checks that a reload after a failed startup settles on the new subscription's outcome while the Collection still shows
   `error`. Another, `a reload of a ready eager Collection`, enumerates 10
   histories (one or two pages; no change, an update, a delete, or an insert
   between the runs, or an insert whose event arrives while the reload's last

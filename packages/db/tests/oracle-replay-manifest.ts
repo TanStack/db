@@ -9,9 +9,17 @@ import { registeredOracleProperties } from './oracle-config.js'
  */
 // Each group is [owner file, prefix, suffixes] and, when the owner runs the
 // properties from another module, the module that names them.
+// A property whose owner lives outside packages/ names it with a `../` prefix.
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
+    `lint`,
+    `part-reach`,
+  ],
+  [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
+  [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [
     `db/tests/ssr-stream-record-wait-oracle.test.ts`,
     `ssr`,
@@ -362,7 +370,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
-    `generation-notice follower-remote-demand`,
+    `follower-remote-demand`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `generation-notice`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts`,
@@ -476,6 +489,7 @@ const ownerGroups: ReadonlyArray<
     `db/tests/proxy-native-methods-oracle.property.test.ts`,
     `proxy`,
     `native-array-methods native-typed-methods`,
+    `db/tests/proxy-native-methods-fixture.ts`,
   ],
   [
     `db-ivm/tests/hash-identity-oracle.property.test.ts`,
@@ -495,7 +509,12 @@ const ownerGroups: ReadonlyArray<
   [
     `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
     `pg-serializer`,
-    `array-determinism bigint-round-trip bigint-text boolean-array-contents boolean-round-trip boolean-tokens date-iso date-round-trip double-round-trip integer-array-contents integer-array-format integer-round-trip integer-text mixed-array-contents nullish-array-contents nullish-empty scalar-determinism string-array-contents string-escaping string-idempotent string-passthrough`,
+    `array-determinism bigint-round-trip bigint-text boolean-array-contents boolean-round-trip boolean-tokens date-iso date-round-trip double-round-trip integer-array-contents integer-array-format integer-round-trip integer-text mixed-array-contents nullish-array-contents scalar-determinism string-array-contents string-escaping string-idempotent string-passthrough`,
+  ],
+  [
+    `electric-db-collection/tests/pg-serializer.test.ts`,
+    `pg-serializer`,
+    `nullish-empty`,
   ],
   [
     `db-ivm/tests/index-refinement-oracle.property.test.ts`,
@@ -805,6 +824,14 @@ function directReplayTestName(property: string): string | undefined {
   return replayTestNames.get(property)
 }
 
+/**
+ * The Vitest config for a directory outside packages/ whose config does not
+ * have a default name. Its owners replay with `--config`.
+ */
+const outsideReplayConfigs = new Map([
+  [`scripts`, `oracle-scripts.vitest.config.mjs`],
+])
+
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
   ...registeredOracleProperties,
 ].map((property) => {
@@ -820,7 +847,15 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
               property.endsWith(`.scenario-statistics`)
             ? `statistics-only`
             : `assertion`
-  const cwd = file?.split(`/`).slice(0, 2).join(`/`)
+  const outsidePackages = file?.startsWith(`packages/../`) === true
+  // An owner outside packages/ replays from its own directory, with the
+  // Vitest config that includes it there.
+  const outsidePath = file?.slice(`packages/../`.length)
+  const cwd = outsidePackages
+    ? outsidePath!.slice(0, outsidePath!.lastIndexOf(`/`))
+    : file?.split(`/`).slice(0, 2).join(`/`)
+  const outsideConfig =
+    cwd === undefined ? undefined : outsideReplayConfigs.get(cwd)
   return {
     property,
     status,
@@ -835,7 +870,9 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
           : status === `seed-replay`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
-            : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+            : outsidePackages
+              ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
+              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [

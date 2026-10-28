@@ -1,4 +1,7 @@
 import { fc } from '@fast-check/vitest'
+import { declareOracle } from '../oracle-declaration.js'
+import { createCollection } from '../../src/collection/index.js'
+import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
   and,
   createLiveQueryCollection,
@@ -7,8 +10,6 @@ import {
   not,
   toArray,
 } from '../../src/query/index.js'
-import { createCollection } from '../../src/collection/index.js'
-import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
@@ -850,3 +851,5 @@ export function sortedRequests(sources: ScopedSources) {
     notes: [...sources.notes.requests].sort(),
   }
 }
+
+declareOracle({ model: [recomputeScopedRows] })

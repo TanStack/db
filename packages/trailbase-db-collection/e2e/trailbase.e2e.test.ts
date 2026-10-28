@@ -15,6 +15,7 @@ import {
   createDeduplicationTestSuite,
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
+  createLiveUpdatesUnitTestSuite,
   createMutationsTestSuite,
   createPaginationTestSuite,
   createPredicatesTestSuite,
@@ -484,6 +485,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
   createDeduplicationTestSuite(getConfig)
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
+  createLiveUpdatesUnitTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
   createProgressiveTestSuite(getConfig)
 })

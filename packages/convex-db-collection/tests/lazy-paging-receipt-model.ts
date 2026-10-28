@@ -21,6 +21,8 @@
  * actual pending receipts to reject as abandoned (SyncAppliedReceipt). Merely
  * calling cleanup does not discharge a receipt; its rejection must be observed.
  */
+import { declareOracle } from '../../db/tests/oracle-declaration'
+
 export class LazyReceiptModel {
   readonly events: Array<string> = []
   private readonly attempts = new Map<
@@ -160,3 +162,7 @@ export class LazyReceiptModel {
         throw new Error(`receipt law: accepted work ${id} abandoned`)
   }
 }
+
+// The settlement model that the receipt, interleaving, and revalidation oracles
+// step: it decides which caller outcomes each history permits.
+declareOracle({ model: [LazyReceiptModel] })

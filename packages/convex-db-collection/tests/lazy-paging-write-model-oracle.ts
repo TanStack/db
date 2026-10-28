@@ -1,3 +1,4 @@
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { copyLazyRows, expectedLazyRows } from './lazy-paging-model-oracle'
 import type { LazyRow, LazyScope } from './lazy-paging-model-oracle'
 
@@ -133,3 +134,6 @@ export class LazyWriteModel {
       )
   }
 }
+
+// The write ledger: it decides which public windows a write history permits.
+declareOracle({ model: [LazyWriteModel] })

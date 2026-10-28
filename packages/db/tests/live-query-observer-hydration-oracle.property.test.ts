@@ -4,6 +4,7 @@ import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import type {
   ChangeMessage,
@@ -183,6 +184,10 @@ function expectedView(
   if (seedActive(model)) return { status: `ready`, rows: model.seed }
   return { status: liveStatus, rows: liveRows }
 }
+
+// The model predicts the view; the grammar draws the histories that the
+// driver below replays, including the fixed replays at the end of the file.
+declareOracle({ model: [advance, expectedView], grammar: [history] })
 
 // ---------------------------------------------------------------------------
 // Production driver
