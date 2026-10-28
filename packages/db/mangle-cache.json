@@ -422,7 +422,6 @@
   "reportedTree": "fD",
   "rootLoadsStarted": "gX",
   "enterErrorState": "gY",
-  "failQuery": "gZ",
   "callLoadSubset": "g_",
   "releaseDemands": "g$",
   "crashQuery": "g0",

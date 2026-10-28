@@ -1,10 +1,14 @@
+import { types as nativeTypes } from 'node:util'
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
+import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
-import { oracleReplayTest } from '../../db/tests/oracle-config'
+import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleReplayTest, oracleRuns } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
+import { FakeStorageAdapter } from './harness'
 import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
@@ -14,6 +18,8 @@ import type { OfflineTransaction } from '../src/types'
  * Contract and source: SerializedOfflineTransaction and the offline persistence
  * contract preserve mutation meaning across process boundaries. Encoding v3
  * supports JSON trees, Date, and the eight restorable Temporal scalar types.
+ * Opt-in v4 records delegate mutation payloads to their identified codec.
+ * Default v3 metadata and mutation behavior stays unchanged.
  * Marker-shaped user objects remain data. Unversioned and v2 records retain
  * their prior meanings. Unsupported or malformed encodings fail visibly.
  *
@@ -44,8 +50,8 @@ import type { OfflineTransaction } from '../src/types'
  * versions. Malformed generated markers are rejected before durable data can
  * be replaced; the single-case Temporal failure paths are unit tests.
  *
- * Limits: undefined, non-finite numbers, arbitrary native objects, and
- * cross-realm boxed values are outside current evidence. Cycles must fail
+ * Limits for default v3: undefined, non-finite numbers, arbitrary native
+ * objects, and cross-realm boxed values are outside that domain's evidence. Cycles must fail
  * visibly while repeated non-cyclic references retain their values. This
  * oracle does not claim byte stability for object key order beyond JSON's
  * established rules. Temporal witnesses install controlled constructors;
@@ -288,7 +294,7 @@ async function checkRoundtrip(
       if (fault === `omit-changes`)
         encoded = encoded.replaceAll(`"changes":`, `"lostChanges":`)
       if (fault === `unknown-encoding`)
-        encoded = encoded.replace(`"valueEncoding":3`, `"valueEncoding":4`)
+        encoded = encoded.replace(`"valueEncoding":3`, `"valueEncoding":5`)
       return encoded
     }
     const serialized = serializer.serialize(offline)
@@ -720,7 +726,7 @@ it.each(
               message:
                 fault === `wrong-registry`
                   ? `Collection with id writer:0 not found`
-                  : `Unsupported transaction value encoding: 4`,
+                  : `Unsupported transaction value encoding: 5`,
             }
       await expect(
         checkRoundtrip(pinned, 0, fault, boundary),
@@ -729,5 +735,314 @@ it.each(
     } finally {
       decode.mockRestore()
     }
+  },
+)
+
+/**
+ * Opt-in mutation codecs own their mutation-value domain independently of the
+ * default JSON/Date/Temporal encoding above. The wire records the codec ID and
+ * a new version so a reader cannot mistake opaque data for ordinary rows.
+ * Missing, mismatched, or failing codecs reject reads without changing storage.
+ *
+ * The supplied fixture codec uses Node's V8 structured serialization. Expected
+ * runtime values come directly from independently generated before/after native
+ * leaves, not production dispatch or codec output. Real Collection operations
+ * construct legal insert/update/delete operands, including equal-payload updates
+ * and removed fields. Declared reach checks these distinctions and each native
+ * scalar class per fixed/random campaign. Histories also cross fresh readers and
+ * unsupported reader configurations. Existing v3 histories remain unchanged.
+ * The Convex receiving witness supplies its real public value codec and tests
+ * disk/process replay against the actual backend.
+ */
+oracleReplayTest(it)(
+  `preserves opt-in mutation values and rejects unreadable codec records without losing work`,
+  async () => {
+    const { serialize, deserialize } = await import('node:v8')
+    const codec = {
+      id: `v8-test/1`,
+      encode: (value: unknown) => serialize(value).toString(`base64`),
+      decode: (value: unknown) =>
+        deserialize(Buffer.from(value as string, `base64`)) as unknown,
+    }
+    const native = fc.oneof(
+      fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n }),
+      fc.constantFrom(NaN, Infinity, -Infinity, -0),
+      fc.uint8Array({ maxLength: 12 }).map((bytes) => bytes.buffer),
+    )
+    // An explicit type/field projection preserves own undefined fields and bytes
+    // without depending on V8's object prototypes or serializer wire tags. Node's
+    // native ArrayBuffer brand check also recognizes V8's restored realm.
+    const observe = (value: unknown): unknown => {
+      if (nativeTypes.isArrayBuffer(value))
+        return [`bytes`, [...new Uint8Array(value)]]
+      if (Array.isArray(value)) return [`array`, value.map(observe)]
+      if (value !== null && typeof value === `object`)
+        return [
+          `object`,
+          Object.entries(value)
+            .map(([key, field]) => [key, observe(field)])
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        ]
+      if (typeof value === `number`)
+        return [`number`, Object.is(value, -0) ? `-0` : String(value)]
+      return [typeof value, String(value)]
+    }
+    const runs = oracleRuns(60)
+    await runOracleCampaign(
+      `OFFLINE_CODEC_ORACLE`,
+      [
+        `insert`,
+        `update`,
+        `delete`,
+        `different-operands`,
+        `equal-payload-update`,
+        `changed-payload-update`,
+        `removed-field-update`,
+        `int64`,
+        `special-float`,
+        `binary`,
+      ],
+      async (reach, parameters) => {
+        const values = fc.array(native, { minLength: 1, maxLength: 5 })
+        const property = fc.asyncProperty(
+          fc.record({
+            kind: fc.constantFrom(
+              `insert` as const,
+              `update` as const,
+              `delete` as const,
+            ),
+            beforeValues: values,
+            afterValues: values,
+            samePayload: fc.boolean(),
+            removeField: fc.boolean(),
+          }),
+          async ({
+            kind,
+            beforeValues,
+            afterValues,
+            samePayload,
+            removeField,
+          }) => {
+            reach.beginHistory()
+            type CodecRow = {
+              id: string
+              revision: number
+              values: Array<unknown>
+              removable?: unknown
+            }
+            const original: CodecRow = {
+              id: `one`,
+              revision: 0,
+              values: beforeValues,
+              removable: beforeValues[0],
+            }
+            const modified: CodecRow = {
+              id: `one`,
+              revision: 1,
+              values: samePayload ? beforeValues : afterValues,
+              ...(removeField ? {} : { removable: beforeValues[0] }),
+            }
+            const writer = createCollection<CodecRow>({
+              id: `codec-writer`,
+              getKey: (row) => row.id,
+              startSync: true,
+              sync: {
+                sync: ({ begin, write, commit, markReady }) => {
+                  begin()
+                  if (kind !== `insert`)
+                    write({ type: `insert`, value: original })
+                  commit()
+                  markReady()
+                },
+              },
+            })
+            const reader = createCollection<CodecRow>({
+              id: `codec-reader`,
+              getKey: (row) => row.id,
+              sync: { sync: ({ markReady }) => markReady() },
+            })
+            const local = createTransaction({
+              autoCommit: false,
+              mutationFn: async () => {},
+            })
+            const rollback = local.isPersisted.promise.catch(() => undefined)
+            const storage = new FakeStorageAdapter()
+            let hasPrimaryFailure = false
+            try {
+              // Core constructs legal CRUD operands. Different authored trees
+              // prevent one operand from masquerading as another; revision also
+              // keeps equal-payload updates observable. The serializer owns
+              // preservation, while core owns changes composition.
+              local.mutate(() => {
+                if (kind === `insert`) writer.insert(modified)
+                else if (kind === `delete`) writer.delete(`one`)
+                else
+                  writer.update(`one`, (draft) => {
+                    draft.revision = modified.revision
+                    draft.values = modified.values
+                    if (removeField) delete draft.removable
+                  })
+              })
+              expect(local.mutations).toHaveLength(1)
+              const mutation = local.mutations[0]!
+              const expectedOriginal = kind === `insert` ? {} : original
+              // Snapshot before the writer: its input aliases the seeded row.
+              // In-place corruption must not rewrite the expected original too.
+              const expectedOriginalObservation = observe(expectedOriginal)
+              // Core owns its full-row and removed-field representation; this
+              // owner preserves that complete supplied operand at the codec cut.
+              const expectedModified = observe(mutation.modified)
+              const expectedChanges = observe(mutation.changes)
+              expect(mutation.original).toEqual(expectedOriginal)
+              expect(mutation.modified.revision).toBe(kind === `delete` ? 0 : 1)
+              expect(observe(mutation.modified.values)).toEqual(
+                observe(kind === `delete` ? original.values : modified.values),
+              )
+              reach.reach(kind)
+              if (kind !== `delete`) reach.reach(`different-operands`)
+              if (kind === `update` && samePayload)
+                reach.reach(`equal-payload-update`)
+              if (
+                kind === `update` &&
+                JSON.stringify(observe(beforeValues)) !==
+                  JSON.stringify(observe(modified.values))
+              )
+                reach.reach(`changed-payload-update`)
+              if (kind === `update` && removeField) {
+                expect(Object.hasOwn(mutation.changes, `removable`)).toBe(true)
+                expect(mutation.changes.removable).toBeUndefined()
+                reach.reach(`removed-field-update`)
+              }
+              const recordNative = (value: unknown): void => {
+                if (typeof value === `bigint`) reach.reach(`int64`)
+                else if (
+                  typeof value === `number` &&
+                  (!Number.isFinite(value) || Object.is(value, -0))
+                )
+                  reach.reach(`special-float`)
+                else if (nativeTypes.isArrayBuffer(value)) reach.reach(`binary`)
+                else if (value !== null && typeof value === `object`)
+                  Object.values(value).forEach(recordNative)
+              }
+              recordNative(mutation.original)
+              recordNative(mutation.modified)
+              recordNative(mutation.changes)
+              const transaction: OfflineTransaction = {
+                id: `codec-transaction`,
+                mutationFnName: `save`,
+                keys: [mutation.globalKey],
+                idempotencyKey: `stable`,
+                createdAt: new Date(0),
+                retryCount: 0,
+                nextAttemptAt: 0,
+                version: 1,
+                metadata: { when: new Date(0) },
+                mutations: local.mutations,
+              }
+              await new OutboxManager(storage, { rows: writer }, codec).add(
+                transaction,
+              )
+              const before = storage.snapshot()
+              const restored = await new OutboxManager(
+                storage,
+                { rows: reader },
+                codec,
+              ).get(`codec-transaction`)
+              expect(
+                observe(restored?.mutations[0]?.modified),
+                `modified operand`,
+              ).toEqual(expectedModified)
+              expect(
+                observe(restored?.mutations[0]?.original),
+                `original operand`,
+              ).toEqual(expectedOriginalObservation)
+              expect(
+                observe(restored?.mutations[0]?.changes),
+                `changes operand`,
+              ).toEqual(expectedChanges)
+              expect(restored?.mutations[0]?.collection).toBe(reader)
+              expect(restored?.metadata).toEqual({ when: new Date(0) })
+              const invalidEncoder = {
+                ...codec,
+                encode: () => null,
+              } as unknown as typeof codec
+              await expect(
+                new OutboxManager(
+                  storage,
+                  { rows: writer },
+                  invalidEncoder,
+                ).add(transaction),
+              ).rejects.toThrow(`codec`)
+              expect(storage.snapshot()).toEqual(before)
+              const wire = JSON.parse(Object.values(before)[0]!)
+              expect(wire.valueEncoding).toBe(4)
+              expect(wire.mutationEncoding).toBe(codec.id)
+              for (const unsupported of [
+                undefined,
+                { ...codec, id: `other` },
+                {
+                  ...codec,
+                  decode: () => {
+                    throw new Error(`broken codec`)
+                  },
+                },
+              ]) {
+                const outbox = new OutboxManager(
+                  storage,
+                  { rows: reader },
+                  unsupported,
+                )
+                await expect(outbox.get(`codec-transaction`)).rejects.toThrow(
+                  `codec`,
+                )
+                await expect(outbox.getAll()).rejects.toThrow(`codec`)
+                expect(storage.snapshot()).toEqual(before)
+              }
+              const plain = { id: `one`, revision: 0, values: [] }
+              const legacy = {
+                ...transaction,
+                id: `legacy-transaction`,
+                mutations: [
+                  {
+                    ...transaction.mutations[0]!,
+                    modified: plain,
+                    original: plain,
+                    changes: { values: [] },
+                  },
+                ],
+              }
+              await new OutboxManager(storage, { rows: writer }).add(legacy)
+              const mixed = await new OutboxManager(
+                storage,
+                { rows: reader },
+                codec,
+              ).getAll()
+              expect(mixed).toHaveLength(2)
+              expect(
+                mixed.find((entry) => entry.id === legacy.id)?.mutations[0]
+                  ?.modified,
+              ).toEqual(plain)
+            } catch (error) {
+              hasPrimaryFailure = true
+              throw error
+            } finally {
+              await cleanupOfflineOracle(
+                [
+                  () => {
+                    local.rollback()
+                  },
+                  () => rollback,
+                  () => writer.cleanup(),
+                  () => reader.cleanup(),
+                ],
+                hasPrimaryFailure,
+              )
+            }
+          },
+        )
+        await fc.assert(property, { numRuns: runs, ...parameters })
+      },
+      { fixedSeed: 20261022 },
+    )
   },
 )
