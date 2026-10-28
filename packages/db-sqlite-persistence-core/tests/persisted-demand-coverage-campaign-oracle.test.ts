@@ -111,7 +111,9 @@ import type { SQLiteDriver } from '../src/index.js'
  * sit well clear of the deadline, so the wait premise at each is certain. A
  * covered load is loading before its wait and ready after it, or ready at
  * once when its upstream fails; an uncovered load stays loading, or fails
- * with its upstream.
+ * with its upstream. At each checkpoint the on-demand Collection's own
+ * status is observed too: settling loads from SQLite must leave it `loading`,
+ * because the offline source never calls `markReady()`.
  *
  * Declared reach (ORC-015): histories in which a demand is covered offline,
  * uncovered offline, covered but short of rows, ended by a truncate, settled
@@ -482,6 +484,8 @@ async function runHistory(
     upstream,
     waitPassed: (load) =>
       at - (source.arrivedAt.get(load) ?? Infinity) >= waitMs,
+    // The offline source never calls `markReady()`.
+    collection: { status: source.collection.status, sourceMarkedReady: false },
   })
   return withCleanup(async () => {
     for (const query of queries) void query.preload().catch(() => undefined)

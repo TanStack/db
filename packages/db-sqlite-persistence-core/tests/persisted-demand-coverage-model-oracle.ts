@@ -1,5 +1,5 @@
 import { getLoadSubsetDemandKey } from '@tanstack/db'
-import type { LoadSubsetOptions } from '@tanstack/db'
+import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
 
 /**
  * # The persisted demand coverage model
@@ -17,7 +17,10 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * for its upstream load, and fails with it. A query is ready when every load
  * it sent has settled; a query over an eager and an on-demand source is ready
  * on the same condition for the on-demand loads, once the eager source has
- * opened from its restored rows.
+ * opened from its restored rows. Settling loads from SQLite never changes the
+ * on-demand Collection's own status: it stays as its source set it, so an
+ * offline source that never called `markReady()` keeps it `loading` (the
+ * guide's "only the load settles from SQLite").
  *
  * This module is the one judgment that the fixed oracle, the generated
  * campaign, and every receiving driver share (ORC-014, ORC-016). A driver
@@ -36,6 +39,8 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * - For each live query at the checkpoint: what it reads (`QuerySpec`), the
  *   loads the source received for it in this session, and what it showed.
  *   A driver that injected a failed coverage check marks the query.
+ * - Optionally, the on-demand Collection's status at the checkpoint, and
+ *   whether its source called `markReady()` in this session.
  * - Premises at the checkpoint: whether each load's wait has passed since
  *   that load started, and, for loads the log does not settle or fail, how
  *   the source answers. Each load measures its own wait: a window's
@@ -144,9 +149,16 @@ export type CoverageQuery = {
   checkFails?: boolean
 }
 
+/** The on-demand Collection's own status, and what its source did. */
+export type CollectionObservation = {
+  status: CollectionStatus
+  sourceMarkedReady: boolean
+}
+
 export type CoverageRecord = {
   events: ReadonlyArray<SourceEvent>
   queries: Readonly<Record<string, CoverageQuery>>
+  collection?: CollectionObservation
   upstream?: OfflineUpstream
   waitPassed: WaitPremise
 }
@@ -407,6 +419,18 @@ export function coverageViolations(
 ): Array<string> {
   const expected = expectedObservations(record, reach)
   const violations: Array<string> = []
+  // The Collection's status is the source's: `ready` only after its
+  // `markReady()`. These histories never fail the source's sync itself; that
+  // is the source-health law's.
+  if (record.collection) {
+    const { status, sourceMarkedReady } = record.collection
+    const want = sourceMarkedReady ? `ready` : `loading`
+    if (status !== want) {
+      violations.push(
+        `on-demand Collection: expected status ${want}, observed ${status}`,
+      )
+    }
+  }
   for (const [name, query] of Object.entries(record.queries)) {
     const want = expected[name]!
     const got = query.observed

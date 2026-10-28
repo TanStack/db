@@ -893,6 +893,8 @@ async function runLifecycle(): Promise<Array<CoverageRecord>> {
         },
         upstream: `never answers`,
         waitPassed: waitPassedAt(upstream, 1000),
+        // The offline source never calls `markReady()`.
+        collection: { status: collection.status, sourceMarkedReady: false },
       })
     }
     return records
@@ -1864,6 +1866,11 @@ async function runJoined(
     },
     upstream: `never answers`,
     waitPassed: waitPassedAt(children, 0),
+    // The offline source never calls `markReady()`.
+    collection: {
+      status: children.collection.status,
+      sourceMarkedReady: false,
+    },
   })
   return withCleanup(async () => {
     for (let i = 0; i < 200 && children.calls.length === 0; i++) {

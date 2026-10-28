@@ -552,3 +552,45 @@ ORC-016 and ORC-014 by stating their own expected answers.
 Limits: the campaign generates no joins and no page moves, which the fixed
 oracle and the shared model cover; native-runtime witnesses remain blocked
 here as the coverage map records.
+
+## 2026-10-27: integrating the source-health change (#2168)
+
+Merge commit: `9262ec82d`. #2168 removed the observer's network-first gate,
+`PersistedReadinessSource`, and `packages/db/src/persisted-readiness.ts`. A
+network-first eager Collection now becomes `ready` from its restored rows,
+and Suspense releases at query readiness. The core half of this PR (the
+builder's `initialDemandsSettled()`, its listeners, and the observer's
+on-demand sources) therefore has no place left and is gone; this PR changes
+no `packages/db/src` code now. The law is unchanged. An on-demand source
+already permits initial readiness, so a joined query is ready when its eager
+source has opened and its demands on the on-demand source have settled.
+
+- **Production:** `openFromDisk` skips an on-demand Collection. Without the
+  guard, an on-demand Collection whose covered rows were restored before the
+  deadline would become `ready` at the deadline, though its source never
+  called `markReady()`. For Electric `progressive`, that status claims a
+  completed full sync.
+- **Law added to the shared model:** settling loads from SQLite never changes
+  the on-demand Collection's own status. The guide already stated it ("only
+  the load settles from SQLite"), but no oracle observed it: mutant P39, which
+  drops the guard, survived the first sweep after the merge. The model now
+  judges an optional Collection observation. The campaign, the fixed
+  lifecycle history, and the joined histories supply it. With it, P39 is
+  killed by the fixed campaign. These histories never call the source's own
+  `fail()`; that path is the source-health law's.
+- **Part 3:** the joined histories observe the query's status directly
+  instead of the removed observer gate. The source-failure histories that
+  closed H1 moved to the source-health law, which #2168 owns in
+  `packages/db/tests/source-health-oracle.test.ts`.
+- **Mutation harness:** the 29 mutants whose targets #2168 deleted (D01–D11,
+  B01–B10, O01–O08) are gone; P39 is new. 38 mutants remain.
+- **Receiving witnesses:** all 13 hosts and frameworks pass on the merge. The
+  Vue witness cleans up with `{ dependents: true }`, as #2168's cleanup
+  admission requires for a query with no component scope.
+- **Readiness oracle:** main's case that expected on-demand network-first to
+  throw contradicts this law and is removed. This owner covers that
+  configuration in every history.
+
+Limits: the Collection observation is not yet part of the receiving
+contract, so hosts and frameworks do not check it; the wrapper is the only
+production path that decides it.
