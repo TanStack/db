@@ -12,7 +12,9 @@ import {
   persistedFlatLane,
   persistedNestedLane,
   persistedNestedSeedLane,
+  persistedPeerFullLane,
   persistedPeerLane,
+  persistedPeerOnDemandLane,
   persistedReadLane,
   persistedSeedLane,
   runSessionHistory,
@@ -54,7 +56,8 @@ import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
  * Checkpoints: source reads after every action; `collection.base` only at the
  * final checkpoint, after every hold ends and the wrapper's continuations
  * drain. The wrapper hands rows to core after its durable step, so consumers
- * see them a turn or more later even with no hold.
+ * see them a turn or more later even with no hold. In the peer lanes the
+ * holding adapter's stored rows are compared at the final checkpoint too.
  *
  * Lanes: `persisted-flat`, `persisted-nested`, `persisted-seeds`,
  * `persisted-cached` (row 1 is in storage when the run starts),
@@ -62,7 +65,10 @@ import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
  * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
  * row, `persisted-reads`, whose read hold keeps an on-demand storage
  * read in flight, and `persisted-peers`, where another tab's source writes
- * storage and sends its notices through the persistence coordinator. Seeds
+ * storage and sends its notices through the persistence coordinator, with
+ * `persisted-peers-full` under full row updates and
+ * `persisted-peers-on-demand`, which loads on demand with a demand for every
+ * row active from the start. Seeds
  * use a `DbClient` that owns the persisted Collection. Restart and resume
  * reads are outside these lanes.
  *
@@ -70,7 +76,9 @@ import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
  * metadata directly, takes the next stream position after this tab's
  * durable commits, and emits the `tx:committed` notice that the Browser and
  * Electron coordinators send: changed rows with their metadata, metadata
- * alone, a deleted key, or a notice that requires a full reload. The model
+ * alone, a deleted key, or a notice that requires a full reload. A reset
+ * empties storage, starts the next reset epoch, and sends
+ * `collection:reset`. The model
  * makes a peer action legal only when no store hold or read hold is active,
  * so every accepted transaction of this tab is durable and the notice is the
  * next one in the stream.
@@ -90,6 +98,7 @@ function createHoldingAdapter(cached = false, stores = false) {
   let holdNext = false
   let releaseStore: (() => void) | undefined
   let latest = { term: 0, seq: 0, rowVersion: 0 }
+  let resetEpoch = 0
   let cachedRows = cached
     ? [{ key: 1, value: cachedRow, metadata: cachedMetadata }]
     : []
@@ -114,7 +123,7 @@ function createHoldingAdapter(cached = false, stores = false) {
         latestTerm: latest.term,
         latestSeq: latest.seq,
         latestRowVersion: latest.rowVersion,
-        resetEpoch: 0,
+        resetEpoch,
       }),
     loadCollectionMetadata: () => Promise.resolve(collectionMetadata()),
     applyCommittedTx: async (_target, tx: PersistedTx) => {
@@ -160,6 +169,13 @@ function createHoldingAdapter(cached = false, stores = false) {
       row: Row,
       metadata: unknown,
     ): typeof latest => {
+      if (notice === `reset`) {
+        stored.clear()
+        storedCollectionMetadata.clear()
+        resetEpoch++
+        latest = { term: latest.term + 1, seq: 0, rowVersion: 0 }
+        return latest
+      }
       if (notice === `delete`) stored.delete(key)
       else if (notice === `metadata`) stored.get(key)!.metadata = metadata
       else stored.set(key, { value: row, metadata })
@@ -170,6 +186,9 @@ function createHoldingAdapter(cached = false, stores = false) {
       }
       return latest
     },
+    resetEpoch: () => resetEpoch,
+    /** The row storage holds for a key, if any. */
+    storedRow: (key: number): Row | undefined => stored.get(key)?.value,
     holdNextStore: () => {
       holdNext = true
     },
@@ -193,6 +212,8 @@ async function createPersistedDriver(
   cached = false,
   reads = false,
   peers = false,
+  fullRows = false,
+  onDemand = false,
 ): Promise<SessionDriver> {
   const store = createHoldingAdapter(cached, reads || peers)
   // The local coordinator persists this tab's commits through the adapter;
@@ -219,14 +240,15 @@ async function createPersistedDriver(
     id,
     getKey: (row) => row.id,
     // A read hold needs an on-demand load to keep in flight.
-    ...(reads ? { syncMode: `on-demand` as const } : {}),
+    ...(reads || onDemand ? { syncMode: `on-demand` as const } : {}),
     sync: {
+      ...(fullRows ? { rowUpdateMode: `full` as const } : {}),
       sync: (actions) => {
         sync = actions
         actions.begin()
         actions.commit()
         actions.markReady()
-        return reads ? { loadSubset: () => true } : undefined
+        return reads || onDemand ? { loadSubset: () => true } : undefined
       },
     },
     onInsert: () =>
@@ -243,6 +265,8 @@ async function createPersistedDriver(
       )
     : createCollection(options)
   await collection.preload()
+  // Every row is demanded, so a reload or reset reads them all.
+  if (onDemand) await collection._sync.loadSubset({})
   await drainTurns()
 
   let depth = 0
@@ -404,16 +428,23 @@ async function createPersistedDriver(
         collectionId: id,
         senderId: `peer-tab`,
         ts: Date.now(),
-        payload: {
-          type: `tx:committed`,
-          term: position.term,
-          seq: position.seq,
-          txId: `peer-${position.seq}`,
-          latestRowVersion: position.rowVersion,
-          ...(notice === `reload`
-            ? { requiresFullReload: true }
-            : { requiresFullReload: false, ...named }),
-        },
+        payload:
+          notice === `reset`
+            ? {
+                type: `collection:reset`,
+                schemaVersion: 2,
+                resetEpoch: store.resetEpoch(),
+              }
+            : {
+                type: `tx:committed`,
+                term: position.term,
+                seq: position.seq,
+                txId: `peer-${position.seq}`,
+                latestRowVersion: position.rowVersion,
+                ...(notice === `reload`
+                  ? { requiresFullReload: true }
+                  : { requiresFullReload: false, ...named }),
+              },
       })
       // The wrapper handles a notice under its apply lock and may reload
       // storage first. A notice it never handled leaves the peer's write
@@ -422,6 +453,10 @@ async function createPersistedDriver(
       // seed keeps (decision 13).
       await drainTurns()
     },
+    storedRows: () => ({
+      1: read(store.storedRow(1)),
+      2: read(store.storedRow(2)),
+    }),
     observe: () => ({
       rowMetadata: {
         1: read(metadata().row.get(1)),
@@ -474,6 +509,8 @@ async function assertPersistedHistory(
       lane.cached === true,
       lane.readHold === true,
       lane.peers === true,
+      lane.fullRows === true,
+      lane.onDemand === true,
     ),
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
@@ -824,6 +861,43 @@ const extraLanes: Array<{
       `peer write during a hold`,
     ],
   },
+  // The peer lane under full row updates: an update replaces its row, so
+  // storage must not keep a seed's fields beneath it (decision 17).
+  {
+    lane: persistedPeerFullLane,
+    property: `sync-metadata-session.persisted-peers-full`,
+    seed: 2_220_019,
+    runs: 150,
+    reach: [
+      `peer row notice`,
+      `peer metadata notice`,
+      `peer delete notice`,
+      `peer reload notice`,
+      `named peer write over a held seed`,
+      `full reload over a held seed`,
+      `peer write during an open insert`,
+      `peer write during a hold`,
+      `accepted update drops a field`,
+    ],
+  },
+  // The peer lane on demand: a reset is a source truncate that keeps the
+  // seeds this tab holds (decisions 19 and 20). Metadata of a missing row is
+  // rare here; a replay pins a reset over it.
+  {
+    lane: persistedPeerOnDemandLane,
+    property: `sync-metadata-session.persisted-peers-on-demand`,
+    seed: 2_220_020,
+    runs: 150,
+    reach: [
+      `peer row notice`,
+      `peer reload notice`,
+      `peer reset notice`,
+      `named peer write over a held seed`,
+      `full reload over a held seed`,
+      `reset over a held seed`,
+      `peer write during a hold`,
+    ],
+  },
   // A seed's metadata still governs a row whose metadata an accepted
   // re-insert kept, here also when the re-insert committed ahead of the
   // enclosing transaction whose row it re-inserted.
@@ -927,6 +1001,17 @@ const peerReplays: Array<[string, Array<SessionAction>]> = [
     ],
   ],
   [
+    `a reload after a reset deletes a held row that storage lacks`,
+    [
+      { type: `peer`, key: 1, notice: `reset` },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: true },
+      { type: `hold`, store: false },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `delete` },
+    ],
+  ],
+  [
     `a held reload's writes stay beneath an open re-insert`,
     [
       { type: `seed`, key: 2, bare: true },
@@ -938,9 +1023,92 @@ const peerReplays: Array<[string, Array<SessionAction>]> = [
   ],
 ]
 
+// Under full row updates an update replaces its row, so storage keeps no
+// field the update dropped: neither a seed's (decision 17 stores the row this
+// tab shows) nor the stored row's own.
+const peerFullReplays: Array<[string, Array<SessionAction>]> = [
+  [
+    `a full update over a seed stores only the update`,
+    [
+      { type: `seed`, key: 1 },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `reload` },
+    ],
+  ],
+  [
+    `a full update drops a field the stored row had`,
+    [
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `reload` },
+    ],
+  ],
+]
+
+// On demand, a reset keeps a held seed and truncates every other source
+// object, held rows and metadata of a missing row included (decisions 19
+// and 20). A notice after the reset reloads storage (the reset fence).
+const peerOnDemandReplays: Array<[string, Array<SessionAction>]> = [
+  [
+    `a reset beside a held seed clears metadata of a missing row`,
+    [
+      { type: `seed`, key: 1 },
+      { type: `begin` },
+      { type: `rowSet`, key: 2 },
+      { type: `commit` },
+      { type: `peer`, key: 1, notice: `reset` },
+    ],
+  ],
+  [
+    `a reset keeps a held seed's source-written metadata from a later seed`,
+    [
+      { type: `peer`, key: 1, notice: `metadata` },
+      { type: `seed`, key: 1, bare: true },
+      { type: `peer`, key: 1, notice: `reset` },
+      { type: `seed`, key: 1, bare: true },
+    ],
+  ],
+  [
+    `a source row write keeps a kept seed's metadata open to a later seed`,
+    [
+      { type: `begin` },
+      { type: `seed`, key: 1, bare: true },
+      { type: `peer`, key: 1, notice: `reset` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+      { type: `hold`, store: false },
+      { type: `begin` },
+      { type: `seed`, key: 1 },
+    ],
+  ],
+  [
+    `a reset beside a held seed deletes a held row`,
+    [
+      { type: `seed`, key: 1 },
+      { type: `hold`, store: false },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: true },
+      { type: `commit` },
+      { type: `peer`, key: 1, notice: `reset` },
+    ],
+  ],
+]
+
 describe(`sync metadata session oracle through the persisted wrapper: peer replays`, () => {
   it.each(peerReplays)(`replays: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerLane),
+  )
+  it.each(peerFullReplays)(`replays under full rows: %s`, (_name, history) =>
+    assertPersistedHistory(history, persistedPeerFullLane),
+  )
+  it.each(peerOnDemandReplays)(`replays on demand: %s`, (_name, history) =>
+    assertPersistedHistory(history, persistedPeerOnDemandLane),
   )
 })
 

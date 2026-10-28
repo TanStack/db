@@ -18,6 +18,7 @@ import {
   resumeDeferredLiveQueryCollections,
 } from './live-query-options.js'
 import { codedMessage, devBuild } from './error-message.js'
+import { truncatesSourceKey } from './collection/state.js'
 import type { LiveQueryObserverClientHost } from './live-query-observer-client.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from './collection/index.js'
@@ -39,6 +40,7 @@ import type {
 import type {
   CollectionStateManager,
   PendingMetadataWrite,
+  StagedSyncTransaction,
 } from './collection/state.js'
 
 const collectionConfigFactory: unique symbol = Symbol.for(
@@ -362,13 +364,26 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
 } {
   const rowKeys = new Set<TKey>()
   const metadataKeys = new Set<TKey>()
-  let truncated = state.hasAppliedAdapterTruncate
+  // The latest source truncate, with the held seeds a schema reset kept.
+  let truncate: StagedSyncTransaction<TKey> | undefined =
+    state.hasAppliedAdapterTruncate
+      ? {
+          truncate: true,
+          operations: [],
+          rowMetadataWrites: new Map(),
+          preserveHydrationSeedKeys: state.adapterTruncateKeptKeys,
+          sourceTruncate: true,
+        }
+      : undefined
   for (const transaction of [
     ...state.pendingSyncedTransactions.filter((pending) => pending.committed),
     ...state.getStagedSyncTransactions(),
   ]) {
-    if (transaction.truncate && !transaction.preserveHydrationSeedKeys)
-      truncated = true
+    if (
+      transaction.truncate &&
+      (!transaction.preserveHydrationSeedKeys || transaction.sourceTruncate)
+    )
+      truncate = transaction
     for (const operation of transaction.operations)
       if (!transaction.preserveHydrationSeedKeys?.has(operation.key as TKey))
         rowKeys.add(operation.key as TKey)
@@ -378,13 +393,13 @@ function createAdapterAuthorityLookups<TKey extends string | number>(
   }
   return {
     rows: (key) =>
-      truncated ||
+      (truncate !== undefined && truncatesSourceKey(truncate, key)) ||
       rowKeys.has(key) ||
       state.appliedAdapterKeys?.get(key) === true ||
       (state.syncedData.has(key) && !state.hydrationSeedKeys.has(key)),
     // A key whose row an applied adapter write deleted is in the map too.
     metadata: (key) =>
-      truncated ||
+      (truncate !== undefined && truncatesSourceKey(truncate, key)) ||
       metadataKeys.has(key) ||
       state.appliedAdapterKeys?.has(key) === true,
   }

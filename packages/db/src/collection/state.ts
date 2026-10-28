@@ -76,6 +76,11 @@ interface PendingSyncedTransaction<
    * read's seed rows.
    */
   preserveHydrationSeedKeys?: ReadonlySet<TKey>
+  /**
+   * Set on a truncate that keeps `preserveHydrationSeedKeys`: a schema reset
+   * on demand truncates the source's state of every other key (decision 20).
+   */
+  sourceTruncate?: boolean
   /** Builds the error for an open transaction whose insert a replay invalidates. */
   duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
   /**
@@ -91,6 +96,19 @@ export type StagedSyncTransaction<TKey extends string | number> = {
   operations: ReadonlyArray<{ key: unknown }>
   rowMetadataWrites: ReadonlyMap<TKey, unknown>
   preserveHydrationSeedKeys?: ReadonlySet<TKey>
+  sourceTruncate?: boolean
+}
+
+/** Whether a sync transaction truncates the source's state of this key. */
+export function truncatesSourceKey<TKey extends string | number>(
+  transaction: StagedSyncTransaction<TKey>,
+  key: TKey,
+): boolean {
+  const kept = transaction.preserveHydrationSeedKeys
+  return (
+    transaction.truncate === true &&
+    (!kept || (transaction.sourceTruncate === true && !kept.has(key)))
+  )
 }
 
 export type PendingMetadataWrite =
@@ -151,6 +169,8 @@ export class CollectionStateManager<
   // hydration has no completion boundary.
   public appliedAdapterKeys?: Map<TKey, boolean>
   public hasAppliedAdapterTruncate = false
+  /** Held seeds that the applied adapter truncate kept (decision 20). */
+  public adapterTruncateKeptKeys = new Set<TKey>()
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -1206,14 +1226,25 @@ export class CollectionStateManager<
           this.syncedData.clear()
           // A wrapping sync's storage read that keeps seed keys replaces
           // rows without truncating the source's authority over them or
-          // their metadata.
-          if (!transaction.preserveHydrationSeedKeys) {
-            this.syncedMetadata.clear()
-            this.hydrationSeedKeys.clear()
-            this.hydratedKeys.clear()
+          // their metadata. A schema reset on demand truncates all but its
+          // kept seeds (decision 20).
+          const kept = transaction.sourceTruncate
+            ? transaction.preserveHydrationSeedKeys
+            : undefined
+          if (!transaction.preserveHydrationSeedKeys || kept) {
+            // A kept seed keeps the authority a source write fixed over
+            // one of its objects too.
+            for (const keys of [
+              this.syncedMetadata,
+              this.hydrationSeedKeys,
+              this.hydratedKeys,
+              this.appliedAdapterKeys ?? new Set<TKey>(),
+            ])
+              for (const key of keys.keys())
+                if (!kept?.has(key)) keys.delete(key)
             if (this.appliedAdapterKeys) {
               this.hasAppliedAdapterTruncate = true
-              this.appliedAdapterKeys.clear()
+              this.adapterTruncateKeptKeys = new Set(kept)
             }
           }
           this.virtualPropsCache.clear()
@@ -1606,6 +1637,7 @@ export class CollectionStateManager<
     this.hydratedKeys.clear()
     this.appliedAdapterKeys?.clear()
     this.hasAppliedAdapterTruncate = false
+    this.adapterTruncateKeptKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.localOnlyDirectWrite = undefined

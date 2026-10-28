@@ -3105,7 +3105,7 @@ reload after a named notice keeps a seed's metadata (decision 18).
 | Owner | Production paths | Observations and checkpoint |
 |---|---|---|
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-peers`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup | the same source reads after every action; `collection.base` and receipts after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer lanes, the stored rows after settlement |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested lanes | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
 | [hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts) | `DbClient` initialData, hydration chunks, and an adapter sync transaction (inserts, updates, deletes, truncates, and metadata-only writes) in full and partial row modes | public rows, the synced store, and row metadata through `client.dehydrate()` after each action; D5 per object |
@@ -3135,12 +3135,19 @@ the review record:
   included (decision 7).
 
 The `persisted-peers` lane plays a second tab's source through the
-persistence coordinator: named row, metadata-only, delete, and full-reload
-notices, crossed with seeds, the cached row, nesting, and holds. A reload
-that a notice causes is a storage read: its truncate replaces rows without
-truncating source authority or row metadata, an unchanged row keeps its
-status, and a seed's metadata survives a reload after a named notice
-(decisions 9, 11, and 15 to 18). The peer is the driver, not a second
+persistence coordinator: named row, metadata-only, delete, full-reload, and
+reset notices, crossed with seeds, the cached row, nesting, and holds. A
+reload that a notice causes is a storage read: its truncate replaces rows
+without truncating source authority or row metadata, an unchanged row keeps
+its status, and a seed's metadata survives a reload after a named notice
+(decisions 9, 11, and 15 to 18). A reset is a source truncate, and every
+later notice in its term reloads storage; on demand the reset keeps the
+seeds this tab holds (decisions 19 and 20). After settlement the stored rows
+must equal the model's, which a restart would read.
+`persisted-peers-full` repeats the lane under full row updates, where an
+update replaces its row in storage too; `persisted-peers-on-demand` repeats
+it on demand with a demand for every row. A reset over metadata of a missing
+row is too rare in generated histories to declare; a replay pins it. The peer is the driver, not a second
 Collection, so the claim stops at the controlled coordinator; a second
 production driver with two real coordinators is the open receiving
 witness (issue #2272). Missed notices and notices over the targeted key limit are not

@@ -219,6 +219,26 @@ encoding the author had extended without asking. Three more followed on
     win, the maintainer chose the scoped form, B′: decision 18 governs
     reloads after notices that name their keys; when this run's writes are
     unknown, stored metadata that differs is a source write (decision 15).
+19. **A reset's treatment of held seeds depends on the sync mode
+    (2026-10-27).** M4 found that an on-demand reset beside a held
+    `DbClient` seed skipped its truncate, so metadata of a missing row and
+    rows a hold kept from `base` survived it. Asked which rule governs held
+    seeds, the maintainer chose the mode-specific rule after a corrected
+    premise (eager resets already truncate first): eager, a reset is a plain
+    source truncate, seeds included; on demand, it keeps held seeds' rows and
+    metadata until the replayed demand replaces them, so one publication
+    replaces them without an empty view.
+20. **An on-demand reset is a source truncate that keeps held seeds
+    (2026-10-27).** The new lane then found a seed of row 2 that arrived
+    after an on-demand reset beside a held seed of row 1: production
+    applied it, because the reset deleted only rows it saw, while with no
+    held seed the reset truncated and rejected the same seed. A reset that
+    skipped its truncate also skipped the demand replay that the truncate
+    drives. The maintainer chose a source truncate that exempts held seed
+    keys: they keep their row, metadata, seed status, and seed authority;
+    every other key is cleared and closed to later seeds; demand replays.
+    A first answer ("seen objects only") was withdrawn after a corrected
+    premise.
 
 ## Laws and sources
 
@@ -868,6 +888,69 @@ Evidence:
   persisted oracle's grids cover them. The adapter is in memory, and restart
   stays outside this oracle.
 
+## Ninth round (medium review)
+
+A medium review of `2156c9c57` raised ten items. Planned together, they
+asked for three oracle changes before any production edit: a peer lane
+under full row updates (M1), a reset notice (M4), and a Query storage-scan
+witness (M10).
+
+- **Law.** A durable write stores the row this tab shows, so storage after
+  settlement equals the model's storage, which a restart reads. Under full
+  row updates an update replaces its row there too. A reset is a source
+  truncate; eager it takes held seeds, on demand it keeps them with their
+  objects' authority (decisions 19 and 20). A notice in a reset's term may
+  predate the reset, so this tab reloads storage for it (the wrapper's
+  reset fence).
+- **Grammar and model.** The peer notice gains `reset`, which empties
+  storage. The model's truncate may keep a set of keys, and a reset on
+  demand keeps the `DbClient` seeds it holds. After a reset every notice
+  reloads storage. New lanes: `persisted-peers-full` and
+  `persisted-peers-on-demand`, the second with a demand for every row.
+- **Observation.** The peer lanes now compare the holding adapter's stored
+  rows with the model's after settlement. Before, storage was seen only
+  when a reload read it back.
+- **Reach.** The full-row lane declares `accepted update drops a field`;
+  the on-demand lane declares `reset over a held seed` with the peer
+  states. A reset over metadata of a missing row reached 1 in 150
+  histories, so a replay holds it instead of a declared state.
+
+| Finding | Disposition |
+|---|---|
+| M1: decision 17's seed merge ignored `rowUpdateMode: 'full'` | Confirmed and wider: the wrapper stored every sync update as a merge, so under full rows a reload or restart brought back fields an update dropped, with or without a seed (`main` too). Fixed: only a partial update merges in storage; every other write replaces its row |
+| M2: seed marks added at a read's begin | Refuted, as F10 |
+| M3: seed metadata applies over a rejected row | Accepted: row and metadata are separate objects (D5) |
+| M4: a reset beside a held seed kept orphan metadata | Confirmed and wider: the reset also kept rows a hold kept from `base` and skipped the demand replay its truncate drives; a reload deleted only `base` rows that storage lacked. Fixed: a reset is a source truncate that keeps held seeds (decisions 19 and 20), and a reload deletes every accepted row that storage lacks |
+| M5: a status-keeping truncate keeps flags of dropped keys | Refuted: a dropped key is outside the read's preserved keys, so its delete is a source write and clears its flags (the grid's `gone` row) |
+| M6: an accepted inner equal insert keeps its kind | Accepted (decision 14) |
+| M7, M8 | Duplicates of F9 and F7, accepted earlier |
+| M9: the commit wrapper reads the newest pending transaction on every commit | Harmless: `withInternalApply` resets the key set before each use |
+| M10: Query's storage-scan owners omit accepted edges | Open; see "Open" |
+| Lane: a reset kept a held seed but cleared the authority a peer's metadata write had fixed over it, so a later seed's metadata replaced the peer's | Fixed: the reset's truncate keeps the authority entries of kept keys |
+| Survey: a source row write after an on-demand reset closed the kept seed's metadata to a later seed | Fixed: a kept key stays exempt for its metadata; a row write fixes row authority through the applied row |
+| Survey: after a full-reload notice, a named notice that the wrapper turns into a reload erased a seed's metadata of another row | Open; see "Open" |
+
+Evidence:
+
+- **RED.** On `2156c9c57`'s production, ten cases fail: the five new
+  replays and the fixed and random campaigns of both new lanes. A
+  replay of the kept-authority case failed on the first M4 repair.
+- **GREEN.** Every persisted session lane and replay passes at the
+  configured runs. Two surveys at four times the runs found two families:
+  one on the reset path, fixed and pinned, and one that `2156c9c57`
+  already had, left open.
+- **Mutants.** Killed: an update over a seed merging under full rows; no
+  seed base for partial updates (now by both partial campaigns, through the
+  storage check); every update replacing; a reset that keeps no seeds; no
+  rewrite of a kept seed's row; reload deletes from `base` only;
+  authority that ignores kept keys; a truncate that clears kept metadata.
+  Survived: a session reader that stops at the reset's truncate for kept
+  keys. A truncating transaction applies at once, so no read sees it
+  pending; the reader change was removed.
+- **Limits.** The reset's term fence is exercised only through the
+  driver's single-term peer. The full-row and on-demand lanes cover the
+  peer grammar, not the other lanes' holds and reads.
+
 ## Open
 
 - **Held-cleanup retention witnesses race on CI.** `does not publish a
@@ -890,6 +973,32 @@ Evidence:
   we can fix it"). Resume when a failure reports its trace; the trace
   names the step to fix, in production if a valid expiry was cancelled, or
   in the witness if only its timing raced.
+
+- **Query storage-scan owners (M10).** `getOwnersFromMetadata` no longer
+  adds this tab's accepted edges, which matters only where it reads a
+  storage scan: `loadPersistedBaselineForQuery` for a retained Query whose
+  known rows are not all in the Collection. Three witnesses (a held scan
+  beside another Query's claim; a retained Query with a stored row, and with
+  a row moved out of its predicate) each took the in-memory baseline, which
+  includes the claim. The scan and every storage hydration hold the apply
+  lock, so a claim during a held scan waits. Not excluded: a claim
+  committed during a storage read, which the wrapper buffers (decision 12),
+  with a retained Query's scan before the buffer flushes. That history is
+  the missing witness; no production change without its RED.
+
+- **A named notice's reload after a full-reload notice (survey).**
+  `peer(1,reload) seed(2) begin upsert(2) commit peer(1,row,keeps)` fails
+  in every peer lane and on `2156c9c57`: row 2's metadata stays the seed's
+  in the model, but production reads it as absent. The named notice carries
+  a row other than the one this tab holds, so the wrapper reloads (P2). The
+  first notice set `runWritesUnknown` for the rest of the run, so that
+  reload judges row 2's stored metadata, which a seed's never reaches, as a
+  source write (decision 15), where a named notice keeps it (decision 18).
+  Scoping the flag to the full reload it belongs to fixes this history but
+  fails six others: the full reload must then record the rows and metadata
+  it wrote as this run's source writes, which it does not yet do. The
+  history is the missing witness; the repair is that recording plus the
+  scoped flag.
 
 Nothing else in this bug class is known to be open. The limits in the
 evidence block still apply.

@@ -3374,6 +3374,7 @@ class PersistedCollectionRuntime<
    */
   private beginStorageRead(
     statuses: ReadonlyMap<TKey, `seed` | `kept`> | undefined,
+    sourceTruncate = false,
   ): void {
     const state = this.collection?._state
     const queued = state?.pendingSyncedTransactions.length ?? 0
@@ -3384,6 +3385,7 @@ class PersistedCollectionRuntime<
         : undefined
     if (!pending || !statuses) return
     pending.preserveHydrationSeedKeys = new Set(statuses.keys())
+    pending.sourceTruncate = sourceTruncate
     for (const [key, status] of statuses)
       if (status === `seed`) state!.hydrationSeedKeys.add(key)
   }
@@ -3930,11 +3932,12 @@ class PersistedCollectionRuntime<
     // A truncate replays the Collection's demand and publishes each durable
     // row's exact shape. A follower routes that demand to its leader, whose
     // source loads and commits again, so a follower replaces its rows in
-    // place, except after a reset, which owes the replay.
+    // place, except after a reset, which owes the replay. A reset's truncate
+    // keeps the seeds this tab holds (decision 20).
     const followsLeader =
       this.canRouteRemoteDemandThroughCoordinator() &&
       !this.persistence.coordinator.isLeader(this.storageCollectionId)
-    const truncate = hydratedKeys.size === 0 && (replayDemand || !followsLeader)
+    const truncate = replayDemand || (hydratedKeys.size === 0 && !followsLeader)
 
     // An accepted row a hold keeps from consumers is this tab's too.
     const state = this.collection?._state
@@ -3948,29 +3951,38 @@ class PersistedCollectionRuntime<
         .map((row) => row.key),
     )
 
-    // Each dropped row is a source's delete, unless a held delete has
-    // already removed it.
-    const dropped = Array.from(base?.keys() ?? []).filter(
-      (key) =>
-        !hydratedKeys.has(key) &&
-        !rowKeys.has(key) &&
-        state?.getAcceptedSyncedRow(key) !== undefined,
-    )
+    // Each accepted row that storage lacks is a source's delete, a row a
+    // hold keeps from consumers included.
+    const dropped = Array.from(
+      state?.acceptedSyncedEntries() ?? [],
+      ([key]) => key,
+    ).filter((key) => !hydratedKeys.has(key) && !rowKeys.has(key))
+    // A reset's truncate clears a kept seed's row, which it writes back.
+    const seedRows = replayDemand
+      ? Array.from(hydratedKeys, (key) => state?.getAcceptedSyncedRow(key))
+      : []
 
     return this.withInternalApply(() => {
       // A reload is a storage read, not a source write, so its truncate
       // replaces rows without truncating source authority, and a row it
       // finds unchanged keeps its status (decisions 9, 11, and 15). A reset
-      // is a source truncate.
-      // Its truncate keeps row metadata in core, so metadata of a row that
-      // storage lacks stays until a source deletes the row (decision 16).
+      // is a source truncate of all but the seeds this tab holds.
+      // A reload's truncate keeps row metadata in core, so metadata of a row
+      // that storage lacks stays until a source deletes the row (decision 16).
       const statuses = replayDemand
-        ? undefined
+        ? new Map(Array.from(hydratedKeys, (key) => [key, `seed` as const]))
         : this.keptStatuses(rows.filter((row) => !hydratedKeys.has(row.key)))
-      this.beginStorageRead(statuses)
+      this.beginStorageRead(statuses, replayDemand)
       if (truncate) this.syncControls.truncate?.()
       for (const key of dropped)
         this.syncControls.write?.({ type: `delete`, key })
+      for (const value of seedRows)
+        if (value !== undefined)
+          this.syncControls.write?.({
+            type: `update`,
+            value,
+            [syncWriteNamesWholeRow]: true,
+          } as { type: `update`; value: T })
 
       for (const row of rows) {
         if (hydratedKeys.has(row.key)) continue
@@ -4302,30 +4314,29 @@ class PersistedCollectionRuntime<
     transaction: BufferedSyncTransaction<T, TKey>,
     streamPosition: { term: number; seq: number; rowVersion: number },
   ): PersistedTx {
-    // Storage lacks a DbClient seed's row, so an update that merges over it
-    // stores the row this tab shows (decision 17). The seed's metadata stays
-    // a seed's (decision 18).
+    // Only a partial update merges into its row; every other write replaces
+    // it. Storage lacks a DbClient seed's row, so a partial update that merges
+    // over it stores the row this tab shows (decision 17). The seed's metadata
+    // stays a seed's (decision 18).
     const written = new Set<TKey>()
-    const mutations = transaction.operations.map((operation) => {
+    const mutations = transaction.operations.map((operation, index) => {
       const key = operation.key
-      const seedBase = written.has(key)
-        ? undefined
-        : transaction.seedBases?.get(key)
-      const overSeed =
-        operation.type === `update` &&
-        seedBase !== undefined &&
-        !transaction.insertOperations.has(operation)
+      const partial = transaction.partialUpdateOperationIndexes.has(index)
+      const seedBase =
+        partial && !written.has(key)
+          ? transaction.seedBases?.get(key)
+          : undefined
       written.add(key)
       return operation.type === `update`
         ? {
             type:
-              overSeed || transaction.insertOperations.has(operation)
-                ? (`insert` as const)
-                : (`update` as const),
+              partial && seedBase === undefined
+                ? (`update` as const)
+                : (`insert` as const),
             key: operation.key,
-            value: (overSeed
-              ? { ...seedBase, ...operation.value }
-              : operation.value) as Record<string, unknown>,
+            value: (seedBase === undefined
+              ? operation.value
+              : { ...seedBase, ...operation.value }) as Record<string, unknown>,
           }
         : {
             type: `delete` as const,

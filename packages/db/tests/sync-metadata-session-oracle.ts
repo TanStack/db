@@ -76,10 +76,13 @@ import { fc } from '@fast-check/vitest'
  * The oracle does not judge `list()` order, live queries, change events, or
  * the error an invalid transaction's commit rejects with. Stale runs and
  * writes without an open transaction are fixed boundary witnesses, not
- * generated histories. Only the `seeds-full` lane uses full row updates. The
- * `persisted-peers` lane adds a second tab's source through its notices;
- * no other lane has a peer, and a peer's write reaches this tab only at a
- * point where the wrapper has no durable step or storage read in flight. A
+ * generated histories. Only the `seeds-full` and `persisted-peers-full`
+ * lanes use full row updates. The `persisted-peers` lanes add a second tab's
+ * source through its notices; no other lane has a peer, and a peer's write
+ * reaches this tab only at a point where the wrapper has no durable step or
+ * storage read in flight. Only the peer lanes model storage, so only they
+ * compare the stored rows, and only after settlement: a restart reads them,
+ * but this oracle's claim ends with one sync run. A
  * source update of an absent row is not a legal history (the change-message
  * protocol), so it is not generated; it arises only when an inner
  * transaction's update commits ahead of the enclosing write it relied on.
@@ -143,11 +146,12 @@ export type SessionAction =
 
 /**
  * How another tab's source write reaches this tab: a notice that names the
- * row with its metadata, its metadata alone, or its delete, or a notice that
- * names no keys and makes this tab reload every row from storage. Model-only
- * term: a peer is another tab; its notice is the `tx:committed` message.
+ * row with its metadata, its metadata alone, or its delete, a notice that
+ * names no keys and makes this tab reload every row from storage, or a
+ * reset of storage (`collection:reset`). Model-only term: a peer is another
+ * tab; its notice is the `tx:committed` or `collection:reset` message.
  */
-export type PeerNotice = `row` | `metadata` | `delete` | `reload`
+export type PeerNotice = `row` | `metadata` | `delete` | `reload` | `reset`
 
 /**
  * A lane fixes which actions the grammar may choose and the nesting depth.
@@ -203,6 +207,12 @@ export type SessionLane = {
    * transaction invalid. The insert still clears metadata, as an insert.
    */
   insertsReplace?: boolean
+  /**
+   * Whether the Collection loads on demand, with a demand for every row
+   * active from the start. A reset then keeps a held `DbClient` seed until
+   * the replayed demand replaces it (decision 19).
+   */
+  onDemand?: boolean
   /**
    * Whether the grammar favours row writes that keep metadata: upserts and
    * re-inserts without metadata, over metadata writes, removes, and inserts
@@ -336,6 +346,24 @@ export const persistedPeerLane: SessionLane = {
   cached: true,
   peers: true,
 }
+/**
+ * The same under full row updates: an update replaces its row, so storage
+ * keeps no field the update dropped, neither the stored row's nor a seed's.
+ */
+export const persistedPeerFullLane: SessionLane = {
+  ...persistedPeerLane,
+  name: `persisted-peers-full`,
+  fullRows: true,
+}
+/**
+ * The same on demand, with a demand for every row: a reset keeps a held
+ * `DbClient` seed and deletes every other row (decision 19).
+ */
+export const persistedPeerOnDemandLane: SessionLane = {
+  ...persistedPeerLane,
+  name: `persisted-peers-on-demand`,
+  onDemand: true,
+}
 
 const anyRowKey = fc.constantFrom(...sessionRowKeys)
 
@@ -345,7 +373,11 @@ export const cachedMetadata = { cached: true }
 
 /** A model at the start of a run on this lane. */
 export function createSessionModel(lane: SessionLane): SessionModel {
-  const model = new SessionModel(lane.fullRows, lane.insertsReplace === true)
+  const model = new SessionModel(
+    lane.fullRows,
+    lane.insertsReplace === true,
+    lane.onDemand === true,
+  )
   if (lane.cached === true)
     model.seed(1, cachedRow, { present: true, value: cachedMetadata }, true)
   return model
@@ -476,7 +508,13 @@ export function sessionActionArbitrary(
         fc
           .tuple(
             rowKeyArbitrary,
-            fc.constantFrom<PeerNotice>(`row`, `metadata`, `delete`, `reload`),
+            fc.constantFrom<PeerNotice>(
+              `row`,
+              `metadata`,
+              `delete`,
+              `reload`,
+              `reset`,
+            ),
             fc.integer({ min: 0, max: 2 }),
           )
           .map(([key, notice, roll]) => ({
@@ -524,6 +562,10 @@ export function historyRegimes(
   const model = createSessionModel(lane)
   const regimes = new Set<string>()
   let reading = false
+  // Under full row updates an update can drop a field its row had; the
+  // settled storage check then reads what storage kept of that row. The drop
+  // counts once an outermost commit accepts it.
+  let pendingDrop = false
   for (const [step, action] of history.entries()) {
     if (!isLegal(lane, model, action)) continue
     if (action.type === `hold` && action.read === true) reading = true
@@ -551,6 +593,7 @@ export function historyRegimes(
         model.sourceRow(action.key).present &&
         !model.sourceWroteRow(action.key),
       heldSeed: action.type === `peer` && model.holdsDbClientSeed(action.key),
+      anyHeldSeed: sessionRowKeys.some((key) => model.holdsDbClientSeed(key)),
       openInsert: action.type === `peer` && model.hasOpenInsert(action.key),
       writesEnclosingRow:
         model.depth >= 2 &&
@@ -561,7 +604,24 @@ export function historyRegimes(
           action.type === `conflictingInsert`) &&
         model.enclosingWroteRow(action.key),
     }
+    const prior =
+      action.type === `upsert` ? model.sourceRow(action.key) : absent
     void planAction(model, action, { s: step })(modelOnly)
+    const next = action.type === `upsert` ? model.sourceRow(action.key) : absent
+    if (
+      action.type === `upsert` &&
+      prior.present &&
+      next.present &&
+      Object.keys(prior.value as object).some(
+        (field) => !(field in (next.value as object)),
+      )
+    )
+      pendingDrop = true
+    if (model.depth === 0) {
+      if (action.type === `commit` && pendingDrop)
+        regimes.add(`accepted update drops a field`)
+      pendingDrop = false
+    }
     if (before.held >= 2) regimes.add(`read with two held transactions`)
     if (model.depth > 0 && model.heldTransactions >= 1)
       regimes.add(`open transaction over a held transaction`)
@@ -615,6 +675,8 @@ export function historyRegimes(
             : `named peer write over a held seed`,
         )
       if (before.openInsert) regimes.add(`peer write during an open insert`)
+      if (action.notice === `reset` && before.anyHeldSeed)
+        regimes.add(`reset over a held seed`)
       if (model.isHolding) regimes.add(`peer write during a hold`)
     }
     if (action.type === `reinsert`) regimes.add(`equal re-insert`)
@@ -704,7 +766,22 @@ type ModelWrite = {
   /** An insert's kind, fixed when its transaction commits. */
   kind?: InsertKind
 }
-type ModelEvent = { frame: number; seq: number; truncate: true } | ModelWrite
+/**
+ * A truncate; a schema reset on demand keeps the rows and metadata of the
+ * `DbClient` seeds it holds (decision 20).
+ */
+type ModelTruncate = {
+  frame: number
+  seq: number
+  truncate: true
+  keeps?: ReadonlySet<string | number>
+}
+type ModelEvent = ModelTruncate | ModelWrite
+
+/** Whether an event truncates this row's data and metadata. */
+function truncatesRow(event: ModelEvent, key: string | number): boolean {
+  return event.truncate && event.keeps?.has(key) !== true
+}
 
 type FrameStatus = `open` | `invalid` | `accepted` | `applied` | `aborted`
 type ModelFrame = {
@@ -748,10 +825,14 @@ export type ReceiptState = `pending` | `applied` | `rejected`
 export const absentMarker = `<absent>`
 
 export class SessionModel {
-  /** Under full row updates an update replaces the row. */
+  /**
+   * Under full row updates an update replaces the row. On demand, a reset
+   * keeps a held `DbClient` seed (decision 19).
+   */
   constructor(
     private readonly fullRows = false,
     private readonly insertsReplace = false,
+    private readonly resetKeepsSeeds = false,
   ) {}
 
   /** Whether an insert over a different source row replaces it. */
@@ -772,6 +853,8 @@ export class SessionModel {
   /** Accepted transactions and seeds, in the order they were accepted. */
   private accepted: Array<{ frame: number } | { seed: ModelSeed }> = []
   private holding = false
+  /** Whether a reset happened; later notices then reload storage. */
+  private fenced = false
   private noticesBlocked = false
   /**
    * What a reload restores for each row: storage's row and metadata, which
@@ -875,7 +958,9 @@ export class SessionModel {
     return this.events.some(
       (event) =>
         enclosing.has(event.frame) &&
-        (event.truncate || (event.store === `row` && event.key === key)),
+        (event.truncate
+          ? truncatesRow(event, key)
+          : event.store === `row` && event.key === key),
     )
   }
 
@@ -1003,7 +1088,8 @@ export class SessionModel {
    * it. A notice that names no keys makes this tab reload storage: a
    * `DbClient` seed this tab holds keeps its row (decision 13), and every
    * other row or metadata that storage holds differently from this tab
-   * becomes a source write of the stored value (decision 15).
+   * becomes a source write of the stored value (decision 15). A reset empties
+   * storage; every notice after it reloads storage (the reset fence).
    */
   peer(
     key: SessionRowKey,
@@ -1013,19 +1099,26 @@ export class SessionModel {
   ): void {
     const row: ModelValue = { present: true, value: { id: key, v: rowValue } }
     const metadata: ModelValue = { present: true, value: { peer: value } }
-    if (notice !== `reload`) {
-      const previous = this.storage.get(key) ?? {
-        row: absent,
-        metadata: absent,
-      }
-      this.storage.set(
-        key,
-        notice === `row`
-          ? { row, metadata }
-          : notice === `metadata`
-            ? { row: previous.row, metadata }
-            : { row: absent, metadata: absent },
-      )
+    if (notice === `reset`) {
+      this.reset()
+      return
+    }
+    // The peer's write reaches storage before its notice.
+    const previous = this.storage.get(key) ?? {
+      row: absent,
+      metadata: absent,
+    }
+    this.storage.set(
+      key,
+      notice === `metadata`
+        ? { row: previous.row, metadata }
+        : notice === `delete`
+          ? { row: absent, metadata: absent }
+          : { row, metadata },
+    )
+    // After a reset, a notice in the reset's term may predate it, so this
+    // tab reloads storage instead (the reset fence); the peer keeps one term.
+    if (notice !== `reload` && !this.fenced) {
       this.acceptPeerFrame(
         notice === `row`
           ? [
@@ -1041,10 +1134,9 @@ export class SessionModel {
       )
       return
     }
-    // The peer's write reaches storage before its notice. A held seed keeps
-    // it from this tab until a notice names the row; a write of the row by
-    // this tab stores this tab's row over it (decision 17).
-    this.storage.set(key, { row, metadata })
+    // A held seed keeps the peer's write from this tab until a notice names
+    // the row; a write of the row by this tab stores this tab's row over it
+    // (decision 17).
     const current = this.acceptedEntries()
     const writes: Array<[ObjectStore, SessionRowKey, ModelValue]> = []
     for (const other of sessionRowKeys) {
@@ -1067,11 +1159,43 @@ export class SessionModel {
     if (writes.length > 0) this.acceptPeerFrame(writes)
   }
 
+  /**
+   * Another tab empties storage and resets it. This tab reloads the empty
+   * storage, a source truncate (decision 15) of its rows, their metadata, and
+   * its collection metadata, accepted like a peer's write. Eager, the truncate
+   * takes a held `DbClient` seed too. On demand, a held seed keeps its row
+   * and metadata until the replayed demand replaces it (decision 19), so the
+   * reset instead deletes each other row and row metadata this tab has
+   * accepted; a later seed of a row it never saw still applies (decision 20).
+   */
+  private reset(): void {
+    this.storage.clear()
+    this.fenced = true
+    const keeps = new Set(
+      this.resetKeepsSeeds
+        ? sessionRowKeys.filter((key) => this.holdsDbClientSeed(key))
+        : [],
+    )
+    this.acceptPeerFrame(
+      sessionCollectionKeys.map((key) => [`collection`, key, absent]),
+      keeps,
+    )
+  }
+
   private acceptPeerFrame(
-    writes: ReadonlyArray<[ObjectStore, SessionRowKey, ModelValue]>,
+    writes: ReadonlyArray<[ObjectStore, string | number, ModelValue]>,
+    truncateKeeps?: ReadonlySet<string | number>,
   ): void {
     this.frames.push({ status: `accepted`, innerCommitted: false })
     const frame = this.frames.length - 1
+    const truncates = truncateKeeps !== undefined
+    if (truncates)
+      this.events.push({
+        frame,
+        seq: this.seq++,
+        truncate: true,
+        keeps: truncateKeeps,
+      })
     for (const [store, key, value] of writes)
       this.events.push({
         frame,
@@ -1087,7 +1211,8 @@ export class SessionModel {
           : {}),
       })
     this.accepted.push({ frame })
-    if (!this.holding) this.applyAccepted()
+    // A transaction that truncates applies at once, as a commit's does.
+    if (!this.holding || truncates) this.applyAccepted()
     this.invalidateOpen()
   }
 
@@ -1106,8 +1231,9 @@ export class SessionModel {
       !entries.some(
         (entry) =>
           `event` in entry &&
-          (entry.event.truncate ||
-            (entry.event.store === `row` && entry.event.key === key)),
+          (entry.event.truncate
+            ? truncatesRow(entry.event, key)
+            : entry.event.store === `row` && entry.event.key === key),
       )
     )
   }
@@ -1134,6 +1260,13 @@ export class SessionModel {
   /** The row storage holds; peer actions that name a stored row need one. */
   storedRow(key: SessionRowKey): ModelValue {
     return this.storage.get(key)?.row ?? absent
+  }
+
+  /** Each row as storage holds it, which a restart would read. */
+  storedRows(): Record<string, unknown> {
+    return Object.fromEntries(
+      sessionRowKeys.map((key) => [key, encode(this.storedRow(key))]),
+    )
   }
 
   /**
@@ -1350,7 +1483,7 @@ export class SessionModel {
       }
       const event = entry.event
       if (event.truncate) {
-        if (store !== `collection`) return absent
+        if (store !== `collection` && truncatesRow(event, key)) return absent
         continue
       }
       if (store === `rowMetadata` && this.clearsMetadata(entries, index, key))
@@ -1388,10 +1521,11 @@ export class SessionModel {
       .some(
         (entry, index) =>
           `event` in entry &&
-          (entry.event.truncate ||
-            (entry.event.store === store && entry.event.key === key) ||
-            (store === `rowMetadata` &&
-              this.clearsMetadata(entries, index, key))),
+          (entry.event.truncate
+            ? truncatesRow(entry.event, key)
+            : (entry.event.store === store && entry.event.key === key) ||
+              (store === `rowMetadata` &&
+                this.clearsMetadata(entries, index, key))),
       )
   }
 
@@ -1502,6 +1636,12 @@ export type SessionDriver = {
   /** Whether a thrown error is core's duplicate-key rejection. */
   isDuplicateKeyError?: (error: unknown) => boolean
   observe: () => SessionObservation
+  /**
+   * Each row as storage holds it. Where a lane models storage, the settled
+   * rows must match the model's: a restart reads them, and a full reload
+   * reads them back into this tab.
+   */
+  storedRows?: () => Record<string, unknown>
   /** Lets receipt continuations run before an observation. */
   flush: () => Promise<void>
   /** Ends any hold and resolves every receipt; returns unexpected rejections. */
@@ -1612,6 +1752,18 @@ export async function runSessionHistory(
           model.observe(),
           driver.observe(),
         )
+      if (!mismatch && lane.peers === true && driver.storedRows) {
+        const expected = model.storedRows()
+        const actual = driver.storedRows()
+        if (canonical(expected) !== canonical(actual))
+          mismatch = {
+            step: history.length,
+            action: `settle`,
+            law: `storage holds the rows this tab shows once they are durable`,
+            expected,
+            actual,
+          }
+      }
     }
   } catch (error) {
     primary = error
@@ -1919,6 +2071,7 @@ function isLegal(
         !model.blocksPeerNotices &&
         (action.notice === `row` ||
           action.notice === `reload` ||
+          action.notice === `reset` ||
           model.storedRow(action.key).present)
       )
     case `insertOverSeed`:

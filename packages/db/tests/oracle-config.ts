@@ -218,6 +218,8 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-nested-seeds`,
   `sync-metadata-session.persisted-reads`,
   `sync-metadata-session.persisted-peers`,
+  `sync-metadata-session.persisted-peers-full`,
+  `sync-metadata-session.persisted-peers-on-demand`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
   `d2-source.exact-retractions`,
