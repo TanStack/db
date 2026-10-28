@@ -1491,8 +1491,11 @@ still has replay work, so demand that any of them starts meanwhile joins its
 own open replay. While a failed replay of any of them holds publication, a
 lazy demand of any of them that fails after initial-query readiness fails its
 own subscription's replacement too, so retiring the other replay's failed
-demand cannot publish the window without this demand's rows. It holds until a
-later replay of the source succeeds or the subscription's last demand retires.
+demand cannot publish the window without this demand's rows. It holds until
+every demand load that joins it loads, a later replay of the source succeeds,
+or the subscription's last demand retires. The query retries the failed demand
+at once and the retry joins the hold, so the hold ends only after the failed
+demand's rows load.
 
 ### Mutation boundaries and initial readiness
 
