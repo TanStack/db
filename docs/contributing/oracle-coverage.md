@@ -2896,13 +2896,28 @@ seed is not unique, so the script cannot attribute it, and neither removal nor
 lowering is reported there. A budget moved into an ordinary test file whose
 seed another oracle file shares is therefore not reported.
 
+A budget that a helper computes at run time is not tracked either: the script
+reads the counts and keys written at a campaign's call, or in constants that the
+oracle file declares or imports. The op-sqlite alias campaigns in
+`packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`
+(`op-sqlite.write-marker-aliases` and `op-sqlite.columnar-sql-aliases`, 50 runs
+each) register through `registerAliasOracle`, which builds its parameters from
+`readAliasOracleRuns()` and `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS`, so lowering
+them is not reported. On main the script instead counted the literal
+`oracleRandomParameters(50, …)` calls in a unit test of those parameters. That
+unit test now lives in `op-sqlite-driver.test.ts`, so the script reports both
+keys and the fixed seed 271828 as removed, although both campaigns still run in
+the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
+budget a helper computes and passes in as parameters.
+
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
 and the Claude edit hook. Its model is a fixed-point closure over the drawn
 import graph, independent of the script's forward search. It covers
 oracle-to-oracle imports, untracked oracle files, and `.js` oracle files. It
-does not draw `.js` support modules or drivers, because the rule resolves only
-TypeScript test modules, and it passes file names in their real-path spelling:
+does not draw `.js` support modules or drivers, although the rule now resolves
+a `.js` test module when no TypeScript source exists for it (the part-reach
+oracle owns that resolution). It passes file names in their real-path spelling:
 a name given through a symlinked path is not covered.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
