@@ -53,7 +53,7 @@ describe(`sync writes of a reused row object`, () => {
     expect(() => sync().write({ type: `update`, value: row })).toThrow(
       SyncRowReusedWithoutPreviousValueError,
     )
-    await collection.cleanup()
+    await collection.cleanup({ dependents: true })
   })
 
   it(`accepts an in-place update that names its previous value`, async () => {
@@ -67,7 +67,7 @@ describe(`sync writes of a reused row object`, () => {
     sync().write({ type: `update`, value: row, previousValue })
     sync().commit()
     expect([...groupA.keys()]).toEqual([])
-    await collection.cleanup()
+    await collection.cleanup({ dependents: true })
   })
 
   it(`accepts an unchanged rewrite after a declared in-place update`, async () => {
@@ -83,7 +83,7 @@ describe(`sync writes of a reused row object`, () => {
     sync().begin()
     expect(() => sync().write({ type: `update`, value: row })).not.toThrow()
     sync().commit()
-    await collection.cleanup()
+    await collection.cleanup({ dependents: true })
   })
 
   it(`accepts an update with a new object`, async () => {
@@ -94,7 +94,7 @@ describe(`sync writes of a reused row object`, () => {
     sync().write({ type: `update`, value: { id: `r`, group: `b` } })
     sync().commit()
     expect([...groupA.keys()]).toEqual([])
-    await collection.cleanup()
+    await collection.cleanup({ dependents: true })
   })
 
   it(`does not check in production`, async () => {
@@ -105,6 +105,6 @@ describe(`sync writes of a reused row object`, () => {
     sync().begin()
     expect(() => sync().write({ type: `update`, value: row })).not.toThrow()
     sync().commit()
-    await collection.cleanup()
+    await collection.cleanup({ dependents: true })
   })
 })

@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Offline On-Demand Readiness</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column; the simulator breaks out wider as the page's single instrument, drawn as three time lanes (SQLite, network, your query). */
+:root {
+  --bg: #f3f5f6;
+  --surface: #ffffff;
+  --fg: #17212b;
+  --muted: #56636f;
+  --rule: #d5dce1;
+  --local: #0f7a74;        /* SQLite / persisted */
+  --local-soft: #d7efec;
+  --net: #b76a0b;          /* network */
+  --net-soft: #f6e6cf;
+  --ready: #2f7d32;
+  --ready-soft: #dcefdc;
+  --wait: #7b8794;
+  --wait-soft: #e6eaee;
+  --wrong: #b3261e;
+  --wrong-soft: #f7dcda;
+  --code-bg: #e9eef1;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --step--1: 0.84rem;
+  --step-0: 1rem;
+  --step-1: 1.2rem;
+  --step-2: 1.55rem;
+  --step-3: 2.3rem;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11171c; --surface: #18212a; --fg: #e3e9ee; --muted: #9aa8b4; --rule: #2c3944;
+    --local: #4fc2b8; --local-soft: #173a38; --net: #e6a24c; --net-soft: #3d2c14;
+    --ready: #73c476; --ready-soft: #1d3820; --wait: #8a97a3; --wait-soft: #252f38;
+    --wrong: #f08a80; --wrong-soft: #45201d; --code-bg: #1f2a33; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11171c; --surface: #18212a; --fg: #e3e9ee; --muted: #9aa8b4; --rule: #2c3944;
+  --local: #4fc2b8; --local-soft: #173a38; --net: #e6a24c; --net-soft: #3d2c14;
+  --ready: #73c476; --ready-soft: #1d3820; --wait: #8a97a3; --wait-soft: #252f38;
+  --wrong: #f08a80; --wrong-soft: #45201d; --code-bg: #1f2a33; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 400 var(--step-0)/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 80px;
+}
+main { max-width: 68rem; margin: 0 auto; display: grid; gap: 56px; }
+.col { max-width: 44rem; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: var(--step-3); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: var(--step-2); font-weight: 700; }
+h3 { font-size: var(--step-1); font-weight: 500; }
+p { margin: 0; }
+section { display: grid; gap: 18px; }
+.eyebrow { font: 600 var(--step--1)/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+code { font-family: var(--mono); font-size: 0.88em; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 4px; }
+a { color: var(--local); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, input:focus-visible + span, input[type=range]:focus-visible { outline: 2px solid var(--local); outline-offset: 2px; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+.lede { font-size: var(--step-1); color: var(--muted); max-width: 40rem; }
+.meta { font: 400 var(--step--1)/1.4 var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
+/* Recap */
+.recap { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 14px; }
+.recap div { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.recap b { font-family: var(--display); font-weight: 500; font-size: var(--step-1); }
+
+/* Two rules diagram */
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 14px; }
+.rule { border-top: 3px solid var(--rule); padding-top: 12px; display: grid; gap: 8px; min-width: 0; }
+.rule.eager { border-color: var(--net); }
+.rule.od { border-color: var(--local); }
+.rule .tag { font: 600 var(--step--1)/1 var(--mono); }
+.rule.eager .tag { color: var(--net); }
+.rule.od .tag { color: var(--local); }
+
+/* Simulator */
+.sim { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 24px; display: grid; gap: 22px; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 18px 28px; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+legend { font: 600 var(--step--1)/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 8px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg label { position: relative; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg span { display: block; padding: 7px 12px; border: 1px solid var(--rule); border-radius: 999px; font-size: var(--step--1); line-height: 1.3; background: var(--bg); color: var(--fg); transition: background .15s, border-color .15s; }
+.seg input:checked + span { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.seg input:disabled + span { opacity: 0.38; cursor: not-allowed; text-decoration: line-through; }
+.seg input:focus-visible + span { outline: 2px solid var(--local); outline-offset: 2px; }
+.model .seg input:checked + span[data-m="today"] { background: var(--wait); border-color: var(--wait); color: #fff; }
+.model .seg input:checked + span[data-m="naive"] { background: var(--wrong); border-color: var(--wrong); color: #fff; }
+.model .seg input:checked + span[data-m="proposed"] { background: var(--local); border-color: var(--local); color: #fff; }
+.slider { display: flex; align-items: center; gap: 12px; }
+.slider input { flex: 1; accent-color: var(--net); min-width: 0; }
+.slider output { font: 600 var(--step--1)/1 var(--mono); font-variant-numeric: tabular-nums; min-width: 5.5em; text-align: right; }
+.hint { font-size: var(--step--1); color: var(--muted); }
+
+.lanes-wrap { overflow-x: auto; }
+.lanes { min-width: 34rem; display: grid; gap: 10px; }
+.lane { display: grid; grid-template-columns: 8.5rem 1fr; gap: 12px; align-items: center; }
+.lane-name { font: 600 var(--step--1)/1.2 var(--mono); }
+.track { position: relative; height: 34px; background: var(--wait-soft); border-radius: 6px; overflow: hidden; }
+.track .never { position: absolute; top: 0; bottom: 0; right: 0; width: 14%; background: repeating-linear-gradient(135deg, transparent 0 6px, var(--rule) 6px 7px); }
+.bar { position: absolute; top: 5px; bottom: 5px; border-radius: 4px; display: flex; align-items: center; padding: 0 8px; font: 600 0.74rem/1 var(--mono); white-space: nowrap; overflow: hidden; transition: left .25s, width .25s; }
+.bar.local { background: var(--local-soft); color: var(--local); border: 1px solid var(--local); }
+.bar.net { background: var(--net-soft); color: var(--net); border: 1px solid var(--net); }
+.bar.netwait { background: transparent; color: var(--net); border: 1px dashed var(--net); }
+.bar.waiting { background: transparent; color: var(--wait); border: 1px dashed var(--wait); }
+.bar.ready { background: var(--ready-soft); color: var(--ready); border: 1px solid var(--ready); }
+.bar.wrong { background: var(--wrong-soft); color: var(--wrong); border: 1px solid var(--wrong); }
+.bar.rows { background: var(--local-soft); color: var(--local); border: 1px solid var(--local); opacity: .85; }
+.axis { display: grid; grid-template-columns: 8.5rem 1fr; gap: 12px; }
+.ticks { position: relative; height: 18px; font: 400 0.72rem/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ticks span { position: absolute; top: 4px; transform: translateX(-50%); }
+.ticks span:first-child { transform: none; }
+.ticks span.inf { transform: translateX(-100%); }
+
+.verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 12px; }
+.cell { border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0; background: var(--bg); }
+.cell .k { font: 600 0.72rem/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cell .v { font-family: var(--display); font-size: var(--step-1); font-weight: 500; }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font: 600 0.78rem/1.6 var(--mono); }
+.pill.ok { background: var(--ready-soft); color: var(--ready); }
+.pill.no { background: var(--wait-soft); color: var(--wait); }
+.pill.bad { background: var(--wrong-soft); color: var(--wrong); }
+.why { border-left: 3px solid var(--rule); padding: 4px 0 4px 14px; display: grid; gap: 8px; max-width: 48rem; }
+.why.ok { border-color: var(--ready); }
+.why.bad { border-color: var(--wrong); }
+.why.no { border-color: var(--wait); }
+.why .note { font-size: var(--step--1); color: var(--muted); }
+
+/* Tables */
+.tw { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); min-width: 32rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 0.74rem/1.3 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+/* The rule card */
+.law { background: var(--surface); border: 1px solid var(--local); border-radius: 12px; padding: 24px; display: grid; gap: 16px; }
+.law blockquote { margin: 0; font-family: var(--display); font-size: var(--step-1); line-height: 1.4; font-weight: 500; text-wrap: pretty; }
+.pieces { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 12px; }
+.piece { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 4px; min-width: 0; }
+.piece .n { font: 600 var(--step--1)/1 var(--mono); color: var(--local); }
+.piece .status { font: 400 0.76rem/1 var(--mono); color: var(--muted); }
+
+.open { display: grid; gap: 12px; }
+.open div { display: grid; grid-template-columns: 2rem 1fr; gap: 10px; align-items: start; }
+.open .q { font: 700 var(--step-1)/1.2 var(--display); color: var(--net); }
+
+/* History */
+.hist { display: grid; gap: 0; border-left: 2px solid var(--rule); margin-left: 6px; }
+.hist div { position: relative; padding: 0 0 16px 22px; display: grid; gap: 2px; }
+.hist div::before { content: ""; position: absolute; left: -7px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); }
+.hist div.key::before { border-color: var(--local); background: var(--local); }
+.hist .d { font: 400 0.76rem/1.2 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.hist .t { font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) { .bar, .seg span { transition: none; } }
+@media (max-width: 34rem) {
+  .sim, .law { padding: 18px; }
+  .lane, .axis { grid-template-columns: 6.5rem 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<header class="col" style="display:grid;gap:16px">
+  <div class="eyebrow">TanStack DB · persistence design notes</div>
+  <h1>Offline On-Demand Readiness</h1>
+  <p class="lede">Why a persisted on-demand query can't render from SQLite while offline today, what we measured, and the one-rule model we're exploring to fix it.</p>
+  <div class="meta">
+    <span>Worktree: .worktrees/progressive-network-first</span>
+    <span>Base: main @ 31dad2dd3</span>
+    <span>Status: proposal, nothing committed</span>
+  </div>
+</header>
+
+<section aria-labelledby="recap-h">
+  <h2 id="recap-h">Where you left off</h2>
+  <div class="recap">
+    <div><b>The report</b><p>A Discord user turned on persistence. <code>initialRender: network-first</code> worked for eager collections but not for progressive Electric ones. They expected progressive to render from SQLite without waiting for the network.</p></div>
+    <div><b>Why it fails</b><p>Electric reports <code>progressive</code> to core as <code>on-demand</code>, and the persisted wrapper rejects network-first for any on-demand source. Not Electric-specific.</p></div>
+    <div><b>What we measured</b><p>Cached rows already show while offline. Only the ready signal waits. A completed progressive sync already works offline; anything short of that waits forever.</p></div>
+    <div><b>Where we landed</b><p>One rule: the wrapper may settle a load from SQLite when that exact query finished loading before. Everything downstream follows from existing laws.</p></div>
+  </div>
+</section>
+
+<section aria-labelledby="today-h">
+  <div class="col" style="display:grid;gap:12px">
+    <h2 id="today-h">How readiness works today</h2>
+    <p>A live query is ready when every source gives it evidence that its rows are present. Since <a href="https://github.com/TanStack/db/pull/2115">#2115</a>, that evidence depends on the source's sync mode.</p>
+  </div>
+  <div class="rules">
+    <div class="rule eager">
+      <span class="tag">EAGER SOURCE</span>
+      <h3>Collection readiness is the evidence</h3>
+      <p>It loads everything without per-query requests, so the query waits for the Collection to be ready. With persistence, a finished SQLite restore of the whole Collection is a separate signal. Network-first (<a href="https://github.com/TanStack/db/pull/1955">#1955</a>) lets Suspense render that restore after a deadline.</p>
+    </div>
+    <div class="rule od">
+      <span class="tag">ON-DEMAND SOURCE</span>
+      <h3>A settled load is the evidence</h3>
+      <p>Each query asks for its subset. The persisted wrapper reads that subset from SQLite, then waits for the upstream load. The query is ready when both settle. There is no per-query "restored" signal, so network-first is rejected.</p>
+    </div>
+  </div>
+  <p class="col hint">Progressive Electric is on-demand to core. Its Collection stays loading until the full sync, but its queries go ready as their own loads settle.</p>
+</section>
+
+<section aria-labelledby="sim-h">
+  <div class="col" style="display:grid;gap:12px">
+    <h2 id="sim-h">Try it</h2>
+    <p>Pick a source, what happened last session, and what the app asks for now. Then compare today's behavior, a naive fix, and the proposed rule. Times are illustrative: SQLite answers at 120 ms, a live network at 900 ms.</p>
+  </div>
+
+  <div class="sim" id="sim">
+    <div class="controls">
+      <fieldset>
+        <legend>Source</legend>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="source" id="src-eager" value="eager"><span>Eager</span></label>
+          <label><input type="radio" name="source" id="src-od" value="ondemand"><span>On-demand (Query, custom)</span></label>
+          <label><input type="radio" name="source" id="src-prog" value="progressive" checked><span>Progressive Electric</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Last session</legend>
+        <div class="seg">
+          <label><input type="radio" name="history" id="h-none" value="none"><span>Nothing cached</span></label>
+          <label><input type="radio" name="history" id="h-loaded" value="loaded" checked><span>Loaded these queries</span></label>
+          <label><input type="radio" name="history" id="h-full" value="full"><span>Full sync completed</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>The app now asks for</legend>
+        <div class="seg">
+          <label><input type="radio" name="query" id="q-same" value="same" checked><span>The same query</span></label>
+          <label><input type="radio" name="query" id="q-page" value="page"><span>Its next page (loaded last time)</span></label>
+          <label><input type="radio" name="query" id="q-new" value="new"><span>A filter never run</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Network</legend>
+        <div class="seg">
+          <label><input type="radio" name="network" id="n-off" value="offline" checked><span>Offline</span></label>
+          <label><input type="radio" name="network" id="n-on" value="online"><span>Online</span></label>
+        </div>
+      </fieldset>
+      <fieldset class="model">
+        <legend>Model</legend>
+        <div class="seg">
+          <label><input type="radio" name="model" id="m-today" value="today" checked><span data-m="today">Today</span></label>
+          <label><input type="radio" name="model" id="m-naive" value="naive"><span data-m="naive">Naive fix</span></label>
+          <label><input type="radio" name="model" id="m-prop" value="proposed"><span data-m="proposed">Proposed rule</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend><label for="wait">Prefer network for (networkTimeoutMs)</label></legend>
+        <div class="slider">
+          <input type="range" id="wait" min="0" max="3000" step="100" value="0">
+          <output id="wait-out" for="wait">0 ms</output>
+        </div>
+        <span class="hint" id="wait-hint">How long to wait for the network before trusting SQLite.</span>
+      </fieldset>
+    </div>
+
+    <div class="lanes-wrap">
+      <div class="lanes" aria-live="polite">
+        <div class="lane"><span class="lane-name" style="color:var(--local)">SQLite</span><div class="track" id="t-local"><div class="never"></div></div></div>
+        <div class="lane"><span class="lane-name" style="color:var(--net)">Network</span><div class="track" id="t-net"><div class="never"></div></div></div>
+        <div class="lane"><span class="lane-name">Rows on screen</span><div class="track" id="t-rows"><div class="never"></div></div></div>
+        <div class="lane"><span class="lane-name">Query ready</span><div class="track" id="t-ready"><div class="never"></div></div></div>
+        <div class="axis"><span></span><div class="ticks" id="ticks"></div></div>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <div class="cell"><span class="k">Rows visible</span><span class="v" id="v-rows">–</span></div>
+      <div class="cell"><span class="k">isReady / Suspense</span><span class="v" id="v-ready">–</span></div>
+      <div class="cell"><span class="k">Is the answer correct?</span><span class="v" id="v-correct">–</span></div>
+    </div>
+    <div class="why" id="why"><p id="why-main"></p><p class="note" id="why-note"></p></div>
+  </div>
+</section>
+
+<section aria-labelledby="obs-h">
+  <div class="col" style="display:grid;gap:12px">
+    <h2 id="obs-h">What we measured</h2>
+    <p>Two witness tests record current behavior on main. They pin observations, not a contract. Each checkpoint is 50 ms after the query starts.</p>
+  </div>
+  <h3>Generic on-demand source</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Upstream</th><th>Local subset</th><th>Rows visible</th><th>Query ready</th></tr></thead>
+    <tbody>
+      <tr><td>Never answers</td><td>Complete</td><td class="num">a1, a2</td><td><span class="pill no">no</span></td></tr>
+      <tr><td>Never answers</td><td>Partial</td><td class="num">a1</td><td><span class="pill no">no</span></td></tr>
+      <tr><td>Never answers</td><td>Empty</td><td class="num">none</td><td><span class="pill no">no</span></td></tr>
+      <tr><td>Settles at once, writes nothing</td><td>Complete</td><td class="num">a1, a2</td><td><span class="pill ok">yes</span></td></tr>
+      <tr><td>Settles at once, writes nothing</td><td>Empty</td><td class="num">none</td><td><span class="pill ok">yes</span></td></tr>
+    </tbody>
+  </table></div>
+  <h3>Progressive Electric, two sessions on real SQLite, second session offline</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Session 1</th><th>Session 2 resumes stream</th><th>Rows visible</th><th>Query ready</th></tr></thead>
+    <tbody>
+      <tr><td>Completed full sync</td><td>yes</td><td class="num">1, 2</td><td><span class="pill ok">yes</span></td></tr>
+      <tr><td>Loaded the query subset only</td><td>no</td><td class="num">1, 2</td><td><span class="pill no">no, forever</span></td></tr>
+      <tr><td>Nothing</td><td>no</td><td class="num">none</td><td><span class="pill no">no</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="col hint">The wrapper can't tell a complete subset from a partial or never-loaded one; they all just read back as rows. That's why "show whatever SQLite has" is wrong.</p>
+</section>
+
+<section aria-labelledby="rule-h">
+  <h2 id="rule-h">The model we're exploring</h2>
+  <div class="law">
+    <span class="eyebrow">The one rule</span>
+    <blockquote>The persisted wrapper may settle a query's load from SQLite once the local rows are visible, if that exact query is covered in the current cache: a previous load of it finished, or the source holds a complete baseline. The network load keeps running and replaces the rows when it answers.</blockquote>
+    <div class="pieces">
+      <div class="piece"><span class="n">Exact query key</span><span>Matches by <code>getLoadSubsetDemandKey</code>. No "this query is broader than that one."</span><span class="status">exists today</span></div>
+      <div class="piece"><span class="n">Covered set</span><span>Per cache generation: keys whose load finished, including empty results, plus "complete baseline" which matches everything.</span><span class="status">new, in the wrapper</span></div>
+      <div class="piece"><span class="n">Settle rule</span><span>Settle when local rows are visible and the query is covered and the wait has passed or its load failed.</span><span class="status">new</span></div>
+      <div class="piece"><span class="n">Network continues</span><span>Upstream keeps loading; its rows publish normally when they arrive.</span><span class="status">exists today</span></div>
+    </div>
+    <p>Why it's small: initial readiness, Suspense, <code>queryOnce</code>, <code>skipInitial</code> effects, and ordered-window publication (pagination) all already wait on "this query's load settled." Settle a covered load and every one of them works offline with no live-query changes. ARCHITECTURE.md already says a source that resumes from complete local rows "settles its loads at once." The rule moves that idea from the whole Collection down to one query.</p>
+    <p>The network-first wait turns into an optional knob. No correctness property needs it. At 0 it matches how a completed progressive resume behaves today.</p>
+  </div>
+</section>
+
+<section aria-labelledby="dec-h">
+  <div class="col" style="display:grid;gap:12px">
+    <h2 id="dec-h">What the rule settles</h2>
+    <p>The first draft had nine open decisions. Most went away once the design reduced to the single rule.</p>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>Earlier open decision</th><th>Under the one rule</th></tr></thead>
+    <tbody>
+      <tr><td>Where coverage lives</td><td>The wrapper, because it has to work the same for every source</td></tr>
+      <tr><td><code>loading</code> vs <code>unavailable</code> status</td><td>Goes away; on-demand needs no new persisted status</td></tr>
+      <tr><td>Progressive subsets before the full sync</td><td>Covered if their load settled (inferred, needs a witness)</td></tr>
+      <tr><td>Deadline meaning per query</td><td>One wait, measured from each load's start; that load's failure ends it</td></tr>
+      <tr><td>"Not available offline" status</td><td>Exposed to the in-progress precise-errors PR</td></tr>
+      <tr><td>Page keys built from other rows</td><td>A known limit: if restored page 1 differs, page 2 is a miss and waits for the network</td></tr>
+      <tr><td>Publishing then replacing rows</td><td>Already normal for ready queries</td></tr>
+      <tr><td>API shape</td><td>One wrapper option: on/off plus wait</td></tr>
+      <tr><td>Oracle owner</td><td>The wrapper's settle rule; existing live-query oracles own the consequences</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Decisions since the first pass</h3>
+  <div class="open">
+    <div><span class="q">1</span><p><b>Coverage lifetime.</b> Valid until revalidated or until the cache generation ends. A <code>persistedGcTime</code>-style expiry gets its own issue and waits until someone asks for it.</p></div>
+    <div><span class="q">2</span><p><b>The wait.</b> Reuses the network-first option and its 3 s default from #1955; 0 is valid.</p></div>
+    <div><span class="q">3</span><p><b>Mixed joins.</b> On-demand sources register no persisted readiness, so a query that joins an eager source keeps the ordinary readiness path and waits for the eager network offline. That's safe, so it's recorded as a limit.</p></div>
+    <div><span class="q">4</span><p><b>Law and ARCHITECTURE.md.</b> Both are updated in the worktree, along with two glossary terms.</p></div>
+  </div>
+  <p class="col hint">Not done yet: no formal model check, no independent range case, and Electric's own pending load after the wrapper settles is unexamined.</p>
+</section>
+
+<section aria-labelledby="hist-h">
+  <div class="col" style="display:grid;gap:12px">
+    <h2 id="hist-h">How we got here</h2>
+    <p>Earlier work that shaped this problem. Filled dots are the ones that matter most.</p>
+  </div>
+  <div class="hist col">
+    <div><span class="d">2025-11-05 · #618</span><span class="t">Electric maps progressive to on-demand</span><span>Core only ever sees <code>eager</code> or <code>on-demand</code>.</span></div>
+    <div><span class="d">2026-03-20 · #1380 (samwillis)</span><span class="t">Persisted sync metadata</span><span>Query DB stores per-row query owners and <code>persistedGcTime</code> retention, "for offline-first flows."</span></div>
+    <div class="key"><span class="d">2026-09-10 · #1797</span><span class="t">Subset algebra removed</span><span>Deleted <code>isPredicateSubset</code> and friends. Dedupe matches exact keys "without inferring broader coverage."</span></div>
+    <div><span class="d">2026-09-11 · #1785 / 2026-09-24 · #1846</span><span class="t">Complete resume baselines</span><span>A progressive resume restores and certifies the full baseline.</span></div>
+    <div class="key"><span class="d">2026-09-30 · #1955</span><span class="t">Network-first initial render</span><span>Eager only by design: "An on-demand Collection has no complete startup snapshot."</span></div>
+    <div><span class="d">2026-10-11 · #2069</span><span class="t">Managed cache generations</span><span>"A partial Electric cache does not certify an offline baseline."</span></div>
+    <div class="key"><span class="d">2026-10-10 · issue #2102 (open)</span><span class="t">Design safe offline subset reuse</span><span>Item 1 asks for durable evidence of what a subset covers. This proposal belongs there.</span></div>
+    <div class="key"><span class="d">2026-10-13 · #2115</span><span class="t">On-demand queries ready on their own load</span><span>The per-query readiness rule this design builds on.</span></div>
+  </div>
+</section>
+
+<section aria-labelledby="files-h">
+  <h2 id="files-h">Files in the worktree</h2>
+  <div class="tw"><table>
+    <thead><tr><th>File</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs/contributing/oracle-reviews/2026-10-20-on-demand-network-first-law.md</code></td><td>The law draft, rewritten around the one rule</td></tr>
+      <tr><td><code>packages/db-sqlite-persistence-core/tests/on-demand-offline-readiness-witness.test.ts</code></td><td>Generic on-demand witness, 5 cases</td></tr>
+      <tr><td><code>packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts</code></td><td>Electric two-session witness on <code>node:sqlite</code>, 4 cases</td></tr>
+      <tr><td><code>docs/contributing/oracle-reviews/2026-10-21-offline-on-demand-explainer.html</code></td><td>This page</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+</main>
+
+<script>
+(function () {
+  var LOCAL = 120, NET = 900, MAX = 4000, NEVER = Infinity;
+  var form = document.getElementById('sim');
+  var wait = document.getElementById('wait');
+
+  function val(name) {
+    var el = form.querySelector('input[name="' + name + '"]:checked');
+    return el ? el.value : null;
+  }
+  function setVal(name, v) {
+    var el = form.querySelector('input[name="' + name + '"][value="' + v + '"]');
+    if (el) el.checked = true;
+  }
+
+  // Map time (ms) to a percentage of the track. The last 14% is "never".
+  function pos(t) {
+    if (t === NEVER) return 86;
+    return Math.min(t, MAX) / MAX * 86;
+  }
+  function bar(track, from, to, cls, label) {
+    var b = document.createElement('div');
+    b.className = 'bar ' + cls;
+    var l = pos(from), r = to === NEVER ? 100 : pos(to);
+    b.style.left = l + '%';
+    b.style.width = Math.max(r - l, 1.5) + '%';
+    b.textContent = label;
+    b.title = label;
+    track.appendChild(b);
+  }
+  function clear(id) {
+    var t = document.getElementById(id);
+    Array.prototype.slice.call(t.querySelectorAll('.bar')).forEach(function (b) { b.remove(); });
+    return t;
+  }
+  function ms(t) { return t === NEVER ? 'never' : t + ' ms'; }
+
+  function ticks() {
+    var el = document.getElementById('ticks');
+    el.innerHTML = '';
+    [0, 1000, 2000, 3000, 4000].forEach(function (t) {
+      var s = document.createElement('span');
+      s.style.left = pos(t) + '%';
+      s.textContent = t === 0 ? '0' : (t / 1000) + 's';
+      el.appendChild(s);
+    });
+    var inf = document.createElement('span');
+    inf.className = 'inf';
+    inf.style.left = '100%';
+    inf.textContent = 'never';
+    el.appendChild(inf);
+  }
+
+  function compute(s) {
+    var online = s.network === 'online';
+    var netAt = online ? NET : NEVER;
+    var w = s.wait;
+    var r = { local: null, net: online ? 'answers' : 'offline', rowsAt: NEVER, rowsLabel: '', readyAt: NEVER,
+              readyKind: 'ready', correct: 'ok', main: '', note: '' };
+
+    var full = s.history === 'full';
+    var loaded = s.history === 'loaded';
+    var covered = full || (loaded && s.query !== 'new');
+    // What SQLite holds for this query.
+    var localKind;
+    if (s.source === 'eager') {
+      localKind = s.history === 'none' ? 'empty' : 'all';
+    } else if (covered) {
+      localKind = 'complete';
+    } else if (loaded && s.query === 'new') {
+      localKind = 'partial';
+    } else {
+      localKind = 'empty';
+    }
+    r.local = localKind;
+    var localLabels = { all: 'whole Collection restored', complete: 'complete rows for this query',
+                        partial: 'some overlapping rows', empty: 'nothing for this query' };
+    r.localLabel = localLabels[localKind];
+
+    if (s.source === 'eager') {
+      // Eager: network-first (#1955) applies in every model; on-demand rules don't touch it.
+      var fallbackAt = Math.max(LOCAL, w);
+      r.readyAt = online ? Math.min(NET, fallbackAt) : fallbackAt;
+      r.readyKind = online && NET <= fallbackAt ? 'ready' : 'ready';
+      r.rowsAt = localKind === 'all' ? LOCAL : (online ? NET : NEVER);
+      r.rowsLabel = localKind === 'all' ? 'restored rows' : 'network rows';
+      if (localKind === 'empty') {
+        r.rowsAt = online ? NET : NEVER;
+        r.main = online
+          ? 'Eager with network-first: the empty restore counts as complete, so Suspense can release at ' + ms(fallbackAt) + ' with no rows if the network is slower than the wait.'
+          : 'Eager with network-first: an empty restore counts as complete data, so Suspense releases at ' + ms(fallbackAt) + ' with zero rows. A fresh install offline renders empty.';
+        r.correct = 'ok';
+        r.note = 'This is the current eager law ("an empty restore is complete data"). None of the models change it.';
+      } else {
+        r.main = 'Eager with network-first: the whole Collection restores from SQLite, so any query can render it after the wait (' + ms(fallbackAt) + ')' + (online ? ', or when the network answers first.' : '. The network keeps trying in the background.');
+        r.note = 'Eager behavior is the same in all three models. The proposal only changes on-demand sources.';
+      }
+      if (s.model === 'today' || s.model === 'proposed' || s.model === 'naive') r.readyKind = 'ready';
+      return r;
+    }
+
+    // On-demand and progressive.
+    var orderedPage = s.query === 'page';
+    var progressiveResume = s.source === 'progressive' && full;
+
+    if (s.model === 'today') {
+      if (progressiveResume) {
+        r.readyAt = LOCAL;
+        r.rowsAt = LOCAL; r.rowsLabel = 'rows from the full sync';
+        r.main = 'A completed progressive sync resumes from a certified baseline. Electric settles every load at once, so any query is ready on SQLite rows with no network. This already works today.';
+        r.note = 'Measured in the Electric two-session witness.';
+      } else if (online) {
+        r.readyAt = NET;
+        r.rowsAt = (localKind === 'complete' || localKind === 'partial') && !orderedPage ? LOCAL : NET;
+        r.rowsLabel = r.rowsAt === LOCAL ? 'cached rows' : 'network rows';
+        r.main = 'Online, the query is ready when the network answers (' + ms(NET) + ').' + (r.rowsAt === LOCAL ? ' Cached rows show first, but the ready signal waits for the network.' : '');
+        r.note = 'Setting initialRender on this source throws at config time today: "network-first initial rendering requires eager persistence syncMode".';
+      } else {
+        r.readyAt = NEVER; r.readyKind = 'waiting';
+        if (orderedPage) {
+          r.rowsAt = NEVER;
+          r.main = 'Offline, the next page never publishes. An ordered window stays unpublished until its load settles, and the load waits for the network forever, even though SQLite has the page.';
+          r.note = 'Follows from the architecture law for ordered windows. No offline pagination history has been run.';
+        } else if (localKind === 'complete' || localKind === 'partial') {
+          r.rowsAt = LOCAL; r.rowsLabel = localKind === 'complete' ? 'cached rows' : 'some cached rows';
+          r.main = 'Offline, the cached rows show at ' + ms(LOCAL) + ' but the query never becomes ready. Suspense, preload() and queryOnce wait forever.';
+          r.note = 'Measured in both witnesses. A UI that renders data regardless of isReady already shows the cache.';
+        } else {
+          r.main = 'Offline with nothing cached, the query shows nothing and waits for the network forever.';
+          r.note = 'This is correct: there is nothing to show. The app just can\'t tell it apart from "still loading" yet.';
+        }
+      }
+      return r;
+    }
+
+    if (s.model === 'naive') {
+      // Naive: treat any finished local read as complete data.
+      var at = online ? Math.min(NET, Math.max(LOCAL, w)) : Math.max(LOCAL, w);
+      r.readyAt = at;
+      r.rowsAt = localKind === 'empty' && !(online && at >= NET) ? at : LOCAL;
+      if (localKind === 'empty') r.rowsAt = online && at >= NET ? NET : NEVER;
+      r.rowsLabel = localKind === 'partial' ? 'some cached rows' : 'cached rows';
+      if (localKind === 'partial' && !(online && at >= NET)) {
+        r.correct = 'bad'; r.readyKind = 'wrong';
+        r.main = 'The naive fix treats whatever SQLite returned as the full answer. This filter was never run, so the rows are leftovers from other queries. The UI shows them as the complete result.';
+        r.note = 'This is wrong design 2 in the draft: "any finished local read counts as evidence."';
+      } else if (localKind === 'empty' && !(online && at >= NET)) {
+        r.correct = 'bad'; r.readyKind = 'wrong';
+        r.main = 'The naive fix renders an empty result as complete at ' + ms(at) + '. SQLite was empty because nothing was ever loaded, not because there are no matching rows.';
+        r.note = 'The witnesses show the wrapper cannot tell "loaded and empty" from "never loaded" without a coverage record.';
+      } else {
+        r.main = 'Here the naive fix happens to be right, because SQLite really does hold the complete answer for this query. Nothing in the naive fix knows that, though.';
+        r.note = 'Switch to "A filter never run" or "Nothing cached" to see it go wrong.';
+      }
+      return r;
+    }
+
+    // Proposed rule.
+    if (covered) {
+      var settleAt = Math.max(LOCAL, w);
+      r.readyAt = online ? Math.min(NET, settleAt) : settleAt;
+      r.rowsAt = orderedPage ? r.readyAt : LOCAL;
+      r.rowsLabel = full && s.query === 'new' ? 'rows from the full sync' : 'cached rows';
+      var why = full ? 'The source holds a complete baseline, which covers every query.' : 'This exact query finished loading last session, so it is covered.';
+      r.main = why + ' The wrapper settles its load from SQLite at ' + ms(r.readyAt) + (online && NET < settleAt ? ' (the network answered first).' : '.') +
+        (orderedPage ? ' The page publishes because its load settled.' : '') + ' The network load keeps running and replaces the rows when it answers.';
+      r.note = w > 0
+        ? 'The wait (' + ms(w) + ') is the network-first preference. No correctness property needs it; it only avoids a stale-then-fresh flash online.'
+        : 'Wait 0 matches how a completed progressive resume behaves today.';
+    } else {
+      r.readyAt = online ? NET : NEVER;
+      r.readyKind = online ? 'ready' : 'waiting';
+      r.rowsAt = localKind === 'partial' && !orderedPage ? LOCAL : (online ? NET : NEVER);
+      r.rowsLabel = r.rowsAt === LOCAL ? 'some cached rows' : 'network rows';
+      r.main = (s.query === 'new' ? 'This filter was never run, so it is not covered, even if SQLite holds some matching rows.' : 'Nothing was cached, so this query is not covered.') +
+        (online ? ' It waits for the network, as today.' : ' It waits for the network. The app can report "not available offline" instead of an endless spinner.');
+      r.note = 'Exact keys only: the rule never guesses that a covered query is "broader" than this one. Only a full sync serves never-run queries offline.';
+    }
+    return r;
+  }
+
+  function render() {
+    var s = { source: val('source'), history: val('history'), query: val('query'),
+              network: val('network'), model: val('model'), wait: parseInt(wait.value, 10) };
+
+    // On-demand sources other than progressive have no full sync.
+    var fullInput = document.getElementById('h-full');
+    var loadedInput = document.getElementById('h-loaded');
+    fullInput.disabled = s.source === 'ondemand';
+    loadedInput.disabled = s.source === 'eager';
+    if (fullInput.disabled && s.history === 'full') { setVal('history', 'loaded'); s.history = 'loaded'; }
+    if (loadedInput.disabled && s.history === 'loaded') { setVal('history', 'full'); s.history = 'full'; }
+    document.getElementById('wait-out').textContent = s.wait + ' ms';
+    var waitApplies = s.source === 'eager' || s.model !== 'today';
+    wait.disabled = !waitApplies;
+    document.getElementById('wait-hint').textContent = waitApplies
+      ? 'How long to wait for the network before trusting SQLite.'
+      : 'Not available today: initialRender is rejected for on-demand sources.';
+
+    var r = compute(s);
+
+    var tl = clear('t-local');
+    bar(tl, 0, LOCAL, 'local', 'read');
+    bar(tl, LOCAL, MAX, 'local', r.localLabel);
+
+    var tn = clear('t-net');
+    if (s.network === 'online') { bar(tn, 0, NET, 'netwait', 'loading'); bar(tn, NET, MAX, 'net', 'answered'); }
+    else bar(tn, 0, NEVER, 'netwait', 'offline, request pending');
+
+    var tr = clear('t-rows');
+    if (r.rowsAt !== NEVER) bar(tr, r.rowsAt, MAX, 'rows', r.rowsLabel || 'rows');
+    else bar(tr, 0, NEVER, 'waiting', 'nothing on screen');
+
+    var tq = clear('t-ready');
+    if (r.readyAt === NEVER) bar(tq, 0, NEVER, 'waiting', 'waiting for the network');
+    else {
+      if (r.readyAt > 0) bar(tq, 0, r.readyAt, 'waiting', '');
+      bar(tq, r.readyAt, MAX, r.readyKind === 'wrong' ? 'wrong' : 'ready', r.readyKind === 'wrong' ? 'ready (wrong answer)' : 'ready');
+    }
+
+    document.getElementById('v-rows').textContent = r.rowsAt === NEVER ? 'None' : 'At ' + ms(r.rowsAt);
+    document.getElementById('v-ready').innerHTML = r.readyAt === NEVER
+      ? '<span class="pill no">Never (offline)</span>'
+      : '<span class="pill ' + (r.readyKind === 'wrong' ? 'bad' : 'ok') + '">At ' + ms(r.readyAt) + '</span>';
+    var correctHtml = r.correct === 'bad' ? '<span class="pill bad">No, shows an incomplete answer as complete</span>'
+      : (r.readyAt === NEVER ? '<span class="pill no">Nothing claimed yet</span>' : '<span class="pill ok">Yes</span>');
+    document.getElementById('v-correct').innerHTML = correctHtml;
+
+    var why = document.getElementById('why');
+    why.className = 'why ' + (r.correct === 'bad' ? 'bad' : (r.readyAt === NEVER ? 'no' : 'ok'));
+    document.getElementById('why-main').textContent = r.main;
+    document.getElementById('why-note').textContent = r.note;
+
+    try { localStorage.setItem('offline-explainer', JSON.stringify(s)); } catch (e) {}
+  }
+
+  try {
+    var saved = JSON.parse(localStorage.getItem('offline-explainer') || 'null');
+    if (saved) {
+      ['source', 'history', 'query', 'network', 'model'].forEach(function (k) { if (saved[k]) setVal(k, saved[k]); });
+      if (typeof saved.wait === 'number') wait.value = saved.wait;
+    }
+  } catch (e) {}
+
+  form.addEventListener('change', render);
+  wait.addEventListener('input', render);
+  ticks();
+  render();
+})();
+</script>
+</body>
+</html>

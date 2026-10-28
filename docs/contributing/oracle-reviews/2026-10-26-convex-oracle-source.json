@@ -1,0 +1,26 @@
+{
+  "reviewParent": "de7cf8de13f14dfa0d4ce6676452eb231ef215e2",
+  "reviewedImplementationRevision": "5aebb71f90919697b459b38673a0aa5fef00a0b2",
+  "sha256": {
+    "docs/collections/convex-collection.md": "c432cd6a6b2cc926c382b75220407dae53ea76e4a914393e3a0b516ff6e85f70",
+    "docs/contributing/oracle-coverage.md": "3b040397b513301a247aa8bf202c5efd18f543a23745a8c889ccda84a64d1c80",
+    "packages/convex-db-collection/e2e/backend-oracle.test.ts": "e30455f6066988c6a6bf9594fce5fac834ce0a4e132da3c67db7c5b65986f363",
+    "packages/convex-db-collection/e2e/public-pagination-oracle.test.ts": "bc2315e2e493762b9b11785876d67de19d76a4f541663f9e22ce71897f337711",
+    "packages/convex-db-collection/tests/offline-oracle.property.test.ts": "02a86f41c6efc350442435156cd4e645652a538a0aaded47a0d9399a7e6ceeb1",
+    "packages/convex-db-collection/tests/ownership-oracle.property.test.ts": "65571b825260f5cba81910bd2c09d4c059381718a22092594732ea97bf39a4b1",
+    "packages/convex-db-collection/tests/pagination-oracle.property.test.ts": "edee7b6bdb287523e54bc4d2acbae9d9239376f67ec89b1e41ec4247e98ef1b8",
+    "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts": "014848222ce1390918edd96eb87ac8f12639d805334e8ce1254942fbf90e06b7",
+    "packages/convex-db-collection/tests/values-oracle.property.test.ts": "656a180d80f1e5dede569487b7ebf4a64a2f463c4c9180fa7539479eba8c0130",
+    "packages/db/tests/oracle-campaign.test.ts": "9bd9847227c02ea294247d29fb263103e24f354b02c56762da53fb0b0bbf734a",
+    "packages/db/tests/oracle-campaign.ts": "eb62aba6b24c596be97a7fe607c4c39808f7bef12ae5e0e2add547a45f8849d5",
+    "packages/db/tests/oracle-reach.ts": "f32b74e0adfaf8d869edaa8aeb2d1d8ac0a413ddd61b91ff706bde1767959283",
+    "packages/offline-transactions/package.json": "2f729365bcdfefc77a948954a1b4bbccfb46683612fa3f46fab24942493a6c7a",
+    "packages/offline-transactions/tests/transaction-serializer-oracle.property.test.ts": "94d3d1aa21f52c3e88b17530653644258f2f44c8283ca70f7aae4ca6199b3278",
+    "packages/offline-transactions/tsconfig.test.json": "5168aca44188a9be3b0bee215bfc2f222010dedb8f4e1fc08029c6873dcb6cf1",
+    "packages/offline-transactions/vite.config.ts": "1314f58bd503c40e633342fb6ed05a28a4d03641280159d65b34e6913226bb63"
+  },
+  "excludedLocalInstallationWorkaround": [
+    "pnpm-workspace.yaml",
+    "pnpm-lock.yaml"
+  ]
+}

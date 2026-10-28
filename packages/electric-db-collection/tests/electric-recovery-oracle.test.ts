@@ -5,22 +5,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
   persistedCollectionOptions,
 } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
-import type { Message, Row } from '@electric-sql/client'
+import { nodeSqliteDriver } from './electric-persistence-fixture'
+import {
+  attachRecoveryCleanupDiagnostics,
+  change,
+  expectPersistedRestartLaw,
+  expectWholeRecoveryTrace,
+  externalPublisher,
+  fixture,
+  freshRow,
+  oldRow,
+  otherOldRow,
+  upToDate,
+  withFixtureCleanup,
+} from './electric-recovery-support'
+import type { Message } from '@electric-sql/client'
+import type { ElectricCollectionUtils } from '../src/electric'
 import type {
-  PersistedCollectionCoordinator,
-  PersistedTx,
-  PersistenceAdapter,
-  ProtocolEnvelope,
-  SQLiteDriver,
-  TxCommitted,
-} from '../../db-sqlite-persistence-core/src'
-import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
+  Item,
+  PersistedRestartObservation,
+} from './electric-recovery-support'
 
 /**
  * # What remains visible while a persisted Electric replica repairs itself?
@@ -49,14 +60,7 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * external-publisher fixture routes complete committed transactions through
  * its bound adapter; that wiring does not add native-host evidence.
  */
-type Item = Row & {
-  id: number
-  name: string
-  stable: string
-  obsolete?: string
-}
 type Subscriber = (messages: Array<Message<Item>>) => void
-type Exposure = { cut: string; rows: Array<Item> }
 
 function persistedResumeKind(value: unknown): unknown {
   return value && typeof value === `object`
@@ -64,67 +68,6 @@ function persistedResumeKind(value: unknown): unknown {
     : undefined
 }
 
-function toSqliteBinding(value: unknown): string | number | bigint | null {
-  if (value === null || value === undefined) return null
-  if (typeof value === `boolean`) return value ? 1 : 0
-  if (
-    typeof value === `string` ||
-    typeof value === `number` ||
-    typeof value === `bigint`
-  ) {
-    return value
-  }
-  return String(value)
-}
-
-function nodeSqliteDriver(database: DatabaseSync): SQLiteDriver {
-  const driver: SQLiteDriver = {
-    exec: (sql) => {
-      database.exec(sql)
-      return Promise.resolve()
-    },
-    query: (sql, params = []) =>
-      Promise.resolve(
-        database
-          .prepare(sql)
-          .all(...params.map(toSqliteBinding))
-          .map((row) => ({ ...row })) as Array<never>,
-      ),
-    run: (sql, params = []) => {
-      database.prepare(sql).run(...params.map(toSqliteBinding))
-      return Promise.resolve()
-    },
-    transaction: async (transaction) => {
-      database.exec(`BEGIN IMMEDIATE`)
-      try {
-        const result = await transaction(driver)
-        database.exec(`COMMIT`)
-        return result
-      } catch (error) {
-        database.exec(`ROLLBACK`)
-        throw error
-      }
-    },
-  }
-  return driver
-}
-
-function expectWholeRecoveryTrace(
-  entries: Array<Exposure>,
-  allowed: Array<Array<Item>>,
-) {
-  let position = 0
-  for (const entry of entries) {
-    while (
-      position < allowed.length &&
-      !isDeepStrictEqual(entry.rows, allowed[position])
-    )
-      position++
-    expect(position, JSON.stringify({ entry, allowed, entries })).toBeLessThan(
-      allowed.length,
-    )
-  }
-}
 const subscribers: Array<Subscriber> = []
 const mockSubscribe = vi.fn((callback: Subscriber) => {
   subscribers.push(callback)
@@ -133,15 +76,18 @@ const mockSubscribe = vi.fn((callback: Subscriber) => {
 
 vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
-  ShapeStream: vi.fn(() => ({
-    subscribe: mockSubscribe,
-    requestSnapshot: vi.fn().mockResolvedValue(undefined),
-    fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
-    forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-    isUpToDate: false,
-    shapeHandle: `shape-current`,
-    lastOffset: `20_0`,
-  })),
+  ShapeStream: vi.fn(function () {
+    return {
+      subscribe: mockSubscribe,
+      unsubscribeAll: vi.fn(),
+      requestSnapshot: vi.fn().mockResolvedValue(undefined),
+      fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+      forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+      isUpToDate: false,
+      shapeHandle: `shape-current`,
+      lastOffset: `20_0`,
+    }
+  }),
 }))
 
 function deferred() {
@@ -150,203 +96,6 @@ function deferred() {
     resolve = complete
   })
   return { promise, resolve }
-}
-
-const oldRow: Item = { id: 1, name: `old`, stable: `stable-1` }
-const otherOldRow: Item = { id: 3, name: `other-old`, stable: `stable-3` }
-const freshRow: Item = { id: 2, name: `fresh`, stable: `stable-2` }
-const upToDate: Message<Item> = { headers: { control: `up-to-date` } }
-
-function change(
-  operation: `insert` | `update` | `delete`,
-  value: Partial<Item>,
-): Message<Item> {
-  return { key: String(value.id), value: value as Item, headers: { operation } }
-}
-
-function fixture(
-  syncMode: ElectricSyncMode,
-  coordinator?: PersistedCollectionCoordinator,
-) {
-  const rows = new Map<string | number, Item>([[oldRow.id, { ...oldRow }]])
-  const metadata = new Map<string, unknown>([
-    [
-      `electric:resume`,
-      {
-        kind: `resume`,
-        requiresTagState: false,
-        offset: `10_0`,
-        handle: `shape-old`,
-        shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
-        updatedAt: 1,
-      },
-    ],
-  ])
-  let hydrationGate = Promise.resolve()
-  const commits: Array<PersistedTx> = []
-  let latestTerm = 0
-  let latestSeq = 0
-  let latestRowVersion = 0
-  let resetEpoch = 0
-  let durableRowReads = 0
-  const adapter: PersistenceAdapter = {
-    loadSubset: () => {
-      durableRowReads++
-      const snapshot = Array.from(rows, ([key, value]) => ({
-        key,
-        value: { ...value },
-      }))
-      return hydrationGate.then(() => snapshot)
-    },
-    loadResumeSnapshot: async (_collectionId, ctx) => {
-      if (ctx?.includeRows !== false) {
-        durableRowReads++
-        await hydrationGate
-      }
-      return {
-        rows:
-          ctx?.includeRows === false
-            ? []
-            : Array.from(rows, ([key, value]) => ({
-                key,
-                value: { ...value },
-              })),
-        keySet: { status: `consistent` },
-        collectionMetadata: Array.from(metadata, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-        latestTerm,
-        latestSeq,
-        latestRowVersion,
-        resetEpoch,
-      }
-    },
-    loadCollectionMetadata: () =>
-      Promise.resolve(
-        Array.from(metadata, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-      ),
-    applyCommittedTx: (_collectionId, tx) => {
-      for (const mutation of tx.collectionMetadataMutations ?? []) {
-        if (mutation.type === `delete`) metadata.delete(mutation.key)
-        else metadata.set(mutation.key, structuredClone(mutation.value))
-      }
-      if (tx.truncate) {
-        rows.clear()
-        resetEpoch++
-      }
-      for (const mutation of tx.mutations) {
-        if (mutation.type === `delete`) rows.delete(mutation.key)
-        else {
-          rows.set(
-            mutation.key,
-            mutation.type === `insert`
-              ? (structuredClone(mutation.value) as Item)
-              : ({
-                  ...rows.get(mutation.key),
-                  ...structuredClone(mutation.value),
-                } as Item),
-          )
-        }
-      }
-      latestTerm = tx.term
-      latestSeq = tx.seq
-      latestRowVersion = tx.rowVersion
-      commits.push(structuredClone(tx))
-      return Promise.resolve()
-    },
-    ensureIndex: () => Promise.resolve(),
-  }
-  const collectionId = `persisted-recovery-${syncMode}`
-  if (coordinator) {
-    coordinator.requestApplyCommittedTx = async (requestedCollectionId, tx) => {
-      await adapter.applyCommittedTx(
-        { kind: `eager`, collectionId: requestedCollectionId },
-        tx,
-      )
-      return {
-        type: `rpc:applyCommittedTx:res`,
-        rpcId: tx.txId,
-        ok: true,
-        term: tx.term,
-        seq: tx.seq,
-        latestRowVersion: tx.rowVersion,
-      }
-    }
-  }
-  const collection = createCollection(
-    persistedCollectionOptions<
-      Item,
-      string | number,
-      never,
-      ElectricCollectionUtils<Item>
-    >({
-      ...electricCollectionOptions<Item>({
-        id: collectionId,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        syncMode,
-        getKey: (row) => row.id,
-        startSync: false,
-      }),
-      persistence: { adapter, coordinator },
-    }),
-  )
-  const publicRows = () =>
-    Array.from(collection.values(), (row) => {
-      const {
-        $hasPendingWrites: _pending,
-        $synced: _synced,
-        $origin: _origin,
-        $key: _key,
-        $collectionId: _collectionId,
-        ...value
-      } = row
-      return structuredClone(value) as Item
-    }).sort((a, b) => a.id - b.id)
-  const durableRows = () =>
-    structuredClone([...rows.values()].sort((a, b) => a.id - b.id))
-  const exposures: Array<Exposure> = []
-  const record = (cut: string) => {
-    exposures.push({ cut, rows: structuredClone(publicRows()) })
-  }
-  let stopObserving = () => {}
-  const start = () => {
-    stopObserving()
-    collection.startSyncImmediate()
-    const subscription = collection.subscribeChanges(() => record(`event`), {
-      includeInitialState: false,
-    })
-    stopObserving = () => subscription.unsubscribe()
-    record(`started`)
-  }
-  return {
-    collection,
-    rows,
-    metadata,
-    commits,
-    publicRows,
-    durableRows,
-    exposures,
-    record,
-    durableRowReadCount: () => durableRowReads,
-    latestDurableRowVersion: () => latestRowVersion,
-    commitExternalTx: (tx: PersistedTx) =>
-      adapter.applyCommittedTx(
-        { kind: `eager`, collectionId: collectionId },
-        tx,
-      ),
-    start,
-    stopObserving: () => stopObserving(),
-    pauseHydration: (gate: Promise<void>) => {
-      hydrationGate = gate
-    },
-  }
 }
 
 const scenarios = ([`eager`, `progressive`] as const).flatMap((syncMode) =>
@@ -394,98 +143,8 @@ const persistedRestartScenarios = ([`empty`, `nonempty`] as const).flatMap(
     ),
 )
 
-type PersistedRestartObservation = {
-  checkpoint: `post-restart-up-to-date`
-  requestedOffset: string | undefined
-  requestedHandle: string | undefined
-  visibleRows: Array<Item>
-  durableRows: Array<Item>
-  durableResumeKind: unknown
-  status: string
-}
-
-function expectPersistedRestartLaw(
-  actual: PersistedRestartObservation,
-  expected: PersistedRestartObservation,
-): void {
-  expect(actual).toEqual(expected)
-}
-
 function cloneItem(item: Item): Item {
   return { id: item.id, name: item.name, stable: item.stable }
-}
-
-function attachRecoveryCleanupDiagnostics(
-  primary: unknown,
-  cleanupEvidence: string,
-  cleanupFailures: ReadonlyArray<unknown>,
-): Error {
-  const error =
-    primary instanceof Error
-      ? primary
-      : new Error(`Persisted restart oracle failed with a non-Error value`, {
-          cause: primary,
-        })
-  Object.defineProperty(error, `cleanupEvidence`, {
-    value: cleanupEvidence,
-    enumerable: true,
-  })
-  if (cleanupFailures.length > 0) {
-    Object.defineProperty(error, `cleanupFailures`, {
-      value: [...cleanupFailures],
-      enumerable: true,
-    })
-  }
-  return error
-}
-
-async function withFixtureCleanup(
-  f: ReturnType<typeof fixture>,
-  run: () => Promise<void>,
-  beforeCleanup?: () => void,
-): Promise<void> {
-  let failed = false
-  let primaryFailure: unknown
-  try {
-    await run()
-  } catch (error) {
-    failed = true
-    primaryFailure = error
-  }
-  const cleanupFailures: Array<unknown> = []
-  try {
-    beforeCleanup?.()
-  } catch (error) {
-    cleanupFailures.push(
-      new Error(`Recovery gate release failed`, { cause: error }),
-    )
-  }
-  try {
-    f.stopObserving()
-  } catch (error) {
-    cleanupFailures.push(
-      new Error(`Recovery observer cleanup failed`, { cause: error }),
-    )
-  }
-  try {
-    await f.collection.cleanup()
-  } catch (error) {
-    cleanupFailures.push(
-      new Error(`Recovery Collection cleanup failed`, { cause: error }),
-    )
-  }
-  if (failed) {
-    throw attachRecoveryCleanupDiagnostics(
-      primaryFailure,
-      cleanupFailures.length === 0
-        ? `passed: recovery fixture cleanup`
-        : `failed: recovery fixture cleanup`,
-      cleanupFailures,
-    )
-  }
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(cleanupFailures, `Recovery fixture cleanup failed`)
-  }
 }
 
 async function observePersistedRestart(
@@ -523,18 +182,10 @@ async function observePersistedRestart(
       scenario.rowState === `empty`
         ? []
         : [cloneItem(oldRow), cloneItem(otherOldRow)]
-    const canResume =
-      scenario.transition === `compatible-reopen` &&
-      scenario.resumeKind === `resume`
-    const expected: PersistedRestartObservation = {
-      checkpoint: `post-restart-up-to-date`,
-      requestedOffset: canResume ? `10_0` : undefined,
-      requestedHandle: canResume ? `shape-old` : undefined,
-      visibleRows: modelCanonicalRows.map(cloneItem),
-      durableRows: modelCanonicalRows.map(cloneItem),
-      durableResumeKind: `resume`,
-      status: `ready`,
-    }
+    const expected = expectedPostRestartObservation(
+      scenario,
+      modelCanonicalRows,
+    )
     const resumeState =
       scenario.resumeKind === `none`
         ? []
@@ -866,6 +517,238 @@ async function observePersistedRestart(
   return result
 }
 
+function expectedPostRestartObservation(
+  scenario: PersistedRestartScenario,
+  modelCanonicalRows: Array<Item>,
+): PersistedRestartObservation {
+  const canResume =
+    scenario.transition === `compatible-reopen` &&
+    scenario.resumeKind === `resume`
+  return {
+    checkpoint: `post-restart-up-to-date`,
+    requestedOffset: canResume ? `10_0` : undefined,
+    requestedHandle: canResume ? `shape-old` : undefined,
+    visibleRows: modelCanonicalRows.map(cloneItem),
+    durableRows: modelCanonicalRows.map(cloneItem),
+    durableResumeKind: `resume`,
+    status: `ready`,
+  }
+}
+
+/**
+ * The Map adapter stands in for SQLite's row operations. An insert replaces
+ * the row; an update keeps the fields that the command omits.
+ */
+function expectedDurableRow(
+  operation: `insert` | `update`,
+  previous: Item,
+  next: Item,
+): Item {
+  return operation === `insert` ? next : { ...previous, ...next }
+}
+
+type PublicationHistoryCommand = {
+  id: number
+  name: string
+  deleted: boolean
+  fullReload: boolean
+  operation?: `insert` | `update`
+  obsolete?: boolean
+}
+
+/**
+ * One model command pairs two production boundaries: a committed peer
+ * publication, then an Electric stream update. The row Map models complete
+ * public values; the publication marker is only a reach witness, not model
+ * state. No later command branches on that marker.
+ *
+ * The bounded grammar permits 1–8 pairs, keys 2–4 beside the untouched
+ * baseline key 1, and names of length 0–8. Key variation distinguishes
+ * independent rows from repeated edits; name and optional field variation
+ * distinguish partial update from same-key insert replacement. Deletion
+ * changes membership;
+ * fullReload requires a persisted read. A targeted notice can also require
+ * a read when its row is new to this Collection: the notice carries a
+ * patch without a completeness certificate. Public rows, rather than the
+ * number of reads, decide whether that route satisfies the law. Multiple
+ * pairs expose repeated-key histories. The authored history below
+ * reconstructs insert then delete with a reload. The other fixed histories
+ * reach both sequence-length and name/key margins. The grammar excludes a
+ * malformed peer transaction that lists one key as both changed and deleted;
+ * the publisher constructs exactly one of those lists from `deleted`.
+ * Arbitrary keys and longer histories remain outside this property.
+ */
+const publicationHistoryArbitrary = fc.array(
+  fc.record({
+    id: fc.integer({ min: 2, max: 4 }),
+    name: fc.string({ maxLength: 8 }),
+    deleted: fc.boolean(),
+    fullReload: fc.boolean(),
+    operation: fc.constantFrom(`insert` as const, `update` as const),
+    obsolete: fc.boolean(),
+  }),
+  { minLength: 1, maxLength: 8 },
+)
+
+/**
+ * The model applies a committed peer publication to the expected rows. A
+ * delete removes the key; an insert replaces the row; an update keeps the
+ * fields that the notice omits.
+ */
+function applyPublicationCommandToModel(
+  expected: Map<number, Item>,
+  command: PublicationHistoryCommand,
+  row: Item,
+  operation: `insert` | `update`,
+): void {
+  if (command.deleted) expected.delete(row.id)
+  else {
+    expected.set(
+      row.id,
+      operation === `insert`
+        ? structuredClone(row)
+        : { ...expected.get(row.id), ...structuredClone(row) },
+    )
+  }
+}
+
+/**
+ * A stream update after a peer publication renames the row that the model
+ * holds. A missing row means the model has no basis for the update.
+ */
+function applyStreamUpdateToModel(
+  expected: Map<number, Item>,
+  id: number,
+): void {
+  const current = expected.get(id)
+  if (!current) throw new Error(`peer row missing before stream update`)
+  expected.set(id, { ...current, name: `stream` })
+}
+
+const assertPublicationHistory = async (
+  commands: Array<PublicationHistoryCommand>,
+) => {
+  subscribers.length = 0
+  const peer = externalPublisher()
+  const f = fixture(`on-demand`, peer.coordinator)
+  const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
+  const expectedRows = () =>
+    structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
+  let checkpoint = `startup`
+  await withFixtureCleanup(f, async () => {
+    try {
+      f.start()
+      await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
+        interval: 1,
+      })
+      await f.collection._sync.loadSubset({})
+      subscribers[0]!([upToDate])
+      for (const command of commands) {
+        checkpoint = `peer publication ${JSON.stringify(command)}`
+        const before = expectedRows()
+        const cut = f.exposures.length
+        f.record(`before peer ${JSON.stringify(command)}`)
+        const row = {
+          id: command.id,
+          name: command.name,
+          stable: `peer-${command.id}`,
+          ...(command.obsolete ? { obsolete: `old field` } : {}),
+        }
+        const operation =
+          command.operation ?? (expected.has(row.id) ? `update` : `insert`)
+        applyPublicationCommandToModel(expected, command, row, operation)
+        const rowReadsBeforeNotice = f.durableRowReadCount()
+        const revision = await peer.publish(
+          f,
+          row,
+          command.deleted,
+          command.fullReload,
+          operation,
+        )
+        f.record(`after peer revision ${revision}`)
+        // An unchanged row set is not proof that the peer publication ran.
+        // Its metadata marker commits with the rows, including empty deletes.
+        await vi.waitFor(
+          () =>
+            expect(
+              f.collection._state.syncedCollectionMetadata.get(
+                `oracle:publication`,
+              ),
+            ).toBe(revision),
+          { interval: 1 },
+        )
+        if (command.fullReload) {
+          await vi.waitFor(
+            () =>
+              expect(f.durableRowReadCount()).toBeGreaterThan(
+                rowReadsBeforeNotice,
+              ),
+            { interval: 1 },
+          )
+        }
+        expect(f.publicRows()).toEqual(expectedRows())
+        f.record(`peer revision ${revision} settled`)
+        const afterPeer = expectedRows()
+        const peerExposures = f.exposures.slice(cut)
+        expectWholeRecoveryTrace(peerExposures, [before, afterPeer])
+        if (!isDeepStrictEqual(before, afterPeer)) {
+          expect(
+            peerExposures.some(
+              ({ cut: eventCut, rows }) =>
+                eventCut === `event` && isDeepStrictEqual(rows, afterPeer),
+            ),
+          ).toBe(true)
+        }
+        checkpoint = `stream delta after ${JSON.stringify(command)}`
+        const streamCut = f.exposures.length
+        f.record(`before stream revision ${revision}`)
+        subscribers[0]!([
+          change(`update`, { id: row.id, name: `stream` }),
+          upToDate,
+        ])
+        if (!command.deleted) applyStreamUpdateToModel(expected, row.id)
+        f.record(`after stream revision ${revision}`)
+        expect(f.publicRows()).toEqual(expectedRows())
+        await vi.waitFor(
+          () => expect(f.durableRows()).toEqual(expectedRows()),
+          { interval: 1 },
+        )
+        const streamExposures = f.exposures.slice(streamCut)
+        expectWholeRecoveryTrace(streamExposures, [afterPeer, expectedRows()])
+        if (!isDeepStrictEqual(afterPeer, expectedRows())) {
+          expect(
+            streamExposures.some(
+              ({ cut: eventCut, rows }) =>
+                eventCut === `event` && isDeepStrictEqual(rows, expectedRows()),
+            ),
+          ).toBe(true)
+        }
+      }
+    } catch (error) {
+      throw new Error(
+        `Electric publication history violation. checkpoint=${checkpoint} history=${JSON.stringify(commands)}`,
+        { cause: error },
+      )
+    }
+  })
+}
+
+function expectedReplacementRows(empty: boolean): Array<Item> {
+  return empty ? [] : [freshRow]
+}
+
+declareOracle({
+  check: [observePersistedRestart, assertPublicationHistory],
+  model: [
+    expectedPostRestartObservation,
+    expectedDurableRow,
+    applyPublicationCommandToModel,
+    applyStreamUpdateToModel,
+    expectedReplacementRows,
+  ],
+  grammar: [publicationHistoryArbitrary],
+})
+
 describe(`persisted Electric recovery laws`, () => {
   // The Map adapter is the driver's durable boundary. It must enact SQLite's
   // distinct row operations before its rows can serve as evidence for a peer
@@ -892,7 +775,7 @@ describe(`persisted Electric recovery laws`, () => {
           mutations: [{ type: operation, key: next.id, value: next }],
         })
         expect(f.rows.get(next.id)).toEqual(
-          operation === `insert` ? next : { ...old, ...next },
+          expectedDurableRow(operation, old, next),
         )
       })
     },
@@ -926,386 +809,6 @@ describe(`persisted Electric recovery laws`, () => {
       expect(cleanupEvidence).toContain(`passed: committed retired-stream`)
     },
   )
-
-  it(`accepts a compatible empty resume and rejects a stale reset request or missing canonical row`, () => {
-    const compatibleEmpty: PersistedRestartObservation = {
-      checkpoint: `post-restart-up-to-date`,
-      requestedOffset: `10_0`,
-      requestedHandle: `shape-old`,
-      visibleRows: [],
-      durableRows: [],
-      durableResumeKind: `resume`,
-      status: `ready`,
-    }
-    expect(() =>
-      expectPersistedRestartLaw(
-        { ...compatibleEmpty, visibleRows: [], durableRows: [] },
-        compatibleEmpty,
-      ),
-    ).not.toThrow()
-
-    const freshNonempty: PersistedRestartObservation = {
-      ...compatibleEmpty,
-      requestedOffset: undefined,
-      requestedHandle: undefined,
-      visibleRows: [{ ...oldRow }, { ...otherOldRow }],
-      durableRows: [{ ...oldRow }, { ...otherOldRow }],
-    }
-    expect(() =>
-      expectPersistedRestartLaw(
-        {
-          ...freshNonempty,
-          requestedOffset: `10_0`,
-          requestedHandle: `shape-old`,
-          visibleRows: [{ ...oldRow }],
-          durableRows: [{ ...oldRow }],
-        },
-        freshNonempty,
-      ),
-    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
-  })
-
-  it(`keeps repaired intermediate publications in the persisted recovery record`, async () => {
-    const f = fixture(`eager`)
-    await withFixtureCleanup(f, async () => {
-      f.start()
-      await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-      await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-      const cut = f.exposures.length
-      f.record(`before`)
-      subscribers[0]!([change(`update`, { id: 1, name: `wrong` }), upToDate])
-      subscribers[0]!([change(`update`, { id: 1, name: `correct` }), upToDate])
-      const correct = [{ ...oldRow, name: `correct` }]
-      await vi.waitFor(() => expect(f.publicRows()).toEqual(correct))
-      f.record(`repaired`)
-      const entries = f.exposures.slice(cut)
-      expect(entries[0]!.rows).toEqual([oldRow])
-      expect(
-        entries.some(
-          ({ cut: kind, rows }) =>
-            kind === `event` && rows[0]?.name === `wrong`,
-        ),
-      ).toBe(true)
-      expect(() =>
-        expectWholeRecoveryTrace(entries, [[oldRow], correct]),
-      ).toThrow()
-      expectWholeRecoveryTrace(entries, [
-        [oldRow],
-        [{ ...oldRow, name: `wrong` }],
-        correct,
-      ])
-    })
-  })
-
-  function externalPublisher() {
-    let receive: ((message: ProtocolEnvelope<unknown>) => void) | undefined
-    let id = ``
-    let term = 100
-    const coordinator: PersistedCollectionCoordinator = {
-      getNodeId: () => `local`,
-      subscribe: (collectionId, callback) => {
-        id = collectionId
-        receive = callback
-        return () => {
-          receive = undefined
-        }
-      },
-      publish: () => {},
-      isLeader: () => true,
-      ensureLeadership: () => Promise.resolve(),
-      requestEnsurePersistedIndex: () => Promise.resolve(),
-      requestEnsureRemoteSubset: () => Promise.resolve(),
-      requestReleaseRemoteSubset: () => Promise.resolve(),
-      registerRemoteSubsetOwner: () => () => {},
-      requestApplyCommittedTx: (_collectionId, tx) =>
-        Promise.resolve({
-          type: `rpc:applyCommittedTx:res`,
-          rpcId: tx.txId,
-          ok: true,
-          term: tx.term,
-          seq: tx.seq,
-          latestRowVersion: tx.rowVersion,
-        }),
-    }
-    return {
-      coordinator,
-      publish: async (
-        fixtureState: ReturnType<typeof fixture>,
-        row: Item,
-        deleted: boolean,
-        fullReload: boolean,
-        operation?: `insert` | `update`,
-      ) => {
-        const revision = term++
-        const rowVersion = fixtureState.latestDurableRowVersion() + 1
-        const txId = `peer-${revision}`
-        // Commit the peer's rows, marker, and stream position before its
-        // notice. A notice with no matching durable position is not a legal
-        // ordinary publication history.
-        await fixtureState.commitExternalTx({
-          txId,
-          term: revision,
-          seq: 1,
-          rowVersion,
-          mutations: deleted
-            ? [{ type: `delete`, key: row.id, value: row }]
-            : [
-                {
-                  type:
-                    operation ??
-                    (fixtureState.rows.has(row.id) ? `update` : `insert`),
-                  key: row.id,
-                  value: row,
-                },
-              ],
-          collectionMetadataMutations: [
-            { type: `set`, key: `oracle:publication`, value: revision },
-          ],
-        })
-        const committed: TxCommitted = fullReload
-          ? {
-              type: `tx:committed`,
-              term: revision,
-              seq: 1,
-              txId,
-              latestRowVersion: rowVersion,
-              requiresFullReload: true,
-            }
-          : {
-              type: `tx:committed`,
-              term: revision,
-              seq: 1,
-              txId,
-              latestRowVersion: rowVersion,
-              requiresFullReload: false,
-              changedRows: deleted ? [] : [{ key: row.id, value: row }],
-              deletedKeys: deleted ? [row.id] : [],
-              collectionMetadataMutations: [
-                { type: `set`, key: `oracle:publication`, value: revision },
-              ],
-            }
-        receive?.({
-          v: 1,
-          dbName: id,
-          collectionId: id,
-          senderId: `peer`,
-          ts: Date.now(),
-          payload: committed,
-        })
-        return revision
-      },
-    }
-  }
-
-  it.each(
-    ([`eager`, `progressive`, `on-demand`] as const).flatMap((syncMode) =>
-      [false, true].map((fullReload) => ({ syncMode, fullReload })),
-    ),
-  )(
-    `$syncMode merges stream deltas into independently published rows, fullReload=$fullReload`,
-    async ({ syncMode, fullReload }) => {
-      const peer = externalPublisher()
-      const f = fixture(syncMode, peer.coordinator)
-      await withFixtureCleanup(f, async () => {
-        f.start()
-        await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-        if (syncMode === `on-demand`) await f.collection._sync.loadSubset({})
-        await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-        subscribers[0]!([upToDate])
-        const cut = f.exposures.length
-        f.record(`before peer`)
-        await peer.publish(f, freshRow, false, fullReload)
-        f.record(`after peer delivery`)
-        await vi.waitFor(() =>
-          expect(f.publicRows()).toEqual([oldRow, freshRow]),
-        )
-        f.record(`peer settled`)
-        expectWholeRecoveryTrace(f.exposures.slice(cut), [
-          [oldRow],
-          [oldRow, freshRow],
-        ])
-        const streamCut = f.exposures.length
-        f.record(`before stream delta`)
-        subscribers[0]!([
-          change(`update`, { id: freshRow.id, name: `changed` }),
-          upToDate,
-        ])
-        const expected = [oldRow, { ...freshRow, name: `changed` }]
-        f.record(`after stream delta`)
-        expect(f.publicRows()).toEqual(expected)
-        await vi.waitFor(() => expect(f.durableRows()).toEqual(expected))
-        expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
-          [oldRow, freshRow],
-          expected,
-        ])
-      })
-    },
-  )
-
-  type PublicationHistoryCommand = {
-    id: number
-    name: string
-    deleted: boolean
-    fullReload: boolean
-    operation?: `insert` | `update`
-    obsolete?: boolean
-  }
-
-  /**
-   * One model command pairs two production boundaries: a committed peer
-   * publication, then an Electric stream update. The row Map models complete
-   * public values; the publication marker is only a reach witness, not model
-   * state. No later command branches on that marker.
-   *
-   * The bounded grammar permits 1–8 pairs, keys 2–4 beside the untouched
-   * baseline key 1, and names of length 0–8. Key variation distinguishes
-   * independent rows from repeated edits; name and optional field variation
-   * distinguish partial update from same-key insert replacement. Deletion
-   * changes membership;
-   * fullReload requires a persisted read. A targeted notice can also require
-   * a read when its row is new to this Collection: the notice carries a
-   * patch without a completeness certificate. Public rows, rather than the
-   * number of reads, decide whether that route satisfies the law. Multiple
-   * pairs expose repeated-key histories. The authored history below
-   * reconstructs insert then delete with a reload. The other fixed histories
-   * reach both sequence-length and name/key margins. The grammar excludes a
-   * malformed peer transaction that lists one key as both changed and deleted;
-   * the publisher constructs exactly one of those lists from `deleted`.
-   * Arbitrary keys and longer histories remain outside this property.
-   */
-  const publicationHistoryArbitrary = fc.array(
-    fc.record({
-      id: fc.integer({ min: 2, max: 4 }),
-      name: fc.string({ maxLength: 8 }),
-      deleted: fc.boolean(),
-      fullReload: fc.boolean(),
-      operation: fc.constantFrom(`insert` as const, `update` as const),
-      obsolete: fc.boolean(),
-    }),
-    { minLength: 1, maxLength: 8 },
-  )
-
-  const assertPublicationHistory = async (
-    commands: Array<PublicationHistoryCommand>,
-  ) => {
-    subscribers.length = 0
-    const peer = externalPublisher()
-    const f = fixture(`on-demand`, peer.coordinator)
-    const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
-    const expectedRows = () =>
-      structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
-    let checkpoint = `startup`
-    await withFixtureCleanup(f, async () => {
-      try {
-        f.start()
-        await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
-          interval: 1,
-        })
-        await f.collection._sync.loadSubset({})
-        subscribers[0]!([upToDate])
-        for (const command of commands) {
-          checkpoint = `peer publication ${JSON.stringify(command)}`
-          const before = expectedRows()
-          const cut = f.exposures.length
-          f.record(`before peer ${JSON.stringify(command)}`)
-          const row = {
-            id: command.id,
-            name: command.name,
-            stable: `peer-${command.id}`,
-            ...(command.obsolete ? { obsolete: `old field` } : {}),
-          }
-          const operation =
-            command.operation ?? (expected.has(row.id) ? `update` : `insert`)
-          if (command.deleted) expected.delete(row.id)
-          else {
-            expected.set(
-              row.id,
-              operation === `insert`
-                ? structuredClone(row)
-                : { ...expected.get(row.id), ...structuredClone(row) },
-            )
-          }
-          const rowReadsBeforeNotice = f.durableRowReadCount()
-          const revision = await peer.publish(
-            f,
-            row,
-            command.deleted,
-            command.fullReload,
-            operation,
-          )
-          f.record(`after peer revision ${revision}`)
-          // An unchanged row set is not proof that the peer publication ran.
-          // Its metadata marker commits with the rows, including empty deletes.
-          await vi.waitFor(
-            () =>
-              expect(
-                f.collection._state.syncedCollectionMetadata.get(
-                  `oracle:publication`,
-                ),
-              ).toBe(revision),
-            { interval: 1 },
-          )
-          if (command.fullReload) {
-            await vi.waitFor(
-              () =>
-                expect(f.durableRowReadCount()).toBeGreaterThan(
-                  rowReadsBeforeNotice,
-                ),
-              { interval: 1 },
-            )
-          }
-          expect(f.publicRows()).toEqual(expectedRows())
-          f.record(`peer revision ${revision} settled`)
-          const afterPeer = expectedRows()
-          const peerExposures = f.exposures.slice(cut)
-          expectWholeRecoveryTrace(peerExposures, [before, afterPeer])
-          if (!isDeepStrictEqual(before, afterPeer)) {
-            expect(
-              peerExposures.some(
-                ({ cut: eventCut, rows }) =>
-                  eventCut === `event` && isDeepStrictEqual(rows, afterPeer),
-              ),
-            ).toBe(true)
-          }
-          checkpoint = `stream delta after ${JSON.stringify(command)}`
-          const streamCut = f.exposures.length
-          f.record(`before stream revision ${revision}`)
-          subscribers[0]!([
-            change(`update`, { id: row.id, name: `stream` }),
-            upToDate,
-          ])
-          if (!command.deleted) {
-            const current = expected.get(row.id)
-            if (!current)
-              throw new Error(`peer row missing before stream update`)
-            expected.set(row.id, { ...current, name: `stream` })
-          }
-          f.record(`after stream revision ${revision}`)
-          expect(f.publicRows()).toEqual(expectedRows())
-          await vi.waitFor(
-            () => expect(f.durableRows()).toEqual(expectedRows()),
-            { interval: 1 },
-          )
-          const streamExposures = f.exposures.slice(streamCut)
-          expectWholeRecoveryTrace(streamExposures, [afterPeer, expectedRows()])
-          if (!isDeepStrictEqual(afterPeer, expectedRows())) {
-            expect(
-              streamExposures.some(
-                ({ cut: eventCut, rows }) =>
-                  eventCut === `event` &&
-                  isDeepStrictEqual(rows, expectedRows()),
-              ),
-            ).toBe(true)
-          }
-        }
-      } catch (error) {
-        throw new Error(
-          `Electric publication history violation. checkpoint=${checkpoint} history=${JSON.stringify(commands)}`,
-          { cause: error },
-        )
-      }
-    })
-  }
 
   const publicationHistoryExamples: Array<[Array<PublicationHistoryCommand>]> =
     [
@@ -1449,7 +952,7 @@ describe(`persisted Electric recovery laws`, () => {
           }
           f.record(`before replacement data`)
           const partialCut = f.exposures.length
-          const expected = empty ? [] : [freshRow]
+          const expected = expectedReplacementRows(empty)
           subscribers[1]!(
             expected.map((row) => change(`insert`, structuredClone(row))),
           )
@@ -1505,27 +1008,6 @@ describe(`persisted Electric recovery laws`, () => {
         },
         gate.resolve,
       )
-    },
-  )
-
-  it.each([`eager`, `progressive`] as const)(
-    `%s valid resume retains cached rows and their unchanged fields`,
-    async (syncMode) => {
-      const f = fixture(syncMode)
-      await withFixtureCleanup(f, async () => {
-        f.start()
-        await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-        await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-        subscribers[0]!([
-          change(`update`, { id: 1, name: `changed` }),
-          upToDate,
-        ])
-        await vi.waitFor(() => expect(f.collection.status).toBe(`ready`))
-        const expected = [{ ...oldRow, name: `changed` }]
-        expect(f.publicRows()).toEqual(expected)
-        await vi.waitFor(() => expect(f.durableRows()).toEqual(expected))
-        expect(f.commits.every((tx) => !tx.truncate)).toBe(true)
-      })
     },
   )
 })

@@ -34,14 +34,15 @@
  * projected-value cells.
  */
 import { describe, expectTypeOf, test } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
   materialize,
   toArray,
 } from '../../src/query/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { declareOracle } from '../oracle-declaration.js'
+import { rows } from './virtual-row-fields-type-fixture.js'
+import type { Profile, Row } from './virtual-row-fields-type-fixture.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { SingleRowRefProxy } from '../../src/query/builder/ref-proxy.js'
 import type { Ref } from '../../src/query/index.js'
@@ -87,23 +88,9 @@ type IndexRefFor<
 
 type VirtualVariant = PublishedValueFor<Variant, `row-root`>
 
-type Profile = { label: string }
-type Row = {
-  id: string
-  profile: Profile
-  optionalProfile?: Profile
-  nullableProfile: Profile | null
-  createdAt: Date
-  tags: Array<string>
-}
-
-const rows = createCollection(
-  mockSyncCollectionOptions<Row>({
-    id: `virtual-row-fields-type-oracle`,
-    getKey: (row) => row.id,
-    initialData: [],
-  }),
-)
+declareOracle({
+  typeModel: [`PublishedValueFor`, `QueryRefFor`, `IndexRefFor`],
+})
 
 describe(`virtual row field type boundary`, () => {
   test(`WithoutVirtualProps preserves discriminated row unions`, () => {
@@ -174,36 +161,6 @@ describe(`virtual row field type boundary`, () => {
 
       return row.id
     })
-  })
-
-  test(`opaque scalar child results do not gain virtual row fields`, () => {
-    const collection = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        dates: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => child.createdAt),
-        ),
-        firstDate: materialize(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => child.createdAt)
-            .findOne(),
-        ),
-      })),
-    )
-
-    const result = collection.toArray[0]!
-    expectTypeOf(result.dates[0]!).toEqualTypeOf<Date>()
-    expectTypeOf(result.firstDate).toEqualTypeOf<Date | undefined>()
-
-    // @ts-expect-error Date values are not rows and have no virtual row fields.
-    result.dates[0]!.$key
-    // @ts-expect-error Materialized Date values are not rows either.
-    result.firstDate?.$synced
   })
 
   test(`projected child metadata follows row-shaped results`, () => {

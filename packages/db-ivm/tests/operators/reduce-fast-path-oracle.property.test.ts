@@ -4,6 +4,7 @@ import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { reduce } from '../../src/operators/reduce.js'
 import { output } from '../../src/operators/output.js'
+import { oracleRuns } from '../../../db/tests/oracle-config.js'
 
 /**
  * # Does the reduce fast path emit what the general path emits?
@@ -137,7 +138,7 @@ describe(`reduce fast path`, () => {
           expect(emitted(runs, false)).toEqual(emitted(runs, true))
         },
       ),
-      { numRuns: 1000 },
+      { numRuns: oracleRuns(1000) },
     )
   })
 })

@@ -16,19 +16,24 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  groupKeys,
   gt,
   sum,
 } from '@tanstack/db'
-import { effectScope, nextTick, onScopeDispose, ref } from 'vue'
+import { effectScope, nextTick, onScopeDispose, ref, watch } from 'vue'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
+import type { PooledLiveQueries } from '@tanstack/db'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -51,10 +56,11 @@ function writer<T extends { id: string }>(collection: any) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
-      id: `conformance-vue-${sourceSeq++}`,
+      id: collectionId ?? `conformance-vue-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
     }),
@@ -105,27 +111,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-vue-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-vue-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 async function settle() {
@@ -142,12 +133,12 @@ function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
         state: result.state?.value,
         status: result.status?.value,
         isReady: result.isReady?.value,
-        persistedStatus: result.persistedStatus?.value,
-        isPersistedReady: result.isPersistedReady?.value,
-        persistedError: result.persistedError?.value,
-        isError: result.isError?.value,
+        isLoadingError: result.isLoadingError?.value,
+        isCrashed: result.isCrashed?.value,
+        isSyncError: result.isSyncError?.value,
         // vue-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status?.value !== `disabled`,
+        health: result.health?.value,
       })
     },
     flush: settle,
@@ -188,7 +179,10 @@ function mountCollection(collection: any) {
   return makeHandle(result, scope)
 }
 
-function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+function mountConfig(
+  build: QueryBuild,
+  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+) {
   const { result, scope } = runInScope(() =>
     useLiveQuery({ query: build, ...opts } as any),
   )
@@ -206,16 +200,40 @@ function mountDisabled() {
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
+  opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
   const param = ref(initial) as { value: P }
-  const { result, scope } = runInScope(() =>
-    useLiveQuery((q: any) => build(q, param.value), [() => param.value]),
-  )
+  const published = createPublicationLog()
+  const { result, scope } = runInScope(() => {
+    const query =
+      opts?.pool !== undefined
+        ? useLiveQuery(
+            {
+              query: (q: any) => build(q, param.value),
+              pool: opts.pool,
+            } as any,
+            [() => param.value],
+          )
+        : useLiveQuery((q: any) => build(q, param.value), [() => param.value])
+    // Vue renders the value present at each pre-flush.
+    watch(
+      () => [query.data.value, [...query.state.value.values()]],
+      ([data]) => published.record(data, query.state.value),
+      { flush: `pre`, immediate: true },
+    )
+    return query
+  })
   const handle = makeHandle(result, scope)
   return {
     ...handle,
+    publications: published.values,
+    statePublications: published.stateValues,
     async setParam(next: P) {
       param.value = next
+      // The first paint after the change: the framework has flushed its
+      // reactive work, but no later task has run.
+      await nextTick()
+      published.record(result.data.value, result.state.value)
       await settle()
     },
   }
@@ -223,14 +241,22 @@ function mountControllable<P>(
 
 const vueDriver: LiveQueryDriver = {
   name: `vue`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
-  ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
+  ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(
       createCollection,
       `conformance-vue-lagging-${sourceSeq++}`,
+    ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-vue-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,
@@ -292,7 +318,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
-    isError: false,
+    isLoadingError: false,
+    isCrashed: false,
+    isSyncError: false,
     isEnabled: false,
   }
   const scope = effectScope()
@@ -312,9 +340,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     expect(healthy.data).toBe(raw.data)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
-    expect(healthy.isError).toBe(false)
+    expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`]) {
       const original = raw[key]
       delete raw[key]
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))

@@ -3,7 +3,7 @@ id: LiveQueryWindowControllerDisposedError
 title: LiveQueryWindowControllerDisposedError
 ---
 
-Defined in: [packages/db/src/errors.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L192)
+Defined in: [packages/db/src/errors.ts:222](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L222)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:192](https://github.com/TanStack/db/blob/
 new LiveQueryWindowControllerDisposedError(): LiveQueryWindowControllerDisposedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L193)
+Defined in: [packages/db/src/errors.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L223)
 
 #### Returns
 

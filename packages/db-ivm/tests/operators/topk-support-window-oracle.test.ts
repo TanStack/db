@@ -5,7 +5,15 @@ import { MultiSet } from '../../src/multiset.js'
 import { output } from '../../src/operators/index.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { TopKRelation } from './topk-relation-oracle.js'
+
+declareOracle({ check: [TopKRelation] })
 
 /**
  * A top-K window selects support from a signed, typed-key relation.
@@ -33,37 +41,23 @@ type Key = (typeof keys)[number]
 type Row = { id: number; value: string }
 type Step = { slot: number; support: number; offset: number; limit: number }
 
-// Normal campaigns share the same property, recorder, checks, and run budget.
-// Replay with TANSTACK_DB_IVM_TOPK_SUPPORT_SEED and
-// TANSTACK_DB_IVM_TOPK_SUPPORT_PATH on the focused Vitest command.
-const replaySeedText = process.env.TANSTACK_DB_IVM_TOPK_SUPPORT_SEED
-const replaySeed =
-  replaySeedText === undefined ? undefined : Number(replaySeedText)
-const replayPath = process.env.TANSTACK_DB_IVM_TOPK_SUPPORT_PATH
-const runs = Number(process.env.TANSTACK_DB_IVM_TOPK_SUPPORT_RUNS ?? 100)
-if (
-  replaySeedText !== undefined &&
-  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-)
-  throw new Error(`TANSTACK_DB_IVM_TOPK_SUPPORT_SEED must be an integer`)
-if (!Number.isSafeInteger(runs) || runs <= 0)
-  throw new Error(`TANSTACK_DB_IVM_TOPK_SUPPORT_RUNS must be positive`)
-if (replayPath !== undefined && replaySeed === undefined)
-  throw new Error(
-    `TANSTACK_DB_IVM_TOPK_SUPPORT_PATH requires TANSTACK_DB_IVM_TOPK_SUPPORT_SEED`,
-  )
-const campaigns: Array<{
-  name: string
-  seed: number | undefined
-  path: string | undefined
-}> =
-  replaySeed === undefined
-    ? [
-        { name: `fixed`, seed: 409033, path: undefined },
-        { name: `random`, seed: undefined, path: undefined },
-      ]
-    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
-
+// The fixed and random campaigns share the same property, recorder, checks,
+// and run budget. A path replay of this property selects only its random
+// campaign; a seed without a path reseeds it.
+const supportWindowProperty = `ivm.topk-support-window`
+const runs = oracleRuns(100)
+const campaigns = [
+  {
+    name: `fixed`,
+    test: oracleReplayTest(it),
+    parameters: { numRuns: runs, seed: 409033 },
+  },
+  {
+    name: `random`,
+    test: oracleReplayTest(it, supportWindowProperty),
+    parameters: oraclePropertyOptions(100, supportWindowProperty),
+  },
+]
 // Slot chooses typed identity and rank; support chooses the presence crossing;
 // offset chooses the first selected rank; limit chooses window width. Removing
 // any of these axes loses its corresponding distinction. The grammar rejects
@@ -95,134 +89,133 @@ describe.each([
   { name: `array`, operator: topKWithFractionalIndex },
   { name: `grouped`, operator: grouped },
 ])(`Signed support and window oracle: $name`, ({ operator }) => {
-  it.each(campaigns)(
-    `matches counted typed keys at every cut ($name campaign)`,
-    ({ seed, path }) => {
-      let firstFailure:
-        | {
-            observation: `rows` | `size`
-            checkpoint: `input` | `move`
-            step: number
-            steps: Array<Step>
-            message: string
-          }
-        | undefined
-      fc.assert(
-        fc.property(
-          fc.array(
-            fc.record({
-              slot: fc.integer({ min: 0, max: keys.length - 1 }),
-              support: fc.integer({ min: 0, max: 3 }),
-              offset: fc.integer({ min: 0, max: 6 }),
-              limit: fc.integer({ min: 0, max: 6 }),
-            }),
-            { minLength: 1, maxLength: 35 },
-          ),
-          (steps) => {
-            const graph = new D2()
-            const input = graph.newInput<[Key, Row]>()
-            const relation = new TopKRelation<Key>()
-            const counts = new Map<Key, number>()
-            let window = { offset: 0, limit: 3 }
-            let size!: () => number
-            let move!: (options: typeof window) => void
-            const rowFor = (key: Key): Row => ({
-              id: 10 - keys.indexOf(key),
-              value: `tie`,
-            })
-            input.pipe(
-              operator(() => 0, {
-                ...window,
-                setSizeCallback: (getSize) => {
-                  size = getSize
-                },
-                setWindowFn: (setWindow) => {
-                  move = setWindow
-                },
+  for (const campaign of campaigns)
+    campaign.test(
+      `matches counted typed keys at every cut (${campaign.name} campaign)`,
+      () => {
+        let firstFailure:
+          | {
+              observation: `rows` | `size`
+              checkpoint: `input` | `move`
+              step: number
+              steps: Array<Step>
+              message: string
+            }
+          | undefined
+        fc.assert(
+          fc.property(
+            fc.array(
+              fc.record({
+                slot: fc.integer({ min: 0, max: keys.length - 1 }),
+                support: fc.integer({ min: 0, max: 3 }),
+                offset: fc.integer({ min: 0, max: 6 }),
+                limit: fc.integer({ min: 0, max: 6 }),
               }),
-              output((message) => relation.add(message.getInner())),
-            )
-            graph.finalize()
-            expect(size).toBeTypeOf(`function`)
-            expect(move).toBeTypeOf(`function`)
-            const check = (
-              checkpoint: `input` | `move`,
-              step: number,
-            ): boolean => {
-              const selected = orderedKeys
-                .filter((key) => (counts.get(key) ?? 0) > 0)
-                .slice(window.offset, window.offset + window.limit)
-              const assertAt = (
-                observation: `rows` | `size`,
-                assertion: () => void,
+              { minLength: 1, maxLength: 35 },
+            ),
+            (steps) => {
+              const graph = new D2()
+              const input = graph.newInput<[Key, Row]>()
+              const relation = new TopKRelation<Key>()
+              const counts = new Map<Key, number>()
+              let window = { offset: 0, limit: 3 }
+              let size!: () => number
+              let move!: (options: typeof window) => void
+              const rowFor = (key: Key): Row => ({
+                id: 10 - keys.indexOf(key),
+                value: `tie`,
+              })
+              input.pipe(
+                operator(() => 0, {
+                  ...window,
+                  setSizeCallback: (getSize) => {
+                    size = getSize
+                  },
+                  setWindowFn: (setWindow) => {
+                    move = setWindow
+                  },
+                }),
+                output((message) => relation.add(message.getInner())),
+              )
+              graph.finalize()
+              expect(size).toBeTypeOf(`function`)
+              expect(move).toBeTypeOf(`function`)
+              const check = (
+                checkpoint: `input` | `move`,
+                step: number,
               ): boolean => {
-                try {
-                  assertion()
-                  return true
-                } catch (error) {
-                  firstFailure ??= {
-                    observation,
-                    checkpoint,
-                    step,
-                    steps: [...steps],
-                    message:
-                      error instanceof Error ? error.message : String(error),
+                const selected = orderedKeys
+                  .filter((key) => (counts.get(key) ?? 0) > 0)
+                  .slice(window.offset, window.offset + window.limit)
+                const assertAt = (
+                  observation: `rows` | `size`,
+                  assertion: () => void,
+                ): boolean => {
+                  try {
+                    assertion()
+                    return true
+                  } catch (error) {
+                    firstFailure ??= {
+                      observation,
+                      checkpoint,
+                      step,
+                      steps: [...steps],
+                      message:
+                        error instanceof Error ? error.message : String(error),
+                    }
+                    // A smaller history is a replay only if it violates the
+                    // same observation at the same graph-run checkpoint.
+                    if (
+                      firstFailure.observation === observation &&
+                      firstFailure.checkpoint === checkpoint
+                    ) {
+                      if (error instanceof Error)
+                        error.message += `\nOriginal ${firstFailure.observation} mismatch after ${firstFailure.checkpoint} run at step ${firstFailure.step}: ${firstFailure.message}; generated history: ${JSON.stringify(firstFailure.steps)}`
+                      throw error
+                    }
+                    return false
                   }
-                  // A smaller history is a replay only if it violates the
-                  // same observation at the same graph-run checkpoint.
-                  if (
-                    firstFailure.observation === observation &&
-                    firstFailure.checkpoint === checkpoint
-                  ) {
-                    if (error instanceof Error)
-                      error.message += `\nOriginal ${firstFailure.observation} mismatch after ${firstFailure.checkpoint} run at step ${firstFailure.step}: ${firstFailure.message}; generated history: ${JSON.stringify(firstFailure.steps)}`
-                    throw error
-                  }
-                  return false
                 }
-              }
-              if (
-                !assertAt(`rows`, () =>
-                  relation.expectRows(
-                    selected.map((key) => [key, rowFor(key).id, `tie`]),
-                  ),
+                if (
+                  !assertAt(`rows`, () =>
+                    relation.expectRows(
+                      selected.map((key) => [key, rowFor(key).id, `tie`]),
+                    ),
+                  )
                 )
-              )
-                return false
-              return assertAt(`size`, () =>
-                expect(size()).toBe(selected.length),
-              )
-            }
-            // Pin positivity crossings before every generated history.
-            const history = [1, 2, 1, 0, 2, 1, 0].map((support) => ({
-              slot: 0,
-              support,
-              offset: 0,
-              limit: 3,
-            }))
-            for (const [index, action] of [...history, ...steps].entries()) {
-              const key = keys[action.slot]!
-              const weight = action.support - (counts.get(key) ?? 0)
-              counts.set(key, action.support)
-              input.sendData(new MultiSet([[[key, rowFor(key)], weight]]))
-              graph.run()
-              if (!check(`input`, index)) return
-              window = { offset: action.offset, limit: action.limit }
-              move(window)
-              graph.run()
-              if (!check(`move`, index)) return
-            }
+                  return false
+                return assertAt(`size`, () =>
+                  expect(size()).toBe(selected.length),
+                )
+              }
+              // Pin positivity crossings before every generated history.
+              const history = [1, 2, 1, 0, 2, 1, 0].map((support) => ({
+                slot: 0,
+                support,
+                offset: 0,
+                limit: 3,
+              }))
+              for (const [index, action] of [...history, ...steps].entries()) {
+                const key = keys[action.slot]!
+                const weight = action.support - (counts.get(key) ?? 0)
+                counts.set(key, action.support)
+                input.sendData(new MultiSet([[[key, rowFor(key)], weight]]))
+                graph.run()
+                if (!check(`input`, index)) return
+                window = { offset: action.offset, limit: action.limit }
+                move(window)
+                graph.run()
+                if (!check(`move`, index)) return
+              }
+            },
+          ),
+          {
+            ...campaign.parameters,
+            examples: [[boundaryHistory]],
           },
-        ),
-        {
-          numRuns: runs,
-          ...(seed === undefined ? {} : { seed }),
-          ...(path === undefined ? {} : { path }),
-          examples: [[boundaryHistory]],
-        },
-      )
-    },
-  )
+        )
+      },
+    )
 })
 
 it.each([-2, 2])(

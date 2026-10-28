@@ -1,3 +1,4 @@
+import { declareOracle } from './oracle-declaration.js'
 import type { BasicExpression } from '../src/query/ir.js'
 
 function compareReferenceValues(left: unknown, right: unknown): number {
@@ -62,3 +63,5 @@ export function evaluateReferenceExpression(
       throw new Error(`unsupported reference expression: ${expression.name}`)
   }
 }
+
+declareOracle({ model: [evaluateReferenceExpression] })

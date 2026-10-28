@@ -1,11 +1,12 @@
 import { expect, it } from 'vitest'
-import { transformPublicContainers } from '../../src/query/compiler/route-metadata.js'
 import {
   createLiveQueryCollection,
   eq,
+  include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { transformPublicContainers } from '../../src/query/compiler/route-metadata.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
 it.each(
@@ -43,7 +44,7 @@ it.each(
           .select(({ inner }) => ({ id: inner.id }))
         return {
           id: parent.id,
-          collection: matches,
+          collection: include(matches),
           array: toArray(matches),
           materialized: materialize(matches),
         }

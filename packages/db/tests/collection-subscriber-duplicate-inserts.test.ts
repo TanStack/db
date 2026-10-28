@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
-import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { mockSyncCollectionOptions } from './utils.js'
 import type { ChangeMessage } from '../src/types.js'
 

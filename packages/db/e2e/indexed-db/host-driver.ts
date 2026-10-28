@@ -1,5 +1,5 @@
 /** Shared production driver for real pages and dedicated workers. Expected
- * rows stay in host-oracle.spec.ts. Native events and storage supply all premises.
+ * rows stay in host.spec.ts. Native events and storage supply all premises.
  */
 import {
   createCollection,

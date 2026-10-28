@@ -58,7 +58,7 @@
     "@angular/core": "^20.3.16",
     "@angular/platform-browser": "^20.3.16",
     "@angular/platform-browser-dynamic": "^20.3.16",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "rxjs": "^7.8.2",
     "zone.js": "~0.15.0"
   }

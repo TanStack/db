@@ -28,7 +28,7 @@ const todosCollection = createCollection(
     shapeOptions: {
       url: '/api/todos',
     },
-    getKey: (item) => item.id,
+    getKey: (item: { id: string }) => item.id,
   })
 )
 ```
@@ -143,7 +143,7 @@ For quick prototyping or when you're confident about timing, you can use a simpl
 const todosCollection = createCollection(
   electricCollectionOptions({
     id: 'todos',
-    getKey: (item) => item.id,
+    getKey: (item: { id: string }) => item.id,
     shapeOptions: {
       url: '/api/todos',
       params: { table: 'todos' },
@@ -355,6 +355,13 @@ A mutation handler waiting on one of them rejects; a later handler can wait for
 evidence from the replacement session. The replacement reloads demanded
 subsets and does not treat acknowledgements from the retired session as current.
 
+Before constructing a replacement `ShapeStream`, Electric releases the
+adapter-owned resources of the retired provider session, including its
+subscriptions and host lifecycle listeners. The replacement starts after cache
+rotation completes. An HTTP request that ignores cancellation may still finish
+later; its response cannot publish rows or settle waits for the replacement
+session.
+
 Persisted resumes wait for the cached row baseline to finish hydrating. If the
 persistence wrapper cannot verify hydration completion, Electric starts a fresh
 snapshot instead of using the saved offset and handle. It warns once per options
@@ -399,6 +406,14 @@ isolated but needs a separate cross-version cleanup policy while older tabs
 may still use it. Scoped recovery
 does not certify the new generation for offline reuse.
 
+With `initialRender: { strategy: 'network-first' }`, an on-demand or
+progressive Collection can render a demand offline from SQLite after that exact
+demand settled online in an earlier session. Each demand keeps its own
+coverage in the current persisted cache generation. Scoped recovery, cache-claim
+expiry, and a must-refetch end it, so after any of them a demand waits for the
+network again. A demand that loads during the rest of a scoped-recovery sync
+run records no coverage. See [On-demand Collections offline](../guides/sqlite-persistence.md#on-demand-collections-offline).
+
 During scoped recovery, coordinator notifications about SQLite changes do not
 hydrate, truncate, or replace public source rows. The Electric change stream
 and demanded source snapshots own those rows until the sync run ends. A change
@@ -407,9 +422,17 @@ rather than when its durable-cache notification arrives. Outside scoped
 recovery, coordinator invalidation retains its normal behavior.
 
 An eager or progressive resume cannot apply a partial update to an unknown row.
-The adapter rejects that batch, enters an error state, and records a reset so the
-next sync starts from a full snapshot. This does not silently retry the failed
-stream. Complete updates from an explicit `replica: 'full'` stream remain valid.
+The adapter rejects that batch, stops the stream, and records a reset so the
+next sync starts from a full snapshot. Before the Collection is ready, this
+fails the first load (`status: 'error'`); after it, the rows stay and the
+source node shows an `error` in `collection.health` and in each live query's
+`health` tree. This does not silently retry the failed stream;
+`collection.reload()` refetches.
+
+While the Electric stream retries a failed request, the Collection reports
+nothing: it stays `loading` before its first up-to-date, and keeps its health tree
+unchanged afterward. When the stream gives up, it calls `fail()`: a failed first load
+before readiness, or the source node's `error` after it. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
 Outside scoped recovery, complete rows published by persistence reloads or

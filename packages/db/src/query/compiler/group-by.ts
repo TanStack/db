@@ -14,6 +14,7 @@ import {
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import { deepEquals, isTemporal } from '../../utils.js'
+import { normalizedKey } from '../../utils/comparison.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -95,13 +96,20 @@ function createPublicGroupKey(values: Array<unknown>): unknown {
   const identities = values.map(getEqualityValueIdentity)
   if (identities.length === 1) {
     const identity = identities[0]
+    if (typeof identity === `string` || typeof identity === `number`) {
+      return identity
+    }
+    // Collection keys are strings or numbers. Another primitive group value,
+    // such as `null`, `undefined`, or a boolean, keys its group in the
+    // namespace that `normalizeValue` reserves. No string group value
+    // occupies that namespace, so the key cannot collide with one.
     if (
       identity == null ||
       (typeof identity !== `object` &&
         typeof identity !== `function` &&
         typeof identity !== `symbol`)
     ) {
-      return identity
+      return normalizedKey(typeof identity, String(identity))
     }
   }
   return serializeValue(identities)
@@ -286,8 +294,6 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
     hasLocal,
   }
 }
-
-const { sum, count, avg, min, max } = groupByOperators
 
 /**
  * Processes the GROUP BY clause with optional HAVING and SELECT
@@ -732,6 +738,10 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return compiledExpr(namespacedRow)
   }
 
+  // Read the operators here: a top-level destructure counts as a side
+  // effect and would keep them in bundles that never aggregate.
+  const { sum, count, avg, min, max } = groupByOperators
+
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {
     case `sum`:
@@ -845,47 +855,6 @@ function evaluateWrappedAggregates(
       delete finalResults[key]
     }
   }
-}
-
-/**
- * Checks whether an expression contains an aggregate anywhere in its tree.
- * Returns true for a top-level Aggregate, or a Func whose args (recursively)
- * contain an Aggregate. Safely returns false for nested Select objects.
- */
-export function containsAggregate(
-  expr: BasicExpression | Aggregate | Select | { type: string },
-): boolean {
-  if (isConditionalSelect(expr)) {
-    const branchHasAggregate = expr.branches.some(
-      (branch) =>
-        containsAggregate(branch.condition) || containsAggregate(branch.value),
-    )
-
-    return (
-      branchHasAggregate ||
-      (expr.defaultValue !== undefined && containsAggregate(expr.defaultValue))
-    )
-  }
-
-  if (isNestedSelectObject(expr)) {
-    return Object.values(expr).some((value) =>
-      containsAggregate(value as BasicExpression | Aggregate | Select),
-    )
-  }
-
-  if (!isExpressionLike(expr)) {
-    return false
-  }
-
-  if (expr.type === `agg`) {
-    return true
-  }
-  if (expr.type === `func` && `args` in expr) {
-    return (expr.args as Array<BasicExpression | Aggregate>).some(
-      (arg: BasicExpression | Aggregate) => containsAggregate(arg),
-    )
-  }
-  return false
 }
 
 /**

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  include,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection'
 import { createDeferred } from '../../src/deferred'
 import { BasicIndex } from '../../src/indexes/basic-index'
-import { createLiveQueryCollection, eq } from '../../src/query'
 import { PropRef } from '../../src/query/ir'
 import { evaluateReferenceExpression } from '../reference-expression-oracle'
 import { flushPromises } from '../utils'
@@ -92,9 +96,11 @@ describe.each([`direct`, `query`] as const)(
               .select(({ row }) => ({
                 id: row.id,
                 version: row.version,
-                children: q
-                  .from({ child: children })
-                  .where(({ child }) => eq(child.id, row.id)),
+                children: include(
+                  q
+                    .from({ child: children })
+                    .where(({ child }) => eq(child.id, row.id)),
+                ),
               })),
           )
         const live = consumer === `query` ? makeLive() : undefined
