@@ -373,7 +373,7 @@ const ownerGroups: ReadonlyArray<
     `follower-remote-demand`,
   ],
   [
-    `db-sqlite-persistence-core/tests/persisted-reset-startup.test.ts`,
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `generation-notice`,
   ],
