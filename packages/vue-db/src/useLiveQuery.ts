@@ -463,9 +463,7 @@ export function useLiveQuery(
     collection: computed(() => getPublicCollection(collection.value)),
     status: computed(() => status.value),
     isLoading: computed(() => flags.value.isLoading),
-    isReady: computed(
-      () => flags.value.isReady || status.value === `disabled`,
-    ),
+    isReady: computed(() => flags.value.isReady || status.value === `disabled`),
     isIdle: computed(() => flags.value.isIdle),
     isLoadingError: computed(() => flags.value.isLoadingError),
     isCrashed: computed(() => flags.value.isCrashed),
