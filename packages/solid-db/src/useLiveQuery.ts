@@ -334,7 +334,10 @@ export function useLiveQuery(
     },
   )
   const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
-  const [isSyncError, setSyncError] = createSignal(false)
+  // Every status flag comes from the shared rule; a disabled query is ready.
+  const flags = createMemo(() =>
+    getLiveQueryStatusFlags(status() as CollectionStatus, health()),
+  )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -399,12 +402,6 @@ export function useLiveQuery(
       }
       setStatus(currentCollection.status)
       setHealth(currentCollection.health)
-      setSyncError(
-        getLiveQueryStatusFlags(
-          currentCollection.status,
-          currentCollection.health,
-        ).isSyncError,
-      )
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWait = {
@@ -440,7 +437,6 @@ export function useLiveQuery(
         if (generation !== resourceGeneration) return data
         // A crashed Collection also rejects preload; keep its crash visible.
         setStatus(currentCollection.status === `crashed` ? `crashed` : `error`)
-        setSyncError(false)
         throw toBoundaryError(error)
       }
       if (generation !== resourceGeneration) {
@@ -455,12 +451,6 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         setStatus(currentCollection.status)
         setHealth(currentCollection.health)
-        setSyncError(
-          getLiveQueryStatusFlags(
-            currentCollection.status,
-            currentCollection.health,
-          ).isSyncError,
-        )
       })
       return data
     },
@@ -476,7 +466,6 @@ export function useLiveQuery(
     if (!currentCollection) {
       setStatus(`disabled` as const)
       setHealth(undefined)
-      setSyncError(false)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -524,7 +513,6 @@ export function useLiveQuery(
           const snapshot = observer.getSnapshot()
           setStatus(snapshot.status)
           setHealth(snapshot.health)
-          setSyncError(snapshot.isSyncError)
         })
       },
     )
@@ -540,7 +528,6 @@ export function useLiveQuery(
       const snapshot = observer.getSnapshot()
       setStatus(snapshot.status)
       setHealth(snapshot.health)
-      setSyncError(snapshot.isSyncError)
     })
 
     onCleanup(() => {
@@ -588,37 +575,37 @@ export function useLiveQuery(
     },
     isLoading: {
       get() {
-        return status() === `loading`
+        return flags().isLoading
       },
     },
     isReady: {
       get() {
-        return status() === `ready` || status() === `disabled`
+        return flags().isReady || status() === `disabled`
       },
     },
     isIdle: {
       get() {
-        return status() === `idle`
+        return flags().isIdle
       },
     },
     isLoadingError: {
       get() {
-        return status() === `error`
+        return flags().isLoadingError
       },
     },
     isCrashed: {
       get() {
-        return status() === `crashed`
+        return flags().isCrashed
       },
     },
     isCleanedUp: {
       get() {
-        return status() === `cleaned-up`
+        return flags().isCleanedUp
       },
     },
     isSyncError: {
       get() {
-        return isSyncError()
+        return flags().isSyncError
       },
     },
     health: {

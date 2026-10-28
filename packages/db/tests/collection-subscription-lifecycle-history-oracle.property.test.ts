@@ -12,9 +12,11 @@ import {
   createLifecycleModel,
   demandChangeLifecycleHistoryArbitrary,
   expectedCleanedRestartDemand,
+  expectedParkedReloadDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
   mixedAbortedRestartHistory,
+  parkedReloadDemandCases,
   pendingSupersessionHistory,
   reduceLifecycle,
   settle,
@@ -204,6 +206,91 @@ describe(`demand created while its Collection is cleaned up`, () => {
       }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     },
   )
+})
+
+/**
+ * The driver of `parkedReloadDemandCases` (see the model in the lifecycle
+ * grammar). A real on-demand Collection's first sync run calls `fail()`
+ * before readiness, a direct subscription then requests a snapshot, which
+ * parks, and `reload()` starts the run that `newRun` describes. Its adapter
+ * counts every `loadSubset` and `unloadSubset` call and serves each load in
+ * a later microtask. After the history settles, the counts, the parked
+ * request's promise, and both statuses must match the model.
+ */
+describe(`demand parked behind a failed first load across a reload`, () => {
+  it.each(parkedReloadDemandCases)(`new run: $newRun`, async (history) => {
+    const expected = expectedParkedReloadDemand(history)
+    let syncRuns = 0
+    let loads = 0
+    let unloads = 0
+    let failFirstRun!: () => void
+    let laterSnapshot: (() => void) | undefined
+    const collection = createCollection<{ id: string }>({
+      id: `parked-reload-${history.newRun}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (next) => {
+          const syncRun = syncRuns++
+          const snapshot = () => {
+            next.begin({ snapshot: true })
+            next.commit()
+          }
+          if (syncRun === 0) {
+            failFirstRun = () => next.fail(new Error(`first load failed`))
+          } else if (history.newRun === `snapshot-then-ready`) {
+            snapshot()
+            next.markReady()
+          } else {
+            next.markReady()
+            if (history.newRun === `ready-then-snapshot`) snapshot()
+            if (history.newRun === `ready-then-later-snapshot`)
+              laterSnapshot = snapshot
+          }
+          return {
+            loadSubset: () => {
+              loads++
+              return Promise.resolve()
+            },
+            unloadSubset: () => {
+              unloads++
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    await withOracleCleanup(async () => {
+      collection.startSyncImmediate()
+      failFirstRun()
+      await flushPromises()
+      let result: `pending` | `fulfilled` | `rejected` = `pending`
+      subscription.requestSnapshot({
+        onLoadSubsetResult: (returned) => {
+          void Promise.resolve(returned).then(
+            () => (result = `fulfilled`),
+            () => (result = `rejected`),
+          )
+        },
+      })
+      await flushPromises()
+      void collection.reload().catch(() => undefined)
+      await flushPromises()
+      if (laterSnapshot) {
+        laterSnapshot()
+        await flushPromises()
+      }
+      expect({
+        loads,
+        unloads,
+        result,
+        status: subscription.status,
+        collectionStatus: collection.status,
+      }).toEqual(expected)
+    }, [() => subscription.unsubscribe(), () => collection.cleanup()])
+  })
 })
 
 /**
@@ -450,6 +537,41 @@ async function runHistory(
   let observedUnsubscribed = false
   let syncOps:
     Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0] | undefined
+  // Law 13 (space): state does not scale with settled historical attempts.
+  // A listener on an acquisition's abort signal keeps what its closure
+  // holds, such as a replay's private rows, for as long as the acquisition
+  // lives. So once an attempt settled without an abort, core keeps no abort
+  // listener on its signal. The driver counts the listeners core adds after
+  // the adapter's `loadSubset` call, by attempt; an abort removes them all,
+  // since core adds each with `once`.
+  const coreAbortListeners = new Map<number, Set<unknown>>()
+  const watchCoreAbortListeners = (
+    attemptId: number,
+    signal: AbortSignal | undefined,
+  ) => {
+    if (!signal) return
+    const listeners = new Set<unknown>()
+    coreAbortListeners.set(attemptId, listeners)
+    const add = signal.addEventListener.bind(signal)
+    const remove = signal.removeEventListener.bind(signal)
+    add(`abort`, () => listeners.clear())
+    signal.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (type === `abort`) listeners.add(listener)
+      add(type, listener, options)
+    }) as AbortSignal[`addEventListener`]
+    signal.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      listeners.delete(listener)
+      remove(type, listener, options)
+    }) as AbortSignal[`removeEventListener`]
+  }
 
   const collection = createCollection<{ id: string }, string>({
     id: `generated-async-demand-lifecycle`,
@@ -504,6 +626,7 @@ async function runHistory(
                 { once: true },
               )
             }
+            watchCoreAbortListeners(observed.id, options.signal)
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
             observedLoads.push(observed)
@@ -601,6 +724,12 @@ async function runHistory(
       Array.from({ length: model.publications }, () => []),
     )
     check(observedTrace, context).toEqual(model.trace)
+    for (const attempt of model.attempts)
+      if (attempt.outcome !== undefined && !attempt.aborted)
+        check(
+          coreAbortListeners.get(attempt.id)?.size ?? 0,
+          `abort listeners kept by settled attempt ${attempt.id}: ${context}`,
+        ).toBe(0)
     for (const attempt of model.attempts) {
       check(
         runtimeAttempts.get(attempt.id)?.options.signal?.aborted,

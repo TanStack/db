@@ -449,13 +449,23 @@ function createPowerSyncCollectionConfig<
             beforeCreate: async (context) => {
               // A load of every row is one snapshot transaction: during a
               // reload it replaces the kept rows, so a row the table no
-              // longer has goes. A subset load commits each batch.
-              if (snapshot) begin({ snapshot })
+              // longer has goes. A subset load commits each batch. A
+              // transaction begins only once its rows are read, so a batch
+              // that fails leaves none open.
+              const batches: Array<Array<TableType>> = []
+              const apply = () => {
+                begin({ snapshot })
+                for (const row of batches.splice(0).flat()) {
+                  write({
+                    type: writeType(row.id),
+                    value: deserializeSyncRow(row),
+                  })
+                }
+                appliedReceipts.push(commit())
+              }
               let currentBatchCount = syncBatchSize
               let cursor = 0
               while (currentBatchCount == syncBatchSize) {
-                if (!snapshot) begin()
-
                 const batchItems = await batchQuery(
                   context,
                   syncBatchSize,
@@ -463,15 +473,10 @@ function createPowerSyncCollectionConfig<
                 )
                 currentBatchCount = batchItems.length
                 cursor += currentBatchCount
-                for (const row of batchItems) {
-                  write({
-                    type: writeType(row.id),
-                    value: deserializeSyncRow(row),
-                  })
-                }
-                if (!snapshot) appliedReceipts.push(commit())
+                batches.push(batchItems)
+                if (!snapshot) apply()
               }
-              if (snapshot) appliedReceipts.push(commit())
+              if (snapshot) apply()
               database.logger.log({
                 level: LogLevels.info,
                 message: `Sync is ready for ${viewName} into ${trackedTableName}`,

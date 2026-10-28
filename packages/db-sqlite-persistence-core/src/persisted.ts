@@ -8,6 +8,7 @@ import {
   compileSingleRowExpression,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
+  reportUncaught,
   safeRandomUUID,
   toBooleanPredicate,
   whenSyncAccepted,
@@ -946,13 +947,6 @@ const TARGETED_INVALIDATION_KEY_LIMIT = 128
 const DEFAULT_DB_NAME = `tanstack-db`
 const REMOTE_ENSURE_RETRY_DELAY_MS = 50
 
-// An adapter contract breach, such as an unloadSubset that rejects, surfaces
-// uncaught as core reports it, and changes no result.
-const reportUncaught = (error: unknown): void =>
-  queueMicrotask(() => {
-    throw error
-  })
-
 // A remote subset request failure that no sync run can carry.
 const warnRemoteFailure = (error: unknown): void =>
   console.warn(`Persisted remote subset request failed:`, error)
@@ -1612,6 +1606,8 @@ class PersistedCollectionRuntime<
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
+  // The failures reported for remote requests, until one succeeds.
+  private remoteErrors: Array<unknown> = []
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
   private terminalFailure:
@@ -1945,14 +1941,38 @@ class PersistedCollectionRuntime<
       this.reportedSyncError = error
     }
     try {
-      if (origin === `remote`) this.collection?._lifecycle.reportError(error)
-      else if (origin === `sync adapter`) fail(error)
+      if (origin === `remote`) {
+        this.remoteErrors.push(error)
+        this.collection?._lifecycle.reportError(error)
+      } else if (origin === `sync adapter`) fail(error)
       else this.collection?._lifecycle.crash(error)
     } catch {
       // Reporting must not replace the original asynchronous failure. A
       // sync adapter that already stopped takes no further report.
     }
     return error
+  }
+
+  /**
+   * Acquires a remote subset. A success shows the remote works again, so
+   * every failure reported for the run's remote requests ends.
+   */
+  private ensureRemoteSubset(
+    options: LoadSubsetOptions,
+    storageId = this.storageCollectionId,
+  ): Promise<void> {
+    const lifecycleGeneration = this.lifecycleGeneration
+    return this.persistence.coordinator
+      .requestEnsureRemoteSubset(storageId, options)
+      .then(() => {
+        if (lifecycleGeneration !== this.lifecycleGeneration) return
+        try {
+          for (const error of this.remoteErrors.splice(0))
+            this.collection?._lifecycle.reportHealthy(error)
+        } catch {
+          // A sync adapter that already stopped takes no further report.
+        }
+      })
   }
 
   registerRemoteSubsetOwner(owner: RemoteSubsetOwner): void {
@@ -2593,10 +2613,7 @@ class PersistedCollectionRuntime<
         if (options.signal?.aborted) continue
         const rotatedOptions = this.rotatedAcquisitions.get(options)
         if (rotatedOptions) {
-          const ensure = this.persistence.coordinator.requestEnsureRemoteSubset(
-            this.storageCollectionId,
-            rotatedOptions,
-          )
+          const ensure = this.ensureRemoteSubset(rotatedOptions)
           this.rotatedEnsures.set(options, ensure)
           void ensure.catch((error) =>
             this.reportSyncError(error, `remote`, lifecycleGeneration),
@@ -2841,10 +2858,7 @@ class PersistedCollectionRuntime<
           !options.signal?.aborted
         ) {
           await (this.rotatedEnsures.get(options) ??
-            this.persistence.coordinator.requestEnsureRemoteSubset(
-              this.storageCollectionId,
-              rotatedOptions,
-            ))
+            this.ensureRemoteSubset(rotatedOptions))
           await this.applyLeaderCommitsBeforeReply(options)
         }
         return
@@ -2881,8 +2895,7 @@ class PersistedCollectionRuntime<
 
     if (this.canRouteRemoteDemandThroughCoordinator()) {
       try {
-        await this.persistence.coordinator.requestEnsureRemoteSubset(
-          this.storageCollectionId,
+        await this.ensureRemoteSubset(
           this.rotatedAcquisitions.get(options) ?? options,
         )
       } catch (error) {
@@ -4586,8 +4599,7 @@ class PersistedCollectionRuntime<
         continue
       }
       try {
-        await this.persistence.coordinator.requestEnsureRemoteSubset(
-          this.storageCollectionId,
+        await this.ensureRemoteSubset(
           this.rotatedAcquisitions.get(options) ?? options,
         )
         this.pendingRemoteSubsetEnsures.delete(subsetKey)
@@ -4951,10 +4963,7 @@ class PersistedCollectionRuntime<
           ) {
             return
           }
-          return this.persistence.coordinator.requestEnsureRemoteSubset(
-            storageId,
-            refreshOptions,
-          )
+          return this.ensureRemoteSubset(refreshOptions, storageId)
         })
         .catch((error: unknown) => {
           if (!options.signal?.aborted)

@@ -1286,22 +1286,31 @@ export function queryCollectionOptions(
     const failedResultApplications = new Map<string, unknown>()
     // A failed fetch or result application after Collection readiness is a
     // failureReason, since TanStack Query fetches again. Each observed Query
-    // still failing keeps the errors it reported. A Query that recovers
-    // removes its own failures, so the other Queries' failures keep their
-    // places; once no Query fails, the failureReason clears.
-    const failingQueries = new Map<string, Array<unknown>>()
+    // still failing keeps one failure listed: its latest error, so a Query
+    // that fails on every refetch does not grow the list. A Query that
+    // recovers removes its own failure, so the other Queries' failures keep
+    // their places; once no Query fails, the failureReason clears. Core lists
+    // one failure per error value, so a value stays listed while any failing
+    // Query still holds it.
+    const failingQueries = new Map<string, unknown>()
+    const reportUnheld = (error: unknown) => {
+      for (const held of failingQueries.values()) if (held === error) return
+      reportHealthy(error)
+    }
     const reportFailing = (hashedQueryKey: string, error: unknown) => {
-      failingQueries.set(hashedQueryKey, [
-        ...(failingQueries.get(hashedQueryKey) ?? []),
-        error,
-      ])
-      if (runReady) reportError(error)
+      const previous = failingQueries.get(hashedQueryKey)
+      failingQueries.set(hashedQueryKey, error)
+      if (!runReady) return
+      // Announce the new failure before removing the replaced one, so the
+      // failureReason never clears in between.
+      reportError(error)
+      if (previous !== undefined) reportUnheld(previous)
     }
     const reportRecovered = (hashedQueryKey: string) => {
-      const errors = failingQueries.get(hashedQueryKey)
+      const error = failingQueries.get(hashedQueryKey)
       if (!failingQueries.delete(hashedQueryKey) || !runReady) return
       if (failingQueries.size === 0) reportHealthy()
-      else for (const error of errors!) reportHealthy(error)
+      else reportUnheld(error)
     }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,
@@ -1800,12 +1809,15 @@ export function queryCollectionOptions(
             currentEntry,
             entry.queryHash,
           )
-          if (
-            !parsedCurrentEntry ||
-            parsedCurrentEntry.mode !== `ttl` ||
-            parsedCurrentEntry.expiresAt > Date.now()
-          ) {
+          if (parsedCurrentEntry?.mode !== `ttl`) {
             return
+          }
+          // A timer can fire before Date.now() reaches its deadline (Node
+          // rounds to the millisecond, and the wall clock can be adjusted),
+          // and another tab can renew the entry. Either way it is not expired
+          // yet, so wait for its current expiry instead of dropping it.
+          if (parsedCurrentEntry.expiresAt > Date.now()) {
+            return schedulePersistedRetentionExpiry(parsedCurrentEntry)
           }
           await cleanupPersistedPlaceholder(entry.queryHash)
         })

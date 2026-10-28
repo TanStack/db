@@ -31,6 +31,14 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   Collection becomes ready through its sync adapter's `markReady()`. So
  *   none of them is reported before the first ready, and a load that waited
  *   on the failed request receives the rejection itself.
+ * - **A later successful remote request ends the remote failures.** When a
+ *   remote acquisition of the same sync run succeeds, the remote works
+ *   again: every failure the wrapper reported for its remote requests
+ *   leaves the failure reason (`reportHealthy(error)` for each), whichever
+ *   request failed (maintainer decision: a coarse clear, not per demand).
+ *   That success may be the repeat of the failed refresh or reacquisition at
+ *   the next scoped recovery, or an unrelated subset's acquisition. Until
+ *   then the failure stays, also for a release, which is never repeated.
  * - **A throwing `unloadSubset` is an adapter contract breach.** Core's law
  *   (`packages/db/src/collection/subscription.ts`, `releaseAcquisition`;
  *   `reportUncaught`) reports it uncaught and fails no load, replay, or
@@ -77,7 +85,13 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *
  * The failure arrives in the same sync run (`current`), or after a reload
  * retired that run, before or after the new run's `markReady()`. A run that
- * never became ready cannot have a reload whose new run became ready.
+ * never became ready cannot have a reload whose new run became ready. A
+ * `current` failure of a remote request may be followed by a success: a
+ * second scoped recovery whose repeat of a refresh or reacquisition succeeds
+ * (`repeat`), or a load of another subset whose acquisition succeeds
+ * (`other`). With the single-process coordinator a load calls the sync
+ * adapter's own `loadSubset` and makes no remote request, so
+ * `rotated-owner-load` has no `other` history.
  *
  * ## The comparison
  *
@@ -105,7 +119,12 @@ type Site =
   | `cleanup-release`
 type Timing = `current` | `retired-before-new-ready` | `retired-after-new-ready`
 type Readiness = `ready` | `loading`
-type History = { site: Site; timing: Timing; readiness: Readiness }
+type History = {
+  site: Site
+  timing: Timing
+  readiness: Readiness
+  recovery: `none` | `repeat` | `other`
+}
 
 type Row = { id: string; value: string }
 
@@ -131,6 +150,13 @@ const REMOTE_SITES: ReadonlySet<Site> = new Set<Site>([
   `rotated-ensure`,
   `rotated-owner-load`,
   `cleanup-release`,
+])
+
+// The sites whose request the next scoped recovery repeats.
+const REPEATED_SITES: ReadonlySet<Site> = new Set<Site>([
+  `refresh-ensure`,
+  `rotated-ensure`,
+  `rotated-owner-load`,
 ])
 
 function expected(history: History): {
@@ -159,6 +185,9 @@ function expected(history: History): {
     afterFailure,
     atEnd: {
       ...afterFailure,
+      // A later remote success ends the remote failures.
+      failureReason:
+        history.recovery === `none` ? afterFailure.failureReason : null,
       status: reloaded ? `ready` : readiness,
       reload: reloaded ? `resolved` : `none`,
     },
@@ -193,18 +222,34 @@ for (const site of SITES) {
       if (site === `unload-throw` && timing !== `current`) continue
       if (readiness === `loading` && timing === `retired-after-new-ready`)
         continue
-      histories.push({ site, timing, readiness })
+      histories.push({ site, timing, readiness, recovery: `none` })
+      if (timing !== `current` || !REMOTE_SITES.has(site)) continue
+      if (site !== `rotated-owner-load`)
+        histories.push({ site, timing, readiness, recovery: `other` })
+      if (REPEATED_SITES.has(site))
+        histories.push({ site, timing, readiness, recovery: `repeat` })
     }
   }
 }
 
 const reachStates = SITES.flatMap((site) =>
   [`current`, `retired`].map((timing) => `${site} failed, ${timing} run`),
-).filter(
-  (state) =>
-    state !== `cleanup-release failed, current run` &&
-    state !== `unload-throw failed, retired run`,
 )
+  .filter(
+    (state) =>
+      state !== `cleanup-release failed, current run` &&
+      state !== `unload-throw failed, retired run`,
+  )
+  .concat(
+    [...REPEATED_SITES].map(
+      (site) => `${site} failed, then its repeat succeeded`,
+    ),
+    [...REMOTE_SITES]
+      .filter(
+        (site) => site !== `cleanup-release` && site !== `rotated-owner-load`,
+      )
+      .map((site) => `${site} failed, then another request succeeded`),
+  )
 
 // ---------------------------------------------------------------------------
 // Production driver
@@ -324,7 +369,11 @@ function createSource(history: History, id: string) {
     return kind === `ensure` && isRefetch(options)
   })
   const unloadFailures: Array<ReturnType<typeof deferred<void>>> = []
-  const ownerLoads: Array<ReturnType<typeof deferred<void>>> = []
+  // Once the history rejects them, later owner loads succeed.
+  const ownerLoads = Object.assign(
+    [] as Array<ReturnType<typeof deferred<void>>>,
+    { closed: false },
+  )
   const runs: Array<Parameters<SyncConfig<Row, string>[`sync`]>[0]> = []
   const collection = createCollection(
     persistedCollectionOptions<Row, string>({
@@ -345,6 +394,7 @@ function createSource(history: History, id: string) {
             loadSubset: (options: LoadSubsetOptions) => {
               if (
                 !firstRun ||
+                ownerLoads.closed ||
                 site !== `rotated-owner-load` ||
                 !isRefetch(options)
               )
@@ -433,7 +483,7 @@ describe(`persisted sync problem oracle`, () => {
     histories.map(
       (history) =>
         [
-          `${history.site}, ${history.readiness}, ${history.timing}`,
+          `${history.site}, ${history.readiness}, ${history.timing}${history.recovery === `none` ? `` : `, ${history.recovery} succeeds`}`,
           history,
         ] as const,
     ),
@@ -507,6 +557,22 @@ describe(`persisted sync problem oracle`, () => {
         observe(collection, capture.uncaught),
         `${name}: after the failure`,
       ).toEqual(model.afterFailure)
+
+      // A later remote request succeeds: the next scoped recovery's repeat,
+      // or another subset's acquisition.
+      if (history.recovery === `repeat`) {
+        await runs[0]!.metadata!.persistence!.startScopedRecovery!().catch(
+          () => undefined,
+        )
+        await settle()
+        reach.reach(`${site} failed, then its repeat succeeded`)
+      } else if (history.recovery === `other`) {
+        void Promise.resolve(collection._sync.loadSubset({ limit: 2 })).catch(
+          () => undefined,
+        )
+        await settle()
+        reach.reach(`${site} failed, then another request succeeded`)
+      }
 
       // The new run becomes ready; the reload ends.
       if (history.timing === `retired-before-new-ready`) {

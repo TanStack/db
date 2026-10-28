@@ -11,6 +11,7 @@ import {
 import {
   BaseQueryBuilder,
   createLiveQueryObserver,
+  getLiveQueryStatusFlags,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
@@ -372,7 +373,10 @@ export function useLiveQuery(
     collection.value ? collection.value.status : (`disabled` as const),
   )
   const health = shallowRef<HealthNode | undefined>(undefined)
-  const isSyncError = ref(false)
+  // Every status flag comes from the shared rule; a disabled query is ready.
+  const flags = computed(() =>
+    getLiveQueryStatusFlags(status.value as CollectionStatus, health.value),
+  )
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -382,7 +386,6 @@ export function useLiveQuery(
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
     health.value = snapshot.health
-    isSyncError.value = snapshot.isSyncError
     internalData.value = snapshotRows(snapshot.data)
   }
 
@@ -405,7 +408,6 @@ export function useLiveQuery(
     if (!currentCollection) {
       status.value = `disabled` as const
       health.value = undefined
-      isSyncError.value = false
       return
     }
 
@@ -460,15 +462,15 @@ export function useLiveQuery(
     data,
     collection: computed(() => getPublicCollection(collection.value)),
     status: computed(() => status.value),
-    isLoading: computed(() => status.value === `loading`),
+    isLoading: computed(() => flags.value.isLoading),
     isReady: computed(
-      () => status.value === `ready` || status.value === `disabled`,
+      () => flags.value.isReady || status.value === `disabled`,
     ),
-    isIdle: computed(() => status.value === `idle`),
-    isLoadingError: computed(() => status.value === `error`),
-    isCrashed: computed(() => status.value === `crashed`),
-    isCleanedUp: computed(() => status.value === `cleaned-up`),
-    isSyncError: computed(() => isSyncError.value),
+    isIdle: computed(() => flags.value.isIdle),
+    isLoadingError: computed(() => flags.value.isLoadingError),
+    isCrashed: computed(() => flags.value.isCrashed),
+    isCleanedUp: computed(() => flags.value.isCleanedUp),
+    isSyncError: computed(() => flags.value.isSyncError),
     health: computed(() => health.value),
   }
 }

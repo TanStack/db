@@ -10,6 +10,7 @@ import {
   BaseQueryBuilder,
   configPool,
   createLiveQueryObserver,
+  getLiveQueryStatusFlags,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
@@ -209,7 +210,10 @@ export function injectLiveQuery(opts: any) {
     return value === `idle` && !collection() ? `disabled` : value
   })
   const health = signal<HealthNode | undefined>(undefined)
-  const isSyncError = signal(false)
+  // Every status flag comes from the shared rule; a disabled query is ready.
+  const flags = computed(() =>
+    getLiveQueryStatusFlags(status() as CollectionStatus, health()),
+  )
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -234,7 +238,6 @@ export function injectLiveQuery(opts: any) {
     const snapshot = observer.getSnapshot()
     statusValue.set(snapshot.status)
     health.set(snapshot.health)
-    isSyncError.set(snapshot.isSyncError)
   }
 
   let unsub: (() => void) | null = null
@@ -250,7 +253,6 @@ export function injectLiveQuery(opts: any) {
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
       health.set(undefined)
-      isSyncError.set(false)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -293,13 +295,13 @@ export function injectLiveQuery(opts: any) {
       getPublicCollection(collection()),
     ) as Signal<any>,
     status,
-    isLoading: computed(() => status() === `loading`),
-    isReady: computed(() => status() === `ready` || status() === `disabled`),
-    isIdle: computed(() => status() === `idle`),
-    isLoadingError: computed(() => status() === `error`),
-    isCrashed: computed(() => status() === `crashed`),
-    isCleanedUp: computed(() => status() === `cleaned-up`),
-    isSyncError,
+    isLoading: computed(() => flags().isLoading),
+    isReady: computed(() => flags().isReady || status() === `disabled`),
+    isIdle: computed(() => flags().isIdle),
+    isLoadingError: computed(() => flags().isLoadingError),
+    isCrashed: computed(() => flags().isCrashed),
+    isCleanedUp: computed(() => flags().isCleanedUp),
+    isSyncError: computed(() => flags().isSyncError),
     health,
   }
 }

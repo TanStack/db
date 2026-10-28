@@ -1243,6 +1243,72 @@ export function expectedCleanedRestartDemand(
 }
 
 /**
+ * # How often does a reload acquire a demand parked behind a failed first load?
+ *
+ * While an on-demand Collection shows a failed first load, a subscription's
+ * new demand parks: it is held, and no request reaches the adapter. A reload
+ * retires the failed sync run and replays the demand (ARCHITECTURE law 16);
+ * the new run's readiness restarts the detached demand; and a snapshot that
+ * the new run commits replaces the rows and replays the demand again. Core
+ * binds each acquisition to the current replay attempt ("Replay participants
+ * and failure"), and a replay attempt loads each demand it replays once. So
+ * every trigger that names the same attempt shares one acquisition: one
+ * `loadSubset` per attempt that starts work, and an `unloadSubset` only for
+ * an acquisition that a later attempt replaced.
+ *
+ * Histories (`newRun`), inside the new run's `sync()` unless named: it marks
+ * ready and commits nothing else; it marks ready and then commits a
+ * snapshot; it commits a snapshot and then marks ready; or it marks ready
+ * and commits a snapshot after the first load settled. A snapshot inside
+ * `sync()` supersedes the reload's replay before that replay starts any
+ * request, so readiness and the snapshot name one attempt. A later snapshot
+ * is a newer attempt: it replaces the settled acquisition and loads again.
+ *
+ * The model predicts the adapter's loads and unloads, the settlement of the
+ * parked request's `onLoadSubsetResult` promise, and the subscription's and
+ * the Collection's status. Rows, asynchronous failures, and a second reload
+ * are outside this account.
+ */
+export type ParkedReloadDemandCase = {
+  newRun:
+    | `ready`
+    | `ready-then-snapshot`
+    | `snapshot-then-ready`
+    | `ready-then-later-snapshot`
+}
+
+export const parkedReloadDemandCases: ReadonlyArray<ParkedReloadDemandCase> = (
+  [
+    `ready`,
+    `ready-then-snapshot`,
+    `snapshot-then-ready`,
+    `ready-then-later-snapshot`,
+  ] as const
+).map((newRun) => ({ newRun }))
+
+export function expectedParkedReloadDemand({
+  newRun,
+}: ParkedReloadDemandCase): {
+  loads: number
+  unloads: number
+  result: `fulfilled`
+  status: `ready`
+  collectionStatus: `ready`
+} {
+  // Attempts that start work: the reload's replay, which a snapshot inside
+  // `sync()` supersedes before it begins, and a later snapshot's replay.
+  const attempts = newRun === `ready-then-later-snapshot` ? 2 : 1
+  return {
+    loads: attempts,
+    // Each later attempt replaces the acquisition of the one before it.
+    unloads: attempts - 1,
+    result: `fulfilled`,
+    status: `ready`,
+    collectionStatus: `ready`,
+  }
+}
+
+/**
  * Publication deferral is outside acquisition ownership above. These commands
  * project only its sync-run boundary and later subscriber batches. The first
  * run's nested handles can outlive cleanup; the restarted run is independent.

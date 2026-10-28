@@ -469,12 +469,16 @@ export class CollectionSubscriber<
     // replayed: its success clears them, and its failure replaces them with
     // its own failures. The query then keeps its last snapshot, which no
     // longer updates: a request error, or a failed first load before
-    // readiness.
+    // readiness. Its failures count before the request errors it replaces
+    // leave, so a failure it lists again keeps its place and its `at` (law
+    // 17). Each request error it changes is still announced on its own (see
+    // the coverage map).
     const decide = (errors: Array<Error> = []) => {
-      this.demand.clearRequestErrors()
-      this.collectionConfigBuilder.settleReplayedRequests(this.sourceId)
       if (errors.length > 0)
         this.collectionConfigBuilder.failReplay(this.sourceId, errors)
+      else this.collectionConfigBuilder.settleReplayedRequests(this.sourceId)
+      this.collectionConfigBuilder.settleRootLoad(this.sourceId)
+      this.demand.clearRequestErrors()
     }
     return {
       start: (retired) => onStart?.(retired),

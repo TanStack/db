@@ -974,8 +974,10 @@ export class CollectionConfigBuilder<
     this.loadMoreFn = undefined
     // The query's own reload retries its data, not the window the app chose:
     // the new run starts from the settled window, and a pending move ends
-    // with the retired run. Cleanup discards the window.
-    if (this.liveQueryCollection?._lifecycle.reloading)
+    // with the retired run. Cleanup discards the window, also during the
+    // reload: it tears the run down before it ends the reload.
+    const lifecycle = this.liveQueryCollection?._lifecycle
+    if (lifecycle?.reloading && !lifecycle.hasStartedCleanup())
       this.currentWindow = this.settledWindow
     else {
       this.currentWindow = undefined
@@ -1192,12 +1194,11 @@ export class CollectionConfigBuilder<
         facadePublication?.prepare()
         if (writesRoot) {
           begin(snapshot ? { snapshot } : undefined)
-          // A snapshot replaces every row, so no earlier row exists for the
-          // batch it holds.
-          const replaces = config.collection._state.openTransactionReplaces()
           let lookup: ((key: string | number) => boolean) | undefined
           const hasSyncedKey = (key: string | number) => {
-            if (replaces) return false
+            // A snapshot replaces every row, so no earlier row exists for
+            // the batch it holds.
+            if (snapshot) return false
             lookup ??= config.collection._state.createSyncedKeyLookup()
             return lookup(key)
           }
@@ -1370,15 +1371,17 @@ export class CollectionConfigBuilder<
   private updateLiveQueryStatus(config: SyncMethods<TResult>) {
     // Don't update status if already in error
     if (this.fatalQueryError || !this.isResultComplete()) return
-    // A reload's run commits its complete result as its snapshot first.
+    // A reload's run commits its complete result as its snapshot first. The
+    // snapshot completes the reload, so a run that keeps its result private
+    // (after a failed window move or ordered load) does not mark ready.
     if (this.reloadSnapshotPending)
       this.currentSyncState?.flushPendingChanges?.()
-    config.markReady()
+    if (!this.reloadSnapshotPending) config.markReady()
   }
 
   /** Whether the current run's graph result is complete. */
   private isResultComplete(): boolean {
-    const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
+    const syncState = this.currentSyncState
     const allReady = this.allRequiredSourcesReady()
     const allDemandsSettled = [...this.activeDemands.values()].every(
       (demand) => demand.settled,
@@ -1386,14 +1389,18 @@ export class CollectionConfigBuilder<
     const isLoading = this.liveQueryCollection?.isLoadingSubset
     // Mark ready when:
     // 1. All subscriptions are set up (subscribedToAllCollections)
-    // 2. All source collections are ready
-    // 3. Every active route demand has settled
-    // 4. The live query collection is not loading subset data
-    // 5. No source reload's replay is still loading the demand again
+    // 2. The graph processed all its input: a source can announce its
+    //    readiness while its last batch still waits in this graph's
+    //    scheduled run, and that run marks ready when it ends
+    // 3. All source collections are ready
+    // 4. Every active route demand has settled
+    // 5. The live query collection is not loading subset data
+    // 6. No source reload's replay is still loading the demand again
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
     return (
-      subscribedToAll === true &&
+      syncState?.subscribedToAllCollections === true &&
+      !syncState.graph.pendingWork() &&
       allReady &&
       allDemandsSettled &&
       isLoading !== true &&

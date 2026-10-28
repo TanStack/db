@@ -353,14 +353,16 @@ export function trailBaseCollectionOptions<
           // A reload keeps the retired run's rows, and the pages update them.
           // The eager load lists every row, so a held row that it did not
           // list and that no change event touched is gone.
-          const gone = everyRow
-            ? [...collection._state.acceptedSyncedEntries()].filter(
-                ([key]) => !listed.has(key) && !eventSequenceByKey.has(key),
-              )
-            : []
+          // Only the gone keys are collected, since a write during the walk
+          // would change the entries it reads.
+          const gone: Array<TKey> = []
+          if (everyRow)
+            for (const [key] of collection._state.acceptedSyncedEntries())
+              if (!listed.has(key) && !eventSequenceByKey.has(key))
+                gone.push(key)
           if (gone.length > 0) {
             begin()
-            for (const [key] of gone) write({ type: `delete`, key })
+            for (const key of gone) write({ type: `delete`, key })
             const applied = commit()
             if (applied !== true) appliedPages.push(applied)
           }

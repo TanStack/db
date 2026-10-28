@@ -446,6 +446,9 @@ visible changes until the reload completes.
 - A live query's own reload keeps its rows and its window (the offset and
   limit it settled on) until its new run has a complete result, then shows
   that result in one change.
+- During a reload, `health` shows the new run's own problems as they happen:
+  a failure it reports shows at once, and its recovery clears the old
+  failure reason.
 
 On a live query, `reload()` reloads each of its sources that has an `error`,
 then the query itself if its own node has an `error`: its first load failed,
@@ -517,7 +520,7 @@ Only a local storage failure crashes a persisted Collection. A remote subset
 request that the persistence layer makes for the sync adapter can also fail:
 acquiring, releasing, refreshing, or reacquiring a subset through the
 coordinator. The source keeps syncing, so on a `ready` Collection the failure
-shows as `health.failureReason`, and the status and rows do not change. Before
+shows as `health.failureReason`, and the status and rows do not change. The next remote request that succeeds clears those failures. Before
 the first ready it is only logged, and a load that waited on the request
 rejects with its error. An `unloadSubset` that throws or rejects is reported
 uncaught, as it is without persistence. After `reload()`, a late failure of
@@ -600,11 +603,12 @@ A sync adapter reports failures with three calls:
 sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) => {
   let ready = false
   const stream = connect({
-    onData: (rows) => {
+    onData: (changes) => {
       // The run's first batch is all of its rows: a snapshot replaces
-      // the rows that a reload keeps.
+      // the rows that a reload keeps. Each later batch carries the
+      // stream's own change types, so a held row gets an update.
       begin(ready ? undefined : { snapshot: true })
-      rows.forEach((row) => write({ type: "insert", value: row }))
+      changes.forEach(({ type, value }) => write({ type, value }))
       commit()
       if (ready) reportHealthy()
       else markReady()

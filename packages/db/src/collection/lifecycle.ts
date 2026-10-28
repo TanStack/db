@@ -464,7 +464,8 @@ export class CollectionLifecycleManager<
    * The source synced successfully again. With no error it clears the
    * failure reason; with one it removes the failure whose cause is that
    * value, and the failure reason clears once none is left. With nothing to
-   * remove it does nothing.
+   * remove it does nothing. `undefined` is no error: it clears every
+   * failure, also one that `reportError(undefined)` listed.
    */
   public reportHealthy(error?: unknown): void {
     if (this.status === `crashed`) return
@@ -816,7 +817,9 @@ export class RequestErrors {
 
   /** Returns whether the problem changed. */
   fail(key: string, errors: Array<unknown>): boolean {
-    let changed = this.release(key)
+    // The request's failures count before its earlier ones leave, so a
+    // failure it lists again stays open: it keeps its place and its `at`.
+    let changed = false
     for (const error of errors) {
       const entry = this.open.get(error)
       if (entry) entry.requests++
@@ -825,6 +828,7 @@ export class RequestErrors {
         changed = true
       }
     }
+    changed = this.release(key) || changed
     this.failed.set(key, errors)
     return changed && this.show()
   }

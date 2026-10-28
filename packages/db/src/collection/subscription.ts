@@ -114,6 +114,8 @@ type SubsetAcquisitionRecord = {
   abortController?: AbortController
   removeRequestAbortListener?: () => void
   releaseAttempted?: true
+  // The replay attempt that started this acquisition.
+  attempt?: TruncateReplayAttempt
 }
 
 type SubsetDemand = {
@@ -168,6 +170,19 @@ function createReplayCompletion(): Deferred<void> {
 function cancelAcquisition(acquisition: SubsetAcquisitionRecord): void {
   acquisition.abortController?.abort()
   acquisition.removeRequestAbortListener?.()
+}
+
+// An abort before the load settles ends it. Once the load settles, the
+// listener goes, so it keeps nothing alive for the acquisition's lifetime
+// (law 13).
+function onAbortBeforeSettled(
+  signal: AbortSignal | undefined,
+  result: Promise<unknown>,
+  onAbort: () => void,
+): void {
+  signal?.addEventListener(`abort`, onAbort, { once: true })
+  const settled = () => signal?.removeEventListener(`abort`, onAbort)
+  void result.then(settled, settled)
 }
 
 export class CollectionSubscription
@@ -583,6 +598,7 @@ export class CollectionSubscription
     if (!isCurrent() || demand.requestOptions.signal?.aborted) return
 
     const next = this.createSubsetAcquisitionRecord(demand)
+    next.attempt = attempt
     demand.acquisition = next
     demand.acquisitionState = `starting`
     const result = this.collection._sync.loadSubset(next.options)
@@ -662,39 +678,27 @@ export class CollectionSubscription
     const pending = { demand, attempt }
     attempt.pendingCount++
     replayState.pending.add(pending)
-    let settled = false
     const settle = () => this.settleTruncateReplay(replayState, pending)
     // After the step that aborted it, as a settlement would be.
-    signal?.addEventListener(
-      `abort`,
-      () => {
-        if (!settled && replayState.currentAttempt === attempt)
-          replayState.unloaded.add(demand)
-        queueMicrotask(settle)
-      },
-      { once: true },
-    )
-    void result.then(
-      () => {
-        settled = true
-        settle()
-      },
-      (error: unknown) => {
-        settled = true
-        if (
-          !signal?.aborted &&
-          this.truncateReplayState === replayState &&
-          replayState.currentAttempt === attempt &&
-          this.isSyncRunGenerationCurrent(replayState.syncRunGeneration) &&
-          this.subsetDemands.includes(demand)
-        ) {
-          const normalized = this.normalizeLoadSubsetPromiseError(result, error)
-          replayState.failures.set(demand, normalized)
-          replayState.failed = true
-        }
-        settle()
-      },
-    )
+    onAbortBeforeSettled(signal, result, () => {
+      if (replayState.currentAttempt === attempt)
+        replayState.unloaded.add(demand)
+      queueMicrotask(settle)
+    })
+    void result.then(settle, (error: unknown) => {
+      if (
+        !signal?.aborted &&
+        this.truncateReplayState === replayState &&
+        replayState.currentAttempt === attempt &&
+        this.isSyncRunGenerationCurrent(replayState.syncRunGeneration) &&
+        this.subsetDemands.includes(demand)
+      ) {
+        const normalized = this.normalizeLoadSubsetPromiseError(result, error)
+        replayState.failures.set(demand, normalized)
+        replayState.failed = true
+      }
+      settle()
+    })
     return pending
   }
 
@@ -918,7 +922,14 @@ export class CollectionSubscription
     demands: ReadonlyArray<SubsetDemand>,
   ): void {
     for (const demand of demands) {
-      if (!this.subsetDemands.includes(demand)) continue
+      // A demand this attempt already started, as a restart that joined it
+      // before its own setup ran, is loading for it: one attempt loads each
+      // demand once.
+      if (
+        !this.subsetDemands.includes(demand) ||
+        demand.acquisition.attempt === attempt
+      )
+        continue
       this.startTruncateReplayDemand(replayState, attempt, demand)
       if (
         this.truncateReplayState !== replayState ||
@@ -1030,9 +1041,10 @@ export class CollectionSubscription
     }
     // An abort ends the load: after the step that aborted it, it holds
     // readiness no more.
-    options.signal?.addEventListener(`abort`, () => queueMicrotask(finish), {
-      once: true,
-    })
+    if (trackStatus)
+      onAbortBeforeSettled(options.signal, syncResult, () =>
+        queueMicrotask(finish),
+      )
 
     void syncResult.then(finish, (error: unknown) => {
       if (

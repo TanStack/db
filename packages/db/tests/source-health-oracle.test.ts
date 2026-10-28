@@ -165,7 +165,10 @@
  *
  * After every step the driver compares, with the model: the query's status,
  * each Collection's rows and tags, the baseline a diffing adapter reads, the
- * query's row count while ready, whether the Effect ended and how often it
+ * query's row count while ready and at the `status:change` that made it
+ * ready in the step (law 9: it becomes ready, also at the end of its own
+ * reload, with the complete result of the step's batch), whether the
+ * Effect ended and how often it
  * reported a source error, the full projected health tree, whether the step
  * threw, and which ready callback errors were reported uncaught. Each problem in the tree projects with its listed failures:
  * their messages, their order, and, for a cause the driver reported, which
@@ -1802,6 +1805,8 @@ const historyReachStates = [
   `healthy removes one failure of several`,
   `healthy removes the last listed failure`,
   `healthy names an unlisted value while failures are listed`,
+  `an inner query's ready batch makes the query ready`,
+  `an inner query's ready batch completes the query's own reload`,
 ] as const
 type HistoryReach = ReturnType<
   typeof createOracleReach<(typeof historyReachStates)[number]>
@@ -1832,12 +1837,14 @@ async function runHistory(
         step.kind !== `cleanup-during-reload`,
     )
   }
-  // Each event, with the status announced so far and the tree read then.
+  // Each event, with the status announced so far, the tree read then, and
+  // the query's row count then.
   type Event = {
     kind: `status` | `health`
     announced: string
     status: string
     tree: ExpectedNode
+    size: number
   }
   let events: Array<Event> = []
   let announced: string = query.status
@@ -1928,6 +1935,7 @@ async function runHistory(
         announced,
         status: tree.status,
         tree: project(tree),
+        size: size(),
       })
     }
     const stopStatus = query.on(`status:change`, () => record(`status`))
@@ -2099,6 +2107,28 @@ async function runHistory(
           cleanedDuringReload[step.source]
         )
           reach.reach(`fresh run commits after a cleanup during a reload`)
+        // A's truncate commit makes A ready and publishes its batch before
+        // A's status listeners run. The inner query processes that batch in
+        // the same publication and becomes ready, so the outer query learns
+        // of its last input's readiness while that batch still waits in its
+        // own graph.
+        const { query } = model
+        if (
+          shape === `nested` &&
+          step.kind === `commit` &&
+          step.source === `A` &&
+          source.gate === `loading` &&
+          source.open?.truncate &&
+          source.open.marksReady &&
+          model.sources.B.gate === `ready`
+        ) {
+          if (query.gate === `loading`)
+            reach.reach(`an inner query's ready batch makes the query ready`)
+          if (query.gate === `error` && query.reloading)
+            reach.reach(
+              `an inner query's ready batch completes the query's own reload`,
+            )
+        }
       }
       // Any other cleanup of a source discards what the last one left.
       if (step.kind === `restart`) {
@@ -2436,6 +2466,18 @@ async function runHistory(
         expect(size(), `${label}: query rows`).toBe(
           expectedQuerySize(shape, model),
         )
+        // Law 9: the query becomes ready with its complete graph result,
+        // also when its own reload completes. A step is one source batch, so
+        // the rows the query shows when it announces `ready` are the rows
+        // that batch leaves: a query that marks ready, or commits its
+        // reload's snapshot, before its graph processed the batch shows
+        // fewer rows then and the rest after.
+        if (step.kind !== `restart`)
+          for (const event of events)
+            if (event.kind === `status` && event.status === `ready`)
+              expect(event.size, `${label}: query rows when ready`).toBe(
+                expectedQuerySize(shape, model),
+              )
       }
       // The Effect ends once, through onSourceError. One that ends as it is
       // created, over a stopped source, leaves nothing on that source.
@@ -3256,9 +3298,39 @@ describe(`source failure and health oracle`, () => {
         .map(([kind, source]) => on(kind, source)),
     },
   )
+  // A's truncate commit that makes A ready while the nested shape's outer
+  // query waits for its inner query: once in the query's first load, and
+  // again, after a restart, in its own reload of a failed first load (B
+  // failed it). A holds row 1 before the truncate and rows 2 and 3 after, so
+  // a query that shows the graph result from before the batch when it
+  // becomes ready shows another row count.
+  const innerReadyBatch: ReadonlyArray<Step> = [
+    { kind: `write`, source: `A`, key: 1 },
+    { kind: `commit`, source: `A` },
+    on(`mark-ready`, `B`),
+    { kind: `truncate`, source: `A` },
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `write`, source: `A`, key: 3 },
+    { kind: `commit`, source: `A` },
+    restart,
+    { kind: `write`, source: `A`, key: 1 },
+    { kind: `commit`, source: `A` },
+    on(`fail`, `B`),
+    { kind: `reload-query` },
+    on(`mark-ready`, `B`),
+    { kind: `truncate`, source: `A` },
+    { kind: `write`, source: `A`, key: 2 },
+    { kind: `write`, source: `A`, key: 3 },
+    { kind: `commit`, source: `A` },
+  ]
+  // A prefix whose reach state exists in one shape only runs in that shape.
+  const prefixShapes = new Map<ReadonlyArray<Step>, Shape>([
+    [innerReadyBatch, `nested`],
+  ])
   // Prefixes that enter a declared reach state that random steps alone rarely
   // reach at the base run count; random steps follow each one.
   const reachPrefixes: ReadonlyArray<ReadonlyArray<Step>> = [
+    innerReadyBatch,
     // A reload's snapshot inserts a row the Collection keeps. Before it, a
     // failure reason's frame grows and clears with failures listed, and the
     // reload's new run reports while the retired run's frame shows. The
@@ -3355,19 +3427,22 @@ describe(`source failure and health oracle`, () => {
   let historiesRan = false
   fcTest.prop(
     [
-      fc.constantFrom(...shapes),
       fc
         .tuple(
+          fc.constantFrom(...shapes),
           fc.option(fc.constantFrom(...reachPrefixes), { freq: 6 }),
           fc.array(stepArb, { maxLength: 12 }),
         )
-        .map(([prefix, rest]): Array<Step> => [...(prefix ?? []), ...rest]),
+        .map(([shape, prefix, rest]): [Shape, Array<Step>] => [
+          (prefix && prefixShapes.get(prefix)) ?? shape,
+          [...(prefix ?? []), ...rest],
+        ]),
       fc.boolean(),
     ],
     oraclePropertyOptions(60, `source-health.history`),
   )(
     `generated histories refine the model`,
-    (shape, steps, directSubscribers) => {
+    ([shape, steps], directSubscribers) => {
       historiesRan = true
       historyReach.beginHistory()
       return withDeadline(
@@ -5223,6 +5298,7 @@ type Demand = {
 type AppliedRule =
   | `load fails after joining a failed replay`
   | `replay verdict replaces a single load's request error`
+  | `replay verdict lists an open failure again`
 
 // `serial` numbers the source's reported problems and written rows.
 // `gone`: demand keys whose row the provider deleted with no stream event
@@ -5401,6 +5477,9 @@ function settleReplay(model: OnDemandModel): void {
     model.gate = `error`
     return
   }
+  // A failure the node still shows stays open: the verdict that lists it
+  // again leaves it as it was, in its place and with its `at` (law 17).
+  const stillShown = new Set(expectedRequestErrors(demand))
   demand.replayFailed = true
   // The attempt's failure is reported once.
   if (demand.replayAttemptFailed) return
@@ -5409,7 +5488,9 @@ function settleReplay(model: OnDemandModel): void {
     demand.applied.add(`replay verdict replaces a single load's request error`)
   demand.failed.clear()
   demand.replayErrors = failures
-  for (const serial of failures) demand.shownAt.set(serial, ++demand.clock)
+  for (const serial of failures)
+    if (!stillShown.has(serial)) demand.shownAt.set(serial, ++demand.clock)
+    else demand.applied.add(`replay verdict lists an open failure again`)
 }
 
 // A truncate or a source reload starts a replay of the held demand. It
@@ -5640,6 +5721,71 @@ function expectRequestErrors(
   )
 }
 
+// Law 17 at every `health:change` of the query, not only at a step's end.
+// "Every change to the tree is announced by `health:change`", and a request
+// error lists "the request failures still open". So:
+//
+// - Every announcement while the query is ready announces a change: it never
+//   repeats the tree that the one before it showed, or that the query showed
+//   before the step.
+// - A failure that stays open keeps its `at`. One the model did not show
+//   anew (its `shownAt` did not change) has the `at` the node showed for it
+//   before, also when a request or a verdict lists it again.
+//
+// The driver makes `Date.now()` strictly increasing for the history, so a
+// failure described anew always gets a new `at`.
+function watchRequestErrorAnnouncements(query: Collection<any, any>) {
+  const realNow = Date.now
+  let last = 0
+  Date.now = () => (last = Math.max(realNow(), last + 1))
+  let announced: Array<HealthNode> = []
+  const stopListening = query.on(`health:change`, () =>
+    announced.push(query.health),
+  )
+  let before = query.health
+  const seen = new Map<number, { at: number; shownAt: number | undefined }>()
+  return {
+    begin: () => {
+      before = query.health
+      announced = []
+    },
+    // `frame` and `shownAt` are the model's at the step's end; check only a
+    // ready query, whose node `expectRequestErrors` compared with `frame`.
+    check: (
+      label: string,
+      frame: ReadonlyArray<number> | null,
+      shownAt: ReadonlyMap<number, number>,
+    ) => {
+      let previous = JSON.stringify(before)
+      announced.forEach((tree, index) => {
+        const facts = JSON.stringify(tree)
+        // Checked while the query is ready: see the coverage map for a
+        // crash, which the query announces twice.
+        if (tree.status === `ready`)
+          expect(facts, `${label}: announcement ${index} is a change`).not.toBe(
+            previous,
+          )
+        previous = facts
+      })
+      if (!frame) return
+      const errors = query.health.error?.errors ?? []
+      frame.forEach((serial, index) => {
+        const at = errors[index]!.at
+        const prior = seen.get(serial)
+        if (prior && prior.shownAt === shownAt.get(serial))
+          expect(at, `${label}: request error ${index} keeps its at`).toBe(
+            prior.at,
+          )
+        seen.set(serial, { at, shownAt: shownAt.get(serial) })
+      })
+    },
+    stop: () => {
+      stopListening()
+      Date.now = realNow
+    },
+  }
+}
+
 // The coverage law (laws 9 and 10): once the query is ready, every key it
 // holds is covered by a load the adapter still serves, by its rows, by a
 // replay failure awaiting judgment, or by the request error the query shows
@@ -5725,8 +5871,21 @@ function expectHeldDemandCovered(
  * drops the retired run's request errors and keeps what the new run
  * reported: its window load's failure, if it failed. The new run is a
  * fresh demand: it requests the window again, and the retired run's loads
- * decide nothing. While the query's own reload is in flight, the grammar
- * issues only settle steps and crashes (a limit).
+ * decide nothing. A window move during the reload is the new run's: a
+ * move whose load fails keeps the run's graph result private until the
+ * app's next move (Atomic window publication), so that result is not
+ * complete, and the reload keeps its rows, `reloading`, and its promise
+ * until a later move's result is. A failure the new run reports shows on
+ * the node at once, as a reload's new run that reports a failure reason
+ * starts its own frame (maintainer decision, in the main grammar). While
+ * the query's own reload is in flight, the grammar issues only settle
+ * steps, window moves, restarts, and crashes (a limit).
+ *
+ * `restart` cleans up the query and preloads it again; the source keeps
+ * its rows. Cleanup discards the window and the query's own reload in
+ * flight (law 14: cleanup discards all state), so the new lifetime is a
+ * first load of the initial window, also after a cleanup during the
+ * query's own reload.
  *
  * The window projection keeps the window offset, the window the query shows,
  * a window move that waits for a replay, and the query's own reload. The comparison checks, after
@@ -5742,14 +5901,18 @@ type WindowStep =
   | `settle-aborted-ok`
   | `reload`
   | `reload-query`
+  | `restart`
   | `report`
   | `healthy`
   | `fail`
   | `crash`
 
 // The window projection over the shared demand model.
-// `selfReload`: the query's own reload is in flight; `shown` is the request
-// error frame its node keeps until the new run's result is complete.
+// `selfReload`: the query's own reload is in flight. `shown` is the request
+// error frame its node keeps until the new run reports a failure or its
+// result is complete. `moved`: a window move of the new run waits for its
+// load. `moveFailed`: such a move's load failed, so the result stays private
+// until the next move.
 type WindowModel = OnDemandModel & {
   offset: number
   // The window whose load last succeeded; the query shows it.
@@ -5760,7 +5923,20 @@ type WindowModel = OnDemandModel & {
   // replay instead, so the replay loads it.
   moveWaitsForReplay: boolean
   replayedOffset: number
-  selfReload?: { shown: Array<number> }
+  selfReload?: { shown?: Array<number>; moved: boolean; moveFailed: boolean }
+}
+
+// A new sync run of the query holds the same demand afresh: the retired
+// run's loads, failures, and replays decide nothing for it. The serials and
+// the clock continue, so failures stay distinguishable.
+function freshQueryDemand(demand: Demand): Demand {
+  return {
+    ...freshOnDemandModel(demand.held).demand,
+    clock: demand.clock,
+    lastSerial: demand.lastSerial,
+    shownAt: demand.shownAt,
+    failedAt: demand.failedAt,
+  }
 }
 
 // Whether `reload-query` reloads only the query itself: it is ready and shows
@@ -5791,6 +5967,9 @@ function applyWindowStep(model: WindowModel, step: WindowStep): void {
         model.moveWaitsForReplay = true
       }
       model.offset += 2
+      // A move ends a failed move's privacy; its own load now decides.
+      if (model.selfReload)
+        Object.assign(model.selfReload, { moved: true, moveFailed: false })
       return
     // The driver settles loads and reports each outcome.
     case `settle-ok`:
@@ -5815,24 +5994,33 @@ function applyWindowStep(model: WindowModel, step: WindowStep): void {
     }
     case `reload-query`: {
       if (!reloadsOnlyQuery(model)) return
-      // The node keeps what it shows. The new run's demand is fresh: the
-      // retired run's loads, failures, and replays decide nothing for it.
-      model.selfReload = { shown: expectedRequestErrors(demand) }
+      // The node keeps what it shows. The new run's demand is fresh.
+      model.selfReload = {
+        shown: expectedRequestErrors(demand),
+        moved: false,
+        moveFailed: false,
+      }
       // The retired run ends a window move that waits for a replay, as a
       // source reload does (law 14: retiring the run rejects its replay
       // barrier): the window returns to the one before that move.
       if (model.moveWaitsForReplay) model.offset = model.replayedOffset
-      const fresh = freshOnDemandModel(demand.held).demand
-      model.demand = {
-        ...fresh,
-        clock: demand.clock,
-        lastSerial: demand.lastSerial,
-        shownAt: demand.shownAt,
-        failedAt: demand.failedAt,
-      }
+      model.demand = freshQueryDemand(demand)
       model.moveWaitsForReplay = false
       return
     }
+    case `restart`:
+      // Cleanup discards the query's state, its own reload in flight
+      // included; the new lifetime's first load requests the initial window.
+      Object.assign(model, {
+        gate: `loading`,
+        demand: freshQueryDemand(demand),
+        offset: 0,
+        shown: 0,
+        moveWaitsForReplay: false,
+        replayedOffset: 0,
+        selfReload: undefined,
+      })
+      return
     default:
       applySourceStep(model, source, `source`, { kind: step })
   }
@@ -5849,10 +6037,24 @@ function settleWindow(
   settled: number,
   inFlight: number,
 ): void {
-  // The query's own reload completes when its new run's load settles: that
-  // result is complete, and it is the run's snapshot.
-  if (model.selfReload && settled > 0 && inFlight === 0)
-    model.selfReload = undefined
+  const reload = model.selfReload
+  if (reload) {
+    // A move of the new run whose load failed keeps the run's result
+    // private until the next move.
+    if (step === `settle-fail` && settled > 0 && reload.moved)
+      reload.moveFailed = true
+    // A failure the new run reports replaces the frame the node kept.
+    if (expectedRequestErrors(model.demand).length > 0) reload.shown = undefined
+    // The query's own reload completes when its new run's result is
+    // complete: its loads settled, or its move needed none, and no failed
+    // move keeps it private. That result is the run's snapshot.
+    if (
+      inFlight === 0 &&
+      (settled > 0 || step === `window`) &&
+      !reload.moveFailed
+    )
+      model.selfReload = undefined
+  }
   if ((step === `settle-ok` || step === `settle-fail`) && settled > 0)
     model.moveWaitsForReplay = false
   if (step === `settle-ok` && settled > 0) model.shown = model.offset
@@ -5912,6 +6114,14 @@ const demandReachStates = [
   `aborted load rejects beside a pending load after a request error`,
   `aborted load succeeds beside a pending load after a request error`,
   `query's own reload with a request error`,
+  // A window move of the new run fails while the query's own reload waits:
+  // the history that separates "the reload completes with its snapshot"
+  // from completing it at the run's readiness without one.
+  `failed window move during the query's own reload`,
+  // Cleanup while the query's own reload is in flight, then a fresh start:
+  // the history that separates "cleanup discards the window" from keeping
+  // it because a reload was in flight when the run retired.
+  `cleanup during the query's own reload`,
 ] as const
 type DemandReach = ReturnType<
   typeof createOracleReach<(typeof demandReachStates)[number]>
@@ -6038,29 +6248,43 @@ async function runDemandHistory(
   const consoleError = console.error
   console.error = () => {}
   let watcher: ReturnType<typeof watchDirectly> | undefined
+  let watch: ReturnType<typeof watchRequestErrorAnnouncements> | undefined
+  // The frame the query's node shows: during its own reload, the one it
+  // keeps until the reload completes.
+  const shownFrame = () =>
+    model.selfReload?.shown ?? expectedRequestErrors(model.demand)
   try {
     void query.preload().catch(() => undefined)
     await flushPromises()
     if (directSubscriber) watcher = watchDirectly(source, boundary)
     report(false)
     deriveDemandGate(model)
+    watch = watchRequestErrorAnnouncements(query)
     // The query's rows when its own reload started: it shows them until the
     // reload completes.
     let rowsAtSelfReload: Array<number> = []
+    // The promise of the query's own reload is still pending.
+    let reloadPending = false
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${step}`
       if (
         model.selfReload &&
         step !== `settle-ok` &&
         step !== `settle-fail` &&
+        step !== `window` &&
+        step !== `restart` &&
         step !== `crash`
       )
         continue
+      watch.begin()
       const selfReloads = step === `reload-query` && reloadsOnlyQuery(model)
       if (selfReloads) {
         reach?.reach(`query's own reload with a request error`)
         rowsAtSelfReload = query.toArray.map((row) => row.id)
       }
+      if (step === `restart` && model.selfReload)
+        reach?.reach(`cleanup during the query's own reload`)
+      const restarts = step === `restart` && model.gate !== `crashed`
       applyWindowStep(model, step)
       if (model.moveWaitsForReplay)
         reach?.reach(`window move waits for a replay`)
@@ -6101,7 +6325,16 @@ async function runDemandHistory(
       } else if (step === `reload`) {
         void source.reload().catch(() => undefined)
       } else if (step === `reload-query`) {
-        if (selfReloads) void query.reload().catch(() => undefined)
+        if (selfReloads) {
+          reloadPending = true
+          const settles = () => (reloadPending = false)
+          query.reload().then(settles, settles)
+        }
+      } else if (step === `restart`) {
+        if (restarts) {
+          await query.cleanup()
+          void query.preload().catch(() => undefined)
+        }
       } else if (step === `crash`) {
         source._lifecycle.crash(new Error(`source crashed`))
       } else {
@@ -6131,7 +6364,18 @@ async function runDemandHistory(
         expect(query.health.reloading, `${label}: query reloading`).toBe(
           model.selfReload !== undefined,
         )
+        // Its promise settles when it completes, and not before.
+        expect(reloadPending, `${label}: query reload pending`).toBe(
+          model.selfReload !== undefined,
+        )
       }
+      if (model.selfReload?.moveFailed)
+        reach?.reach(`failed window move during the query's own reload`)
+      watch.check(
+        label,
+        model.gate === `ready` ? shownFrame() : null,
+        model.demand.shownAt,
+      )
       if (model.gate === `ready` && model.selfReload)
         expect(
           query.toArray.map((row) => row.id),
@@ -6180,6 +6424,7 @@ async function runDemandHistory(
     }
   } finally {
     console.error = consoleError
+    watch?.stop()
     watcher?.stop()
     for (const { deferred } of loads.splice(0)) deferred.resolve()
     await query.cleanup()
@@ -6326,6 +6571,31 @@ describe(`on-demand demand grammar`, () => {
     `reload-query`,
     `settle-fail`,
   ]
+  // A move of the new run fails: the reload waits, with the kept rows, for
+  // the app's next move, whose load completes it.
+  named[
+    `a failed window move keeps the query's own reload until a later move loads`
+  ] = [
+    `settle-ok`,
+    `window`,
+    `settle-fail`,
+    `reload-query`,
+    `window`,
+    `settle-fail`,
+    `window`,
+    `settle-ok`,
+  ]
+  // Cleanup during the query's own reload discards the window it kept.
+  named[`a cleanup during the query's own reload discards its window`] = [
+    `settle-ok`,
+    `window`,
+    `settle-ok`,
+    `window`,
+    `settle-fail`,
+    `reload-query`,
+    `restart`,
+    `settle-ok`,
+  ]
   for (const [name, steps] of Object.entries(named))
     it(name, () => runDemandHistory(steps))
 
@@ -6337,6 +6607,7 @@ describe(`on-demand demand grammar`, () => {
     `settle-aborted-ok`,
     `reload`,
     `reload-query`,
+    `restart`,
     `report`,
     `healthy`,
     `fail`,
@@ -6376,6 +6647,25 @@ describe(`on-demand demand grammar`, () => {
     ],
     // A request error, then the query's own reload.
     [`settle-ok`, `window`, `settle-fail`, `reload-query`],
+    // The query's own reload, then a failed move of its new run.
+    [
+      `settle-ok`,
+      `window`,
+      `settle-fail`,
+      `reload-query`,
+      `window`,
+      `settle-fail`,
+    ],
+    // A moved window, the query's own reload, and a cleanup during it.
+    [
+      `settle-ok`,
+      `window`,
+      `settle-ok`,
+      `window`,
+      `settle-fail`,
+      `reload-query`,
+      `restart`,
+    ],
   ]
   fcTest.prop(
     [
@@ -6588,6 +6878,7 @@ const lazyReachStates = [
   `replay verdict replaces a single load's request error`,
   `failed replay lists several failed loads`,
   `reload keeps a row the provider deleted`,
+  `replay verdict lists an open failure again`,
 ] as const
 type LazyReach = ReturnType<
   typeof createOracleReach<(typeof lazyReachStates)[number]>
@@ -6853,6 +7144,7 @@ async function runLazyHistory(
     }
   }
   let watcher: ReturnType<typeof watchDirectly> | undefined
+  let watch: ReturnType<typeof watchRequestErrorAnnouncements> | undefined
   // An Effect over the same lazy join, with its delivered rows by key.
   const effectRows = new Map<
     string | number,
@@ -6980,8 +7272,10 @@ async function runLazyHistory(
     }
     let announcements = 0
     query.on(`health:change`, () => announcements++)
+    watch = watchRequestErrorAnnouncements(query)
     for (const [index, step] of steps.entries()) {
       const label = `step ${index} ${JSON.stringify(step)}`
+      watch.begin()
       // A demand change that leaves the projected tree as it was keeps the
       // tree's identity and announces nothing.
       const treeBefore = query.health
@@ -7170,6 +7464,11 @@ async function runLazyHistory(
           reach?.reach(`failed replay lists several failed loads`)
         expectRequestErrors(query.health, frame, causes, label)
       }
+      watch.check(
+        label,
+        model.gate === `ready` ? expectedRequestErrors(demand) : null,
+        demand.shownAt,
+      )
       // After a failed replay the query keeps its last complete snapshot
       // private, which the model does not track.
       // Law 9: while a replay is open, its replacement stays private, so the
@@ -7204,9 +7503,13 @@ async function runLazyHistory(
           ).toEqual([...rows].sort((a, b) => a[0] - b[0]))
       }
     }
+    // The ending's cleanup and fresh start are outside the announcement
+    // checks; restore the clock first.
+    watch.stop()
     if (ending) await endWithCleanupDuringReload(ending)
   } finally {
     console.error = consoleError
+    watch?.stop()
     watcher?.stop()
     await effect?.dispose()
     for (const { deferred } of loads.splice(0)) deferred.resolve()
@@ -8198,6 +8501,22 @@ describe(`lazy join demand grammar`, () => {
     holdChildReady?: boolean
   }> = [
     { steps: [{ kind: `reload` }, { kind: `truncate` }], holdChildReady: true },
+    // A failed replay, then the child's restart: a parked demand joins the
+    // failed replay, and the verdict after its release lists the replay's
+    // open failure again.
+    {
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `child-ready` },
+        { kind: `unparent`, key: 2 },
+      ],
+      holdChildReady: true,
+    },
     // A reload from inside the adapter's loadSubset, and a reload that
     // keeps a row the provider deleted.
     {
@@ -9006,7 +9325,13 @@ describe(`include nodes`, () => {
  * compares the shown cause and the listed causes after every step, plus
  * whether a report or a settle changed the problem. `fail-shared` fails an
  * issuer with the cause another issuer still fails with; `fail-several`
- * fails an issuer with two new causes, as a failed replay does.
+ * fails an issuer with two new causes, as a failed replay does;
+ * `fail-again` fails an issuer again with every cause it still fails with
+ * and one new cause, as a replay's later verdict lists the failures of the
+ * attempt it failed before. A cause still failing is the same open failure:
+ * the issuer that lists it again leaves it in its place (law 17), so a
+ * cause's order is the order of its first failure among the failures open
+ * before the step.
  */
 describe(`request error bookkeeping`, () => {
   const key = fc.constantFrom(`a`, `b`, `c`)
@@ -9014,6 +9339,7 @@ describe(`request error bookkeeping`, () => {
     fc.record({ kind: fc.constant(`fail` as const), key }),
     fc.record({ kind: fc.constant(`fail-shared` as const), key }),
     fc.record({ kind: fc.constant(`fail-several` as const), key }),
+    fc.record({ kind: fc.constant(`fail-again` as const), key }),
     fc.record({ kind: fc.constant(`settle` as const), key }),
   )
   fcTest.prop(
@@ -9038,10 +9364,13 @@ describe(`request error bookkeeping`, () => {
       for (const { kind, key: issuer } of steps) {
         const before = listed()
         const shownBefore = tracker.problem
+        const open = [...failing]
+        const own = failing
+          .filter((entry) => entry.key === issuer)
+          .map(({ cause }) => cause)
         for (let index = failing.length - 1; index >= 0; index--)
           if (failing[index]!.key === issuer) failing.splice(index, 1)
-        let changed: boolean
-        if (kind === `settle`) changed = tracker.settle(issuer)
+        if (kind === `settle`) tracker.settle(issuer)
         else {
           const causes =
             kind === `fail-several`
@@ -9049,20 +9378,24 @@ describe(`request error bookkeeping`, () => {
                   new Error(`${issuer} failed`),
                   new Error(`${issuer} failed again`),
                 ]
-              : [
-                  (kind === `fail-shared` ? failing[0]?.cause : undefined) ??
-                    new Error(`${issuer} failed`),
-                ]
+              : kind === `fail-again`
+                ? [...own, new Error(`${issuer} failed again`)]
+                : [
+                    (kind === `fail-shared` ? failing[0]?.cause : undefined) ??
+                      new Error(`${issuer} failed`),
+                  ]
           for (const cause of causes)
             failing.push({
               key: issuer,
               cause,
               order:
-                failing.find((entry) => entry.cause === cause)?.order ??
+                open.find((entry) => entry.cause === cause)?.order ??
                 ++failures,
             })
-          changed = tracker.fail(issuer, causes)
+          tracker.fail(issuer, causes)
         }
+        // A change makes the problem a new object.
+        const changed = tracker.problem !== shownBefore
         const after = listed()
         expect(changed, `${kind} ${issuer} reports a change`).toBe(
           !same(before, after),

@@ -865,12 +865,6 @@ export class CollectionStateManager<
     )
   }
 
-  /** Whether the open sync transaction replaces every synced row. */
-  openTransactionReplaces(): boolean {
-    const open = this.pendingSyncedTransactions.at(-1)
-    return open?.committed === false && open.truncate === true
-  }
-
   /**
    * Every synced row once every accepted sync transaction applies: the
    * baseline a diffing adapter writes against, also during a reload. Inside

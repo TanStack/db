@@ -439,6 +439,99 @@ describe(`Sync Streams`, () => {
     }
   })
 
+  // A reload's load of every row is one snapshot transaction across its
+  // batches. When a later batch fails, that transaction is canceled, so the
+  // failed reload leaves the kept rows, none of its partial batch writes,
+  // and no open transaction that later writes would queue behind; the next
+  // reload ends with the table. Batch size 2 makes the second batch fail
+  // after the first wrote. Hostile mutant: leave the snapshot open on throw.
+  it(`eager mode: a reload whose later batch fails keeps the rows and the next reload ends with the table`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const createDiffTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+    let failSecondBatch = false
+    vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation((options) =>
+      createDiffTrigger({
+        ...options,
+        hooks: {
+          beforeCreate: (context) => {
+            let batches = 0
+            const getAll: typeof context.getAll = (...args) =>
+              failSecondBatch && ++batches === 2
+                ? Promise.reject(new Error(`batch failed`))
+                : context.getAll(...args)
+            return options.hooks!.beforeCreate!(
+              new Proxy(context, {
+                get: (target, property, receiver) =>
+                  property === `getAll`
+                    ? getAll
+                    : Reflect.get(target, property, receiver),
+              }),
+            )
+          },
+        },
+      }),
+    )
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncBatchSize: 2,
+      }),
+    )
+    const rows = () =>
+      new Map(collection.toArray.map((row) => [row.id, row.name]))
+    const table = async () =>
+      new Map(
+        (
+          await db.getAll<{ id: string; name: string }>(
+            `SELECT id, name FROM products`,
+          )
+        ).map((row) => [row.id, row.name]),
+      )
+    try {
+      await collection.preload()
+      const before = rows()
+      await db.execute(`UPDATE products SET name = 'Edited' WHERE name = ?`, [
+        `Product A`,
+      ])
+      failSecondBatch = true
+      await collection.reload().catch(() => undefined)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(rows(), `the failed reload keeps the rows`).toEqual(before)
+      // The failed run stays current, so its open transaction would stay at
+      // the tail of the queue. No public read sees it yet, so the witness
+      // reads core's accepted-row baseline, which a diffing adapter and the
+      // live-query facade write against.
+      expect(
+        collection._state.hasOpenSyncTransaction(),
+        `no transaction is left open`,
+      ).toBe(false)
+      expect(
+        new Map(
+          [...collection._state.acceptedSyncedEntries()].map(([key, row]) => [
+            key,
+            row.name,
+          ]),
+        ),
+        `the accepted rows are the kept rows`,
+      ).toEqual(before)
+
+      failSecondBatch = false
+      await Promise.race([
+        collection.reload(),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ])
+      expect(collection.status).toBe(`ready`)
+      expect(rows(), `the next reload ends with the table`).toEqual(
+        await table(),
+      )
+    } finally {
+      vi.restoreAllMocks()
+      await collection.cleanup()
+    }
+  })
+
   it(`eager mode: releases a load hook that resolves after cleanup`, async () => {
     const db = await createDatabase()
     const releaseLoad = pDefer<void>()

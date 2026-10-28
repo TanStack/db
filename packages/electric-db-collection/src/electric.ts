@@ -2210,6 +2210,24 @@ function createElectricSync<T extends Row<unknown>>(
           })
         : undefined
 
+    // Track synced keys and handle overlapping subset queries. When multiple
+    // subset queries return the same row, the server sends `insert` for each
+    // response, and a subset snapshot row is an `insert` too. An insert of a
+    // key already synced, such as a reload's kept row, becomes an update, to
+    // avoid duplicate key errors when the row's data has changed.
+    const writeSynced = (message: {
+      type: `insert` | `update` | `delete`
+      value: T
+      metadata: Record<string, unknown>
+    }) => {
+      const rowId = collection.getKeyFromItem(message.value)
+      const isDuplicateInsert =
+        message.type === `insert` && syncedKeys.has(rowId)
+      if (message.type === `delete`) syncedKeys.delete(rowId)
+      else syncedKeys.add(rowId)
+      write(isDuplicateInsert ? { ...message, type: `update` } : message)
+    }
+
     /**
      * Process a change message: handle tags and write the mutation
      */
@@ -2230,27 +2248,14 @@ function createElectricSync<T extends Row<unknown>>(
       const rowId = collection.getKeyFromItem(changeMessage.value)
       const operation = changeMessage.headers.operation
 
-      // Track synced keys and handle overlapping subset queries.
-      // When multiple subset queries return the same row, the server sends
-      // `insert` for each response. We convert subsequent inserts to updates
-      // to avoid duplicate key errors when the row's data has changed.
-      const isDelete = operation === `delete`
-      const isDuplicateInsert = operation === `insert` && syncedKeys.has(rowId)
-
-      if (isDelete) {
-        syncedKeys.delete(rowId)
-      } else {
-        syncedKeys.add(rowId)
-      }
-
-      if (isDelete) {
+      if (operation === `delete`) {
         clearTagsForRow(rowId)
       } else if (hasTags) {
         processTagsForChangeMessage(tags, removedTags, rowId, activeConditions)
       }
 
-      write({
-        type: isDuplicateInsert ? `update` : operation,
+      writeSynced({
+        type: operation,
         value: changeMessage.value,
         // Include the primary key and relation info in the metadata
         metadata: {
@@ -2269,18 +2274,7 @@ function createElectricSync<T extends Row<unknown>>(
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
       waitForEstablishedSnapshot: () => fullSnapshotReady,
       begin,
-      // A subset snapshot row is a full row. It edits a row the Collection
-      // holds, such as a reload's kept row before the atomic swap.
-      write: (mutation) =>
-        write({
-          ...mutation,
-          type:
-            collection._state.getAcceptedSyncedRow(
-              collection.getKeyFromItem(mutation.value),
-            ) === undefined
-              ? `insert`
-              : `update`,
-        }),
+      write: writeSynced,
       commit,
       getCommitCursor: () => commitSequence,
       waitForCommitsAfter,

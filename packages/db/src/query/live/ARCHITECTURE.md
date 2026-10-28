@@ -1818,11 +1818,16 @@ every row before the top-K (a recorded limit).
     snapshot, a `delete`, or row ownership, and an `insert` of a key the
     Collection holds throws `DuplicateKeySyncError`, during a reload as at
     any time ([#2269](https://github.com/TanStack/db/issues/2269)). A live
-    query's own reload keeps its rows, its node, and its settled window
-    until its new run's graph result is complete (law 9), then commits that
-    result as its snapshot; the node then drops the retired run's request
-    errors and keeps the new run's, and a window move still waiting for a
-    replay ends with the retired run. An abort ends the load: once core
+    query's own reload keeps its rows and its settled window until its new
+    run's graph result is complete (law 9), then commits that result as its
+    snapshot; the node then drops the retired run's request errors, and a
+    window move still waiting for a replay ends with the retired run. During
+    any reload the node shows the new run's own problems as they happen
+    (maintainer decision): a failure the new run reports starts its frame at
+    once, and its `reportHealthy()` clears the retired run's failure reason.
+    One verdict or load that decides several request errors can announce
+    `health:change` once per error, with no error shown between them; the
+    state after it is exact. An abort ends the load: once core
     aborts a load (a window move, a demand retirement, a replay that
     replaces it, or a reload that retires its run), its later success or
     rejection decides no request error, holds no readiness, and no replay

@@ -12040,6 +12040,12 @@ describe(`reload settles on the new run's first result`, () => {
    *
    * - `expiry-timer`: the entry is still live when the new run starts, so the
    *   new run schedules its expiry, and it expires while the fetch is held.
+   * - `expiry-timer-lagging-clock`: as `expiry-timer`, but `Date.now()` lags
+   *   the timer clock once the expiry is scheduled, so the expiry timer fires
+   *   before `Date.now()` reaches the entry's `expiresAt`. A Node timer can
+   *   fire up to a millisecond early by `Date.now()`, and a wall-clock
+   *   adjustment can widen that; the driver widens it to `clockLagMs` so every
+   *   history meets it. The entry must still expire in that run.
    * - `expiry-at-startup`: the entry appears in the shared persisted metadata
    *   between the runs, as another tab's release writes it, already expired,
    *   so the new run's startup maintenance removes it.
@@ -12056,8 +12062,14 @@ describe(`reload settles on the new run's first result`, () => {
    * while the reload waits for its Query result. Every such transaction is
    * housekeeping, since the fetch is held. The driver counts those begins
    * through the current run's sync parameters, whatever options they pass,
-   * so the reach does not depend on the repair; a retired run's begin does
-   * nothing in core, so it does not count. Each kind must reach that state.
+   * so the reach does not depend on the repair. A retired run's begin does
+   * nothing in core, so it does not count; that includes the old run's own
+   * cleanup, which core can invoke after `reload()` and before it starts the
+   * new run. Each kind must reach that state.
+   *
+   * Checkpoint: the driver observes the window when the entry is gone (the
+   * housekeeping commit has applied), polling rather than sleeping a fixed
+   * time, so a loaded runner cannot move the observation before the expiry.
    * A housekeeping begin marked `snapshot: true` is the hostile mutant: it
    * replaces the kept rows with none.
    *
@@ -12087,14 +12099,23 @@ describe(`reload settles on the new run's first result`, () => {
    */
   describe(`housekeeping during a reload`, () => {
     type Row = { id: number; v: string }
-    type Kind = `expiry-timer` | `expiry-at-startup` | `release-at-startup`
-    const kinds: ReadonlyArray<Kind> = [`expiry-timer`, `expiry-at-startup`]
+    type Kind =
+      | `expiry-timer`
+      | `expiry-timer-lagging-clock`
+      | `expiry-at-startup`
+      | `release-at-startup`
+    const kinds: ReadonlyArray<Kind> = [
+      `expiry-timer`,
+      `expiry-timer-lagging-clock`,
+      `expiry-at-startup`,
+    ]
     const reach = createOracleReach(`query-db.reload-housekeeping`, [
       ...kinds,
       `release-at-startup`,
     ])
     afterAll(() => reach.assertReached())
     const expiryMs = 100
+    const clockLagMs = 20
     const entryKey = `queryCollection:gc:released-subset`
 
     const run = async (kind: Kind, via: `reload` | `refetch`) => {
@@ -12125,7 +12146,8 @@ describe(`reload settles on the new run's first result`, () => {
         getKey: (row) => row.id,
         queryFn: () => fetches.shift()!,
       })
-      let waiting = false
+      // The run that `reload()` retires; only a later run's begin counts.
+      let retiredRun = Infinity
       let runs = 0
       let housekeepingBegins = 0
       const collection = createCollection({
@@ -12136,7 +12158,7 @@ describe(`reload settles on the new run's first result`, () => {
             return base.sync.sync({
               ...params,
               begin: (options?: Parameters<typeof params.begin>[0]) => {
-                if (waiting && run === runs) housekeepingBegins++
+                if (run > retiredRun && run === runs) housekeepingBegins++
                 params.begin(options)
               },
               metadata: harness.api,
@@ -12146,8 +12168,9 @@ describe(`reload settles on the new run's first result`, () => {
       })
       const rows = () =>
         new Map(collection.toArray.map((row) => [row.id, row.v]))
+      let restoreClock = () => {}
       try {
-        if (kind === `expiry-timer`)
+        if (kind !== `expiry-at-startup`)
           harness.collectionMetadata.set(entryKey, {
             queryHash: `released-subset`,
             mode: `ttl`,
@@ -12161,7 +12184,7 @@ describe(`reload settles on the new run's first result`, () => {
             mode: `ttl`,
             expiresAt: 0,
           })
-        waiting = true
+        retiredRun = runs
         const pending =
           via === `reload`
             ? collection.reload()
@@ -12171,7 +12194,25 @@ describe(`reload settles on the new run's first result`, () => {
           () => (settled = true),
           () => (settled = true),
         )
-        await new Promise((resolve) => setTimeout(resolve, expiryMs * 1.5))
+        await new Promise((resolve) => setTimeout(resolve, expiryMs / 2))
+        if (kind === `expiry-timer-lagging-clock`) {
+          const now = Date.now.bind(Date)
+          const clock = vi
+            .spyOn(Date, `now`)
+            .mockImplementation(() => now() - clockLagMs)
+          restoreClock = () => clock.mockRestore()
+        }
+        await new Promise((resolve) => setTimeout(resolve, expiryMs / 2))
+        // A refetch keeps the run, so its new-run maintenance never comes.
+        if (via === `reload`)
+          await vi.waitFor(
+            () =>
+              expect(
+                harness.collectionMetadata.has(entryKey),
+                `maintenance ran`,
+              ).toBe(false),
+            { timeout: expiryMs * 10 },
+          )
         await flushPromises()
         const during = {
           before,
@@ -12181,7 +12222,7 @@ describe(`reload settles on the new run's first result`, () => {
           housekeepingBegins,
           entryRemoved: !harness.collectionMetadata.has(entryKey),
         }
-        waiting = false
+        retiredRun = Infinity
         release()
         await pending
         await flushPromises()
@@ -12191,6 +12232,7 @@ describe(`reload settles on the new run's first result`, () => {
           reloading: collection.health.reloading,
         }
       } finally {
+        restoreClock()
         release()
         await collection.cleanup()
         client.clear()
@@ -12473,42 +12515,50 @@ describe(`reload settles on the new run's first result`, () => {
 /**
  * While any observed Query fails, the node's `failureReason` lists the
  * failures of the Queries still failing, oldest first, and shows the newest.
- * A Query that fails reports its error (`reportError`). A Query that
- * recovers while another still fails removes its own failures
- * (`reportHealthy(error)` of each error it reported), so the other Queries'
- * failures keep their places, their `at`, and their causes. When the last
- * failing Query recovers, the slot clears (`reportHealthy()`). This is the
- * adapter API's maintainer decision: `reportHealthy(error)` removes just the
- * failure whose cause is that value, and the slot clears when its list
- * empties.
+ * Each failing Query keeps one failure listed: its latest error. A Query
+ * that fails again with a new error replaces its listed failure, so a Query
+ * failing on every refetch for hours lists one failure, not one per fetch
+ * (review ledger R21: one entry per failing Query, enforced in Query
+ * Collection). A Query that recovers while another still fails removes its
+ * own failure, so the other Queries' failures keep their places, their `at`,
+ * and their causes. When the last failing Query recovers, the slot clears.
+ *
+ * Core lists one failure per error value (the adapter API's maintainer
+ * decision: `reportError` of a value already listed changes nothing, and
+ * `reportHealthy(error)` removes the failure whose cause is that value). So
+ * Queries that fail with the same value, such as a module-level
+ * `throw OFFLINE`, share one listed failure, and it stays while any of them
+ * still fails (review ledger R22).
  *
  * The glossary's health tree entry adds identity: the tree keeps stable
  * object identity while its content is unchanged, and `health:change`
  * announces a change (ARCHITECTURE law 17 makes the tree an observation).
  *
- * The model is the frame: each listed failure is the subset whose Query
- * failed and the very error value its fetch threw, in failure order. The
- * lane loads two subsets and enumerates every history of four steps, each
- * step a fetch of one subset's Query that fails or succeeds. After each step
- * the node's `failureReason.errors` lists exactly the model's causes, by
- * identity and in order, its own `message` and `cause` are the newest's, and
- * a failure listed before and after keeps its entry's `at`. A step that
- * leaves the frame as it was keeps the node and its `failureReason` object
- * and announces no `health:change`. A step that adds or removes one failure,
- * or clears the slot, announces one; a Query that recovers with several
- * failures listed removes each, and each removal is announced.
+ * The model keeps each failing subset's latest error value and the listed
+ * values, oldest first. A failure lists its value at the end unless it is
+ * already listed. After every step, a listed value that no failing subset
+ * still holds leaves the list. The lane loads two subsets and enumerates
+ * every history of four steps, each step a fetch of one subset's Query that
+ * succeeds, fails with a fresh error, or fails with one error value shared by
+ * every Query and fetch. After each step the node's `failureReason.errors`
+ * lists exactly the model's values, by identity and in order, its own
+ * `message` and `cause` are the newest's, and a failure listed before and
+ * after keeps its entry's `at`. A step that leaves the list as it was keeps
+ * the node and its `failureReason` object and announces no `health:change`.
+ * A step that adds or removes one failure, or clears the slot, announces one;
+ * a step that replaces a Query's failure announces at least one.
  *
  * Limits: one Collection, two subsets, histories of four fetches; a
  * recovery whose result applies late is the next test's.
  */
 describe(`failureReason follows the still-failing Queries`, () => {
-  type Fetch = { subset: 1 | 2; fails: boolean }
-  const fetches: ReadonlyArray<Fetch> = [
-    { subset: 1, fails: true },
-    { subset: 2, fails: true },
-    { subset: 1, fails: false },
-    { subset: 2, fails: false },
-  ]
+  type Fetch = { subset: 1 | 2; fails: false | `fresh` | `shared` }
+  const fetches: ReadonlyArray<Fetch> = [1, 2].flatMap((subset) =>
+    ([`fresh`, `shared`, false] as const).map((fails) => ({
+      subset: subset as 1 | 2,
+      fails,
+    })),
+  )
   let histories: Array<Array<Fetch>> = [[]]
   for (let length = 0; length < 4; length++)
     histories = histories.flatMap((history) =>
@@ -12516,32 +12566,41 @@ describe(`failureReason follows the still-failing Queries`, () => {
     )
   const reach = createOracleReach(`query-db.failing-queries`, [
     `a Query recovers while another's failure stays listed`,
-    `a Query fails again while its failure is listed`,
-    `a Query with two failures listed recovers while another fails`,
-    `the last failing Query recovers with several failures listed`,
+    `a Query fails again with a new error while its failure is listed`,
+    `a Query fails with the error value another Query lists`,
+    `a Query recovers while another lists the same error value`,
   ])
 
-  // The declared states a fetch enters from the frame before it.
-  function recordReach(
-    frame: ReadonlyArray<{ subset: number }>,
-    subset: number,
-    fails: boolean,
-  ) {
-    const listed = frame.filter((failure) => failure.subset === subset).length
-    const failingQueries = new Set(frame.map((failure) => failure.subset)).size
-    if (fails && listed > 0)
-      reach.reach(`a Query fails again while its failure is listed`)
-    if (!fails && listed > 0 && failingQueries > 1) {
-      reach.reach(`a Query recovers while another's failure stays listed`)
-      if (listed > 1)
-        reach.reach(
-          `a Query with two failures listed recovers while another fails`,
-        )
-    }
-    if (!fails && listed > 0 && failingQueries === 1 && frame.length > 1)
+  // The model: each failing subset's latest error value, and the listed
+  // values, oldest first.
+  type Model = { latest: Map<number, Error>; listed: Array<Error> }
+  function step(model: Model, { subset, fails }: Fetch, error?: Error): Model {
+    const latest = new Map(model.latest)
+    let listed = model.listed
+    if (fails) {
+      latest.set(subset, error!)
+      if (!listed.includes(error!)) listed = [...listed, error!]
+    } else latest.delete(subset)
+    const held = new Set(latest.values())
+    listed = listed.filter((value) => held.has(value))
+    return { latest, listed }
+  }
+
+  // The declared states a fetch enters from the model before it.
+  function recordReach(model: Model, { subset, fails }: Fetch, error?: Error) {
+    const own = model.latest.get(subset)
+    const others = [...model.latest].filter(([other]) => other !== subset)
+    if (fails && own && own !== error)
       reach.reach(
-        `the last failing Query recovers with several failures listed`,
+        `a Query fails again with a new error while its failure is listed`,
       )
+    if (fails && others.some(([, value]) => value === error))
+      reach.reach(`a Query fails with the error value another Query lists`)
+    if (!fails && own && others.length > 0) {
+      reach.reach(`a Query recovers while another's failure stays listed`)
+      if (others.some(([, value]) => value === own))
+        reach.reach(`a Query recovers while another lists the same error value`)
+    }
   }
 
   async function runHistory(
@@ -12553,7 +12612,8 @@ describe(`failureReason follows the still-failing Queries`, () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     })
-    const failing = new Set<number>()
+    const failing = new Map<number, `fresh` | `shared`>()
+    const shared = new Error(`offline`)
     // The error value each failed fetch threw, in fetch order.
     const thrown: Array<Error> = []
     const options = queryCollectionOptions({
@@ -12567,8 +12627,12 @@ describe(`failureReason follows the still-failing Queries`, () => {
         const limit = (
           ctx.meta?.loadSubsetOptions as { limit?: number } | undefined
         )?.limit
-        if (!failing.has(limit!)) return Promise.resolve([{ id: limit! }])
-        const error = new Error(`subset ${limit} failure ${thrown.length}`)
+        const fails = failing.get(limit!)
+        if (!fails) return Promise.resolve([{ id: limit! }])
+        const error =
+          fails === `shared`
+            ? shared
+            : new Error(`subset ${limit} failure ${thrown.length}`)
         thrown.push(error)
         return Promise.reject(error)
       },
@@ -12596,8 +12660,7 @@ describe(`failureReason follows the still-failing Queries`, () => {
       await query.fetch().catch(() => undefined)
       await flushPromises()
     }
-    // Model: the listed failures, oldest first.
-    let frame: Array<{ subset: number; cause: Error }> = []
+    let model: Model = { latest: new Map(), listed: [] }
     let healthChanges = 0
     const stopHealth = collection.on(`health:change`, () => {
       healthChanges++
@@ -12606,13 +12669,9 @@ describe(`failureReason follows the still-failing Queries`, () => {
       await collection._sync.loadSubset({ limit: 1 })
       await collection._sync.loadSubset({ limit: 2 })
       await flushPromises()
-      for (const [at, { subset, fails }] of history.entries()) {
+      for (const [at, fetch] of history.entries()) {
+        const { subset, fails } = fetch
         const label = `${JSON.stringify(history)} step ${at}`
-        const listed = frame.filter((failure) => failure.subset === subset)
-        const failingBefore = new Set(frame.map((failure) => failure.subset))
-        // The persisted run replays the plain lane's histories, whose reach
-        // the plain run records.
-        if (!persisted) recordReach(frame, subset, fails)
         const before = {
           node: collection.health,
           failureReason: collection.health.failureReason,
@@ -12620,32 +12679,31 @@ describe(`failureReason follows the still-failing Queries`, () => {
         }
         const entryOf = (cause: Error) =>
           before.failureReason?.errors.find((entry) => entry.cause === cause)
-        if (fails) failing.add(subset)
+        if (fails) failing.set(subset, fails)
         else failing.delete(subset)
         const thrownBefore = thrown.length
         await refetch(subset)
-        const previousFrame = frame
-        if (fails) {
+        if (fails)
           expect(thrown.length, `${label}: the fetch failed`).toBe(
             thrownBefore + 1,
           )
-          frame = [...frame, { subset, cause: thrown.at(-1)! }]
-        } else if (listed.length > 0)
-          frame =
-            failingBefore.size === 1
-              ? []
-              : frame.filter((failure) => failure.subset !== subset)
+        const error = fails ? thrown.at(-1) : undefined
+        // The persisted run replays the plain lane's histories, whose reach
+        // the plain run records.
+        if (!persisted) recordReach(model, fetch, error)
+        const previous = model.listed
+        model = step(model, fetch, error)
 
         const problem = collection.health.failureReason
         expect(
           problem?.errors.map((entry) => entry.cause) ?? [],
           `${label}: listed causes`,
-        ).toEqual(frame.map((failure) => failure.cause))
+        ).toEqual(model.listed)
         expect(problem?.cause ?? null, `${label}: shown cause`).toBe(
-          frame.at(-1)?.cause ?? null,
+          model.listed.at(-1) ?? null,
         )
         expect(problem?.message ?? null, `${label}: shown message`).toBe(
-          frame.at(-1)?.cause.message ?? null,
+          model.listed.at(-1)?.message ?? null,
         )
         for (const entry of problem?.errors ?? []) {
           const kept = entryOf(entry.cause as Error)
@@ -12654,10 +12712,11 @@ describe(`failureReason follows the still-failing Queries`, () => {
               kept.at,
             )
         }
-        const unchanged =
-          frame.length === previousFrame.length &&
-          frame.every((failure, i) => failure === previousFrame[i])
-        if (unchanged) {
+        const added = model.listed.filter((value) => !previous.includes(value))
+        const removed = previous.filter(
+          (value) => !model.listed.includes(value),
+        )
+        if (added.length + removed.length === 0) {
           expect(collection.health, `${label}: same node`).toBe(before.node)
           expect(problem, `${label}: same failureReason`).toBe(
             before.failureReason,
@@ -12666,16 +12725,16 @@ describe(`failureReason follows the still-failing Queries`, () => {
             before.changes,
           )
         } else if (
-          Math.abs(frame.length - previousFrame.length) === 1 ||
-          frame.length === 0
+          added.length + removed.length === 1 ||
+          model.listed.length === 0
         ) {
           // One failure added or removed, or the slot cleared, is one change.
           expect(healthChanges, `${label}: one health:change`).toBe(
             before.changes + 1,
           )
         } else {
-          // A recovered Query with several failures listed removes each
-          // (reportHealthy(error) of each); every removal is announced.
+          // A Query's new error replaces its listed failure; the change is
+          // announced.
           expect(healthChanges, `${label}: health:change`).toBeGreaterThan(
             before.changes,
           )
@@ -12693,12 +12752,12 @@ describe(`failureReason follows the still-failing Queries`, () => {
     for (const [index, history] of histories.entries())
       await runHistory(history, index, false)
     reach.assertReached()
-  }, 120_000)
+  }, 240_000)
 
   it(`every history of four fetches refines the model behind the persisted wrapper`, async () => {
     for (const [index, history] of histories.entries())
       await runHistory(history, index, true)
-  }, 120_000)
+  }, 240_000)
 
   // A recovered Query's result can apply late, behind a persisting write.
   // Another Query failing meanwhile does not keep the recovered one listed:
