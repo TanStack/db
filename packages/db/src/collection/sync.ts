@@ -21,7 +21,7 @@ import { isPromiseLike } from '../utils/type-guards'
 import { reportUncaught } from '../utils/callbacks'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import { isFailedStatus } from '../live-query-primitives.js'
-import { automaticRowMetadataWrite } from './state'
+import { automaticRowMetadataWrite, truncatesSourceKey } from './state'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -627,15 +627,15 @@ export class CollectionSyncManager<
           // A source reads its own session: every accepted or open sync
           // transaction that no invalidation ended, newest first, then
           // applied state. A truncate hides older row metadata, except a
-          // wrapping sync's storage read, which keeps it.
+          // wrapping sync's storage read, which keeps it, and a schema reset's
+          // kept seeds (decision 20). The wrapper reads its own open reset.
           const pending = this.state.pendingSyncedTransactions
           for (let index = pending.length - 1; index >= 0; index--) {
             const transaction = pending[index]!
             if (transaction.invalidationError !== undefined) continue
             const write = transaction.rowMetadataWrites.get(key)
             if (write) return write.type === `delete` ? undefined : write.value
-            if (transaction.truncate && !transaction.preserveHydrationSeedKeys)
-              return undefined
+            if (truncatesSourceKey(transaction, key)) return undefined
           }
           return this.state.syncedMetadata.get(key)
         },

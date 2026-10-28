@@ -16,6 +16,7 @@ import {
   persistedPeerLane,
   persistedPeerOnDemandLane,
   persistedReadLane,
+  persistedReadSeedLane,
   persistedSeedLane,
   runSessionHistory,
   sessionCollectionKeys,
@@ -64,7 +65,8 @@ import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
  * `persisted-conflicts` (inner writes that land ahead of enclosing ones), and
  * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
  * row, `persisted-reads`, whose read hold keeps an on-demand storage
- * read in flight, and `persisted-peers`, where another tab's source writes
+ * read in flight, `persisted-reads-seeds`, which adds seeds and the cached
+ * row and may abort a buffered commit's signal, and `persisted-peers`, where another tab's source writes
  * storage and sends its notices through the persistence coordinator, with
  * `persisted-peers-full` under full row updates and
  * `persisted-peers-on-demand`, which loads on demand with a demand for every
@@ -168,10 +170,14 @@ function createHoldingAdapter(cached = false, stores = false) {
       notice: PeerNotice,
       row: Row,
       metadata: unknown,
+      rewrites = false,
     ): typeof latest => {
       if (notice === `reset`) {
-        stored.clear()
-        storedCollectionMetadata.clear()
+        // A resetting tab that writes its rows back leaves storage as it was.
+        if (!rewrites) {
+          stored.clear()
+          storedCollectionMetadata.clear()
+        }
         resetEpoch++
         latest = { term: latest.term + 1, seq: 0, rowVersion: 0 }
         return latest
@@ -271,6 +277,8 @@ async function createPersistedDriver(
 
   let depth = 0
   let holdCount = 0
+  // Signals of the outermost transactions committed during a read hold.
+  let readCommits: Array<AbortController> = []
   let blocker: { isPersisted: { promise: Promise<unknown> } } | undefined
   const receipts: Array<Promise<void>> = []
   const rejections: Array<string> = []
@@ -310,6 +318,7 @@ async function createPersistedDriver(
   const release = async () => {
     readGate?.resolve()
     readGate = undefined
+    readCommits = []
     await reading
     reading = undefined
     store.releaseStore()
@@ -330,7 +339,9 @@ async function createPersistedDriver(
     },
     commit: () => {
       const index = receiptStates.length
-      const receipt = sync.commit()
+      const controller = new AbortController()
+      if (readGate && depth === 1) readCommits.push(controller)
+      const receipt = sync.commit(controller.signal)
       depth--
       if (receipt === true) {
         receiptStates.push(`applied`)
@@ -349,6 +360,7 @@ async function createPersistedDriver(
       )
     },
     cancel: abort,
+    abandon: () => readCommits.pop()!.abort(),
     rowSet: (key, value) => metadata().row.set(key, value),
     rowDelete: (key) => metadata().row.delete(key),
     insert: (_key, value, rowMetadata) =>
@@ -402,8 +414,14 @@ async function createPersistedDriver(
           },
         ],
       }),
-    peer: async (key, notice, row, metadata) => {
-      const position = store.peerWrite(key, notice, row as Row, metadata)
+    peer: async (key, notice, row, metadata, rewrites) => {
+      const position = store.peerWrite(
+        key,
+        notice,
+        row as Row,
+        metadata,
+        rewrites,
+      )
       const named =
         notice === `row`
           ? {
@@ -841,6 +859,17 @@ const extraLanes: Array<{
       `store hold`,
     ],
   },
+  // A transaction committed during a read and abandoned before the wrapper
+  // hands it to core never wrote its rows, so a seed beneath it still holds
+  // them (decision 21). Abandoning a seeded row's writer is rare here; a
+  // replay pins it.
+  {
+    lane: persistedReadSeedLane,
+    property: `sync-metadata-session.persisted-reads-seeds`,
+    seed: 2_220_021,
+    runs: 150,
+    reach: [`write during a storage read`, `abort after commit`, `seed`],
+  },
   // Another tab's source writes reach this tab through its notices: a named
   // write is a source write that lands beneath open transactions and over
   // seeds (decision 11); a full reload keeps a held seed and makes every
@@ -895,6 +924,7 @@ const extraLanes: Array<{
       `named peer write over a held seed`,
       `full reload over a held seed`,
       `reset over a held seed`,
+      `reset that rewrites its rows`,
       `peer write during a hold`,
     ],
   },
@@ -1023,6 +1053,14 @@ const peerReplays: Array<[string, Array<SessionAction>]> = [
     ],
   ],
   [
+    `an equal re-insert of a row a reset wrote back keeps its metadata`,
+    [
+      { type: `peer`, key: 1, notice: `reset`, rewrites: true },
+      { type: `begin` },
+      { type: `reinsert`, key: 1, metadata: false },
+    ],
+  ],
+  [
     `a held reload's writes stay beneath an open re-insert`,
     [
       { type: `seed`, key: 2, bare: true },
@@ -1066,6 +1104,15 @@ const peerFullReplays: Array<[string, Array<SessionAction>]> = [
 // object, held rows and metadata of a missing row included (decisions 19
 // and 20). A notice after the reset reloads storage (the reset fence).
 const peerOnDemandReplays: Array<[string, Array<SessionAction>]> = [
+  [
+    `a reset whose storage keeps a row keeps the row's stored metadata`,
+    [
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: true },
+      { type: `commit` },
+      { type: `peer`, key: 1, notice: `reset`, rewrites: true },
+    ],
+  ],
   [
     `a reset beside a held seed clears metadata of a missing row`,
     [
@@ -1111,6 +1158,50 @@ const peerOnDemandReplays: Array<[string, Array<SessionAction>]> = [
   ],
 ]
 
+// A transaction the wrapper buffers during a read and that is abandoned
+// before it is handed to core wrote nothing, so the seed beneath it holds. A
+// seed that arrives after it was judged then and stays ignored (decision 22).
+const readSeedReplays: Array<[string, Array<SessionAction>]> = [
+  [
+    `a seed that arrives after a buffered write stays ignored when it is abandoned (metadata)`,
+    [
+      { type: `begin` },
+      { type: `hold`, read: true },
+      { type: `rowSet`, key: 2 },
+      { type: `commit` },
+      { type: `seed`, key: 2 },
+      { type: `abandon` },
+      { type: `release` },
+    ],
+  ],
+  [
+    `a seed that arrives after a buffered write stays ignored when it is abandoned (row)`,
+    [
+      { type: `hold`, read: true },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: false },
+      { type: `commit` },
+      { type: `seed`, key: 2 },
+      { type: `abandon` },
+      { type: `release` },
+    ],
+  ],
+  [
+    `an abandoned commit leaves a seed held against a later read`,
+    [
+      { type: `seed`, key: 1 },
+      { type: `hold`, read: true },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+      { type: `abandon` },
+      { type: `release` },
+      { type: `hold`, read: true },
+      { type: `release` },
+    ],
+  ],
+]
+
 describe(`sync metadata session oracle through the persisted wrapper: peer replays`, () => {
   it.each(peerReplays)(`replays: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerLane),
@@ -1120,6 +1211,10 @@ describe(`sync metadata session oracle through the persisted wrapper: peer repla
   )
   it.each(peerOnDemandReplays)(`replays on demand: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerOnDemandLane),
+  )
+  it.each(readSeedReplays)(
+    `replays with reads and seeds: %s`,
+    (_name, history) => assertPersistedHistory(history, persistedReadSeedLane),
   )
 })
 

@@ -115,6 +115,13 @@ export type SessionAction =
   | { type: `begin` }
   | { type: `commit` }
   | { type: `cancel` }
+  /**
+   * Aborts the signal of the newest outermost transaction committed during
+   * the read hold, which the wrapper still buffers. The wrapper accepts a
+   * transaction when it hands it to core, so the transaction is abandoned
+   * there (decision 21).
+   */
+  | { type: `abandon` }
   | { type: `rowSet`; key: SessionRowKey }
   | { type: `rowDelete`; key: SessionRowKey }
   | { type: `upsert`; key: SessionRowKey; metadata: boolean }
@@ -142,6 +149,12 @@ export type SessionAction =
        * while the whole row replaces it.
        */
       keepsValue?: boolean
+      /**
+       * A reset after which the resetting tab writes back the rows and
+       * metadata storage held, so the reset's reload finds what this tab
+       * holds.
+       */
+      rewrites?: boolean
     }
 
 /**
@@ -323,6 +336,18 @@ export const persistedReadLane: SessionLane = {
   readHold: true,
   insertsReplace: true,
 }
+/**
+ * The read lane with `DbClient` seeds and the cached row, which a demand for
+ * every row loads at the start: a transaction the wrapper buffers during a
+ * read may have its signal aborted after it commits, which abandons it.
+ */
+export const persistedReadSeedLane: SessionLane = {
+  ...persistedReadLane,
+  name: `persisted-reads-seeds`,
+  seeds: true,
+  cached: true,
+  onDemand: true,
+}
 export const persistedNestedSeedLane: SessionLane = {
   name: `persisted-nested-seeds`,
   maxDepth: 2,
@@ -475,6 +500,10 @@ export function sessionActionArbitrary(
           : fc.constant({ type: `hold` as const }),
     ),
     weighted(1, fc.constant({ type: `release` as const })),
+    ...(lane.readHold === true
+      ? // Legal only just after a commit during a read, so it weighs more.
+        [weighted(8, fc.constant({ type: `abandon` as const }))]
+      : []),
   ]
   if (lane.seeds || lane.cached === true)
     actions.push(
@@ -522,6 +551,7 @@ export function sessionActionArbitrary(
             key,
             notice,
             ...(notice === `row` && roll === 0 ? { keepsValue: true } : {}),
+            ...(notice === `reset` && roll === 0 ? { rewrites: true } : {}),
           })),
       ),
     )
@@ -677,12 +707,14 @@ export function historyRegimes(
       if (before.openInsert) regimes.add(`peer write during an open insert`)
       if (action.notice === `reset` && before.anyHeldSeed)
         regimes.add(`reset over a held seed`)
+      if (action.rewrites === true) regimes.add(`reset that rewrites its rows`)
       if (model.isHolding) regimes.add(`peer write during a hold`)
     }
     if (action.type === `reinsert`) regimes.add(`equal re-insert`)
     if (action.type === `collectionSet` && action.undefinedValue === true)
       regimes.add(`undefined collection value`)
     if (action.type === `cancel`) regimes.add(`cancel`)
+    if (action.type === `abandon`) regimes.add(`abort after commit`)
     if (action.type === `hold`)
       regimes.add(action.store === true ? `store hold` : `core hold`)
   }
@@ -695,6 +727,7 @@ function writesSource(action: SessionAction): boolean {
     `begin`,
     `commit`,
     `cancel`,
+    `abandon`,
     `hold`,
     `release`,
     `seed`,
@@ -801,6 +834,11 @@ type ModelSeed = {
    * no keys, and only a stored row is in storage.
    */
   cached: boolean
+  /**
+   * The objects a source write had written when the seed arrived. A seed is
+   * judged then (decision 22), so a write abandoned later does not revive it.
+   */
+  lost?: { row: boolean; rowMetadata: boolean }
 }
 /** One step of the serialization order: a source write or a seed. */
 type ModelEntry = { event: ModelEvent } | { seed: ModelSeed }
@@ -853,6 +891,11 @@ export class SessionModel {
   /** Accepted transactions and seeds, in the order they were accepted. */
   private accepted: Array<{ frame: number } | { seed: ModelSeed }> = []
   private holding = false
+  private reading = false
+  /** Outermost transactions committed during the read hold, oldest first. */
+  private committedDuringRead: Array<number> = []
+  /** A transaction whose signal aborted; the read's end abandons it. */
+  private abandoning: number | undefined
   /** Whether a reset happened; later notices then reload storage. */
   private fenced = false
   private noticesBlocked = false
@@ -1008,6 +1051,8 @@ export class SessionModel {
       this.frames[enclosing]!.innerCommitted = true
     this.frames[frame]!.status = `accepted`
     this.accepted.push({ frame })
+    if (this.reading && this.openStack.length === 0 && !this.truncates(frame))
+      this.committedDuringRead.push(frame)
     this.store(frame)
     if (!this.holding || this.truncates(frame)) this.applyAccepted()
     this.invalidateOpen()
@@ -1061,14 +1106,75 @@ export class SessionModel {
     this.lastCancelKeptInnerCommit = this.frames[frame]!.innerCommitted
   }
 
-  hold(blocksNotices = false): void {
+  hold(blocksNotices = false, reads = false): void {
     this.holding = true
     this.noticesBlocked = blocksNotices
+    this.reading = reads
+  }
+
+  /**
+   * Whether the newest transaction is outermost, committed during the read
+   * hold, and has no transaction begun after it. A transaction open over a
+   * buffered one reads its writes, which makes it a dependent successor that
+   * the abort-graph oracle owns.
+   */
+  get canAbandon(): boolean {
+    return (
+      this.abandoning === undefined &&
+      this.depth === 0 &&
+      this.committedDuringRead.at(-1) === this.frames.length - 1
+    )
+  }
+
+  /** Whether only the read's end may come next, which abandons a commit. */
+  get awaitsAbandonment(): boolean {
+    return this.abandoning !== undefined
+  }
+
+  /**
+   * The wrapper accepts a source transaction when it hands it to core, so an
+   * abort of the signal while a read still buffers it abandons it when the
+   * read ends; until then the source reads it (decision 21). A seed that
+   * arrived meanwhile stays judged against it (decision 22). Only the read's
+   * end may follow, so no later transaction depends on it here; the
+   * abort-graph oracle owns dependent suffixes.
+   */
+  abandon(): void {
+    this.abandoning = this.committedDuringRead.pop()
   }
 
   release(): void {
+    const frame = this.abandoning
+    if (frame !== undefined) {
+      // Its writes never apply. A seed that arrived after it was judged
+      // then, so it keeps every object it had lost (decision 22).
+      const entries = this.acceptedEntries()
+      entries.forEach((entry, index) => {
+        if (`seed` in entry)
+          entry.seed.lost = {
+            row:
+              entry.seed.lost?.row === true ||
+              this.sourceWroteBefore(`row`, entry.seed.key, entries, index),
+            rowMetadata:
+              entry.seed.lost?.rowMetadata === true ||
+              this.sourceWroteBefore(
+                `rowMetadata`,
+                entry.seed.key,
+                entries,
+                index,
+              ),
+          }
+      })
+      this.frames[frame]!.status = `aborted`
+      this.accepted = this.accepted.filter(
+        (item) => !(`frame` in item && item.frame === frame),
+      )
+      this.abandoning = undefined
+    }
     this.holding = false
     this.noticesBlocked = false
+    this.reading = false
+    this.committedDuringRead = []
     this.applyAccepted()
   }
 
@@ -1096,11 +1202,12 @@ export class SessionModel {
     notice: PeerNotice,
     value: unknown,
     rowValue: unknown = value,
+    rewrites = false,
   ): void {
     const row: ModelValue = { present: true, value: { id: key, v: rowValue } }
     const metadata: ModelValue = { present: true, value: { peer: value } }
     if (notice === `reset`) {
-      this.reset()
+      this.reset(rewrites)
       return
     }
     // The peer's write reaches storage before its notice.
@@ -1168,16 +1275,31 @@ export class SessionModel {
    * reset instead deletes each other row and row metadata this tab has
    * accepted; a later seed of a row it never saw still applies (decision 20).
    */
-  private reset(): void {
-    this.storage.clear()
+  private reset(rewrites: boolean): void {
+    // Only rows are durable; metadata of a row storage lacks stood here only
+    // for this tab (decision 16), and a reset truncates it.
+    for (const key of sessionRowKeys)
+      if (!rewrites || !this.storedRow(key).present) this.storage.delete(key)
     this.fenced = true
     const keeps = new Set(
       this.resetKeepsSeeds
         ? sessionRowKeys.filter((key) => this.holdsDbClientSeed(key))
         : [],
     )
+    // Rows a resetting tab wrote back are stored again, so the reset's
+    // reload writes them after its truncate, as source writes.
+    const restored = rewrites
+      ? sessionRowKeys
+          .filter((key) => !keeps.has(key) && this.storedRow(key).present)
+          .flatMap((key): Array<[ObjectStore, SessionRowKey, ModelValue]> => [
+            [`row`, key, this.storage.get(key)!.row],
+            [`rowMetadata`, key, this.storage.get(key)!.metadata],
+          ])
+      : []
     this.acceptPeerFrame(
-      sessionCollectionKeys.map((key) => [`collection`, key, absent]),
+      rewrites
+        ? restored
+        : sessionCollectionKeys.map((key) => [`collection`, key, absent]),
       keeps,
     )
   }
@@ -1226,7 +1348,10 @@ export class SessionModel {
     return (
       entries.some(
         (entry) =>
-          `seed` in entry && !entry.seed.cached && entry.seed.key === key,
+          `seed` in entry &&
+          !entry.seed.cached &&
+          entry.seed.key === key &&
+          entry.seed.lost?.row !== true,
       ) &&
       !entries.some(
         (entry) =>
@@ -1399,7 +1524,7 @@ export class SessionModel {
         const status = this.frames[frame]!.status
         return status === `applied`
           ? `applied`
-          : status === `invalid`
+          : status === `invalid` || status === `aborted`
             ? `rejected`
             : `pending`
       }),
@@ -1474,6 +1599,7 @@ export class SessionModel {
         if (
           store === `collection` ||
           seed.key !== key ||
+          seed.lost?.[store] === true ||
           this.sourceWroteBefore(store, key, entries, index)
         )
           continue
@@ -1632,9 +1758,15 @@ export type SessionDriver = {
     notice: PeerNotice,
     row: unknown,
     metadata: unknown,
+    rewrites: boolean,
   ) => Promise<void>
   /** Whether a thrown error is core's duplicate-key rejection. */
   isDuplicateKeyError?: (error: unknown) => boolean
+  /**
+   * Aborts the signal of the newest outermost transaction committed during
+   * the read hold. Lanes with read holds use it.
+   */
+  abandon?: () => void
   observe: () => SessionObservation
   /**
    * Each row as storage holds it. Where a lane models storage, the settled
@@ -2013,6 +2145,7 @@ export async function runSeedOrderInvariance(
 const modelOnly: SessionDriver = {
   begin: () => {},
   commit: () => {},
+  abandon: () => {},
   cancel: () => {},
   rowSet: () => {},
   rowDelete: () => {},
@@ -2056,6 +2189,8 @@ function isLegal(
   model: SessionModel,
   action: SessionAction,
 ): boolean {
+  // An abandoned commit's read ends next.
+  if (model.awaitsAbandonment && action.type !== `release`) return false
   switch (action.type) {
     case `begin`:
       return model.depth < lane.maxDepth
@@ -2063,6 +2198,8 @@ function isLegal(
       return !model.isHolding
     case `release`:
       return model.isHolding
+    case `abandon`:
+      return lane.readHold === true && model.canAbandon
     case `seed`:
       return lane.seeds
     case `peer`:
@@ -2116,6 +2253,9 @@ function planAction(
     case `cancel`:
       model.cancel()
       return (driver) => driver.cancel()
+    case `abandon`:
+      model.abandon()
+      return (driver) => driver.abandon!()
     case `rowSet`:
       model.write(`rowMetadata`, action.key, { present: true, value })
       return (driver) => driver.rowSet(action.key, value)
@@ -2178,7 +2318,10 @@ function planAction(
       model.write(`collection`, action.key, absent)
       return (driver) => driver.collectionDelete(action.key)
     case `hold`:
-      model.hold(action.store === true || action.read === true)
+      model.hold(
+        action.store === true || action.read === true,
+        action.read === true,
+      )
       return (driver) =>
         driver.hold(action.store === true, action.read === true)
     case `release`:
@@ -2236,13 +2379,20 @@ function planAction(
       const kept =
         action.keepsValue === true ? model.acceptedValue(action.key) : undefined
       const rowValue = kept ? kept.value : value
-      model.peer(action.key, action.notice, value, rowValue)
+      model.peer(
+        action.key,
+        action.notice,
+        value,
+        rowValue,
+        action.rewrites === true,
+      )
       return (driver) =>
         driver.peer!(
           action.key,
           action.notice,
           { id: action.key, v: rowValue },
           { peer: value },
+          action.rewrites === true,
         )
     }
     case `insertOverSeed`: {

@@ -222,6 +222,7 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-cached`,
   `sync-metadata-session.persisted-nested-seeds`,
   `sync-metadata-session.persisted-reads`,
+  `sync-metadata-session.persisted-reads-seeds`,
   `sync-metadata-session.persisted-peers`,
   `sync-metadata-session.persisted-peers-full`,
   `sync-metadata-session.persisted-peers-on-demand`,

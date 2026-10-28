@@ -4034,6 +4034,14 @@ class PersistedCollectionRuntime<
     const seedRows = replayDemand
       ? Array.from(hydratedKeys, (key) => state?.getAcceptedSyncedRow(key))
       : []
+    // A reset truncated everything before it, so what storage holds after it
+    // a source wrote in this run.
+    if (replayDemand) {
+      const restored = rows
+        .filter((row) => !hydratedKeys.has(row.key))
+        .map((row) => row.key)
+      this.noteRunWrites(restored, restored, false)
+    }
 
     return this.withInternalApply(() => {
       // A reload is a storage read, not a source write, so its truncate
@@ -5317,9 +5325,7 @@ class PersistedCollectionRuntime<
     const hasUnseenDemandedKey =
       this.activeSubsets.size > 0 &&
       txCommitted.changedRows.some(
-        (row) =>
-          !this.collection?.base.has(row.key as TKey) &&
-          !this.holdsHydrationSeed(row.key as TKey),
+        (row) => !this.collection?.base.has(row.key as TKey),
       )
     if (
       hasRepeatedChange ||
@@ -5341,6 +5347,10 @@ class PersistedCollectionRuntime<
     await reloadActiveSubsets()
   }
 
+  /**
+   * Applies a notice that names its keys. Its keys are this run's source
+   * writes, over any seed they land on (decision 11).
+   */
   private async applyTargetedInvalidationUnsafe(
     txCommitted: TxCommitted & { requiresFullReload: false },
   ): Promise<void> {
@@ -5356,7 +5366,6 @@ class PersistedCollectionRuntime<
         value: newValue,
       } of txCommitted.changedRows) {
         const key = changedKey as TKey
-        if (this.holdsHydrationSeed(key)) continue
         const previous = this.collection?.base.get(key)
         if (previous === undefined && this.activeSubsets.size === 0) continue
         const completeValue = {
@@ -5378,21 +5387,10 @@ class PersistedCollectionRuntime<
         }
       }
 
-      for (const deletedKey of txCommitted.deletedKeys) {
-        const key = deletedKey as TKey
-        if (!this.holdsHydrationSeed(key)) {
-          this.syncControls.write?.({ type: `delete`, key })
-        }
-      }
+      for (const deletedKey of txCommitted.deletedKeys)
+        this.syncControls.write?.({ type: `delete`, key: deletedKey as TKey })
 
       txCommitted.rowMetadataMutations?.forEach((mutation) => {
-        // A DbClient hydration seed owns both its row and row metadata until
-        // a source writes the key in this run (decision 11).
-        if (
-          this.holdsHydrationSeed(mutation.key as TKey) &&
-          !this.runWrittenMetadataKeys.has(mutation.key as TKey)
-        )
-          return
         applyMetadataWrite(
           this.syncControls.metadata?.row,
           mutation.key as TKey,
@@ -5879,18 +5877,10 @@ function createWrappedSyncConfig<
       const bindToCurrentHydration = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
+        // A transaction binds to a storage read when it commits (decision 12).
         if (transaction.internal || !runtime.isHydratingNow()) return
-        const hydrationSequence = runtime.getHydrationSequence()
-        if (
-          transaction.hydrationSequence !== undefined &&
-          transaction.hydrationSequence !== hydrationSequence
-        ) {
-          throw new InvalidPersistedCollectionConfigError(
-            `a persisted sync transaction cannot cross a hydration cycle`,
-          )
-        }
         transaction.queuedBecauseHydrating = true
-        transaction.hydrationSequence = hydrationSequence
+        transaction.hydrationSequence = runtime.getHydrationSequence()
       }
       const assertHydrationSequenceCurrent = (
         transaction: OpenSyncTransaction<T, TKey>,
@@ -6226,12 +6216,6 @@ function createWrappedSyncConfig<
                   params.collection._state.getAcceptedSyncedRow(key),
                 )
           }
-          if (!transaction.internal)
-            runtime.noteRunWrites(
-              transaction.operationKeys,
-              transaction.rowMetadataWrites.keys(),
-              transaction.truncate,
-            )
           transaction.operations.forEach((operation) => {
             if (operation.type === `delete`) {
               params.write({ type: `delete`, key: operation.key })
@@ -6267,6 +6251,14 @@ function createWrappedSyncConfig<
           // aborted; only then do core's own holds cover its keys.
           transaction.handedToCollection = signal?.aborted !== true
           const applied = params.commit(signal)
+          // Only a transaction core received is a source write of this run;
+          // an abandoned one wrote nothing.
+          if (!transaction.internal && transaction.handedToCollection)
+            runtime.noteRunWrites(
+              transaction.operationKeys,
+              transaction.rowMetadataWrites.keys(),
+              transaction.truncate,
+            )
           transaction.applicationReceipt = applied
           // Core accepted the transaction, so it is no longer staged here;
           // the receipt resolves when it is visible.
@@ -6673,13 +6665,7 @@ function createWrappedSyncConfig<
             const error = new SyncTransactionAbortedError()
             return abortPublicationTransaction(openTransaction, error)
           }
-          try {
-            bindToCurrentHydration(openTransaction)
-            assertHydrationSequenceCurrent(openTransaction)
-          } catch (error) {
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            throw error
-          }
+          bindToCurrentHydration(openTransaction)
           const transaction = {
             operations: openTransaction.operations,
             partialUpdateOperationIndexes:

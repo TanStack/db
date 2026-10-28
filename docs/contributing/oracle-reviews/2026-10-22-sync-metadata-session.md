@@ -240,6 +240,24 @@ encoding the author had extended without asking. Three more followed on
     A first answer ("seen objects only") was withdrawn after a corrected
     premise.
 
+21. **A persisted Collection accepts a source transaction when it hands it
+    to core (2026-10-28).** H2 needed a late abort: a commit whose signal
+    aborts while the wrapper still buffers it behind a storage read.
+    `SyncConfig.commit` says that aborting after acceptance has no effect.
+    The maintainer first chose that text, but it failed 16 cases of the
+    abort-graph law ("abort graphs preserve independent siblings and reject
+    dependent suffixes") and its witnesses, which the question had not
+    named. Asked again, the maintainer kept the abort-graph law: the
+    wrapper's acceptance is its handoff to core, so a signal aborted before
+    then abandons the transaction, its receipt rejects, and source reads
+    include it until then.
+22. **A seed is judged when it arrives (2026-10-28).** The reads-and-seeds
+    lane found a seed that arrives after a buffered write to its row, which
+    is then abandoned. The glossary's "surviving source write" would revive
+    the seed; production ignored it for good. The maintainer chose judging at
+    arrival, for less code in a tiny window: the seed stays ignored for that
+    object. The glossary's hydration-seed entry says so.
+
 ## Laws and sources
 
 | Law | Source | Transfer to a sync run |
@@ -952,6 +970,53 @@ Evidence:
 - **Limits.** The reset's term fence is exercised only through the
   driver's single-term peer. The full-row and on-demand lanes cover the
   peer grammar, not the other lanes' holds and reads.
+
+## Tenth round (high review)
+
+A high review of `18f7df562` raised ten items (H1 to H10).
+
+- **Law.** A reset's own reload reads metadata through its open truncate
+  only for kept seeds. What storage holds after a reset is this run's
+  source writes. A transaction the wrapper abandons before handoff wrote
+  nothing, so a seed beneath it holds (decision 21); a seed that arrives
+  after it stays judged against it (decision 22).
+- **Grammar and model.** A reset may rewrite its rows: the resetting tab
+  writes storage's rows back, and the reload applies them after its
+  truncate. A new `abandon` action aborts the signal of the newest
+  outermost transaction committed during a read hold; only the read's end
+  may follow, which abandons it. A transaction begun over a buffered one
+  reads it and becomes a dependent successor, which the abort-graph oracle
+  owns, so `abandon` needs none. New lane `persisted-reads-seeds` crosses
+  read holds with seeds and the cached row, loaded by a demand for every
+  row.
+- **Reach.** `reset that rewrites its rows` and `abort after commit` are
+  declared. Abandoning the writer of a held seed's row stays below five in
+  150 histories; a replay pins it.
+
+| Finding | Disposition |
+|---|---|
+| H1: the session reader read through a reset's open truncate, so the reset skipped writing stored metadata equal to what it was about to delete | Confirmed. RED: the rewriting reset's replay and the on-demand campaigns. Fixed: the reader stops at a source truncate for keys it does not keep. Round 9 had removed this as unreachable; the wrapper reads inside its own open reset |
+| Sibling: an equal re-insert of a row a reset wrote back cleared its metadata | Fixed: a reset records the rows it restores as this run's source writes |
+| Sibling (model): the model kept decision 16's metadata of a missing row through a rewriting reset | Fixed in the model: only rows are durable |
+| H2: run writes were recorded before the handoff and kept when it abandoned the transaction | Confirmed. RED: the abandon replay. Fixed: only a transaction handed to core with a live signal is recorded |
+| H3: `truncate` ignores an invalid open transaction | Accepted design (decision 7); a mutant that revives it fails the nested and conflict campaigns |
+| H4: a read's seed marks and run-written rows stay if its transaction is discarded | First half refuted earlier (F10). Second half true but harmless: under unknown writes a changed stored row is this run's source write whether or not the read applies (decision 15) |
+| H5: the targeted-invalidation seed checks are always false | Confirmed by source: the notice's keys are recorded first. Removed |
+| H6: the hydration binding's cross-cycle throw and its assert are unreachable | Confirmed by source. Removed with their `try`; the assert at the handoff stays |
+| H7 | Duplicate of G (accepted design) |
+| H8 | Duplicate of F7; the newer known-key set is cleared at each full-reload notice |
+| H9: `appliedAdapterKeys` keeps an entry for nearly every synced key while a `DbClient` tracks authority | Accepted: per-object seed authority needs it (D4, D5); the map exists only under `DbClient` tracking |
+| H10: the session reader walks every pending transaction | Observation, no performance law: pending transactions accumulate only while an optimistic transaction holds sync |
+| Survey: a seed after a buffered write that is then abandoned | Decision 22; the model records each seed's losses before abandonment |
+
+Evidence:
+
+- **RED.** On `18f7df562`: H1's replay and the on-demand campaigns; the
+  re-insert sibling's replay; H2's replay.
+- **GREEN.** Every persisted session lane and replay; three searches of
+  `persisted-reads-seeds` at four times the runs.
+- **Limits.** The abandon action covers one buffered transaction with no
+  successor; dependent suffixes belong to the abort-graph oracle.
 
 ## Open
 
