@@ -278,7 +278,7 @@ These rules keep `ready` meaningful:
 - **A failed restore is a crash.** The Collection becomes `crashed`, because local storage cannot serve reads.
 - **The deadline does not stop network sync.** Network changes apply over the restored rows when they arrive.
 
-`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot.
+These rules apply to an eager Collection. An on-demand Collection applies `initialRender` to each query demand. See [On-demand Collections offline](#on-demand-collections-offline).
 
 Suspense uses the same status. This React component uses the `syncedTodos` Collection configured above:
 

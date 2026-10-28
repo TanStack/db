@@ -1455,4 +1455,34 @@ describe(`multi-tab Electric over one persisted database`, () => {
       ),
     60_000,
   )
+
+  // Known gap, pinned from the random campaign (seed -1660880085, path
+  // 55:0:1:4:4:4:1:1:1:1:3:4:4:4:4): row 1 reaches v2 on the server and both
+  // tabs catch up, but after tab B stops, tab A catches up, and tab A stops,
+  // the durable rows lose row 1. Law 2 expects every open tab and the durable
+  // rows to show the head. This reproduces on main and is tracked with #2281.
+  // It replays through the same driver and checks with the known-gap detector
+  // off. Remove `fails` when the durable row survives the stops.
+  it.fails(
+    `keeps a durable row after both tabs catch up to it and then stop`,
+    () =>
+      runGeneratedHistory(
+        {
+          tabCount: 2,
+          steps: [
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `catch up`, tab: 1, pick: 1 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `stop`, tab: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `stop`, tab: 0, pick: 0 },
+          ],
+        },
+        () => undefined,
+      ),
+    60_000,
+  )
 })

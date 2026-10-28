@@ -1344,6 +1344,7 @@ describe(`CollectionSubscription status tracking`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
         truncateReplayPublication: {
+          siblingReplays: () => undefined,
           start: () => {
             replayStarts += 1
           },

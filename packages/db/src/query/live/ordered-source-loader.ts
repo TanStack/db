@@ -114,6 +114,8 @@ export class OrderedSourceLoader {
   private authorityGeneration = 0
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
+  // The rows the source's prefix held when it last grew.
+  private grownPrefixRows: number | undefined
   // The count of the last request that read from the start of the order,
   // until a continuation reads past it.
   private ownPrefixCount: number | undefined
@@ -479,14 +481,31 @@ export class OrderedSourceLoader {
     continuesOrderedPrefixRepair = false,
   ): void {
     if (!this.active || this.pending || this.stagedContinuation) return
-    if (this.lastPrefixCount === count) {
-      if ((this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) > 0) {
-        if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair()
-        this.loadFullSource(windowOperationGeneration)
-      } else if (continuesOrderedPrefixRepair) {
-        this.finishOrderedPrefixRepair(windowOperationGeneration)
+    const last = this.lastPrefixCount ?? 0
+    if (last >= count) {
+      if ((this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) === 0) {
+        if (continuesOrderedPrefixRepair) {
+          this.finishOrderedPrefixRepair(windowOperationGeneration)
+        }
+        return
       }
-      return
+      // A filter after the read dropped rows, so the prefix doubles: each read
+      // stays bounded by twice the last one, and none reads the full source.
+      // A pending optimistic departure can hide a row from this count, so the
+      // prefix grows while growing still adds rows. Once growing adds none,
+      // the source holds no more rows.
+      const rows = this.subscription.readOrderedSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: last,
+      }).length
+      if (rows <= (this.grownPrefixRows ?? -1)) {
+        if (continuesOrderedPrefixRepair) {
+          this.finishOrderedPrefixRepair(windowOperationGeneration)
+        }
+        return
+      }
+      this.grownPrefixRows = rows
+      count = last * 2
     }
     this.requestAndObserve(
       (tracking) =>
@@ -634,6 +653,7 @@ export class OrderedSourceLoader {
     }
     this.lastPage = undefined
     this.lastPrefixCount = undefined
+    this.grownPrefixRows = undefined
   }
 
   invalidateSourceOrdering(): void {
@@ -661,12 +681,21 @@ export class OrderedSourceLoader {
    */
   revalidateLoadedCoverage(): void {
     // A `requiresFullSource` plan's coverage is its full-source read: nothing
-    // has settled before it, and it covers the source after.
+    // has settled before it. Coverage that one full-source read completed
+    // owes an ordering invalidation nothing, so the invalidation below starts
+    // no request for it, and the loader ignores the report (ARCHITECTURE.md).
+    if (!this.hasSettledSourceRequest) return
+    const end = this.ownPrefixEnd()
+    // An installed row past the page proves the source's next row only when
+    // the page read it, or when it ties with an end whose tie the loader
+    // read. A refetch can move the end before that tie, and then the bounded
+    // repair proves the window again. An `undefined` end also matches a
+    // loader that attempted no tie. No cursor expresses a nullish end, so the
+    // loader has started or will start a full-source read, which covers it.
     if (
-      !this.active ||
-      !this.hasSettledSourceRequest ||
-      this.coversSource() ||
-      this.windowIsInsideOwnPrefix()
+      end !== undefined &&
+      ((this.ownPrefixCount ?? 0) > this.info.offset + this.info.limit ||
+        Object.is(this.info.valueExtractorForRawRow(end), this.lastBoundary))
     )
       return
     this.invalidateSourceOrdering()
@@ -676,8 +705,9 @@ export class OrderedSourceLoader {
   // through its end, and any row it left out sorts after that end. So a
   // window whose rows all sort at or before the end is right. A row after
   // the page that ties with its end could sort before a window row; then
-  // the window is not proven.
-  private windowIsInsideOwnPrefix(): boolean {
+  // the window is not proven. Returns the end when the window is inside
+  // the page.
+  private ownPrefixEnd(): Record<string, unknown> | undefined {
     const size = this.info.offset + this.info.limit
     // A report can arrive while the refetched rows are accepted but held
     // back, as behind a persisting optimistic transaction. The visible rows
@@ -687,19 +717,19 @@ export class OrderedSourceLoader {
       !this.info.dataNeeded ||
       this.subscription.hasHeldSyncTransaction
     ) {
-      return false
+      return undefined
     }
     const rows = this.subscription.readOrderedSnapshot({
       orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
       limit: size + 1,
     })
     // Optimistic rows are left out, so a short read proves nothing.
-    if (rows.length <= size) return false
+    if (rows.length <= size) return undefined
     const end = rows[size - 1]!.value
-    return (
-      this.info.comparator(rows[size]!.value, end) > 0 &&
+    return this.info.comparator(rows[size]!.value, end) > 0 &&
       this.info.dataNeeded(end) === 0
-    )
+      ? end
+      : undefined
   }
 
   private finishOrderedPrefixRepair(windowOperationGeneration?: number): void {
