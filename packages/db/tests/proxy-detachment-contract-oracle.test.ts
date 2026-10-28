@@ -16,7 +16,7 @@
  * Native Set and Map iteration order is part of the detached snapshot: a
  * reorder with identical members or entries is still a draft change.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { withChangeTracking } from '../src/proxy.js'
 import { oracleRuns } from './oracle-config.js'
@@ -31,10 +31,38 @@ import {
   storedDataRow,
   storedRow,
 } from './proxy-detachment-fixture.js'
-import type {
-  CycleRow} from './proxy-detachment-fixture.js';
+import type { CycleRow } from './proxy-detachment-fixture.js'
 
 describe(`Mutation result detachment`, () => {
+  // For any number of ordinary fields, one write changes only that field and
+  // defines no property descriptors: a generated law over the field count.
+  it(`copies ordinary fields without descriptor writes`, () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
+        const row = Object.fromEntries(
+          Array.from({ length: count }, (_, i) => [`field${i}`, i]),
+        )
+        const define = vi.spyOn(Object, `defineProperty`)
+        let changes: Record<string | symbol, unknown>
+        let writes: number
+        try {
+          changes = withChangeTracking(row, (draft) => {
+            draft.field0 = 42
+          })
+          writes = define.mock.calls.filter(([, key]) =>
+            String(key).startsWith(`field`),
+          ).length
+        } finally {
+          define.mockRestore()
+        }
+        expect(changes).toEqual({ field0: 42 })
+        expect(row.field0).toBe(0)
+        expect(writes).toBe(0)
+      }),
+      { seed: 20260914, numRuns: 40 },
+    )
+  })
+
   it.each([`value`, `__proto__`, `constructor`, `toString`])(
     `rejects missing or prototype-changing %s data properties`,
     (key) => {
