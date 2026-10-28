@@ -759,6 +759,9 @@ old constant, even after its first load settles: deduplication and query state
 may retain its identity. Request data uses stable data properties, not stateful
 getters. The signal and subscription references do not change, but their
 lifecycle remains live. Cancellation and release are not data mutations.
+A truncate replay asks again for each retained demand with that demand's
+request data, so an adapter sees the same `where` expression it received
+before the truncate.
 The immutable-demand boundary matrix checks direct and deferred sync startup,
 adapter return and asynchronous settlement, cancellation, and release identity.
 
@@ -766,7 +769,8 @@ A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` therefore retires the
 logical owner at once, but physical release waits until the adapter returns and
 proves that it established an acquisition. A synchronous `loadSubset` throw
-rolls the tentative owner back without calling `unloadSubset`. Logical demand
+is a rejection: the load failed, it keeps its owner, and the owner's release
+unloads it as it does any failed load. Logical demand
 retires even when `unloadSubset` fails. Each physical acquisition gets one release
 attempt, marked before calling adapter or error-listener code. Reentrant and
 repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
@@ -930,7 +934,10 @@ applied settlement. A failed or obsolete replacement cannot retire established
 coverage, and a retry requests the same union again. A partial shrink may keep
 one intersecting acquisition without replacement. This avoids repeatedly
 loading the growing prefix while allowing a changing bounded window to return
-to one acquisition.
+to one acquisition. The controller starts new coverage before it releases an
+acquisition that no longer intersects current demand. A demand change
+therefore never leaves its subscription without logical demand partway
+through, which would end that subscription's truncate replay.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
@@ -1046,7 +1053,18 @@ when its window is inside that page: every window row sorts at or before the
 `offset + limit`-th source row, and the next source row sorts strictly after
 it in the leading term. The refetched page holds every row from the start
 through its end, and any row it left out sorts after that end, so the window
-is proven. A window that needs a row past the page, such as one whose page
+is proven. The loader checks the next source row through an installed row,
+which is evidence only when the page read it, or when the loader read the tie
+of the page's current end: the refetch re-read that tie, so every row that ties
+with the end is installed. A row that another request installed proves
+nothing. Neither does a tie that the loader read for an older end, because a
+refetch can move the end earlier, so a row the provider never sent can tie
+with the new end. When the end moved, the loader repairs. (Reading only the
+new end's tie would also complete the proof, since the refetched page holds
+every row before the end, and saves one request; the bounded repair is kept
+because that read cost shipped bytes for one saved request per such
+refetch.) A window that needs a row
+past the page, such as one whose page
 holds rows a joined filter rejects, still repairs. So does any loader while
 its source holds accepted sync rows back, as behind a persisting optimistic
 transaction: the visible rows then predate the refetch. Core reissues the
@@ -1214,7 +1232,10 @@ join-key update, or a root change, and for Collection and Effect consumers. The 
 finite root requests; this contract does not imply that it can evaluate the
 relation filter remotely.
 Finite continuation still requires an order index; an underfilled unindexed
-prefix retains the established full-source fallback.
+prefix grows. Each growth reads a prefix twice as long as the last one, so
+every read stays bounded and none reads the full source. The prefix grows
+while growing still adds rows to the source. When the last growth added
+none, the source holds no more rows and the window stays short.
 
 A custom string comparator is a local ordering contract. If any resolved
 source order term uses `stringSort: 'custom'`, bounded and unbounded queries
@@ -1355,7 +1376,16 @@ late rejection from an abandoned sync run cannot reset the replacement sync
 run's requested window.
 A window move started during an active source replay waits for that replay and
 applies only after its replacement is complete. A failed replay rejects the
-move without advancing the reported window. Replay completion callbacks carry
+move without advancing the reported window. A replay that a newer truncate or
+the retirement of its last demand discards did not fail, even though its
+completion rejects with `AbortError`: the move waits for any replay that still
+holds publication and then applies. If a replay it waits on fails, the move
+rejects with that replay's own error, its earliest failure that still decides
+it (maintainer decision). When a replay it waits on is discarded and
+the query's or a source's sync run changed meanwhile, as a reload changes it,
+the move rejects with that replay's `AbortError`. The move compares the sync
+runs only when a replay it waits on rejects, so a reload of another source
+whose replay it does not wait on leaves the move to apply. Replay completion callbacks carry
 their sync-run identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.
@@ -1478,6 +1508,19 @@ while the retired transport can no longer gate it. A genuine replay failure is
 normalized once by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
+
+A live query's subscriptions to one collection, such as a join and an include
+of the same source, share one publication barrier. None of their replays
+publishes, and none whose last demand retired closes, while another of them
+still has replay work, so demand that any of them starts meanwhile joins its
+own open replay. While a failed replay of any of them holds publication, a
+lazy demand of any of them that fails after initial-query readiness fails its
+own subscription's replacement too, so retiring the other replay's failed
+demand cannot publish the window without this demand's rows. It holds until
+every demand load that joins it loads, a later replay of the source succeeds,
+or the subscription's last demand retires. The query retries the failed demand
+at once and the retry joins the hold, so the hold ends only after the failed
+demand's rows load.
 
 ### Mutation boundaries and initial readiness
 

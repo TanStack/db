@@ -607,6 +607,9 @@ remove the old package dependency. See the
   `DuplicateKeySyncError`. A partial on-demand `loadSubset` result must never
   claim to be a full snapshot. Honor its `signal`: aborted loads no longer hold
   readiness, and core ignores their later promise results.
+- Treat a synchronous `loadSubset` throw like a rejected load. Core keeps its
+  logical demand and calls `unloadSubset` when that demand is released. Ensure
+  `unloadSubset` can clean up partially initialized or failed loads.
 - Sync metadata reads now include the source's own committed writes that an
   optimistic transaction still holds, followed by its open transactions.
   This applies to `metadata.row.get`, `metadata.collection.get`, and

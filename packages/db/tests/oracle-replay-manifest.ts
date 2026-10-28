@@ -285,12 +285,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
+    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch`,
   ],
   [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
     `replay`,
-    `ordered-window-faults keyed-request-failures subscription-demand-origin`,
+    `ordered-window-faults ordered-failed-replay ordered-preload-recovery keyed-request-failures subscription-demand-origin`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -342,7 +342,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
     `ordered-loader`,
-    `request-authority`,
+    `request-authority unproven-report`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
@@ -835,6 +835,10 @@ const seedReplayProperties = new Set([`evaluators.like`])
 function directReplayTestName(property: string): string | undefined {
   if (property === `replay.ordered-window-faults`)
     return `keeps the ordered window under load and release faults \\(replay campaign\\)`
+  if (property === `replay.ordered-failed-replay`)
+    return `keeps the last publication through a failed replay \\(replay campaign\\)`
+  if (property === `replay.ordered-preload-recovery`)
+    return `recovers replays that start during the initial preload \\(replay campaign\\)`
   if (property === `replay.keyed-request-failures`)
     return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
   if (property === `replay.subscription-demand-origin`)
