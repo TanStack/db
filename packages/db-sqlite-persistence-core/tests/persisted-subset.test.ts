@@ -1140,8 +1140,11 @@ describe(`persistedCollectionOptions`, () => {
       title: `From remote`,
     })
     expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    // A source insert names the whole row, so storage replaces any cached row
+    // instead of merging over it (decision C1 of 2026-10-23); the adapter's
+    // insert is an upsert, so cache and snapshot overlap stays safe.
     expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(
-      `update`,
+      `insert`,
     )
   })
 })

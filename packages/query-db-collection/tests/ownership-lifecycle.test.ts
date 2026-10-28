@@ -39,6 +39,7 @@ import {
   createOwnershipStorage,
   createPersistedOwnershipFixture,
   createQueryClient,
+  createSharedRowClient,
   detailOnly,
   expectColdOwnerRevalidation,
   expectMutationLifecycleSnapshot,
@@ -49,6 +50,7 @@ import {
   listOnly,
   observeColdOwnerRevalidation,
   persistedOwners,
+  publishedRowMetadata,
   readClaimedCacheRows,
   recordMetadata,
   recordRunCacheClaim,
@@ -57,6 +59,7 @@ import {
   runCleanups,
   shared,
   storedItems,
+  waitForRetention,
 } from './ownership-lifecycle-support.js'
 import type {
   Item,
@@ -1428,6 +1431,1196 @@ describe(`query collection ownership lifecycle`, () => {
     expect(queryFn).toHaveBeenCalledOnce()
   })
 
+  // Retention cleanup runs on a real 10 ms GC timer followed by a storage
+  // scan and a sync transaction. A loaded CI runner can take longer than the
+  // default 1 s wait, so these witnesses wait up to 5 s for it.
+  const retentionWait = { timeout: 5_000 }
+  // Longer than a wait, so a stuck wait reports its own observation.
+  const retentionTestTimeout = 20_000
+
+  /**
+   * ## A claim made during a held retention cleanup does not publish the cleaned owner
+   *
+   * Law: each publication records only the observer leases that still own a
+   * row. A persisted retention entry keeps its Query's owner edges until its
+   * time-to-live expires. The expiry then removes those edges in a sync
+   * transaction. That transaction is accepted but held behind an optimistic
+   * blocker, so the edges stay applied while a claim of the same row runs. The
+   * claim must not copy the removed owner back into its own publication. Its
+   * owners come from the pending cleanup and the claimant's own edge, never
+   * from an applied edge whose owner has already been retired.
+   *
+   * Authority: the published-owner law above, under which a released lease is
+   * not an owner even while its release waits behind held publication, and
+   * the retention rule that expiry releases the Query's owner edges.
+   *
+   * Reference: one row shared by a retained `detail` demand and a `list` demand
+   * that claims it during the cleanup hold. After publication the row has one
+   * owner, `list`.
+   *
+   * History: load `detail`, hold publication behind an optimistic blocker,
+   * unload `detail` so that its retention is recorded, wait for the expiry to
+   * start its cleanup transaction, load `list`, then publish. The checkpoint
+   * reads the applied owners.
+   *
+   * Why it fails: the expiry's cleanup deletes the row, because `detail` was
+   * its only owner, and retires the released Query's owner tracking when the
+   * cleanup commits, before the cleanup applies. The claim is an insert of the
+   * deleted row. Its owner read runs before its own insert, and the newest
+   * transaction has no write for the row there. So the read takes the applied
+   * edge for `detail`, and the released-owner filter, with no tracking entry,
+   * keeps it. The published owners then include `detail`. The claim's insert
+   * clear and the `??` fallback are not the trigger. Dropping the fallback alone
+   * leaves this history failing, so it does not discriminate that repair. The
+   * peer history below isolates the update path.
+   *
+   * Observation: this fixture has no DbClient, so the applied metadata is read
+   * from `collection._state.syncedMetadata`.
+   *
+   * Limits: one row, one retained demand, one claimant, a 10 ms time-to-live
+   * on real timers, and an in-memory baseline (the persisted scan returns no
+   * rows). The history checks the applied owners after publication. It does
+   * not model the hydrated client or a row that a claimant removes while the
+   * cleanup is held.
+   */
+  it(
+    `does not publish a retention-cleaned owner through a claim made during the cleanup hold`,
+    async () => {
+      const id = `retention-cleanup-hold-claim`
+      const detail = categorySubset(`detail`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await waitForRetention(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      // The expiry's owner release is accepted but held behind the blocker.
+      await waitForRetention(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
+
+      expect({
+        rows: rows(collection),
+        owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+          .length,
+      }).toEqual({
+        rows: [shared.id],
+        owners: 1,
+      })
+    },
+    retentionTestTimeout,
+  )
+
+  /**
+   * ## A retention-cleaned owner does not keep its row after the claimant releases
+   *
+   * Law: a row stays public while a committed owner needs it. After the
+   * retention cleanup, `list` is the row's only owner, and `detail` has been
+   * released. Releasing `list` must therefore let the row go once its own
+   * retention expires. A released demand's edge must not keep the row alive.
+   *
+   * Authority: the published-owner law above, under which a released lease is
+   * not an owner, and the retention rule that expiry releases the Query's
+   * owner edges. This is the identity observation for the count in the
+   * claim-during-cleanup-hold history above. The count cannot say which owner
+   * it is, so this sibling releases the claimant and watches the row.
+   *
+   * Reference: the same history as above, with the claim published. The
+   * expected public rows after `list` releases and its retention expires are
+   * none.
+   *
+   * History: the claim-during-cleanup-hold history, then unload `list` with no
+   * further hold. The checkpoint waits for the row to leave the collection.
+   *
+   * Why it fails: the stale `detail` edge that the cleanup should have retired
+   * stays in the applied owners, so the row survives the claimant's release.
+   *
+   * Limits: the same as the claim-during-cleanup-hold history. The row is
+   * observed through the public collection rows, and the owner set is not
+   * read.
+   */
+  it(
+    `removes a retention-cleaned row once its claimant releases it`,
+    async () => {
+      const id = `retention-cleanup-hold-release`
+      const detail = categorySubset(`detail`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await waitForRetention(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      await waitForRetention(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
+
+      collection._sync.unloadSubset(list)
+      await waitForRetention(
+        () => expect(rows(collection)).toEqual([]),
+        retentionWait,
+      )
+    },
+    retentionTestTimeout,
+  )
+
+  /**
+   * ## A claimed row with no retention history is collected on release
+   *
+   * Law: a row whose only owner releases it leaves the collection once that
+   * owner's retention expires. This control runs the release step of the
+   * sibling above without a prior demand, so a failure there can be attributed
+   * to the stale owner edge rather than to the release or expiry.
+   *
+   * Authority: the retention rule that expiry releases the Query's owner
+   * edges, and the published-owner law (a released lease is not an owner).
+   *
+   * Reference: one row `shared` claimed by `list` alone. After `list` releases
+   * and its retention expires, no rows remain.
+   *
+   * History: load `list`, unload it, and wait for the row to leave.
+   *
+   * Limits: one row, one demand, a 10 ms time-to-live on real timers, and an
+   * in-memory baseline.
+   */
+  it(
+    `collects a claimed row with no retention history once its claimant releases it`,
+    async () => {
+      const id = `retention-release-control`
+      const list = categorySubset(`list`)
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+
+      await collection._sync.loadSubset(list)
+      expect(rows(collection)).toEqual([shared.id])
+
+      collection._sync.unloadSubset(list)
+      await waitForRetention(
+        () => expect(rows(collection)).toEqual([]),
+        retentionWait,
+      )
+    },
+    retentionTestTimeout,
+  )
+
+  /**
+   * ## A held cleanup does not publish a released owner beside a surviving peer
+   *
+   * Law: each publication records only the observer leases that still own a
+   * row. When a retention expiry releases one owner of a row that another lease
+   * still owns, the expiry removes only the released owner's edge, and the row
+   * stays public. A claim made while that release is held reads the pending
+   * release, so it publishes the peer and itself, and not the released owner.
+   *
+   * Authority: the published-owner law above, under which a released lease is
+   * not an owner even while its release waits behind held publication, and the
+   * retention rule that expiry releases the Query's owner edges.
+   *
+   * Reference: one row `shared`, owned by a retained `detail` demand and a
+   * surviving `peer` demand. A `list` claim during the cleanup hold publishes
+   * exactly two owners, `peer` and `list`, and not `detail`.
+   *
+   * History: load `detail`, load `peer`, hold publication behind an optimistic
+   * blocker, unload `detail` so that its retention is recorded, wait for the
+   * expiry to start its cleanup transaction, load `list`, then publish.
+   *
+   * Why it fails: the expiry's cleanup writes the row's owners as `{ peer }`,
+   * but that write is in an older pending transaction. The claim's read sees
+   * only its own newest transaction. The row is present, so the claim is an
+   * update and the read has no write to find. The read takes the applied
+   * `{ detail, peer }`. The cleanup has already retired `detail`'s tracking, so
+   * the released-owner filter keeps `detail`. The claim is an update, so the
+   * insert clear and the `??` fallback are not involved. This history therefore
+   * fails with the fallback kept and with it removed, and passes only when the
+   * read sees the pending owner set or the released tombstone outlives the
+   * cleanup's commit.
+   *
+   * Observation: this fixture has no DbClient, so the applied metadata is read
+   * from `collection._state.syncedMetadata`.
+   *
+   * Limits: one row, three demands, a 10 ms time-to-live on real timers, and an
+   * in-memory baseline. It does not model a row that a claimant removes while
+   * the cleanup is held.
+   */
+  it(
+    `does not publish a released owner beside a surviving peer through a held cleanup`,
+    async () => {
+      const id = `retention-cleanup-peer-claim`
+      const detail = categorySubset(`detail`)
+      const peer = categorySubset(`peer`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      await collection._sync.loadSubset(peer)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await waitForRetention(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      // The expiry's owner release is accepted but held behind the blocker.
+      await waitForRetention(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
+
+      expect({
+        rows: rows(collection),
+        owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+          .length,
+      }).toEqual({
+        rows: [shared.id],
+        owners: 2,
+      })
+    },
+    retentionTestTimeout,
+  )
+
+  /**
+   * ## A hydrated release of a held-cleanup row needs a recorded owner to keep it
+   *
+   * Law: a row stays public while a committed owner needs it. In the surviving
+   * peer history above, the released `detail` is not an owner, so its edge
+   * must not keep the row alive after `peer` and `list` release. A live
+   * collection cannot show this, because its applied owners are already
+   * filtered. The stored owners do show it: a hydrated client trusts every
+   * recorded owner.
+   *
+   * Authority: the published-owner law above, under which a released lease is
+   * not an owner, and the hydration rule of the published-owner histories, a
+   * hydrated row stays while any recorded owner remains. The count in the peer
+   * history cannot name the owner, so this sibling reads the stored owners
+   * through a hydrated release.
+   *
+   * Reference: the surviving-peer history, dehydrated after publication. A
+   * browser client that loads and then releases `peer` and `list` has no
+   * recorded owner left, so the row leaves.
+   *
+   * History: the surviving-peer history, with its stored metadata for `shared`
+   * taken as the hydration input. A fresh browser DbClient hydrates it over the
+   * same collection id. The browser loads and releases `peer` and `list`, and
+   * the checkpoint reads its rows. The fixture is the server because it supplies
+   * the persisted scan that retention needs, and a DbClient collection here does
+   * not. The stored metadata is the owner set that `dehydrate` would publish.
+   *
+   * Why it fails: the stale `detail` edge stays in the stored owners, so the
+   * hydrated row survives after its last real owners release.
+   *
+   * Limits: one row, three demands, a 10 ms server time-to-live, and a browser
+   * with no retention. It does not model a browser that holds the release.
+   */
+  it(
+    `hydrated clients drop a held-cleanup row once its peer and claimant release it`,
+    async () => {
+      const id = `retention-cleanup-peer-hydrated`
+      const detail = categorySubset(`detail`)
+      const peer = categorySubset(`peer`)
+      const list = categorySubset(`list`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      // The fixture supplies the persisted scan that makes retention expire.
+      const { collection } = createOwnershipFixture({
+        id,
+        results: [[shared], [shared], [shared]],
+        persistedGcTime: 10,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+
+      await collection._sync.loadSubset(detail)
+      await collection._sync.loadSubset(peer)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await waitForRetention(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      const pendingBeforeExpiry =
+        collection._state.pendingSyncedTransactions.length
+      await waitForRetention(
+        () =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(pendingBeforeExpiry),
+        retentionWait,
+      )
+      const claimed = Promise.resolve(collection._sync.loadSubset(list))
+      void claimed.catch(() => undefined)
+      await settleTurn()
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await settleTurn()
+      await claimed
+
+      // The stored metadata of the row is the state that a dehydrate publishes.
+      const state = {
+        collections: [
+          {
+            collectionId: id,
+            rows: [
+              {
+                key: shared.id,
+                value: shared,
+                metadata: collection._state.syncedMetadata.get(shared.id),
+              },
+            ],
+          },
+        ],
+      }
+      const browser = createSharedRowClient(id)
+      cleanups.push(async () => {
+        await browser.client.cleanup()
+        browser.queryClient.clear()
+      })
+      browser.client.hydrate(state)
+      const hydrated = browser.client.collection(browser.descriptor)
+      await hydrated._sync.loadSubset(peer)
+      await hydrated._sync.loadSubset(list)
+      hydrated._sync.unloadSubset(peer)
+      hydrated._sync.unloadSubset(list)
+      await waitForRetention(
+        () => expect(rows(hydrated)).toEqual([]),
+        retentionWait,
+      )
+    },
+    retentionTestTimeout,
+  )
+
+  /**
+   * ## A held owner stays published beside a later claim of its row
+   *
+   * Law: each publication records every observer lease that still owns a row.
+   * A lease whose result is held behind publication already owns its rows in
+   * memory. A later lease that claims the same row while that result is held
+   * must publish both leases as owners. It must not overwrite the held owner
+   * with its own edge alone, because the held owner's edge is not yet visible
+   * in the applied metadata.
+   *
+   * Authority: the published-owner law above (a row remains public while any
+   * committed owner needs it, and publication records the owner set), and the
+   * accepted-edge rule in the ownership read: accepted in-memory edges
+   * supplement owners whose metadata has not published yet.
+   *
+   * Reference: one row `shared`. `detail` and `list` both need it. Publication
+   * is held, so neither edge has published. After release, the published owners
+   * are exactly `detail` and `list`.
+   *
+   * History: hold publication behind an optimistic blocker, load `detail` and
+   * leave its result held, load `list` for the same row, release the blocker,
+   * then publish. The checkpoint reads the applied owners.
+   *
+   * Why it fails when the in-memory supplement is ignored: the claim reads only
+   * the applied metadata, which has no owner for the row. It publishes `{list}`
+   * and drops the held `detail` edge.
+   *
+   * Observation: this fixture has no DbClient, so the applied metadata is read
+   * from `collection._state.syncedMetadata`.
+   *
+   * Limits: one row, two demands, one blocker, in-memory on-demand loads, and no
+   * persistence.
+   */
+  it(`publishes a held owner beside a later claim of its row`, async () => {
+    const id = `held-owner-beside-claim`
+    const detail = categorySubset(`detail`)
+    const list = categorySubset(`list`)
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const { collection } = createOwnershipFixture({
+      id,
+      results: [[shared], [shared]],
+    })
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    cleanups.push(async () => {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+    })
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+
+    mutation.mutate(() => collection.insert(blocker))
+    const held = Promise.resolve(collection._sync.loadSubset(detail))
+    void held.catch(() => undefined)
+    await settleTurn()
+    const claimed = Promise.resolve(collection._sync.loadSubset(list))
+    void claimed.catch(() => undefined)
+    await settleTurn()
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    await settleTurn()
+    await Promise.all([held, claimed])
+
+    expect({
+      rows: rows(collection),
+      owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+        .length,
+    }).toEqual({
+      rows: [shared.id],
+      owners: 2,
+    })
+  })
+
+  /**
+   * ## A hydrated release keeps a held owner's row while the held owner is recorded
+   *
+   * Law: a row stays public while a committed owner needs it. In the held-owner
+   * history above, `detail` and `list` both own the row, and publication
+   * records both. A browser that hydrates the published state and releases
+   * `list` must keep the row through the recorded `detail` owner.
+   *
+   * Authority: the published-owner law above (publication records the owner
+   * set, and a row remains public while any committed owner needs it), and the
+   * hydration rule that a hydrated row stays while any recorded owner remains.
+   * The count in that history cannot name the owner. A live collection cannot
+   * show the drop either, because its in-memory `detail` lease still holds the
+   * row, so this sibling reads the stored owners through a hydrated release.
+   *
+   * Reference: the held-owner history, dehydrated after publication. A browser
+   * that loads and releases `list` keeps `shared`, because `detail` is recorded.
+   *
+   * History: the held-owner history on a server DbClient, dehydrate it, and
+   * hydrate a fresh browser DbClient over the same collection. The browser loads
+   * and then releases `list`. The checkpoint reads its rows after the release
+   * settles.
+   *
+   * Why it fails: publication dropped the held `detail` edge, so the stored
+   * owners hold only `list`. Releasing `list` in the browser removes the row.
+   *
+   * Limits: one row, two demands, one blocker, and a browser with no retention.
+   * The survival checkpoint waits three turns, so a release that is slower than
+   * that would not be caught by this test.
+   */
+  it(`hydrated clients keep a held owner's row after its later claimant releases`, async () => {
+    const id = `held-owner-hydrated-release`
+    const detail = categorySubset(`detail`)
+    const list = categorySubset(`list`)
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const server = createSharedRowClient(id)
+    const collection = server.client.collection(server.descriptor)
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    cleanups.push(async () => {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+      await server.client.cleanup()
+      server.queryClient.clear()
+    })
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+
+    mutation.mutate(() => collection.insert(blocker))
+    const held = Promise.resolve(collection._sync.loadSubset(detail))
+    void held.catch(() => undefined)
+    await settleTurn()
+    const claimed = Promise.resolve(collection._sync.loadSubset(list))
+    void claimed.catch(() => undefined)
+    await settleTurn()
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    await settleTurn()
+    await Promise.all([held, claimed])
+
+    const state = server.client.dehydrate({
+      shouldDehydrateCollection: () => true,
+    })
+    const browser = createSharedRowClient(id)
+    cleanups.push(async () => {
+      await browser.client.cleanup()
+      browser.queryClient.clear()
+    })
+    browser.client.hydrate(state)
+    const hydrated = browser.client.collection(browser.descriptor)
+    await hydrated._sync.loadSubset(list)
+    hydrated._sync.unloadSubset(list)
+    await settleTurn()
+    expect(rows(hydrated)).toEqual([shared.id])
+  })
+
+  /**
+   * ## A claim that inserts a row replaces its applied metadata
+   *
+   * Law: an insert names the whole metadata of its row. An insert that names
+   * none clears the row's previous metadata, and a later write in the same
+   * session reads its own earlier writes. Query's claim of an absent row is a
+   * source insert with no metadata. It stages its owners only after that
+   * clear, so the published metadata contains the owner edge and nothing from
+   * the applied metadata that the clear removed. Metadata written outside a
+   * Query, here a plain metadata write with no row data, is not a hydration
+   * seed. The source sees the row as absent, so the insert is not an update.
+   *
+   * Authority: the sync metadata session law (an insert without metadata
+   * clears it, and a read includes the session's own earlier write), and the
+   * insert comment in the result-application path ("An insert clears stale
+   * metadata for its key").
+   *
+   * Reference: one absent row `shared` whose applied metadata carries a
+   * non-owner field `user`. A claim of the row by `detail` publishes the owner
+   * edge for `detail`, with no `user` field.
+   *
+   * History: seed the metadata through `setupMetadata` without any row data,
+   * then load `detail`. The result inserts the row and stages the owner edge
+   * in the same transaction. The checkpoint reads the published metadata.
+   *
+   * Why it fails: the owner write reads the row's metadata after the insert
+   * has staged the clear. `metadata.row.get` returns the clear as `undefined`,
+   * and `getRowMetadata` treats `undefined` as "no session value", falling
+   * back with `??` to the applied `{ user }`. The owner write spreads that
+   * fallback, so `user` survives the insert.
+   *
+   * Limits: one row, one claimant, no hold, and an in-memory baseline. The
+   * history checks the published row metadata. It does not model persistence
+   * or a row that already has data.
+   */
+  it(`does not keep applied row metadata when a claim inserts its row`, async () => {
+    const id = `claim-insert-replaces-metadata`
+    const detail = categorySubset(`detail`)
+    const { collection } = createOwnershipFixture({
+      id,
+      results: [[shared]],
+      setupMetadata: (metadata) => {
+        metadata.row.set(shared.id, { user: `stale` })
+      },
+    })
+
+    await collection._sync.loadSubset(detail)
+
+    expect({
+      rows: rows(collection),
+      user: (
+        collection._state.syncedMetadata.get(shared.id) as
+          Record<string, unknown> | undefined
+      )?.user,
+      owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+        .length,
+    }).toEqual({
+      rows: [shared.id],
+      user: undefined,
+      owners: 1,
+    })
+  })
+
+  /**
+   * ## A persisted claim that inserts its row does not keep applied row metadata
+   *
+   * Law: the claim-insert law above also holds behind the persistence wrapper.
+   * The insert of a row without metadata clears the row's metadata for the
+   * session. The claim's owner write then reads its own session's metadata,
+   * and that read sees the clear. It must not restore the applied `user` field.
+   *
+   * Authority: the same law as the in-memory claim-insert witness, applied to
+   * the persisted sync API that a Query Collection receives when it is wrapped
+   * by `persistedCollectionOptions`. The wrapper's staged metadata read is the
+   * session's view, and core supplies only the applied metadata beneath it.
+   *
+   * Reference: applied row metadata `{ user: 'stale' }` with no row data. A
+   * claim by `detail` inserts `shared`. The published metadata keeps only the
+   * `queryCollection` key, and the owner set holds `detail`.
+   *
+   * History: a persisted Query Collection with an empty storage. Before the
+   * first Query result, one metadata-only transaction stages the applied
+   * metadata. Then a `detail` claim loads `shared`. The checkpoint reads the
+   * applied metadata of the row after the claim settles.
+   *
+   * Why it fails: the insert stages a clear in the wrapper's open transaction.
+   * The owner write then reads the row through the wrapper. Its
+   * `readStagedMetadata` returns the staged clear as `undefined`. `getRowMetadata`
+   * falls back with `??` to core's applied `{ user }`, and the owner write
+   * spreads it. The wrapper's own fallback to applied metadata answers only the
+   * earlier read, which runs before the insert stages its clear.
+   *
+   * Limits: one row, one claimant, no hold, and a controlled in-memory storage
+   * adapter behind the wrapper.
+   */
+  it(`does not keep applied row metadata when a persisted claim inserts its row`, async () => {
+    const id = `persisted-claim-insert-replaces-metadata`
+    const detail = categorySubset(`detail`)
+    const storage = createOwnershipStorage()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([shared]))
+    const baseOptions = queryCollectionOptions<Item>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      persistedGcTime: Number.POSITIVE_INFINITY,
+      startSync: true,
+    })
+    const originalSync = baseOptions.sync
+    let pendingSetup = true
+    const collection = createCollection(
+      persistedCollectionOptions<
+        Item,
+        string | number,
+        never,
+        QueryCollectionUtils<Item, string | number, Item, unknown>
+      >({
+        ...baseOptions,
+        sync: {
+          sync: (params) => {
+            if (!params.metadata) {
+              throw new Error(`Sync metadata API is unavailable`)
+            }
+            if (pendingSetup) {
+              pendingSetup = false
+              params.begin()
+              params.metadata.row.set(shared.id, { user: `stale` })
+              params.commit()
+            }
+            return originalSync.sync(params)
+          },
+        },
+        persistence: { adapter: storage.adapter },
+      }),
+    )
+    cleanups.push(async () => {
+      storage.release()
+      try {
+        await collection.cleanup()
+      } finally {
+        queryClient.clear()
+      }
+    })
+
+    await collection._sync.loadSubset(detail)
+
+    expect({
+      rows: rows(collection),
+      user: (
+        collection._state.syncedMetadata.get(shared.id) as
+          Record<string, unknown> | undefined
+      )?.user,
+      owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+        .length,
+    }).toEqual({
+      rows: [shared.id],
+      user: undefined,
+      owners: 1,
+    })
+  })
+
+  /**
+   * ## A persisted claim after a held removal does not restore the removed row's metadata
+   *
+   * Law: the held-removal law above, behind the persistence wrapper. A source
+   * delete clears the row's metadata for the session. A source insert that
+   * names no metadata clears it again. A claim reads its session's own earlier
+   * writes, so the removal's delete stays in force while it is held.
+   *
+   * Authority: the same sync metadata session law as the in-memory held-removal
+   * witness, and the published-owner law: a released lease is not an owner.
+   *
+   * Reference: a persisted row `shared` with applied metadata `{ user: 'seeded' }`
+   * that `detail` owns. A held removal of `detail` deletes the row. A `list`
+   * claim during the hold re-inserts it. The published metadata holds the `list`
+   * owner edge and no `user` field.
+   *
+   * History: a persisted Query Collection over storage that holds `shared` with
+   * metadata `{ user: 'seeded' }`, with `persistedGcTime: 0` so that a release
+   * removes the row. That storage is a restored state. Restart and resume reads
+   * belong to other owners, so this test uses the restored state only as a
+   * legal starting point. Load `detail`. Hold publication behind an optimistic
+   * blocker, unload `detail`, and wait for the removal to be accepted. Load
+   * `list` during the hold, then publish. The checkpoint reads the applied
+   * metadata of the row.
+   *
+   * Why it fails: the claim's insert stages a clear, and the owner write reads
+   * it as `undefined` through the wrapper. `getRowMetadata` falls back to core's
+   * applied `{ user: 'seeded' }`. The removal has not published, so core still
+   * holds that value.
+   *
+   * Limits: one row, one removed demand, one claimant, a controlled in-memory
+   * storage adapter behind the wrapper.
+   */
+  it(`does not restore a removed row's applied metadata when a persisted claim follows a held removal`, async () => {
+    const id = `persisted-held-removal-claim-metadata`
+    const detail = categorySubset(`detail`)
+    const list = categorySubset(`list`)
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([[shared.id, { user: `seeded` }]]),
+      collectionMetadata: new Map(),
+    })
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([shared]))
+    const collection = createCollection(
+      persistedCollectionOptions<
+        Item,
+        string | number,
+        never,
+        QueryCollectionUtils<Item, string | number, Item, unknown>
+      >({
+        ...queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          persistedGcTime: 0,
+          startSync: true,
+        }),
+        persistence: { adapter: storage.adapter },
+      }),
+    )
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    cleanups.push(async () => {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+      storage.release()
+      try {
+        await collection.cleanup()
+      } finally {
+        queryClient.clear()
+      }
+    })
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+
+    await collection._sync.loadSubset(detail)
+    mutation.mutate(() => collection.insert(blocker))
+    const pendingBeforeRemoval =
+      collection._state.pendingSyncedTransactions.length
+    collection._sync.unloadSubset(detail)
+    // The removal's delete is accepted but held behind the blocker.
+    await vi.waitFor(() =>
+      expect(
+        collection._state.pendingSyncedTransactions.length,
+      ).toBeGreaterThan(pendingBeforeRemoval),
+    )
+    const claimed = Promise.resolve(collection._sync.loadSubset(list))
+    void claimed.catch(() => undefined)
+    await settleTurn()
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    await settleTurn()
+    await claimed
+
+    expect({
+      user: (
+        collection._state.syncedMetadata.get(shared.id) as
+          Record<string, unknown> | undefined
+      )?.user,
+      owners: persistedOwners(collection._state.syncedMetadata, shared.id)
+        .length,
+    }).toEqual({
+      user: undefined,
+      owners: 1,
+    })
+  })
+
+  /**
+   * ## A claim of a hydrated row keeps the seed's metadata
+   *
+   * Law: a hydration seed sits beneath every source write and supplies only
+   * the objects that no source write has written. Query sees a hydrated row as
+   * present, so a claim with an equal result writes no row; it writes only the
+   * row's metadata, after reading the current metadata. At claim time no source
+   * write has replaced the seed's metadata, so that read returns it, and the
+   * claim keeps the seed's non-owner fields beside the claimant's owner edge.
+   * The owner write is itself a source write to that metadata, so the law
+   * afterwards is different: a later seed for the row must not replace it. The
+   * late-seed witness below checks that. This control is the boundary of the
+   * claim-insert history above, where the claim inserts an absent row and the
+   * insert clears the metadata.
+   *
+   * Authority: decisions D4 and D5 recorded in the sync metadata session
+   * oracle (a seed sits beneath source writes; a source insert replaces a
+   * seeded row), and the read-your-writes law that the owner write's read
+   * returns the current metadata.
+   *
+   * Reference: one row `shared` hydrated with metadata `{ user: 'seeded' }`.
+   * A claim by `detail` keeps `user` and publishes one `detail` owner edge.
+   *
+   * History: create a DbClient, hydrate the row with its metadata, create the
+   * Query Collection through that client, then load `detail`. The result
+   * carries the same row. The checkpoint reads the published metadata.
+   *
+   * Why this is a control: it runs the same claim as the claim-insert history,
+   * over a present hydrated row rather than an absent row. A repair that clears
+   * metadata on every claim would pass the claim-insert history and fail this
+   * one.
+   *
+   * Limits: one row, one claimant, no hold, and an in-memory client without
+   * persistence.
+   */
+  it(`keeps a hydrated row's metadata when a claim reconciles the seeded row`, async () => {
+    const id = `claim-hydrated-keeps-metadata`
+    const detail = categorySubset(`detail`)
+    const queryClient = createQueryClient()
+    const descriptor = collectionOptions(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([shared]),
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const client = new DbClient({ queryClient })
+    cleanups.push(async () => {
+      await client.cleanup()
+      queryClient.clear()
+    })
+    client.hydrate({
+      collections: [
+        {
+          collectionId: id,
+          rows: [
+            {
+              key: shared.id,
+              value: shared,
+              metadata: { user: `seeded` },
+            },
+          ],
+        },
+      ],
+    })
+    const collection = client.collection(descriptor)
+
+    await collection._sync.loadSubset(detail)
+
+    expect({
+      rows: rows(collection),
+      published: publishedRowMetadata(client, shared.id),
+    }).toEqual({
+      rows: [shared.id],
+      published: { user: `seeded`, owners: 1 },
+    })
+  })
+
+  /**
+   * ## A late hydration seed does not erase a claim's owner edge
+   *
+   * Law: a hydration seed supplies only the objects that no source write has
+   * written. Query's owner write is a source write to the row's metadata, so
+   * once a claim has published that metadata, a later seed for the row must
+   * not replace it. The claim's owner edge and the seed's `user` field both
+   * stay published.
+   *
+   * Authority: decision D5 recorded in the sync metadata session oracle (a seed
+   * sits beneath source writes, and row data and row metadata are separate
+   * objects). The claim's own owner write is the source write in this history.
+   *
+   * Reference: one row `shared` hydrated with `{ user: 'seeded' }`. A `detail`
+   * claim publishes `user: 'seeded'` and one owner. A late chunk for the same
+   * row carries `{ user: 'late' }`. Its metadata is ignored, so the published
+   * metadata is unchanged.
+   *
+   * History: the hydrated control's setup, then load `detail`, check the claim
+   * checkpoint, and apply a chunk that seeds `shared` with `{ user: 'late' }`
+   * through `DbClient.applyCollectionChunk`. The checkpoint after the chunk
+   * reads the published metadata through the client.
+   *
+   * Why it fails: the late seed replaces the published metadata with
+   * `{ user: 'late' }`. The `detail` owner edge is gone, and the seed's field
+   * is the one that survives.
+   *
+   * Limits: one row, one claimant, no hold, and an in-memory client without
+   * persistence. The chunk is applied while the claim is published and not
+   * held. Held or persisted seeds are not covered here.
+   */
+  it(`ignores a late hydration seed for a row whose metadata a claim has published`, async () => {
+    const id = `late-seed-after-claim`
+    const detail = categorySubset(`detail`)
+    const queryClient = createQueryClient()
+    const descriptor = collectionOptions(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([shared]),
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const client = new DbClient({ queryClient })
+    cleanups.push(async () => {
+      await client.cleanup()
+      queryClient.clear()
+    })
+    client.hydrate({
+      collections: [
+        {
+          collectionId: id,
+          rows: [
+            { key: shared.id, value: shared, metadata: { user: `seeded` } },
+          ],
+        },
+      ],
+    })
+    const collection = client.collection(descriptor)
+
+    await collection._sync.loadSubset(detail)
+    expect(publishedRowMetadata(client, shared.id)).toEqual({
+      user: `seeded`,
+      owners: 1,
+    })
+
+    client.applyCollectionChunk({
+      collectionId: id,
+      rows: [{ key: shared.id, value: shared, metadata: { user: `late` } }],
+    })
+
+    expect({
+      rows: rows(collection),
+      published: publishedRowMetadata(client, shared.id),
+    }).toEqual({
+      rows: [shared.id],
+      published: { user: `seeded`, owners: 1 },
+    })
+  })
+
+  /**
+   * ## A held removal's cleared metadata is not restored by a later claim
+   *
+   * Law: a source delete clears the row's metadata for the session. A source
+   * insert that names no metadata then clears it again. A claim reads its
+   * session's own earlier writes, including a held removal that deleted the
+   * row. Under the seed-ordering decision D5, a hydration seed supplies only
+   * objects that no surviving source write has written. The held removal's
+   * delete is such a write, so the seed's `user` field stays gone while the
+   * removal is in the session.
+   *
+   * Authority: the sync metadata session law (a delete clears, an insert names
+   * the whole metadata, a read includes the session's own earlier write), the
+   * seed-ordering decision D5, and the published-owner law above, under which a
+   * released lease is not an owner.
+   *
+   * Reference: a hydrated row `shared` with metadata `{ user: 'seeded' }` that
+   * `detail` owns. A held removal of `detail` deletes the row. A `list` claim
+   * during the hold re-inserts it. The published metadata holds the `list`
+   * owner edge and no `user` field.
+   *
+   * History: create a DbClient and hydrate the row with its metadata. Load
+   * `detail`. Hold publication behind an optimistic blocker, unload `detail`,
+   * and wait for the removal to commit. Load `list` during the hold, then
+   * publish. The checkpoint reads the published metadata through the client.
+   *
+   * Why it fails: the claim's owner write reads the row's metadata after its
+   * own insert's clear. The newest transaction holds a delete for the row, so
+   * the read returns `undefined` and falls back to the applied metadata. The
+   * removal has not applied, so the applied metadata still has `user`, and the
+   * owner write spreads it back.
+   *
+   * Reachability: the removal is a public unload and the claim is a public
+   * load. The only hold is an optimistic blocker.
+   *
+   * Limits: one row, one removed demand, one claimant, an in-memory client, and
+   * no persistence.
+   */
+  it(`does not restore a removed row's applied metadata when a claim follows a held removal`, async () => {
+    const id = `held-removal-claim-metadata`
+    const detail = categorySubset(`detail`)
+    const list = categorySubset(`list`)
+    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+    const persistence = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const descriptor = collectionOptions(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([shared]),
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const client = new DbClient({ queryClient })
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    cleanups.push(async () => {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+      await client.cleanup()
+      queryClient.clear()
+    })
+    client.hydrate({
+      collections: [
+        {
+          collectionId: id,
+          rows: [
+            { key: shared.id, value: shared, metadata: { user: `seeded` } },
+          ],
+        },
+      ],
+    })
+    const collection = client.collection(descriptor)
+    const settleTurn = async () => {
+      for (let turn = 0; turn < 3; turn++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+
+    await collection._sync.loadSubset(detail)
+    mutation.mutate(() => collection.insert(blocker))
+    const pendingBeforeRemoval =
+      collection._state.pendingSyncedTransactions.length
+    collection._sync.unloadSubset(detail)
+    // The removal's delete is accepted but held behind the blocker.
+    await vi.waitFor(() =>
+      expect(
+        collection._state.pendingSyncedTransactions.length,
+      ).toBeGreaterThan(pendingBeforeRemoval),
+    )
+    const claimed = Promise.resolve(collection._sync.loadSubset(list))
+    void claimed.catch(() => undefined)
+    await settleTurn()
+    persistence.resolve()
+    await mutation.isPersisted.promise
+    await settleTurn()
+    await claimed
+
+    expect(publishedRowMetadata(client, shared.id)).toEqual({
+      user: undefined,
+      owners: 1,
+    })
+  })
+
   /**
    * ## A reacquired lease's cached rows receive accepted direct writes
    *
@@ -1455,61 +2648,72 @@ describe(`query collection ownership lifecycle`, () => {
    * distinguish the skip: the upsert keeps the row either way. The Query
    * cache, read through `QueryClient.getQueriesData`, does.
    */
-  it(`patches a reacquired lease's cached rows while its result waits`, async () => {
-    const id = `reacquired-lease-direct-patch`
-    const detail = categorySubset(`detail`)
-    const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
-    const persistence = createDeferred<void>()
-    const barrier = createDeferred<void>()
-    const { collection, queryClient, queryFn } = createOwnershipFixture({
-      id,
-      results: [[shared]],
-    })
-    const mutation = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    const settleTurn = async () => {
-      for (let turn = 0; turn < 3; turn++)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
-    cleanups.push(async () => {
+  it(
+    `patches a reacquired lease's cached rows while its result waits`,
+    async () => {
+      const id = `reacquired-lease-direct-patch`
+      const detail = categorySubset(`detail`)
+      const blocker = { id: `blocker`, category: `local`, name: `Blocker` }
+      const persistence = createDeferred<void>()
+      const barrier = createDeferred<void>()
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        results: [[shared]],
+      })
+      const mutation = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      const settleTurn = async () => {
+        for (let turn = 0; turn < 3; turn++)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      cleanups.push(async () => {
+        collection.deferDataRefresh = null
+        barrier.resolve()
+        persistence.resolve()
+        await mutation.isPersisted.promise.catch(() => undefined)
+      })
+
+      await collection._sync.loadSubset(detail)
+      // Earlier result transactions apply first, so the count below grows only
+      // with the expiry's held transaction.
+      await waitForRetention(
+        () =>
+          expect(collection._state.pendingSyncedTransactions).toHaveLength(0),
+        retentionWait,
+      )
+      mutation.mutate(() => collection.insert(blocker))
+      collection._sync.unloadSubset(detail)
+      await settleTurn()
+      collection.deferDataRefresh = barrier.promise
+      const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
+      void reacquired.catch(() => undefined)
+      await settleTurn()
+      const write = Promise.resolve(
+        collection.utils.writeUpsert({ ...shared, name: `Manual` }),
+      )
+      void write.catch(() => undefined)
+      await settleTurn()
+
+      persistence.resolve()
+      await mutation.isPersisted.promise
       collection.deferDataRefresh = null
       barrier.resolve()
-      persistence.resolve()
-      await mutation.isPersisted.promise.catch(() => undefined)
-    })
+      await reacquired.catch(() => undefined)
+      await write
+      await settleTurn()
 
-    await collection._sync.loadSubset(detail)
-    mutation.mutate(() => collection.insert(blocker))
-    collection._sync.unloadSubset(detail)
-    await settleTurn()
-    collection.deferDataRefresh = barrier.promise
-    const reacquired = Promise.resolve(collection._sync.loadSubset(detail))
-    void reacquired.catch(() => undefined)
-    await settleTurn()
-    const write = Promise.resolve(
-      collection.utils.writeUpsert({ ...shared, name: `Manual` }),
-    )
-    void write.catch(() => undefined)
-    await settleTurn()
-
-    persistence.resolve()
-    await mutation.isPersisted.promise
-    collection.deferDataRefresh = null
-    barrier.resolve()
-    await reacquired.catch(() => undefined)
-    await write
-    await settleTurn()
-
-    expect({
-      row: collection.get(shared.id)?.name,
-      cache: queryClient
-        .getQueriesData<Array<Item>>({ queryKey: [id] })
-        .flatMap(([, data]) => data ?? [])
-        .map((item) => item.name),
-      queryCalls: queryFn.mock.calls.length,
-    }).toEqual({ row: `Manual`, cache: [`Manual`], queryCalls: 2 })
-  })
+      expect({
+        row: collection.get(shared.id)?.name,
+        cache: queryClient
+          .getQueriesData<Array<Item>>({ queryKey: [id] })
+          .flatMap(([, data]) => data ?? [])
+          .map((item) => item.name),
+        queryCalls: queryFn.mock.calls.length,
+      }).toEqual({ row: `Manual`, cache: [`Manual`], queryCalls: 2 })
+    },
+    retentionTestTimeout,
+  )
 
   /**
    * ## A release whose durable commit fails is terminal for its sync run

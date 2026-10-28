@@ -645,8 +645,18 @@ is:
 3. hydrated rows
 
 Fresh adapter sync is authoritative over all three. Hydrated and initial rows
-are provisional base state, so the adapter's first insert for the same key is
-reconciled as an update instead of raising a duplicate-key error.
+are provisional base state. The adapter's first insert for the same key
+replaces the provisional row and its row metadata instead of raising a
+duplicate-key error; an insert without metadata clears the seed's metadata.
+An adapter update merges over the provisional row like any update. A hydrated
+row that arrives after the adapter has written its key, or while the adapter's
+transaction for it is open, does not change what the adapter wrote: it only
+supplies a row or row metadata that the adapter has not written. Row data and
+row metadata count separately, so a later hydrated row can still supply
+metadata for a key whose row the adapter only updated. After an adapter delete
+or truncate, a later hydrated row does not bring the key back. Among hydrated
+rows for a key the adapter has not written, the latest one wins, including its
+row metadata or the lack of it.
 
 Hydrated rows and `initialData` never mark adapter sync as ready by themselves.
 The adapter still owns readiness through its sync lifecycle.

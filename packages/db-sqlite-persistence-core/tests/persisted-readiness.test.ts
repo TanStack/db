@@ -106,19 +106,6 @@ describe(`persisted readiness examples`, () => {
     }
   })
 
-  it(`rejects network-first initial rendering for on-demand persistence`, () => {
-    const fixture = controlledAdapter()
-    expect(() =>
-      persistedCollectionOptions<Row, string>({
-        id: `local-on-demand`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        initialRender: { strategy: `network-first`, networkTimeoutMs: 100 },
-        persistence: { adapter: fixture.adapter },
-      }),
-    ).toThrow(/network-first.*eager/i)
-  })
-
   it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
     `rejects an invalid network timeout (%s)`,
     (networkTimeoutMs) => {

@@ -61,10 +61,10 @@ function git(cwd, ...args) {
  * The commit where this branch left main. Without one, the branch's own
  * history cannot be found, so this fails instead of comparing too little.
  */
-export function mergeBase() {
+export function mergeBase(repo = root) {
   for (const branch of [`origin/main`, `main`]) {
     try {
-      return git(root, `merge-base`, `HEAD`, branch)
+      return git(repo, `merge-base`, `HEAD`, branch)
     } catch {
       // Try the next branch.
     }

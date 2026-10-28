@@ -1235,7 +1235,9 @@ describe(`electron sqlite persistence bridge`, () => {
         truncate: true,
         mutations: [
           {
-            type: `update`,
+            // A source insert is persisted as an insert, which replaces any cached
+            // row (decision C1 of 2026-10-23).
+            type: `insert`,
             key: `fresh`,
             value: { id: `fresh`, title: `Durable through owner` },
           },

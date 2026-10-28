@@ -1488,7 +1488,7 @@ generic visitor behavior outside the named collectors.
 | React paced-mutation render cuts             | [render-cut oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/usePacedMutations-render-cuts-oracle.test.tsx), [PR #2170 review](oracle-reviews/pr-2170-react-paced-render-cuts.md)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `usePacedMutations` publishes callbacks only from committed renders and does so before descendant layout effects, while callback-only commits preserve mutate identity. An independent committed-document model crosses ordinary and StrictMode schedules with mutation before or after a suspended candidate, mutation after the candidate commits, and delayed or immediate mutation from a descendant layout effect. It compares ordered callback traces and public rows at the mutation cut, the trace after persistence, and mutate identity at the commit cut. Render-time publication, layout-effect-only publication, and split insertion/layout publication mutants fail at the intended comparisons. A commit between transaction admission and persistence, arbitrary React schedules, server delivery, and other frameworks remain outside this receiving owner. |
 | Optimistic state                             | [same-key composition](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-composition-oracle.test.ts), [history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts), [generated histories](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-transaction-oracle.property.test.ts), [outcomes](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-outcomes-oracle.test.ts), [publication](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Optimistic state drops at settlement and held sync transactions publish with it ([settlement-drop review](oracle-reviews/2026-10-03-settlement-drop.md)); whole-row active overlays, metadata and prior-value events. A raw subscriber without initial state checks that each truncate batch inserts a key once ([2026-10-02 review](oracle-reviews/2026-10-02-truncate-raw-subscriber.md)). Never rebase a pending snapshot merely to simplify the model. Generated histories also write source batches inside mutation handlers, before they return; the Collection must own the request by then ([handler source batch review](oracle-reviews/2026-10-01-handler-source-batch.md)). The same-key transaction lane also authors a delete followed by a reinsert, which must be visible optimistically and net to the truth-table request ([state mutation round 2](oracle-reviews/2026-10-02-state-mutation-round-2.md)). Source rows are written as `insert` for a key the source lacks, and batches may delete keys the source holds ([state-stack mutation gaps](oracle-reviews/2026-10-02-state-stack-mutant-gaps.md)). Batches may also delete a key the source never held. That delete leaves an active request in place ([absent-key source delete review](oracle-reviews/2026-10-02-absent-key-source-delete.md)). A separate partial campaign keeps the default partial row update mode, where source updates may omit a field and merge into the source row, not into an optimistic row ([round 3 review](oracle-reviews/2026-10-05-state-mutation-round-3.md)). An aborted open batch restores the driver's own source rows as well as its keys, so a later partial update still omits the field ([aborted-batch review](oracle-reviews/2026-10-08-partial-update-aborted-batch.md)). A failed synchronous manual `mutate` callback is now checked after same-key update, distinct insert, and same-key delete, with and without earlier intent, plus two two-Collection cases, one with a restoration listener failure. The throw cut compares public rows and pending payload; the later commit checks only surviving intent. A restoration listener error retains the callback error as the aggregate cause and does not stop other Collection restoration. These witnesses allow transient notifications during the callback and do not cover nested throwing callbacks or async work after the synchronous scope. After every step the driver also checks, by transaction identity, that the Collection tracks exactly its unsettled transactions, so a failed or rolled-back transaction leaves the map ([failed transaction retention review](oracle-reviews/failed-transaction-retention.md)). The [transaction ownership oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/transaction-ownership-oracle.property.test.ts) owns release across two Collections: merged-away pairs, conflicting rollbacks with a throwing subscriber, asynchronous success and failure settlements with a throwing subscriber, rollbacks from a `truncate` listener during a sync commit, a reused transaction id, and a `mutate()` callback that throws, checked in the same call stack and after promises flush. It also checks the settlement error shape and that a settled transaction's set of tracking Collections is empty; its mutations still name their Collection, so neither owner claims the Collection is collectable. Focused [restoration ownership](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/restoration-ownership.test.ts) witnesses check that repeated offline `mutate()` calls add to one transaction, that a completed restoration settles `isPersisted`, and that a restoration one Collection cannot track leaves no Collection tracking it. Its grammar also has direct writes (`insert`, `update` and `delete` outside a transaction), optionally with a throwing subscriber that may have been sent the rows first; it captures each direct write's own transaction and requires it to fail when the admission throws and to complete otherwise, counts handler calls (none for a rejected write), and keeps a mirror subscriber on each Collection that must match the rows after every step. A write whose admission throws rolls back only its own transaction and rethrows. The [change-event history oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/change-event-history-oracle.test.ts) generates local-only direct writes that meet a throwing subscriber, registered after the mirror, and requires the call to rethrow with its transaction completed and the rows following the model. Focused witnesses cover a local-only subscriber that writes the key it was told about, and a subscriber that throws a value that is not an Error; whether a throwing subscriber may stop a later subscriber is not decided. Open (approved limits): a direct write made inside another write's change subscriber reports its subscriber failure to the outer write; on a local-only Collection a direct write whose subscriber throws completes on the fast path but rolls back on the transaction path, and the change-event oracle generates only the fast path; a direct write admitted from inside a sync-commit listener, where the rollback's recompute is deferred, is not generated; the generated ownership histories read every receipt themselves, so only a focused witness (rolling back an empty manual transaction) checks that an unread receipt reaches no `unhandledrejection`; two Collection instances with one id, a Collection cleaned up before its transaction settles, and offline restoration have focused witnesses only; no generated history combines a held completed row with a second Collection. |
 | Drafts and native values | [proxy](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-oracle.test.ts), [detachment](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-detachment-contract-oracle.test.ts), [iteration](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-iteration-contract-oracle.test.ts), [revert](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-revert-oracle.property.test.ts), [native methods](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-native-methods-oracle.property.test.ts) | Native-operation controls, exact patches and actual stored rows; alias/cycle/adversarial-key histories. Set and Map reorder histories check draft patches and stored iteration order after replacement and clear-and-readd; RegExp replacement/reversion histories check `lastIndex`. General native-mutator and symbol-write support is not established by a plain-object oracle. The revert owner generates assignment, revert, delete, nested, symbol-key, and `for...of` histories and checks `getChanges()` and the draft against an independent draft-equality model: ordered Map and Set contents (including Sets inside Map values), RegExp `lastIndex`, array holes, and symbol keys inside nested values. Map and Set mutators and top-level symbol writes are outside its grammar; array mutators appear only in the mixed block below. Its round-trip grammar also replaces a field with a new object and restores the original value through a nested write. The law requires every changed key, and permits a written key whose final value equals its original to be reported with that value: a false positive repeats the stored value, and a false negative loses a write ([review](oracle-reviews/proxy-revert-replaced-object.md)). A further revert block mixes array `push`, `pop`, and `reverse` with assignments, a nested object replacement, and a retained handle, and checks that a mutator through a replaced handle changes nothing; pinned witnesses require a native write through a Map or Set value, a typed-array view, or a frozen draft to be reported, and a nested revert inside a Map or Set to keep the container's other write; Map and Set mutators are not mixed with assignments, and an equal-valued assignment keeps a retained handle attached (declared). The proxy owner's stored-function law checks, against a native row, that a function stored as data reads back as stored by every read path and that a stored method sees the draft as `this`, so its writes are tracked. The detachment owner pins which key classes a draft copies: enumerable string keys and every symbol key. The revert owner also generates typed arrays (including a subclass that does not forward its constructor argument), URLs, and a class with only private state as written values, with a property that writes two of them over one field. The native-methods owner generates rows (holes, `undefined`, duplicates, nested arrays, empty rows, typed `-0` and `NaN`) and calls every method of `Array.prototype` and `TypedArray.prototype`, in fixed and random campaigns with replay; it compares the result, whether the method returned the array itself, the identity of each original object, and the published row with native values, and a new built-in method fails until it has arguments. The proxy owner's `defineProperty`, stored-function, and frozen-draft laws are bounded tables against native rows. Its `defineProperty` law compares result, value, descriptor, and changes, for values and accessors. The iteration owner checks that array iterators see a push, removal, index write, or length cut made while they are open. Open: a draft reads a class instance of the original row as a plain object, so private-field getters read `undefined`, and a built-in method called through `this` on a nested Map or Set draft rejects the Proxy receiver; a mutator that changes nothing publishes an equal value; writing back a keyless class instance of the original row is a change, and `DataView` setters are untracked ([draft proxy review](oracle-reviews/code-weight-draft-proxy.md)). |
-| Query DB and observer                        | [ownership](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts), [persisted direct-write window](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/persisted-direct-write-window.oracle.test.ts) ([review](oracle-reviews/issue-2029-direct-write-lock-window.md)), [load lifecycle](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/load-subset-lifecycle.test.ts) (fixed tests; no oracle owner (tracked in #2264)), [observer histories](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-observer-history-oracle.property.test.ts), [retained snapshots](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-observer-snapshot-oracle.property.test.ts) ([review](oracle-reviews/pr-2043-retained-observer-snapshots.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Real QueryClient boundary, applied-settlement barriers for existing and cached demand, mutation-handler Collection identity, terminal fetch-record lifecycle, and a per-listener eligibility ledger, not a duplicate dispatch queue. The bounded handler grammar crosses insert, update, delete, parameter and mutation-alias access, refetch, and clearError. A held clearError retry retains the prior public error through initial, background, and Collection application failures; success clears it, failure advances the count, including a repeated error at clock time zero. An intermediate Query retry attempt does not recount the previous background error; a held final attempt can succeed or fail. A held application after successful Query fetch keeps the error visible until the applied result. A mocked persisted-baseline scan holds an older success while a newer terminal Query failure arrives; the newer public error and count survive application, including when the Error object and clock tick repeat. Native SQLite persistence, concurrent retries across multiple tracked Queries, mutation-handler fetch-boundary settlement, and deferred result application remain outside this witness. The mutation overlap grammar crosses both start orders. Check reentry, peer survival, FIFO and disposal independently of final rows. A retained observer snapshot shows its capture-time rows on a later first read of `data` or `state`. Direct-write witnesses now distinguish an idle pending eager cache seed (success with no new freshness timestamp) from an in-flight pending request, and require update, delete, and upsert to reach both eager Collections through their shared physical Query, in both acquisition orders. They check both public Collections and the Query cache immediately after each write. A held older shared fetch also crosses B's release and reacquisition, then compares both public rows at refetch and load settlement; mixed select wrappers and three or more co-owners remain outside this witness. The load-lifecycle tests also restore an intermediate checkpoint that keeps an explicit subset refetch pending until a post-write request applies, and rejects a no-cancel mutant at the replacement-request assertion. |
+| Query DB and observer                        | [ownership](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts), [persisted direct-write window](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/persisted-direct-write-window.oracle.test.ts) ([review](oracle-reviews/issue-2029-direct-write-lock-window.md)), [load lifecycle](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/load-subset-lifecycle.test.ts) (fixed tests; no oracle owner (tracked in #2264)), [observer histories](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-observer-history-oracle.property.test.ts), [retained snapshots](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-observer-snapshot-oracle.property.test.ts) ([review](oracle-reviews/pr-2043-retained-observer-snapshots.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Real QueryClient boundary, applied-settlement barriers for existing and cached demand, mutation-handler Collection identity, terminal fetch-record lifecycle, and a per-listener eligibility ledger, not a duplicate dispatch queue. The bounded handler grammar crosses insert, update, delete, parameter and mutation-alias access, refetch, and clearError. A held clearError retry retains the prior public error through initial, background, and Collection application failures; success clears it, failure advances the count, including a repeated error at clock time zero. An intermediate Query retry attempt does not recount the previous background error; a held final attempt can succeed or fail. A held application after successful Query fetch keeps the error visible until the applied result. A mocked persisted-baseline scan holds an older success while a newer terminal Query failure arrives; the newer public error and count survive application, including when the Error object and clock tick repeat. Native SQLite persistence, concurrent retries across multiple tracked Queries, mutation-handler fetch-boundary settlement, and deferred result application remain outside this witness. The mutation overlap grammar crosses both start orders. Check reentry, peer survival, FIFO and disposal independently of final rows. A retained observer snapshot shows its capture-time rows on a later first read of `data` or `state`. Direct-write witnesses now distinguish an idle pending eager cache seed (success with no new freshness timestamp) from an in-flight pending request, and require update, delete, and upsert to reach both eager Collections through their shared physical Query, in both acquisition orders. They check both public Collections and the Query cache immediately after each write. A held older shared fetch also crosses B's release and reacquisition, then compares both public rows at refetch and load settlement; mixed select wrappers and three or more co-owners remain outside this witness. The load-lifecycle tests also restore an intermediate checkpoint that keeps an explicit subset refetch pending until a post-write request applies, and rejects a no-cancel mutant at the replacement-request assertion. . Two sync-metadata session witnesses fail on `30175be48`: a claim that inserts a row keeps applied non-owner metadata, and a claim during a held retention cleanup publishes the cleaned owner (see Sync metadata session)|
 | Observer hydration under terminal statuses | `packages/db/tests/live-query-observer-hydration-oracle.property.test.ts` | ARCHITECTURE.md law 16 and the glossary "crash": while a hydration seed is active, a Collection `error` or `crashed` shows in the snapshot, attached or detached, and is announced; an attached observer that sees the failure ends the seed, so cleanup then shows `cleaned-up` and live rows, not the stale failure or the seed. Decision (not a law-16 claim): `cleaned-up` and restart under an active seed keep the seed as `ready`, because cleanup is not a failure and the next sync run's readiness hands off. Generated histories cross both modes, attach order, live writes, `markReady()`, `fail()`, `crash()`, cleanup, and restart, with declared reach; replays pin the crash, fail-then-cleanup, and crash-before-attach traces. Limits: rows under a failure status are not claimed; the source is a plain controlled Collection, not a live-query graph or an on-demand subset; streamed client errors, handoff timing, and framework adapters stay with the focused observer and adapter tests; the property is not in the `oracle-config.ts` path-replay registry. |
 | Query DB SSR dehydration                     | `packages/query-db-collection/tests/ssr-dehydration-oracle.test.ts`, [review record](oracle-reviews/issue-1950-ssr-dehydration.md)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | A plain Query cache control, a live on-demand compound predicate, a signal-only request, and an ordered cursor with a custom comparator all retain their row through QueryClient dehydration, reconstruction of Seroval's emitted stream payload, and Query Core hydration from that payload. The on-demand query functions still receive the original IR, comparator, and signal; serialized metadata retains enumerable user metadata but excludes request options. The original implementation fails the compound and signal cases at the stream checkpoint. A serializable stream-only request-options leak passes the former chunk-count check but fails the current payload assertion. This owner covers successful Query cache entries at the installed Query Core 5.90.20 and Seroval 1.5.0 versions. A TanStack Start integration owner still needs the reporter's Router 1.171.33 and Seroval 1.6.8 path, browser Collection resume/refetch, and request cancellation across SSR. Query subset and pagination oracles remain owners of predicate/order/cursor meaning and supported value types. The issue's `shouldDehydrateQuery` workaround replaces Query Core's success-only default and admits pending/error queries; any documented workaround must preserve that default filter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Query DB ordered refetch | `packages/query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts` | Issue #2136: after preload, and after `utils.refetch()` or a Query invalidation settles, an on-demand Query Collection behind a LEFT-joined, ordered, limited live query must show the window over the current backend rows. The design under test: query-db reports `invalidateLoadedSubsets()` when an ordered page changes keys and either has a later page or ends earlier in the order than before, and each ordered loader runs its bounded prefix repair. Its model is a pure top-k of marked backend rows. A fixed and a random campaign generate rounds of marker flips (which serve continuation pages), backend changes while the provider lags, a second live query (`observe`) whose own demand can load a page's new row first, optional Query invalidation with further changes, and a refetch, across one or two order terms, a numeric or locale-collated string order, limits 1–3, offsets 0–1, and a static or function Query key. With an unchanged backend, a repeated refetch must serve no more rows, start at most one first-page request, and report nothing. A refetch or invalidation must never start a new full-source request. A coverage law runs at the same checkpoints: every backend row from the start of the order through the window's last row (every row, when the window is short) must be in the source Collection with its current values, so a latent gap fails before a marker exposes it; a named replay of the issue trace with the moved row unmarked passes the window law and fails only the coverage law when Query DB never reports. The grammar can hold an optimistic update across a refetch, with the checkpoint moved to its release, and a premise-directed campaign under a hold (other rows observed, a row moved ahead of the page's end, a new row further ahead, a write to the last-sorting observed row) requires a report during a hold in every case and fails a skip that reads rows held back behind the transaction; the general campaigns did not. The general grammar holds optimistic deletes as well as updates. A named replay of a refetch during a held delete left the window short after release, also with this PR's report and overlap changes reverted, until the fix that resumes a continuation after a synchronous answer; no window is checked during a hold, where #2148 and #2169 remain open. Reports (`loadedSubsets:invalidated`) are bounded: a step reports at most once, and only when some ordered request was answered again with different rows; named replays require no report when a one-page window, or a window's last page, only loses a row, and a sync-boundary replay requires a report when a page ending on a row without an order value has its end move earlier (on the earlier gate, which read that page as empty, it reported nothing), and another requires a report when the provider returns a one-page window's rows in reverse order (the earlier gate took the last array row as the page's end). When a page's end moves earlier, Query DB reports, and a loader whose window lies inside its own first page must skip the repair: a named replay of an insert into a top-N list bounds the refetch's requests by its Queries, and a filtered one-page window whose page end moves past an unseen row must still repair (found by the random campaign; a loader that always skips fails it, the f9 tie replay, and the ordered-work oracle's signalling replays). The skip also refuses while the source holds accepted sync rows back: a replay refetches while an optimistic update persists, so the report arrives before the refetched rows are visible, and a skip that reads those older rows fails it. The ordered loader state oracle checks that a prefix read issued before an ordering invalidation, which settles after the bounded repair, does not retire the repair's prefix; the repair-first order failed before that fix. A `loadSubset` call that acquires a released, invalidated page can report, because Query then refetches that page on its own. A failed repair shows only the last window or the right one. Named replays cover the issue trace after a refetch and after an invalidation, with a page-capping provider, with another live query loading the page's new row first, with an empty later page, with a page whose end moves earlier while a tie request holds its old last row, a second refetch after an invalidation, a repair failure, and a provider that honors neither cursor nor offset. Never signalling, the old overlap-to-full-source rule, ignoring empty later pages, reporting on any page change, removing the repair loop guard, and reporting once per page each fail it by assertion. A replay makes a page's application fail and checks the window shows its last result or the right one, then the next refetch restores it; recording a page before its rows are accepted cannot be distinguished, because the failed attempt reports on its own. Open: the report laws bound reports but do not require each one; a page whose end moves earlier reports even with unique order values, where no row can be missing; it does not check whether a repair waits for in-flight work; the generated campaigns use an uncapped cursor provider only (an offset-only provider and a page-capping provider each hit a loader defect that reproduces on main: #2182, #2183); the generated campaigns do not check the window after a marker flip (a named replay checks the trace where the loader stopped refilling after a joined-side removal, which the repair-retirement fix below closed); a failed repair still recovers through the loader's full-source retry; interval, focus, and reconnect refetches share the invalidation path but are not driven; NaN order values have no executable witness; overlapping `refetch: true` acquisitions on one Query hash are counted, so the first to finish does not clear the loop guard for the other, but no witness separates that from a plain set; a Query refetch that joins a running `refetch: true` acquisition on the same hash does not report, and no witness reaches it (#2185); follower tabs of a multi-tab persisted collection never receive the report (#2174). The offset-only and page-capping loader defects have `it.fails` witnesses in the oracle. A finished bounded repair used to discard its boundary when its retirement made Query DB remove a row the loader had sent; the loader then restarted paging with a smaller first page that could not retire the repair's prefix, so every later refetch read both. A named replay found by the random campaign (at four times the run count) and an ordered loader state witness fail on that, and the fix also closed the joined-side refill defect. At four times the run count, the random campaign found a short window that stopped paging before the last row of the order: a report's repair released continuation Queries, and Query DB answered their reacquisition synchronously from its cache, so the graph turn inside each request asked for more while the loader was still requesting and nothing resumed the staged continuation. Only the coverage law failed. A named replay and an ordered loader state witness (a synchronous answer whose writes the graph already processed must continue the chain) fail on that, and pass with the fix. The loader side of the report also has a second owner: the ordered-work oracle's `refetch-signal` provider re-runs each served request alone and reports when any answer changed, across that oracle's generated plans, and a signalling refetch must start no full-source request unless a bounded page in that step ended on a null or NaN rank, which takes the documented full-source fallback (a random seed found that case). Never signalling and the old overlap-to-full-source rule each fail it. It excludes a peer live query, which can keep a short window after a refetch (#2155). The persisted-collection oracle checks that a source's report reaches the Collection through the managed cache-generation wrapper and that a retired source session's report is dropped. Remaining work for this class is tracked in #2186. |
@@ -3386,13 +3386,22 @@ budget a helper computes and passes in as parameters.
 
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
-and the Claude edit hook. Its model is a fixed-point closure over the drawn
-import graph, independent of the script's forward search. It covers
+and the Claude edit and stop hooks. Its model is a fixed-point closure over the
+drawn import graph, independent of the script's forward search. It covers
 oracle-to-oracle imports, untracked oracle files, and `.js` oracle files. It
-does not draw `.js` support modules or drivers, although the rule now resolves
-a `.js` test module when no TypeScript source exists for it (the part-reach
-oracle owns that resolution). It passes file names in their real-path spelling:
-a name given through a symlinked path is not covered.
+also covers the checkout rule from #2280. A session works in the launch
+checkout or in a worktree nested under its `.worktrees/`. The hooks run the
+launch checkout's script with the session checkout as the input's `cwd`. They
+must select that checkout's files, and they must report through that
+checkout's own copy of the rule. A plain scratch directory under `.worktrees/`
+must produce no report. The repository's `.gitignore` is part of the tested
+configuration. It does not draw `.js` support modules or drivers, although the
+rule now resolves a `.js` test module when no TypeScript source exists for it
+(the part-reach oracle owns that resolution). It passes file names in their
+real-path spelling: a name given through a symlinked path is not covered. It
+does not generate a hook input without `cwd`, a worktree outside the launch
+checkout, or a worktree branch that has no copy of the script. In that last
+case the launch checkout's rule lints the worktree.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
@@ -3778,6 +3787,290 @@ an answer, and a Collection that synced to zero rows before (it waits like an
 empty restore) are outside it. Hooks read Collection status only, so the
 framework conformance suite's status scenarios cover the binding side.
 
+The persisted demand coverage oracle in
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`
+owns the on-demand law: an opted-in wrapper may settle a demand's
+load from SQLite only when that exact demand has persisted demand coverage,
+after the configured wait or an upstream failure. Its bounded enumeration
+crosses twelve session-1 histories (not requested, failed, overlapping
+filter, same filter with another window, same filter with another order,
+rejected durable row write, settled empty, settled, settled then truncated,
+three in which a reset lands after the load's rows but before it settles (a
+source truncate, a completed scoped recovery that rotates the cache
+generation, and a scoped recovery still pending), and one in which the source
+deletes a row of D after D settles), two waits, and six
+session-2 upstream schedules (pending, early and late failure, early and late
+answer, late empty answer), over the real wrapper and
+`SQLiteCorePersistenceAdapter` on `node:sqlite`. Session 1 creates coverage
+only through real loads, and a positive witness checks whether it sent the
+session-2 demand key. A pure trace model predicts status, `preload()` state,
+and exact rows at five checkpoints. A fixed lifecycle history checks that each
+load measures its own wait and settles on its own restored rows, that
+release aborts the upstream load, and that coverage survives release. A joined history checks that a
+query over an eager and an on-demand source is ready only when the on-demand
+demand is covered, read directly and through an outer live query, with the
+joined row visible when ready. A third shape reaches the on-demand source
+through two live queries; covering only the inner query's demand must keep
+the query loading.
+Two fixed same-session histories check that a load of D after a cache
+rotation, and a `refetch: true` load of D, both wait for the network. Model-level calibration shows that eighteen wrong designs (fifteen
+single-demand, two lifecycle, one joined) each differ from the law at a named
+case. Before the implementation, every
+production case failed at setup because `initialRender` rejected
+`syncMode: 'on-demand'`; without the opt-in, that code matched every
+uncovered cell and diverged at the first checkpoint where the law applies for
+every covered cell except an early network answer. With the implementation,
+every case passes; the [implementation review](oracle-reviews/2026-10-21-persisted-demand-coverage-review.md) records RED, GREEN, and each mutant's outcome. Production mutants that ignore coverage, ignore or halve
+the wait, error a covered demand on upstream failure, write coverage before
+the load settles, measure the wait from the sync run, keep coverage across a
+truncate, let an on-demand opt-in permit fallback alone, or read the root
+query's demands instead of the owning inner query's each fail named cases.
+A review then found three more defects, and the in-flight histories and the
+two-reader shape reproduced each one on unchanged production: an obsolete load
+recorded coverage after a truncate or rotation (22 cells), a coverage record
+during pending recovery failed the session-1 load (12 cells), and the first
+live query reached on a source stood for every reader (one cell). After the
+repair, mutants that restore each defect, or that check only for a truncate,
+fail those cases. A third review round added the row-deletion history, the
+source-failure history, and the rotation and refetch histories; on the parent
+production code they failed 14 cases by assertion, and the Query DB witness
+failed its retention history. Mutants that drop the row count, require more
+rows than recorded, ignore the cache generation, let a refetch settle on
+coverage, or let a network failure bypass on-demand settlement each fail
+those cases; a gate that ignores the
+eager deadline fails the persisted-readiness oracle instead. The Electric
+progressive witness in
+`packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
+receives the law as a production driver for the shared model: it records
+Electric's own log at its `loadSubset` boundary, and session 2 reads either
+the subset session 1 loaded or one no query read. A subset-only session 1
+settles the loaded subset offline and leaves the other waiting; after a
+completed progressive full sync, the never-loaded subset is ready too,
+because Electric settles every later load at once from its complete rows
+(model rule `full sync completes`). A mutant that drops the complete resume's
+full-snapshot resolution fails only that never-loaded history. The Query DB witness
+in `packages/query-db-collection/tests/persisted-on-demand-offline-witness.test.ts`
+receives it with a fresh QueryClient per session: a covered on-demand query
+stays loading until the wait and then shows its restored rows, a rejected
+`queryFn` settles it at once, and a never-loaded query keeps loading; a mutant
+that ignores coverage fails both covered histories. A fourth history lets
+Query DB retention delete the released rows after a 20 ms `gcTime`; session 2
+must then keep loading. React and Solid Suspense once received a joined
+initial-render gate through capability fixtures. The source-health change
+(#2168) removed that gate: Suspense now releases at query readiness, and the
+React and Solid receiving witnesses below run the shared contract. A later round closed most open limits with enforced cases. The driver checks
+that the wrapper forwards a load only after its persisted subset restore is
+visible, so no upstream event can precede it. Session 2 reads answer on a
+later macrotask, so a load that fails at once reaches the coverage read, and
+removing the wrapper's early rejection handler raises unhandled rejections.
+Part 2b adds a schema reset over an empty covered demand, an optimistic write
+that rolls back on a demand settled from SQLite, and two cache-claim expiry
+histories: one before the coverage record and one before the coverage check.
+Part 4 covers ordered windows: a row deleted, moved out, or moved in after the
+window settled keeps it loading, a swap keeps it covered, and with an index a
+page move settles offline only when session 1 loaded that page with a cursor.
+The Electric witness adds on-demand must-refetch and checks that Electric
+writes nothing from a snapshot that answers after release. React
+(`useLiveSuspenseQuery-persisted-on-demand.test.tsx`) and Solid
+(`useLiveQuery-persisted-on-demand.test.tsx`) Suspense render a covered demand
+from a real persisted on-demand Collection on `node:sqlite`. Vue
+(`useLiveQuery-persisted-on-demand.test.ts`), Svelte
+(`useLiveQuery-persisted-on-demand.svelte.test.ts`), and Angular
+(`injectLiveQuery-persisted-on-demand.test.ts`) witnesses observe `isReady`,
+`isLoading`, and rows. All five run the shared receiving contract described below. Mutants that drop
+the early rejection handler, keep collection metadata across a schema reset,
+key coverage without cursor and offset, ignore coverage, or let a coverage
+read under an expired claim fail the load each fail these cases.
+A fifth round added Part 2c and five more histories. Part 2c checks that a
+failed coverage read, after the load or during the check, keeps the load's
+own outcome; that a synchronous answer's coverage counts its rows, so a
+later deletion ends it; and that a release during the coverage check stops
+the source Collection loading. Part 3 then added a source failure before a
+covered demand's wait ends; after the source-health change (#2168) replaced
+the initial-render gate with Collection status, those histories belong to
+`packages/db/tests/source-health-oracle.test.ts`. Part 4 adds a row replaced below the window boundary and a row gained
+by an under-full window, which keep the tie-boundary key. Each failed on the
+parent production code. A window check that accepts a superset of the
+recorded keys, and a builder that drops its error-state check without
+notifying settlement, each fail named cases.
+A sixth round (the 2026-10-28 review) closed three more holes, each RED on
+the parent production code. The campaign adds a `snapshot` command (a
+snapshot transaction ends coverage, as a truncate does) and a source that
+stops and resolves an aborted load (a load that core aborted records
+nothing); Part 2b adds a load after scoped recovery reloaded the demand (no
+load settles or records during the rest of that sync run). The shared model
+now judges demand identity from the request data itself instead of core's
+demand key. The storage sweep also checks that a failed coverage write
+crashes the Collection.
+
+Remaining limits: coverage relies on the source committing a load's rows
+before it settles that load (law 7); an unordered demand that loses one row
+and gains another keeps its row count and stays covered, so a row that
+retention removed can be missing from a covered restore (maintainer
+decision, 2026-10-26; a fixed history pins the rule); and multi-tab
+coordinators, outside the law by maintainer decision (2026-10-26). Part 4
+now covers a tie at the window boundary, modelled as a limited demand plus
+an unordered tie-boundary demand, and page moves with and without an index.
+
+The generated campaign in
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`
+shares the fixed oracle's driver (`tests/helpers/demand-coverage-driver.ts`).
+Its model replays the source's own log of row writes, deletes, truncates,
+and settled loads, so it does not predict when the wrapper reacquires a
+demand. A fixed and a random campaign of 40 histories each interleave two
+unordered demands with load starts, answers, failures, releases, live
+writes and deletes, truncates, snapshot transactions, and a source that
+rejects, ignores, or stops and resolves an aborted load; declared reach
+covers an obsolete load that settles, an aborted load that settles, a demand
+settled only by an aborted load, coverage ended by a snapshot, coverage
+recorded twice, a row moved between demands, and a covered demand short of
+rows. Part 2 fails each
+adapter call of a covered history once, before or after its effect, in
+either session: safety holds for every call, a failed coverage read keeps
+the load ready, and a failed coverage check waits. Part 3 releases the
+demand after each step of a load: the source Collection stops loading, and
+every load left behind was aborted. Mutants that ignore the row count, let
+an obsolete load record coverage, keep coverage across a truncate, let a
+failed coverage read fail the load, or keep a released load's wait each fail
+it. The campaign also reads the window `group = 'a' orderBy rank limit 2`
+over generated ranks with ties: a query is ready offline exactly when every
+load it sent in session 2 is covered, which judges the tie-boundary load
+without predicting when core sends it. Mutants that ignore window keys,
+compare them in order, or record keys for every demand each fail it. Its
+limits: real timers in session 1, one process, `node:sqlite`, and no cursor
+or offset loads.
+A scripted mutation sweep (63 mutants, recorded in the review record) then
+added five fixed histories: an empty covered demand after a rotation, a
+truncate during an empty load's coverage read, a synchronous answer whose
+durable write lands late, claim recovery after an expired claim during the
+check, and a coverage read that outlasts the wait. A sixth history holds the
+load's cache-claim renewal past the wait and kills the last survivor, a wait
+measured from after that renewal. No survivor of the sweep remains open in
+this owner.
+
+Every receiving witness is a production driver for the same judgment
+(ORC-014). The shared contract,
+`packages/db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract.ts`,
+holds six histories as data (session-1 steps and session-2 premises only):
+covered, never loaded, covered then a source delete, a covered window, a
+window with a row replaced below the boundary, and a covered demand whose
+upstream fails at once. Each host records the source log, the session-2 loads,
+and two checkpoint observations, and the shared model in
+`tests/persisted-demand-coverage-model-oracle.ts` judges them; no witness
+states an expected result. The histories module imports nothing, so the
+Playwright spec can load it.
+
+The hosts run all six through their own entry point: Node (better-sqlite3
+through `createNodeSQLitePersistence`), Chromium OPFS (wa-sqlite in two page
+loads, in `playwright.opfs.config.ts`, which the browser E2E job runs),
+Electron (a renderer over IPC to a `node:sqlite` main process, two app
+launches, in the desktop E2E job), Cloudflare Durable Objects (`wrangler dev`
+restarted over one persist directory, in the cloud-mobile job), React Native
+(an op-sqlite-shaped driver, in the cloud-mobile job), Expo (an expo-sqlite
+shim), and Tauri and Capacitor (their unit-suite SQLite stand-ins). The React,
+Solid, Vue, Svelte, and Angular witnesses run the covered, never-loaded, and
+failure histories through their own hook or primitive. With the contract's
+session-2 source forced to a 60 s wait and an upstream that never answers,
+every host and framework reports violations on its covered histories. The
+OPFS witness also pins the guide's statement that a multi-tab coordinator
+waits for the network; that run is recorded, not judged, because it pins the
+guide rather than the law.
+
+Limits: no CI job runs the Expo, Capacitor, or Tauri e2e suites, and no host
+runs on its native runtime here. The Capacitor device e2e needs an iOS
+simulator or Android emulator, and `adb` is not installed here; its Node e2e
+fails at file load (`SqliteError: cannot start a transaction within a
+transaction` at `tests/helpers/capacitor-sqlite-test-db.ts:22`). The Tauri
+native e2e needs `cargo`. React Suspense reveals a covered failure about 300 ms
+late (its fallback throttle), so the contract's before-wait checkpoint sits at
+450 ms.
+
+## Sync metadata session
+
+[Issue #2220](https://github.com/TanStack/db/issues/2220) reports that a
+sync-side metadata read misses an earlier accepted transaction's write while a
+persisting optimistic transaction holds it. The law is borrowed from standard
+theory (maintainer decisions of 2026-10-22 and 2026-10-23, recorded in
+[the review record](oracle-reviews/2026-10-22-sync-metadata-session.md)): one
+sync run is a session with read-your-writes, own reads, and monotonic writes
+in commit order. Every sync transaction is independent, including one begun
+inside another; accepted transactions apply in commit order, and a hold
+cannot change that order. An outer insert that lands on a different source
+row in commit order makes its transaction invalid, and an insert written over
+such a row is rejected as a duplicate, whatever holds or seeds there are. Consumers see whole
+transactions. Hydration seeds and persisted cache rows are older than every
+source write, and a later seed replaces either until the source writes the
+row or its metadata; an equal re-insert keeps metadata without writing it.
+In the persisted wrapper an insert replaces whatever row it lands on. A
+peer's notice of a write in this run counts as a source write, and writes
+during a storage read follow the same rules, the last write for a key
+winning. When a stored row's author is unknown, a seed this tab holds stays
+unless storage changed it, and other stored rows count as source writes
+(decisions 13 and 15). Reloads keep metadata of a missing row (decision 16),
+a write over a seed stores the row this tab shows (decision 17), and a
+reload after a named notice keeps a seed's metadata (decision 18).
+
+| Owner | Production paths | Observations and checkpoint |
+|---|---|---|
+| [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer lanes, the stored rows after settlement |
+| paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
+| [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested lanes | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
+| [hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts) | `DbClient` initialData, hydration chunks, and an adapter sync transaction (inserts, updates, deletes, truncates, and metadata-only writes) in full and partial row modes | public rows, the synced store, and row metadata through `client.dehydrate()` after each action; D5 per object |
+| [Query ownership lifecycle](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts) receiving witnesses | Query DB claims, releases, and retention cleanup over core and `persistedCollectionOptions` | published owners and non-owner row metadata |
+| receiving expectations in the [persisted oracle](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts), the Electric oracle, the Browser coordinator oracle, and the Electron IPC tests | persisted source inserts over a hydrated baseline; the durable mutation a source insert writes | public and durable rows; persisted mutation types |
+
+On `30175be48`, 51 of 186 tests fail in the session, composition, and
+retention files: held reads, commit order and outer writes after a held inner
+commit, every seed rule, and the paired properties. The persisted lanes fail
+the held reads through core, reads of an enclosing open transaction, an
+insert's implicit clear, equal re-inserts, inserts over seeds and cached rows
+under partial row updates, and late seeds beside a store-held transaction.
+Six Query witnesses fail, including two that only dropping Query's `??`
+metadata fallback repairs. The review record's evidence block lists reach
+counts, mutants, and GREEN runs.
+
+Two comparisons are narrowed on purpose, each recorded with its authority in
+the review record:
+
+- Under partial row updates the seed-order property drops `reinsert` from
+  both runs: decision "b" lets a seed moved first change a partial update's
+  merge base, so a re-insert planned from the arrival-order row is no longer
+  equal. The named witnesses `partialUpdateThenLateSeed` and
+  `seedUnderOpenReinsert` cover that interaction.
+- Key independence skips histories in which the model invalidates a
+  transaction: invalidation removes the whole transaction, row 1's writes
+  included (decision 7).
+
+The `persisted-peers` lane plays a second tab's source through the
+persistence coordinator: named row, metadata-only, delete, full-reload, and
+reset notices, crossed with seeds, the cached row, nesting, and holds. A
+reload that a notice causes is a storage read: its truncate replaces rows
+without truncating source authority or row metadata, an unchanged row keeps
+its status, and a seed's metadata survives a reload after a named notice
+(decisions 9, 11, and 15 to 18). A reset is a source truncate, and every
+later notice in its term reloads storage; on demand the reset keeps the
+seeds this tab holds (decisions 19 and 20). After settlement the stored rows
+must equal the model's, which a restart would read.
+`persisted-peers-full` repeats the lane under full row updates, where an
+update replaces its row in storage too; `persisted-peers-on-demand` repeats
+it on demand with a demand for every row. A reset over metadata of a missing
+row is too rare in generated histories to declare; a replay pins it. A reset
+may rewrite its rows, which its reload then applies as source writes.
+`persisted-reads-seeds` crosses read holds with seeds and the cached row and
+aborts a buffered commit's signal, which abandons it at the read's end
+(decision 21); a seed that arrived after it stays judged against it
+(decision 22). Dependent suffixes of an abandoned transaction belong to the
+abort-graph oracle. The peer is the driver, not a second
+Collection, so the claim stops at the controlled coordinator; a second
+production driver with two real coordinators is the open receiving
+witness (issue #2272). Missed notices and notices over the targeted key limit are not
+generated; the persisted oracle's grids cover them. Two held-cleanup
+Query retention witnesses race on CI; the maintainer deferred the race until
+a failure reports the timer trace these witnesses now print, and the review
+record's "Open" section holds the evidence. Restart and resume reads belong to the
+SQLite resume-snapshot and Electric resume owners; this oracle's claim ends
+with one sync run.
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to

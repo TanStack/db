@@ -3101,7 +3101,12 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
+  // The last write for a key wins (decision 12 and the row-metadata rules of
+  // 2026-10-05): an insert without metadata names the row's whole metadata,
+  // so it clears an explicit write before it in the same transaction, as it
+  // does outside hydration. Query writes a row before it stamps the row's
+  // owners, so its owners survive.
+  it(`clears row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
     const sync: SyncConfig<Todo, string> = {
@@ -3134,8 +3139,8 @@ describe(`persistedCollectionOptions`, () => {
     await collection.stateWhenReady()
     await flushAsyncWork()
 
-    expect(adapter.rowMetadata.get(`remote-1`)).toEqual(ownership)
-    expect(collection._state.syncedMetadata.get(`remote-1`)).toEqual(ownership)
+    expect(adapter.rowMetadata.get(`remote-1`)).toBeUndefined()
+    expect(collection._state.syncedMetadata.get(`remote-1`)).toBeUndefined()
   })
 
   it(`resets stale row metadata for a metadata-less insert with no queued metadata`, async () => {

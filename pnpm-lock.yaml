@@ -248,8 +248,8 @@ importers:
         specifier: ^2.8.6
         version: 2.8.6
       electron:
-        specifier: ^41.0.0
-        version: 41.10.7
+        specifier: ^42.0.0
+        version: 42.11.18
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -1412,8 +1412,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
       electron:
-        specifier: ^41.0.0
-        version: 41.10.7
+        specifier: ^42.0.0
+        version: 42.11.18
 
   packages/expo-db-sqlite-persistence:
     dependencies:
@@ -1577,8 +1577,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
       seroval:
-        specifier: 1.5.3
-        version: 1.5.3
+        specifier: 1.6.3
+        version: 1.6.3
 
   packages/react-db:
     dependencies:
@@ -8218,8 +8218,8 @@ packages:
   electron-to-chromium@1.5.286:
     resolution: {integrity: sha512-9tfDXhJ4RKFNerfjdCcZfufu49vg620741MNs26a9+bhLThdB+plgMeou98CAaHu/WATj2iHOOHTp1hWtABj2A==}
 
-  electron@41.10.7:
-    resolution: {integrity: sha512-AqIiefddlf5i+HYCGatr8VlBuEbWJpad4/yloBFYcMB2r57j7xhW1ogiJ+BfA5kxQyfmSs5yjwy54Me+wJn1jw==}
+  electron@42.11.18:
+    resolution: {integrity: sha512-hbzodG06x/l7uq+oeyob5ugv6qZBmJRWC7Uto5QEE99xSHUARz6d+++Rz+79T/ssTYTQkONW4ciTTcJuAbXKIQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -11589,6 +11589,10 @@ packages:
 
   seroval@1.5.3:
     resolution: {integrity: sha512-BXe0x4buEeYiIKaRUnth1WqCILQ3k4O67KP/B4pC3pVz0Mv2c96ngA9QDREUYxWY1sb2RZVRqwI9RcpVMyHCVw==}
+    engines: {node: '>=10'}
+
+  seroval@1.6.3:
+    resolution: {integrity: sha512-5PwLbVPpT4DEki1hYVSSsoxWY6xCNMVucAVLK/CH0mXSDfp/I4KaAex72q80GNt5hpn7CCMGdSpIg4YGqH/wXQ==}
     engines: {node: '>=10'}
 
   seroval@1.6.8:
@@ -20079,7 +20083,7 @@ snapshots:
 
   electron-to-chromium@1.5.286: {}
 
-  electron@41.10.7:
+  electron@42.11.18:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
@@ -24389,6 +24393,8 @@ snapshots:
       seroval: 1.6.8
 
   seroval@1.5.3: {}
+
+  seroval@1.6.3: {}
 
   seroval@1.6.8: {}
 

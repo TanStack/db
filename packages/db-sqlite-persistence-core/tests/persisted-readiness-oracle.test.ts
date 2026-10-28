@@ -89,7 +89,8 @@ import type { Call, Restore } from './persisted-readiness-support.js'
  *
  * The adapter is a controlled in-memory persistence adapter, not native
  * SQLite. Restarts, cross-tab coordination, and on-demand persistence are
- * outside this owner (on-demand rejects network-first configuration). Calls
+ * outside this owner (`persisted-demand-coverage-oracle.test.ts` owns on-demand
+ * network-first restores). Calls
  * that break the adapter contract, and the option and deadline examples, are
  * fixed examples in persisted-readiness.test.ts, not generated.
  */

@@ -2298,11 +2298,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         limit: index + 1,
       }))
       // Model complete source obligations independently of production queues.
-      // Hydration establishes the baseline first; source patches retain detail.
-      // Fresh inserts reset metadata, while updates keep baseline ownership.
-      // Row values retain the pre-existing quiescent wrapper semantics: source
-      // inserts are upserts, and partial mode retains omitted baseline fields.
-      // Metadata reset does not imply replacement of the complete row value.
+      // Hydration establishes the baseline first. A cached baseline row is a
+      // snapshot older than every source write, like a hydration seed
+      // (maintainer decision C1 of 2026-10-23, recorded in
+      // docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md):
+      // a source insert names the whole row, so it replaces the baseline row
+      // and resets its metadata, while a partial update merges over it and
+      // keeps baseline ownership. A later partial update merges over the row
+      // the first source write left.
       const sourceTitles = hasSuccessor
         ? [`first source value`, `second source value`]
         : [`first source value`]
@@ -2312,7 +2315,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           {
             type: `write`,
             transactionId: title,
-            row: { id: `shared`, title, detail: `retained baseline` },
+            row:
+              type === `insert`
+                ? { id: `shared`, title }
+                : { id: `shared`, title, detail: `retained baseline` },
           },
           { type: `commit`, transactionId: title },
         ]),
@@ -2868,15 +2874,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
-  // The same targeted path must respect DbClient hydration authority. A seed
-  // key may also exist in older durable storage. Active complete and filtered
-  // demand, and retired demand, cannot let a peer delta replace that
-  // source-owned value. The filtered case makes the durable row leave the
-  // predicate while the hydrated seed still matches it. The ordinary row
-  // beside it proves the notice was processed, so a
-  // subject that simply drops all targeted messages cannot pass. The model is
-  // the authored durable snapshot with the protected seed overlaid; public
-  // rows and change keys are checked after the targeted commit publishes.
+  // A peer's notice reports a source write in this run, and the last write
+  // wins: it replaces a DbClient seed this tab holds, row and metadata
+  // (decision 11 in docs/contributing/oracle-reviews/
+  // 2026-10-22-sync-metadata-session.md). Before that decision this test held
+  // the seed against the peer. Active complete and filtered demand, and
+  // retired demand, each publish the peer's durable result for the seed key
+  // as for any public row. The filtered case makes the durable row leave the
+  // predicate. The ordinary row beside it proves the notice was processed.
+  // The model is the authored durable snapshot; public rows, the seed key's
+  // metadata, and change keys are checked after the targeted commit
+  // publishes.
   it.each(
     ([`active demand`, `active filter`, `retired demand`] as const).flatMap(
       (route) =>
@@ -2890,7 +2898,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
     ),
   )(
-    `preserves a hydrated seed and metadata during a targeted $mutation with $route ($metadataAction)`,
+    `replaces a hydrated seed and metadata with a peer's targeted $mutation with $route ($metadataAction)`,
     async ({ route, mutation, metadataAction }) => {
       const ordinary =
         route === `active filter`
@@ -3106,24 +3114,27 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await flushAsyncWork()
         const expected =
           route === `active filter`
-            ? new Map([
-                ...expectedTargetedSnapshot(before, authoredDurable, `Keep`),
-                [seed.id, seed] as const,
-              ])
+            ? expectedTargetedSnapshot(before, authoredDurable, `Keep`)
             : expectedScopedSnapshot(
                 before,
                 authoredDurable,
-                new Map([[seed.id, seed]]),
+                new Map(),
                 route === `active demand`,
               )
         expectExactSnapshot(publicRows(), expected)
-        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+        // Row metadata lives with a public row, so a seed key that the peer
+        // deleted or moved out of demand keeps none.
+        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(
+          metadataAction === `set` && expected.has(seed.id)
+            ? { owner: `peer durable` }
+            : undefined,
+        )
         expect(publishedSnapshots).toHaveLength(1)
         for (const snapshot of publishedSnapshots)
           expectExactSnapshot(snapshot, expected)
         expect(publishedOrdinaryValues).toEqual([durableOrdinary])
         expect(publishedKeys).toContain(ordinary.id)
-        expect(publishedKeys).not.toContain(seed.id)
+        expect(publishedKeys).toContain(seed.id)
       } catch (error) {
         hasPrimaryFailure = true
         throw error
