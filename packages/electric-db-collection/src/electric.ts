@@ -2112,8 +2112,10 @@ function createElectricSync<T extends Row<unknown>>(
       usesBaseline = false
     }
 
+    // The commit consumes the transaction even if it throws.
     const commitSourceTransaction = (): SyncAppliedReceipt => {
       const committedPresenceRevision = pendingPresenceRevision
+      transactionStarted = false
       const applied = commit()
       if (metadata?.persistence) {
         const retireAppliedPresence = () => {
@@ -2129,8 +2131,10 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     // Subset hydration must not split a stream transaction it overlaps.
+    // Every reserved transaction is marked open, so a stop can abandon it.
     const beginSourceTransaction = () => {
       begin()
+      transactionStarted = true
       metadata?.persistence?.reserveCommitTurn()
     }
 
@@ -2371,7 +2375,6 @@ function createElectricSync<T extends Row<unknown>>(
       if (freshSnapshotPending) {
         freshSnapshotPending = false
         beginSourceTransaction()
-        transactionStarted = true
         truncate()
         recordPendingTruncate()
         syncedKeys.clear()
@@ -2476,7 +2479,6 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal processing: write changes immediately
             if (!transactionStarted) {
               beginSourceTransaction()
-              transactionStarted = true
             }
 
             processChangeMessage(message)
@@ -2535,7 +2537,6 @@ function createElectricSync<T extends Row<unknown>>(
           // Start a transaction and truncate the collection
           if (!transactionStarted) {
             beginSourceTransaction()
-            transactionStarted = true
           }
 
           truncate()
@@ -2618,8 +2619,7 @@ function createElectricSync<T extends Row<unknown>>(
                 bufferedMsg.headers.patterns,
                 begin,
                 write,
-                // The swap already opened a transaction, even though the
-                // normal-stream transactionStarted flag is still false.
+                // The swap already opened a transaction.
                 true,
                 (rowId) => {
                   recordPendingPresence(rowId, false)
@@ -2651,8 +2651,6 @@ function createElectricSync<T extends Row<unknown>>(
             if (!isResettingSnapshot || finishesReset) {
               stageResumeMetadata()
             }
-            // The commit consumes the transaction even if it throws.
-            transactionStarted = false
             applied = commitSourceTransaction()
           } else if (commitPoint === `up-to-date` && metadata) {
             beginSourceTransaction()

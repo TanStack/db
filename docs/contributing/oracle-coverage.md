@@ -2995,7 +2995,13 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       on `851e8d9da` the abandoned admission cells failed with a rejected
       load. The ending is commits,
       abandoned, cleanup, an aborted demand, or the source awaiting its own
-      baseline. The follow-up is a reset then a pre-reset commit.
+      baseline. The follow-up is a reset then a pre-reset commit, or a
+      reset, a new reservation, and then the pre-reset commit. A reservation
+      that a reset abandoned cannot reserve again; on `7a6f32fd7` 8
+      re-reserve cells failed because a later hydration waited for the
+      abandoned transaction. An aborted demand still waiting for its turn
+      also receives the reset follow-up; on `7a6f32fd7` the reset's reload
+      read for it, and 4 cells failed on the read count.
       Observations: receipts, final rows, row metadata, cursor, status,
       reads during the reservation, upstream requests, pullSince count,
       rows while waiting, and every read against the fold of the durable
@@ -3013,7 +3019,11 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       follower's flush and its wait check is a one-microtask window no
       timing reaches; a temporary hook that ended the reservation there
       showed the old wait loop settling early in 4 straddled cells and the
-      current loop keeping the owner's row public. A peer reset for a
+      current loop keeping the owner's row public. A new reservation that
+      opens between the loop's wait and its flush defers the owner's
+      broadcast again. The loop checks for a reservation after each flush; a
+      temporary hook that opened one there showed the loop on `7a6f32fd7`
+      settling the routed load in 2 cells before the owner's row was public. A peer reset for a
       storage generation this Collection no longer uses abandons nothing.
       Known limit (maintainer decision on PR #2265): Electric publishes a
       transaction's txids as stream evidence before persistence accepts its
@@ -4004,7 +4014,12 @@ public and durable state. A second delivery lands during rotation, before the
 replacement stream starts; it rejects old callback admission into the new
 cache. Initial scoped recovery also forgets imported old txid evidence, and
 retiring an incomplete old stream transaction releases its commit turn so a
-new demand can start. These histories killed the one-phase restart, retained
+new demand can start. A progressive atomic swap that throws in `getKey`
+leaves its reserved transaction open; when the SDK then gives up, Electric
+must abandon it, and a subset load that waited runs. On `7a6f32fd7` the swap
+did not mark its transaction open, so no stop could abandon it and the load
+waited until its checkpoint timed out. The metadata-only commit shares the
+same begin and commit helpers but has no fallible step between them. These histories killed the one-phase restart, retained
 acknowledgement, and open-transaction designs at their named checkpoints. The
 Electric descriptor owner also holds rotation while aborting one old demand:
 that demand rejects promptly and a sibling later applies fresh source rows.

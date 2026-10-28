@@ -1302,10 +1302,8 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   // Settles once the reservation ends; every wait shares it.
   reservationEnded?: Promise<void>
   hasDependentSuccessor: boolean
-  publicationAdmissionWaiters?: Set<{
-    resolve: () => void
-    reject: (error: unknown) => void
-  }>
+  // Every outcome of the transaction releases its admission waiters.
+  publicationAdmissionWaiters?: Set<() => void>
   terminalFailure?: { error: unknown }
   // Set just before the transaction is handed to the Collection; from then
   // on core holds its keys itself.
@@ -2121,7 +2119,8 @@ class PersistedCollectionRuntime<
         await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
         // With no reservation left, a head still queued is held by other work,
         // such as a claim recovery, which flushes it.
-        if (!reservation && this.queuedTxCommitted[0] === head) break
+        if (this.queuedTxCommitted[0] === head && !this.waitForReservedCommit?.())
+          break
       }
       // A broadcast that failed to apply made the runtime terminal; its rows
       // are not visible, so the load must not settle successfully.
@@ -5359,7 +5358,10 @@ class PersistedCollectionRuntime<
     if (!continuesHydrationCycle) this.beginHydrationCycle()
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
-    const activeSubsetOptions = Array.from(this.activeSubsets.values())
+    // An aborted demand still waiting for its turn loads nothing.
+    const activeSubsetOptions = Array.from(this.activeSubsets.values()).filter(
+      (options) => !options.signal?.aborted,
+    )
     if (restoreResetBaseline && activeSubsetOptions.length === 0) {
       activeSubsetOptions.push({})
     }
@@ -5802,15 +5804,10 @@ function createWrappedSyncConfig<
         transactionStack[transactionStack.length - 1]
       const settlePublicationAdmissionWaiters = (
         transaction: OpenSyncTransaction<T, TKey>,
-        error?: unknown,
       ) => {
         const waiters = transaction.publicationAdmissionWaiters
         transaction.publicationAdmissionWaiters = undefined
-        if (!waiters) return
-        for (const waiter of waiters) {
-          if (error === undefined) waiter.resolve()
-          else waiter.reject(error)
-        }
+        waiters?.forEach((release) => release())
       }
       const bindToCurrentHydration = (
         transaction: OpenSyncTransaction<T, TKey>,
@@ -5926,7 +5923,7 @@ function createWrappedSyncConfig<
         error: unknown,
       ) => {
         removePendingPublicationTransaction(transaction)
-        settlePublicationAdmissionWaiters(transaction, error)
+        settlePublicationAdmissionWaiters(transaction)
         return createHandledRejection(error)
       }
       const updateMetadataWrite = <K>(
@@ -5975,14 +5972,13 @@ function createWrappedSyncConfig<
           const waiters = (transaction.publicationAdmissionWaiters ??=
             new Set())
           const settle = () => {
-            waiters.delete(waiter)
+            waiters.delete(settle)
             options.signal?.removeEventListener(`abort`, settle)
             acquisition.cancelAdmissionWait = undefined
             resolve()
           }
-          const waiter = { resolve: settle, reject: settle }
           if (options.signal?.aborted) return settle()
-          waiters.add(waiter)
+          waiters.add(settle)
           options.signal?.addEventListener(`abort`, settle, { once: true })
           acquisition.cancelAdmissionWait = settle
         })
@@ -6109,10 +6105,9 @@ function createWrappedSyncConfig<
           // cleanup discards it. Every outcome closes the reservation.
           return (transaction.reservationEnded ??= new Promise<void>(
             (resolve) => {
-              ;(transaction.publicationAdmissionWaiters ??= new Set()).add({
+              ;(transaction.publicationAdmissionWaiters ??= new Set()).add(
                 resolve,
-                reject: () => resolve(),
-              })
+              )
             },
           ))
         },
@@ -6141,7 +6136,12 @@ function createWrappedSyncConfig<
         },
         reserveCommitTurn: () => {
           const openTransaction = getOpenTransaction()
-          if (openTransaction && !openTransaction.internal)
+          // A transaction a reset abandoned cannot reserve again.
+          if (
+            openTransaction &&
+            !openTransaction.internal &&
+            !openTransaction.terminalFailure
+          )
             openTransaction.reservesCommitTurn = true
         },
         hydrateBaseline: async () => {
@@ -6499,7 +6499,7 @@ function createWrappedSyncConfig<
             bindToCurrentHydration(openTransaction)
             assertHydrationSequenceCurrent(openTransaction)
           } catch (error) {
-            settlePublicationAdmissionWaiters(openTransaction, error)
+            settlePublicationAdmissionWaiters(openTransaction)
             throw error
           }
           const transaction = {
@@ -6577,11 +6577,9 @@ function createWrappedSyncConfig<
           let applied: Promise<void>
           try {
             applied = runtime.applyHydrationBufferedTransaction(transaction)
-          } catch (error) {
-            settlePublicationAdmissionWaiters(openTransaction, error)
-            throw error
+          } finally {
+            settlePublicationAdmissionWaiters(openTransaction)
           }
-          settlePublicationAdmissionWaiters(openTransaction)
           settleRuntimeTransaction(openTransaction, applied)
           return visibleAfterDurable(openTransaction, applied)
         },
@@ -6756,9 +6754,8 @@ function createWrappedSyncConfig<
         // open old-source transaction is abandoned before the new cache binds.
         if (!sourceCleanupPromise) {
           sourceSession++
-          const abortError = new SyncTransactionAbortedError()
           for (const transaction of transactionStack) {
-            settlePublicationAdmissionWaiters(transaction, abortError)
+            settlePublicationAdmissionWaiters(transaction)
           }
           transactionStack.length = 0
           const retiredResult = sourceResult
@@ -6834,7 +6831,6 @@ function createWrappedSyncConfig<
           // reenters cleanup before returning, wait for that exact synchronous
           // entry to publish its cleanup callback before sampling the result.
           const sourceSyncEntry = activeSourceSyncEntry
-          const cleanupError = new SyncTransactionAbortedError()
           for (const acquisition of acquisitions.values()) {
             acquisition.cancelAdmissionWait?.()
           }
@@ -6842,7 +6838,7 @@ function createWrappedSyncConfig<
           acquisitions.clear()
           pendingPublicationTransactions.length = 0
           for (const transaction of transactionStack) {
-            settlePublicationAdmissionWaiters(transaction, cleanupError)
+            settlePublicationAdmissionWaiters(transaction)
           }
           transactionStack.length = 0
           let sourceCleanup: Promise<void>

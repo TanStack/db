@@ -17713,7 +17713,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     truncateReplay: `none` | `before` | `after`
     commitTiming: PersistedReadTiming
     ending: PersistedReadEnding
-    followUp: `none` | `reset then pre-reset commit` | `retired-storage reset`
+    followUp:
+      | `none`
+      | `reset then pre-reset commit`
+      | `reset, re-reserve, then pre-reset commit`
+      | `retired-storage reset`
   }
   type PersistedReadReach =
     | `route performed a persisted read`
@@ -17806,7 +17810,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const resetAbandons =
       waits &&
       (route === `collection-reset` ||
-        followUp === `reset then pre-reset commit`)
+        followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`)
     const hydrationWaits = waits && !recoveryStraddles && !resetAbandons
     const hydrationStraddles = straddles || recoveryStraddles || resetAbandons
     const noticeWaited = waits && !recoveryStraddles
@@ -17900,10 +17905,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       ending !== `demand aborted`
     // A routed subset reads its local rows, then rereads to admit the
     // owner's row; a reset follow-up reloads, and so does the fenced
-    // pre-reset notice.
+    // pre-reset notice. Those reloads read only active demand: an eager
+    // Collection's baseline, or a subset whose demand was not aborted. An
+    // aborted demand loads no rows.
     const expectedReadCount =
       (!readsSomething ? 0 : route === `routed subset` ? 2 : 1) +
-      (followUp === `reset then pre-reset commit` ? 2 : 0)
+      ((followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`) &&
+      (syncMode === `eager` || readsSomething)
+        ? 2
+        : 0)
     const applyDurableEvent = (rows: Map<string, Todo>, event: string) => {
       if (event === `replacement`) {
         rows.clear()
@@ -18271,7 +18282,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       [
         ...(ending === `cleanup` ||
         ((route === `targeted` || ending === `demand aborted`) &&
-          followUp !== `reset then pre-reset commit`)
+          followUp !== `reset then pre-reset commit` &&
+          followUp !== `reset, re-reserve, then pre-reset commit`)
           ? []
           : ([`route performed a persisted read`] as const)),
         ...(waits &&
@@ -18304,7 +18316,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ...(route === `targeted` && waits
           ? ([`peer change announced while reserved`] as const)
           : []),
-        ...(followUp === `reset then pre-reset commit` && waits
+        ...((followUp === `reset then pre-reset commit` ||
+          followUp === `reset, re-reserve, then pre-reset commit`) &&
+        waits
           ? ([`reset and pre-reset commit announced while waiting`] as const)
           : []),
         ...(followUp === `retired-storage reset`
@@ -18566,6 +18580,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           schemaVersion: 1,
           resetEpoch: 1,
         })
+        // The source reserves its turn again on the transaction the reset
+        // abandoned; a dead transaction cannot reserve.
+        if (
+          followUp === `reset, re-reserve, then pre-reset commit` &&
+          reservationOpen
+        ) {
+          sourceParams.metadata!.persistence!.reserveCommitTurn()
+        }
         const position = nextPeerPosition()
         coordinator.emit({
           type: `tx:committed`,
@@ -18712,13 +18734,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           await peerCommit(peerRow, `peer-change`)
           reach.reach(`peer change announced while reserved`)
         }
-        if (followUp !== `none`) {
+        const announceFollowUp = () => {
           deliverFollowUp()
           reach.reach(
             followUp === `retired-storage reset`
               ? `retired-storage reset announced while reserved`
               : `reset and pre-reset commit announced while waiting`,
           )
+        }
+        // An aborted demand meets its follow-up after the abort (below).
+        if (followUp !== `none` && ending !== `demand aborted`) {
+          announceFollowUp()
         }
         await persistenceQuiesced(`reservation open, route waiting`)
         observeWhileReserved()
@@ -18740,6 +18766,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               ),
               `aborted demand settles before the reservation ends`,
             )
+            // A reset after the abort reloads only demand that is still
+            // active, so the aborted demand loads nothing.
+            if (followUp !== `none`) {
+              announceFollowUp()
+              await persistenceQuiesced(`follow-up after the abort applied`)
+            }
           }
           if (ending === `source awaits own baseline`) {
             ownBaselineRejection = await atPersistedOracleCheckpoint(
@@ -18878,7 +18910,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           : {}),
         ...(hydrationStraddles ? { rowsWhileReserved } : {}),
         ...(route === `targeted` && waits ? { peerWhileReserved } : {}),
-        ...(followUp === `reset then pre-reset commit`
+        ...(followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`
           ? { publishedSuperseded: published.has(supersededRow.id) }
           : {}),
         ...(route === `routed subset` ? { ownerVisibleAtSettlement } : {}),
@@ -18931,7 +18964,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ...(route === `targeted` && waits
           ? { peerWhileReserved: peerRow }
           : {}),
-        ...(followUp === `reset then pre-reset commit`
+        ...(followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`
           ? { publishedSuperseded: false }
           : {}),
         ...(route === `routed subset`
@@ -19111,10 +19145,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           (
             [
               `none`,
-              ...(syncMode === `eager` &&
-              (commitTiming === `after read` || waits) &&
-              (ending === `commits` || ending === `abandoned`)
-                ? ([`reset then pre-reset commit`] as const)
+              ...((syncMode === `eager` &&
+                (commitTiming === `after read` || waits) &&
+                (ending === `commits` || ending === `abandoned`)) ||
+              ending === `demand aborted`
+                ? ([
+                    `reset then pre-reset commit`,
+                    `reset, re-reserve, then pre-reset commit`,
+                  ] as const)
                 : []),
               ...(syncMode === `eager` &&
               waits &&
