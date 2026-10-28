@@ -303,7 +303,9 @@ describe(`persistedCollectionOptions`, () => {
         getKey: (row: Todo) => row.id,
         persistence: { adapter },
       }
-      const options =
+      // Each branch creates its Collection from one options type, so the
+      // call never resolves overloads against a union.
+      const syncOptions =
         mode === `sync-present`
           ? persistedCollectionOptions<Todo, string>({
               ...base,
@@ -314,8 +316,14 @@ describe(`persistedCollectionOptions`, () => {
                 },
               },
             })
-          : persistedCollectionOptions<Todo, string>(base)
-      const first = createCollection(options)
+          : undefined
+      const localOptions = syncOptions
+        ? undefined
+        : persistedCollectionOptions<Todo, string>(base)
+      const options = syncOptions ?? localOptions!
+      const first = syncOptions
+        ? createCollection(syncOptions)
+        : createCollection(localOptions!)
       const second = createCollection({
         id: `unclaimed-${mode}`,
         getKey: (row: Todo) => row.id,
@@ -444,7 +452,9 @@ describe(`persistedCollectionOptions`, () => {
         getKey: (row: Todo) => row.id,
         persistence: { adapter },
       }
-      const options =
+      // Each branch creates its Collection from one options type, so the
+      // call never resolves overloads against a union.
+      const syncOptions =
         mode === `sync-present`
           ? persistedCollectionOptions<Todo, string>({
               ...base,
@@ -455,8 +465,14 @@ describe(`persistedCollectionOptions`, () => {
                 },
               },
             })
-          : persistedCollectionOptions<Todo, string>(base)
-      const first = createCollection(options)
+          : undefined
+      const localOptions = syncOptions
+        ? undefined
+        : persistedCollectionOptions<Todo, string>(base)
+      const options = syncOptions ?? localOptions!
+      const first = syncOptions
+        ? createCollection(syncOptions)
+        : createCollection(localOptions!)
       const second = createCollection({
         id: `post-cleanup-copy-${mode}`,
         getKey: (row: Todo) => row.id,

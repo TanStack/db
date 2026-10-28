@@ -888,7 +888,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 }
 
 /**
- * Type for the awaitTxId utility function
+ * Type for the awaitTxId utility function. It resolves when the txid
+ * appears in the Electric stream (the server's confirmation), before this
+ * tab's persistence accepts the transaction. If that commit later rejects,
+ * the source fails instead, and the Collection's health node records it
+ * (maintainer decision on PR #2265).
  */
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
@@ -1939,6 +1943,17 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
+    let transactionStarted = false
+    // Commit with an aborted signal: the wrapper discards the transaction and
+    // its reserved commit turn ends.
+    const abandonOpenTransaction = () => {
+      if (!transactionStarted) return
+      transactionStarted = false
+      const cancellation = new AbortController()
+      cancellation.abort()
+      const abandoned = commit(cancellation.signal)
+      if (abandoned !== true) void abandoned.catch(() => undefined)
+    }
     // A final initial failure decides its waiting loads. A cleanup that a
     // status listener runs inside that failure must not relabel it.
     let initialSyncFailedFinally = false
@@ -1970,6 +1985,9 @@ function createElectricSync<T extends Row<unknown>>(
       const fails = isActiveLifecycle() && !ready
       abortController.abort()
       if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      // A source that stops must end its reserved transaction. The initial
+      // failure decides first: abandoning commits.
+      abandonOpenTransaction()
     }
 
     if (shapeOptions.signal) {
@@ -2015,6 +2033,9 @@ function createElectricSync<T extends Row<unknown>>(
         const failWaits = (cause: unknown) => {
           rejectFullSnapshot(cause)
           if (!ready) failInitialSync(cause)
+          // No retry follows, so the open transaction can never commit. A
+          // source that stops must end its reserved transaction.
+          abandonOpenTransaction()
         }
 
         if (shapeOptions.onError) {
@@ -2043,7 +2064,6 @@ function createElectricSync<T extends Row<unknown>>(
         return
       },
     })
-    let transactionStarted = false
     const newTxids = new Set<Txid>()
     const newSnapshots: Array<PostgresSnapshot> = []
     // Track if we've completed initial sync in progressive mode. A persisted
@@ -2092,8 +2112,10 @@ function createElectricSync<T extends Row<unknown>>(
       usesBaseline = false
     }
 
+    // The commit consumes the transaction even if it throws.
     const commitSourceTransaction = (): SyncAppliedReceipt => {
       const committedPresenceRevision = pendingPresenceRevision
+      transactionStarted = false
       const applied = commit()
       if (metadata?.persistence) {
         const retireAppliedPresence = () => {
@@ -2109,8 +2131,10 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     // Subset hydration must not split a stream transaction it overlaps.
+    // Every reserved transaction is marked open, so a stop can abandon it.
     const beginSourceTransaction = () => {
       begin()
+      transactionStarted = true
       metadata?.persistence?.reserveCommitTurn()
     }
 
@@ -2328,12 +2352,7 @@ function createElectricSync<T extends Row<unknown>>(
 
     const invalidateResume = () => {
       resumeInvalid = true
-      if (transactionStarted) {
-        const cancellation = new AbortController()
-        cancellation.abort()
-        commit(cancellation.signal)
-        transactionStarted = false
-      }
+      abandonOpenTransaction()
       syncedKeys.clear()
       newTxids.clear()
       newSnapshots.length = 0
@@ -2356,7 +2375,6 @@ function createElectricSync<T extends Row<unknown>>(
       if (freshSnapshotPending) {
         freshSnapshotPending = false
         beginSourceTransaction()
-        transactionStarted = true
         truncate()
         recordPendingTruncate()
         syncedKeys.clear()
@@ -2461,7 +2479,6 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal processing: write changes immediately
             if (!transactionStarted) {
               beginSourceTransaction()
-              transactionStarted = true
             }
 
             processChangeMessage(message)
@@ -2520,7 +2537,6 @@ function createElectricSync<T extends Row<unknown>>(
           // Start a transaction and truncate the collection
           if (!transactionStarted) {
             beginSourceTransaction()
-            transactionStarted = true
           }
 
           truncate()
@@ -2603,8 +2619,7 @@ function createElectricSync<T extends Row<unknown>>(
                 bufferedMsg.headers.patterns,
                 begin,
                 write,
-                // The swap already opened a transaction, even though the
-                // normal-stream transactionStarted flag is still false.
+                // The swap already opened a transaction.
                 true,
                 (rowId) => {
                   recordPendingPresence(rowId, false)
@@ -2637,7 +2652,6 @@ function createElectricSync<T extends Row<unknown>>(
               stageResumeMetadata()
             }
             applied = commitSourceTransaction()
-            transactionStarted = false
           } else if (commitPoint === `up-to-date` && metadata) {
             beginSourceTransaction()
             stageResumeMetadata()
@@ -2735,6 +2749,9 @@ function createElectricSync<T extends Row<unknown>>(
           if (!ready) failInitialSync(error)
           else fail(error)
         }
+        // A source that stops must end its reserved transaction. The initial
+        // failure decides first: abandoning commits.
+        abandonOpenTransaction()
       },
     )
 
@@ -2774,13 +2791,7 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
         stream.unsubscribeAll()
         abortController.abort()
-        if (transactionStarted) {
-          transactionStarted = false
-          const cancellation = new AbortController()
-          cancellation.abort()
-          const abandoned = commit(cancellation.signal)
-          if (abandoned !== true) void abandoned.catch(() => undefined)
-        }
+        abandonOpenTransaction()
         pendingResumeBatches.length = 0
         // Reset deduplication tracking so collection can load fresh data if restarted
         loadSubsetDedupe?.reset()
