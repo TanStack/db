@@ -560,6 +560,21 @@ async function checkOrderedReplay(
       barrier.failures.set(load, options)
       barrier.history.push(load)
     }
+    // A later load of the replay that loads a failed load's keys, such as
+    // the retry the query starts at once, decides those keys, so that
+    // failure no longer fails the replay (ARCHITECTURE.md law 17: a failure
+    // counts for a key no later held load loaded).
+    if (ok && barrier?.pending.has(load) && !options.signal?.aborted) {
+      for (const failed of barrier.failures.keys()) {
+        if (
+          loads.indexOf(failed) < loads.indexOf(load) &&
+          failed.ordered === load.ordered &&
+          failed.keys !== undefined &&
+          [...failed.keys].every((key) => load.keys?.has(key))
+        )
+          barrier.failures.delete(failed)
+      }
+    }
     barrier?.pending.delete(load)
     // A replay completes when its last participant settles, so demand that
     // starts after it does not join it.
