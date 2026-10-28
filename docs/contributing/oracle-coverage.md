@@ -3008,6 +3008,13 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       | Gap recovery that reloads partway through, on `851e8d9da` | 28 cells fail: recovery advanced the stream position and applied a targeted delta before it deferred, so its retry skipped the reload. A gate only at recovery start still fails 15 scope-entry cells; reloads that start their own cycle inside recovery fail 61. |
       | `5649a07d4` | The open cells fail with `a persisted sync transaction cannot cross a hydration cycle`. Three `after read` reset follow-up cells also fail, because `main` applied a pre-reset commit before the reset set its term fence. Queueing resets with notices fixes this pre-existing defect. |
       | Hostile mutants | Each mutant fails its cells, and every failure is an assertion. Deferring every notice fails the targeted change. Dropping the follower reply's wait fails the routed subset. Reporting hydration start before the check fails the aborted demand. A reset reload that starts its own cycle fails the first-publication reset. Applying a reset outside the notice queue fails the reset follow-ups. Retrying a waited notice while the reservation is open fails the follow-up and routed cells (repeated pullSince). Checking only at the mutex turn fails every scope-entry cell. Gating subset hydration only fails every reset, reload, and gap cell. Requeueing a waited notice behind later notices fails 12 reset follow-up cells: the pre-reset commit is published before its reset, and a reload is lost. |
+      A routed load also judges law 7 at its settlement: the owner's row is
+      public when the load settles. A reservation that ends between the
+      follower's flush and its wait check is a one-microtask window no
+      timing reaches; a temporary hook that ended the reservation there
+      showed the old wait loop settling early in 4 straddled cells and the
+      current loop keeping the owner's row public. A peer reset for a
+      storage generation this Collection no longer uses abandons nothing.
       Known limit (maintainer decision on PR #2265): Electric publishes a
       transaction's txids as stream evidence before persistence accepts its
       commit, so `awaitTxId` can resolve for a commit that a peer reset or a

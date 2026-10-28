@@ -1335,6 +1335,8 @@ type WaitForReservedCommit = () => Promise<void> | undefined
  * durable write needs the mutex.
  */
 class ReservedCommitPending extends Error {}
+// One instance signals every deferral; callers compare it by identity.
+const reservedCommitPending = new ReservedCommitPending()
 
 class ApplyMutex {
   private queue: Promise<void> = Promise.resolve()
@@ -1940,8 +1942,15 @@ class PersistedCollectionRuntime<
   // Every hydration start calls this before it changes state. The check runs
   // inside the hydration's own scope, because a shared scheduler can hold the
   // scope long after its apply-mutex turn began.
+  // A hydration cycle begins: it waits for an open reservation, then moves
+  // the sequence that open sync transactions are bound to.
+  private beginHydrationCycle(): void {
+    this.throwIfReservedCommitOpen()
+    this.hydrationSequence++
+  }
+
   private throwIfReservedCommitOpen(): void {
-    if (this.waitForReservedCommit?.()) throw new ReservedCommitPending()
+    if (this.waitForReservedCommit?.()) throw reservedCommitPending
   }
 
   /** Runs a hydration turn, retrying it after a reserved commit it met. */
@@ -1952,7 +1961,7 @@ class PersistedCollectionRuntime<
       try {
         return await this.applyMutex.run(turn)
       } catch (error) {
-        if (!(error instanceof ReservedCommitPending)) throw error
+        if (error !== reservedCommitPending) throw error
         await this.waitForReservedCommit?.()
       }
     }
@@ -2101,15 +2110,18 @@ class PersistedCollectionRuntime<
       }
       await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
       // A broadcast whose reload waits for a reserved commit has not applied
-      // yet, so the load waits with it. Notices behind a head that does not
-      // wait arrived after this flush and are not the owner's.
+      // yet, so the load waits with it, including when the reservation ends
+      // before this check. Notices behind a head that does not wait arrived
+      // after this flush and are not the owner's.
       for (;;) {
-        const closed = this.queuedTxCommitted[0]?.waitsForReservedCommit
-          ? this.waitForReservedCommit?.()
-          : undefined
-        if (!closed) break
-        await closed
+        const head = this.queuedTxCommitted[0]
+        if (!head?.waitsForReservedCommit) break
+        const reservation = this.waitForReservedCommit?.()
+        await reservation
         await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+        // With no reservation left, a head still queued is held by other work,
+        // such as a claim recovery, which flushes it.
+        if (!reservation && this.queuedTxCommitted[0] === head) break
       }
       // A broadcast that failed to apply made the runtime terminal; its rows
       // are not visible, so the load must not settle successfully.
@@ -3469,12 +3481,11 @@ class PersistedCollectionRuntime<
     },
     adapter: HydrationPersistenceAdapter,
   ): Promise<boolean> {
-    this.throwIfReservedCommitOpen()
+    this.beginHydrationCycle()
     let rowsLoaded = false
     let boundRowVersion: number | undefined
     let replayFailure: { reason: unknown } | undefined
     const resetSequence = this.resetSequence
-    this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
     try {
@@ -4845,7 +4856,7 @@ class PersistedCollectionRuntime<
           )
         }
       } catch (error) {
-        if (error instanceof ReservedCommitPending) {
+        if (error === reservedCommitPending) {
           // Only a notice that reaches a hydration waits; later notices stay
           // queued behind it. The reserved commit lands first and takes the
           // next stream position, so the retry may run as gap recovery, which
@@ -5009,8 +5020,7 @@ class PersistedCollectionRuntime<
         if (lifecycleGeneration !== this.lifecycleGeneration) return false
 
         if (pullResponse.ok) {
-          this.throwIfReservedCommitOpen()
-          this.hydrationSequence++
+          this.beginHydrationCycle()
           this.observeStreamPosition(
             pullResponse.latestTerm,
             pullResponse.latestSeq,
@@ -5346,7 +5356,7 @@ class PersistedCollectionRuntime<
       this.refreshScopedSubsets()
       return
     }
-    if (!continuesHydrationCycle) this.throwIfReservedCommitOpen()
+    if (!continuesHydrationCycle) this.beginHydrationCycle()
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
     const activeSubsetOptions = Array.from(this.activeSubsets.values())
@@ -5375,7 +5385,6 @@ class PersistedCollectionRuntime<
           .map(([key]) => key)
 
     this.hydratedDemands.clear()
-    if (!continuesHydrationCycle) this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
     this.hydratingGeneration = lifecycleGeneration
