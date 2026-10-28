@@ -1,5 +1,6 @@
 import { D2, MultiSet } from '@tanstack/db-ivm'
 import { describe, expect, it, vi } from 'vitest'
+import { include } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq } from '../../src/query/builder/functions.js'
@@ -67,7 +68,14 @@ describe(`BucketFacadeAdapter`, () => {
       const activeBuckets = graph.newInput<[string, true]>()
       const adapter = new BucketFacadeAdapter(
         `public-membership`,
-        [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+        [
+          {
+            edgeId: `children`,
+            rows,
+            activeBuckets,
+            hasOrderBy: false,
+          },
+        ],
         () => {},
       )
       graph.finalize()
@@ -123,7 +131,14 @@ describe(`BucketFacadeAdapter`, () => {
       const activeBuckets = graph.newInput<[string, true]>()
       const adapter = new BucketFacadeAdapter(
         `facade-read-work`,
-        [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: ordered }],
+        [
+          {
+            edgeId: `children`,
+            rows,
+            activeBuckets,
+            hasOrderBy: ordered,
+          },
+        ],
         () => {},
       )
       graph.finalize()
@@ -202,7 +217,14 @@ describe(`BucketFacadeAdapter`, () => {
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-order-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: true }],
+      [
+        {
+          edgeId: `children`,
+          rows,
+          activeBuckets,
+          hasOrderBy: true,
+        },
+      ],
       () => {},
     )
     graph.finalize()
@@ -248,7 +270,14 @@ describe(`BucketFacadeAdapter`, () => {
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-rollback-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: true }],
+      [
+        {
+          edgeId: `children`,
+          rows,
+          activeBuckets,
+          hasOrderBy: true,
+        },
+      ],
       () => {},
     )
     graph.finalize()
@@ -509,7 +538,14 @@ describe(`BucketFacadeAdapter`, () => {
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-index-rollback-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+      [
+        {
+          edgeId: `children`,
+          rows,
+          activeBuckets,
+          hasOrderBy: false,
+        },
+      ],
       () => {},
     )
     graph.finalize()
@@ -630,9 +666,11 @@ describe(`BucketFacadeAdapter`, () => {
     const live = createLiveQueryCollection((q) =>
       q.from({ parent: parents }).select(({ parent }) => ({
         id: parent.id,
-        children: q
-          .from({ child: children })
-          .where(({ child }) => eq(child.groupId, parent.groupId)),
+        children: include(
+          q
+            .from({ child: children })
+            .where(({ child }) => eq(child.groupId, parent.groupId)),
+        ),
       })),
     )
 

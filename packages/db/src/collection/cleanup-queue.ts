@@ -1,5 +1,10 @@
 import { codedMessage, devBuild } from '../error-message'
 
+// Share one elapsed clock for appointments and startup handoff deadlines.
+// Some runtimes lack `performance` although the DOM types declare it.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+export const cleanupNow = () => globalThis.performance?.now() ?? Date.now()
+
 type CleanupTask = {
   executeAt: number
   callback: () => void
@@ -15,17 +20,11 @@ export class CleanupQueue {
 
   private timeoutId: ReturnType<typeof setTimeout> | null = null
   private microtaskScheduled = false
-  // Some runtimes lack `performance` although the DOM types declare it.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  private readonly now = () => globalThis.performance?.now() ?? Date.now()
 
   private constructor() {}
 
   public static getInstance(): CleanupQueue {
-    if (!CleanupQueue.instance) {
-      CleanupQueue.instance = new CleanupQueue()
-    }
-    return CleanupQueue.instance
+    return (CleanupQueue.instance ??= new CleanupQueue())
   }
 
   /**
@@ -33,7 +32,7 @@ export class CleanupQueue {
    * multiple synchronous registrations can share one root timer.
    */
   public schedule(key: unknown, gcTime: number, callback: () => void): void {
-    const executeAt = this.now() + gcTime
+    const executeAt = cleanupNow() + gcTime
     this.tasks.set(key, { executeAt, callback })
 
     if (!this.microtaskScheduled) {
@@ -78,38 +77,31 @@ export class CleanupQueue {
       }
     }
 
-    const delay = Math.max(0, earliestTime - this.now())
-    this.timeoutId = setTimeout(() => this.process(), delay)
+    const delay = Math.max(0, earliestTime - cleanupNow())
+    // Run every due task, then select the next shared wakeup.
+    this.timeoutId = setTimeout(() => {
+      this.timeoutId = null
+      const now = cleanupNow()
+      for (const [key, task] of this.tasks.entries()) {
+        if (now >= task.executeAt) {
+          this.tasks.delete(key)
+          try {
+            task.callback()
+          } catch (error) {
+            console.error(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? 'Error in CleanupQueue task:'
+                : codedMessage(214),
+              error,
+            )
+          }
+        }
+      }
+
+      this.updateTimeout()
+    }, delay)
     // Background collection GC must not keep an otherwise finished Node
     // process alive. Browsers return a numeric timer handle.
     if (typeof this.timeoutId === `object`) this.timeoutId.unref()
-  }
-
-  /**
-   * Runs every task whose deadline has passed, then schedules the next wakeup
-   * if there is still pending work.
-   */
-  private process(): void {
-    this.timeoutId = null
-    const now = this.now()
-    for (const [key, task] of this.tasks.entries()) {
-      if (now >= task.executeAt) {
-        this.tasks.delete(key)
-        try {
-          task.callback()
-        } catch (error) {
-          console.error(
-            devBuild() && process.env.NODE_ENV !== `production`
-              ? 'Error in CleanupQueue task:'
-              : codedMessage(214),
-            error,
-          )
-        }
-      }
-    }
-
-    if (this.tasks.size > 0) {
-      this.updateTimeout()
-    }
   }
 }

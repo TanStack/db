@@ -348,8 +348,16 @@ void transaction.when('settled').catch((error) => console.error(error))
 
 For the leader, `waitForInit()` waits for the initial outbox read and optimistic restoration attempt. It does not make `todos` ready. The separate `preload()` call starts Collection loading without blocking offline actions. A screen that needs initial rows can await `todos.preload()` and handle a rejection.
 
-The final `refetch()` asks the server for current rows after a successful write. By default, it can resolve when that read fails. The offline transaction can then settle successfully because the POST succeeded. That read error does not itself request an outbox retry. Check `todos.utils.isError` and `todos.utils.lastError` to report or retry the read.
+The final `refetch()` asks the server for current rows after a successful write. By default, it can resolve when that read fails. The offline transaction can then settle successfully because the POST succeeded. That read error does not itself request an outbox retry. Check `todos.health` (or the `health` tree of a live query over it) to report or retry the read.
 
 The [React Native offline transactions example](https://github.com/TanStack/db/tree/main/examples/react-native/offline-transactions) shows the full app structure. Its API client does not yet send an idempotency key, so use the request pattern above when you adapt it. The [shopping list example](https://github.com/TanStack/db/tree/main/examples/react-native/shopping-list) also shows Electric sync.
 
 The [Electron example](https://github.com/TanStack/db/tree/main/examples/electron/offline-first) uses a custom SQLite-backed `StorageAdapter` for the outbox. That adapter is separate from the persisted Collection tables.
+
+## Mutation value codecs
+
+The default outbox format preserves its existing JSON, Date, and Temporal behavior. For other mutation value domains, set `mutationCodec` to a codec with a stable `id`, synchronous `encode(value): string`, and synchronous `decode(encoded): unknown`.
+
+Encoded transactions use wire version 4 and retain the codec ID. Configure the same codec on restart. Missing or mismatched codecs, and decoder failures, reject the outbox read with the transaction ID while keeping its storage entry. Readers without version 4 support cannot replay these records. Default writers still emit version 3. A configured codec can read older records through their original decoder.
+
+The codec applies to `modified`, `original`, and `changes`. Transaction metadata keeps the default encoding. Codec functions must not perform network calls. TanStack's Convex adapter supplies `convexMutationCodec` for Convex values and removed fields.

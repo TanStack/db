@@ -94,9 +94,11 @@ async function setup(
                 })
                 installed.set(partial.id, partial)
                 const receipt = sync.commit()
-                if (syncFailure) throw failure
+                // A throw is a rejection (maintainer decision): an
+                // acquisition that core releases, owning its partial row.
                 active.add(options)
                 owned.set(options, new Set([partial.id]))
+                if (syncFailure) throw failure
                 return Promise.resolve(receipt).then(() => {
                   throw failure
                 })

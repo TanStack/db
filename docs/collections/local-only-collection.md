@@ -60,7 +60,7 @@ The `localOnlyCollectionOptions` function accepts the following options:
 ### Optional Options
 
 - `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
-- `initialData`: Array of items to populate the collection with on creation
+- `initialData`: Array of items to populate the collection with on creation. It loads when the Collection starts empty: at creation, or after cleanup. `reload()` keeps the rows, including your writes; the rows are the only copy of them.
 - `onInsert`: Optional handler function called before confirming inserts
 - `onUpdate`: Optional handler function called before confirming updates
 - `onDelete`: Optional handler function called before confirming deletes

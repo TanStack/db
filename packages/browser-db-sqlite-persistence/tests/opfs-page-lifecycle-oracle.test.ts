@@ -1,11 +1,27 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, vi } from 'vitest'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
+import {
+  ControlledWorker,
+  cleanupEnvironment,
+  expectDisposed,
+  installEnvironment,
+  track,
+} from './opfs-page-lifecycle-harness'
 import type {
-  BrowserOPFSWorkerErrorCode,
-  BrowserOPFSWorkerRequest,
-  BrowserOPFSWorkerResponse,
-} from '../src/opfs-worker-protocol'
+  ReleaseDirection,
+  RequestKind,
+  Settlement,
+  TerminalEventType,
+  TrackedResult,
+} from './opfs-page-lifecycle-harness'
+import type { BrowserOPFSWorkerErrorCode } from '../src/opfs-worker-protocol'
 
 /**
  * # Who owns an OPFS worker when the browser page leaves?
@@ -41,17 +57,17 @@ import type {
  * plus caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
- * locking, real bfcache admission, or browser process teardown.
+ * locking, real bfcache admission, or browser process teardown. The open
+ * histories begin after asset resolution. The OPFS open outcome oracle in
+ * opfs-open-outcome-oracle.ts owns how an open settles across asset lookup,
+ * worker start, WASM load, and initialization, with jsdom and Chromium drivers.
  */
 
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
-type RequestKind = BrowserOPFSWorkerRequest[`type`]
 type DeliveryStage =
   | `pagehide-before-response-production`
   | `pagehide-after-response-production`
   | `response-before-pagehide`
-type ReleaseDirection = `fifo` | `reverse`
-type TerminalEventType = `error` | `messageerror`
 
 type PagehideHistory = {
   pending: RequestKind
@@ -89,242 +105,6 @@ type TerminalEventHistory = {
   pending: RequestKind
   eventType: TerminalEventType
   executeCount: number
-}
-
-type WorkerBehavior = {
-  heldResponseType?: RequestKind
-  initErrorCode?: BrowserOPFSWorkerErrorCode
-  closeErrorCode?: BrowserOPFSWorkerErrorCode
-}
-
-type Settlement = {
-  label: string
-  status: `fulfilled` | `rejected`
-  observation: unknown
-}
-
-type TrackedResult<T> = {
-  settlement: Settlement
-  value?: T
-}
-
-class ControlledPage {
-  private readonly pagehideListeners = new Set<(event: Event) => void>()
-  public addCalls = 0
-  public removeCalls = 0
-
-  addEventListener(type: string, listener: (event: Event) => void): void {
-    if (type !== `pagehide`) return
-    this.addCalls++
-    this.pagehideListeners.add(listener)
-  }
-
-  removeEventListener(type: string, listener: (event: Event) => void): void {
-    if (type !== `pagehide`) return
-    this.removeCalls++
-    this.pagehideListeners.delete(listener)
-  }
-
-  dispatchPageHide(persisted: boolean): void {
-    const event = Object.assign(new Event(`pagehide`), { persisted })
-    for (const listener of [...this.pagehideListeners]) listener(event)
-  }
-
-  get listenerCount(): number {
-    return this.pagehideListeners.size
-  }
-}
-
-class ControlledWorker {
-  static instances: Array<ControlledWorker> = []
-  static behavior: WorkerBehavior = {}
-
-  private readonly listeners: {
-    message: Set<(event: Event) => void>
-    error: Set<(event: Event) => void>
-    messageerror: Set<(event: Event) => void>
-  } = {
-    message: new Set(),
-    error: new Set(),
-    messageerror: new Set(),
-  }
-  private readonly heldResponses: Array<BrowserOPFSWorkerResponse> = []
-  private initialized = false
-
-  public readonly requests: Array<BrowserOPFSWorkerRequest> = []
-  public terminationCalls = 0
-
-  constructor(..._args: Array<unknown>) {
-    ControlledWorker.instances.push(this)
-  }
-
-  addEventListener(
-    type: keyof ControlledWorker[`listeners`],
-    listener: (event: Event) => void,
-  ): void {
-    this.listeners[type].add(listener)
-  }
-
-  removeEventListener(
-    type: keyof ControlledWorker[`listeners`],
-    listener: (event: Event) => void,
-  ): void {
-    this.listeners[type].delete(listener)
-  }
-
-  terminate(): void {
-    this.terminationCalls++
-  }
-
-  postMessage(request: BrowserOPFSWorkerRequest): void {
-    this.requests.push(request)
-    if (this.terminationCalls > 0) return
-
-    queueMicrotask(() => {
-      const response = this.handleRequest(request)
-      if (request.type === ControlledWorker.behavior.heldResponseType) {
-        this.heldResponses.push(response)
-      } else {
-        this.emitMessage(response)
-      }
-    })
-  }
-
-  listenerCount(type: keyof ControlledWorker[`listeners`]): number {
-    return this.listeners[type].size
-  }
-
-  get heldResponseCount(): number {
-    return this.heldResponses.length
-  }
-
-  releaseHeldResponses(
-    count = this.heldResponses.length,
-    direction: ReleaseDirection = `fifo`,
-  ): void {
-    const releaseCount = Math.min(count, this.heldResponses.length)
-    if (releaseCount === 0) return
-    const responses =
-      direction === `fifo`
-        ? this.heldResponses.splice(0, releaseCount)
-        : this.heldResponses.splice(-releaseCount).reverse()
-    for (const response of responses) {
-      this.emitMessage(response)
-    }
-  }
-
-  emitTerminalEvent(type: TerminalEventType): void {
-    for (const listener of this.listeners[type]) listener(new Event(type))
-  }
-
-  private handleRequest(
-    request: BrowserOPFSWorkerRequest,
-  ): BrowserOPFSWorkerResponse {
-    if (request.type === `init`) {
-      if (ControlledWorker.behavior.initErrorCode) {
-        return {
-          type: `response`,
-          requestId: request.requestId,
-          ok: false,
-          code: ControlledWorker.behavior.initErrorCode,
-          error: `controlled init failure`,
-        }
-      }
-      this.initialized = true
-      return { type: `response`, requestId: request.requestId, ok: true }
-    }
-
-    if (request.type === `execute`) {
-      if (!this.initialized) {
-        return {
-          type: `response`,
-          requestId: request.requestId,
-          ok: false,
-          code: `INVALID_CONFIG`,
-          error: `worker not initialized`,
-        }
-      }
-      return {
-        type: `response`,
-        requestId: request.requestId,
-        ok: true,
-        rows: [{ sql: request.sql }],
-      }
-    }
-
-    if (ControlledWorker.behavior.closeErrorCode) {
-      return {
-        type: `response`,
-        requestId: request.requestId,
-        ok: false,
-        code: ControlledWorker.behavior.closeErrorCode,
-        error: `controlled close failure`,
-      }
-    }
-    this.initialized = false
-    return { type: `response`, requestId: request.requestId, ok: true }
-  }
-
-  private emitMessage(response: BrowserOPFSWorkerResponse): void {
-    for (const listener of this.listeners.message) {
-      listener({ data: response } as MessageEvent<BrowserOPFSWorkerResponse>)
-    }
-  }
-}
-
-function installEnvironment(behavior: WorkerBehavior): ControlledPage {
-  const page = new ControlledPage()
-  ControlledWorker.instances = []
-  ControlledWorker.behavior = behavior
-  vi.stubGlobal(`Worker`, ControlledWorker)
-  vi.stubGlobal(`navigator`, {
-    storage: { getDirectory: () => Promise.resolve({}) },
-  })
-  vi.stubGlobal(`addEventListener`, page.addEventListener.bind(page))
-  vi.stubGlobal(`removeEventListener`, page.removeEventListener.bind(page))
-  return page
-}
-
-async function cleanupEnvironment(): Promise<void> {
-  for (const worker of ControlledWorker.instances) worker.releaseHeldResponses()
-  await Promise.resolve()
-  vi.unstubAllGlobals()
-  ControlledWorker.instances = []
-  ControlledWorker.behavior = {}
-}
-
-function errorObservation(error: unknown): { name: string; message: string } {
-  return error instanceof Error
-    ? { name: error.name, message: error.message }
-    : { name: `NonError`, message: String(error) }
-}
-
-function track<T>(
-  label: string,
-  promise: Promise<T>,
-  fulfilledObservation: (value: T) => unknown,
-  ledger: Array<Settlement>,
-): Promise<TrackedResult<T>> {
-  return promise.then(
-    (value) => {
-      const settlement: Settlement = {
-        label,
-        status: `fulfilled`,
-        observation: fulfilledObservation(value),
-      }
-      ledger.push(settlement)
-      return { settlement, value }
-    },
-    (error: unknown) => {
-      const settlement: Settlement = {
-        label,
-        status: `rejected`,
-        observation: errorObservation(error),
-      }
-      ledger.push(settlement)
-      return { settlement }
-    },
-  )
 }
 
 // Authority: the public error classes exported by sqlite-persistence-core and
@@ -457,16 +237,6 @@ function expectSettlementSet(
   // duplicate cannot disappear behind request-keyed normalization.
   expect(actual).toHaveLength(expected.length)
   expect(canonicalSettlements(actual)).toEqual(canonicalSettlements(expected))
-}
-
-function expectDisposed(page: ControlledPage, worker: ControlledWorker): void {
-  expect(worker.terminationCalls).toBe(1)
-  expect(worker.listenerCount(`message`)).toBe(0)
-  expect(worker.listenerCount(`error`)).toBe(0)
-  expect(worker.listenerCount(`messageerror`)).toBe(0)
-  expect(page.listenerCount).toBe(0)
-  expect(page.addCalls).toBe(1)
-  expect(page.removeCalls).toBe(1)
 }
 
 async function runPagehideHistory(history: PagehideHistory): Promise<void> {
@@ -932,66 +702,6 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
-const lifecycleSeed = Number(
-  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED ?? 1844,
-)
-const lifecycleRuns = Number(
-  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_RUNS ?? 48,
-)
-const lifecyclePath = process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_PATH
-const mixedSeed = Number(process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED ?? 1845)
-const mixedRuns = Number(process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_RUNS ?? 32)
-const mixedPath = process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_PATH
-const failureSeed = Number(
-  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED ?? 1846,
-)
-const failureRuns = Number(
-  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_RUNS ?? 18,
-)
-const failurePath = process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_PATH
-const terminalEventSeed = Number(
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED ?? 1847,
-)
-const terminalEventRuns = Number(
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_RUNS ?? 24,
-)
-const terminalEventPath =
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_PATH
-const closeSeed = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED ?? 1848)
-const closeRuns = Number(process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_RUNS ?? 32)
-const closePath = process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_PATH
-const replayRequested = [
-  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED,
-  lifecyclePath,
-  process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED,
-  mixedPath,
-  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED,
-  failurePath,
-  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED,
-  terminalEventPath,
-  process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED,
-  closePath,
-].some((value) => value !== undefined)
-
-type OracleCampaign = {
-  label: `fixed` | `random` | `replay`
-  seed?: number
-  path?: string
-}
-
-function oracleCampaigns(
-  seed: number,
-  replaySeedSupplied: boolean,
-  path: string | undefined,
-  replayRequestedForFile: boolean,
-): Array<OracleCampaign> {
-  if (replaySeedSupplied || path !== undefined) {
-    return [{ label: `replay`, seed, ...(path === undefined ? {} : { path }) }]
-  }
-  if (replayRequestedForFile) return []
-  return [{ label: `fixed`, seed }, { label: `random` }]
-}
-
 const pagehideHistory = fc.record({
   pending: fc.constantFrom<RequestKind>(`init`, `execute`, `close`),
   delivery: fc.constantFrom<DeliveryStage>(
@@ -1189,301 +899,102 @@ bfcache admission, durability, native handle release, or wa-sqlite #88. The
 Chromium Web Lock fixture checks native queued-lock release separately.
 Challenge/replay: fixed examples exhaust the cheap structural products. Each
 generated lane runs a fixed and an unseeded campaign with the same grammar and
-run budget. Verbose FastCheck output retains original/reduced traces. Setting
-SEED or PATH selects only the direct replay for that lane. Use its
-TANSTACK_DB_OPFS_*_ORACLE_{SEED,RUNS,PATH} controls with this file's
-package-local Vitest command.
+run budget. Verbose FastCheck output retains original/reduced traces. A path
+replay selects only the direct replay of its lane's property, named by
+TANSTACK_DB_ORACLE_PROPERTY: opfs.page-lifecycle, opfs.mixed-execute,
+opfs.terminal-event, opfs.close, or opfs.failure-cleanup. A seed without a
+path reseeds the unseeded campaigns. Run it with this file's package-local
+Vitest command.
 */
+declareOracle({
+  check: [runFailureHistory],
+  model: [expectedCloseSettlements],
+})
+
 describe(`OPFS page lifecycle oracle`, () => {
-  it.each([
-    { label: `default`, timeoutMs: undefined, deadline: 30_000 },
-    { label: `overridden`, timeoutMs: 40, deadline: 40 },
-    { label: `minimum positive`, timeoutMs: 1, deadline: 1 },
-  ])(
-    `terminates a silent worker at the $label open deadline`,
-    async ({ timeoutMs, deadline }) => {
-      vi.useFakeTimers()
-      const page = installEnvironment({ heldResponseType: `init` })
-      const settlements: Array<Settlement> = []
-      const opened = track(
-        `init`,
-        openBrowserWASQLiteOPFSDatabase({
-          databaseName: `oracle.sqlite`,
-          ...(timeoutMs === undefined ? {} : { timeoutMs }),
-        }),
-        () => `database`,
-        settlements,
-      )
-      const worker = ControlledWorker.instances[0]!
-
-      await Promise.resolve()
-      expect(worker.heldResponseCount).toBe(1)
-      await vi.advanceTimersByTimeAsync(deadline - 1)
-      expect(settlements).toEqual([])
-      await vi.advanceTimersByTimeAsync(1)
-      expect(settlements).toEqual([
-        {
-          label: `init`,
-          status: `rejected`,
-          observation: {
-            name: `TimeoutError`,
-            message: `Opening browser OPFS database timed out after ${deadline} ms`,
-          },
-        },
-      ])
-      expect((await opened).settlement).toEqual(settlements[0])
-      expectDisposed(page, worker)
-
-      const terminalLedger = [...settlements]
-      worker.releaseHeldResponses()
-      await Promise.resolve()
-      expect(settlements).toEqual(terminalLedger)
-      expect(worker.terminationCalls).toBe(1)
-    },
+  oracleReplayTest(fcTest).prop([pagehideHistory], {
+    seed: 1844,
+    numRuns: oracleRuns(48),
+    examples: pagehideExamples,
+    verbose: true,
+  })(
+    `matches the independent model across generated histories (fixed)`,
+    runPagehideHistory,
   )
-
-  it(`aborts a pending open and ignores its late worker response`, async () => {
-    vi.useFakeTimers()
-    const page = installEnvironment({ heldResponseType: `init` })
-    const controller = new AbortController()
-    const reason = new DOMException(`App stopped opening`, `AbortError`)
-    const settlements: Array<Settlement> = []
-    const opened = track(
-      `init`,
-      openBrowserWASQLiteOPFSDatabase({
-        databaseName: `oracle.sqlite`,
-        timeoutMs: 40,
-        signal: controller.signal,
-      }),
-      () => `database`,
-      settlements,
-    )
-    const worker = ControlledWorker.instances[0]!
-    await Promise.resolve()
-    expect(worker.heldResponseCount).toBe(1)
-
-    controller.abort(reason)
-    expect((await opened).settlement).toEqual({
-      label: `init`,
-      status: `rejected`,
-      observation: { name: `AbortError`, message: `App stopped opening` },
-    })
-    expectDisposed(page, worker)
-    worker.releaseHeldResponses()
-    await vi.advanceTimersByTimeAsync(40)
-    expect(settlements).toHaveLength(1)
-    expect(worker.terminationCalls).toBe(1)
-  })
-
-  it(`does not create a worker for an already-aborted open`, async () => {
-    const page = installEnvironment({})
-    const controller = new AbortController()
-    const reason = new DOMException(`App stopped opening`, `AbortError`)
-    controller.abort(reason)
-
-    await expect(
-      openBrowserWASQLiteOPFSDatabase({
-        databaseName: `oracle.sqlite`,
-        signal: controller.signal,
-      }),
-    ).rejects.toBe(reason)
-    expect(ControlledWorker.instances).toEqual([])
-    expect(page.listenerCount).toBe(0)
-  })
-
-  it(`observes an abort during synchronous option evaluation`, async () => {
-    vi.useFakeTimers()
-    const page = installEnvironment({ heldResponseType: `init` })
-    const controller = new AbortController()
-    const reason = new DOMException(`App stopped opening`, `AbortError`)
-    const settlements: Array<Settlement> = []
-    let vfsNameReads = 0
-    const opened = track(
-      `init`,
-      openBrowserWASQLiteOPFSDatabase({
-        databaseName: `oracle.sqlite`,
-        timeoutMs: 0,
-        signal: controller.signal,
-        get vfsName() {
-          vfsNameReads++
-          controller.abort(reason)
-          return `opfs`
-        },
-      }),
-      () => `database`,
-      settlements,
-    )
-    const worker = ControlledWorker.instances[0]!
-
-    await vi.advanceTimersByTimeAsync(0)
-    expect(vfsNameReads).toBe(1)
-    expect(worker.requests.map((request) => request.type)).toEqual([`init`])
-    expect(settlements).toEqual([
-      {
-        label: `init`,
-        status: `rejected`,
-        observation: { name: `AbortError`, message: `App stopped opening` },
-      },
-    ])
-    expect((await opened).settlement).toEqual(settlements[0])
-    expectDisposed(page, worker)
-
-    worker.releaseHeldResponses()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(settlements).toHaveLength(1)
-  })
-
-  it(`allows an explicit zero deadline while the worker remains silent`, async () => {
-    vi.useFakeTimers()
-    const page = installEnvironment({ heldResponseType: `init` })
-    const settlements: Array<Settlement> = []
-    const opened = track(
-      `init`,
-      openBrowserWASQLiteOPFSDatabase({
-        databaseName: `oracle.sqlite`,
-        timeoutMs: 0,
-      }),
-      () => `database`,
-      settlements,
-    )
-    const worker = ControlledWorker.instances[0]!
-    await Promise.resolve()
-    expect(worker.heldResponseCount).toBe(1)
-
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(settlements).toEqual([])
-    expect(worker.terminationCalls).toBe(0)
-    worker.releaseHeldResponses()
-    const database = (await opened).value!
-    await database.close?.()
-    expectDisposed(page, worker)
-  })
-
-  it.each([-1, 0.5, Number.POSITIVE_INFINITY, 2_147_483_648])(
-    `rejects invalid open deadline %s before creating a worker`,
-    async (timeoutMs) => {
-      const page = installEnvironment({})
-      await expect(
-        openBrowserWASQLiteOPFSDatabase({
-          databaseName: `oracle.sqlite`,
-          timeoutMs,
-        }),
-      ).rejects.toMatchObject({
-        name: `InvalidPersistedCollectionConfigError`,
-      })
-      expect(ControlledWorker.instances).toEqual([])
-      expect(page.listenerCount).toBe(0)
-    },
+  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop([pagehideHistory], {
+    ...oraclePropertyOptions(48, `opfs.page-lifecycle`),
+    examples: pagehideExamples,
+    verbose: true,
+  })(
+    `matches the independent model across generated histories (random)`,
+    runPagehideHistory,
   )
-
-  it(`stops observing the deadline and signal after open succeeds`, async () => {
-    vi.useFakeTimers()
-    const page = installEnvironment({})
-    const controller = new AbortController()
-    const database = await openBrowserWASQLiteOPFSDatabase({
-      databaseName: `oracle.sqlite`,
-      timeoutMs: 40,
-      signal: controller.signal,
-    })
-    const worker = ControlledWorker.instances[0]!
-
-    await vi.advanceTimersByTimeAsync(40)
-    controller.abort()
-    expect(worker.terminationCalls).toBe(0)
-    await expect(database.execute(`SELECT 1`)).resolves.toEqual([
-      { sql: `SELECT 1` },
-    ])
-    await database.close?.()
-    expectDisposed(page, worker)
-  })
-
-  for (const campaign of oracleCampaigns(
-    lifecycleSeed,
-    process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED !== undefined,
-    lifecyclePath,
-    replayRequested,
-  )) {
-    fcTest.prop([pagehideHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: lifecycleRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: pagehideExamples,
-      verbose: true,
-    })(
-      `matches the independent model across generated histories (${campaign.label})`,
-      runPagehideHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    mixedSeed,
-    process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED !== undefined,
-    mixedPath,
-    replayRequested,
-  )) {
-    fcTest.prop([mixedExecuteHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: mixedRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: mixedExamples,
-      verbose: true,
-    })(
-      `preserves completed siblings while aborting pending siblings (${campaign.label})`,
-      runMixedExecuteHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    terminalEventSeed,
-    process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED !== undefined,
-    terminalEventPath,
-    replayRequested,
-  )) {
-    fcTest.prop([terminalEventHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: terminalEventRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: terminalEventExamples,
-      verbose: true,
-    })(
-      `rejects pending work across Worker terminal event paths (${campaign.label})`,
-      runTerminalEventHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    closeSeed,
-    process.env.TANSTACK_DB_OPFS_CLOSE_ORACLE_SEED !== undefined,
-    closePath,
-    replayRequested,
-  )) {
-    fcTest.prop([closeHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: closeRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: closeExamples,
-      verbose: true,
-    })(
-      `settles pending work and refuses new work across explicit close (${campaign.label})`,
-      runCloseHistory,
-    )
-  }
-
-  for (const campaign of oracleCampaigns(
-    failureSeed,
-    process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED !== undefined,
-    failurePath,
-    replayRequested,
-  )) {
-    fcTest.prop([failureHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: failureRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: failureExamples,
-      verbose: true,
-    })(
-      `matches terminal cleanup and error mapping across worker failures (${campaign.label})`,
-      runFailureHistory,
-    )
-  }
+  oracleReplayTest(fcTest).prop([mixedExecuteHistory], {
+    seed: 1845,
+    numRuns: oracleRuns(32),
+    examples: mixedExamples,
+    verbose: true,
+  })(
+    `preserves completed siblings while aborting pending siblings (fixed)`,
+    runMixedExecuteHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop([mixedExecuteHistory], {
+    ...oraclePropertyOptions(32, `opfs.mixed-execute`),
+    examples: mixedExamples,
+    verbose: true,
+  })(
+    `preserves completed siblings while aborting pending siblings (random)`,
+    runMixedExecuteHistory,
+  )
+  oracleReplayTest(fcTest).prop([terminalEventHistory], {
+    seed: 1847,
+    numRuns: oracleRuns(24),
+    examples: terminalEventExamples,
+    verbose: true,
+  })(
+    `rejects pending work across Worker terminal event paths (fixed)`,
+    runTerminalEventHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.terminal-event`).prop([terminalEventHistory], {
+    ...oraclePropertyOptions(24, `opfs.terminal-event`),
+    examples: terminalEventExamples,
+    verbose: true,
+  })(
+    `rejects pending work across Worker terminal event paths (random)`,
+    runTerminalEventHistory,
+  )
+  oracleReplayTest(fcTest).prop([closeHistory], {
+    seed: 1848,
+    numRuns: oracleRuns(32),
+    examples: closeExamples,
+    verbose: true,
+  })(
+    `settles pending work and refuses new work across explicit close (fixed)`,
+    runCloseHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.close`).prop([closeHistory], {
+    ...oraclePropertyOptions(32, `opfs.close`),
+    examples: closeExamples,
+    verbose: true,
+  })(
+    `settles pending work and refuses new work across explicit close (random)`,
+    runCloseHistory,
+  )
+  oracleReplayTest(fcTest).prop([failureHistory], {
+    seed: 1846,
+    numRuns: oracleRuns(18),
+    examples: failureExamples,
+    verbose: true,
+  })(
+    `matches terminal cleanup and error mapping across worker failures (fixed)`,
+    runFailureHistory,
+  )
+  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop([failureHistory], {
+    ...oraclePropertyOptions(18, `opfs.failure-cleanup`),
+    examples: failureExamples,
+    verbose: true,
+  })(
+    `matches terminal cleanup and error mapping across worker failures (random)`,
+    runFailureHistory,
+  )
 })

@@ -7,7 +7,76 @@ import { registeredOracleProperties } from './oracle-config.js'
  * separate campaign gates. An absent or statistics-only entry must not be
  * promoted to assertion evidence merely because a process exited cleanly.
  */
-const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
+// Each group is [owner file, prefix, suffixes] and, when the owner runs the
+// properties from another module, the module that names them.
+// A property whose owner lives outside packages/ names it with a `../` prefix.
+const ownerGroups: ReadonlyArray<
+  readonly [string, string, string] | readonly [string, string, string, string]
+> = [
+  [
+    `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
+    `lint`,
+    `part-reach`,
+  ],
+  [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
+  [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
+  [
+    `db/tests/ssr-stream-record-wait-oracle.test.ts`,
+    `ssr`,
+    `stream-record-lifetime`,
+  ],
+  [
+    `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
+    `live-query`,
+    `start-handoff`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
+    `pooled-live-query`,
+    `late-cleanup bootstrap-ownership cleanup-peers cleanup-admission`,
+  ],
+  [
+    `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
+    `react`,
+    `descriptor-error-surface descriptor-ownership ssr-ordinary ssr-infinite ssr-stream-cut`,
+  ],
+  [
+    `react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx`,
+    `react`,
+    `ssr-runtime-ordinary ssr-runtime-infinite`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-admission-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-snapshot`,
+  ],
+  [
+    `svelte-db/tests/ssr-snapshot-handoff-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-handoff ssr-receiving-reader`,
+  ],
+  [
+    `svelte-db/tests/ssr-runtime-error-oracle.svelte.test.ts`,
+    `svelte`,
+    `ssr-runtime-errors`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-options.test.ts`,
+    `persisted-options`,
+    `types.core utilities.core`,
+    `db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/persisted-options.test.ts`,
+    `persisted-options`,
+    `types.browser utilities.browser`,
+    `db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
+  ],
+  [
+    `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
+    `live-query-observer`,
+    `retained-snapshot`,
+  ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
     `cleanup-queue`,
@@ -18,7 +87,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `sorted-map`,
     `key ascending descending`,
   ],
-  [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
+  [
+    `db/tests/replay-guard-calibration.fixture.test.ts`,
+    `oracle-replay`,
+    `calibration`,
+  ],
   [
     `db-ivm/tests/structural-identity-oracle.property.test.ts`,
     `structural-identity`,
@@ -77,12 +150,22 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     `electric`,
-    `sdk-snapshot-delivery sdk-dnf-membership`,
+    `sdk-snapshot-delivery sdk-dnf-membership sdk-source-release sdk-rotation-release`,
   ],
   [
     `db/tests/collection-sync-reentrancy-oracle.test.ts`,
     `collection-sync`,
     `reentrant-drain`,
+  ],
+  [
+    `db/tests/collection-gc-transaction-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-persisting-transaction`,
+  ],
+  [
+    `db/tests/collection-gc-mutation-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-mutation-shapes`,
   ],
   [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
@@ -107,12 +190,17 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `history-statistics async-history sync-history`,
+    `history-statistics async-history sync-history demand-change`,
+  ],
+  [
+    `db/tests/source-health-oracle.test.ts`,
+    `source-health`,
+    `history on-demand lazy-demand request-errors`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
     `subscription-lifecycle`,
-    `async-statistics async-restart`,
+    `async-statistics async-restart notification-error`,
   ],
   [
     `db/tests/collection-subscription-replay-oracle.property.test.ts`,
@@ -132,7 +220,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/live-query-observer-history-oracle.property.test.ts`,
     `live-query-observer`,
-    `granular-history wholesale-history`,
+    `granular-history wholesale-history partial-attach release-failure hydration-error-timing`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
@@ -200,6 +288,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
   ],
   [
+    `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
+    `replay`,
+    `ordered-window-faults keyed-request-failures subscription-demand-origin`,
+  ],
+  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
@@ -209,15 +302,348 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `persistence`,
     `retained-demand`,
   ],
+  // Owners of properties that a module names and a host file runs carry
+  // that module as the fourth element.
+  [
+    `query-db-collection/tests/cursor-pagination.no-peek.test.ts`,
+    `cursor-pagination`,
+    `no-peek`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.oracle.test.ts`,
+    `cursor-pagination`,
+    `history backend-ownership partition reset failure`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.cache-oracle.test.ts`,
+    `cursor-pagination`,
+    `cache defaults cancellation`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.boundary-oracle.test.ts`,
+    `cursor-pagination`,
+    `nested-cancellation reader-abort`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination-oracle.integration.test.ts`,
+    `cursor-pagination`,
+    `manual-write`,
+  ],
+  [
+    `query-db-collection/tests/cursor-pagination.publication-oracle.test.ts`,
+    `cursor-pagination`,
+    `refresh-publication protocol-publication slice-work`,
+  ],
+  [
+    `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
+    `query-db`,
+    `refetch-ordered-prefix`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `request-authority`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
+    `sqlite-persistence`,
+    `binding-capacity`,
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
+    `sqlite-resume`,
+    `baseline-lineage`,
+    `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
+    `sqlite-ordinary`,
+    `write-history independent-work`,
+    `db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `sqlite-persistence`,
+    `request-local-failure-buffered-source`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `follower-remote-demand`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `generation-notice`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts`,
+    `sqlite-persistence`,
+    `optimistic-history`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
+    `sqlite-resume`,
+    `managed-claim-read retired-storage`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
+    `persisted-demand-coverage`,
+    `history`,
+  ],
+  [
+    `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
+    `trailbase`,
+    `page-event`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
+    `sqlite-reload`,
+    `class`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts`,
+    `browser`,
+    `multi-tab-reserved-history`,
+  ],
+  [
+    `electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
+    `sqlite-reload`,
+    `class.electron`,
+  ],
+  [
+    `db/tests/query/where-predicate-publication-oracle.property.test.ts`,
+    `where-predicate`,
+    `publication`,
+  ],
+  [
+    `db/tests/query/join-result-key-oracle.property.test.ts`,
+    `join-result-key`,
+    `pairs`,
+  ],
+  [
+    `db/tests/query/group-result-key-oracle.property.test.ts`,
+    `group-result-key`,
+    `groups`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-oracle.property.test.ts`,
+    `pooled-live-query`,
+    `publication`,
+  ],
+  [
+    `db/tests/flat-change-tracking-oracle.property.test.ts`,
+    `flat-change-tracking`,
+    `equivalence`,
+  ],
+  [
+    `db/tests/local-storage-value-fidelity-oracle.property.test.ts`,
+    `local-storage`,
+    `value-fidelity`,
+  ],
+  [
+    `db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,
+    `bucket-facade`,
+    `rollback-history`,
+  ],
+  [
+    `db/tests/query/aggregate-select-oracle.property.test.ts`,
+    `aggregate`,
+    `select-shapes`,
+  ],
+  [
+    `db/tests/query/compiler/in-evaluator-oracle.property.test.ts`,
+    `evaluators`,
+    `in`,
+  ],
+  [
+    `db/tests/transaction-ownership-oracle.property.test.ts`,
+    `transaction-ownership`,
+    `settlement-release`,
+  ],
+  [
+    `db/tests/query/includes-work-counter-oracle.test.ts`,
+    `includes-work`,
+    `ordered-window`,
+  ],
+  [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
+  // Owners of the replays that moved to the shared variables.
+  [
+    `browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts`,
+    `opfs-worker`,
+    `diagnostics`,
+  ],
+  [
+    `db/tests/indexed-db/cross-tab-history-oracle.test.ts`,
+    `indexeddb`,
+    `cross-tab-history`,
+  ],
+  [`db/tests/proxy-oracle.test.ts`, `proxy`, `callback-history`],
+  [
+    `db/e2e/indexed-db/cross-tab-oracle.spec.ts`,
+    `indexeddb`,
+    `browser-native-history`,
+  ],
+  [
+    `db/tests/indexed-db/pending-history-oracle.test.ts`,
+    `indexeddb`,
+    `pending-history`,
+  ],
+  [
+    `db/tests/proxy-revert-oracle.property.test.ts`,
+    `proxy`,
+    `revert-history revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
+  ],
+  [
+    `db/tests/proxy-native-methods-oracle.property.test.ts`,
+    `proxy`,
+    `native-array-methods native-typed-methods`,
+    `db/tests/proxy-native-methods-fixture.ts`,
+  ],
+  [
+    `db-ivm/tests/hash-identity-oracle.property.test.ts`,
+    `ivm`,
+    `hash-identity hash-identity-cycles`,
+  ],
+  [
+    `db-ivm/tests/multiset-consolidate-oracle.property.test.ts`,
+    `ivm`,
+    `multiset-consolidate`,
+  ],
+  [
+    `electric-db-collection/tests/electric-oracle.property.test.ts`,
+    `electric`,
+    `adapter-failure-policy design-convergence durable-prefix initial-tagged-move-outs invalid-resume-partition metadata-merge-complete-state process-grammar publication-before-persistence queued-presence-order resume-metadata-merge retry-decision subset-request-row-validity synthetic-batch-partition valid-batch-partition`,
+  ],
+  [
+    `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
+    `pg-serializer`,
+    `array-determinism bigint-round-trip bigint-text boolean-array-contents boolean-round-trip boolean-tokens date-iso date-round-trip double-round-trip integer-array-contents integer-array-format integer-round-trip integer-text mixed-array-contents nullish-array-contents scalar-determinism string-array-contents string-escaping string-idempotent string-passthrough`,
+  ],
+  [
+    `electric-db-collection/tests/pg-serializer.test.ts`,
+    `pg-serializer`,
+    `nullish-empty`,
+  ],
+  [
+    `db-ivm/tests/index-refinement-oracle.property.test.ts`,
+    `ivm`,
+    `index-refinement`,
+  ],
+  [
+    `offline-transactions/tests/KeyScheduler-oracle.property.test.ts`,
+    `offline`,
+    `key-scheduler-fifo-ledger`,
+  ],
+  [
+    `offline-transactions/tests/interruption-settlement-oracle.property.test.ts`,
+    `offline`,
+    `interruption-settlement`,
+  ],
+  [
+    `offline-transactions/tests/fifo-retry-oracle.property.test.ts`,
+    `offline`,
+    `fifo-retry`,
+  ],
+  [
+    `offline-transactions/tests/leadership-replay-oracle.property.test.ts`,
+    `offline`,
+    `leadership.serial-work leadership.report leadership.delayed-read leadership.startup leadership.stale-read leadership.storage-failure`,
+  ],
+  [
+    `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
+    `offline`,
+    `serializer.mutation-wire serializer.date-marker serializer.version-two`,
+  ],
+  [
+    `offline-transactions/tests/transaction-settlement-oracle.property.test.ts`,
+    `offline`,
+    `settlement.transaction settlement.retry-record settlement.admission settlement.retry-decision`,
+  ],
+  [
+    `react-native-db-sqlite-persistence/tests/op-sqlite-driver-oracle.test.ts`,
+    `op-sqlite`,
+    `columnar-sql-aliases result-carrier-equivalence write-marker-aliases`,
+  ],
+  [
+    `node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
+    `sqlite-persistence`,
+    `expression-index bigint-roundtrip bigint-rejection`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
+    `opfs`,
+    `page-lifecycle mixed-execute terminal-event close failure-cleanup`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts`,
+    `opfs`,
+    `request-order`,
+  ],
+  [
+    `db-ivm/tests/hash-failure-retry-oracle.property.test.ts`,
+    `ivm`,
+    `hash-failure-retry`,
+  ],
+  [`db-ivm/tests/hash-graph-oracle.property.test.ts`, `ivm`, `hash-graph`],
+  [
+    `db-ivm/tests/hash-mixed-graph-oracle.property.test.ts`,
+    `ivm`,
+    `hash-mixed-graph`,
+  ],
+  [`db-ivm/tests/hash-oracle.property.test.ts`, `ivm`, `hash-value`],
+  [
+    `db-ivm/tests/incrementalization-law-oracle.property.test.ts`,
+    `ivm`,
+    `incrementalization-law`,
+  ],
+  [
+    `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
+    `ivm`,
+    `topk-support-window`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,
+    `sqlite-persistence`,
+    `boolean-arity`,
+  ],
+  [`db/tests/btree-map-oracle.test.ts`, `btree-map`, `history`],
+  [
+    `db/tests/indexed-db/persistence-oracle.test.ts`,
+    `indexeddb`,
+    `settled-history`,
+  ],
+  [`db/tests/query/compiler/evaluators-oracle.test.ts`, `evaluators`, `like`],
+  [
+    `db/tests/sync-metadata-session-oracle.property.test.ts`,
+    `sync-metadata-session`,
+    [
+      `flat nested seeds seeds-full nested-seeds nested-conflicts`,
+      `flat.hold-invariance nested.hold-invariance seeds.hold-invariance`,
+      `seeds-full.hold-invariance nested-seeds.hold-invariance`,
+      `nested-conflicts.hold-invariance flat.key-independence`,
+      `nested.key-independence seeds.key-independence`,
+      `nested-seeds.key-independence nested-conflicts.key-independence`,
+      `seeds.seed-order nested-seeds.seed-order seeds-full.seed-order`,
+    ].join(` `),
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`,
+    `sync-metadata-session`,
+    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand`,
+  ],
 ]
 
 const owners = new Map<string, string>()
-for (const [file, prefix, suffixes] of ownerGroups) {
+const sources = new Map<string, string>()
+for (const [file, prefix, suffixes, source] of ownerGroups) {
   for (const suffix of suffixes.split(` `)) {
     const property = `${prefix}.${suffix}`
     if (owners.has(property))
       throw new Error(`duplicate replay owner: ${property}`)
     owners.set(property, `packages/${file}`)
+    if (source !== undefined) sources.set(property, `packages/${source}`)
   }
 }
 
@@ -238,12 +664,23 @@ for (const law of [
   }
 }
 
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
+
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
     owners.set(
       property,
       `packages/db/tests/query/includes-oracle.property.test.ts`,
     )
+  }
+  if (property.startsWith(`utils.`)) {
+    owners.set(property, `packages/db/tests/utils-oracle.property.test.ts`)
+  }
+  if (property.startsWith(`comparison.`)) {
+    owners.set(property, `packages/db/tests/comparison-oracle.property.test.ts`)
   }
   if (property.startsWith(`pagination.matrix.`)) {
     owners.set(
@@ -255,8 +692,23 @@ for (const property of registeredOracleProperties) {
 
 export type OracleReplayManifestEntry = {
   property: string
-  status: `assertion` | `statistics-only` | `no-named-owner`
+  /**
+   * `browser-replay` names a Playwright owner. The guarded Vitest runner
+   * cannot witness it, so it rejects the target. Replay it with `command`.
+   * `seed-replay` names a property whose generator has no shrink path. A
+   * seed alone reproduces its history: `command` runs the owner directly
+   * with TANSTACK_DB_ORACLE_SEED, which reseeds its random campaign. The
+   * guarded runner, which witnesses a seed and path, rejects it.
+   */
+  status:
+    | `assertion`
+    | `statistics-only`
+    | `browser-replay`
+    | `seed-replay`
+    | `no-named-owner`
   file?: string
+  /** The module that names the property, when the owner file imports it. */
+  source?: string
   cwd?: string
   command?: string
   testNamePattern?: string
@@ -267,6 +719,85 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `collection-lifecycle.gc-mutation-shapes`,
+    `retains every touched Collection across mutation shapes.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-persisting-transaction`,
+    `retires a Collection only after gcTime.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
+  [
+    `ssr.stream-record-lifetime`,
+    `settles each record demand at its transport checkpoint.*random`,
+  ],
+  [
+    `live-query-observer.hydration-error-timing`,
+    `publishes errors at their ownership checkpoint.*random`,
+  ],
+  [
+    `live-query-observer.retained-snapshot`,
+    `first reads match the capture-time rows.*random`,
+  ],
+  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
+  [
+    `pooled-live-query.late-cleanup`,
+    `releases late cleanup registration channels.*random`,
+  ],
+  [
+    `pooled-live-query.bootstrap-ownership`,
+    `bootstrap ownership after callback failure.*random`,
+  ],
+  [
+    `pooled-live-query.cleanup-peers`,
+    `cleanup status reaches every observer.*random`,
+  ],
+  [
+    `pooled-live-query.cleanup-admission`,
+    `matches a live-query Collection's cleanup admission \\(random\\)`,
+  ],
+  [
+    `live-query-observer.partial-attach`,
+    `releases every acquired channel before retry.*random`,
+  ],
+  [
+    `subscription-lifecycle.notification-error`,
+    `acquires retained demand after replacement readiness.*random`,
+  ],
+  [
+    `react.descriptor-error-surface`,
+    `error-surface after descriptor failure.*random`,
+  ],
+  [`react.descriptor-ownership`, `ownership after descriptor failure.*random`],
+  [`react.ssr-ordinary`, `ordinary admits reproducible SSR snapshots.*random`],
+  [`react.ssr-infinite`, `infinite admits reproducible SSR snapshots.*random`],
+  [`react.ssr-stream-cut`, `transports the rendered view.*random`],
+  [
+    `react.ssr-runtime-ordinary`,
+    `ordinary preserves runtime error hydration views.*random`,
+  ],
+  [
+    `react.ssr-runtime-infinite`,
+    `infinite preserves runtime error hydration views.*random`,
+  ],
+  [`svelte.ssr-snapshot`, `admits reproducible SSR snapshots.*random`],
+  [`svelte.ssr-handoff`, `matches the actual browser initialization.*random`],
+  [
+    `svelte.ssr-receiving-reader`,
+    `preserves each receiving reader view.*random`,
+  ],
+  [
+    `svelte.ssr-runtime-errors`,
+    `keeps runtime failures on their ordinary error surface.*random`,
+  ],
+  [
+    `live-query-observer.release-failure`,
+    `reattaches after reporting a release failure.*random`,
+  ],
   [
     `structural-identity.equal-representations`,
     `agrees with D2 value identity for equal representations`,
@@ -291,9 +822,23 @@ const replayTestNames = new Map([
     `index-update.custom-comparator`,
     `matches an independent custom-comparator model \\(seed undefined\\)`,
   ],
+  [
+    `group-result-key.groups`,
+    `publishes one key of the key type per group \\(seed undefined\\)`,
+  ],
 ])
 
+// Properties whose own seeded generator replaces fast-check, so they have no
+// shrink path.
+const seedReplayProperties = new Set([`evaluators.like`])
+
 function directReplayTestName(property: string): string | undefined {
+  if (property === `replay.ordered-window-faults`)
+    return `keeps the ordered window under load and release faults \\(replay campaign\\)`
+  if (property === `replay.keyed-request-failures`)
+    return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
+  if (property === `replay.subscription-demand-origin`)
+    return `distinguishes failed demand origins \\(replay campaign\\)`
   if (property === `cold-join.compound`)
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
@@ -303,6 +848,14 @@ function directReplayTestName(property: string): string | undefined {
   return replayTestNames.get(property)
 }
 
+/**
+ * The Vitest config for a directory outside packages/ whose config does not
+ * have a default name. Its owners replay with `--config`.
+ */
+const outsideReplayConfigs = new Map([
+  [`scripts`, `oracle-scripts.vitest.config.mjs`],
+])
+
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
   ...registeredOracleProperties,
 ].map((property) => {
@@ -310,31 +863,52 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
   const status =
     file === undefined
       ? `no-named-owner`
-      : property.endsWith(`-statistics`) ||
-          property.endsWith(`.scenario-statistics`)
-        ? `statistics-only`
-        : `assertion`
-  const cwd = file?.split(`/`).slice(0, 2).join(`/`)
+      : file.endsWith(`.spec.ts`)
+        ? `browser-replay`
+        : seedReplayProperties.has(property)
+          ? `seed-replay`
+          : property.endsWith(`-statistics`) ||
+              property.endsWith(`.scenario-statistics`)
+            ? `statistics-only`
+            : `assertion`
+  const outsidePackages = file?.startsWith(`packages/../`) === true
+  // An owner outside packages/ replays from its own directory, with the
+  // Vitest config that includes it there.
+  const outsidePath = file?.slice(`packages/../`.length)
+  const cwd = outsidePackages
+    ? outsidePath!.slice(0, outsidePath!.lastIndexOf(`/`))
+    : file?.split(`/`).slice(0, 2).join(`/`)
+  const outsideConfig =
+    cwd === undefined ? undefined : outsideReplayConfigs.get(cwd)
   return {
     property,
     status,
     file,
+    ...(sources.has(property) ? { source: sources.get(property) } : {}),
     cwd,
     testNamePattern: directReplayTestName(property),
     command:
       file === undefined
         ? undefined
-        : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+        : status === `browser-replay`
+          ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
+          : status === `seed-replay`
+            ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
+            : outsidePackages
+              ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
+              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [
             `TANSTACK_DB_ORACLE_STATISTICS=1 (sampling only; no exact assertion replay)`,
           ]
-        : [
-            `TANSTACK_DB_ORACLE_SEED`,
-            `TANSTACK_DB_ORACLE_PATH`,
-            `TANSTACK_DB_ORACLE_PROPERTY`,
-          ],
+        : status === `seed-replay`
+          ? [`TANSTACK_DB_ORACLE_SEED`]
+          : [
+              `TANSTACK_DB_ORACLE_SEED`,
+              `TANSTACK_DB_ORACLE_PATH`,
+              `TANSTACK_DB_ORACLE_PROPERTY`,
+            ],
   }
 })
 

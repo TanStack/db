@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # When does the B+ tree behave like a sorted Map?
@@ -95,25 +101,12 @@ const arbitraryAction: fc.Arbitrary<Action> = fc.oneof(
   }),
 )
 
-// Replay a reported fast-check seed and shrink path directly with
-// BTREE_MAP_ORACLE_SEED=<seed> BTREE_MAP_ORACLE_PATH=<path> pnpm exec vitest run
-// packages/db/tests/btree-map-oracle.test.ts. Ordinary runs execute both lanes.
-const replaySeedText = process.env.BTREE_MAP_ORACLE_SEED
-const replayPath = process.env.BTREE_MAP_ORACLE_PATH
-if ((replaySeedText === undefined) !== (replayPath === undefined)) {
-  throw new Error(`BTree Map oracle replay requires both seed and path`)
-}
-const replaySeed =
-  replaySeedText === undefined ? undefined : Number(replaySeedText)
-if (
-  replaySeedText !== undefined &&
-  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-) {
-  throw new Error(`BTREE_MAP_ORACLE_SEED must be an integer`)
-}
-if (replayPath !== undefined && !/^\d+(?::\d+)*$/.test(replayPath)) {
-  throw new Error(`BTREE_MAP_ORACLE_PATH must be a fast-check shrink path`)
-}
+// A fixed campaign and a random campaign run the same history grammar. A path
+// replay of this property runs only its random campaign from the recorded seed
+// and shrink path: TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
+// TANSTACK_DB_ORACLE_PROPERTY=btree-map.history with
+// `pnpm exec vitest run packages/db/tests/btree-map-oracle.test.ts`.
+const btreeMapProperty = `btree-map.history`
 
 const mapHistoryProperty = fc.property(
   fc.integer({ min: 4, max: 8 }),
@@ -129,14 +122,18 @@ const mapHistoryProperty = fc.property(
   },
 )
 
-const mapHistoryCampaigns: Array<{
-  name: string
-  seed?: number
-  path?: string
-}> =
-  replayPath === undefined
-    ? [{ name: `fixed`, seed: 20260930 }, { name: `random` }]
-    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
+const mapHistoryCampaigns = [
+  {
+    name: `fixed`,
+    test: oracleReplayTest(it),
+    parameters: { numRuns: oracleRuns(100), seed: 20260930 },
+  },
+  {
+    name: `random`,
+    test: oracleReplayTest(it, btreeMapProperty),
+    parameters: oraclePropertyOptions(100, btreeMapProperty),
+  },
+]
 
 // The model uses only Map operations and the declared numeric order. It does
 // not use the tree's nodes, search helpers, or traversal code.
@@ -284,6 +281,8 @@ function expectRefinement(
   expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
 }
 
+declareOracle({ check: [expectRefinement], model: [stepModel] })
+
 describe(`BTree Map oracle`, () => {
   // The 120,000-operation corpus takes about nine seconds with CI coverage.
   // This fixed lane is a stable depth campaign, not random discovery. Keep
@@ -335,16 +334,13 @@ describe(`BTree Map oracle`, () => {
     },
   )
 
-  it.each(mapHistoryCampaigns)(
-    `matches complete Map cuts across shrinkable histories ($name)`,
-    ({ seed, path }) => {
-      fc.assert(mapHistoryProperty, {
-        numRuns: path === undefined ? 100 : 1,
-        seed,
-        path,
-      })
-    },
-  )
+  for (const campaign of mapHistoryCampaigns)
+    campaign.test(
+      `matches complete Map cuts across shrinkable histories (${campaign.name})`,
+      () => {
+        fc.assert(mapHistoryProperty, campaign.parameters)
+      },
+    )
 
   it(`replays a shrunk Map mismatch with the reported seed and path`, () => {
     // A scanner that drops every row keeps the initial empty cut green. The

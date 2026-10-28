@@ -1,0 +1,214 @@
+diff --git a/packages/db/tests/query/includes-temporal-oracle.test.ts b/packages/db/tests/query/includes-temporal-oracle.test.ts
+index ee1f8e9dd..5f4228c42 100644
+--- a/packages/db/tests/query/includes-temporal-oracle.test.ts
++++ b/packages/db/tests/query/includes-temporal-oracle.test.ts
+@@ -2727,35 +2727,54 @@ function disturbedHistories(
+   ]
+ }
+ 
+-// A source error before settlement rejects the pending load and puts the
+-// source Collection in `error`, in that order, as Electric does when a stream
+-// error is final. `source-ready` then recovers the source. Each history moves
+-// the source's readiness after the error, so recovery is the source's first
+-// `ready` after it; a history may also settle before recovery, when no
+-// request is pending. A `fail` rejects the pending load while the source
+-// stays healthy: the hostile control for the same rejection.
++// A source error rejects any pending load and puts the source Collection in
++// `error`, in that order, as Electric does when a stream error is final. The
++// first `source-ready` after the error recovers the source; a history whose
++// source was ready before the error gets a recovery at every later position,
++// so ready → error → ready is reached as well as an error before the first
++// ready. The error can come before or after `settle`: after it, the query is
++// already ready and no load is pending. A `truncate` can arrive during the
++// error or right after its recovery. A `fail` rejects the pending load while
++// the source stays healthy, the hostile control for the same rejection, with
++// the source's readiness at every position.
++function insertStep(
++  history: ReadonlyArray<LaggingSourceStep>,
++  at: number,
++  step: LaggingSourceStep,
++): Array<LaggingSourceStep> {
++  return [...history.slice(0, at), step, ...history.slice(at)]
++}
++
+ function sourceErrorHistories(
+   failure: `source-error` | `fail`,
+ ): Array<Array<LaggingSourceStep>> {
+   const histories = new Map<string, Array<LaggingSourceStep>>()
++  const add = (history: Array<LaggingSourceStep>) =>
++    histories.set(history.join(), history)
+   for (const history of laggingSourceHistories(`on-demand`)) {
+-    const rest = history.filter((step) => step !== `source-ready`)
+-    for (let at = 0; at <= rest.indexOf(`settle`); at++) {
+-      const failed = [...rest.slice(0, at), failure, ...rest.slice(at)]
+-      const recoveries =
+-        failure === `fail`
+-          ? [history.slice(0, at).includes(`source-ready`) ? 0 : failed.length]
+-          : Array.from(
+-              { length: failed.length - at },
+-              (_, offset) => at + 1 + offset,
++    if (failure === `fail`) {
++      const rest = history.filter((step) => step !== `source-ready`)
++      for (let at = 0; at <= rest.indexOf(`settle`); at++) {
++        const failed = insertStep(rest, at, `fail`)
++        for (let ready = 0; ready <= failed.length; ready++)
++          add(insertStep(failed, ready, `source-ready`))
++      }
++      continue
++    }
++    for (let at = 0; at <= history.length; at++) {
++      const errored = insertStep(history, at, `source-error`)
++      const later = errored.indexOf(`source-ready`, at + 1)
++      const recovered =
++        later >= 0
++          ? [errored]
++          : Array.from({ length: errored.length - at }, (_, offset) =>
++              insertStep(errored, at + 1 + offset, `source-ready`),
+             )
+-      for (const ready of recoveries) {
+-        const candidate = [
+-          ...failed.slice(0, ready),
+-          `source-ready` as const,
+-          ...failed.slice(ready),
+-        ]
+-        histories.set(candidate.join(), candidate)
++      for (const candidate of recovered) {
++        add(candidate)
++        const recovery = candidate.indexOf(`source-ready`, at + 1)
++        add(insertStep(candidate, recovery, `truncate`))
++        add(insertStep(candidate, recovery + 1, `truncate`))
+       }
+     }
+   }
+@@ -2783,6 +2802,11 @@ type LaggingSourceFacts = {
+   // The source Collection is in `error`: its rejected loads belong to that
+   // error, and recovery acquires their demand again.
+   sourceErrored: boolean
++  // The source error rejected a pending load, so recovery acquires its
++  // demand again.
++  detachedByError: boolean
++  // Acquisitions the model expects beyond the first, one per such recovery.
++  reacquisitions: number
+   // A load rejected while its source was healthy: a terminal query failure.
+   failed: boolean
+   preloadFailed: boolean
+@@ -2828,7 +2852,9 @@ function expectedLiveQueryObservation(
+   facts: LaggingSourceFacts,
+ ): LiveQueryObservation {
+   const mode = LAGGING_SOURCE_SHAPES[shape]
+-  const ready = initiallyReady(mode, facts)
++  const initial = initiallyReady(mode, facts)
++  // A source in `error` puts the live query in error until it recovers.
++  const ready = initial && !facts.sourceErrored
+   const heldIds = facts.posts
+     .filter((post) => postMatchesShape(shape, facts, post))
+     .map(({ id }) => id)
+@@ -2836,7 +2862,7 @@ function expectedLiveQueryObservation(
+   return {
+     ready,
+     // A preload settles at readiness, or rejects with the source error.
+-    preloadSettled: ready || facts.preloadFailed,
++    preloadSettled: initial || facts.preloadFailed,
+     preloadFailed: facts.preloadFailed,
+     // A failed query owes no rows; a recovering one publishes through the
+     // restart replay barrier.
+@@ -2848,7 +2874,15 @@ function expectedLiveQueryObservation(
+           : facts.settled
+             ? heldIds.slice(-1)
+             : [],
+-    acquisitions: mode === `on-demand` ? 1 : 0,
++    // A replay after a truncate or rekey, and an ordered window, may issue
++    // extra requests by implementation choice; only acquisition is judged.
++    // Otherwise each recovery from a rejecting source error acquires once.
++    acquisitions:
++      mode !== `on-demand`
++        ? 0
++        : shape === `ordered` || facts.disturbed
++          ? 1
++          : 1 + facts.reacquisitions,
+   }
+ }
+ 
+@@ -3182,15 +3216,19 @@ function applyLaggingSourceStep(
+     facts.replayPending = true
+   } else if (step === `source-error` || step === `fail`) {
+     const error = new Error(`subset load failed`)
++    // Before settlement a load is pending; after it, none is.
++    const pending = !facts.settled
+     for (const source of sources) {
+       source.rejectPending(error)
+       if (step === `source-error`) source.markError(error)
+     }
+-    if (step === `source-error`) facts.sourceErrored = true
+-    else facts.failed = true
+-    facts.disturbed = true
+-    facts.replayPending = step === `source-error`
+-    facts.preloadFailed = true
++    if (step === `source-error`) {
++      facts.sourceErrored = true
++      facts.detachedByError ||= pending
++    } else facts.failed = true
++    facts.replayPending ||= step === `source-error` && pending
++    // Only a preload that has not settled can reject.
++    if (pending) facts.preloadFailed = true
+   } else if (step === `settle`) {
+     for (const source of sources)
+       for (const acquisition of source.acquisitions) acquisition.resolve()
+@@ -3201,10 +3239,12 @@ function applyLaggingSourceStep(
+       facts.replayPending = false
+     }
+   } else if (facts.sourceErrored) {
+-    // Recovery: both sources become ready and acquire their demand again.
++    // Recovery: both sources become ready and acquire detached demand again.
+     for (const source of sources) source.markReady()
+     facts.sourceErrored = false
+     facts.sourceReady = true
++    if (facts.detachedByError) facts.reacquisitions += 1
++    facts.detachedByError = false
+   } else {
+     // The twin's source has been ready since its start.
+     main.source.markReady()
+@@ -3255,6 +3295,8 @@ function createLaggingSourceDriver(
+           readOwes: undefined,
+           replayPending: false,
+           sourceErrored: false,
++          detachedByError: false,
++          reacquisitions: 0,
+           failed: false,
+           preloadFailed: false,
+         },
+@@ -3417,6 +3459,8 @@ function laggingSourceProjection(
+       twinDisagreement: undefined,
+     }),
+     assertEqual: (observed, expected) => {
++      if (process.env.DEBUG_MODEL_D && JSON.stringify(observed) !== JSON.stringify(expected))
++        require('node:fs').appendFileSync(process.env.DEBUG_MODEL_D + '.diff', JSON.stringify({ observed, expected }) + '\n')
+       expect(observed).toEqual(expected)
+       return undefined
+     },
+@@ -3428,11 +3472,20 @@ async function expectLaggingSourceTraceMatches(
+   shape: LaggingSourceShape,
+   steps: ReadonlyArray<LaggingSourceStep>,
+ ): Promise<void> {
+-  await runTrace({
+-    steps,
+-    driver: createLaggingSourceDriver(consumer, shape),
+-    projection: laggingSourceProjection(consumer, shape),
+-  })
++  try {
++    await runTrace({
++      steps,
++      driver: createLaggingSourceDriver(consumer, shape),
++      projection: laggingSourceProjection(consumer, shape),
++    })
++  } catch (error) {
++    if (process.env.DEBUG_MODEL_D)
++      require('node:fs').appendFileSync(
++        process.env.DEBUG_MODEL_D,
++        JSON.stringify({ consumer, shape, steps, error: String((error as any).message), cause: String((error as any).cause?.message ?? '') }) + '\n',
++      )
++    throw error
++  }
+ }
+ 
+ // Each generated lane uses one grammar and one check in both campaigns. A
