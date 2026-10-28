@@ -1,0 +1,14 @@
+f1	Model checking completed. No error has been found.	10560 distinct states found, 0 states left on queue.
+safe	Model checking completed. No error has been found.	10560 distinct states found, 0 states left on queue.
+w_CleanupWithSubscribers	Error: Invariant I6_NoCleanupUnderQuery is violated.	5 distinct states found, 3 states left on queue.
+w_EmptyRestoreOpens	Error: Invariant I8_ReadyMeansKnown is violated.	9 distinct states found, 7 states left on queue.
+w_HealthyClearsError	Error: Action property ErrorClearsOnlyByReload is violated.	79 distinct states found, 66 states left on queue.
+w_NoRunFence	Error: Invariant I7_NoStaleRows is violated.	33 distinct states found, 28 states left on queue.
+w_OneErrorField	Error: Invariant I4_RemedyDecodable is violated.	12 distinct states found, 9 states left on queue.
+w_QueryErrorSticks	Error: Invariant QueryErrorHasAWayOut is violated.	888 distinct states found, 643 states left on queue.
+w_ReloadBlanks	Error: Invariant I3_ReadyShowsRows is violated.	14 distinct states found, 11 states left on queue.
+w_ReloadCrashed	Error: Action property CrashPermanentForInstance is violated.	67 distinct states found, 56 states left on queue.
+w_ReloadFailIsLoadingError	Error: Invariant LocalRowsNotHidden is violated.	294 distinct states found, 233 states left on queue.
+w_ReloadHidden	Error: Invariant I4_RemedyDecodable is violated.	14 distinct states found, 11 states left on queue.
+w_ReloadShowsLoading	Error: Action property ReloadNeverShowsLoading is violated.	47 distinct states found, 41 states left on queue.
+w_SilentFromDisk	Error: Invariant I4_RemedyDecodable is violated.	62 distinct states found, 53 states left on queue.

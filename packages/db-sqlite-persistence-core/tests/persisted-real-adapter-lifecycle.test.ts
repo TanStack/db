@@ -28,7 +28,7 @@ import {
   createSQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
 } from '../src'
-import { SqliteCliDriver } from './sqlite-core-adapter-oracle.test'
+import { SqliteCliDriver } from './sqlite-core-adapter-support'
 import { cleanupTestActions } from './test-cleanup'
 import type { SyncConfig } from '@tanstack/db'
 import type { PersistenceAdapter, SQLiteDriver } from '../src'

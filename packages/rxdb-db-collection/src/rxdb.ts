@@ -126,7 +126,7 @@ export function rxdbCollectionOptions(
   type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, fail, collection } = params
 
       let initialFetchComplete = false
       async function initialFetch() {
@@ -137,7 +137,12 @@ export function rxdbCollectionOptions(
          */
         let cursor: RxDocumentData<Row> | undefined = undefined
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
-        begin()
+        // The initial fetch reads every document. When the Collection holds
+        // rows, such as a reload's kept rows, it is a snapshot that replaces
+        // them, so a row RxDB no longer has goes.
+        begin({
+          snapshot: !collection._state.acceptedSyncedEntries().next().done,
+        })
 
         while (!initialFetchComplete) {
           let query: FilledMangoQuery<Row>
@@ -225,19 +230,23 @@ export function rxdbCollectionOptions(
 
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
-        sub = rxCollection.$.subscribe((ev) => {
-          const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
-          switch (ev.operation) {
-            case `INSERT`:
-              queue({ type: `insert`, value: cur })
-              break
-            case `UPDATE`:
-              queue({ type: `update`, value: cur })
-              break
-            case `DELETE`:
-              queue({ type: `delete`, value: cur })
-              break
-          }
+        sub = rxCollection.$.subscribe({
+          next: (ev) => {
+            const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
+            switch (ev.operation) {
+              case `INSERT`:
+                queue({ type: `insert`, value: cur })
+                break
+              case `UPDATE`:
+                queue({ type: `update`, value: cur })
+                break
+              case `DELETE`:
+                queue({ type: `delete`, value: cur })
+                break
+            }
+          },
+          // An errored stream ends, so later writes would never arrive.
+          error: stop,
         })
 
         const subs = getFromMapOrCreate(
@@ -272,17 +281,16 @@ export function rxdbCollectionOptions(
           }
         }
 
-        if (!isCleanedUp()) {
-          markReady()
-        }
+        // After this run's fail(), markReady() does nothing.
+        markReady()
       }
 
-      void start().catch((error: unknown) => {
+      // Core ignores a later fail() in the same run.
+      function stop(error: unknown) {
         stopOngoingFetch()
-        if (collection.status === `loading`) {
-          markError(error)
-        }
-      })
+        fail(error)
+      }
+      void start().catch(stop)
 
       return stopOngoingFetch
     },

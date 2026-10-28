@@ -308,6 +308,26 @@ presence of a preferred heading, class, comment template, or helper.
 - **Not required:** A declared state for every modeled transition. Declare the
   states that the cited laws need, so that reach stays honest about scope.
 
+### ORC-016: Law-only oracle files
+
+- **Trigger:** A file defines an oracle, its input grammar, or a generated
+  campaign, including a compile-time type oracle.
+- **Obligation:** The file MUST NOT contain ordinary example-based unit tests
+  or standalone concrete type assertions. Fixed regressions MUST be inputs to
+  the same independent model, production driver, and comparison used by the
+  broader campaign. They MUST NOT restate their expected answers. A type
+  oracle MUST apply a reusable independent type law to generated legal inputs.
+- **Acceptance evidence:** A reviewer can vary the input without adding an
+  expectation. Every retained regression and receiving driver uses the shared
+  judgment. Checker calibration supplies deliberately wrong observations to
+  that judgment.
+- **Does not satisfy:** Renaming a unit test, adding contract prose, enumerating
+  fixtures with separate assertions, or wrapping fixed expectations in a
+  property runner.
+- **Not required:** Removing supplemental unit tests from ordinary test files,
+  randomizing a deliberately exhaustive finite grammar, or executing runtime
+  behavior to establish a source-level type law.
+
 ## A quick start
 
 One way to supply that judgment is a small reference model. For a simple stateful test, choose a legal action, apply it to production and the reference, and compare the promised result at the agreed point. “After the action returns” may be the right point for one API; a callback during that action may matter for another.
@@ -369,9 +389,49 @@ Two small examples show the form:
 Use `oracle` in filenames that own an independent expected-result computation,
 state model, differential or metamorphic comparison, or reusable law checker.
 A separate module that defines that model, checker, or its history grammar also
-qualifies. Identify the mechanism in the code before applying the name. A mixed
-test file can qualify through a specific oracle inside it; its other tests do
-not thereby become separate oracles.
+qualifies. Identify the mechanism in the code before applying the name.
+
+An oracle file holds only oracle tests. It names its parts with
+`declareOracle({ check: [...], model: [...], grammar: [...] })` from
+[`oracle-declaration.ts`](../../packages/db/tests/oracle-declaration.ts), which
+imports nothing so that browser and native-app modules can use it: the check
+compares production observations with the model or with a second
+formulation, and the grammar is the generators that produce legal histories.
+Each part is optional. Every test in the file uses a declared part, directly
+or through a driver:
+
+- A generated property or a fixed history runs through the check.
+- A model pin steps the model and checks one rule against its authority.
+- A calibration shows that the check rejects a wrong answer (ORC-006).
+- A grammar calibration shows that the generators reach the states that the
+  laws need (ORC-004, ORC-015).
+- A generated property can state its law inline: its predicate relates
+  production to inputs that nobody wrote down. A property whose arbitraries
+  are all constants, or whose predicate ignores its input, checks written
+  values instead.
+- A type-level test compares an inferred type with a type model. A type has no
+  value to pass, so the file names its model types in
+  `declareOracle({ typeModel: [...] })`. Each name is a type alias or
+  interface in the same file, and a type built from one counts as using it.
+
+A test that uses none of them compares production with a hand-written value. It
+is a unit test, even when it asserts a contract, and it belongs in an
+ordinary test file beside the oracle. A finite table of hand-written expected
+values selected by a test's parameters is not a model. The `oracle/no-unit-test` lint rule
+reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are
+the shared oracle machinery and declare no parts.
+
+An oracle file also registers no test through a helper from an ordinary module.
+The rule reports a call to such a helper, because the helper's tests then appear
+under the oracle file. The ordinary runner registers those tests, and passes the
+shared suite a registrar when the suite needs one. A helper from an oracle-named
+module is linted on its own, so the rule does not report a call to it. An
+`oracle-` machinery module, such as `oracle-config.ts`, is not linted, so the
+rule judges a call to its helpers as it judges an ordinary module's.
+
+ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
+files. Fixed regressions replay the shared law; supplemental examples live in
+ordinary test files.
 
 An ordinary example or regression does not need this suffix merely because it
 asserts a contract. The same applies to concrete type assertions, fixtures,
@@ -702,8 +762,12 @@ example or fixed campaign.
 
 [`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
 shows this shape. Its fixed run preserves one scheduler campaign. Its second
-campaign uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
-`OFFLINE_ORACLE_PATH` for replay.
+campaign uses a random seed by default. To replay its recorded failure, set
+`TANSTACK_DB_ORACLE_PROPERTY=offline.fifo-retry` with
+`TANSTACK_DB_ORACLE_SEED` and `TANSTACK_DB_ORACLE_PATH`. The fixed run stands
+aside, and the random campaign runs the recorded path once. The offline
+owners' other properties use the same variables and name their own properties,
+such as `offline.leadership.stale-read` and `offline.settlement.retry-decision`.
 
 Do not use a larger random run count as a substitute for structural reach.
 Pinned examples force rare boundaries. Bounded enumeration proves small finite

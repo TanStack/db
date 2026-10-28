@@ -13,6 +13,11 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterAll, beforeAll, describe, expect, vi } from 'vitest'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   findRequestOrderViolation,
@@ -204,6 +209,7 @@ beforeAll(async () => {
   vi.stubGlobal(`FileSystemFileHandle`, {
     prototype: { createSyncAccessHandle: () => {} },
   })
+  vi.stubGlobal(`location`, { href: `https://example.test/` })
   // The connection registers pagehide here; the worker registers message.
   vi.stubGlobal(
     `addEventListener`,
@@ -261,36 +267,29 @@ const requestOrderHistory = fc
     }),
   )
 
-const requestOrderSeed = Number(
-  process.env.TANSTACK_DB_OPFS_REQUEST_ORDER_ORACLE_SEED ?? 1849,
-)
-const requestOrderRuns = Number(
-  process.env.TANSTACK_DB_OPFS_REQUEST_ORDER_ORACLE_RUNS ?? 24,
-)
-const requestOrderPath = process.env.TANSTACK_DB_OPFS_REQUEST_ORDER_ORACLE_PATH
-const replayRequested =
-  process.env.TANSTACK_DB_OPFS_REQUEST_ORDER_ORACLE_SEED !== undefined ||
-  requestOrderPath !== undefined
+const requestOrderProperty = `opfs.request-order`
 
 describe(`OPFS request order oracle (Node driver)`, () => {
-  const campaigns = replayRequested
-    ? [{ label: `replay`, seed: requestOrderSeed, path: requestOrderPath }]
-    : [
-        { label: `fixed`, seed: requestOrderSeed, path: undefined },
-        { label: `random`, seed: undefined, path: undefined },
-      ]
-  for (const campaign of campaigns) {
-    fcTest.prop([requestOrderHistory], {
-      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-      numRuns: requestOrderRuns,
-      ...(campaign.path === undefined ? {} : { path: campaign.path }),
-      examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
-        history,
-      ]),
-      verbose: true,
-    })(
-      `answers requests in order and closes after them (${campaign.label})`,
-      runRequestOrderHistory,
-    )
-  }
+  // A path replay of this property selects only its random campaign.
+  oracleReplayTest(fcTest).prop([requestOrderHistory], {
+    seed: 1849,
+    numRuns: oracleRuns(24),
+    examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
+      history,
+    ]),
+    verbose: true,
+  })(
+    `answers requests in order and closes after them (fixed)`,
+    runRequestOrderHistory,
+  )
+  oracleReplayTest(fcTest, requestOrderProperty).prop([requestOrderHistory], {
+    ...oraclePropertyOptions(24, requestOrderProperty),
+    examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
+      history,
+    ]),
+    verbose: true,
+  })(
+    `answers requests in order and closes after them (random)`,
+    runRequestOrderHistory,
+  )
 })

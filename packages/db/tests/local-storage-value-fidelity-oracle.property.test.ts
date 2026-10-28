@@ -34,16 +34,17 @@ import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   observeHistoryPromise,
   withHistoryCleanup,
 } from './optimistic-history-oracle'
 
 const property = `local-storage.value-fidelity`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 // ---------------------------------------------------------------------------
 // Model. Each generated value carries the JSON form a restore must return, or
@@ -372,8 +373,13 @@ async function runHistory({ entry, handler, payload }: History) {
   )
 }
 
+declareOracle({
+  check: [runHistory],
+  model: [restoredArray, restoredObject],
+})
+
 describe(`LocalStorage value fidelity oracle`, () => {
-  if (requestedReplayProperty === undefined) {
+  if (!oracleReplayRequested()) {
     // Pinned witnesses. The first is the reported case: a function property in
     // an inserted row. The others place each lost kind under an array or an
     // object, and check each documented normalization on every entry path.
@@ -441,16 +447,10 @@ describe(`LocalStorage value fidelity oracle`, () => {
       seed: 20_261_021,
       numRuns: oracleRuns(300),
     })(`matches the JSON value model (fixed)`, runHistory)
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(300, property))(
-      `matches the JSON value model (random)`,
-      runHistory,
-    )
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(300, property))(
-      `matches the JSON value model (replay)`,
-      runHistory,
-    )
-  } else {
-    it.skip(`runs only when its replay property is selected`, () => {})
   }
+  // A path replay of this property runs its one recorded history here.
+  oracleReplayTest(fcTest, property).prop(
+    [historyArbitrary],
+    oraclePropertyOptions(300, property),
+  )(`matches the JSON value model (random)`, runHistory)
 })

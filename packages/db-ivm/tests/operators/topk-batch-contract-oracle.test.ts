@@ -237,36 +237,6 @@ it.each(
   },
 )
 
-it.each([
-  { name: `RegExp source`, before: /old/g, after: /new/g },
-  { name: `RegExp flags`, before: /same/g, after: /same/i },
-  {
-    name: `RegExp position`,
-    before: Object.assign(/same/g, { lastIndex: 0 }),
-    after: Object.assign(/same/g, { lastIndex: 1 }),
-  },
-  { name: `sparse-array length`, before: [], after: Array(2) },
-])(
-  `keeps a $name replacement through hash consolidation`,
-  ({ before, after }) => {
-    // Relation: a retraction and a distinct addition must remain observable to
-    // an ordered operator even when an earlier stage consolidates the batch.
-    const previous = { id: 1, value: before }
-    const next = { id: 1, value: after }
-    expect(
-      new MultiSet([
-        [previous, -1],
-        [next, 1],
-      ])
-        .consolidate()
-        .getInner(),
-    ).toEqual([
-      [previous, -1],
-      [next, 1],
-    ])
-  },
-)
-
 it.each([true, false])(
   `replaces ordinary rows with File available=%s`,
   (available) => {
@@ -310,16 +280,6 @@ it.each([true, false])(
   },
 )
 
-it(`keeps distinct row keys when structural hashes collide`, () => {
-  // A hash is an accelerator, never proof that two keyed rows are equal.
-  vi.spyOn(hashing, `hash`).mockReturnValue(7)
-  const batch = new MultiSet<[string | number, { id: number }]>([
-    [[1, { id: 1 }], 1],
-    [[`1`, { id: 2 }], 1],
-  ])
-  expect([...topKBatch([batch])]).toEqual(batch.getInner())
-})
-
 it(`compares shared subtrees without expanding every path`, () => {
   vi.spyOn(hashing, `hash`).mockReturnValue(7)
   fc.assert(
@@ -349,28 +309,6 @@ it(`compares shared subtrees without expanding every path`, () => {
     }),
     { seed: 409034, numRuns: 25 },
   )
-})
-
-it(`does not inspect payloads when each key occurs once`, () => {
-  let reads = 0
-  const rows = Array.from({ length: 100 }, (_, id) => ({
-    id,
-    get unused() {
-      reads++
-      return id
-    },
-  }))
-  const batch = new MultiSet<[number, (typeof rows)[number]]>(
-    rows.map((row) => [[row.id, row], 1]),
-  )
-  const actual = [...topKBatch([batch])]
-  expect(reads).toBe(0)
-  expect(actual).toHaveLength(rows.length)
-  for (const [index, [[key, row], weight]] of actual.entries()) {
-    expect(key).toBe(index)
-    expect(row).toBe(rows[index])
-    expect(weight).toBe(1)
-  }
 })
 
 it(`short-circuits replacements without hashing unrelated payloads`, () => {
@@ -408,78 +346,4 @@ it(`cancels long same-key histories with independently allocated values`, () => 
     }),
     { seed: 409037, numRuns: 25 },
   )
-})
-
-it.each([TypeError, RangeError])(
-  `does not swallow user %s exceptions while bucketing`,
-  (ErrorType) => {
-    const error = new ErrorType(`Cannot hash cyclic structural values`)
-    const row = {
-      get value(): number {
-        throw error
-      },
-    }
-    let observed: unknown
-    try {
-      Array.from(
-        topKBatch([
-          new MultiSet<[number, object]>([
-            [[1, row], 1],
-            [[1, row], -1],
-            [[1, { value: 2 }], 1],
-          ]),
-        ]),
-      )
-    } catch (caught) {
-      observed = caught
-    }
-    expect(observed).toBe(error)
-  },
-)
-
-it.each([`plain cycle`, `class cycle`, `large payload`] as const)(
-  `orders a unique key without imposing a structural hash domain: %s`,
-  (kind) => {
-    class Row {
-      id = 1
-      payload: unknown
-    }
-    const row =
-      kind === `class cycle`
-        ? new Row()
-        : { id: 1, payload: undefined as unknown }
-    row.payload = kind === `large payload` ? new Array(1_000_001).fill(0) : row
-    const entries = [
-      ...topKBatch([new MultiSet<[number, typeof row]>([[[1, row], 1]])]),
-    ]
-    expect(entries).toHaveLength(1)
-    expect(entries[0]![0][1]).toBe(row)
-    expect(entries[0]![1]).toBe(1)
-    const graph = new D2()
-    const input = graph.newInput<[number, typeof row]>()
-    const observed: Array<[[number, [typeof row, string]], number]> = []
-    input.pipe(
-      topKWithFractionalIndex((a, b) => a.id - b.id, { limit: 1 }),
-      output((message) => observed.push(...message.getInner())),
-    )
-    graph.finalize()
-    input.sendData(new MultiSet([[[1, row], 1]]))
-    graph.run()
-    expect(observed).toHaveLength(1)
-    expect(observed[0]![0][1][0]).toBe(row)
-    expect(observed[0]![1]).toBe(1)
-  },
-)
-
-it(`consolidates structurally equal fresh transient values before replacements`, () => {
-  const batch = new MultiSet<[number, { value: string }]>([
-    [[1, { value: `new` }], 1],
-    [[1, { value: `temporary` }], 1],
-    [[1, { value: `old` }], -1],
-    [[1, { value: `temporary` }], -1],
-  ])
-  expect([...topKBatch([batch])]).toEqual([
-    [[1, { value: `old` }], -1],
-    [[1, { value: `new` }], 1],
-  ])
 })

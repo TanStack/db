@@ -25,6 +25,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
+import { oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SHARED_DRIVER_FAIRNESS_BOUND,
   createPersistFirstFaultObservation,
@@ -33,6 +35,12 @@ import {
   observeSharedDriverFairness,
 } from './shared-driver-fairness-oracle'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
+import {
+  FIXED_SEED,
+  createFairnessPropertyModes,
+  readFairnessCalibration,
+  readFairnessReplayConfig,
+} from './shared-driver-fairness-config'
 import type {
   SharedDriverFairnessObservation,
   SharedDriverFairnessOptions,
@@ -40,24 +48,10 @@ import type {
   SharedDriverFairnessWork,
 } from './shared-driver-fairness-oracle'
 
-const FIXED_SEED = 165_905
 const GENERATED_RUNS = 12
 const HYDRATE_COUNT_RANGE = { min: 2, max: 7 } as const
 const PERSIST_COUNT_RANGE = { min: 3, max: 7 } as const
 const MUTATIONS_PER_PERSIST_RANGE = { min: 1, max: 3 } as const
-
-type FairnessReplayEnvironment = Record<string, string | undefined>
-
-type FairnessReplayConfig = {
-  seed: number
-  path: string
-}
-
-type FairnessPropertyMode = {
-  label: `fixed-seed` | `seedless-random` | `checked-replay`
-  seed?: number
-  path?: string
-}
 
 class FairnessOracleFailure extends Error {
   constructor(
@@ -75,55 +69,6 @@ function checkAt(law: string, checkpoint: string, assertion: () => void): void {
   } catch (error) {
     throw new FairnessOracleFailure(law, checkpoint, error)
   }
-}
-
-function readFairnessReplayConfig(
-  environment: FairnessReplayEnvironment = process.env,
-): FairnessReplayConfig | undefined {
-  const seedText = environment.TANSTACK_DB_DRIVER_FAIRNESS_SEED
-  const path = environment.TANSTACK_DB_DRIVER_FAIRNESS_PATH
-  if (seedText === undefined && path === undefined) return undefined
-  if (seedText === undefined || path === undefined) {
-    throw new Error(
-      `TANSTACK_DB_DRIVER_FAIRNESS_SEED and TANSTACK_DB_DRIVER_FAIRNESS_PATH must be supplied together`,
-    )
-  }
-
-  const seed = Number(seedText)
-  if (seedText.trim() === `` || !Number.isSafeInteger(seed)) {
-    throw new Error(`TANSTACK_DB_DRIVER_FAIRNESS_SEED must be an integer`)
-  }
-  if (!/^\d+(?::\d+)*$/.test(path)) {
-    throw new Error(
-      `TANSTACK_DB_DRIVER_FAIRNESS_PATH must contain colon-separated nonnegative integers`,
-    )
-  }
-  return { seed, path }
-}
-
-function createFairnessPropertyModes(
-  replay: FairnessReplayConfig | undefined,
-): ReadonlyArray<FairnessPropertyMode> {
-  if (replay) {
-    return [{ label: `checked-replay`, ...replay }]
-  }
-  return [
-    { label: `fixed-seed`, seed: FIXED_SEED },
-    { label: `seedless-random` },
-  ]
-}
-
-function readFairnessCalibration(
-  environment: FairnessReplayEnvironment = process.env,
-): SharedDriverFairnessOptions {
-  const fault = environment.TANSTACK_DB_DRIVER_FAIRNESS_CALIBRATION
-  if (fault === undefined) return {}
-  if (fault !== `persist-first-fifo`) {
-    throw new Error(
-      `TANSTACK_DB_DRIVER_FAIRNESS_CALIBRATION must be persist-first-fifo`,
-    )
-  }
-  return { schedulingFault: fault }
 }
 
 const fairnessPropertyModes = createFairnessPropertyModes(
@@ -332,6 +277,10 @@ function reachesHydrateBeforeLaterPersist(
 
 const generatedHistoryArbitrary = createGeneratedHistoryArbitrary(`varied`)
 const tailOrderAblatedArbitrary = createGeneratedHistoryArbitrary(`removed`)
+
+declareOracle({
+  grammar: [generatedHistoryArbitrary, tailOrderAblatedArbitrary],
+})
 let generatedPropertyExecutions = 0
 type GeneratedFailureRecord = {
   law: string
@@ -384,60 +333,6 @@ const generatedFairnessProperty = fc.asyncProperty(
 )
 
 describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
-  it(`selects fixed and seedless lanes by default and only replay when requested`, () => {
-    expect(createFairnessPropertyModes(readFairnessReplayConfig({}))).toEqual([
-      { label: `fixed-seed`, seed: FIXED_SEED },
-      { label: `seedless-random` },
-    ])
-    expect(
-      createFairnessPropertyModes(
-        readFairnessReplayConfig({
-          TANSTACK_DB_DRIVER_FAIRNESS_SEED: `42`,
-          TANSTACK_DB_DRIVER_FAIRNESS_PATH: `0:1`,
-        }),
-      ),
-    ).toEqual([{ label: `checked-replay`, seed: 42, path: `0:1` }])
-    expect(readFairnessCalibration({})).toEqual({})
-    expect(
-      readFairnessCalibration({
-        TANSTACK_DB_DRIVER_FAIRNESS_CALIBRATION: `persist-first-fifo`,
-      }),
-    ).toEqual({ schedulingFault: `persist-first-fifo` })
-  })
-
-  it.each([
-    {
-      name: `seed without path`,
-      environment: { TANSTACK_DB_DRIVER_FAIRNESS_SEED: `42` },
-      message: `must be supplied together`,
-    },
-    {
-      name: `path without seed`,
-      environment: { TANSTACK_DB_DRIVER_FAIRNESS_PATH: `0` },
-      message: `must be supplied together`,
-    },
-    {
-      name: `non-integer seed`,
-      environment: {
-        TANSTACK_DB_DRIVER_FAIRNESS_SEED: `4.2`,
-        TANSTACK_DB_DRIVER_FAIRNESS_PATH: `0`,
-      },
-      message: `must be an integer`,
-    },
-    {
-      name: `invalid shrink path`,
-      environment: {
-        TANSTACK_DB_DRIVER_FAIRNESS_SEED: `42`,
-        TANSTACK_DB_DRIVER_FAIRNESS_PATH: `0:-1`,
-      },
-      message: `colon-separated nonnegative integers`,
-    },
-  ])(`rejects incomplete or invalid replay coordinates: $name`, (probe) => {
-    expect(() => readFairnessReplayConfig(probe.environment)).toThrow(
-      probe.message,
-    )
-  })
-
   it(`reconstructs the known persist-first witness, covers range marginals, and rejects a nearby invalid storm`, async () => {
     const knownWitness = buildGeneratedHistory(2, 4, 1, [
       { kind: `persist`, token: `p1` },
@@ -629,7 +524,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
       const executionsBefore = generatedPropertyExecutions
       const failuresBefore = generatedFailureRecords.length
       const result = await fc.check(generatedFairnessProperty, {
-        numRuns: GENERATED_RUNS,
+        numRuns: oracleRuns(GENERATED_RUNS),
         verbose: 2,
         ...(mode.seed === undefined ? {} : { seed: mode.seed }),
         ...(mode.path === undefined ? {} : { path: mode.path }),
@@ -765,7 +660,10 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   })
 
   it(`proves tail-order ablation removes a hydrate-before-later-persist history`, () => {
-    const sampleOptions = { seed: FIXED_SEED, numRuns: GENERATED_RUNS }
+    const sampleOptions = {
+      seed: FIXED_SEED,
+      numRuns: oracleRuns(GENERATED_RUNS),
+    }
     const completeGrammar = fc.sample(generatedHistoryArbitrary, sampleOptions)
     const tailOrderAblatedGrammar = fc.sample(
       tailOrderAblatedArbitrary,

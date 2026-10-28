@@ -542,7 +542,8 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
-  it(`records a synchronously thrown subset failure`, async () => {
+  // A synchronous throw is a rejection (maintainer decision).
+  it(`records a synchronously thrown subset failure as a rejection`, async () => {
     const error = new Error(`synchronous subset failure`)
     const collection = createCollection<{ id: string }>({
       id: `synchronous-subset-error`,
@@ -567,7 +568,8 @@ describe(`CollectionSubscription status tracking`, () => {
 
     expect(() =>
       subscription.requestSnapshot({ optimizedOnly: false }),
-    ).toThrow(error)
+    ).not.toThrow()
+    await flushPromises()
     expect(subscription.lastError).toBe(error)
     expect(failures).toEqual([error])
 
@@ -575,7 +577,9 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
-  it(`does not unload a subset when loadSubset throws before acquisition`, async () => {
+  // A load that throws is an acquisition, as one that rejects is: releasing
+  // its demand unloads it.
+  it(`unloads a subset whose loadSubset threw when its demand ends`, async () => {
     const failure = new Error(`subset failed before acquisition`)
     const unloadedOptions: Array<unknown> = []
     const collection = createCollection<{ id: string }>({
@@ -600,10 +604,11 @@ describe(`CollectionSubscription status tracking`, () => {
 
     expect(() =>
       subscription.requestSnapshot({ optimizedOnly: false }),
-    ).toThrow(failure)
+    ).not.toThrow()
+    await flushPromises()
     subscription.unsubscribe()
 
-    expect(unloadedOptions).toEqual([])
+    expect(unloadedOptions).toHaveLength(1)
     await collection.cleanup()
   })
 
@@ -782,7 +787,9 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
+      subscription.resumeDeferredAcquisition()
       const where = new Func(`eq`, [
         new PropRef([`id`]),
         new Value(`requested`),
@@ -1033,13 +1040,8 @@ describe(`CollectionSubscription status tracking`, () => {
           subscription.requestSnapshot({ where: failedWhere })
           truncateSource()
         } else {
-          const request = () =>
-            subscription.requestSnapshot({ where: failedWhere })
-          if (failureMode === `sync`) {
-            expect(request).toThrow(primaryFailure)
-          } else {
-            request()
-          }
+          // A synchronous throw is a rejection: the request does not throw.
+          subscription.requestSnapshot({ where: failedWhere })
         }
         await flushPromises()
 
@@ -1054,7 +1056,9 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
-  it(`does not unload a synchronous acquisition that never started`, async () => {
+  // A load that throws started its acquisition, as one that rejects did:
+  // a release from its error delivery unloads it once.
+  it(`unloads a thrown acquisition once when its error delivery releases it`, async () => {
     const failure = new Error(`load failed before acquisition`)
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`failed`)])
     const unloads: Array<LoadSubsetOptions> = []
@@ -1084,8 +1088,9 @@ describe(`CollectionSubscription status tracking`, () => {
     })
 
     try {
-      expect(() => subscription.requestSnapshot({ where })).toThrow(failure)
-      expect(unloads).toEqual([])
+      expect(() => subscription.requestSnapshot({ where })).not.toThrow()
+      await flushPromises()
+      expect(unloads).toHaveLength(1)
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -1490,7 +1495,9 @@ describe(`CollectionSubscription status tracking`, () => {
       if (start === `deferred`) expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: start === `deferred`,
       })
+      if (start === `deferred`) subscription.resumeDeferredAcquisition()
       unsubscribeDuringLoad = () => subscription.unsubscribe()
 
       try {
@@ -2457,8 +2464,9 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(subscription.lastError).toBe(error)
 
     subscription.unsubscribe()
-    // The initial load and the later successful replay each acquired a lease.
-    expect(unloadCount).toBe(2)
+    // The initial load, the replay load that threw, and the later
+    // successful replay each acquired a lease: a throw is a rejection.
+    expect(unloadCount).toBe(3)
     await collection.cleanup()
   })
 
@@ -2544,7 +2552,9 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
-  it(`publishes one coherent snapshot after overlapping truncate replays`, async () => {
+  // The newer replay aborts the older one's load, and an abort ends the load
+  // (maintainer decision): the newer replay publishes without waiting for it.
+  it(`publishes the newest replay without waiting for the replay it aborted`, async () => {
     type Row = { id: string }
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
@@ -2611,7 +2621,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
     resolveReplays[1]!()
     await flushPromises()
-    expect([...visible.keys()]).toEqual([`old`])
+    expect([...visible.keys()]).toEqual([`new`])
 
     resolveReplays[0]!()
     await flushPromises()

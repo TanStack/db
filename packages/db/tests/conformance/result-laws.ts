@@ -5,12 +5,12 @@ export function expectResultSurface<
   T extends {
     status: unknown
     isReady: unknown
-    isError: unknown
+    isLoadingError: unknown
     isEnabled: unknown
   },
 >(result: T): T {
   expect(typeof result.status, `raw status`).toBe(`string`)
-  for (const key of [`isReady`, `isError`, `isEnabled`] as const)
+  for (const key of [`isReady`, `isLoadingError`, `isEnabled`] as const)
     expect(typeof result[key], `raw ${key}`).toBe(`boolean`)
   return result
 }
