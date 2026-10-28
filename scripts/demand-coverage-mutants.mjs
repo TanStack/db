@@ -69,6 +69,8 @@ const MUTANTS = [
     find: 'resetSequence === this.resetSequence &&',
     replace: 'true &&',
     rationale: 'captureResetEpoch ignores resetSequence',
+    equivalent:
+      'in the single-process scope only scoped recovery bumps resetSequence while a load or record exists (startup reclaim precedes loads; a peer reset is multi-tab), and during scoped recovery the coverage read proves nothing',
   },
   {
     id: 'P06',
@@ -113,6 +115,8 @@ const MUTANTS = [
     replace: 'record !== undefined &&',
     rationale:
       'currentCoverageRecord ignores storage generation: stale-generation record counts',
+    equivalent:
+      'a stale-generation record can stay in memory only after an in-run rotation, and every in-run rotation (scoped recovery, claim recovery through startScopedRecovery) leaves the coverage read proving nothing',
   },
   {
     id: 'P11',

@@ -105,6 +105,9 @@ export type Upstream = {
   snapshot: (rows: ReadonlyArray<Row>) => Promise<void>
   // When set, each later load rejects as soon as it is called.
   rejectAtOnce: boolean
+  // When set, the next load truncates synchronously inside the source's
+  // `loadSubset` call, after the source received the load.
+  truncateInNextLoad: boolean
   // Writes rows without settling any load.
   write: (rows: ReadonlyArray<Row>) => Promise<void>
   // Settles only the oldest pending load, without writing rows.
@@ -167,6 +170,7 @@ export function onDemandSource(
     arrivedAt: new Map(),
     visibleAtCall: [],
     rejectAtOnce: false,
+    truncateInNextLoad: false,
     pendingCount: () => pending.length,
     answer: async (rows) => {
       await write?.(rows)
@@ -271,9 +275,16 @@ export function onDemandSource(
                 upstream.events.push({ type: `failed`, load: options })
                 return Promise.reject(new Error(`offline at once`))
               }
-              return new Promise<void>((resolve, reject) => {
+              const loaded = new Promise<void>((resolve, reject) => {
                 pending.push({ resolve, reject, options, epoch })
               })
+              if (upstream.truncateInNextLoad) {
+                upstream.truncateInNextLoad = false
+                epoch++
+                void truncate?.()
+                upstream.events.push({ type: `truncate` })
+              }
+              return loaded
             },
           }
         },

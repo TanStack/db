@@ -934,6 +934,11 @@ async function runLifecycle(): Promise<Array<CoverageRecord>> {
 //   its persisted subset restore publishes no rows, so the online load
 //   records nothing and the last load must wait for the network.
 //
+// - Truncate inside the load: the source truncates synchronously inside its
+//   own `loadSubset` call for D, then settles only that obsolete load. A
+//   truncate came between the source receiving the load and settling it, so
+//   the load records nothing, and session 2 waits.
+//
 // An empty covered demand isolates the generation check in the rotation
 // history: no row count can end its coverage, so only the generation does.
 // ===========================================================================
@@ -1138,6 +1143,56 @@ async function runRecoveryReload(): Promise<Array<CoverageRecord>> {
   ])
 }
 
+async function runTruncateInsideLoad(): Promise<Array<CoverageRecord>> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const session1: Array<SourceEvent> = []
+  {
+    const { collection, upstream } = onDemandSource(
+      new SQLiteCorePersistenceAdapter({ driver }),
+      0,
+    )
+    upstream.truncateInNextLoad = true
+    const query = filterQuery(collection, `a`)
+    await withCleanup(async () => {
+      void query.preload().catch(() => undefined)
+      await vi.waitFor(() => expect(upstream.pendingCount()).toBeGreaterThan(0))
+      // Positive witness: the truncate ran inside the source's load call.
+      expect(upstream.truncateInNextLoad).toBe(false)
+      await upstream.write([A1, A2])
+      upstream.settleOldest()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      session1.push(...upstream.events)
+    }, [() => query.cleanup(), () => collection.cleanup()])
+  }
+  useFakeClock()
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const query = filterQuery(collection, `a`)
+  return withCleanup(async () => {
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, 1)
+    await drain()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    return [
+      {
+        events: [...session1, ...upstream.events],
+        queries: {
+          d: { spec: D, sent: [...upstream.calls], observed: observed(query) },
+        },
+        upstream: `never answers`,
+        waitPassed: waitPassedAt(upstream, 0),
+      },
+    ]
+  }, [
+    () => vi.useRealTimers(),
+    () => query.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
 async function runSchemaReset(): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   // An empty covered demand: no row count can end its coverage, so only the
@@ -1213,24 +1268,29 @@ async function runClaimExpiredBeforeRecord(): Promise<Array<CoverageRecord>> {
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-async function runClaimExpiredBeforeCheck(): Promise<Array<CoverageRecord>> {
+async function runClaimExpiredBeforeCheck(
+  rows: ReadonlyArray<Row> = [A1, A2],
+): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
-  const session1 = await coverD(driver)
+  const session1 = await coverD(driver, rows)
   const clock = { now: Date.now() }
   const base = new SQLiteCorePersistenceAdapter({
     driver,
     now: () => clock.now,
     cacheGenerationClaimTtlMs: 60_000,
   })
-  // The restore publishes D's rows under a live claim. The claim expires
-  // just before the first read of D after that, the coverage check.
-  const holder: { collection?: Collection<Row, string, any> } = {}
+  // The restore reads D under a live claim, and the wrapper forwards D's
+  // load upstream only once that restore is visible. The claim expires just
+  // before the next read of D, the coverage check. An empty covered demand
+  // isolates the generation check: after claim recovery rotates the cache,
+  // no row count can end the old record, so only its generation does.
+  const holder: { upstream?: Upstream } = {}
   const reads = { afterRestore: 0 }
   const adapter = new Proxy(base, {
     get(target, property) {
       if (property === `loadSubset`) {
         return (...args: Parameters<typeof target.loadSubset>) => {
-          if ((holder.collection?.toArray.length ?? 0) > 0) {
+          if ((holder.upstream?.calls.length ?? 0) > 0) {
             if (++reads.afterRestore === 1) clock.now += 10 * 60_000
           }
           return target.loadSubset(...args)
@@ -1241,7 +1301,7 @@ async function runClaimExpiredBeforeCheck(): Promise<Array<CoverageRecord>> {
     },
   })
   const { collection, upstream } = onDemandSource(adapter, 0)
-  holder.collection = collection
+  holder.upstream = upstream
   const query = filterQuery(collection, `a`)
   return withCleanup(async () => {
     void query.preload().catch(() => undefined)
@@ -1416,15 +1476,24 @@ async function runCoverageReadFailsDuringCheck(): Promise<
   }, [() => query.cleanup(), () => collection.cleanup()])
 }
 
-async function runSynchronousAnswerThenDelete(
-  deleteAfterwards: boolean,
+// A source that answers D synchronously, then does nothing, deletes `a1`,
+// or truncates at once, while the coverage read of that answer still waits
+// behind the slow durable write. A synchronous answer's load has already
+// settled, so core cannot abort it; only the reset check stops a coverage
+// record of an empty answer that a truncate made obsolete.
+async function runSynchronousAnswer(
+  rows: ReadonlyArray<Row>,
+  after: `nothing` | `delete` | `truncate`,
 ): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   // This source answers synchronously, so the driver records its log here.
   const session1: Array<SourceEvent> = []
   const records: Array<CoverageRecord> = []
   {
-    const handles: { remove?: (row: Row) => void } = {}
+    const handles: {
+      remove?: (row: Row) => void
+      truncate?: () => void
+    } = {}
     const sent: Array<LoadSubsetOptions> = []
     // Same ID as `onDemandSource`, so session 2 restores these rows.
     const collection = createCollection(
@@ -1439,23 +1508,34 @@ async function runSynchronousAnswerThenDelete(
           ),
         },
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, truncate }) => {
             handles.remove = (row) => {
               begin()
               write({ type: `delete`, value: row })
               commit()
               session1.push({ type: `delete`, id: row.id })
             }
+            handles.truncate = () => {
+              begin()
+              truncate()
+              commit()
+              session1.push({ type: `truncate` })
+            }
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 sent.push(options)
+                // After a truncate, core replays D; the source leaves that
+                // load waiting, so only the reset check decides coverage.
+                if (after === `truncate` && sent.length > 1) {
+                  return new Promise<void>(() => {})
+                }
                 begin()
-                for (const value of [A1, A2]) write({ type: `insert`, value })
+                for (const value of rows) write({ type: `insert`, value })
                 commit()
                 session1.push(
                   {
                     type: `rows`,
-                    rows: [A1, A2].map(
+                    rows: rows.map(
                       (row) =>
                         [row.id, { group: row.group, rank: row.rank }] as const,
                     ),
@@ -1472,13 +1552,26 @@ async function runSynchronousAnswerThenDelete(
     const query = filterQuery(collection, `a`)
     await withCleanup(async () => {
       await query.preload()
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      records.push({
-        events: [...session1],
-        queries: { d: { spec: D, sent: [...sent], observed: observed(query) } },
-        waitPassed: true,
-      })
-      if (deleteAfterwards) {
+      // Session 1's checkpoint precedes any truncate: a truncate replay keeps
+      // an already ready query ready, which the model does not judge.
+      const checkpoint = () =>
+        records.push({
+          events: [...session1],
+          queries: {
+            d: { spec: D, sent: [...sent], observed: observed(query) },
+          },
+          waitPassed: true,
+        })
+      if (after === `truncate`) {
+        checkpoint()
+        // The truncate lands while the answer's coverage read still waits.
+        handles.truncate!()
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        checkpoint()
+      }
+      if (after === `delete`) {
         handles.remove!(A1)
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
@@ -2560,6 +2653,7 @@ describe(`persisted demand coverage oracle`, () => {
     [`a refetch`, () => runSessionReset(`refetch`)],
     [`a refetch of an empty demand`, () => runSessionReset(`refetch`, [])],
     [`a load after scoped recovery reloaded the demand`, runRecoveryReload],
+    [`a truncate inside the source's load call`, runTruncateInsideLoad],
     [`a schema reset`, runSchemaReset],
     [
       `a cache claim that expires before the coverage record`,
@@ -2567,7 +2661,11 @@ describe(`persisted demand coverage oracle`, () => {
     ],
     [
       `a cache claim that expires before the coverage check`,
-      runClaimExpiredBeforeCheck,
+      () => runClaimExpiredBeforeCheck(),
+    ],
+    [
+      `a cache claim that expires before an empty demand's coverage check`,
+      () => runClaimExpiredBeforeCheck([]),
     ],
   ] as const)(`judges a reset in the same session: %s`, async (_name, run) => {
     quietConsole()
@@ -2580,10 +2678,14 @@ describe(`persisted demand coverage oracle`, () => {
       runCoverageReadFailsAfterLoad,
     ],
     [`a coverage check read that fails`, runCoverageReadFailsDuringCheck],
-    [`a synchronous answer`, () => runSynchronousAnswerThenDelete(false)],
+    [`a synchronous answer`, () => runSynchronousAnswer([A1, A2], `nothing`)],
     [
       `a synchronous answer, then a deletion`,
-      () => runSynchronousAnswerThenDelete(true),
+      () => runSynchronousAnswer([A1, A2], `delete`),
+    ],
+    [
+      `an empty synchronous answer, then a truncate during its coverage read`,
+      () => runSynchronousAnswer([], `truncate`),
     ],
     [
       `an unordered demand that loses a row and gains another`,

@@ -638,3 +638,39 @@ full-sync, never-loaded history shows `ready` on its restored row and reaches
 covers #2202 without a new adapter API, unlike #2203's
 `isPersistedSnapshotComplete`.
 
+
+## 2026-10-28: final high review of `d9bc29d74`
+
+Reviewed in a clean worktree whose files matched `gh pr diff`; the reviewer
+could not run tests there. No production change followed.
+
+| ID | Claim | Verdict and evidence | Action |
+| --- | --- | --- | --- |
+| S1 | A covered demand settles while a source truncate is staged but uncommitted | Refuted on the Electric path: a same-path probe (cover group a, then an open `must-refetch` in session 2, then a group-a query offline) kept the query `loading` with no rows until `up-to-date`. On the generic path the precondition needs a source transaction held open across a new demand's hydration, which the wrapper rejects at commit (`cannot cross a hydration cycle`); the oracle already excludes that history (X5). A probe history reproduced exactly that rejection and was removed. | None |
+| S2 | A rejected coverage commit fails a load whose rows applied | Duplicate of R2. The new path, a coverage transaction queued behind hydration and rejected by a later reset, belongs to a load that core already aborted at that reset (see S5), so its outcome decides nothing. | None |
+| S3 | A load without a signal, released by `unloadSubset`, records coverage | Refuted: every on-demand subset load carries its own `AbortController` signal (`subscription.ts`), and an acquisition release aborts it (glossary, "acquisition release"). | None |
+| S4 | A `BrowserCollectionCoordinator` leader without a subset owner records and settles coverage | Refuted for conforming coordinators: `registerRemoteSubsetOwner` is required, and the wrapper registers the owner synchronously when the source session starts and again inside scoped recovery's mutex turn. The OPFS witness with a real coordinator waits for the network. | None |
+| S5 | The reset epoch is captured after the source's `loadSubset` returns | Same-path history added (the source truncates synchronously inside its own load call): it passes on production, because core's truncate replay aborts the in-flight load and an aborted load records nothing. | Regression history kept |
+| S6, S7 | Extra SQLite reads and a metadata commit on the online path | Duplicates of H7 and R6. The synchronous path also reads on every deduplicated re-subscription. | No change; no work promise |
+| S8 | Unbounded coverage metadata | Duplicate of R7 (#2211). | Accepted design |
+| S9 | Abort listener and timer outlive their load | Duplicate of R10; the timer resolves an already-settled load. | None |
+| S10 | The wait starts after startup, so offline it is startup plus `networkTimeoutMs` | True, by design: the wait is a preference for the network and runs from when the wrapper asks it, as the eager deadline runs from the sync start when its source starts. | Accepted design |
+
+The full mutation sweep after the earlier repairs reported three survivors,
+because the abort check (R3) and the scoped-recovery guard (R5) now subsume
+older guards on the tested paths:
+
+- P33 (no reset-epoch check) is killed by a new history: an empty synchronous
+  answer, then a truncate during its coverage read, with the replay left
+  waiting. A synchronous answer's load has already settled, so core cannot
+  abort it, and only the epoch check stops the stale record.
+- P05 (the epoch ignores the reset sequence) and P10 (the record ignores its
+  generation) are equivalent in the single-process scope: every in-run
+  rotation or reset-sequence change that can meet a record or a load goes
+  through scoped recovery, where the coverage read proves nothing, and
+  claim recovery after startup also calls `startScopedRecovery`. A new
+  history with an empty covered demand and an expired claim confirms P10
+  survives with its premise reached.
+
+Totals: 10 items; 0 fixed, 6 refuted or duplicate-refuted (S1 to S5, S9),
+2 duplicates of no-change cost items (S6, S7), 2 accepted design (S8, S10).
