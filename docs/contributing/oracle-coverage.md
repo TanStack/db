@@ -2970,8 +2970,9 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Further maintainer decisions fix its edges. Readers keep the rows from
       before a hydration while it waits; a transaction opened after a
       hydration began straddles it. A notice that waited may be retried as
-      gap recovery, with at most one more pullSince request and no added
-      upstream request. A source that stops for good abandons its
+      gap recovery, with at most one more pullSince request for each
+      reservation it waited for (maintainer decision on PR #2265) and no
+      added upstream request. A source that stops for good abandons its
       reservation.
       A second registration crosses the routes with the reserving timings,
       ending, and follow-up dimensions. The routes are subset, complete
@@ -3031,16 +3032,15 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       settling the routed load in 2 cells before the owner's row was public.
       A third registration reaches it without a hook. The owner's reply is
       held while its broadcast waits; the source commits 0 to 8 microtasks
-      after the reply and reserves an empty second transaction 0 to 6
-      microtasks later. On `7a6f32fd7` the 6 cells that commit 3 microtasks
+      after the reply and reserves an empty second transaction 0 to 12
+      microtasks later. On `7a6f32fd7` the 12 cells that commit 3 microtasks
       after the reply settle the routed load before the owner's row is
-      public; all 63 cells pass on the current loop. A held write after the
+      public; all 117 cells pass on the current loop. A held write after the
       commit does not open the window, because a reservation lasts through
       its own durable write.
-      Open (law question on PR #2265): a second reservation that opens 7 or
-      more microtasks after the commit makes the broadcast wait twice, and
-      the notice asks the leader once per wait. The pullSince bound counts
-      one request per waited notice, so those delays are not registered. A peer reset for a
+      A second reservation that opens 7 or more microtasks after the commit
+      holds the broadcast twice, and the notice asks the leader once per
+      wait, as the bound allows. A peer reset for a
       storage generation this Collection no longer uses abandons nothing.
       Known limit (maintainer decision on PR #2265): Electric publishes a
       transaction's txids as stream evidence before persistence accepts its

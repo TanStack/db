@@ -17616,7 +17616,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   //   the transaction straddles it.
   // - A notice that waited may be retried as gap recovery, because the
   //   reserved commit lands first and takes the next stream position: at
-  //   most one more pullSince request, and no added upstream request.
+  //   most one more pullSince request for each reservation it waited for,
+  //   and no added upstream request (maintainer decision on PR #2265).
   // - A source that stops for good abandons its reserved transaction; waiting
   //   hydrations then proceed and the abandoned writes never apply.
   // - A peer change that starts no hydration is not delayed. A load aborted
@@ -17682,8 +17683,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // reservation open while the broadcast still waits, and the second
   // reservation defers the broadcast again. Law 7 still requires the load to
   // settle after the owner's row is public. The delays range over 0 to 8 and
-  // 0 to 6 microtasks; a later second reservation makes the broadcast wait
-  // twice, which the pullSince bound does not yet decide.
+  // 0 to 12 microtasks. A late second reservation holds the broadcast twice,
+  // so it may ask the leader twice.
   //
   // Three registrations share this one driver and model: the row-algebra
   // cross (every operation and truncate replay; committed endings; the
@@ -17957,15 +17958,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const noWaitPullSinceCalls =
       route === `seq-gap pull` || route === `seq-gap deltas` ? 1 : 0
     // A route notice waits in the waiting timings; a follower's owner notice
-    // arrives during a straddled reservation and waits there. Each notice
-    // that waited may ask the leader once more; nothing else may.
+    // arrives during a straddled reservation and waits there. A notice may
+    // ask the leader once more for each reservation it waited for; nothing
+    // else may. A second reservation can hold the owner's notice again.
     const waitedNotices =
       (noticeWaited &&
         (route === `full-reload` ||
           route === `seq-gap pull` ||
           route === `seq-gap deltas`)) ||
       (straddles && route === `routed subset`)
-        ? 1
+        ? followUp === `owner replies, then the source reserves again`
+          ? 2
+          : 1
         : 0
     const expectedSourceLoads =
       route === `subset` ||
@@ -19238,7 +19242,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )
   // The follower window: a second reservation after the owner replied.
   const reReserveHistories = Array.from({ length: 9 }, (_, commitDelay) =>
-    Array.from({ length: 7 }, (_, reserveDelay): PersistedReadHistory => ({
+    Array.from({ length: 13 }, (_, reserveDelay): PersistedReadHistory => ({
       syncMode: `on-demand`,
       route: `routed subset`,
       operation: `insert`,
