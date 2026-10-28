@@ -3011,7 +3011,8 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Known limit (maintainer decision on PR #2265): Electric publishes a
       transaction's txids as stream evidence before persistence accepts its
       commit, so `awaitTxId` can resolve for a commit that a peer reset or a
-      terminal failure later rejects; the Collection then goes to `error`.
+      terminal failure later rejects; the source then fails, and the
+      Collection's health node records it.
       Known limit (maintainer decision on PR #2265): no fairness rule. A
       hydration released by a commit waits again for a reservation that
       opens before its next mutex turn, so a source that reserves back to
@@ -3055,8 +3056,8 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       checkpoints, except a cleaned-up tab before recovery. It also judges the
       full-snapshot request after resume invalidation. A Collection in
       `error` keeps showing durable rows (maintainer decision on PR #2265),
-      so the tab that resume invalidation put in `error` must show its peers'
-      refetch. Its 290 storm cells pass. Every ordinary storm
+      so the tab whose source resume invalidation failed must show its
+      peers' refetch; it stays `ready` with an error on its health node. Its 290 storm cells pass. Every ordinary storm
       cell fails on `5649a07d4`. Removing Electric's abandon on the `onError`,
       give-up, or signal-abort path fails 12 cells each, and on the resume
       invalidation path 16 cells. Cleanup's abandon mutant survives here,
@@ -3086,8 +3087,10 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       The histories also post a peer `collection:reset` on the tabs'
       coordinator channel; no shipped host sends one yet, so this premise is
       controlled. The reset abandons every open reserved transaction, and
-      Electric's next commit then puts that Collection in `error` until it
-      restarts (maintainer decision on PR #2265). A reset that waits and
+      Electric's next commit then fails the source until the tab restarts
+      (maintainer decision on PR #2265): a ready tab keeps `ready` with an
+      error on its health node, which the histories judge, and a loading tab
+      goes to `error` (#2168). A reset that waits and
       accepts the stale commit fails both campaigns.
       A delivery may also commit only a prefix of what a stream owes, as a
       server answering at an earlier moment does, so lagging commits are

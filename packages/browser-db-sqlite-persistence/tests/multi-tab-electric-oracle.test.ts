@@ -51,12 +51,15 @@
  * Collection status and public rows, and the position from which a
  * recovered tab's new stream starts.
  *
- * Law 3, a Collection in `error` keeps showing durable rows. Authority:
- * maintainer decision on PR #2265. A persisted Collection that a source
- * failure put in `error` still applies its peers' durable commits, so its
- * public rows match the durable rows. This file judges it after resume
- * invalidation and after a failed initial sync; the source must end its
- * reserved transaction for the peers' commits to apply.
+ * Law 3, a Collection whose source failed keeps showing durable rows.
+ * Authority: maintainer decision on PR #2265. A persisted Collection whose
+ * source failed still applies its peers' durable commits, so its public rows
+ * match the durable rows. A failure before the first load completes puts it
+ * in `error`; a later one leaves it `ready` with an error on its health node
+ * (#2168: after readiness, sync failures never change Collection status).
+ * This file judges it after resume invalidation, after a failed initial
+ * sync, and after a reset abandoned the source's transaction; the source
+ * must end its reserved transaction for the peers' commits to apply.
  *
  * Law 4, a Collection status changes only through its own source. Authority:
  * maintainer decision on PR #2265. A peer's durable commit reloads a tab's
@@ -68,7 +71,9 @@
  * loudly. Authority: maintainer decisions on PR #2265. A peer
  * `collection:reset` abandons every reserved transaction that began before
  * it. Electric still holds that transaction, so its next commit rejects and
- * puts the Collection in `error`; the app recovers by restarting the tab.
+ * the source fails: a ready Collection keeps `ready` with an error on its
+ * health node, one that is still loading goes to `error`. The app recovers by
+ * restarting the tab.
  * No shipped host sends `collection:reset` yet, so the histories post it on
  * the tabs' coordinator channel as a peer would (a controlled premise).
  *
@@ -524,8 +529,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // (maintainer decision on #2226). So a stopped tab that is still open
   // applies its peers' refetch from durable rows, as it did before
   // reservations deferred hydrations. Electric then fails no further, except
-  // that resume invalidation puts the Collection in `error`, as Electric
-  // documents; that Collection still shows durable rows (Law 3). The
+  // that resume invalidation fails the source, as Electric documents: the
+  // ready tab keeps `ready` with an error on its health node and still shows
+  // durable rows (Law 3). The
   // application's recovery, cleanup and a restart, then brings
   // the tab to the head. After resume invalidation the restart must request a
   // full snapshot (electric.ts: "a full snapshot is required").
@@ -687,29 +693,33 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }
 
       // Checkpoint 1, every source has delivered or stopped. A rejected
-      // reserved commit puts its Collection in `error`. A stopped tab that is
-      // still open shows its peers' refetch, including one in `error` after
+      // reserved commit would fail its source. A stopped tab that is still
+      // open shows its peers' refetch, including one whose source failed on
       // resume invalidation (Law 3); a cleaned-up tab has no rows. Eager rows
       // must equal the head snapshot; on-demand rows are not judged (above).
-      const stoppedStatus =
-        stop === `cleanup`
-          ? `cleaned-up`
-          : stop === `resume invalidated`
-            ? `error`
-            : `ready`
+      // Resume invalidation comes after the tab was ready, so the tab stays
+      // `ready` and its health node records the source's error (#2168: after
+      // readiness, sync failures never change Collection status).
+      const stoppedStatus = stop === `cleanup` ? `cleaned-up` : `ready`
       const judgesRowsBeforeRestart = (tab: Tab) =>
         syncMode === `eager` && (tab !== stoppedTab || stop !== `cleanup`)
+      const judgesSourceError = (tab: Tab) =>
+        tab === stoppedTab && stop === `resume invalidated`
       const observe = (judgesRows: (tab: Tab) => boolean) =>
         tabs.map((tab) => ({
           tab: tab.tab,
           status: tab.collection.status,
           ...(judgesRows(tab) ? { rows: tab.publicRows() } : {}),
+          ...(judgesSourceError(tab)
+            ? { sourceError: tab.collection.health.error !== null }
+            : {}),
         }))
       expect(observe(judgesRowsBeforeRestart)).toEqual(
         tabs.map((tab) => ({
           tab: tab.tab,
           status: tab === stoppedTab ? stoppedStatus : `ready`,
           ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
+          ...(judgesSourceError(tab) ? { sourceError: true } : {}),
         })),
       )
 
@@ -735,11 +745,13 @@ describe(`multi-tab Electric over one persisted database`, () => {
         if (stop === `resume invalidated`) {
           expect(restartedAt).toEqual({ handle: undefined, offset: `-1` })
         }
+        // The new sync run starts without the retired run's problems.
         expect(observe(() => syncMode === `eager`)).toEqual(
           tabs.map((tab) => ({
             tab: tab.tab,
             status: `ready`,
             ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
+            ...(judgesSourceError(tab) ? { sourceError: false } : {}),
           })),
         )
       }
@@ -774,9 +786,10 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // head.
   //
   // Checkpoint after every step, at host quiescence:
-  // - no Collection is in `error`, and only a tab stopped by cleanup is
-  //   `cleaned-up`; a rejected reserved commit would put its Collection in
-  //   `error`;
+  // - every status is the one the model owes: `error` only for a failed
+  //   first load, `cleaned-up` only for a tab stopped by cleanup; a
+  //   reset-abandoned commit fails the source, which keeps a ready tab
+  //   `ready` with an error on its health node (Law 5);
   // - the durable rows equal the fold;
   // - every open tab with no open transaction shows the durable rows. That
   //   includes a tab whose source stopped: it abandoned its transaction, so
@@ -890,8 +903,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
     stoppedMidTransaction: StreamStop | undefined
     closed: boolean
     // A peer reset abandoned this tab's open transaction. Electric still
-    // holds it, so its next commit rejects and puts the Collection in
-    // `error` (maintainer decision on PR #2265); the app then restarts it.
+    // holds it, so its next commit rejects and the source fails (maintainer
+    // decision on PR #2265, Law 5); the app then restarts it.
     abandonedByReset: boolean
     failedByReset: boolean
   }
@@ -1088,7 +1101,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
       const expectedStatus = (index: number) =>
         models[index]!.stopped === `cleanup` || models[index]!.closed
           ? `cleaned-up`
-          : models[index]!.failedInitialSync || models[index]!.failedByReset
+          : models[index]!.failedInitialSync ||
+              (models[index]!.failedByReset && !models[index]!.ready)
             ? `error`
             : models[index]!.ready
               ? `ready`
@@ -1099,6 +1113,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           tab: tab.tab,
           status: expectedStatus(index),
           ...(judgesRows(index) ? { rows: expectedDurable } : {}),
+          // The reset-abandoned source failed (Law 5).
+          ...(models[index]!.failedByReset ? { sourceError: true } : {}),
         })),
       }
       const actual = {
@@ -1107,6 +1123,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
           tab: tab.tab,
           status: tab.collection.status,
           ...(judgesRows(index) ? { rows: tab.publicRows() } : {}),
+          ...(models[index]!.failedByReset
+            ? { sourceError: tab.collection.health.error !== null }
+            : {}),
         })),
       }
       // fast-check reports only the message, so it carries both sides, plus
