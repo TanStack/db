@@ -11,7 +11,10 @@ import { createCollection } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { createTransaction } from '../src/transactions'
 import { createDeferred } from '../src/deferred'
-import { confirmEverything, createOrders  } from './local-only-direct-write-fixture'
+import {
+  confirmEverything,
+  createOrders,
+} from './local-only-direct-write-fixture'
 import { captureCreatedTransactions } from './utils'
 import type { Orders } from './local-only-direct-write-fixture'
 

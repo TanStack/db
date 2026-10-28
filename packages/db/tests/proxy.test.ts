@@ -12,13 +12,8 @@ import {
   withArrayChangeTracking,
   withChangeTracking,
 } from '../src/proxy'
-import {
-  
-  
-  makeFrozenRow,
-  makeStoredRow
-} from './proxy-native-rows'
-import type {FrozenRow, StoredRow} from './proxy-native-rows';
+import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
+import type { FrozenRow, StoredRow } from './proxy-native-rows'
 
 describe(`Proxy Library`, () => {
   it.each([null, `true`])(
