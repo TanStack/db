@@ -90,7 +90,7 @@ describePowerSync(`PowerSync Integration`, () => {
         table: APP_SCHEMA.props.documents,
       }),
     )
-    onTestFinished(() => collection.cleanup())
+    onTestFinished(() => collection.cleanup({ dependents: true }))
     return collection
   }
 

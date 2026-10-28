@@ -7,4 +7,4 @@ title: PooledLiveQueries
 type PooledLiveQueries = typeof pooledLiveQueries;
 ```
 
-Defined in: [packages/db/src/query/pooled-live-query.ts:733](https://github.com/TanStack/db/blob/main/packages/db/src/query/pooled-live-query.ts#L733)
+Defined in: [packages/db/src/query/pooled-live-query.ts:883](https://github.com/TanStack/db/blob/main/packages/db/src/query/pooled-live-query.ts#L883)

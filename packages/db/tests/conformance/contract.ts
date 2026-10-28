@@ -68,7 +68,7 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection, PooledLiveQueries } from '@tanstack/db'
+import type { Collection, HealthNode, PooledLiveQueries } from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -125,6 +125,21 @@ export interface LaggingSourceHandle<
 }
 
 /**
+ * A source Collection that reaches Collection readiness at once with its
+ * initial rows, then lets the scenario play its sync adapter's reports.
+ */
+export interface SyncSourceHandle<
+  T extends { id: string } = Row,
+> extends SourceHandle<T> {
+  /** The sync adapter reports a problem and keeps trying: a `failureReason`. */
+  reportError: (error: unknown) => void
+  /** The sync adapter stops after readiness: the node's `error`. */
+  fail: (error: unknown) => void
+  /** The sync adapter reports that sync works again. */
+  reportHealthy: () => void
+}
+
+/**
  * The subset of `@tanstack/db` query operators scenarios need, supplied by the
  * driver from the adapter's realm. Grows as engine scenarios are ported.
  */
@@ -155,19 +170,43 @@ export interface ConformanceResult {
   state: ReadonlyMap<any, any> | undefined
   status: string
   isReady: boolean
-  persistedStatus?: string
-  isPersistedReady?: boolean
-  persistedError?: unknown
-  isError: boolean
+  isLoadingError: boolean
+  /** Local storage or an invariant broke: `status` is `crashed`. */
+  isCrashed: boolean
+  /** The data is shown and the health tree has a problem. */
+  isSyncError: boolean
   isEnabled: boolean
+  /**
+   * The hook's health tree, read without normalization so scenarios can judge
+   * object identity. `undefined` only for a disabled query.
+   */
+  health: HealthNode | undefined
 }
 
 /** A query-builder callback, e.g. `(q) => q.from({ items: source.collection })`. */
 export type QueryBuild = (q: any) => any
 
+/** The status flags and health tree of a result, without its rows. */
+export type ConformanceStatusSurface = Pick<
+  ConformanceResult,
+  | `status`
+  | `isReady`
+  | `isLoadingError`
+  | `isCrashed`
+  | `isSyncError`
+  | `health`
+>
+
 /** A mounted live query under test. */
 export interface LiveQueryHandle {
   current: () => ConformanceResult
+  /**
+   * Read the status flags and health tree without reading `data`. Required
+   * when the driver's `errorSurface` is `throw`: reading `data` then throws
+   * for an error boundary, but the hook's flags stay readable, and they must
+   * still tell a loading error (`isLoadingError`) from a crash (`isCrashed`).
+   */
+  statusSurface?: () => ConformanceStatusSurface
   /** The live-query Collection currently backing this result. */
   collection: () => Collection<any, any, any> | null
   /** Let the framework scheduler + core sync settle, then resolve. */
@@ -234,6 +273,10 @@ export interface LiveQueryDriver {
   ) => SourceHandle<T>
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
+  /** Create a ready source whose sync adapter reports the scenario controls. */
+  makeSyncSource: <T extends { id: string }>(
+    initialData: ReadonlyArray<T>,
+  ) => SyncSourceHandle<T>
   /** Create an on-demand source that lags behind its settled subset (keyed by `id`). */
   makeLaggingSource: <T extends { id: string }>() => LaggingSourceHandle<T>
   /**
@@ -244,8 +287,12 @@ export interface LiveQueryDriver {
     build: QueryBuild,
     opts?: { startSync?: boolean; gcTime?: number },
   ) => { collection: Collection<any, any, any> }
-  /** Create a source whose sync fails, driving it into `error` status. */
-  makeErrorSource: () => {
+  /**
+   * Create a source that fails during startup: `fail` calls `fail()` before
+   * the first ready (`status: 'error'`), `crash` throws from its sync function
+   * (`status: 'crashed'`).
+   */
+  makeErrorSource: (kind: `fail` | `crash`) => {
     collection: Collection<any, any, any>
     expectedError: Error
     startup: { returned: true } | { returned: false; error: unknown }
@@ -298,7 +345,7 @@ export interface LiveQueryDriver {
   knownGaps?: ReadonlyArray<never>
   /**
    * How the adapter surfaces a query error (see the `error-status` scenario):
-   * - `flag` (default): a readable `isError`/`status === 'error'` on the result.
+   * - `flag` (default): a readable `isLoadingError`/`status === 'error'` on the result.
    * - `throw`: reading the errored result throws, for a framework error boundary
    *   to catch (e.g. Solid's `createResource`/`<ErrorBoundary>` model).
    */

@@ -574,7 +574,7 @@ describe(`Collection mutation startup oracle`, () => {
         }
         expect(captureError(mutate)).toBe(startupError)
         expect(syncStarts).toBe(1)
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
         expect(
           collection.toArray.map(({ id, value }) => ({ id, value })),
         ).toEqual(initialData)

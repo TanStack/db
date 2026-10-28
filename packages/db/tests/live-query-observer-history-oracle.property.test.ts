@@ -4,10 +4,6 @@ import { DbClient } from '../src/client.js'
 import { createDeferred } from '../src/deferred.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import {
-  PERSISTED_READINESS,
-  waitForPersistedInitialRender,
-} from '../src/persisted-readiness.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { withOracleCleanup } from './utils.js'
 import { createOracleReach } from './oracle-reach.js'
@@ -67,7 +63,7 @@ describe(`observer hydration error timing`, () => {
             getKey: (row) => row.id,
             gcTime: 0,
             sync: {
-              sync: ({ markError }) => {
+              sync: ({ fail: markError }) => {
                 fail = markError
               },
             },
@@ -501,9 +497,9 @@ describe(`observer release failure ownership`, () => {
  * subscribes reentrantly during setup. A failed attempt transfers no physical
  * channel ownership. An already-returned peer record remains a logical owner;
  * the next explicit subscribe reattaches it. This follows subscribe/dispose's
- * handle ownership contract, not persistence's implementation. The capability
- * supplies controlled registration failure; no failing registration transfers
- * an unreturned handle. First-party persisted readiness currently never throws.
+ * handle ownership contract. A throwing `health:change` registration, which
+ * the observer makes before subscribeChanges, supplies controlled early
+ * failure; no failing registration transfers an unreturned handle.
  */
 describe(`observer partial attachment`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
@@ -518,7 +514,7 @@ describe(`observer partial attachment`, () => {
         fc.asyncProperty(
           fc.record({
             mode: fc.constantFrom(`granular` as const, `wholesale` as const),
-            failureAt: fc.constantFrom(`persisted` as const, `sync` as const),
+            failureAt: fc.constantFrom(`health` as const, `sync` as const),
             reenter: fc.boolean(),
             failures: fc.integer({ min: 1, max: 2 }),
           }),
@@ -530,30 +526,10 @@ describe(`observer partial attachment`, () => {
             let peerStop: (() => void) | undefined
             let publish = () => {}
             const peer = vi.fn()
-            let persistedLeases = 0
+            let healthLeases = 0
             const source = createCollection<Row>({
               getKey: (row) => row.id,
               gcTime: 0,
-              ...{
-                [PERSISTED_READINESS]: {
-                  networkTimeoutMs: 0,
-                  getOrStartNetworkDeadline: () => 0,
-                  getSnapshot: () => ({ status: `ready` as const }),
-                  waitForInitialRender: waitForPersistedInitialRender,
-                  subscribe: () => {
-                    if (history.reenter && !reentered) {
-                      reentered = true
-                      peerStop = observer.subscribe(peer)
-                    }
-                    if (failing && history.failureAt === `persisted`)
-                      throw failure
-                    persistedLeases++
-                    return () => {
-                      persistedLeases--
-                    }
-                  },
-                },
-              },
               sync: {
                 sync: ({ begin, write, commit, markReady }) => {
                   if (failing && history.failureAt === `sync`) throw failure
@@ -569,6 +545,23 @@ describe(`observer partial attachment`, () => {
             let statusLeases = 0
             const on = source.on.bind(source)
             source.on = (event, listener) => {
+              if (event === `health:change`) {
+                if (history.reenter && !reentered) {
+                  reentered = true
+                  peerStop = observer.subscribe(peer)
+                }
+                if (failing && history.failureAt === `health`) throw failure
+                const stopHealth = on(event, listener)
+                healthLeases++
+                let active = true
+                return () => {
+                  if (active) {
+                    active = false
+                    healthLeases--
+                    stopHealth()
+                  }
+                }
+              }
               const stop = on(event, listener)
               if (event !== `status:change`) return stop
               statusLeases++
@@ -601,7 +594,7 @@ describe(`observer partial attachment`, () => {
               for (let i = 0; i < history.failures; i++) {
                 expect(() => observer.subscribe(() => {})).toThrow(failure)
                 reach.reach(
-                  history.failureAt === `persisted`
+                  history.failureAt === `health`
                     ? `early-failure`
                     : `sync-failure`,
                 )
@@ -611,14 +604,14 @@ describe(`observer partial attachment`, () => {
                   {
                     statusLeases,
                     layoutLeases,
-                    persistedLeases,
+                    healthLeases,
                     source: source.subscriberCount,
                   },
                   `failure returns no physical ownership`,
                 ).toEqual({
                   statusLeases: 0,
                   layoutLeases: 0,
-                  persistedLeases: 0,
+                  healthLeases: 0,
                   source: 0,
                 })
                 await source.cleanup()
@@ -634,12 +627,12 @@ describe(`observer partial attachment`, () => {
               expect({
                 statusLeases,
                 layoutLeases,
-                persistedLeases,
+                healthLeases,
                 source: source.subscriberCount,
               }).toEqual({
                 statusLeases: 0,
                 layoutLeases: 0,
-                persistedLeases: 0,
+                healthLeases: 0,
                 source: 0,
               })
             }, [
@@ -754,6 +747,7 @@ type RunOptions = {
 | logical subscription identity | same callback subscribed twice | SubscriptionRecord lifecycle | independent teardown/call count | focused `live-query-observer.test.ts` test `treats two subscriptions with the same callback as independent` |
 | readiness/stale ready | unsubscribe/resubscribe and dispose before markReady | status listener -> notify(undefined) | exact ready-notify count | focused `live-query-observer.test.ts` tests `fires the ready notify once...`, `emits exactly one post-bootstrap...`; stale-ready calibration below |
 | hydration handoff | server seed followed by live readiness | DbClient hydrate -> syncHydrationState/handoffHydrationSeed | atomic visible rows/batch at handoff | focused `live-query-observer.test.ts` tests `shows a hydrated result...` and `delivers an atomic hydrated-to-live diff...` |
+| hydration under terminal statuses | seed crossed with `error`, `crashed`, `cleaned-up`, restart, and attach order | DbClient hydrate -> getSnapshot/notify/attach | status, flags, rows, and announced changes after each step | generated `live-query-observer-hydration-oracle.property.test.ts` |
 | stale server data | server snapshot arrives after live readiness | client event -> syncHydrationState/markLiveResultAuthoritative | live rows remain visible and stale snapshot is consumed | focused `live-query-observer.test.ts` test `ignores a server snapshot that arrives after browser sync is ready` |
 | errors | live/status or streamed error before/after hydration authority | status/client event -> getError/getSnapshot | error identity, status, and retained rows | focused `live-query-observer.test.ts` tests `publishes a live error...`, `exposes a streamed query error...`, and `ignores a server failure...` |
 | source authority | abandoned read, consumed seed, or later observer | syncHydrationState -> markLiveResultAuthoritative/_consumeLiveQueryResult | which server/live result remains authoritative | focused `live-query-observer.test.ts` tests `does not consume...abandoned render`, `does not replay...later observer`, and the stale-server tests |

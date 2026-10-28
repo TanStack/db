@@ -17,12 +17,6 @@ Defined in: [useLiveInfiniteQuery.ts:60](https://github.com/TanStack/db/blob/mai
 data: InferResultType<TContext>;
 ```
 
-### error
-
-```ts
-error: unknown;
-```
-
 ### fetchNextPage()
 
 ```ts

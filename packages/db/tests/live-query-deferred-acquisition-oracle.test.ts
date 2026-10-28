@@ -615,7 +615,7 @@ describe(`pooled live-query deferred acquisition`, () => {
       } finally {
         observer?.dispose()
         await view?.cleanup()
-        await source.cleanup()
+        await source.cleanup({ dependents: true })
         await client?.cleanup()
       }
     },
@@ -679,7 +679,7 @@ describe(`pooled live-query deferred acquisition`, () => {
         } finally {
           subscription?.unsubscribe()
           await view?.cleanup()
-          await source.cleanup()
+          await source.cleanup({ dependents: true })
         }
       })
     }
@@ -756,7 +756,7 @@ describe(`preload answered by a DbClient stream`, () => {
  * The same options can be retried, but the failed source Collection remains
  * in error until explicitly restarted. That retry must report the source error
  * rather than wait on the failed query's former pending stream. A controlled
- * later `markError` crosses the asynchronous failure cut: the pending preload
+ * later `fail` crosses the asynchronous failure cut: the pending preload
  * rejects, its stream disappears, and a healthy replacement of the same
  * query hash can publish its own row while the peer source remains ready. A
  * failed stream has no reusable result, so a replacement observer may attach
@@ -780,9 +780,9 @@ describe(`DbClient preload releases independent source starts`, () => {
       getKey: (row: { id: string }) => row.id,
       startSync: true,
       sync: {
-        sync: ({ markError }) => {
+        sync: ({ fail }) => {
           firstStarts++
-          failFirst = () => markError(failure)
+          failFirst = () => fail(failure)
         },
       },
     }))
@@ -840,7 +840,8 @@ describe(`DbClient preload releases independent source starts`, () => {
       ).toHaveLength(1)
 
       failFirst()
-      await expect(pending).rejects.toThrow(/entered error state/)
+      // The live query reports its source's own failure.
+      await expect(pending).rejects.toThrow(/late source startup failure/)
       expect(
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
@@ -922,7 +923,7 @@ describe(`DbClient preload releases independent source starts`, () => {
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
       await expect(client.preloadLiveQuery(options)).rejects.toThrow(
-        /entered error state/,
+        /source start failed/,
       )
       expect(starts).toBe(1)
       expect(
@@ -1268,7 +1269,8 @@ describe(`a subscriber that outlives cleanup`, () => {
     try {
       outer.startSyncImmediate()
       await settle()
-      await inner.cleanup()
+      // Drive internal teardown, which bypasses cleanup admission.
+      await inner._lifecycle.cleanup()
       inner.startSyncImmediate()
       await settle()
       expect(counts.starts, `source sync-run starts`).toBe(0)
@@ -1359,7 +1361,7 @@ describe(`a source whose start throws on resumption`, () => {
       )
       // The failed start puts the source and its live query in error, so the
       // supported recovery is cleanup and a new sync run, not a retry in place.
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       await live.cleanup()
       await flaky.cleanup()
       // A new preload after cleanup starts a new sync run and must resume.
@@ -1514,7 +1516,10 @@ describe(`a request that arrives while a source subscription is created`, () => 
  * extends the primary demand oracle at its previously omitted failure cut.
  * The grammar crosses callback return/throw, independent/owned start, and an
  * optional error cause. Removing timing confuses another reader's failure
- * with ours; removing outcome confuses markError with throw. No second start
+ * with ours; removing outcome confuses fail() (a loading error, status
+ * `error`) with a throwing sync function (a crash, status `crashed`). An
+ * independent reader's earlier start can leave either status before the
+ * release, so both are declared reach states. No second start
  * without cleanup is legal. The shared judgment also feeds the React driver.
  */
 describe(`render sync-start handoff error provenance`, () => {
@@ -1522,7 +1527,8 @@ describe(`render sync-start handoff error provenance`, () => {
     it(`reports only its own thrown starts (${campaign})`, async () => {
       const reach = createOracleReach(`start-handoff`, [
         `prior-error`,
-        `marked-error`,
+        `prior-crash`,
+        `failed`,
         `own-throw`,
         `undefined-cause`,
         `healthy`,
@@ -1532,7 +1538,7 @@ describe(`render sync-start handoff error provenance`, () => {
           fc.record({
             outcome: fc.constantFrom(
               `ready` as const,
-              `mark-error` as const,
+              `fail` as const,
               `throw` as const,
             ),
             timing: fc.constantFrom(
@@ -1553,10 +1559,10 @@ describe(`render sync-start handoff error provenance`, () => {
               getKey: (row) => row.id,
               gcTime: 0,
               sync: {
-                sync: ({ markReady, markError }) => {
+                sync: ({ markReady, fail }) => {
                   starts++
                   if (history.outcome === `throw`) throw failure
-                  if (history.outcome === `mark-error`) markError(failure)
+                  if (history.outcome === `fail`) fail(failure)
                   else markReady()
                 },
               },
@@ -1572,7 +1578,8 @@ describe(`render sync-start handoff error provenance`, () => {
                 }
               }
               if (source.status === `error`) reach.reach(`prior-error`)
-              if (history.outcome === `mark-error`) reach.reach(`marked-error`)
+              if (source.status === `crashed`) reach.reach(`prior-crash`)
+              if (history.outcome === `fail`) reach.reach(`failed`)
               if (expected.throws) reach.reach(`own-throw`)
               if (history.cause === `undefined`) reach.reach(`undefined-cause`)
               if (history.outcome === `ready`) reach.reach(`healthy`)

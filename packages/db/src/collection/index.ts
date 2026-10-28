@@ -3,10 +3,12 @@ import { safeRandomUUID } from '../utils/uuid'
 import { collectionOptionsClaim } from '../collection-options.js'
 import {
   CollectionConfigurationError,
+  CollectionHasSubscribersError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
 import { codedMessage, devBuild } from '../error-message'
+import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
@@ -17,6 +19,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import { buildHealthTree } from './health-tree.js'
 import type { SortedMap } from '../SortedMap.js'
 import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
@@ -30,8 +33,10 @@ import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
+  CollectionDependent,
   CollectionStatus,
   CurrentStateAsChangesOptions,
+  HealthNode,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -50,6 +55,7 @@ import type { WithVirtualProps } from '../virtual-props.js'
 import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+export { findProblems } from './health-tree.js'
 
 export type CollectionBase<TKey extends string | number, TOutput> = Pick<
   SortedMap<TKey, TOutput>,
@@ -552,6 +558,21 @@ export class CollectionImpl<
    */
   public get status(): CollectionStatus {
     return this._lifecycle.status
+  }
+
+  /**
+   * The health tree for this Collection and every Collection it depends on.
+   * A base Collection's tree is one node. It always has the same shape for a
+   * given query, so apps can parse it. After the first ready, sync problems
+   * appear here and the rows stay.
+   */
+  public get health(): HealthNode {
+    return buildHealthTree(this)
+  }
+
+  /** @internal A Collection this one depends on changed its health tree. */
+  public _emitHealthChange(): void {
+    this._events.emitHealthChange()
   }
 
   /**
@@ -1269,15 +1290,90 @@ export class CollectionImpl<
   }
 
   /**
+   * Start a new sync run while everything visible stays: the rows, the
+   * status, and the current error, with `reloading` on this Collection's
+   * health node. The new run's writes apply on the kept rows; its snapshot
+   * (`begin({ snapshot: true })`) or truncate replaces them at once. The
+   * reload completes when that replacement applies, or at the new run's
+   * `markReady()`, and the node drops the old run's problems; a `status` of
+   * `error` becomes `ready` at `markReady()`. If the new run fails first, the
+   * rows and status stay and the node shows the new error. On a live query, it reloads each of its sources that has an
+   * `error`, and then the query itself if its own node has an `error`: a
+   * failed first load or a failed request for more data.
+   *
+   * Returns the promise of a reload in flight when called again. Rejects on a
+   * `crashed` Collection: a crash is not recovered in place. Clean the
+   * Collection up with its dependents to start it fresh.
+   */
+  public reload(): Promise<void> {
+    const builder = getBuilderFromConfig(this.config)
+    return builder ? builder.reload(this) : this._sync.reload()
+  }
+
+  /**
+   * Live queries, Effects, and direct subscriptions that read this
+   * Collection. `cleanup()` refuses while a live query or Effect reads it.
+   */
+  public get subscribers(): ReadonlyArray<CollectionDependent> {
+    // A live query or Effect can hold several subscriptions, one per alias.
+    const dependents = new Set<CollectionDependent>()
+    for (const subscription of this._changes.changeSubscriptions) {
+      dependents.add(
+        subscription.owner ?? {
+          kind: `subscription`,
+          active: true,
+          end: () => {
+            subscription.unsubscribe()
+            return Promise.resolve()
+          },
+        },
+      )
+    }
+    return [...dependents]
+  }
+
+  /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    * Cleanup callbacks must not restart this collection or call its preload().
    * Wait until cleanup completes before starting a new sync run. If adapter
    * cleanup rejects, this promise rejects after the Collection reaches its
    * final cleaned-up state.
+   *
+   * Rejects with `CollectionHasSubscribersError` while an active live query
+   * (one that still has a subscriber) or an Effect reads this Collection,
+   * because its readers would lose their data. A live query nothing reads
+   * any more ends with this Collection's cleanup start. With
+   * `{ dependents: true }`, it first cleans up each live query (and its own
+   * dependents) and disposes each Effect. A direct subscription survives
+   * cleanup and asks for data again when a new sync run starts.
    */
-  public cleanup(): Promise<void> {
-    return this._lifecycle.cleanup()
+  public cleanup(options?: { dependents?: boolean }): Promise<void> {
+    const dependents = this.subscribers.filter(
+      (dependent) => dependent.kind !== `subscription`,
+    )
+    if (!options?.dependents) {
+      const active = dependents.filter((dependent) => dependent.active)
+      if (active.length > 0) {
+        return Promise.reject(
+          new CollectionHasSubscribersError(this.id, active.length),
+        )
+      }
+      return this._lifecycle.cleanup()
+    }
+    // Each dependent's cleanup starts synchronously, before this Collection's
+    // own cleanup start, so none of them sees the source end under it. A
+    // dependent's throw becomes its rejection, so this cleanup still starts,
+    // and the promise settles only after everything has, with the first
+    // failure, this Collection's own first.
+    const ended = dependents.map(async (dependent) => dependent.end())
+    return Promise.allSettled([this._lifecycle.cleanup(), ...ended]).then(
+      (results) => {
+        for (const result of results) {
+          if (result.status === `rejected`) throw result.reason
+        }
+      },
+    )
   }
 }
 

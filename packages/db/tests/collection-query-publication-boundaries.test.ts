@@ -184,11 +184,11 @@ it.each([`depth`, `cycle`] as const)(
           : `Cannot hash cyclic structural values`,
       )
       expect(source.has(1)).toBe(true)
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       sync.begin()
       sync.write({ type: `insert`, value: { id: 2, nested: {} } })
       sync.commit()
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       expect(live.toArray).toEqual(before)
     } finally {
       await live.cleanup()

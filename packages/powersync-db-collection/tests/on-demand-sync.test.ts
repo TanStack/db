@@ -84,6 +84,63 @@ describe(`On-Demand Sync Mode`, () => {
     `)
   }
 
+  // Receiving witness for the on-demand reload law (maintainer decisions
+  // F19 and snapshot-api §8): the reload keeps the rows, core replays the
+  // live query's demand through the new run, and the replayed load writes
+  // `update` for a key the Collection holds, so it never inserts a held key.
+  // Core does not sweep after a reload (issue #2269); a row goes only when
+  // the adapter deletes it. While the reload runs the table changes one row,
+  // deletes one, and leaves the others untouched; the new run's tracking
+  // sees the delete. Afterwards the rows equal the table's matching rows:
+  // the untouched rows survive, the edit shows, and the deleted row is gone.
+  // Limit: a row deleted while no trigger tracked the table stays.
+  it(`an unchanged row survives an on-demand reload`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      }),
+    )
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ product: collection })
+          .where(({ product }) => eq(product.category, `electronics`)),
+    })
+    const rows = () =>
+      new Map(collection.toArray.map((row) => [row.id, row.name]))
+    const table = async () =>
+      new Map(
+        (
+          await db.getAll<{ id: string; name: string }>(
+            `SELECT id, name FROM products WHERE category = 'electronics'`,
+          )
+        ).map((row) => [row.id, row.name]),
+      )
+    try {
+      await live.preload()
+      await vi.waitFor(async () => expect(rows()).toEqual(await table()))
+      expect(rows().size).toBe(3)
+
+      const reload = collection.reload()
+      await db.execute(`UPDATE products SET name = 'Edited' WHERE name = ?`, [
+        `Product A`,
+      ])
+      await db.execute(`DELETE FROM products WHERE name = ?`, [`Product B`])
+      await reload
+      await vi.waitFor(async () => expect(rows()).toEqual(await table()))
+      // The reach of this case: an untouched row was kept and survives.
+      expect([...rows().values()]).toContain(`Product D`)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      await live.cleanup()
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves complete public rows across overlapping demand ownership and release`, async () => {
     type Demand = `electronics` | `clothing` | `expensive`
     type Row = {
@@ -574,7 +631,8 @@ describe(`On-Demand Sync Mode`, () => {
         expect(publications).toEqual([])
 
         if (outcome === `cleanup`) {
-          await collection.cleanup()
+          // Internal teardown that bypasses cleanup admission.
+          await collection._lifecycle.cleanup()
           const message =
             `Source collection '${collection.id}' was manually cleaned up while live query '${electronics.id}' depends on it. ` +
             `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
@@ -619,7 +677,7 @@ describe(`On-Demand Sync Mode`, () => {
             expect.objectContaining({ name: `AssertionError` }),
           )
           expect(collection.status).toBe(`cleaned-up`)
-          expect(electronics.status).toBe(`error`)
+          expect(electronics.status).toBe(`crashed`)
         }
       }, [
         resolvePersistence,
@@ -2697,7 +2755,9 @@ describe(`On-Demand Sync Mode`, () => {
         write,
         commit,
         markReady: vi.fn(),
-        markError: vi.fn(),
+        fail: vi.fn(),
+        reportError: vi.fn(),
+        reportHealthy: vi.fn(),
         truncate: vi.fn(),
       } as never)
       const loadSubset =
@@ -2744,6 +2804,55 @@ describe(`On-Demand Sync Mode`, () => {
       } finally {
         firstHook.resolve()
         sync.cleanup?.()
+      }
+    })
+
+    // An abort ends the load (snapshot-api §8): core stops listening at
+    // once, and the adapter must stop and write no rows for it. The load's
+    // subset hook is held, the caller aborts, then the hook resolves.
+    // Checkpoints: the Collection holds no row and no trigger tracks the
+    // subset, while a later load of the same subset loads its rows.
+    it(`an aborted load writes no rows and its late result changes nothing`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const hook = pDefer<void>()
+      const onLoadSubset = vi
+        .fn()
+        .mockReturnValueOnce(hook.promise)
+        .mockResolvedValue(undefined)
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset,
+        }),
+      )
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+      try {
+        await collection.preload()
+        const abort = new AbortController()
+        const load = Promise.resolve(
+          collection._sync.loadSubset({
+            where: categoryEquals(`electronics`),
+            signal: abort.signal,
+          }),
+        ).catch(() => undefined)
+        await vi.waitFor(() => expect(onLoadSubset).toHaveBeenCalledOnce())
+        abort.abort()
+        hook.resolve()
+        await load
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(collection.size).toBe(0)
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+
+        await collection._sync.loadSubset({
+          where: categoryEquals(`electronics`),
+        })
+        expect(collection.size).toBe(3)
+      } finally {
+        hook.resolve()
+        await collection.cleanup()
       }
     })
 
@@ -3246,7 +3355,13 @@ describe(`On-Demand Sync Mode`, () => {
             collection._sync.loadSubset({ where: categoryEquals(`clothing`) }),
           ),
         ).rejects.toBe(failure)
-        expect(collection.status).toBe(`error`)
+        // After the first ready, failures don't change status. Instead, they're
+        // reported as a failure reason. Status stays ready; data stays available.
+        expect(collection.status).toBe(`ready`)
+        expect(collection.health.hasErrors).toBe(true)
+        expect(collection.health.failureReason?.message).toMatch(
+          `trigger installation failed`,
+        )
       } finally {
         await collection.cleanup()
       }
@@ -3276,7 +3391,14 @@ describe(`On-Demand Sync Mode`, () => {
             .spyOn(db.triggers, `createDiffTrigger`)
             .mockRejectedValueOnce(new Error(`release rebuild failed`))
           collection._sync.unloadSubset(first)
-          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          // The outage keeps the rows and the ready status. The adapter retries
+          // the rebuild, so it reports a failure reason.
+          await vi.waitFor(() =>
+            expect(collection.health.failureReason).toMatchObject({
+              message: `release rebuild failed`,
+            }),
+          )
+          expect(collection.status).toBe(`ready`)
           if (change === `delete` || change === `release-last`) {
             await db.execute(`DELETE FROM products WHERE id = 'retained'`)
           } else if (change === `predicate exit`) {
@@ -3290,7 +3412,11 @@ describe(`On-Demand Sync Mode`, () => {
             await vi.waitFor(() =>
               expect(trigger.mock.calls.length).toBeGreaterThan(1),
             )
-          await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+          // A rebuild whose baseline applied reports healthy again.
+          await vi.waitFor(() =>
+            expect(collection.health.hasErrors).toBe(false),
+          )
+          expect(collection.status).toBe(`ready`)
           expect([...collection.keys()]).toEqual(
             change === `unchanged` ? [`retained`] : [],
           )

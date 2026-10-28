@@ -3,7 +3,7 @@ id: FnSelectWithGroupByError
 title: FnSelectWithGroupByError
 ---
 
-Defined in: [packages/db/src/errors.ts:716](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L716)
+Defined in: [packages/db/src/errors.ts:746](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L746)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:716](https://github.com/TanStack/db/blob/
 new FnSelectWithGroupByError(): FnSelectWithGroupByError;
 ```
 
-Defined in: [packages/db/src/errors.ts:717](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L717)
+Defined in: [packages/db/src/errors.ts:747](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L747)
 
 #### Returns
 

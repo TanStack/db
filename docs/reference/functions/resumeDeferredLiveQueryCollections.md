@@ -4,10 +4,10 @@ title: resumeDeferredLiveQueryCollections
 ---
 
 ```ts
-function resumeDeferredLiveQueryCollections(collections): void;
+function resumeDeferredLiveQueryCollections(collections, reportSourceErrors): void;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L116)
+Defined in: [packages/db/src/live-query-options.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L117)
 
 Release every deferred source, then report the first startup failure.
 
@@ -16,6 +16,10 @@ Release every deferred source, then report the first startup failure.
 ### collections
 
 [`DeferredLiveQueryCollections`](../type-aliases/DeferredLiveQueryCollections.md)
+
+### reportSourceErrors
+
+`boolean` = `false`
 
 ## Returns
 

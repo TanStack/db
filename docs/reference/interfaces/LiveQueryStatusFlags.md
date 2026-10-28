@@ -15,17 +15,19 @@ The derived boolean status flags every adapter exposes for a query.
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L56)
+Defined in: [packages/db/src/live-query-primitives.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L59)
 
 ***
 
-### isError
+### isCrashed
 
 ```ts
-isError: boolean;
+isCrashed: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L55)
+Defined in: [packages/db/src/live-query-primitives.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L58)
+
+Local storage or an invariant broke. `status` is `crashed`.
 
 ***
 
@@ -46,6 +48,18 @@ isLoading: boolean;
 ```
 
 Defined in: [packages/db/src/live-query-primitives.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L52)
+
+***
+
+### isLoadingError
+
+```ts
+isLoadingError: boolean;
+```
+
+Defined in: [packages/db/src/live-query-primitives.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L56)
+
+The first load failed: there is nothing to show. `status` is `error`.
 
 ***
 

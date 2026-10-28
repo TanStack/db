@@ -12,21 +12,21 @@ describe(`preload retention`, () => {
 
   function makeCollection(startSync = false, gcTime = 10) {
     let ready!: () => void
-    let fail!: (error: Error) => void
+    let failSync!: (error: Error) => void
     const cleanup = vi.fn()
     const collection = createCollection<{ id: number }>({
       getKey: (row) => row.id,
       gcTime,
       startSync,
       sync: {
-        sync: ({ begin, write, commit, markReady, markError }) => {
+        sync: ({ begin, write, commit, markReady, fail }) => {
           ready = () => {
             begin()
             write({ type: `insert`, value: { id: 1 } })
             commit()
             markReady()
           }
-          fail = markError
+          failSync = fail
           return cleanup
         },
       },
@@ -35,7 +35,7 @@ describe(`preload retention`, () => {
     return {
       collection,
       ready: () => ready(),
-      fail: (error: Error) => fail(error),
+      fail: (error: Error) => failSync(error),
       cleanup,
     }
   }

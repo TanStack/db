@@ -80,6 +80,8 @@ const { data, isEnabled } = useLiveQuery((q) =>
 )
 ```
 
+`isLoadingError` means the first load failed and there is nothing to show; offer `collection.reload()`. `isCrashed` means local storage broke; only `cleanup({ dependents: true })` and a fresh start recover. After the query is ready, sync problems never change `status`: read `isSyncError` or the `health` tree to show stale-data warnings. There is no `isError`.
+
 ### useLiveInfiniteQuery
 
 ```tsx
@@ -93,7 +95,7 @@ const { data, pages, fetchNextPage, hasNextPage, isFetchingNextPage } =
   )
 ```
 
-The query must include `.orderBy()`. `fetchNextPage()` resolves when the page request settles; failures appear in `error`. `getNextPageParam` is rejected.
+The query must include `.orderBy()`. `fetchNextPage()` resolves when the page request settles; a failed page load does not reject or change `status`; it appears as a request error in the returned `health` tree. `getNextPageParam` is rejected.
 
 ## Preact-Specific Patterns
 

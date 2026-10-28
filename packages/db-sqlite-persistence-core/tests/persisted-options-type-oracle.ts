@@ -390,7 +390,8 @@ function collectionSource(shape: Shape, cell: Cell): string {
 /**
  * Query's documented utility capability model is independent of adapter output.
  * Direct write signatures vary with generated rows/keys; state fields and the
- * closed namespace follow the public QueryCollectionUtils reference. Refetch
+ * closed namespace follow the public QueryCollectionUtils reference, whose
+ * failures live in `collection.health` rather than in error utilities. Refetch
  * compares its exact parameter tuple and a non-any Promise-of-array envelope.
  * A supplemental transparency relation preserves the full payload across the
  * wrapper; QueryObserverResult internals have no independent model here.
@@ -412,11 +413,7 @@ function querySource(shape: Shape): string {
       writeDelete: (keys: Key | Array<Key>) => Promise<void>;
       writeUpsert: (data: Partial<Output> | Array<Partial<Output>>) => Promise<void>;
       writeBatch: (callback: () => void) => Promise<void>;
-      clearError: () => Promise<void>;
       refetch: [opts?: { throwOnError?: boolean }];
-      lastError: unknown;
-      isError: boolean;
-      errorCount: number;
       isFetching: boolean;
       isRefetching: boolean;
       isLoading: boolean;
