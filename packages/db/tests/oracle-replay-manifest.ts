@@ -811,6 +811,14 @@ function directReplayTestName(property: string): string | undefined {
   return replayTestNames.get(property)
 }
 
+/**
+ * The Vitest config for a directory outside packages/ whose config does not
+ * have a default name. Its owners replay with `--config`.
+ */
+const outsideReplayConfigs = new Map([
+  [`scripts`, `oracle-scripts.vitest.config.mjs`],
+])
+
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
   ...registeredOracleProperties,
 ].map((property) => {
@@ -827,9 +835,14 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
             ? `statistics-only`
             : `assertion`
   const outsidePackages = file?.startsWith(`packages/../`) === true
+  // An owner outside packages/ replays from its own directory, with the
+  // Vitest config that includes it there.
+  const outsidePath = file?.slice(`packages/../`.length)
   const cwd = outsidePackages
-    ? `scripts/eslint-plugin-oracle`
+    ? outsidePath!.slice(0, outsidePath!.lastIndexOf(`/`))
     : file?.split(`/`).slice(0, 2).join(`/`)
+  const outsideConfig =
+    cwd === undefined ? undefined : outsideReplayConfigs.get(cwd)
   return {
     property,
     status,
@@ -845,7 +858,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           : status === `seed-replay`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
             : outsidePackages
-              ? `node --import tsx ../../packages/db/tests/oracle-replay.ts ${file.split(`/`).pop()}`
+              ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
               : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
