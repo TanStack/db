@@ -1635,8 +1635,8 @@ class PersistedCollectionRuntime<
   // run's cache (decisions 9 and 11). A source truncate names no keys, so
   // after one every stored row may be this run's. A notice that requires a
   // full reload names none either, so every stored row may be a peer's write
-  // until this tab knows the key again: a storage read judges its row, or
-  // this tab's source writes it.
+  // until this tab's source writes the key; a storage read records each row
+  // it finds changed as a source's write.
   private runWrittenKeys = new Set<TKey>()
   // Row metadata is a separate object (D5): keys whose metadata a source
   // wrote in this run, a delete included.
@@ -3510,15 +3510,6 @@ class PersistedCollectionRuntime<
     return statuses
   }
 
-  /** Once a storage read has judged its rows, this tab knows their keys. */
-  private commitStorageRead(
-    rows: ReadonlyArray<{ key: TKey }>,
-  ): SyncAppliedReceipt {
-    const receipt = this.syncControls.commit?.() ?? true
-    for (const row of rows) this.keysKnownSincePeerWrites.add(row.key)
-    return receipt
-  }
-
   private withInternalApply<TResult>(task: () => TResult): TResult {
     if (this.internalApplyDepth++ === 0) this.internalApplyKeys = new Set()
     try {
@@ -3921,7 +3912,7 @@ class PersistedCollectionRuntime<
       for (const row of readRows) this.writeStoredRow(row, held.has(row.key))
       if (collectionMetadata)
         this.applyCollectionMetadataSnapshot(collectionMetadata)
-      return this.commitStorageRead(readRows)
+      return this.syncControls.commit?.() ?? true
     })
   }
 
@@ -4073,7 +4064,7 @@ class PersistedCollectionRuntime<
       }
 
       this.applyCollectionMetadataSnapshot(collectionMetadata)
-      return this.commitStorageRead(rows)
+      return this.syncControls.commit?.() ?? true
     })
   }
 
@@ -5424,8 +5415,8 @@ class PersistedCollectionRuntime<
 
   /**
    * Reloads storage after notices that named no keys: any stored row or
-   * metadata this tab has not read since may be a source's write
-   * (decisions 13 and 15).
+   * metadata of a key this tab has not written since may be a source's
+   * write (decisions 13 and 15).
    */
   private async reloadUnknownWritesUnsafe(
     adapter: HydrationPersistenceAdapter,
