@@ -5,7 +5,7 @@ id: migrate-to-1-0-rc
 
 This guide covers the API changes in `1.0.0-rc.1` and the changes shipped since
 `@tanstack/db@0.9.2` in September 2026 that may require changes to an app. It
-includes changes merged through October 27, 2026. For the earlier `DbClient`
+includes changes merged through October 28, 2026. For the earlier `DbClient`
 and SSR migration, see the
 [SSR and Hydration guide](./ssr.md#migration-guide).
 
@@ -398,7 +398,43 @@ first load; a failed restore crashes the Collection. The default deadline is
 three seconds, and it does not stop sync.
 Without `initialRender`, restored rows do not make the Collection ready before
 its sync adapter does. Suspense and ordinary hooks now follow the same status.
+A storage reload triggered by another tab's commit keeps this tab's status:
+it cannot mark a loading source ready or recover its failed first load. Use
+`reload()` to retry that failure.
 See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore).
+
+### Enable network-first for on-demand persisted queries
+
+`initialRender: { strategy: 'network-first', networkTimeoutMs }` now also works
+with `syncMode: 'on-demand'` and Electric's `syncMode: 'progressive'`. These
+configurations previously threw `InvalidPersistedCollectionConfigError`.
+
+On-demand fallback uses persisted demand coverage: an earlier online load of
+the exact filter, order, and window must have settled and saved its rows in
+SQLite. A later load of that demand can settle from SQLite after its deadline
+or when its network load fails. Coverage can include a confirmed empty result.
+This settles the query's load; it does not change the source Collection's own
+status. Network loading continues, and later results update the visible rows.
+
+Check these limits when enabling the option:
+
+- Rows in SQLite alone do not establish coverage. An overlapping query or a
+  different order or window does not cover a demand that never loaded online.
+- A source truncate, snapshot transaction, scoped recovery, or cache-generation
+  rotation clears coverage. Loads during the rest of a scoped-recovery sync
+  run cannot use or record it. Released or obsolete loads record none.
+- Coverage requires at least the recorded row count to remain in SQLite.
+  Limited ordered windows require the same rows. Deletion or cache retention
+  can therefore require another online load.
+- `refetch: true` loads always wait for the network. Only the default
+  single-process coordinator supports on-demand fallback; multi-tab
+  coordinators such as `BrowserCollectionCoordinator` still wait for the
+  network.
+
+A joined query waits for every eager source to become ready and every
+on-demand load it needs to settle. Coverage proves earlier completeness, not
+current server data. See
+[On-demand Collections offline](./sqlite-persistence.md#on-demand-collections-offline).
 
 ## Prepare SSR data explicitly
 
@@ -451,6 +487,21 @@ This also applies to hooks that receive `client` explicitly. Omit it for a root
 created with `mount()`. It preserves each reader's server snapshot through
 hydration, even when browser data has already changed. See
 [Svelte SSR](./ssr.md#svelte).
+
+### Treat hydrated rows as provisional seeds
+
+`DbClient` hydration and `initialData` supply provisional rows. A source's
+first insert for a seeded key replaces that seed, including its row metadata;
+an insert without metadata clears the seed's metadata. An update merges over
+the seed unless the adapter uses `rowUpdateMode: 'full'`.
+
+A later hydration seed cannot overwrite source-written row data or metadata,
+or restore a key the source deleted or truncated. Row data and row metadata
+are tracked separately, so a seed may still supply metadata when the source
+wrote only the row data. For row data or metadata the source has not written,
+the latest seed wins. Persisted cache rows also remain provisional to later
+`DbClient` seeds, including after a storage reload from another tab. See
+[Initial Data](./ssr.md#initial-data).
 
 ## Changes since `@tanstack/db@0.9.2`
 
@@ -531,6 +582,14 @@ remove the old package dependency. See the
   `DuplicateKeySyncError`. A partial on-demand `loadSubset` result must never
   claim to be a full snapshot. Honor its `signal`: aborted loads no longer hold
   readiness, and core ignores their later promise results.
+- Sync metadata reads now include the source's own committed writes that an
+  optimistic transaction still holds, followed by its open transactions.
+  This applies to `metadata.row.get`, `metadata.collection.get`, and
+  `metadata.collection.list`. Do not treat these reads as proof that the
+  writes are publicly visible; commit receipts still establish application.
+- With `rowUpdateMode: 'full'`, supply a complete replacement row. Persistence
+  now replaces the stored row too, so fields omitted from an update no longer
+  return after a restart. Use `partial` for updates that should merge fields.
 
 See [For sync adapter authors](./error-handling.md#for-sync-adapter-authors)
 for an example and the full reload contract.
@@ -557,6 +616,20 @@ for an example and the full reload contract.
   utilities with those names. `persistedCollectionOptions` now throws
   `InvalidPersistedCollectionConfigError` for them, even when inherited or set
   to `undefined`. Collections with a `sync` option keep their adapter utilities.
+
+Custom sync adapters using `metadata.persistence.reserveCommitTurn()` must
+finish every reserved sync transaction. Every persisted hydration now waits
+for that transaction, including reloads from peer commit notices and recovery
+after a gap in notification sequence numbers. Commit it, or abandon it by
+calling `commit()` with an already-aborted signal when the source stops for
+good. Abandonment releases waiting hydrations too. A peer reset can instead
+abandon an older reservation; its commit rejects with
+`SyncTransactionAbortedError`.
+
+Finish any needed `hydrateBaseline()` before reserving the commit turn. Calling
+it with a reservation open now rejects, and awaiting an earlier baseline while
+holding a reservation can deadlock. Built-in Electric handling already ends
+its open transaction when its stream stops for good.
 
 Browser SQLite now ships `wa-sqlite.wasm` separately from its OPFS worker.
 Deploy both emitted assets. Vite, webpack 5, and Next.js include them
