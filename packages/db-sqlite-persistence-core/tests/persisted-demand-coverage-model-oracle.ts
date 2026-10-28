@@ -1,4 +1,3 @@
-import { getLoadSubsetDemandKey } from '@tanstack/db'
 import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
 
 /**
@@ -13,7 +12,15 @@ import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
  * ended it since; SQLite still holds at least as many of the demand's rows
  * as it recorded; and a limited load still holds the same rows. A covered
  * load settles from SQLite once its wait has passed or its upstream load has
- * failed. A load with `refetch: true` is never covered. Any other load waits
+ * failed. A load with `refetch: true` is never covered. A snapshot
+ * transaction replaces every synced row, as a truncate at its start does, so
+ * it ends coverage too (the glossary's "snapshot transaction"). A load that
+ * settles after core aborted it records nothing: its later outcome decides
+ * nothing (the glossary's "abort"). Scoped recovery ends coverage and does
+ * not certify the new generation for offline reuse
+ * (`docs/collections/electric-collection.md`), so for the rest of that sync
+ * run no load records coverage and none settles from SQLite; the persisted
+ * subset restore publishes no rows then. Any other load waits
  * for its upstream load, and fails with it. A query is ready when every load
  * it sent has settled; a query over an eager and an on-demand source is ready
  * on the same condition for the on-demand loads, once the eager source has
@@ -29,13 +36,15 @@ import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
  *
  * ## The record a driver supplies
  *
- * - The source log of every session so far, in order: the rows each source
- *   wrote or deleted, its truncates, the ends of a persisted cache generation
- *   (a cache rotation or a schema reset), and each load it settled or
- *   failed. A settled load is current when no truncate or generation change
- *   came between the source receiving it and settling it, and obsolete
- *   otherwise. A driver that injected a failed coverage read marks the
- *   settled load whose coverage read failed.
+ * - The source log of every session so far, in order: the start of each
+ *   sync run, the rows each source wrote or deleted, its truncates and
+ *   snapshot transactions, the start of scoped recovery, the ends of a
+ *   persisted cache generation (a schema reset), and each load it settled or
+ *   failed. A settled load is current when no truncate, snapshot, or
+ *   generation change came between the source receiving it and settling it,
+ *   and obsolete otherwise; it is aborted when core aborted its signal before
+ *   the source settled it. A driver that injected a failed coverage read
+ *   marks the settled load whose coverage read failed.
  * - For each live query at the checkpoint: what it reads (`QuerySpec`), the
  *   loads the source received for it in this session, and what it showed.
  *   A driver that injected a failed coverage check marks the query.
@@ -62,6 +71,12 @@ import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
  *   adapter's `ORDER BY ..., key ASC` does.
  * - A record holds a row count and, for a limited load, its row keys. The
  *   production record holds the same facts; the model computes them itself.
+ * - Two loads have the same demand when their request data asks for the same
+ *   rows: the same filter, order, limit, cursor, and offset, with an offset
+ *   of 0 the same as none. The model compares that request data itself; it
+ *   does not use core's demand key.
+ * - Scoped recovery combines two production facts: it ends the persisted
+ *   cache generation, and it leaves the rest of its sync run uncertified.
  * - Coverage is judged with the records at the checkpoint, not at the instant
  *   the load checked. No supplied history records a demand while another load
  *   of it waits to check.
@@ -83,11 +98,18 @@ export type SourceEvent = InCollection &
     | { type: `rows`; rows: ReadonlyArray<readonly [string, RowState]> }
     | { type: `delete`; id: string }
     | { type: `truncate` }
+    | {
+        type: `snapshot`
+        rows: ReadonlyArray<readonly [string, RowState]>
+      }
     | { type: `generation ends` }
+    | { type: `scoped recovery starts` }
+    | { type: `sync run starts` }
     | {
         type: `settled`
         load: LoadSubsetOptions
         current: boolean
+        aborted?: boolean
         coverage?: `recorded` | `read fails`
       }
     | { type: `failed`; load: LoadSubsetOptions }
@@ -127,6 +149,10 @@ export type CoverageReach =
   | `uncovered offline`
   | `covered but short of rows`
   | `coverage ended by a truncate`
+  | `coverage ended by a snapshot`
+  | `aborted load settled`
+  | `demand settled only by an aborted load`
+  | `covered during scoped recovery`
   | `obsolete load settled`
   | `row moved between demands`
   | `coverage recorded twice`
@@ -272,10 +298,16 @@ function readQuery(
     : ids.slice(offset, offset + spec.limit)
 }
 
-// The demand identity the law uses: two loads cover each other only with the
-// same key.
+// The demand identity the law uses: two loads cover each other only when
+// their request data asks for the same rows. An offset of 0 skips no rows.
 const demandKey = (load: LoadSubsetOptions): string =>
-  String(getLoadSubsetDemandKey(load))
+  JSON.stringify([
+    load.where,
+    load.orderBy,
+    load.limit,
+    load.offset || undefined,
+    load.cursor,
+  ])
 const rowsKey = (ids: ReadonlyArray<string>) => JSON.stringify([...ids].sort())
 const isWindow = (spec: QuerySpec) =>
   !(`join` in spec) && spec.limit !== undefined
@@ -301,32 +333,60 @@ export function expectedObservations(
     `${collection} ${demandKey(load)}`
   const settledByUpstream = new Set<LoadSubsetOptions>()
   const failed = new Set<LoadSubsetOptions>()
+  // The Collections whose current sync run is in scoped recovery, and the
+  // demands that settled online during it, which record nothing.
+  const recovering = new Set<string>()
+  const settledWhileRecovering = new Set<string>()
+  // Demands whose only settlement since their coverage ended was aborted.
+  const settledOnlyAborted = new Set<string>()
+  const writeRows = (
+    collection: string,
+    rows: ReadonlyArray<readonly [string, RowState]>,
+  ) => {
+    for (const [id, state] of rows) {
+      const before = rowsIn(collection).get(id)
+      if (before !== undefined && before.group !== state.group) {
+        reach(`row moved between demands`)
+      }
+      rowsIn(collection).set(id, state)
+    }
+  }
+  // A truncate, a snapshot, and a generation change empty SQLite and end
+  // every coverage record of the Collection.
+  const endCoverage = (collection: string, by: CoverageReach) => {
+    if ([...records.keys()].some((key) => key.startsWith(`${collection} `))) {
+      reach(by)
+    }
+    rowsIn(collection).clear()
+    for (const keys of [records, settledOnlyAborted]) {
+      for (const key of [...keys.keys()]) {
+        if (key.startsWith(`${collection} `)) keys.delete(key)
+      }
+    }
+  }
   for (const event of record.events) {
     const collection = event.collection ?? `source`
     switch (event.type) {
+      case `sync run starts`:
+        recovering.delete(collection)
+        break
       case `rows`:
-        for (const [id, state] of event.rows) {
-          const before = rowsIn(collection).get(id)
-          if (before !== undefined && before.group !== state.group) {
-            reach(`row moved between demands`)
-          }
-          rowsIn(collection).set(id, state)
-        }
+        writeRows(collection, event.rows)
         break
       case `delete`:
         rowsIn(collection).delete(event.id)
         break
       case `truncate`:
       case `generation ends`:
-        if (
-          [...records.keys()].some((key) => key.startsWith(`${collection} `))
-        ) {
-          reach(`coverage ended by a truncate`)
-        }
-        rowsIn(collection).clear()
-        for (const key of [...records.keys()]) {
-          if (key.startsWith(`${collection} `)) records.delete(key)
-        }
+        endCoverage(collection, `coverage ended by a truncate`)
+        break
+      case `scoped recovery starts`:
+        endCoverage(collection, `coverage ended by a truncate`)
+        recovering.add(collection)
+        break
+      case `snapshot`:
+        endCoverage(collection, `coverage ended by a snapshot`)
+        writeRows(collection, event.rows)
         break
       case `settled`: {
         settledByUpstream.add(event.load)
@@ -334,8 +394,18 @@ export function expectedObservations(
           reach(`obsolete load settled`)
           break
         }
-        if (event.coverage === `read fails`) break
         const key = recordKey(collection, event.load)
+        if (event.aborted) {
+          reach(`aborted load settled`)
+          if (!records.has(key)) settledOnlyAborted.add(key)
+          break
+        }
+        settledOnlyAborted.delete(key)
+        if (recovering.has(collection)) {
+          settledWhileRecovering.add(key)
+          break
+        }
+        if (event.coverage === `read fails`) break
         if (records.has(key)) reach(`coverage recorded twice`)
         const rows = readLoad(event.load, rowsIn(collection))
         records.set(key, {
@@ -353,8 +423,19 @@ export function expectedObservations(
     const collection = loadsOf(query.spec)
     const covered = (load: LoadSubsetOptions): boolean => {
       if (load.refetch === true || query.checkFails) return false
+      if (recovering.has(collection)) {
+        if (settledWhileRecovering.has(recordKey(collection, load))) {
+          reach(`covered during scoped recovery`)
+        }
+        return false
+      }
       const stored = records.get(recordKey(collection, load))
-      if (stored === undefined) return false
+      if (stored === undefined) {
+        if (settledOnlyAborted.has(recordKey(collection, load))) {
+          reach(`demand settled only by an aborted load`)
+        }
+        return false
+      }
       const rows = readLoad(load, rowsIn(collection))
       if (rows.length < stored.count) {
         reach(`covered but short of rows`)

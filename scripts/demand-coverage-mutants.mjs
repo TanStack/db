@@ -82,7 +82,7 @@ const MUTANTS = [
   {
     id: 'P07',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
-    find: 'if (!record || !isCurrent()) return',
+    find: 'if (!record || !current()) return',
     replace: 'if (!record) return',
     rationale:
       'recordCoverage: no check after the coverage read that a reset may have begun',
@@ -90,7 +90,7 @@ const MUTANTS = [
   {
     id: 'P08',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
-    find: 'if (!isCurrent()) return\n        const record = await runtime.nextCoverageRecord(demand)',
+    find: 'if (!current()) return\n        const record = await runtime.nextCoverageRecord(demand)',
     replace: 'const record = await runtime.nextCoverageRecord(demand)',
     rationale:
       'recordCoverage: early isCurrent check removed (should be EQUIVALENT: second check still guards)',
@@ -306,8 +306,8 @@ const MUTANTS = [
   {
     id: 'P35',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
-    find: '        for (const { key } of wrappedParams.metadata?.collection.list(\n            DEMAND_COVERAGE_PREFIX,\n          ) ?? []) {',
-    replace: '        for (const { key } of [] as Array<{ key: string }>) {',
+    find: '          endDemandCoverage(openTransaction)\n          openTransaction.truncate = true',
+    replace: '          openTransaction.truncate = true',
     rationale: 'source truncate does not delete demand coverage records',
   },
   {
@@ -324,6 +324,41 @@ const MUTANTS = [
     find: '  options.limit === undefined\n    ? undefined\n    : JSON.stringify',
     replace: '  JSON.stringify',
     rationale: 'every demand records its row keys, not only a window',
+  },
+  // The coverage key. The model judges demand identity from the request
+  // data itself, so a key that merges two pages is visible to it. (Mutating
+  // core's own demand key is not distinguishable here: core's subset
+  // deduplication uses the same key, so the merged key changes which loads
+  // core sends, and the model reads those loads from the record.)
+  {
+    id: 'K01',
+    file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
+    find: '`${DEMAND_COVERAGE_PREFIX}${getLoadSubsetDemandKey(options)}`',
+    replace:
+      '`${DEMAND_COVERAGE_PREFIX}${getLoadSubsetDemandKey({ ...options, cursor: undefined, offset: undefined })}`',
+    rationale: 'coverage keyed without cursor and offset: pages share coverage',
+  },
+  {
+    id: 'P40',
+    file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
+    find: '          if (options?.snapshot) endDemandCoverage(transaction)\n',
+    replace: '',
+    rationale: 'a snapshot transaction keeps demand coverage',
+  },
+  {
+    id: 'P41',
+    file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
+    find: 'const current = () => isCurrent() && !demand.signal?.aborted',
+    replace: 'const current = isCurrent',
+    rationale:
+      'a load that core aborted records coverage when its source resolves',
+  },
+  {
+    id: 'P42',
+    file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
+    find: '    if (this.scopedRecovery) return undefined\n',
+    replace: '',
+    rationale: 'scoped recovery reads, records, and settles coverage',
   },
   {
     id: 'P39',

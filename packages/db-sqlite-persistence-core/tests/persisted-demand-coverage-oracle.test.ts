@@ -27,6 +27,7 @@ import {
 import { coverageViolations } from './persisted-demand-coverage-model-oracle.js'
 import type { Row, Upstream } from './helpers/demand-coverage-driver.js'
 import type {
+  CoverageReach,
   CoverageRecord,
   QueryObservation,
   QuerySpec,
@@ -90,9 +91,11 @@ import type { SQLiteDriver } from '../src/index.js'
  * `persisted-demand-coverage-supplemental.test.ts`.
  *
  * Limits: Electric, Query DB, React, and Solid have receiving witnesses in
- * their packages, not here. Resets are a source truncate, scoped recovery,
- * a schema reset, a refetch, and cache-claim expiry; Electric's must-refetch
- * is in its witness. There is no coordinator other than the default
+ * their packages, not here. Resets are a source truncate, scoped recovery
+ * (also followed by an online load in the same sync run), a schema reset, a
+ * refetch, and cache-claim expiry; Electric's must-refetch is in its
+ * witness, and snapshot transactions and aborted loads that resolve are in
+ * the generated campaign. There is no coordinator other than the default
  * single-process one (multi-tab is out of scope, maintainer decision
  * 2026-10-26), and no native host. A failure before the persisted subset
  * restore publishes is not a legal history (Part 1). Every block is a
@@ -924,6 +927,12 @@ async function runLifecycle(): Promise<Array<CoverageRecord>> {
 //   load waits for the network. Both are premises the driver injects and
 //   marks in the record.
 //
+// - Recovery reload: after scoped recovery, D loads online again and its
+//   query is released; then D is asked for once more while the network is
+//   silent. Scoped recovery leaves the rest of its sync run uncertified, and
+//   its persisted subset restore publishes no rows, so the online load
+//   records nothing and the last load must wait for the network.
+//
 // An empty covered demand isolates the generation check in the rotation
 // history: no row count can end its coverage, so only the generation does.
 // ===========================================================================
@@ -1061,6 +1070,69 @@ async function runSessionReset(
     () => subscription?.unsubscribe(),
     () => first.cleanup(),
     () => second?.cleanup(),
+    () => collection.cleanup(),
+  ])
+}
+
+async function runRecoveryReload(): Promise<Array<CoverageRecord>> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const session1 = await coverD(driver)
+  useFakeClock()
+  const { collection, upstream } = onDemandSource(
+    new SQLiteCorePersistenceAdapter({ driver }),
+    0,
+  )
+  const queries: Array<ReturnType<typeof filterQuery>> = []
+  const ask = async () => {
+    const query = filterQuery(collection, `a`)
+    queries.push(query)
+    const calls = upstream.calls.length
+    void query.preload().catch(() => undefined)
+    await untilUpstreamCalled(upstream, calls + 1)
+    await drain()
+    return query
+  }
+  return withCleanup(async () => {
+    // A first load of D starts the sync run, and so lets recovery start.
+    const first = await ask()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    await first.cleanup()
+    await drain()
+    await upstream.startScopedRecovery()
+    await drain()
+    // The online load during scoped recovery.
+    const online = await ask()
+    await upstream.answer([A1, A2])
+    await drain()
+    // Positive witness: the online load settled.
+    expect(online.status).toBe(`ready`)
+    await online.cleanup()
+    await drain()
+    const callsBefore = upstream.calls.length
+    const last = await ask()
+    await vi.advanceTimersByTimeAsync(1)
+    await drain()
+    const record: CoverageRecord = {
+      events: [...session1.events, ...upstream.events],
+      queries: {
+        last: {
+          spec: D,
+          sent: upstream.calls.slice(callsBefore),
+          observed: observed(last),
+        },
+      },
+      upstream: `never answers`,
+      waitPassed: waitPassedAt(upstream, 0),
+    }
+    // Positive witness: the model saw D settle during scoped recovery.
+    const reached = new Set<CoverageReach>()
+    coverageViolations(record, (state) => reached.add(state))
+    expect(reached.has(`covered during scoped recovery`)).toBe(true)
+    return [record]
+  }, [
+    () => vi.useRealTimers(),
+    ...[0, 1, 2].map((index) => () => queries[index]?.cleanup()),
     () => collection.cleanup(),
   ])
 }
@@ -2498,6 +2570,7 @@ describe(`persisted demand coverage oracle`, () => {
     [`a rotation of an empty demand`, () => runSessionReset(`rotation`, [])],
     [`a refetch`, () => runSessionReset(`refetch`)],
     [`a refetch of an empty demand`, () => runSessionReset(`refetch`, [])],
+    [`a load after scoped recovery reloaded the demand`, runRecoveryReload],
     [`a schema reset`, runSchemaReset],
     [
       `a cache claim that expires before the coverage record`,

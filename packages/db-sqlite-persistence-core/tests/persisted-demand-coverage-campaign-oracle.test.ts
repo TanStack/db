@@ -77,11 +77,19 @@ import type { SQLiteDriver } from '../src/index.js'
  *   without a load.
  * - `delete id`: the source deletes a row, without a load.
  * - `truncate`: the source truncates. Active demands load again.
+ * - `snapshot`: the source commits a snapshot transaction of every row it
+ *   holds, which replaces every synced row as a truncate at its start does.
  *
- * Each history also chooses whether the source honors abort. One that
- * ignores it keeps a load that the wrapper aborted at a truncate waiting, so
- * that obsolete load can still settle; this is the case in which an obsolete
- * load could wrongly record coverage.
+ * Each history also chooses how the source treats an aborted load:
+ *
+ * - `rejects`: it drops the load and rejects it.
+ * - `ignores`: it keeps the load waiting, so a load that the wrapper aborted
+ *   at a truncate can still settle. That obsolete load could wrongly record
+ *   coverage.
+ * - `stops and resolves`: it stops installing rows and resolves the load at
+ *   once, as the abort contract allows ("async adapters should stop before
+ *   installing more request-scoped rows"). The load is over for core, so it
+ *   must record nothing, even though it fulfilled.
  *
  * Session 2 reopens the same database offline and reads all three demands.
  * Each history also chooses its wait, 0 or 1000 ms, and whether its source
@@ -94,8 +102,10 @@ import type { SQLiteDriver } from '../src/index.js'
  * holds and each demand's recorded row count. A source write reaches SQLite
  * whether or not a load asked for it. A load is obsolete when a truncate came
  * between the source receiving it and settling it (law 6 in
- * `packages/db/src/query/live/ARCHITECTURE.md`); it records nothing. A
- * truncate also ends every coverage record and empties SQLite. A current load
+ * `packages/db/src/query/live/ARCHITECTURE.md`); it records nothing. A load
+ * that core aborted before the source settled it records nothing either. A
+ * truncate or a snapshot also ends every coverage record and empties SQLite;
+ * the snapshot's rows then reach SQLite. A current load
  * that settles records how many rows SQLite holds for its exact demand, and
  * for a limited load which rows. A failed or released load records nothing.
  * Offline, a query is ready exactly when every load it sent in session 2 is
@@ -116,10 +126,14 @@ import type { SQLiteDriver } from '../src/index.js'
  * because the offline source never calls `markReady()`.
  *
  * Declared reach (ORC-015): histories in which a demand is covered offline,
- * uncovered offline, covered but short of rows, ended by a truncate, settled
- * through an obsolete load, moved between demands, and recorded twice; a
- * window covered offline, a window that holds other rows than it recorded,
- * and a window whose tie-boundary load is uncovered. The fixed and random
+ * uncovered offline, covered but short of rows, ended by a truncate, ended
+ * by a snapshot, settled through an obsolete load, settled through an
+ * aborted load, settled only by an aborted load (so its session-2 check
+ * separates "records nothing" from "records coverage"), moved between
+ * demands, and recorded twice; a window covered offline, a window that holds
+ * other rows than it recorded, and a window whose tie-boundary load is
+ * uncovered. Teardown drops every waiting load before it aborts them, so
+ * only a release during the commands settles an aborted load. The fixed and random
  * campaigns run the same property with 40 histories each.
  *
  * Parts 2 and 3 sweep a storage failure over every adapter call and a
@@ -128,7 +142,8 @@ import type { SQLiteDriver } from '../src/index.js'
  * Limits: a session-1 wait long enough that no session-1 load settles from
  * SQLite except on failure; real timers in session 1, so checkpoints are
  * coarse; no cursor or offset loads (page moves are in the fixed oracle);
- * one process and the default coordinator; `node:sqlite` only.
+ * one process and the default coordinator; `node:sqlite` only; no scoped
+ * recovery (Part 2b of the fixed oracle owns it).
  */
 
 type Group = `a` | `b`
@@ -152,11 +167,13 @@ type Command =
   | { type: `write`; id: Id; group: Group; rank: Rank }
   | { type: `delete`; id: Id }
   | { type: `truncate` }
+  | { type: `snapshot` }
+
+// What the source does with a load that core aborts.
+type AbortBehavior = `rejects` | `ignores` | `stops and resolves`
 
 type History = {
-  // A source that honors abort drops a load that the wrapper aborts; one
-  // that ignores it may still settle that load later.
-  honorsAbort: boolean
+  abort: AbortBehavior
   // The offline session's wait and how its source answers.
   offline: { waitMs: 0 | 1000; upstream: OfflineUpstream }
   initial: Partial<Record<Id, RowState>>
@@ -226,7 +243,7 @@ function campaignSource(
   driver: SQLiteDriver,
   online: boolean | OfflineUpstream,
   waitMs: number,
-  honorsAbort = true,
+  abort: AbortBehavior = `rejects`,
 ) {
   const pending = new Map<Demand, Array<Pending>>()
   // When the source received each load. The wrapper starts a load before it
@@ -240,6 +257,7 @@ function campaignSource(
       type: `settled`,
       load: load.options,
       current: load.epoch === epoch,
+      ...(load.options.signal?.aborted ? { aborted: true } : {}),
     })
     load.resolve()
   }
@@ -269,12 +287,15 @@ function campaignSource(
                 options.signal?.addEventListener(
                   `abort`,
                   () => {
-                    if (!honorsAbort) return
+                    // A load the driver already dropped is not the source's.
+                    const waiting = pending.get(demand) ?? []
+                    if (abort === `ignores` || !waiting.includes(entry)) return
                     pending.set(
                       demand,
                       (pending.get(demand) ?? []).filter((e) => e !== entry),
                     )
-                    reject(new DOMException(`aborted`, `AbortError`))
+                    if (abort === `stops and resolves`) settled(entry)
+                    else reject(new DOMException(`aborted`, `AbortError`))
                   },
                   { once: true },
                 )
@@ -343,6 +364,22 @@ function campaignSource(
       await commit((sync) => sync.truncate())
       events.push({ type: `truncate` })
     },
+    // Every row the source holds, in one snapshot transaction.
+    async snapshot(rows: ReadonlyArray<readonly [Id, RowState]>) {
+      written.clear()
+      epoch++
+      const sync = params!
+      sync.begin({ snapshot: true })
+      for (const [id, state] of rows) {
+        sync.write({
+          type: `insert`,
+          value: rowFor(id, state.group, state.rank),
+        })
+        written.add(id)
+      }
+      await sync.commit()
+      events.push({ type: `snapshot`, rows })
+    },
   }
 }
 
@@ -362,7 +399,7 @@ async function runHistory(
   // Session 1 is online. Its wait is long, so a load settles from SQLite
   // only when its upstream load fails.
   {
-    const source = campaignSource(driver, true, 60_000, history.honorsAbort)
+    const source = campaignSource(driver, true, 60_000, history.abort)
     events = source.events
     const queries = new Map<Demand, ReturnType<typeof queryFor>>()
     // A reacquired load, or a window's tie-boundary load, reaches the source
@@ -448,9 +485,17 @@ async function runHistory(
             }
             break
           }
+          case `snapshot`: {
+            await source.snapshot([...truth])
+            await settle()
+            break
+          }
         }
       }
       await settle(50)
+      // Teardown aborts every waiting load; the source drops them first, so
+      // only a release during the commands settles an aborted load.
+      for (const demand of DEMANDS) source.forget(demand)
     }, [
       ...DEMANDS.map((demand) => () => queries.get(demand)?.cleanup()),
       () => source.collection.cleanup(),
@@ -526,8 +571,13 @@ async function runHistory(
 //   coverage: session 2 waits.
 // - A failed coverage check in session 2 (a read after the restore
 //   published) proves nothing: session 2 waits and does not fail.
+// - A failed coverage write in session 1 (a metadata-only commit after the
+//   answer) is a terminal local persistence failure, before or after its
+//   effect, so the Collection crashes, as for any durable write (the
+//   glossary's "crash"). Whether the load itself fulfilled no longer decides
+//   anything.
 // Other failures, such as a startup read, a claim, or an acknowledgement
-// lost after the write applied, are held only to safety.
+// lost after a row write applied, are held only to safety.
 // ---------------------------------------------------------------------------
 
 type FailureTiming = `before effect` | `after effect`
@@ -689,10 +739,22 @@ function checkFault(
     reach(`coverage check failed`)
     expect(observed.session2.status).toBe(`loading`)
   }
+  if (
+    failed.session === 1 &&
+    failed.method === `applyCommittedTx` &&
+    !failed.rows &&
+    failed.late
+  ) {
+    reach(`coverage write failed`)
+    expect(observed.session1.status).toBe(`crashed`)
+  }
 }
 
 type FaultReach =
-  `coverage read failed` | `row write failed` | `coverage check failed`
+  | `coverage read failed`
+  | `row write failed`
+  | `coverage check failed`
+  | `coverage write failed`
 
 // ---------------------------------------------------------------------------
 // Part 3: swept releases
@@ -832,6 +894,7 @@ const commandArb = fc.oneof(
     weight: 2,
   },
   { arbitrary: fc.constant({ type: `truncate` as const }), weight: 1 },
+  { arbitrary: fc.constant({ type: `snapshot` as const }), weight: 1 },
 ) as fc.Arbitrary<Command>
 
 // A full load cycle answers twice, so that a window's tie-boundary load,
@@ -894,6 +957,23 @@ const stepArb: fc.Arbitrary<ReadonlyArray<Command>> = fc.oneof(
   },
   { arbitrary: demandArb.map(cycle), weight: 2 },
   {
+    // Cover a demand, then replace every row with a snapshot.
+    arbitrary: demandArb.map((demand): ReadonlyArray<Command> => [
+      ...cycle(demand),
+      { type: `snapshot` },
+    ]),
+    weight: 1,
+  },
+  {
+    // Release a demand while its load waits at the source. A source that
+    // stops and resolves then settles an aborted load.
+    arbitrary: demandArb.map((demand): ReadonlyArray<Command> => [
+      { type: `start`, demand },
+      { type: `release`, demand },
+    ]),
+    weight: 3,
+  },
+  {
     arbitrary: demandArb.map((demand): ReadonlyArray<Command> => [
       { type: `start`, demand },
       { type: `truncate` },
@@ -911,7 +991,11 @@ const stepArb: fc.Arbitrary<ReadonlyArray<Command>> = fc.oneof(
   },
 )
 const historyArb: fc.Arbitrary<History> = fc.record({
-  honorsAbort: fc.boolean(),
+  abort: fc.constantFrom<AbortBehavior>(
+    `rejects`,
+    `ignores`,
+    `stops and resolves`,
+  ),
   offline: fc.record({
     waitMs: fc.constantFrom<0 | 1000>(0, 1000),
     upstream: fc.constantFrom<OfflineUpstream>(
@@ -948,7 +1032,10 @@ const REACH_STATES: ReadonlyArray<CoverageReach> = [
   `uncovered offline`,
   `covered but short of rows`,
   `coverage ended by a truncate`,
+  `coverage ended by a snapshot`,
   `obsolete load settled`,
+  `aborted load settled`,
+  `demand settled only by an aborted load`,
   `row moved between demands`,
   `coverage recorded twice`,
   `window covered offline`,
@@ -983,7 +1070,12 @@ describe(`persisted demand coverage over generated histories`, () => {
     expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
     const reach = createOracleReach<FaultReach>(
       `persisted demand coverage storage failures`,
-      [`coverage read failed`, `row write failed`, `coverage check failed`],
+      [
+        `coverage read failed`,
+        `row write failed`,
+        `coverage check failed`,
+        `coverage write failed`,
+      ],
     )
     for (const session of [1, 2] as const) {
       const count = baseline.calls.filter((c) => c.session === session).length

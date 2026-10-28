@@ -3175,6 +3175,15 @@ by an under-full window, which keep the tie-boundary key. Each failed on the
 parent production code. A window check that accepts a superset of the
 recorded keys, and a builder that drops its error-state check without
 notifying settlement, each fail named cases.
+A sixth round (the 2026-10-28 review) closed three more holes, each RED on
+the parent production code. The campaign adds a `snapshot` command (a
+snapshot transaction ends coverage, as a truncate does) and a source that
+stops and resolves an aborted load (a load that core aborted records
+nothing); Part 2b adds a load after scoped recovery reloaded the demand (no
+load settles or records during the rest of that sync run). The shared model
+now judges demand identity from the request data itself instead of core's
+demand key. The storage sweep also checks that a failed coverage write
+crashes the Collection.
 
 Remaining limits: coverage relies on the source committing a load's rows
 before it settles that load (law 7); an unordered demand that loses one row
@@ -3192,9 +3201,12 @@ Its model replays the source's own log of row writes, deletes, truncates,
 and settled loads, so it does not predict when the wrapper reacquires a
 demand. A fixed and a random campaign of 40 histories each interleave two
 unordered demands with load starts, answers, failures, releases, live
-writes and deletes, truncates, and a source that may ignore abort; declared
-reach covers an obsolete load that settles, coverage recorded twice, a row
-moved between demands, and a covered demand short of rows. Part 2 fails each
+writes and deletes, truncates, snapshot transactions, and a source that
+rejects, ignores, or stops and resolves an aborted load; declared reach
+covers an obsolete load that settles, an aborted load that settles, a demand
+settled only by an aborted load, coverage ended by a snapshot, coverage
+recorded twice, a row moved between demands, and a covered demand short of
+rows. Part 2 fails each
 adapter call of a covered history once, before or after its effect, in
 either session: safety holds for every call, a failed coverage read keeps
 the load ready, and a failed coverage check waits. Part 3 releases the

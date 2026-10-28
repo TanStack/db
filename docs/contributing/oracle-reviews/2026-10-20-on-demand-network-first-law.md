@@ -230,6 +230,18 @@ holds after a rotation in the same sync run does not count. A crash between
 writing the rows and writing the coverage must not leave coverage without rows.
 Coverage also ends when the restore returns fewer rows than it recorded.
 
+Update, 2026-10-28 (high review of the head after #2168): three consequences
+of existing terms are now enforced.
+
+- A snapshot transaction replaces every synced row, as a truncate at its
+  start does (glossary, "snapshot transaction"), so it ends coverage too.
+- A load that core aborted decides nothing, even if its source resolves it
+  (glossary, "abort"), so it records no coverage.
+- Scoped recovery ends coverage and does not certify the new generation for
+  offline reuse (`docs/collections/electric-collection.md`). Its persisted
+  subset restore publishes no rows, so coverage cannot count during the
+  rest of that sync run: no load settles from SQLite and none records.
+
 ### Limits
 
 - **Coverage lifetime after release.** After a demand is released, its source

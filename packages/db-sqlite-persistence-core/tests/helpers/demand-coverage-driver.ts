@@ -101,6 +101,8 @@ export type Upstream = {
   answer: (rows: ReadonlyArray<Row>) => Promise<void>
   fail: (error: unknown) => void
   truncate: () => Promise<void>
+  // Commits a snapshot transaction of these rows: it replaces every row.
+  snapshot: (rows: ReadonlyArray<Row>) => Promise<void>
   // When set, each later load rejects as soon as it is called.
   rejectAtOnce: boolean
   // Writes rows without settling any load.
@@ -113,9 +115,10 @@ export type Upstream = {
   // Updates rows in one sync transaction.
   update: (rows: ReadonlyArray<Row>) => Promise<void>
   // The source's own log of what it did, for the shared judgment in
-  // `tests/persisted-demand-coverage-model-oracle.ts`. A load is current
-  // when no truncate or generation change came between the source receiving
-  // it and settling it.
+  // `tests/persisted-demand-coverage-model-oracle.ts`. Each source is one
+  // sync run. A load is current when no truncate, snapshot, or generation
+  // change came between the source receiving it and settling it, and aborted
+  // when core aborted its signal before the source settled it.
   events: Array<SourceEvent>
   // When the source received each load (`Date.now()`, so the fake clock
   // where a history installs one).
@@ -148,17 +151,19 @@ export function onDemandSource(
       type: `settled`,
       load: load.options,
       current: load.epoch === epoch,
+      ...(load.options.signal?.aborted ? { aborted: true } : {}),
     })
     load.resolve()
   }
   let write: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   let truncate: (() => unknown) | undefined
+  let snapshot: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   let startScopedRecovery: (() => Promise<void>) | undefined
   let remove: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   let update: ((rows: ReadonlyArray<Row>) => unknown) | undefined
   const upstream: Upstream = {
     calls: [],
-    events: [],
+    events: [{ type: `sync run starts` }],
     arrivedAt: new Map(),
     visibleAtCall: [],
     rejectAtOnce: false,
@@ -179,6 +184,14 @@ export function onDemandSource(
       await truncate?.()
       upstream.events.push({ type: `truncate` })
     },
+    snapshot: async (rows) => {
+      epoch++
+      await snapshot?.(rows)
+      upstream.events.push({
+        type: `snapshot`,
+        rows: rows.map((row) => [row.id, { group: row.group, rank: row.rank }]),
+      })
+    },
     write: async (rows) => {
       await write?.(rows)
       upstream.events.push(rowEvent(rows))
@@ -187,10 +200,15 @@ export function onDemandSource(
       const load = pending.shift()
       if (load) settle(load)
     },
+    // Production starts recovery synchronously, so the log records it first.
     startScopedRecovery: async () => {
       epoch++
-      await (startScopedRecovery?.() ?? Promise.resolve())
-      upstream.events.push({ type: `generation ends` })
+      // Premise: the sync run is active, so the recovery really starts.
+      if (!startScopedRecovery) {
+        throw new Error(`scoped recovery needs an active sync run`)
+      }
+      upstream.events.push({ type: `scoped recovery starts` })
+      await startScopedRecovery()
     },
     remove: async (rows) => {
       await remove?.(rows)
@@ -222,9 +240,16 @@ export function onDemandSource(
             params.truncate()
             return params.commit()
           }
-          startScopedRecovery = () =>
-            params.metadata?.persistence?.startScopedRecovery?.() ??
-            Promise.resolve()
+          snapshot = (rows) => {
+            params.begin({ snapshot: true })
+            for (const value of rows) params.write({ type: `insert`, value })
+            return params.commit()
+          }
+          startScopedRecovery = () => {
+            const start = params.metadata?.persistence?.startScopedRecovery
+            if (!start) throw new Error(`the wrapper offers no scoped recovery`)
+            return start()
+          }
           remove = (rows) => {
             params.begin()
             for (const value of rows) params.write({ type: `delete`, value })

@@ -3021,10 +3021,13 @@ class PersistedCollectionRuntime<
   // The read waits behind every source transaction already committed, so it
   // sees their rows durably. Coverage is bookkeeping: a failed read proves
   // nothing and returns undefined, and the load keeps its own outcome. A
-  // read under an expired cache claim also starts claim recovery.
+  // read under an expired cache claim also starts claim recovery. Scoped
+  // recovery leaves the rest of its sync run uncertified, and its persisted
+  // subset restore publishes no rows, so no read proves coverage then.
   private async readDemandRows(
     options: LoadSubsetOptions,
   ): Promise<Array<{ key: string | number }> | undefined> {
+    if (this.scopedRecovery) return undefined
     try {
       return await this.applyMutex.run(() =>
         this.persistence.adapter.loadSubset(this.storageTargetFor(), options, {
@@ -6165,6 +6168,15 @@ function createWrappedSyncConfig<
       }
       const reportUpstreamError = (error: unknown) =>
         afterStartup(() => failUpstream(error))
+      // Persisted demand coverage ends with the rows it described, at a
+      // truncate and at a snapshot transaction, which replaces every row.
+      const endDemandCoverage = (transaction: OpenSyncTransaction<T, TKey>) => {
+        for (const { key } of wrappedParams.metadata?.collection.list(
+          DEMAND_COVERAGE_PREFIX,
+        ) ?? []) {
+          transaction.collectionMetadataWrites.set(key, { type: `delete` })
+        }
+      }
       const wrappedParams = {
         ...params,
         fail: reportUpstreamError,
@@ -6219,6 +6231,7 @@ function createWrappedSyncConfig<
                 : undefined,
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
+          if (options?.snapshot) endDemandCoverage(transaction)
           transactionStack.push(transaction)
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
@@ -6407,14 +6420,7 @@ function createWrappedSyncConfig<
           // Callers (for example electric resume/reset handling) may stage
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
-          // Persisted demand coverage ends with the rows it described.
-          for (const { key } of wrappedParams.metadata?.collection.list(
-            DEMAND_COVERAGE_PREFIX,
-          ) ?? []) {
-            openTransaction.collectionMetadataWrites.set(key, {
-              type: `delete`,
-            })
-          }
+          endDemandCoverage(openTransaction)
           openTransaction.truncate = true
           openTransaction.truncateOptions = options ?? {}
         },
@@ -6650,13 +6656,16 @@ function createWrappedSyncConfig<
       // Only a current load records coverage. A reset makes the record
       // obsolete before its commit could be aborted, so a current record
       // fails only with a durable failure that already fails the runtime.
+      // A load that core aborted decides nothing, even if its source
+      // resolves it.
       const recordCoverage = async (
         demand: LoadSubsetOptions,
         isCurrent: () => boolean,
       ): Promise<void> => {
-        if (!isCurrent()) return
+        const current = () => isCurrent() && !demand.signal?.aborted
+        if (!current()) return
         const record = await runtime.nextCoverageRecord(demand)
-        if (!record || !isCurrent()) return
+        if (!record || !current()) return
         wrappedParams.begin()
         wrappedParams.metadata?.collection.set(
           demandCoverageKey(demand),

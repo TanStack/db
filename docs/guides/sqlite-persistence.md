@@ -331,8 +331,10 @@ The rule applies to each demand separately:
 - A later load of a covered demand first shows its rows from SQLite. If the network does not answer within `networkTimeoutMs`, or it fails, the load settles on those rows. `isReady`, `preload()`, and Suspense then proceed as they do after a network load. Only the load settles from SQLite; the on-demand Collection's own status does not change.
 - The network load keeps running. Its rows replace the restored rows when they arrive. If it fails after the load settled, the query stays ready on the rows it shows.
 - A demand that never settled online is not covered. Offline, it waits for the network. A query that has never run therefore stays loading offline unless a completed progressive full sync already holds every row.
-- A source truncate, such as an Electric must-refetch, ends coverage for every demand. A new cache generation starts without coverage.
-- Coverage also ends when SQLite holds fewer rows for the demand than it held when the demand settled. A row that the source deletes, or that Query DB retention removes after `gcTime`, therefore ends coverage until the demand loads online again.
+- A source truncate, such as an Electric must-refetch, ends coverage for every demand, and so does a snapshot transaction (`begin({ snapshot: true })`), which replaces every row. A new cache generation starts without coverage.
+- Scoped recovery also ends coverage. For the rest of that sync run, no load settles from SQLite and no load records coverage.
+- A load that is released before it settles records no coverage, even if its source finishes it afterward.
+- Coverage also ends when SQLite holds fewer rows for the demand than it held when the demand settled. A row that the source deletes, or that Query DB retention removes after `gcTime`, therefore ends coverage until the demand loads online again, unless another row of the demand reached SQLite meanwhile, for example through another query. Coverage counts the rows of an unordered demand; it does not record which rows they were.
 - An ordered window with a `limit` stays covered only while SQLite holds the same rows for it, in any order. A row that leaves, joins, or replaces a row of the window ends its coverage.
 - A load with `refetch: true` always waits for the network.
 - Only the default single-process coordinator supports this. If you pass a multi-tab coordinator, such as `BrowserCollectionCoordinator`, on-demand loads do not settle from SQLite. They wait for the network, as they did before this option.
