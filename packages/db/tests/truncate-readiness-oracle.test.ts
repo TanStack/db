@@ -7,9 +7,13 @@
  * The reference fold is a sequence of authored replacements and status signals.
  * Every last truncate in one source transaction supplies that replacement's
  * readiness intent. Repeated transactions compose in publication order. We
- * cross initial error/loading/ready, all two-truncate intent pairs, and a held
+ * cross initial loading/ready, all two-truncate intent pairs, and a held
  * optimistic transaction. Checks run inside public notifications as well as
- * after commit, so transient false readiness cannot hide behind a final error.
+ * after commit, so transient false readiness cannot hide behind a later status.
+ *
+ * An initial error is final for its sync attempt, so a replacement that
+ * promises readiness after it is a contract violation and throws. Only a
+ * restart begins a new attempt.
  */
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
@@ -21,7 +25,7 @@ type Row = { id: number; value: string }
 type Sync = Parameters<SyncConfig<Row, number>['sync']>[0]
 type Intent = undefined | boolean
 const intents: Array<Intent> = [undefined, true, false]
-const cells = (['loading', 'ready', 'error'] as const).flatMap((status) =>
+const cells = (['loading', 'ready'] as const).flatMap((status) =>
   [false, true].flatMap((held) =>
     intents.flatMap((first) =>
       intents.map((last) => ({ status, held, first, last })),
@@ -53,14 +57,14 @@ function expectReplacementStatus(
 }
 
 // The model for reentrant batches: the final intent alone decides the status.
-// A `false` intent leaves the source-closed error; any other ends ready.
+// A `false` intent leaves the Collection loading; any other ends ready.
 function expectReentrantStatuses(
   committed: string,
   statuses: ReadonlyArray<string>,
   last: Intent,
 ): void {
-  expect(committed).toBe(last === false ? 'error' : 'ready')
-  expect(statuses).toEqual(last === false ? ['error'] : ['error', 'ready'])
+  expect(committed).toBe(last === false ? 'loading' : 'ready')
+  expect(statuses).toEqual(last === false ? [] : ['ready'])
 }
 
 declareOracle({
@@ -96,12 +100,10 @@ it.each(cells)(
       sync.write({ type: 'insert', value: { id: 1, value: 'initial' } })
       sync.commit()
       if (status === 'ready') sync.markReady()
-      // Author optimistic work before marking error; Collection admission rejects
-      // new edits once errored. Loading admits edits after sync entry.
+      // Loading admits edits after sync entry.
       const optimistic = held
         ? c.insert({ id: 9, value: 'optimistic' })
         : undefined
-      if (status === 'error') sync.markError(new Error('retired source'))
       observed.length = 0
       // Structural callable widening makes the pre-fix run reach assertions:
       // an ignored option is a semantic failure, never a compiler-error witness.
@@ -123,7 +125,7 @@ it.each(cells)(
       finish.resolve()
       await optimistic?.isPersisted.promise
       expect.soft(c.status).toBe(expectedStatus)
-      // A later independent ordinary replacement still recovers normally.
+      // A later independent ordinary replacement is ready.
       sync.begin()
       sync.truncate()
       sync.commit()
@@ -140,6 +142,7 @@ it.each(cells)(
 // Reentrant commits queue behind the publication currently notifying observers.
 // Their final replacement determines the next published batch, including its
 // readiness intent. An earlier replaced snapshot must not make that batch ready.
+// The Collection starts loading, so only a replacement can make it ready.
 it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
   'composes readiness of reentrant replacement batches: %j',
   async ({ first, last }) => {
@@ -151,7 +154,6 @@ it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
       sync: {
         sync: (params) => {
           sync = params
-          params.markReady()
         },
       },
     })
@@ -164,7 +166,6 @@ it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
     const subscription = c.subscribeChanges(() => {
       if (entered) return
       entered = true
-      sync.markError(new Error('source closed'))
       for (const [index, markReady] of [first, last].entries()) {
         sync.begin()
         sync.truncate(markReady === undefined ? undefined : { markReady })

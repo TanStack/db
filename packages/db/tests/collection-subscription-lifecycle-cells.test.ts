@@ -216,7 +216,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         reentry === `truncate` ||
         reentry === `unsubscribe` ||
         reentry === `cleanup`
-      const targetStarted = outcome !== `throw` && reentry !== `cleanup`
+      // A synchronous throw is a rejection (maintainer decision): it starts
+      // the acquisition, as a rejected Promise does.
+      const targetStarted = reentry !== `cleanup`
 
       if (outcome === `resolve`) pending.resolve()
       if (outcome === `reject`) pending.reject(failure)
@@ -243,9 +245,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         )
       }
 
-      expect(thrown).toBe(outcome === `throw` ? failure : undefined)
+      expect(thrown).toBeUndefined()
       expect(targetLoad.signal?.aborted).toBe(
-        outcome === `throw` || targetWasReleased || reentry === `abort-self`,
+        targetWasReleased || reentry === `abort-self`,
       )
       expect(unloads.filter((options) => options === targetLoad)).toHaveLength(
         Number(targetStarted && targetWasReleased),
@@ -261,21 +263,17 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           : [],
       )
       expect(statuses).toEqual(
-        reentry === `truncate` ||
-          ((outcome === `resolve` || outcome === `reject`) &&
-            !targetWasReleased)
+        reentry === `truncate` || (outcome !== `return` && !targetWasReleased)
           ? [`loadingSubset`, `ready`]
           : [],
       )
       if (reentry === `truncate`) {
-        // A synchronous throw never acquired an owner to replay. Returned work
-        // retains logical demand, even when its first transport later rejects.
-        expect(loads).toHaveLength(outcome === `throw` ? 1 : 2)
-        if (outcome !== `throw`) {
-          expect(loads[1]).not.toBe(targetLoad)
-          expect(loads[1]?.where).toBe(targetWhere)
-          expect(loads[1]?.signal?.aborted).toBe(false)
-        }
+        // Every start retains logical demand, also one that throws: its
+        // first transport rejects, and the replay acquires it again.
+        expect(loads).toHaveLength(2)
+        expect(loads[1]).not.toBe(targetLoad)
+        expect(loads[1]?.where).toBe(targetWhere)
+        expect(loads[1]?.signal?.aborted).toBe(false)
       }
 
       subscription.unsubscribe()
@@ -413,7 +411,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const tearsDownTarget =
         reentry === `release-self` || reentry === `unsubscribe`
 
-      expect.soft(thrown).toBe(outcome === `throw` ? failure : undefined)
+      // A synchronous throw is a rejection (maintainer decision): the start
+      // does not throw, and the failure is delivered as a rejection's is.
+      expect.soft(thrown).toBeUndefined()
       expect.soft(errors).toEqual([failure])
       expect.soft(subscription.lastError).toBe(failure)
       expect.soft(targetAttempts[0]?.options).toBe(targetLoad)
@@ -425,11 +425,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(truncateCount).toBe(Number(reentry === `truncate`))
       expect
         .soft(unloads.filter((options) => options === targetLoad))
-        .toHaveLength(
-          Number(
-            outcome === `reject` && (tearsDownTarget || reentry === `truncate`),
-          ),
-        )
+        .toHaveLength(Number(tearsDownTarget || reentry === `truncate`))
       expect
         .soft(unloads.filter((options) => options === peerLoad))
         .toHaveLength(
@@ -444,11 +440,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         .toEqual(
           reentry === `truncate`
             ? [`loadingSubset`, `ready`]
-            : outcome === `reject`
-              ? reentry === `unsubscribe`
-                ? [`loadingSubset`]
-                : [`loadingSubset`, `ready`]
-              : [],
+            : reentry === `unsubscribe`
+              ? [`loadingSubset`]
+              : [`loadingSubset`, `ready`],
         )
       if (reentry === `abort-self`) {
         expect.soft(targetLoad.signal?.aborted).toBe(true)
@@ -459,24 +453,20 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const peerReplacement = peerAttempts[1]?.options
       if (reentry === `truncate`) {
         expect.soft(targetLoad.signal?.aborted).toBe(true)
-        // Error delivery may request replay, but it cannot turn a failed
-        // synchronous start into an owned acquisition. Only the peer survives.
-        expect.soft(targetAttempts).toHaveLength(outcome === `reject` ? 2 : 1)
-        if (outcome === `reject`) {
-          expect.soft(replacement).not.toBe(targetLoad)
-          expect.soft(replacement?.where).toBe(targetWhere)
-          expect.soft(targetAttempts[1]?.syncRunGeneration).toBe(0)
-          expect.soft(targetAttempts[1]?.result).toBe(`replay-return`)
-        } else {
-          expect.soft(replacement).toBeUndefined()
-        }
+        // Error delivery may request replay: a failed start still owns its
+        // logical demand, also one that threw.
+        expect.soft(targetAttempts).toHaveLength(2)
+        expect.soft(replacement).not.toBe(targetLoad)
+        expect.soft(replacement?.where).toBe(targetWhere)
+        expect.soft(targetAttempts[1]?.syncRunGeneration).toBe(0)
+        expect.soft(targetAttempts[1]?.result).toBe(`replay-return`)
         expect.soft(peerLoad.signal?.aborted).toBe(true)
         expect.soft(peerAttempts).toHaveLength(2)
         expect.soft(peerReplacement).not.toBe(peerLoad)
         expect.soft(peerReplacement?.where).toBe(peerWhere)
         expect.soft(peerAttempts[1]?.syncRunGeneration).toBe(0)
         expect.soft(peerAttempts[1]?.result).toBe(`peer-return`)
-        expect.soft(unloads).toHaveLength(outcome === `reject` ? 2 : 1)
+        expect.soft(unloads).toHaveLength(2)
       }
       if (reentry === `cleanup`) {
         expect.soft(collection.status).toBe(`cleaned-up`)
@@ -487,13 +477,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       subscription.unsubscribe()
       const replays = reentry === `truncate`
-      expect
-        .soft(targetAttempts)
-        .toHaveLength(replays && outcome === `reject` ? 2 : 1)
+      expect.soft(targetAttempts).toHaveLength(replays ? 2 : 1)
       expect.soft(peerAttempts).toHaveLength(replays ? 2 : 1)
       expect
         .soft(unloads.filter((options) => options === targetLoad))
-        .toHaveLength(Number(outcome === `reject` && reentry !== `cleanup`))
+        .toHaveLength(Number(reentry !== `cleanup`))
       expect
         .soft(unloads.filter((options) => options === peerLoad))
         .toHaveLength(Number(reentry !== `cleanup`))
@@ -509,10 +497,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           .toHaveLength(Number(replays))
         expect.soft(peerReplacement.signal?.aborted).toBe(true)
       }
-      const expectedUnloads =
-        reentry === `cleanup`
-          ? 0
-          : (outcome === `reject` ? 2 : 1) * (replays ? 2 : 1)
+      const expectedUnloads = reentry === `cleanup` ? 0 : 2 * (replays ? 2 : 1)
       expect.soft(unloads).toHaveLength(expectedUnloads)
       expect.soft(peerLoad.signal?.aborted).toBe(true)
       expect.soft(targetLoad.signal?.aborted).toBe(true)
@@ -732,7 +717,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (outcome === `reject`) pending.reject(failure)
       await flushPromises()
 
-      const targetEstablished = outcome !== `throw` && reentry !== `cleanup`
+      // A synchronous throw is a rejection: it establishes the acquisition.
+      const targetEstablished = reentry !== `cleanup`
       const targetSurvives = reentry === `none` || reentry === `release-peer`
       const peerStarts =
         reentry !== `release-peer` &&
@@ -977,7 +963,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           includeInitialState: false,
         },
       )
-      const removeErrorListener = collection.on(`status:error`, () => {
+      const removeErrorListener = collection.on(`status:crashed`, () => {
         if (!requestOnError) return
         requestOnError = false
         subscription.requestSnapshot({
@@ -992,7 +978,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       requestOnError = true
       expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
       expect(observed).toEqual([expect.any(Promise)])
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(loads).toEqual([{ syncRunGeneration: 0, demand: `old` }])
 
       await collection.cleanup()
@@ -1368,7 +1354,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         reach(`starting:syncReturn`)
 
         expect(observed).toEqual([expect.any(Promise)])
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
         expect(loads.map(({ where }) => where)).toEqual([oldWhere])
         await flushPromises()
         expect(outcomes).toHaveLength(1)
@@ -1427,8 +1413,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )
 
   acquisitionCase(
-    [`starting:markError`, `unavailable:markReady`],
-    `retains demand requested during initial error for recovery in the same sync run`,
+    [`starting:fail`],
+    `keeps demand requested during initial error unacquired until a restart`,
     async (reach) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const loads: Array<LoadSubsetOptions> = []
@@ -1439,8 +1425,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         id: `sync-entry-error-ready-recovery`,
         startSync: false,
         sync: {
-          sync: ({ markError, markReady }) => {
-            if (syncRunCount++ === 0) {
+          sync: ({ fail, markReady }) => {
+            if (syncRunCount++ !== 1) {
               markReady()
               return {
                 loadSubset: (options) => {
@@ -1451,8 +1437,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
               }
             }
             recover = markReady
-            markError(new Error(`initial sync failed`))
-            reach(`starting:markError`)
+            fail(new Error(`initial sync failed`))
+            reach(`starting:fail`)
             return {
               loadSubset: (options) => {
                 loads.push(options)
@@ -1483,38 +1469,43 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(loads).toEqual([])
       expect.soft(observed).toEqual([expect.any(Promise)])
 
-      recover()
-      reach(`unavailable:markReady`)
+      // The initial error is final for this attempt: its markReady() does
+      // nothing (maintainer decision).
+      expect(() => recover()).not.toThrow()
       await flushPromises()
+      expect(collection.status).toBe(`error`)
+      expect(loads).toEqual([])
 
+      // A restart begins a new attempt, which acquires the surviving demand.
+      removeErrorListener()
+      await collection.cleanup()
+      collection.startSyncImmediate()
+      await flushPromises()
       expect(collection.status).toBe(`ready`)
       expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([
         where,
       ])
-      expect(observed).toEqual([expect.any(Promise)])
-      await expect(observed[0]).resolves.toBeUndefined()
 
-      removeErrorListener()
       subscription.unsubscribe()
       await collection.cleanup()
     },
   )
 
   acquisitionCase(
-    [`on-demand:markError`],
-    `defers demand while an installed loader is in initial error`,
+    [`on-demand:fail`],
+    `keeps demand from an installed loader's initial error unacquired until a restart`,
     async (reach) => {
       const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
       const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
       const loads: Array<LoadSubsetOptions> = []
-      let markError!: (error: unknown) => void
+      let fail!: (error: unknown) => void
       let markReady!: () => void
       const collection = createOnDemandCollection<{ id: string }>({
         id: `installed-loader-initial-error`,
         startSync: false,
         sync: {
           sync: (operations) => {
-            markError = operations.markError
+            fail = operations.fail
             markReady = operations.markReady
             return {
               loadSubset: (options) => {
@@ -1533,20 +1524,32 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot({ where: oldWhere })
       const removeErrorListener = collection.on(`status:error`, () => {
         subscription.requestSnapshot({ where: newWhere })
-        reach(`on-demand:markError`)
+        reach(`on-demand:fail`)
       })
 
-      markError(new Error(`initial sync failed`))
+      fail(new Error(`initial sync failed`))
 
       await flushPromises()
       expect.soft(collection.status).toBe(`error`)
       expect.soft(loads.map(({ where }) => where)).toEqual([oldWhere])
 
+      expect(() => markReady()).not.toThrow()
+      expect(collection.status).toBe(`error`)
+
+      // A restart begins a new attempt, which acquires the surviving demand.
+      removeErrorListener()
+      await collection.cleanup()
+      collection.startSyncImmediate()
       markReady()
       await flushPromises()
-      expect(loads.map(({ where }) => where)).toEqual([oldWhere, newWhere])
+      // The first attempt acquired `old` before its error. The new attempt
+      // acquires both surviving demands; `new` was never acquired before.
+      expect(loads.map(({ where }) => where)).toEqual([
+        oldWhere,
+        oldWhere,
+        newWhere,
+      ])
 
-      removeErrorListener()
       subscription.unsubscribe()
       await collection.cleanup()
     },

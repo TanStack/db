@@ -7,7 +7,7 @@ import {
   transactionScopedScheduler,
   withPublicationContext,
 } from '../src/scheduler.js'
-import { resetCleanupQueue } from './utils'
+import { captureMicrotaskErrors, resetCleanupQueue } from './utils'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -117,10 +117,10 @@ describe(`Collection Lifecycle Management`, () => {
       const collection = createCollection<{ id: string }>({
         getKey: ({ id }) => id,
         sync: {
-          sync: ({ collection: source, markReady, markError }) => {
+          sync: ({ collection: source, markReady, fail }) => {
             starts++
             if (starts > 1 || phase === `ready`) markReady()
-            else if (phase === `failed`) markError(failure)
+            else if (phase === `failed`) fail(failure)
             else if (phase === `starting`) void source.cleanup()
           },
         },
@@ -724,10 +724,12 @@ describe(`Collection Lifecycle Management`, () => {
         expectedFirstReadyCalls: 1,
         invalid: false,
       },
+      // An initial error is final for its sync attempt: a later markReady()
+      // in it does nothing (maintainer decision).
       {
         from: `error`,
-        expectedStatus: `ready`,
-        expectedFirstReadyCalls: 1,
+        expectedStatus: `error`,
+        expectedFirstReadyCalls: 0,
         invalid: false,
       },
       {
@@ -745,7 +747,7 @@ describe(`Collection Lifecycle Management`, () => {
     ] as const)(
       `defines the $from -> ready transition`,
       async ({ from, expectedStatus, expectedFirstReadyCalls, invalid }) => {
-        const syncFailure = new Error(`sync failed before recovery`)
+        const syncFailure = new Error(`initial sync failed`)
         let firstReadyCalls = 0
         let recoveryFirstReadyCalls = 0
         const collection = createCollection<{ id: string; name: string }>({
@@ -758,12 +760,13 @@ describe(`Collection Lifecycle Management`, () => {
           firstReadyCalls++
         })
 
-        if (from === `ready` || from === `error`) {
+        if (from === `ready`) {
           collection._lifecycle.setStatus(`loading`)
           collection._lifecycle.markReady()
         }
         if (from === `error`) {
-          collection._lifecycle.markError(syncFailure)
+          collection._lifecycle.setStatus(`loading`)
+          collection._lifecycle.fail(syncFailure)
           expect(collection._lifecycle.getSyncError()).toBe(syncFailure)
         } else if (from === `cleaned-up`) {
           collection._lifecycle.setStatus(`cleaned-up`)
@@ -774,7 +777,7 @@ describe(`Collection Lifecycle Management`, () => {
           collection.onFirstReady(() => {
             recoveryFirstReadyCalls++
           })
-          expect(recoveryFirstReadyCalls).toBe(1)
+          expect(recoveryFirstReadyCalls).toBe(0)
         }
 
         const transitionTrace: Array<
@@ -828,25 +831,11 @@ describe(`Collection Lifecycle Management`, () => {
         }
         expect(collection.status).toBe(expectedStatus)
         expect(firstReadyCalls).toBe(expectedFirstReadyCalls)
-        expect(recoveryFirstReadyCalls).toBe(from === `error` ? 1 : 0)
-        expect(transitionTrace).toEqual(
-          from === `error`
-            ? [
-                {
-                  kind: `status`,
-                  previousStatus: `error`,
-                  status: `ready`,
-                  syncError: undefined,
-                },
-                {
-                  kind: `dependent-ready`,
-                  status: `ready`,
-                  syncError: undefined,
-                },
-              ]
-            : [],
+        expect(recoveryFirstReadyCalls).toBe(0)
+        expect(transitionTrace).toEqual([])
+        expect(collection._lifecycle.getSyncError()).toBe(
+          from === `error` ? syncFailure : undefined,
         )
-        expect(collection._lifecycle.getSyncError()).toBeUndefined()
 
         await collection.cleanup()
       },
@@ -899,14 +888,16 @@ describe(`Collection Lifecycle Management`, () => {
       )
       const firstReady = vi.fn()
       collection.onFirstReady(firstReady)
+      // An internal failure during the ready transition still ends it. A
+      // source's fail at this point would be health metadata instead.
       collection.on(`status:ready`, () => {
-        collection._lifecycle.markError(failure)
+        collection._lifecycle.crash(failure)
       })
       collection._lifecycle.setStatus(`loading`)
 
       collection._lifecycle.markReady()
 
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(failure)
       expect(collection._lifecycle.hasBeenReady).toBe(false)
       expect(firstReady).not.toHaveBeenCalled()
@@ -1181,13 +1172,13 @@ describe(`Collection Lifecycle Management`, () => {
 
       try {
         await expect(collection.preload()).rejects.toBe(adapterFailure)
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
       } finally {
         await collection.cleanup()
       }
     })
 
-    it(`ends the synchronous sync-entry boundary after an adapter failure`, async () => {
+    it(`rejects markReady after a failed synchronous sync entry`, async () => {
       const adapterFailure = new Error(`adapter entry failed`)
       let markReadyCallback: (() => void) | undefined
       const collection = createCollection<{ id: string; name: string }>({
@@ -1206,7 +1197,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       try {
         expect(() => collection._sync.startSync()).toThrow(adapterFailure)
-        expect(collection.status).toBe(`error`)
+        expect(collection.status).toBe(`crashed`)
 
         let didThrow = false
         let thrown: unknown
@@ -1217,9 +1208,11 @@ describe(`Collection Lifecycle Management`, () => {
           thrown = error
         }
 
-        expect(didThrow).toBe(true)
+        // The failed entry crashed the Collection. Core ended the sync run,
+        // so the adapter's later markReady() does nothing and is no error.
+        expect(didThrow).toBe(false)
         expect(thrown).toBeUndefined()
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`crashed`)
       } finally {
         await collection.cleanup()
       }
@@ -1458,6 +1451,8 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
+    // The throw reaches no caller of preload(), so core reports it uncaught
+    // (maintainer decision) and the Collection stays ready.
     it(`resolves a pending preload after a ready callback failure alone`, async () => {
       let syncContinued = false
       const collection = createCollection<{ id: string; name: string }>({
@@ -1474,11 +1469,16 @@ describe(`Collection Lifecycle Management`, () => {
         throw undefined
       })
 
+      const uncaught = captureMicrotaskErrors()
       try {
         await expect(collection.preload()).resolves.toBeUndefined()
+        // The report is a microtask; this describe uses fake timers.
+        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+        expect(uncaught.errors).toEqual([undefined])
         expect(syncContinued).toBe(true)
         expect(collection.status).toBe(`ready`)
       } finally {
+        uncaught.restore()
         await collection.cleanup()
       }
     })

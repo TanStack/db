@@ -134,7 +134,7 @@ const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
 
 The query must include `.orderBy()`. The hook keeps one live query collection and widens its window as pages load, so every loaded page stays live. Its identity follows `useLiveQuery`: pass `queryKey` in the config for a functional query variant.
 
-`fetchNextPage()` returns a promise that resolves after the page request settles. Failures are exposed through the returned `error` value and do not reject the promise.
+`fetchNextPage()` returns a promise that resolves after the page request settles. A failed page load does not reject the promise or change `status`; it appears as a request error in the returned `health` tree.
 
 This hook widens an ordered live query; it is not TanStack Query's `useInfiniteQuery`. `getNextPageParam` is rejected. `initialPageParam` only labels the returned pages; it does not set a server cursor or skip remote rows. For server pagination, use an on-demand Query Collection whose `queryFn` fulfills `meta.loadSubsetOptions`. See the [server pagination guide](../../collections/query-collection.md#server-pagination-with-live-queries).
 

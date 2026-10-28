@@ -12,6 +12,9 @@ Defined in: [packages/db/src/errors.ts:135](https://github.com/TanStack/db/blob/
 ## Extended by
 
 - [`CollectionInErrorStateError`](CollectionInErrorStateError.md)
+- [`CollectionHasSubscribersError`](CollectionHasSubscribersError.md)
+- [`CollectionReloadCrashedError`](CollectionReloadCrashedError.md)
+- [`CollectionReloadDuringSyncEntryError`](CollectionReloadDuringSyncEntryError.md)
 - [`InvalidCollectionStatusTransitionError`](InvalidCollectionStatusTransitionError.md)
 - [`CollectionIsInErrorStateError`](CollectionIsInErrorStateError.md)
 - [`NegativeActiveSubscribersError`](NegativeActiveSubscribersError.md)

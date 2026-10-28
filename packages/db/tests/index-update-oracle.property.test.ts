@@ -1476,7 +1476,7 @@ describe.each([
           expect(() => write(collection, sync, { id: 2, name: `bob` })).toThrow(
             TypeError,
           )
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(() => collection.insert({ id: 3, name: `cy` })).toThrow(
             CollectionInErrorStateError,
           )

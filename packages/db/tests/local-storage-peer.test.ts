@@ -271,7 +271,7 @@ it('rejects null stored row data before opening a sync transaction', async () =>
   await withHistoryCleanup(
     async () => {
       await expect(collection.preload()).rejects.toThrow()
-      expect(collection.status).toBe('error')
+      expect(collection.status).toBe('crashed')
       expect(host.storage.getItem('shared')).toBe(raw)
       expect(begins, 'malformed restore opens no transaction').toBe(0)
     },

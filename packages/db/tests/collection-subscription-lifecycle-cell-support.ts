@@ -35,7 +35,7 @@ export const acquisitionEntries = [
   `request`,
   `resume`,
   `markReady`,
-  `markError`,
+  `fail`,
   `syncReturn`,
 ] as const
 export type AcquisitionPhase = (typeof acquisitionPhases)[number]
@@ -52,7 +52,7 @@ export const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `the sync callback has not started and cannot mark ready`,
   },
-  'deferred:markError': {
+  'deferred:fail': {
     kind: `excluded`,
     reason: `the sync callback has not started and cannot mark error`,
   },
@@ -66,7 +66,7 @@ export const acquisitionCellDefinitions = {
     reason: `resuming the deferred gate enters this phase only once`,
   },
   'starting:markReady': { kind: `covered` },
-  'starting:markError': { kind: `covered` },
+  'starting:fail': { kind: `covered` },
   'starting:syncReturn': { kind: `covered` },
   'on-demand:request': { kind: `covered` },
   'on-demand:resume': {
@@ -74,7 +74,7 @@ export const acquisitionCellDefinitions = {
     reason: `an installed loader is no longer behind the deferred gate`,
   },
   'on-demand:markReady': { kind: `covered` },
-  'on-demand:markError': { kind: `covered` },
+  'on-demand:fail': { kind: `covered` },
   'on-demand:syncReturn': {
     kind: `excluded`,
     reason: `the sync callback already returned the installed loader`,
@@ -88,7 +88,7 @@ export const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `eager readiness does not install a subset loader`,
   },
-  'eager:markError': {
+  'eager:fail': {
     kind: `excluded`,
     reason: `eager errors do not change subset acquisition availability`,
   },
@@ -105,7 +105,7 @@ export const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `callbacks from a retiring sync run cannot restore availability`,
   },
-  'retiring:markError': {
+  'retiring:fail': {
     kind: `excluded`,
     reason: `callbacks from a retiring sync run are obsolete`,
   },
@@ -116,10 +116,13 @@ export const acquisitionCellDefinitions = {
   'unavailable:request': { kind: `covered` },
   'unavailable:resume': {
     kind: `excluded`,
-    reason: `recovery in the same sync run uses markReady rather than defer resume`,
+    reason: `an initial error is final for its sync attempt; only a restart recovers`,
   },
-  'unavailable:markReady': { kind: `covered` },
-  'unavailable:markError': {
+  'unavailable:markReady': {
+    kind: `excluded`,
+    reason: `markReady after fail in one sync attempt is a contract violation and throws`,
+  },
+  'unavailable:fail': {
     kind: `excluded`,
     reason: `a repeated error leaves acquisition unavailable`,
   },
@@ -176,7 +179,8 @@ export type AcquisitionInteractionCause =
 export type AcquisitionInteractionCell =
   `${AcquisitionLifecycleState}:${AcquisitionInteractionCause}`
 // `retire` projects the end of ownership, not necessarily acquisition release.
-// During `starting`, a synchronous throw fails the attempt before acceptance.
+// A synchronous throw is a rejection (maintainer decision): the attempt is
+// accepted and its transport fails.
 // Cleanup invalidation cancels a returned tentative acquisition before activation
 // without retaining its lease. An accepted acquisition instead releases its lease.
 // Logical demand can survive this boundary, as it does during truncate replay.

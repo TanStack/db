@@ -130,7 +130,7 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
   const handlers: Array<Deferred<void>> = []
   const subscriptions: Array<{ unsubscribe: () => void }> = []
   let markReady = () => {}
-  let markError = (_error: Error) => {}
+  let fail = (_error: Error) => {}
   const preloadFailure = new Error(`preload failed`)
   const cleanupGate = createDeferred<void>()
   const cleanupFailure = new Error(`adapter cleanup rejected`)
@@ -166,7 +166,7 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
     sync: {
       sync: (params) => {
         markReady = params.markReady
-        markError = params.markError
+        fail = params.fail
         if (history.ready) markReady()
         return history.asyncCleanup
           ? () => {
@@ -345,7 +345,7 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         if (model.preload && !model.transactions.includes(`persisting`))
           boundaryReach.reach(`preload-last-release`)
       } else if (action.kind === `preload-failure`) {
-        markError(preloadFailure)
+        fail(preloadFailure)
         for (const preload of preloads)
           if (preload.expected === `pending`) preload.expected = `rejected`
         boundaryReach.reach(

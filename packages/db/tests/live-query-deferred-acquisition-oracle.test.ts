@@ -493,7 +493,7 @@ async function runPooledHistory(
   } finally {
     subscription?.unsubscribe()
     await view?.cleanup()
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
   }
 }
 
@@ -646,7 +646,10 @@ describe(`a subscriber that outlives cleanup`, () => {
  * extends the primary demand oracle at its previously omitted failure cut.
  * The grammar crosses callback return/throw, independent/owned start, and an
  * optional error cause. Removing timing confuses another reader's failure
- * with ours; removing outcome confuses markError with throw. No second start
+ * with ours; removing outcome confuses fail() (a loading error, status
+ * `error`) with a throwing sync function (a crash, status `crashed`). An
+ * independent reader's earlier start can leave either status before the
+ * release, so both are declared reach states. No second start
  * without cleanup is legal. The shared judgment also feeds the React driver.
  */
 describe(`render sync-start handoff error provenance`, () => {
@@ -654,7 +657,8 @@ describe(`render sync-start handoff error provenance`, () => {
     it(`reports only its own thrown starts (${campaign})`, async () => {
       const reach = createOracleReach(`start-handoff`, [
         `prior-error`,
-        `marked-error`,
+        `prior-crash`,
+        `failed`,
         `own-throw`,
         `undefined-cause`,
         `healthy`,
@@ -664,7 +668,7 @@ describe(`render sync-start handoff error provenance`, () => {
           fc.record({
             outcome: fc.constantFrom(
               `ready` as const,
-              `mark-error` as const,
+              `fail` as const,
               `throw` as const,
             ),
             timing: fc.constantFrom(
@@ -685,10 +689,10 @@ describe(`render sync-start handoff error provenance`, () => {
               getKey: (row) => row.id,
               gcTime: 0,
               sync: {
-                sync: ({ markReady, markError }) => {
+                sync: ({ markReady, fail }) => {
                   starts++
                   if (history.outcome === `throw`) throw failure
-                  if (history.outcome === `mark-error`) markError(failure)
+                  if (history.outcome === `fail`) fail(failure)
                   else markReady()
                 },
               },
@@ -704,7 +708,8 @@ describe(`render sync-start handoff error provenance`, () => {
                 }
               }
               if (source.status === `error`) reach.reach(`prior-error`)
-              if (history.outcome === `mark-error`) reach.reach(`marked-error`)
+              if (source.status === `crashed`) reach.reach(`prior-crash`)
+              if (history.outcome === `fail`) reach.reach(`failed`)
               if (expected.throws) reach.reach(`own-throw`)
               if (history.cause === `undefined`) reach.reach(`undefined-cause`)
               if (history.outcome === `ready`) reach.reach(`healthy`)

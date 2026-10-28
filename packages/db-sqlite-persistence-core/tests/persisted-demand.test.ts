@@ -339,7 +339,7 @@ describe(`persistedCollectionOptions`, () => {
       expect(reacquired).not.toBe(true)
       await expect(Promise.resolve(reacquired)).rejects.toBe(failure)
       expect(adapter.loadSubsetCalls).toHaveLength(readsBeforeReacquire)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(failure)
     } finally {
       warn.mockRestore()
@@ -700,7 +700,7 @@ describe(`persistedCollectionOptions`, () => {
         durableRow: adapter.rows.get(`shared`),
         durabilityCalls: adapter.applyCommittedTxCalls.length,
       }).toEqual({
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         publicRow: undefined,
         durableRow: {
@@ -1767,7 +1767,7 @@ describe(`persistedCollectionOptions`, () => {
         ),
       ).rejects.toBe(hydrationFailure)
 
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure)
       expect([...collection.values()]).toEqual([])
       expect(adapter.rows.size).toBe(0)
@@ -1854,7 +1854,7 @@ describe(`persistedCollectionOptions`, () => {
       await vi.waitFor(() =>
         expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure),
       )
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
 
       let laterAdapterCalls = 0
       adapter.loadSubset = () => {
@@ -1955,7 +1955,7 @@ describe(`persistedCollectionOptions`, () => {
       await vi.waitFor(() =>
         expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure),
       )
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure)
 
       remoteBegin!()
@@ -1986,7 +1986,7 @@ describe(`persistedCollectionOptions`, () => {
         receiptStatus: `rejected`,
         exactReceipt: true,
         publicErrorIsHydration: true,
-        status: `error`,
+        status: `crashed`,
         lateVisible: undefined,
         lateDurable: undefined,
         applyCalls: 0,

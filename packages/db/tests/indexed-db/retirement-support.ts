@@ -67,13 +67,13 @@ export function recordStatus(c: Subject) {
   return statuses
 }
 export function closed(c: Subject, statuses: Array<string>) {
-  expect.soft(c.status, 'closed connection status').toBe('error')
-  const firstError = statuses.indexOf('error')
-  expect.soft(firstError, 'retirement is observable').toBeGreaterThanOrEqual(0)
+  expect.soft(c.status, 'closed connection status').toBe('crashed')
+  const firstCrash = statuses.indexOf('crashed')
+  expect.soft(firstCrash, 'retirement is observable').toBeGreaterThanOrEqual(0)
   expect
     .soft(
-      statuses.slice(firstError).every((status) => status === 'error'),
-      'retired status stays error',
+      statuses.slice(firstCrash).every((status) => status === 'crashed'),
+      'retired status stays crashed',
     )
     .toBe(true)
 }

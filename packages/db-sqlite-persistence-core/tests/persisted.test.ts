@@ -419,7 +419,7 @@ describe(`persistedCollectionOptions`, () => {
         receiptErrorCode: `SQLITE_FULL`,
         receiptErrorPath: `adapter.applyCommittedTx`,
         publicErrorIsReceipt: true,
-        status: `error`,
+        status: `crashed`,
         visible: { id: `failed`, title: `Not durable` },
         durable: undefined,
       })
@@ -508,7 +508,7 @@ describe(`persistedCollectionOptions`, () => {
         cause: persistenceError,
       })
       expect(adapter.rows.get(`failed`)).toBeUndefined()
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       rejectPersistence?.(persistenceError)
@@ -571,7 +571,7 @@ describe(`persistedCollectionOptions`, () => {
         cause: persistenceResponse,
       })
       expect(String(rejection)).not.toContain(`CONFLICT`)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       await collection.cleanup()
@@ -629,29 +629,27 @@ describe(`persistedCollectionOptions`, () => {
 
       try {
         await collection.stateWhenReady()
-        const originalMarkError = collection._lifecycle.markError.bind(
+        const originalCrash = collection._lifecycle.crash.bind(
           collection._lifecycle,
         )
-        vi.spyOn(collection._lifecycle, `markError`).mockImplementation(
-          (error) => {
-            sourceParams.begin()
-            sourceParams.write({
-              type: `insert`,
-              value: {
-                get id() {
-                  reentrantKeyReads++
-                  return `reentrant`
-                },
-                title: `must be fenced before error observation`,
+        vi.spyOn(collection._lifecycle, `crash`).mockImplementation((error) => {
+          sourceParams.begin()
+          sourceParams.write({
+            type: `insert`,
+            value: {
+              get id() {
+                reentrantKeyReads++
+                return `reentrant`
               },
-            })
-            reentrantReceipt = Promise.resolve(sourceParams.commit()).then(
-              () => ({ status: `fulfilled` as const }),
-              (reason: unknown) => ({ status: `rejected` as const, reason }),
-            )
-            originalMarkError(error)
-          },
-        )
+              title: `must be fenced before error observation`,
+            },
+          })
+          reentrantReceipt = Promise.resolve(sourceParams.commit()).then(
+            () => ({ status: `fulfilled` as const }),
+            (reason: unknown) => ({ status: `rejected` as const, reason }),
+          )
+          originalCrash(error)
+        })
 
         sourceParams.begin()
         sourceParams.write({
@@ -796,7 +794,7 @@ describe(`persistedCollectionOptions`, () => {
         namedDurability: true,
         cause: storageError,
         exactPublicError: true,
-        status: `error`,
+        status: `crashed`,
         durable: undefined,
       })
     } catch (error) {
@@ -941,7 +939,7 @@ describe(`persistedCollectionOptions`, () => {
         firstStatus: `rejected`,
         siblingStatus: `rejected`,
         sameTerminal: true,
-        status: `error`,
+        status: `crashed`,
         publicErrorIsFirst: true,
         visibleSibling: undefined,
         durableSibling: undefined,
@@ -1119,7 +1117,7 @@ describe(`persistedCollectionOptions`, () => {
         sameSibling: true,
         sameLoad: true,
         namedDurability: true,
-        status: `error`,
+        status: `crashed`,
         publicError: terminalError,
         publicSibling: undefined,
         applyCalls: 1,
@@ -1262,7 +1260,7 @@ describe(`persistedCollectionOptions`, () => {
         abortedName: `AbortError`,
         dependentStatus: `rejected`,
         dependentExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         visibleDependent: undefined,
         durableDependent: undefined,

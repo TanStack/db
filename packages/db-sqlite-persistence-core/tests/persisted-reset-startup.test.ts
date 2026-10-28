@@ -171,7 +171,7 @@ describe(`persistedCollectionOptions`, () => {
         queuedExact: true,
         lateStatus: `rejected`,
         lateExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         visibleSeed: undefined,
         durableSeed: seed,
@@ -325,7 +325,7 @@ describe(`persistedCollectionOptions`, () => {
         reloadVisible: undefined,
         targetedDurable: undefined,
         reloadDurable: undefined,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -1447,7 +1447,7 @@ describe(`persistedCollectionOptions`, () => {
         }
         await entered.promise
         await flushAsyncWork()
-        expect(collection.status).not.toBe(`error`)
+        expect(collection.status).not.toBe(`crashed`)
         if (phase === `runtime`) {
           expect(collection.status).toBe(`ready`)
           expect(stripVirtualProps(collection.get(row.id))).toEqual(row)

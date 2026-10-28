@@ -6,10 +6,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:113](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L113)
+Defined in: [useLiveQuery.ts:123](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L123)
 
 Create a live query using a query function
 
@@ -76,7 +76,7 @@ return (
     <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError}>
+    <Match when={todosQuery.isLoadingError}>
       <div>Error: {todosQuery.status}</div>
     </Match>
     <Match when={todosQuery.isReady}>
@@ -106,10 +106,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:135](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L135)
+Defined in: [useLiveQuery.ts:137](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L137)
 
 Create a live query using a query function
 
@@ -176,7 +176,7 @@ return (
     <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError}>
+    <Match when={todosQuery.isLoadingError}>
       <div>Error: {todosQuery.status}</div>
     </Match>
     <Match when={todosQuery.isReady}>
@@ -206,10 +206,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
+function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:199](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L199)
+Defined in: [useLiveQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L193)
 
 Create a live query using configuration object
 
@@ -262,7 +262,7 @@ return (
     <Match when={itemsQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={itemsQuery.isError}>
+    <Match when={itemsQuery.isLoadingError}>
       <div>Something went wrong</div>
     </Match>
     <Match when={!itemsQuery.isReady}>
@@ -275,10 +275,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:256](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L256)
+Defined in: [useLiveQuery.ts:242](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L242)
 
 Subscribe to an existing live query collection
 
@@ -337,7 +337,7 @@ return (
    <Match when={sharedQuery.isLoading}>
      <div>Loading...</div>
    </Match>
-   <Match when={sharedQuery.isError}>
+   <Match when={sharedQuery.isLoadingError}>
      <div>Error loading data</div>
    </Match>
  </Switch>
@@ -347,10 +347,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:284](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L284)
+Defined in: [useLiveQuery.ts:262](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L262)
 
 Create a live query using a query function
 
@@ -423,7 +423,7 @@ return (
     <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError}>
+    <Match when={todosQuery.isLoadingError}>
       <div>Error: {todosQuery.status}</div>
     </Match>
     <Match when={todosQuery.isReady}>

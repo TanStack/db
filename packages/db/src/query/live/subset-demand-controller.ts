@@ -2,7 +2,7 @@ import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
-import { runAllCallbacks } from '../../utils/callbacks.js'
+import { normalizeError } from '../../utils/error.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type {
@@ -10,13 +10,12 @@ import type {
   LazyDemandPlan,
 } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
-import type { LoadSubsetRequestResult } from '../../types.js'
 
 type DemandSegment = {
   keys: Map<string, unknown>
   where: BasicExpression<boolean>
   abortController: AbortController
-  ready: LoadSubsetRequestResult
+  ready: true | Promise<void>
   state: `starting` | `pending` | `settled` | `failed`
   replaces?: Array<DemandSegment>
 }
@@ -39,8 +38,32 @@ export type DemandUpdate = {
  */
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
+
+  /**
+   * `onKeyOutcome`: the latest load of a key the plan needs failed with
+   * `error`; without one, a load of the key succeeded or the plan no longer
+   * needs it. A request error belongs to the key's failed request.
+   */
+  constructor(
+    private readonly onKeyOutcome?: (
+      planId: string,
+      key: string,
+      error?: Error,
+    ) => void,
+  ) {}
   private readonly warnedPlans = new Set<string>()
   private valueIdentity = createValueIdentity()
+
+  /**
+   * A truncate's or a reload's replay was judged: its verdict decides every
+   * request error of the demand it replayed. Its success clears them, and
+   * its failure replaces them with the replay's own failures, which the
+   * query reports for the replay.
+   */
+  clearRequestErrors(): void {
+    for (const [planId, state] of this.states)
+      for (const key of state.keys.keys()) this.onKeyOutcome?.(planId, key)
+  }
 
   setDemand(
     subscription: CollectionSubscription,
@@ -78,18 +101,18 @@ export class SubsetDemandController {
     )
     const state: DemandState = { keys: nextKeys, segments }
     this.states.set(plan.id, state)
+    // A key the plan no longer needs shows no request error.
+    for (const key of previous?.keys.keys() ?? [])
+      if (!nextKeys.has(key)) this.onKeyOutcome?.(plan.id, key)
 
-    // Release every retired segment even if subscriber code that a release
-    // runs throws, then report the first error.
-    runAllCallbacks(
-      retired.map((segment) => () => releaseSegment(subscription, segment)),
-    )
-    if (this.states.get(plan.id) !== state) {
-      return { changed: false, empty: false, ready: true }
-    }
+    // Law 9: a demand change is one step. Start its new demand before it
+    // releases the retired segments, and release them together, so an open
+    // replay keeps the new demand and is judged once, after the whole change.
+    const release = () => releaseSegments(subscription, retired)
 
     if (nextKeys.size === 0) {
       this.states.delete(plan.id)
+      release()
       return { changed: true, empty: true, ready: true }
     }
 
@@ -105,46 +128,86 @@ export class SubsetDemandController {
     const replace =
       retryReplacement || (removed && (added.size > 0 || segments.length > 1))
     const requestedKeys = replace ? nextKeys : added
-    if (requestedKeys.size > 0) {
-      const segment = createSegment(plan, requestedKeys)
-      if (replace) segment.replaces = [...segments]
-      segments.push(segment)
-      const started = startSegment(subscription, segment, () =>
-        this.warnUnoptimized(plan),
-      )
-      if (this.states.get(plan.id) !== state) {
-        return { changed: false, empty: false, ready: true }
-      }
-      if (!started)
-        throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `Subset demand snapshot did not start`
-            : codedMessage(159),
+    // A replacement alone decides the demand: the segments it supersedes are
+    // released, and aborted, once it settles.
+    let replacement: DemandSegment | undefined
+    try {
+      if (requestedKeys.size > 0) {
+        const segment = createSegment(plan, requestedKeys)
+        if (replace) {
+          segment.replaces = [...segments]
+          replacement = segment
+        }
+        segments.push(segment)
+        const started = startSegment(
+          subscription,
+          segment,
+          () => this.warnUnoptimized(plan),
+          (error) => this.recordOutcome(plan.id, segment, error),
         )
-      if (replace) {
-        if (segment.ready instanceof Promise) {
-          void segment.ready.then(
-            () => this.finishReplacement(subscription, plan.id, segment),
-            () => {},
+        if (this.states.get(plan.id) !== state) {
+          return { changed: false, empty: false, ready: true }
+        }
+        if (!started)
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Subset demand snapshot did not start`
+              : codedMessage(159),
           )
-        } else {
-          this.finishReplacement(subscription, plan.id, segment)
+        if (replace) {
+          subscription.replaceSnapshots(
+            segment.where,
+            (segment.replaces ?? []).map((replaced) => replaced.where),
+          )
+          if (segment.ready instanceof Promise) {
+            void segment.ready.then(
+              () => this.finishReplacement(subscription, plan.id, segment),
+              () => {},
+            )
+          } else {
+            this.finishReplacement(subscription, plan.id, segment)
+          }
         }
       }
+    } finally {
+      release()
+    }
+    if (this.states.get(plan.id) !== state) {
+      return { changed: false, empty: false, ready: true }
     }
 
-    const pending = state.segments
+    const pending = (replacement ? [replacement] : state.segments)
       .filter(
         (segment) =>
           segment.state === `pending` && intersects(segment.keys, nextKeys),
       )
       .map((segment) => segment.ready)
-      .filter((ready): ready is Promise<void> => ready instanceof Promise)
+      .filter((ready) => ready instanceof Promise)
     return {
       changed: true,
       empty: false,
       ready: pending.length > 0 ? Promise.all(pending) : true,
     }
+  }
+
+  // The outcome of a segment the plan still holds decides its needed keys: a
+  // success (no `error`) loaded them, and a failure leaves them missing,
+  // unless a later segment loads the key (law 10: a key's latest load
+  // decides it). A released segment's outcome decides nothing.
+  private recordOutcome(
+    planId: string,
+    segment: DemandSegment,
+    error?: Error,
+  ): void {
+    const state = this.states.get(planId)
+    if (!state?.segments.includes(segment)) return
+    const later = state.segments.slice(state.segments.indexOf(segment) + 1)
+    for (const key of segment.keys.keys())
+      if (
+        state.keys.has(key) &&
+        !(error && later.some((loader) => loader.keys.has(key)))
+      )
+        this.onKeyOutcome?.(planId, key, error)
   }
 
   clear(): void {
@@ -174,15 +237,13 @@ export class SubsetDemandController {
       !state?.segments.includes(replacement) ||
       !equalKeySets(replacement.keys, state.keys)
     ) {
-      releaseSegment(subscription, replacement)
+      releaseSegments(subscription, [replacement])
       return
     }
     const replaced = replacement.replaces ?? []
     replacement.replaces = undefined
     state.segments = [replacement]
-    runAllCallbacks(
-      replaced.map((segment) => () => releaseSegment(subscription, segment)),
-    )
+    releaseSegments(subscription, replaced)
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
@@ -254,10 +315,16 @@ function createSegment(
   }
 }
 
+// An abort ends the segment's load: its outcome decides nothing. A replay
+// that aborted it covers its keys, so the load's consumers wait for that
+// replay instead. While a truncate's or a reload's replay is judged, its
+// verdict decides the outcome of every load that settles, so the load
+// decides no request error itself and does not fail the query's first load.
 function startSegment(
   subscription: CollectionSubscription,
   segment: DemandSegment,
   onUnoptimized: () => void,
+  onOutcome: (error?: Error) => void,
 ): boolean {
   let observed = false
   const requested = subscription.requestSnapshot({
@@ -265,29 +332,52 @@ function startSegment(
     signal: segment.abortController.signal,
     trackLoadSubsetPromise: false,
     onUnoptimized,
-    onLoadSubsetResult: (result) => {
+    onLoadSubsetResult: (result, options) => {
       observed = true
-      segment.ready = result
-      segment.state = result instanceof Promise ? `pending` : `settled`
+      if (!(result instanceof Promise)) {
+        segment.state = `settled`
+        return
+      }
+      segment.state = `pending`
+      const settle = (failure?: {
+        error: unknown
+      }): Promise<void> | undefined => {
+        if (options.signal?.aborted)
+          return replayed(subscription).then(() => {
+            segment.state = `settled`
+          })
+        segment.state = failure ? `failed` : `settled`
+        if (subscription.pendingTruncateReplacement) return undefined
+        const error = failure && normalizeError(failure.error)
+        onOutcome(error)
+        if (error) throw error
+        return undefined
+      }
+      segment.ready = result.then(
+        () => settle(),
+        (error: unknown) => settle({ error }),
+      )
     },
   })
-  if (segment.ready instanceof Promise) {
-    void segment.ready.then(
-      () => {
-        segment.state = `settled`
-      },
-      () => {
-        segment.state = `failed`
-      },
-    )
-  }
   return requested && observed
 }
 
-function releaseSegment(
+// Settles once no truncate's or reload's replay is pending, also when a
+// newer one replaces the pending one.
+function replayed(subscription: CollectionSubscription): Promise<void> {
+  const replay = subscription.pendingTruncateReplacement
+  if (!replay) return Promise.resolve()
+  const next = () => replayed(subscription)
+  return replay.then(next, next)
+}
+
+// One demand change: the subscription releases every segment even if
+// subscriber code that a release runs throws, then reports the first error.
+function releaseSegments(
   subscription: CollectionSubscription,
-  segment: DemandSegment,
+  segments: Array<DemandSegment>,
 ): void {
-  segment.abortController.abort()
-  subscription.releaseSnapshot(segment.where)
+  if (segments.length === 0) return
+  for (const segment of segments) segment.abortController.abort()
+  subscription.releaseSnapshot(...segments.map((segment) => segment.where))
 }

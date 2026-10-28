@@ -9,8 +9,8 @@ description: >
   useLiveInfiniteQuery for cursor-based pagination (pageSize, fetchNextPage,
   hasNextPage, isFetchingNextPage). usePacedMutations for debounced React
   state updates. Return shape: data, state, collection, status, isLoading,
-  isReady, isError. Import from @tanstack/react-db (re-exports all of
-  @tanstack/db).
+  isReady, isLoadingError, isCrashed, isSyncError, health. Import from
+  @tanstack/react-db (re-exports all of @tanstack/db).
 type: framework
 library: db
 framework: react
@@ -69,9 +69,12 @@ const {
   status,
   isLoading,
   isReady,
-  isError,
+  isLoadingError, // the first load failed: nothing to show
+  isCrashed, // status 'crashed': local storage broke
   isIdle,
   isCleanedUp,
+  isSyncError, // data is shown, but a sync problem is in health
+  health, // health tree: one node for the query and one per source
 } = useLiveQuery({
   query: (q) =>
     q
@@ -86,7 +89,7 @@ const { data } = useLiveQuery({
 })
 
 // Pre-created collection (from route loader)
-const { data } = useLiveQuery(preloadedCollection)
+const { data } = useLiveQuery(preloadedTodos)
 
 // Conditional query — derived identity handles enabled/disabled transitions
 const { data, status } = useLiveQuery({
@@ -99,6 +102,8 @@ const { data, status } = useLiveQuery({
 })
 // When disabled: status='disabled', data=undefined
 ```
+
+`isLoadingError` means the first load failed and there is nothing to show; offer `collection.reload()`. `isCrashed` means local storage broke; only `cleanup({ dependents: true })` and a fresh start recover. After the query is ready, sync problems never change `status`: read `isSyncError` or the `health` tree to show stale-data warnings. `isError` and node `phase` were removed.
 
 Many queries of one shape, such as one per list row, can share one partition. Pass `pool: pooledLiveQueries` (from `@tanstack/db`) in the config form: `useLiveQuery({ query, pool: pooledLiveQueries })`. Pooling applies to queries that filter one eager source with `eq(field, literal)`. It is off by default, and Suspense and `DbClient` queries never pool.
 

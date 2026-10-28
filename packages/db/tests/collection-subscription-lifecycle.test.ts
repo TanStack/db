@@ -8,7 +8,7 @@ import {
   flushPromises,
 } from './utils.js'
 import { startOutcomes } from './collection-subscription-lifecycle-cell-support.js'
-import type { LoadSubsetOptions } from '../src/types.js'
+import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 /**
  * Pinned unit tests for CollectionSubscription demand lifecycle: concrete
@@ -342,17 +342,17 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  it(`re-enables an installed loader after initial recovery in the same sync run`, async () => {
+  it(`keeps an installed loader unavailable after its initial error`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const loads: Array<LoadSubsetOptions> = []
-    let markError!: (error: unknown) => void
+    let fail!: (error: unknown) => void
     let markReady!: () => void
     const collection = createOnDemandCollection<{ id: string }>({
       id: `installed-loader-error-ready-recovery`,
       startSync: false,
       sync: {
         sync: (operations) => {
-          markError = operations.markError
+          fail = operations.fail
           markReady = operations.markReady
           return {
             loadSubset: (options) => {
@@ -369,12 +369,15 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
 
-    markError(new Error(`initial sync failed`))
-    markReady()
+    fail(new Error(`initial sync failed`))
+    // The initial error is final for this attempt: its markReady() does
+    // nothing (maintainer decision).
+    expect(() => markReady()).not.toThrow()
     subscription.requestSnapshot({ where })
+    await flushPromises()
 
-    expect(collection.status).toBe(`ready`)
-    expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([where])
+    expect(collection.status).toBe(`error`)
+    expect(loads).toEqual([])
 
     subscription.unsubscribe()
     await collection.cleanup()
@@ -384,14 +387,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
-    let markError!: (error: unknown) => void
+    let fail!: (error: unknown) => void
     let markReady!: () => void
     const collection = createOnDemandCollection<{ id: string }>({
       id: `release-unavailable-demand`,
       startSync: false,
       sync: {
         sync: (operations) => {
-          markError = operations.markError
+          fail = operations.fail
           markReady = operations.markReady
           return {
             loadSubset: (options) => {
@@ -408,9 +411,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       includeInitialState: false,
     })
 
-    markError(new Error(`initial sync failed`))
+    fail(new Error(`initial sync failed`))
     subscription.requestSnapshot({ where })
     subscription.releaseSnapshot(where)
+    // A restart is the only recovery; the released demand stays released.
+    await collection.cleanup()
+    collection.startSyncImmediate()
     markReady()
     await flushPromises()
 
@@ -466,7 +472,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
     await flushPromises()
 
-    expect(collection.status).toBe(`error`)
+    expect(collection.status).toBe(`crashed`)
     expect(subscription.status).toBe(`ready`)
 
     subscription.unsubscribe()
@@ -512,7 +518,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     uncaught.restore()
   })
 
-  it(`treats an externally aborted replay as failed without publishing partial rows`, async () => {
+  // An abort ends the load (maintainer decision): an owner whose replay load
+  // was aborted owes the replay nothing, so the replay publishes what the
+  // source holds, as one whose last owner retired does. The rows the adapter
+  // wrote before the abort applied as ordinary writes.
+  it(`publishes the source rows when an external abort ends the replay's only load`, async () => {
     type Row = { id: string; value: string }
     const abort = new AbortController()
     const replay = createDeferred<void>()
@@ -575,7 +585,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     replay.reject(new DOMException(`aborted`, `AbortError`))
     await flushPromises()
 
-    expect([...visible.values()]).toEqual([{ id: `row`, value: `old` }])
+    expect([...visible.values()]).toEqual([{ id: `row`, value: `partial` }])
     expect(subscription.status).toBe(`ready`)
 
     subscription.unsubscribe()
@@ -662,6 +672,154 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       subscription.unsubscribe()
       await collection.cleanup()
+    },
+  )
+
+  it.each(
+    ([`initial`, `replay`] as const).flatMap((origin) =>
+      ([`resolve`, `reject`] as const).flatMap((oldOutcome) =>
+        ([`old-first`, `current-first`] as const).map((order) => ({
+          origin,
+          oldOutcome,
+          order,
+        })),
+      ),
+    ),
+  )(
+    `does not wait for aborted $origin work before publishing or readiness, $oldOutcome, $order`,
+    async ({ origin, oldOutcome, order }) => {
+      type Row = { id: string; version: number }
+      const where = {
+        a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
+        b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+      }
+      const loads: Array<{
+        options: LoadSubsetOptions
+        deferred: ReturnType<typeof createDeferred<void>>
+      }> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const errors: Array<unknown> = []
+      const visible = new Map<string | number, Row>()
+      let emptyBatches = 0
+      let replacementChanges = 0
+      let operations!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+      const collection = createCollection<Row, string>({
+        id: `publication-readiness-boundary`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (nextOperations) => {
+            operations = nextOperations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                const deferred = createDeferred<void>()
+                void deferred.promise.catch(() => {})
+                loads.push({ options, deferred })
+                return deferred.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          if (changes.length === 0) emptyBatches++
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else {
+              visible.set(change.key, {
+                id: change.value.id,
+                version: change.value.version,
+              })
+              if (change.value.id === `b` && change.value.version === 2)
+                replacementChanges++
+            }
+          }
+        },
+        { includeInitialState: false },
+      )
+      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+      const write = async (id: string, version: number) => {
+        operations.begin()
+        operations.write({
+          type: collection.has(id) ? `update` : `insert`,
+          value: { id, version },
+        })
+        const receipt = operations.commit()
+        if (receipt !== true) await receipt
+      }
+      const truncate = async () => {
+        operations.begin()
+        operations.truncate()
+        const receipt = operations.commit()
+        if (receipt !== true) await receipt
+        await flushPromises()
+      }
+      const settle = async (
+        attempt: (typeof loads)[number],
+        outcome: `resolve` | `reject`,
+        id = `b`,
+      ) => {
+        // The source settles an aborted load late but suppresses its writes.
+        // An abort ended that load (maintainer decision): its late settlement
+        // installs nothing and holds neither readiness nor publication.
+        if (outcome === `resolve`) {
+          if (!attempt.options.signal?.aborted) await write(id, 2)
+          attempt.deferred.resolve()
+        } else attempt.deferred.reject(new Error(`obsolete source failed`))
+        await flushPromises()
+      }
+      try {
+        subscription.requestSnapshot({ where: where.b })
+        await write(`b`, 0)
+        if (origin === `replay`) {
+          loads[0]!.deferred.resolve()
+          await flushPromises()
+          await truncate()
+        }
+        const old = loads.at(-1)!
+        await truncate()
+        const current = loads.at(-1)!
+        expect(old.options.signal?.aborted).toBe(true)
+        expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
+        if (order === `old-first`) {
+          await settle(old, oldOutcome)
+          expect(subscription.status).toBe(`loadingSubset`)
+          expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
+        }
+        await settle(current, `resolve`)
+        expect([...visible.values()]).toEqual([{ id: `b`, version: 2 }])
+        expect(subscription.status).toBe(`ready`)
+        const emptyBeforeRequest = emptyBatches
+        subscription.requestSnapshot({ where: where.a })
+        expect(emptyBatches - emptyBeforeRequest).toBe(1)
+        await settle(loads.at(-1)!, `resolve`, `a`)
+        expect([...visible.values()]).toEqual([
+          { id: `b`, version: 2 },
+          { id: `a`, version: 2 },
+        ])
+        if (order === `current-first`) await settle(old, oldOutcome)
+        expect([...visible.values()]).toEqual([
+          { id: `b`, version: 2 },
+          { id: `a`, version: 2 },
+        ])
+        expect(subscription.status).toBe(`ready`)
+        expect(errors).toEqual([])
+        expect(replacementChanges).toBe(1)
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(loads.length)
+        for (const { options } of loads)
+          expect(unloads.filter((value) => value === options)).toHaveLength(1)
+      } finally {
+        for (const { deferred } of loads) deferred.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
     },
   )
 })

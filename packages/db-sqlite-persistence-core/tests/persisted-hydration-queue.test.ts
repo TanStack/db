@@ -785,7 +785,7 @@ describe(`persistedCollectionOptions`, () => {
       readyExact: true,
       lateStatus: `rejected`,
       lateExact: true,
-      status: `error`,
+      status: `crashed`,
       exactPublicError: true,
       visibleLate: undefined,
       durableLate: undefined,
@@ -847,7 +847,7 @@ describe(`persistedCollectionOptions`, () => {
         }).toEqual({
           startupStatus: `rejected`,
           startupExact: true,
-          status: `error`,
+          status: `crashed`,
           exactPublicError: true,
           visibleRows: [],
           durableRows:
@@ -958,7 +958,7 @@ describe(`persistedCollectionOptions`, () => {
         readyExact: true,
         lateStatus: `rejected`,
         lateExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         visibleBad: undefined,
         visibleLate: undefined,
@@ -2253,7 +2253,7 @@ describe(`persistedCollectionOptions`, () => {
         sameTerminal: true,
         durabilityCalls: 1,
         suffixDurable: undefined,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -2535,7 +2535,7 @@ describe(`persistedCollectionOptions`, () => {
         abortedName: `AbortError`,
         dependentStatus: `rejected`,
         dependentExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         publicRow: undefined,
         durableRow: undefined,
@@ -2653,7 +2653,7 @@ describe(`persistedCollectionOptions`, () => {
       expect({
         status: collection.status,
         pendingMarkers: collection._state.pendingSyncedTransactions.length,
-      }).toEqual({ status: `error`, pendingMarkers: 0 })
+      }).toEqual({ status: `crashed`, pendingMarkers: 0 })
     } catch (error) {
       hasPrimaryFailure = true
       throw error

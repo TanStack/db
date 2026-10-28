@@ -79,13 +79,41 @@ describe(`pooled live-query deferred acquisition`, () => {
       } finally {
         observer?.dispose()
         await view?.cleanup()
-        await source.cleanup()
+        await source.cleanup({ dependents: true })
         await client?.cleanup()
       }
     },
   )
 })
 
+/**
+ * A DbClient preload owns the release of every source it prepared. If the
+ * first source's sync run throws, that error belongs to the failed query;
+ * the later healthy source still gets its release and can serve a direct
+ * reader. The model needs only two independent start counts: zero before
+ * preload, one for each after release. The public checkpoint is the failed
+ * preload followed by readiness of the second source Collection.
+ * The failed call has no result to stream. A dehydration request at the
+ * synchronous error cut must not publish its pending query promise, even when
+ * the caller opts to stream pending queries.
+ * A later same-hash preload over a healthy replacement source must publish
+ * that source's row; the failed attempt has no result to reuse.
+ * The same options can be retried, but the failed source Collection remains
+ * in error until explicitly restarted. That retry must report the source error
+ * rather than wait on the failed query's former pending stream. A controlled
+ * later `fail` crosses the asynchronous failure cut: the pending preload
+ * rejects, its stream disappears, and a healthy replacement of the same
+ * query hash can publish its own row while the peer source remains ready. A
+ * failed stream has no reusable result, so a replacement observer may attach
+ * through the same hash before a new preload. Its public snapshot must show
+ * the replacement row as ready, with no stale stream error. The active-stream
+ * identity rule also applies before that failure: a different same-hash
+ * preload rejects while the original stream is pending. A synchronous source
+ * throw crosses the same recovery law at a different cut. After the peer source
+ * becomes ready, a replacement observer may attach before a new client preload
+ * and must read only the replacement row. These fixed histories do not claim
+ * all failure schedules or concurrent replacement observers.
+ */
 describe(`DbClient preload releases independent source starts`, () => {
   it(`retire a pending stream after asynchronous source startup failure`, async () => {
     const failure = new Error(`late source startup failure`)
@@ -97,9 +125,9 @@ describe(`DbClient preload releases independent source starts`, () => {
       getKey: (row: { id: string }) => row.id,
       startSync: true,
       sync: {
-        sync: ({ markError }) => {
+        sync: ({ fail }) => {
           firstStarts++
-          failFirst = () => markError(failure)
+          failFirst = () => fail(failure)
         },
       },
     }))
@@ -157,7 +185,8 @@ describe(`DbClient preload releases independent source starts`, () => {
       ).toHaveLength(1)
 
       failFirst()
-      await expect(pending).rejects.toThrow(/entered error state/)
+      // The live query reports its source's own failure.
+      await expect(pending).rejects.toThrow(/late source startup failure/)
       expect(
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
@@ -239,7 +268,7 @@ describe(`DbClient preload releases independent source starts`, () => {
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
       await expect(client.preloadLiveQuery(options)).rejects.toThrow(
-        /entered error state/,
+        /source start failed/,
       )
       expect(starts).toBe(1)
       expect(
@@ -425,7 +454,8 @@ describe(`a subscriber that outlives cleanup`, () => {
     try {
       outer.startSyncImmediate()
       await settle()
-      await inner.cleanup()
+      // Drive internal teardown, which bypasses cleanup admission.
+      await inner._lifecycle.cleanup()
       inner.startSyncImmediate()
       await settle()
       expect(counts.starts, `source sync-run starts`).toBe(0)
@@ -437,6 +467,15 @@ describe(`a subscriber that outlives cleanup`, () => {
   })
 })
 
+/**
+ * ## A source whose start throws on resumption
+ *
+ * The first subscriber or preload resumes every deferred source subscription.
+ * One source's start can throw synchronously. That failure is reported, as a
+ * rejected preload, but it does not keep the other sources deferred: each is
+ * resumed before the first error surfaces. `preload()` keeps its promise
+ * contract and never throws.
+ */
 describe(`a source whose start throws on resumption`, () => {
   it(`a retried preload resumes a source whose first start failed`, async () => {
     let attempts = 0
@@ -476,7 +515,7 @@ describe(`a source whose start throws on resumption`, () => {
       )
       // The failed start puts the source and its live query in error, so the
       // supported recovery is cleanup and a new sync run, not a retry in place.
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       await live.cleanup()
       await flaky.cleanup()
       // A new preload after cleanup starts a new sync run and must resume.
@@ -534,6 +573,16 @@ describe(`a source whose start throws on resumption`, () => {
     }
   })
 })
+/**
+ * ## A preload answered by a DbClient stream
+ *
+ * During SSR streaming, a DbClient may already hold a pending or settled
+ * stream for a query. The observer's preload then returns that stream instead
+ * of preloading the live-query Collection. It is still a request for the
+ * Collection's data, so it counts as a preload: deferred acquisition resumes
+ * and the idle source Collection starts its sync run. This includes a source
+ * left deferred by a render: that render does not own the preload's demand.
+ */
 describe(`preload answered by a DbClient stream`, () => {
   it.each(
     ([`pending`, `success`] as const).flatMap((stream) =>
@@ -579,6 +628,16 @@ describe(`preload answered by a DbClient stream`, () => {
   )
 })
 
+/**
+ * ## A subscriber that outlives cleanup
+ *
+ * Cleanup ends a live-query Collection's sync run but keeps its subscriptions.
+ * A subscriber that survives is still a subscriber in the next sync run, so a
+ * restarted live-query Collection acquires for it at once instead of
+ * deferring until another subscriber or preload arrives. The finite command
+ * histories above unsubscribe before cleanup. This block pins the history: subscribe,
+ * clean up while subscribed, restart, then settle.
+ */
 describe(`a subscriber that outlives cleanup`, () => {
   for (const state of [
     `eager-idle`,
@@ -619,6 +678,15 @@ describe(`a subscriber that outlives cleanup`, () => {
   }
 })
 
+/**
+ * ## Reads that wait for readiness
+ *
+ * `toArrayWhenReady()` and `stateWhenReady()` ask for a Collection's data:
+ * when it holds no rows they preload it. They are requests for data in either
+ * branch, so they count as a preload. A deferring live-query Collection that
+ * already shows its source's local rows returns those rows at once and resumes
+ * acquisition for the rest.
+ */
 describe(`reads that wait for readiness`, () => {
   for (const read of [`toArrayWhenReady`, `stateWhenReady`] as const) {
     it(`${read} resumes a deferring live query that already shows local rows`, async () => {
@@ -641,6 +709,16 @@ describe(`reads that wait for readiness`, () => {
   }
 })
 
+/**
+ * ## A deferring live query is not a subscriber of its sources
+ *
+ * Adapters read a source Collection's `subscriberCount` and
+ * `subscribers:change` as a request for live data: Query Collection
+ * resubscribes its observers, which can refetch. A live-query Collection that
+ * defers asks for no data, so it does not count there. It still keeps its
+ * source Collections from garbage collection, because it reads their rows.
+ * Its first subscriber or preload makes it count.
+ */
 describe(`a deferring live query is not a subscriber of its sources`, () => {
   for (const state of [`eager-running`, `on-demand-running`] as const) {
     it(`${state}: counts only once a subscriber asks for data`, async () => {
@@ -681,6 +759,16 @@ describe(`a deferring live query is not a subscriber of its sources`, () => {
   }
 })
 
+/**
+ * ## A request that arrives while a source subscription is created
+ *
+ * A live-query Collection decides that a source subscription defers when it
+ * creates it. Creating it can run user code: subscribing to an inner
+ * live-query Collection starts that Collection, whose status handlers run
+ * before the outer subscription returns. If such a handler preloads or
+ * subscribes to the outer live query, the request arrives after the decision
+ * but before the outer one listens for it. It still resumes the source.
+ */
 describe(`a request that arrives while a source subscription is created`, () => {
   for (const request of [`preload`, `subscribe`] as const) {
     it(`an inner status handler that ${request}s the outer live query resumes it`, async () => {

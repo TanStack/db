@@ -162,9 +162,11 @@ ssrSnapshotExamples.push({
  * This extension uses empty eager sources so it judges lifecycle flags without
  * inventing a row-retention policy after failure. An outcome is an authored sync
  * callback signal, not an abstraction of the Collection's full lifecycle: ready
- * calls markReady; error returns after markError. Preloading handles a rejection
- * as a normal runtime failure. A throwing callback and error-detail transport
- * require separate judgments and are outside this grammar.
+ * calls markReady; error returns after fail(), a loading error before Collection
+ * readiness (status `error`, `isLoadingError`). Preloading handles a rejection
+ * as a normal runtime failure. A throwing callback is a crash (status
+ * `crashed`), and it and error-detail transport require separate judgments
+ * outside this grammar, so no view here is crashed.
  */
 export type SsrRuntimeErrorHistory = {
   serverOutcome: `ready` | `error`
@@ -212,7 +214,8 @@ export function expectedSsrRuntimeErrorViews(history: SsrRuntimeErrorHistory) {
     rows: [],
     status,
     isReady: status === `ready`,
-    isError: status === `error`,
+    isLoadingError: status === `error`,
+    isCrashed: false,
     isLoading: false,
     isIdle: false,
   })

@@ -107,7 +107,7 @@ it.each(cells)(
         await second
       })
       await blocked[0]!.promise
-      expect.soft(old.status).toBe('error')
+      expect.soft(old.status).toBe('crashed')
       assertRows(old.values(), a, 'announced deletion retains A')
       expect(settled).toEqual([false, false])
       expect(nativeSucceeded).toEqual([false, false])
@@ -162,7 +162,7 @@ it.each(cells)(
       expect(nativeSucceeded[1], 'B blocker prevents native success').toBe(
         false,
       )
-      expect.soft(fresh.status).toBe('error')
+      expect.soft(fresh.status).toBe('crashed')
       assertRows(fresh.values(), b, 'B retained while newer deletion blocked')
       assertRows(
         (await readStore<Row>({ ...freshDb, db: blockerB }, 'items')).rows,
@@ -181,7 +181,7 @@ it.each(cells)(
         b,
         'B retained after native completion before caller',
       )
-      expect.soft(fresh.status).toBe('error')
+      expect.soft(fresh.status).toBe('crashed')
       receipts[1]!.resolve()
       await second
       receipts[0]!.resolve()
@@ -190,9 +190,9 @@ it.each(cells)(
       expect(settled).toEqual([true, true])
       assertRows(old.values(), a, 'A receipt never empties A')
       assertRows(fresh.values(), b, 'B receipt never empties B')
-      expect.soft([old.status, fresh.status]).toEqual(['error', 'error'])
-      expect.soft(oldStatuses).toEqual(['error'])
-      expect.soft(freshStatuses).toEqual(['error'])
+      expect.soft([old.status, fresh.status]).toEqual(['crashed', 'crashed'])
+      expect.soft(oldStatuses).toEqual(['crashed'])
+      expect.soft(freshStatuses).toEqual(['crashed'])
       for (const rows of oldRows) assertRows(rows, a, 'every A publication')
       for (const rows of freshRows) assertRows(rows, b, 'every B publication')
       // A fresh open proves native deletion did occur. Retained Collection rows
@@ -262,7 +262,7 @@ it('a delete queued during A can delete the intervening recreated B', async () =
       [],
       'B was natively deleted',
     )
-    expect.soft(old.status).toBe('error')
+    expect.soft(old.status).toBe('crashed')
   })
 })
 
@@ -280,7 +280,7 @@ it('retains errored snapshots when all obligations finish before announcement', 
     await gate.release()
     blocker.close()
     await deleteDatabase(h.db.name)
-    expect(c.status).toBe('error')
+    expect(c.status).toBe('crashed')
     assertRows(c.values(), rows, 'unblocked deletion retains snapshot')
     const fresh = await h.connect()
     assertRows(

@@ -9,7 +9,9 @@
  * expected view. Empty eager sources avoid inventing error row retention or
  * portable error-object identity. The fixture supplies native SSR, JSON
  * transport and hydrate(); construction and pre-effects record the two public
- * cuts. This lane does not model throwing provider callbacks or Suspense.
+ * cuts. A failure is the provider's fail() before readiness, a loading error
+ * (`isLoadingError`). This lane does not model throwing provider callbacks,
+ * which crash the Collection (`isCrashed`), or Suspense.
  */
 import { TextEncoder } from 'node:util'
 import { fc } from '@fast-check/vitest'
@@ -98,10 +100,10 @@ async function checkRuntimeHistory(
     getKey: (row: { id: string; name: string; sourcePayload: string }) =>
       row.id,
     sync: {
-      sync: ({ markReady, markError }) => {
+      sync: ({ markReady, fail }) => {
         starts++
         if (history.browserOutcome === `error`)
-          markError(
+          fail(
             history.definedError
               ? new Error(`provider unavailable`)
               : undefined,

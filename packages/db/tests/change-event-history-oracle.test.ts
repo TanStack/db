@@ -70,6 +70,16 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * model. Whether a throwing subscriber may stop a later subscriber of the same
  * publication is not decided here; the throwing subscriber is always last.
  *
+ * A reload may end a history. A local-only Collection has no backend: its
+ * rows are the only copy of the user's writes, so a reload keeps them
+ * (maintainer decision; `initialData` loads only into a Collection that
+ * starts empty, at creation or after cleanup). `reload()` resolves, the
+ * Collection stays `ready`, the public rows equal the model's fold, the
+ * mirror of every delivered message, each valid for its state, equals them,
+ * and a later write through the reloaded run reaches both. The error-handling
+ * guide's adapter obligations also apply: an adapter never inserts a key the
+ * Collection holds.
+ *
  * This partial oracle does not cover failed persistence, sync-transaction
  * cancellation, general callback batch shape, callback-time index agreement, or
  * publications without change messages.
@@ -92,6 +102,8 @@ type GeneratedHistory = {
   mode: `batched` | `sequential`
   /** The operation whose publication meets a throwing subscriber. */
   throwOn?: number
+  /** The history ends with a reload. */
+  reload?: boolean
 }
 
 type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
@@ -327,6 +339,7 @@ async function runHistory(
   id: string,
   indexType?: IndexType,
   throwOn?: number,
+  reload = false,
 ): Promise<void> {
   const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
     ([, row]) => row,
@@ -468,6 +481,19 @@ async function runHistory(
         if (index) assertIndexAgreement(index, expected)
       }
     }
+    if (reload) {
+      const kept = mirrorRows(expectedRowsAfter(initialKeys, sequence))
+      await collection.reload()
+      expect(collection.status, `status after reload`).toBe(`ready`)
+      expect(publicRows(collection), `a reload keeps the rows`).toEqual(kept)
+      expect(mirrorRows(mirror), `mirror after reload`).toEqual(kept)
+      // The histories use keys 1 to 4, so key 5 is absent.
+      const later = { id: 5, name: `after-reload`, fileId: fileIdForKey(5) }
+      await settle(collection.insert(later))
+      const expected = [...kept, [5, later] as const]
+      expect(publicRows(collection), `write after reload`).toEqual(expected)
+      expect(mirrorRows(mirror), `mirror after write`).toEqual(expected)
+    }
     if (index) {
       await assertIndexedQueryAgreement(
         collection,
@@ -517,6 +543,7 @@ async function verifyGeneratedHistory({
   sequence,
   mode,
   throwOn,
+  reload,
 }: GeneratedHistory): Promise<void> {
   await runHistory(
     sequence,
@@ -525,6 +552,7 @@ async function verifyGeneratedHistory({
     `history-oracle-generated-${initialKeys.join(``)}-${mode}-${describeSequence(sequence)}`,
     undefined,
     throwOn === undefined ? undefined : throwOn % sequence.length,
+    reload,
   )
 }
 
@@ -750,10 +778,11 @@ describe(`change-event history oracle`, () => {
       // About two histories in three arm a throwing subscriber; about one in
       // four reaches the operation it throws on.
       throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
+      reload: fc.boolean(),
     })
-    .map(({ initialKeys, steps, mode, throwOn }) => {
+    .map(({ initialKeys, steps, mode, throwOn, reload }) => {
       const sequence = opsFromPresence(initialKeys, steps, 1)
-      return { initialKeys, sequence, mode, throwOn }
+      return { initialKeys, sequence, mode, throwOn, reload }
     })
 
   // The fixed prefix forces reused keys through an already-built index.
@@ -859,6 +888,23 @@ describe(`change-event history oracle`, () => {
     `$id: $label reconstructs every public row`,
     async ({ mode, sequence, initialKeys, id }) => {
       await runHistory(sequence, initialKeys, mode, `history-oracle-${id}`)
+    },
+  )
+
+  // Every bounded history again, ending with a reload. It includes the
+  // reported trace: initialData [1], update 1, reload.
+  it.each(cases)(
+    `$id: $label then reload reconstructs every public row`,
+    async ({ mode, sequence, initialKeys, id }) => {
+      await runHistory(
+        sequence,
+        initialKeys,
+        mode,
+        `history-oracle-reload-${id}`,
+        undefined,
+        undefined,
+        true,
+      )
     },
   )
 

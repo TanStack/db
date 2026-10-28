@@ -68,3 +68,9 @@ export function source() {
     listCalls: 0,
   }
 }
+
+export type RaceRow = { id: number; data: string }
+
+// Compare only the row fields; the Collection adds virtual properties.
+export const sortedRows = (rows: Iterable<RaceRow>) =>
+  [...rows].map(({ id, data }) => ({ id, data })).sort((a, b) => a.id - b.id)

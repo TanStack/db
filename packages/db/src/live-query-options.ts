@@ -1,6 +1,6 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
-import { isCollection } from './live-query-primitives.js'
+import { isCollection, isFailedStatus } from './live-query-primitives.js'
 import {
   DEFAULT_GC_TIME_MS,
   UNSUBSCRIBED_GC_FLOOR_MS,
@@ -125,8 +125,8 @@ export function resumeDeferredLiveQueryCollections(
     try {
       collection._resumeSyncStart()
       // An explicit preload owns source failure reporting even when graph
-      // demand already released the gate. Ordinary hooks read error status.
-      if (reportSourceErrors && collection.status === `error`) {
+      // demand already released the gate. Ordinary hooks read the status.
+      if (reportSourceErrors && isFailedStatus(collection.status)) {
         throw collection._lifecycle.getSyncError()
       }
     } catch (error) {

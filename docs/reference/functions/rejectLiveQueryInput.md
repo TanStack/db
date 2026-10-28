@@ -7,7 +7,7 @@ title: rejectLiveQueryInput
 function rejectLiveQueryInput(collections, rejection): never;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L66)
+Defined in: [packages/db/src/live-query-options.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L67)
 
 Release the sync starts a rejected query input deferred, then rethrow its
 rejection. A framework hook calls this around its own render work, so a

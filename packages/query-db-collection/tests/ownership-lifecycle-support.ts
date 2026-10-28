@@ -650,3 +650,20 @@ export async function readClaimedCacheRows(
     .map((row) => ({ key: row.key, name: row.value.name }))
     .sort((a, b) => String(a.key).localeCompare(String(b.key)))
 }
+
+/**
+ * The Query failure a Collection reports: its failed first load while it is
+ * in `error`, or the cause of its failure reason after readiness.
+ */
+export function reportedError(collection: {
+  status: string
+  health: {
+    failureReason: { cause: unknown } | null
+    error: { cause: unknown } | null
+  }
+  _lifecycle: { getSyncError: () => unknown }
+}): unknown {
+  return collection.status === `error`
+    ? collection._lifecycle.getSyncError()
+    : (collection.health.failureReason ?? collection.health.error)?.cause
+}

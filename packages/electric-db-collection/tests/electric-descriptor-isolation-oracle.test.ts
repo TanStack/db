@@ -486,7 +486,7 @@ beforeEach(() => {
 // a retired session's acceptance settles nothing, whether it resolves or
 // rejects, and the replacement session's first up-to-date decides readiness.
 // The driver observes the Collection's readiness boundary (markReady and
-// markError) after the retired acceptance settles and after the replacement
+// fail) after the retired acceptance settles and after the replacement
 // delivers its snapshot.
 
 // Two valid cache rotations may overlap in the persisted wrapper. The second

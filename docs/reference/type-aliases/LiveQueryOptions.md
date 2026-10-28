@@ -7,7 +7,7 @@ title: LiveQueryOptions
 type LiveQueryOptions = LiveQueryCollectionConfig<any> & object;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L47)
+Defined in: [packages/db/src/live-query-options.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L48)
 
 ## Type Declaration
 

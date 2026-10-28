@@ -1085,7 +1085,7 @@ describe(`persistedCollectionOptions`, () => {
         releases: tab.releases(),
         ensures: tab.ensures(),
         rows: Array.from(tab.source.values()).map((row) => row.id),
-        status: tab.source.status === `error` ? `error` : `healthy`,
+        status: tab.source.status === `crashed` ? `crashed` : `healthy`,
       }).toEqual({
         outcome: `rejected`,
         releases: 0,
@@ -1620,12 +1620,12 @@ describe(`persistedCollectionOptions`, () => {
           expect(
             persistenceCapability?.resumeSnapshot.getKeySetEvidence(),
           ).toEqual({ status: `incompatible` })
-          expect(collection.status).not.toBe(`error`)
+          expect(collection.status).not.toBe(`crashed`)
         } else {
           expect(outcome).toEqual([{ status: `rejected`, reason: ioFailure }])
           expect(rotations).toBe(0)
           expect(storageId).toBe(oldStorageId)
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
         }
       } finally {
         releaseRead.resolve()
@@ -1738,14 +1738,14 @@ describe(`persistedCollectionOptions`, () => {
         await flushAsyncWork()
 
         if (failure === `io`) {
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(collection.get(`old`)?.title).toBe(`Initial row`)
           expect(rotations).toBe(0)
           await expect(collection._sync.loadSubset({})).rejects.toBe(readError)
           return
         }
         expect(collection.get(`old`)?.title).not.toBe(`Expired peer row`)
-        expect(collection.status).not.toBe(`error`)
+        expect(collection.status).not.toBe(`crashed`)
         await vi.waitFor(() => expect(rotations).toBe(1))
         expect(collection.get(`old`)).toBeUndefined()
       } finally {
@@ -2025,6 +2025,9 @@ describe(`persistedCollectionOptions`, () => {
             params.markReady()
             // Both old commits have entered the wrapper before rotation.
             return {
+              // An on-demand source serves the subsets that recovery
+              // reacquires in the new generation.
+              loadSubset: () => true,
               restartAfterScopedRecovery: (cacheRotated) =>
                 cacheRotated.then(() => sourceRestarted.resolve()),
             }
@@ -2080,6 +2083,8 @@ describe(`persistedCollectionOptions`, () => {
           ),
         ),
       ).toEqual([])
+      // Recovery succeeded: the Collection still accepts sync data.
+      expect(collection.status).toBe(`ready`)
       source.begin()
       source.write({
         type: `insert`,

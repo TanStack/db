@@ -519,12 +519,17 @@ it(`rejects a demand after provider-session restart fails`, async () => {
   const options = descriptor(`original`, false, `on-demand`)
   const rotationError = new Error(`cache rotation failed`)
   const params = {
-    collection: { utils: {}, getKeyFromItem: (row: TestRow) => row.id },
+    collection: {
+      utils: {},
+      getKeyFromItem: (row: TestRow) => row.id,
+      // A fresh Collection holds no synced rows.
+      _state: { acceptedSyncedEntries: () => new Map().entries() },
+    },
     begin: () => {},
     write: () => {},
     commit: () => true,
     markReady: () => {},
-    markError: () => {},
+    fail: () => {},
     truncate: () => {},
     metadata: {
       collection: { get: () => undefined, set: () => {} },
@@ -582,7 +587,10 @@ it.each([`resolves`, `rejects`] as const)(
       collection: {
         utils: {},
         getKeyFromItem: (row: TestRow) => row.id,
-        _state: { syncedData: new Map() },
+        _state: {
+          syncedData: new Map(),
+          acceptedSyncedEntries: () => new Map().entries(),
+        },
         get status() {
           return status
         },
@@ -600,7 +608,7 @@ it.each([`resolves`, `rejects`] as const)(
         readiness.push(`ready`)
         status = `ready`
       },
-      markError: () => {
+      fail: () => {
         readiness.push(`error`)
         status = `error`
       },
@@ -656,12 +664,17 @@ it.each([`resolves`, `rejects`] as const)(
 it(`waits for every overlapping cache rotation before restarting Electric`, async () => {
   const options = descriptor(`original`, false, `on-demand`)
   const params = {
-    collection: { utils: {}, getKeyFromItem: (row: TestRow) => row.id },
+    collection: {
+      utils: {},
+      getKeyFromItem: (row: TestRow) => row.id,
+      // A fresh Collection holds no synced rows.
+      _state: { acceptedSyncedEntries: () => new Map().entries() },
+    },
     begin: () => {},
     write: () => {},
     commit: () => true,
     markReady: () => {},
-    markError: () => {},
+    fail: () => {},
     truncate: () => {},
     metadata: {
       collection: { get: () => undefined, set: () => {} },
@@ -718,18 +731,21 @@ it(`waits for every overlapping cache rotation before restarting Electric`, asyn
 it(`retires a replacement Electric stream before a second cache rotation`, async () => {
   const options = descriptor(`original`, false, `on-demand`)
   const write = vi.fn()
-  const markError = vi.fn()
+  const fail = vi.fn()
   const params = {
     collection: {
       utils: {},
       getKeyFromItem: (row: TestRow) => row.id,
-      _state: { syncedData: new Map() },
+      _state: {
+        syncedData: new Map(),
+        acceptedSyncedEntries: () => new Map().entries(),
+      },
     },
     begin: () => {},
     write,
     commit: () => true,
     markReady: () => {},
-    markError,
+    fail,
     truncate: () => {},
     metadata: {
       collection: { get: () => undefined, set: () => {} },
@@ -783,7 +799,7 @@ it(`retires a replacement Electric stream before a second cache rotation`, async
     retiredStream.ignoreAbort = true
     retiredStream.send([insert(7, `retired`), upToDate])
     expect(write).not.toHaveBeenCalled()
-    expect(markError).not.toHaveBeenCalled()
+    expect(fail).not.toHaveBeenCalled()
     releaseSecond()
     await atCheckpoint(second, `second cache rotation completes`)
     expect(streams).toHaveLength(3)

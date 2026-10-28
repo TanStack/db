@@ -16,6 +16,7 @@ import {
   createOracleCollection,
   createPersistedAdapter,
   everyContiguousPartition,
+  expectGaveUpAfterReadiness,
   expectPreloadOutcome,
   expectWholePublications,
   mockStream,
@@ -505,7 +506,7 @@ describe(`Electric adapter laws`, () => {
         trace.subscriber([change(`insert`, 1, `complete`), upToDate])
         for (const batch of partition) trace.subscriber(batch)
 
-        expect(trace.collection.status).toBe(`error`)
+        expectGaveUpAfterReadiness(trace.collection)
         expect(trace.collection.get(1)).toEqual(
           expect.objectContaining({ stable: `stable-1` }),
         )

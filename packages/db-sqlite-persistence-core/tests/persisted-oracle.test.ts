@@ -307,7 +307,7 @@ function expectAbortGraphObservation(
           predecessorName: `AbortError`,
           successorStatus: `rejected`,
           sameFailure: true,
-          status: `error`,
+          status: `crashed`,
           publicSuccessor: undefined,
           durableSuccessor: undefined,
           pendingMarkers: 0,
@@ -359,7 +359,7 @@ function expectOpenTransactionBoundaryObservation(
         ? `cleaned-up`
         : boundary === `abort`
           ? `ready`
-          : `error`,
+          : `crashed`,
     pendingMarkers: 0,
   })
 }
@@ -1574,7 +1574,7 @@ describeDurabilityOracles(`generated persistence durability oracles`, () => {
               predecessorName: `AbortError`,
               successorStatus: `rejected`,
               sameFailure: true,
-              status: `error`,
+              status: `crashed`,
               publicSuccessor: undefined,
               durableSuccessor: undefined,
               pendingMarkers: 0,
@@ -1596,7 +1596,7 @@ describeDurabilityOracles(`generated persistence durability oracles`, () => {
         name: `open-transaction boundary leaks one core marker`,
         reject: () =>
           expectOpenTransactionBoundaryObservation(
-            { status: `error`, pendingMarkers: 1 },
+            { status: `crashed`, pendingMarkers: 1 },
             `terminal-failure`,
           ),
       },
@@ -3790,7 +3790,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (ownerRead === `fails`) {
           // Not settled(): a terminal runtime rejects the checkpoint scan.
           await flushAsyncWork()
-          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          await vi.waitFor(() => expect(collection.status).toBe(`crashed`))
           expectExactSnapshot(publicRows(), visible)
         } else {
           await settled(`owner update processed`)
@@ -3917,7 +3917,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         history.consumer === `live-query`
           ? applied
             ? { outcome: `fulfilled`, rows: [`remote`], status: `ready` }
-            : { outcome: `rejected`, rows: undefined, status: `error` }
+            : { outcome: `rejected`, rows: undefined, status: `crashed` }
           : applied
             ? {
                 outcome: `fulfilled`,
@@ -3928,7 +3928,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             : {
                 outcome: `rejected`,
                 rows: undefined,
-                status: `error`,
+                status: `crashed`,
                 releases: 1,
               },
     }
@@ -4019,7 +4019,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             : history.consumer === `live-query` &&
                 expected.settled.status === `ready`
               ? query.status
-              : expected.settled.status === `error`
+              : expected.settled.status === `crashed`
                 ? history.consumer === `live-query`
                   ? `${query.status}/${tab.source.status}`
                   : tab.source.status
@@ -4031,9 +4031,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           ? { releases: expected.settled.releases }
           : {}),
         status:
-          expected.settled.status === `error` &&
+          expected.settled.status === `crashed` &&
           history.consumer === `live-query`
-            ? `error/error`
+            ? `crashed/crashed`
             : expected.settled.status,
       })
     } finally {
@@ -4097,7 +4097,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * arrived while the reacquisitions were settling. If any fails, the
    * follower stays in scoped recovery, shows no row from the incomplete
    * generation, and the source reports the failure as soon as that
-   * reacquisition settles.
+   * reacquisition settles. A reacquisition is a remote request, so the
+   * failure is the ready source's failure reason (`reportError()`: the source
+   * keeps syncing), never a crash; a crash is only for local storage or an
+   * internal invariant (glossary "crash"; maintainer decision for PR #2168).
    *
    * A demand that the caller releases or aborts while it reacquires no longer
    * needs the new generation's rows: its aborted ensure is neither a failure
@@ -4155,7 +4158,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     rows: Record<`a` | `b` | `c`, number | undefined>
     // The new demand's load, when the history has one.
     newLoad?: `pending` | `fulfilled` | `rejected`
-    status: `error` | `healthy`
+    // `retrying`: ready, with a failure reason.
+    status: `crashed` | `retrying` | `healthy`
   }
   const expectedReacquisition = (
     history: RotatedReacquisitionHistory,
@@ -4165,8 +4169,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       history.fails === group || history.fails === `both`
     const allSettled = settled === 2
     const ended = allSettled && !fails(`a`) && !fails(`b`)
-    // A failed reacquisition is reported when it settles.
-    const failed = history.order.slice(0, settled).some(fails)
+    // A failed reacquisition is reported when it settles, and the next
+    // remote request that succeeds clears it (maintainer decision: a coarse
+    // clear). A released demand's aborted ensure is neither.
+    let failed = false
+    for (const group of history.order.slice(0, settled))
+      if (fails(group)) failed = true
+      else if (!(group === `b` && history.fails === `released`)) failed = false
     return {
       rows: ended
         ? {
@@ -4186,7 +4195,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 : (`rejected` as const),
           }
         : {}),
-      status: failed ? `error` : `healthy`,
+      status: failed ? `retrying` : `healthy`,
     }
   }
 
@@ -4370,6 +4379,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         sync: {
           sync: (params) => {
             sourceParams = params
+            // A ready source: only a ready Collection can carry the failed
+            // reacquisition as its failure reason.
+            params.markReady()
             return {
               loadSubset: () => Promise.resolve(),
               restartAfterScopedRecovery: () => {},
@@ -4387,7 +4399,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         c: source.get(`c-row`)?.v,
       },
       ...(history.newDemand ? { newLoad } : {}),
-      status: source.status === `error` ? `error` : `healthy`,
+      status:
+        source.status === `crashed`
+          ? `crashed`
+          : source.health.failureReason
+            ? `retrying`
+            : `healthy`,
     })
     const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
     const settle = async () => {
@@ -5072,6 +5089,9 @@ function expectedDurableHydrationTransactions(
 
 // A routing reproduction must not contaminate a requested generated-property
 // replay from this shared file. These bounded cases exclude every explicit replay.
+// Terminal local persistence failures crash the Collection after readiness,
+// following the IndexedDB closure precedent. Upstream (wrapped sync adapter)
+// failures after readiness stay health metadata; this lane holds both.
 describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
   const first = { id: `shared`, title: `first source value` }
   const second = { id: `shared`, title: `last source value` }
@@ -5453,7 +5473,7 @@ describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
               status: `rejected`,
               reason: rejected.reason,
             })
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(collection._lifecycle.getSyncError()).toBe(rejected.reason)
           expect((rejected.reason as Error).cause).toBe(storageError)
           await expect(

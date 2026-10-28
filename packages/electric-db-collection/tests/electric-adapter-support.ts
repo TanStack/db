@@ -445,3 +445,16 @@ export function resetElectricOracleMocks(): void {
   mockStream.shapeHandle = `shape-current`
   mockStream.lastOffset = `20_0`
 }
+
+/**
+ * After Collection readiness, an Electric sync adapter that gives up reports a
+ * stopped sync: the Collection's `error`. Status and rows stay, and only a restart recovers; the
+ * reset resume state is what lets that restart refetch.
+ */
+export function expectGaveUpAfterReadiness(
+  collection: Collection<OracleRow, string | number>,
+) {
+  expect(collection.status).toBe(`ready`)
+  expect(collection.health.failureReason).toBeNull()
+  expect(collection.health.error).toBeTruthy()
+}

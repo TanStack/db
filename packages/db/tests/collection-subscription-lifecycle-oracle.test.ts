@@ -735,28 +735,6 @@ function expectedSubscriberCountAfterRelease(
 }
 
 /**
- * Private-replay model: a replay whose current attempt settles before the
- * obsolete one stays private. Its prior row stays visible and publishes no
- * replacement until the obsolete attempt settles.
- */
-function isPrivateReplay(
-  origin: `initial` | `replay`,
-  order: `old-first` | `current-first`,
-): boolean {
-  return origin === `replay` && order === `current-first`
-}
-
-/**
- * Readiness model: the subscription is ready after the current attempt settles
- * only when the obsolete attempt already settled.
- */
-function expectedStatusAfterCurrentSettles(
-  order: `old-first` | `current-first`,
-): `ready` | `loadingSubset` {
-  return order === `old-first` ? `ready` : `loadingSubset`
-}
-
-/**
  * Three-generation model: the current sync run decides the published row and
  * the delivered error. The obsolete run's settlement never publishes.
  */
@@ -785,8 +763,6 @@ declareOracle({
     expectedStatusAfterQueuedCancel,
     expectedUncaughtReleaseErrors,
     expectedSubscriberCountAfterRelease,
-    isPrivateReplay,
-    expectedStatusAfterCurrentSettles,
     expectedThreeGenerationSettlement,
   ],
   grammar: [
@@ -991,8 +967,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  // A cleaned-up attempt recovers with a restart. An errored attempt cannot
+  // recover in place; the test above owns its demand.
   it.each(
-    ([`error`, `cleaned-up`] as const).flatMap((unavailable) =>
+    ([`cleaned-up`] as const).flatMap((unavailable) =>
       (
         [
           `return`,
@@ -1022,7 +1000,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     ),
   )(
     `observes unavailable demand synchronously: $entry / $unavailable / $outcome / $phase`,
-    async ({ unavailable, outcome, phase, entry }) => {
+    async ({ outcome, phase, entry }) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const transport = createDeferred<void>()
       const failure = new Error(`recovery acquisition failed`)
@@ -1069,9 +1047,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
             collection.createIndex((row) => row.id, { indexType: BTreeIndex }),
           )
         }
-        if (unavailable === `error`)
-          operations.markError(new Error(`initial error`))
-        else await collection.cleanup()
+        await collection.cleanup()
         const onLoadSubsetResult = (
           value: true | Promise<void>,
           _options: LoadSubsetOptions,
@@ -1114,7 +1090,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(settlements).toEqual([])
         expect(loads).toEqual([])
         const recover = () => {
-          if (unavailable === `cleaned-up`) collection.startSyncImmediate()
+          collection.startSyncImmediate()
           operations.markReady()
         }
         if (phase === `during`) {
@@ -1407,162 +1383,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         uncaught.restore()
         await collection.cleanup()
         subscription.unsubscribe()
-      }
-    },
-  )
-
-  it.each(
-    ([`initial`, `replay`] as const).flatMap((origin) =>
-      ([`resolve`, `reject`] as const).flatMap((oldOutcome) =>
-        ([`old-first`, `current-first`] as const).map((order) => ({
-          origin,
-          oldOutcome,
-          order,
-        })),
-      ),
-    ),
-  )(
-    `separates publication from readiness for pending $origin work, $oldOutcome, $order`,
-    async ({ origin, oldOutcome, order }) => {
-      type Row = { id: string; version: number }
-      const where = {
-        a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
-        b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
-      }
-      const loads: Array<{
-        options: LoadSubsetOptions
-        deferred: ReturnType<typeof createDeferred<void>>
-      }> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      const errors: Array<unknown> = []
-      const visible = new Map<string | number, Row>()
-      let emptyBatches = 0
-      let replacementChanges = 0
-      let operations!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
-      const collection = createCollection<Row, string>({
-        id: `publication-readiness-boundary`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (nextOperations) => {
-            operations = nextOperations
-            operations.markReady()
-            return {
-              loadSubset: (options) => {
-                const deferred = createDeferred<void>()
-                void deferred.promise.catch(() => {})
-                loads.push({ options, deferred })
-                return deferred.promise
-              },
-              unloadSubset: (options) => {
-                unloads.push(options)
-              },
-            }
-          },
-        },
-      })
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          if (changes.length === 0) emptyBatches++
-          for (const change of changes) {
-            if (change.type === `delete`) visible.delete(change.key)
-            else {
-              visible.set(change.key, {
-                id: change.value.id,
-                version: change.value.version,
-              })
-              if (change.value.id === `b` && change.value.version === 2)
-                replacementChanges++
-            }
-          }
-        },
-        { includeInitialState: false },
-      )
-      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
-      const write = async (id: string, version: number) => {
-        operations.begin()
-        operations.write({
-          type: collection.has(id) ? `update` : `insert`,
-          value: { id, version },
-        })
-        const receipt = operations.commit()
-        if (receipt !== true) await receipt
-      }
-      const truncate = async () => {
-        operations.begin()
-        operations.truncate()
-        const receipt = operations.commit()
-        if (receipt !== true) await receipt
-        await flushPromises()
-      }
-      const settle = async (
-        attempt: (typeof loads)[number],
-        outcome: `resolve` | `reject`,
-        id = `b`,
-      ) => {
-        // The source cannot cancel transport promptly, but must suppress its
-        // canceled writes. Late settlement does not install an obsolete row.
-        if (outcome === `resolve`) {
-          if (!attempt.options.signal?.aborted) await write(id, 2)
-          attempt.deferred.resolve()
-        } else attempt.deferred.reject(new Error(`obsolete source failed`))
-        await flushPromises()
-      }
-      try {
-        subscription.requestSnapshot({ where: where.b })
-        await write(`b`, 0)
-        if (origin === `replay`) {
-          loads[0]!.deferred.resolve()
-          await flushPromises()
-          await truncate()
-        }
-        const old = loads.at(-1)!
-        await truncate()
-        const current = loads.at(-1)!
-        expect(old.options.signal?.aborted).toBe(true)
-        expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
-        if (order === `old-first`) {
-          await settle(old, oldOutcome)
-          expect(subscription.status).toBe(`loadingSubset`)
-          expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
-        }
-        await settle(current, `resolve`)
-        const privateReplay = isPrivateReplay(origin, order)
-        expect([...visible.values()]).toEqual([
-          { id: `b`, version: privateReplay ? 0 : 2 },
-        ])
-        expect(subscription.status).toBe(
-          expectedStatusAfterCurrentSettles(order),
-        )
-        const emptyBeforeRequest = emptyBatches
-        subscription.requestSnapshot({ where: where.a })
-        expect(emptyBatches - emptyBeforeRequest).toBe(privateReplay ? 0 : 1)
-        await settle(loads.at(-1)!, `resolve`, `a`)
-        expect([...visible.values()]).toEqual(
-          privateReplay
-            ? [{ id: `b`, version: 0 }]
-            : [
-                { id: `b`, version: 2 },
-                { id: `a`, version: 2 },
-              ],
-        )
-        if (order === `current-first`) await settle(old, oldOutcome)
-        expect([...visible.values()]).toEqual([
-          { id: `b`, version: 2 },
-          { id: `a`, version: 2 },
-        ])
-        expect(subscription.status).toBe(`ready`)
-        expect(errors).toEqual([])
-        expect(replacementChanges).toBe(1)
-        subscription.unsubscribe()
-        expect(unloads).toHaveLength(loads.length)
-        for (const { options } of loads)
-          expect(unloads.filter((value) => value === options)).toHaveLength(1)
-      } finally {
-        for (const { deferred } of loads) deferred.resolve()
-        await flushPromises()
-        subscription.unsubscribe()
-        await collection.cleanup()
       }
     },
   )

@@ -3,7 +3,7 @@ id: CollectionIsInErrorStateError
 title: CollectionIsInErrorStateError
 ---
 
-Defined in: [packages/db/src/errors.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L162)
+Defined in: [packages/db/src/errors.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L192)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:162](https://github.com/TanStack/db/blob/
 new CollectionIsInErrorStateError(): CollectionIsInErrorStateError;
 ```
 
-Defined in: [packages/db/src/errors.ts:163](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L163)
+Defined in: [packages/db/src/errors.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L193)
 
 #### Returns
 

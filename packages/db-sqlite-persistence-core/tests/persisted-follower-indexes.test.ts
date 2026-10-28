@@ -576,7 +576,7 @@ describe(`persistedCollectionOptions`, () => {
           expect(collection.status).toBe(`ready`)
           expect(ensure).toHaveBeenCalledTimes(1)
         } else {
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           await expect(
             Promise.resolve().then(async () => {
               await collection._sync.loadSubset(options)
@@ -669,11 +669,9 @@ describe(`persistedCollectionOptions`, () => {
           persistence: { adapter, coordinator },
         }),
       )
-      const markError = collection._lifecycle.markError.bind(
-        collection._lifecycle,
-      )
+      const crash = collection._lifecycle.crash.bind(collection._lifecycle)
       const report = vi
-        .spyOn(collection._lifecycle, `markError`)
+        .spyOn(collection._lifecycle, `crash`)
         .mockImplementation((error) => {
           reported.push(error)
           // Invoke while the error is being reported, before core marks the
@@ -681,7 +679,7 @@ describe(`persistedCollectionOptions`, () => {
           reentrantFailure = Promise.resolve(
             collection._sync.loadSubset(sibling),
           ).catch((reason: unknown) => reason)
-          markError(error)
+          crash(error)
           errorReported.resolve()
         })
       let hasPrimaryFailure = false
@@ -707,7 +705,7 @@ describe(`persistedCollectionOptions`, () => {
         // Recording-adapter I/O is immediate. Drain the turn while transport
         // remains held; this is not a real-host timing or latency assertion.
         await flushAsyncWork()
-        expect(collection.status).toBe(terminal ? `error` : `ready`)
+        expect(collection.status).toBe(terminal ? `crashed` : `ready`)
         if (terminal) {
           await atPersistedOracleCheckpoint(
             errorReported.promise,
@@ -1180,7 +1178,7 @@ describe(`persistedCollectionOptions`, () => {
             path: [`database`, `wal`],
             cause: persistenceResponse,
           })
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(collection._lifecycle.getSyncError()).toBe(rejection)
         } else {
           expect(rejection).toMatchObject({
@@ -1265,26 +1263,24 @@ describe(`persistedCollectionOptions`, () => {
 
     try {
       await collection.stateWhenReady()
-      const originalMarkError = collection._lifecycle.markError.bind(
+      const originalCrash = collection._lifecycle.crash.bind(
         collection._lifecycle,
       )
-      vi.spyOn(collection._lifecycle, `markError`).mockImplementation(
-        (error) => {
-          reentrantOutcome = Promise.resolve(
-            collection.utils.acceptMutations({
-              mutations: [
-                reentrantMutation as unknown as PendingMutation<
-                  Record<string, unknown>
-                >,
-              ],
-            }),
-          ).then(
-            () => ({ status: `fulfilled` as const }),
-            (reason: unknown) => ({ status: `rejected` as const, reason }),
-          )
-          originalMarkError(error)
-        },
-      )
+      vi.spyOn(collection._lifecycle, `crash`).mockImplementation((error) => {
+        reentrantOutcome = Promise.resolve(
+          collection.utils.acceptMutations({
+            mutations: [
+              reentrantMutation as unknown as PendingMutation<
+                Record<string, unknown>
+              >,
+            ],
+          }),
+        ).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
+        originalCrash(error)
+      })
 
       const primary = collection.insert({
         id: `primary-local`,
@@ -2001,7 +1997,12 @@ describe(`persistedCollectionOptions`, () => {
             params.markReady()
             // The controlled source has no pending asynchronous callback.
             // Its old commit is already queued inside the persisted wrapper.
-            return { restartAfterScopedRecovery: () => {} }
+            return {
+              // An on-demand source serves the subsets that recovery
+              // reacquires in the new generation.
+              loadSubset: () => true,
+              restartAfterScopedRecovery: () => {},
+            }
           },
         },
         persistence: { adapter },
@@ -2043,6 +2044,8 @@ describe(`persistedCollectionOptions`, () => {
         value: { id: `new-source`, title: `New source result` },
       })
       await whenSyncAccepted(source.commit())
+      // Recovery succeeded: the Collection still accepts sync data.
+      expect(collection.status).toBe(`ready`)
       expect(collection.get(`new-source`)).toMatchObject({
         id: `new-source`,
         title: `New source result`,
@@ -2227,6 +2230,17 @@ describe(`persistedCollectionOptions`, () => {
             tx.mutations.some(({ key }) => key === `late-old`),
           ),
         ).toBe(false)
+        // The retired session's reports have no authority over the node:
+        // its error does not show, and its recovery does not clear the live
+        // session's problem.
+        oldSource.reportError(new Error(`retired session`))
+        await flushAsyncWork()
+        expect(collection.health.failureReason).toBeNull()
+        sourceSessions[1]!.reportError(new Error(`live session`))
+        await flushAsyncWork()
+        oldSource.reportHealthy()
+        await flushAsyncWork()
+        expect(collection.health.failureReason?.message).toBe(`live session`)
       } finally {
         releaseOldCallback.resolve()
         await Promise.allSettled([lateCallback])
@@ -2386,7 +2400,7 @@ describe(`persistedCollectionOptions`, () => {
           expect(currentStorageId).toBe(`startup-rejected-new`)
         } else {
           await expect(ready).rejects.toBe(ioFailure)
-          expect(collection.status).toBe(`error`)
+          expect(collection.status).toBe(`crashed`)
           expect(sourceStarts).toBe(0)
           expect(rotations).toBe(0)
         }

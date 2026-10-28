@@ -169,7 +169,7 @@ describe(`persistedCollectionOptions`, () => {
     let hasPrimaryFailure = false
     try {
       await expect(collection.stateWhenReady()).rejects.toBe(startupError)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(startupError)
     } catch (error) {
       hasPrimaryFailure = true
@@ -2702,7 +2702,7 @@ describe(`persistedCollectionOptions`, () => {
           }),
       },
     })
-    const unsubscribeError = collection.on(`status:error`, () => {
+    const unsubscribeError = collection.on(`status:crashed`, () => {
       terminal.resolve()
     })
     let hasPrimaryFailure = false
@@ -2777,7 +2777,7 @@ describe(`persistedCollectionOptions`, () => {
         loadCalls,
       }).toEqual({
         outcome: `terminal`,
-        status: `error`,
+        status: `crashed`,
         publicError: receiptError,
         loadCalls: 0,
       })
@@ -2857,7 +2857,7 @@ describe(`persistedCollectionOptions`, () => {
           }),
       },
     })
-    const unsubscribeError = collection.on(`status:error`, () => {
+    const unsubscribeError = collection.on(`status:crashed`, () => {
       terminal.resolve()
     })
     let hasPrimaryFailure = false
@@ -2931,7 +2931,7 @@ describe(`persistedCollectionOptions`, () => {
         loadCalls,
       }).toEqual({
         outcome: `terminal`,
-        status: `error`,
+        status: `crashed`,
         publicError: loadError,
         loadCalls: 1,
       })

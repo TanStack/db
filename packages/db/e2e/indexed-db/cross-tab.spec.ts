@@ -41,7 +41,7 @@ for (const transactionFirst of [false, true])
       await a.waitForFunction(
         () => window.crossTab!.observe().versionChanges === 1,
       )
-      expect((await observe(a)).status).toBe('error')
+      expect((await observe(a)).status).toBe('crashed')
       if (transactionFirst) {
         await a.evaluate(() => window.crossTab!.releaseBarrier())
         expect((await observe(a)).writes.at(-1)).toBe('complete')
@@ -62,6 +62,6 @@ for (const transactionFirst of [false, true])
       await b.waitForFunction(
         () => window.crossTab!.observe().schema.status === 'complete',
       )
-      expect((await observe(a)).status).toBe('error')
+      expect((await observe(a)).status).toBe('crashed')
     })
   })

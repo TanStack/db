@@ -13,6 +13,7 @@ import {
   pooledLiveQueries,
 } from '../../src/query/pooled-live-query.js'
 import { resolveLiveQueryValue } from '../../src/live-query-options.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import {
   makeSource,
   query,
@@ -115,6 +116,46 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
+  // Cleaning up one view ends that view only. A sibling built during a
+  // render, still inside its grace period to subscribe, keeps its rows and
+  // its partition, as its own live-query Collection would.
+  it(`keeps a built sibling's rows when another view is cleaned up`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `pooled-gc-sibling-${serial++}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: `a`, g: `x` },
+          { id: `b`, g: `y` },
+        ],
+      }),
+    )
+    const view = (g: string) =>
+      createPooledLiveQuery(
+        new Query()
+          .from({ r: source })
+          .where(({ r }: any) => eq(r.g, g)) as any,
+        { gcTime: 100 },
+      )!
+    const first = view(`x`)
+    const sibling = view(`y`)
+    const stop = createLiveQueryObserver(first, {
+      mode: `wholesale`,
+    }).subscribe(() => {})
+    // Read the sibling without subscribing: it stays inside its grace period.
+    const siblingRows = () => [
+      ...createLiveQueryObserver(sibling, { mode: `wholesale` })
+        .getSnapshot()
+        .state!.keys(),
+    ]
+    await vi.advanceTimersByTimeAsync(0)
+    expect(siblingRows()).toEqual([`b`])
+    stop()
+    await first.cleanup()
+    expect(siblingRows()).toEqual([`b`])
+    expect(source.subscriberCount).toBe(1)
+  })
+
   it(`keeps a newer partition when an older one releases again`, async () => {
     const source = makeSource()
     const mount = () => {
@@ -137,7 +178,7 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
-  it(`turns terminal when source cleanup starts, before it settles`, async () => {
+  it(`ends with its source's dependents, before the source's cleanup settles`, async () => {
     let release!: () => void
     const source = createCollection<Row, string | number>({
       id: `pooled-gc-${serial++}`,
@@ -168,10 +209,13 @@ describe(`pooled live query gcTime`, () => {
       createLiveQueryCollection({ query: query(source), startSync: true }),
     )
     await vi.advanceTimersByTimeAsync(1)
-    const cleanup = source.cleanup()
+    // Cleanup refuses while they read the source; with its dependents it
+    // ends both views like their live queries, before the adapter settles.
+    await expect(source.cleanup()).rejects.toThrow(/dependent/)
+    const cleanup = source.cleanup({ dependents: true })
     await vi.advanceTimersByTimeAsync(1)
-    expect(compiledView.observer.getSnapshot().status).toBe(`error`)
-    expect(pooledView.observer.getSnapshot().status).toBe(`error`)
+    expect(compiledView.observer.getSnapshot().status).toBe(`cleaned-up`)
+    expect(pooledView.observer.getSnapshot().status).toBe(`cleaned-up`)
     release()
     await cleanup
     pooledView.stop()
@@ -380,7 +424,8 @@ describe(`pooled live query gcTime`, () => {
         stop = view.subscribeChanges(() => {})
         expect(pending).toBeDefined()
         expect(starts).toBe(cleanupAt === `loading` ? 0 : 1)
-        expect(view.status).toBe(`error`)
+        // Source cleanup start crashes a pooled view that it did not end.
+        expect(view.status).toBe(`crashed`)
         expect(source.subscriberCount).toBe(0)
         expect(source[`_changes`].activeSubscribersCount).toBe(0)
         gate.resolve()
@@ -458,7 +503,14 @@ describe(`pooled live query gcTime`, () => {
             expect(source.subscriberCount).toBe(0)
           }
         }
-        const pending = source.cleanup()
+        // A retained view reads the source, so only a cascade cleanup may
+        // start; it ends the view. A view that attaches during cleanup
+        // crashes, because the cleanup did not end it.
+        const pending =
+          ownership === `retained`
+            ? source.cleanup({ dependents: true })
+            : source.cleanup()
+        const terminal = ownership === `retained` ? `cleaned-up` : `crashed`
         expect(source.status).toBe(priorStatus)
         view ??= build()
         observer ??= createLiveQueryObserver(view, { mode })
@@ -472,14 +524,14 @@ describe(`pooled live query gcTime`, () => {
           attachmentError,
           `late dependent becomes terminal without acquiring a source`,
         ).toBeUndefined()
-        expect(view.status).toBe(`error`)
-        expect(observer.getSnapshot().status).toBe(`error`)
+        expect(view.status).toBe(terminal)
+        expect(observer.getSnapshot().status).toBe(terminal)
         expect(source.subscriberCount).toBe(0)
         expect(source[`_changes`].activeSubscribersCount).toBe(0)
         gate.resolve()
         await pending
         source.startSyncImmediate()
-        expect(view.status).toBe(`error`)
+        expect(view.status).toBe(terminal)
         fresh = createLiveQueryObserver(build(), { mode })
         stopFresh = fresh.subscribe(() => {})
         expect(fresh.getSnapshot().status).toBe(`ready`)
@@ -501,13 +553,14 @@ describe(`pooled live query gcTime`, () => {
     },
   )
 
-  /** A recoverable eager-source error changes status, not partition lifetime.
-   * Only source cleanup is terminal. The return-to-ready checkpoint checks
-   * both shared views and fresh subscription ownership in the same sync run.
+  /** A recoverable eager-source problem after readiness is a sync problem in
+   * the health tree: it changes neither status nor partition lifetime. Only
+   * source cleanup is terminal. The return-to-healthy checkpoint checks both
+   * shared views and fresh subscription ownership in the same sync run.
    * On-demand sources cannot enter this path: pooling explicitly excludes them.
    */
   it.each([`before-views`, `after-views`] as const)(
-    `retains a partition through recoverable error $0`,
+    `retains a partition through a recoverable sync problem $0`,
     async (errorAt) => {
       let fail = () => {}
       let recover = () => {}
@@ -515,13 +568,20 @@ describe(`pooled live query gcTime`, () => {
         getKey: (row) => row.id,
         gcTime: 0,
         sync: {
-          sync: ({ begin, write, commit, markReady, markError }) => {
+          sync: ({
+            begin,
+            write,
+            commit,
+            markReady,
+            reportError,
+            reportHealthy,
+          }) => {
             begin()
             write({ type: `insert`, value: { id: `a`, g: `x` } })
             commit()
             markReady()
-            fail = () => markError(new Error(`temporary source error`))
-            recover = markReady
+            fail = () => reportError(new Error(`temporary source error`))
+            recover = reportHealthy
           },
         },
       })
@@ -542,11 +602,13 @@ describe(`pooled live query gcTime`, () => {
         for (const view of views) {
           expect(view).toBeDefined()
           stops.push(view.subscribeChanges(() => {}))
-          expect(view.status).toBe(`error`)
+          expect(view.status).toBe(`ready`)
+          expect(view.health.hasErrors).toBe(true)
         }
         recover()
         for (const view of views) {
           expect(view.status).toBe(`ready`)
+          expect(view.health.hasErrors).toBe(false)
           expect(
             Array.from(view.entries(), ([key, row]) => ({
               key,

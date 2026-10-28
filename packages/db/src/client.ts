@@ -441,7 +441,7 @@ export class DbClient {
     const preloaded = this.preloadedLiveQueries.get(queryHash)
     if (!preloaded) return
     preloaded.observer.dispose()
-    void preloaded.collection.cleanup().catch(() => {})
+    void preloaded.collection.cleanup({ dependents: true }).catch(() => {})
     this.preloadedLiveQueries.delete(queryHash)
   }
 
@@ -966,13 +966,13 @@ export class DbClient {
         )),
         ...(await Promise.allSettled(
           Array.from(liveQueryCollections, (collection) =>
-            collection.cleanup(),
+            collection.cleanup({ dependents: true }),
           ),
         )),
         ...(await Promise.allSettled(
           materializedCollections
             .filter((collection) => !liveQueryCollections.has(collection))
-            .map((collection) => collection.cleanup()),
+            .map((collection) => collection.cleanup({ dependents: true })),
         )),
       ]
       const failure = cleanupResults.find(

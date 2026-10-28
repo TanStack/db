@@ -546,7 +546,7 @@ describe(`React source ID reuse`, () => {
     await waitFor(() =>
       expect(hook.result.current.data[0]?.value).toBe(`first`),
     )
-    await act(async () => first.cleanup())
+    await act(async () => first.cleanup({ dependents: true }))
     checkRerender([{ source: first }], { source: second }, () =>
       hook.rerender({ current: second }),
     )

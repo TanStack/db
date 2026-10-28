@@ -697,83 +697,122 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`reports one fail-stop lifecycle error when a single-process async unload rejects`, async () => {
-    const unloadError = new Error(`remote owner unload failed`)
-    let unloadThenCalls = 0
-    const rejectingThenable = {
-      then: (
-        _resolve: (value?: void) => void,
-        reject: (error: unknown) => void,
-      ) => {
-        unloadThenCalls++
-        queueMicrotask(() => reject(unloadError))
-      },
-    }
-    const sourceUnloadMock = vi.fn((options: LoadSubsetOptions) =>
-      options.limit === 1 ? rejectingThenable : undefined,
-    )
-    const sourceUnload = sourceUnloadMock as unknown as (
-      options: LoadSubsetOptions,
-    ) => void
-    const collection = createCollection(
-      persistedCollectionOptions<Todo, string>({
-        id: `owner-unload-error`,
-        getKey: (todo) => todo.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => true,
-              unloadSubset: sourceUnload,
-            }
+  // An adapter's unloadSubset that rejects broke its contract. Core reports a
+  // throwing unloadSubset uncaught and fails no load, replay, or caller
+  // (subscription.ts, releaseAcquisition); the wrapper forwards the call as
+  // core makes it, so a rejection surfaces uncaught once and changes neither
+  // the status nor the node, whether or not the sync adapter gave up first.
+  // The supplemental witness for the persisted sync-run oracle's
+  // `unload-reject` site.
+  it.each([false, true])(
+    `reports a single-process async unload rejection uncaught without changing the Collection (sync adapter gave up first: %s)`,
+    async (gaveUpFirst) => {
+      const unloadError = new Error(`remote owner unload failed`)
+      const gaveUp = new Error(`sync adapter gave up`)
+      let giveUp: ((error: unknown) => void) | undefined
+      let unloadThenCalls = 0
+      const rejectingThenable = {
+        then: (
+          _resolve: (value?: void) => void,
+          reject: (error: unknown) => void,
+        ) => {
+          unloadThenCalls++
+          queueMicrotask(() => reject(unloadError))
+        },
+      }
+      const sourceUnloadMock = vi.fn((options: LoadSubsetOptions) =>
+        options.limit === 1 ? rejectingThenable : undefined,
+      )
+      const sourceUnload = sourceUnloadMock as unknown as (
+        options: LoadSubsetOptions,
+      ) => void
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `owner-unload-error`,
+          getKey: (todo) => todo.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady, fail }) => {
+              markReady()
+              giveUp = fail
+              return {
+                loadSubset: () => true,
+                unloadSubset: sourceUnload,
+              }
+            },
           },
-        },
-        persistence: {
-          adapter: createRecordingAdapter(),
-        },
-      }),
-    )
-    const failing: LoadSubsetOptions = { limit: 1 }
-    const sibling: LoadSubsetOptions = { limit: 2 }
-    const markError = vi.spyOn(collection._lifecycle, `markError`)
-    const unhandled: Array<unknown> = []
-    const captureUnhandled = (error: unknown) => unhandled.push(error)
-    process.on(`unhandledRejection`, captureUnhandled)
+          persistence: {
+            adapter: createRecordingAdapter(),
+          },
+        }),
+      )
+      const failing: LoadSubsetOptions = { limit: 1 }
+      const sibling: LoadSubsetOptions = { limit: 2 }
+      const crash = vi.spyOn(collection._lifecycle, `crash`)
+      const unhandled: Array<unknown> = []
+      const captureUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, captureUnhandled)
+      const uncaught: Array<unknown> = []
+      const queue = globalThis.queueMicrotask.bind(globalThis)
+      const microtasks = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((task) =>
+          queue(() => {
+            try {
+              task()
+            } catch (error) {
+              uncaught.push(error)
+            }
+          }),
+        )
 
-    try {
-      collection.startSyncImmediate()
-      await collection._sync.loadSubset(failing)
-      await collection._sync.loadSubset(sibling)
-      collection._sync.unloadSubset(failing)
-      collection._sync.unloadSubset(sibling)
-      await flushAsyncWork()
-      await flushAsyncWork()
+      try {
+        collection.startSyncImmediate()
+        await collection._sync.loadSubset(failing)
+        await collection._sync.loadSubset(sibling)
+        if (gaveUpFirst) {
+          giveUp!(gaveUp)
+          await flushAsyncWork()
+          expect(collection.status).toBe(`ready`)
+          expect(collection.health.error?.cause).toBe(gaveUp)
+        }
+        collection._sync.unloadSubset(failing)
+        collection._sync.unloadSubset(sibling)
+        await flushAsyncWork()
+        await flushAsyncWork()
 
-      expect({
-        status: collection.status,
-        error: collection._lifecycle.getSyncError(),
-        unloadThenCalls,
-        unloadOptions: sourceUnloadMock.mock.calls.map(([options]) => options),
-        lifecycleErrors: markError.mock.calls.map(([error]) => error),
-        unhandled,
-      }).toEqual({
-        status: `error`,
-        error: unloadError,
-        unloadThenCalls: 1,
-        unloadOptions: [failing, sibling],
-        lifecycleErrors: [unloadError],
-        unhandled: [],
-      })
+        expect({
+          status: collection.status,
+          error: collection.health.error?.cause,
+          failureReason: collection.health.failureReason,
+          unloadThenCalls,
+          unloadOptions: sourceUnloadMock.mock.calls.map(
+            ([options]) => options,
+          ),
+          lifecycleErrors: crash.mock.calls.map(([error]) => error),
+          uncaught,
+          unhandled,
+        }).toEqual({
+          status: `ready`,
+          error: gaveUpFirst ? gaveUp : undefined,
+          failureReason: null,
+          unloadThenCalls: 1,
+          unloadOptions: [failing, sibling],
+          lifecycleErrors: [],
+          uncaught: [unloadError],
+          unhandled: [],
+        })
 
-      await flushAsyncWork()
-      expect(sourceUnloadMock).toHaveBeenCalledTimes(2)
-      expect(markError).toHaveBeenCalledTimes(1)
-    } finally {
-      process.off(`unhandledRejection`, captureUnhandled)
-      await collection.cleanup()
-    }
-  })
+        await flushAsyncWork()
+        expect(sourceUnloadMock).toHaveBeenCalledTimes(2)
+        expect(crash).not.toHaveBeenCalled()
+      } finally {
+        microtasks.mockRestore()
+        process.off(`unhandledRejection`, captureUnhandled)
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`surfaces duplicate remote-subset owner registration through the collection lifecycle`, async () => {
     const coordinator = new SingleProcessCoordinator()

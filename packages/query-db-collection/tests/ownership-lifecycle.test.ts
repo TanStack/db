@@ -52,6 +52,7 @@ import {
   readClaimedCacheRows,
   recordMetadata,
   recordRunCacheClaim,
+  reportedError,
   rows,
   runCleanups,
   shared,
@@ -204,21 +205,22 @@ describe(`query collection ownership lifecycle`, () => {
         ).rejects.toBe(previousError)
       }
 
-      const observeError = () => ({
-        lastError: collection.utils.lastError,
-        isError: collection.utils.isError,
-        errorCount: collection.utils.errorCount,
-      })
-      // An independent three-state model: pending retains the previous
-      // failure; a failed retry advances the consecutive count; success resets.
-      const expected = {
-        pending: { lastError: previousError, isError: true, errorCount: 1 },
-        failure: { lastError: retryError, isError: true, errorCount: 2 },
-        success: { lastError: undefined, isError: false, errorCount: 0 },
-      }
+      const observeError = () => reportedError(collection)
+      // An independent model. An initial error is final for its sync run, so
+      // every later state reports it. After readiness, a pending retry keeps
+      // the previous health error, a failed retry reports its own, and a
+      // successful retry clears it.
+      const expected =
+        priorFailure === `initial`
+          ? {
+              pending: previousError,
+              failure: previousError,
+              success: previousError,
+            }
+          : { pending: previousError, failure: retryError, success: undefined }
       expect(observeError()).toEqual(expected.pending)
 
-      const retry = collection.utils.clearError().then(
+      const retry = collection.utils.refetch({ throwOnError: true }).then(
         () => ({ outcome: `fulfilled` as const }),
         (error: unknown) => ({ outcome: `rejected` as const, error }),
       )
@@ -290,32 +292,16 @@ describe(`query collection ownership lifecycle`, () => {
         | undefined
       try {
         await expect(collection.stateWhenReady()).rejects.toBe(applicationError)
-        expect({
-          lastError: collection.utils.lastError,
-          isError: collection.utils.isError,
-          errorCount: collection.utils.errorCount,
-        }).toEqual({
-          lastError: applicationError,
-          isError: true,
-          errorCount: 1,
-        })
+        expect(reportedError(collection)).toBe(applicationError)
 
-        retry = collection.utils.clearError().then(
+        retry = collection.utils.refetch({ throwOnError: true }).then(
           () => ({ outcome: `fulfilled` as const }),
           (error: unknown) => ({ outcome: `rejected` as const, error }),
         )
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
         // Query still holds its old successful result, despite the failed
         // Collection application. A fetch-start success notification is not recovery.
-        expect({
-          lastError: collection.utils.lastError,
-          isError: collection.utils.isError,
-          errorCount: collection.utils.errorCount,
-        }).toEqual({
-          lastError: applicationError,
-          isError: true,
-          errorCount: 1,
-        })
+        expect(reportedError(collection)).toBe(applicationError)
 
         if (retryResult === `failure`) {
           heldResult.reject(retryError)
@@ -323,14 +309,14 @@ describe(`query collection ownership lifecycle`, () => {
             outcome: `rejected`,
             error: retryError,
           })
-          expect(collection.utils.lastError).toBe(retryError)
-          expect(collection.utils.errorCount).toBe(2)
         } else {
           heldResult.resolve([shared])
           expect(await retry).toEqual({ outcome: `fulfilled` })
-          expect(collection.utils.lastError).toBeUndefined()
-          expect(collection.utils.errorCount).toBe(0)
         }
+        // The failed application was the initial load, so its error is final
+        // for this sync run whatever the retry does.
+        expect(reportedError(collection)).toBe(applicationError)
+        expect(collection.status).toBe(`error`)
       } finally {
         heldResult.resolve([shared])
         await retry
@@ -373,23 +359,21 @@ describe(`query collection ownership lifecycle`, () => {
       await expect(
         Promise.resolve(initialLoad === true ? undefined : initialLoad),
       ).rejects.toBe(previousError)
-      expect(collection.utils.lastError).toBe(previousError)
-      expect(collection.utils.errorCount).toBe(1)
+      expect(reportedError(collection)).toBe(previousError)
+      expect(reportedError(collection)).toBeDefined()
 
-      const retry = collection.utils.clearError()
+      const retry = collection.utils.refetch({ throwOnError: true })
       await vi.waitFor(() => {
         expect(queryFn).toHaveBeenCalledTimes(2)
         expect(scanPersistedRows).toHaveBeenCalledOnce()
       })
       // Query has fetched successfully, but Collection application is held.
-      expect(collection.utils.lastError).toBe(previousError)
-      expect(collection.utils.isError).toBe(true)
-      expect(collection.utils.errorCount).toBe(1)
+      expect(reportedError(collection)).toBe(previousError)
+      expect(reportedError(collection)).toBeDefined()
 
       persistedScan.resolve([])
       await retry
-      expect(collection.utils.lastError).toBeUndefined()
-      expect(collection.utils.errorCount).toBe(0)
+      expect(reportedError(collection)).toBeUndefined()
     } finally {
       firstResult.resolve([])
       persistedScan.resolve([])
@@ -452,11 +436,11 @@ describe(`query collection ownership lifecycle`, () => {
         await expect(
           Promise.resolve(initialLoad === true ? undefined : initialLoad),
         ).rejects.toBe(previousError)
-        expect(collection.utils.lastError).toBe(previousError)
+        expect(reportedError(collection)).toBe(previousError)
 
         const firstRetry = (
           retryMode === `clearError`
-            ? collection.utils.clearError()
+            ? collection.utils.refetch({ throwOnError: true })
             : collection.utils.refetch({ throwOnError: true })
         ).then(
           () => ({ outcome: `fulfilled` as const }),
@@ -466,19 +450,19 @@ describe(`query collection ownership lifecycle`, () => {
           expect(queryFn).toHaveBeenCalledTimes(2)
           expect(scanPersistedRows).toHaveBeenCalledOnce()
         })
-        expect(collection.utils.lastError).toBe(previousError)
+        expect(reportedError(collection)).toBe(previousError)
 
         const secondRetry = collection.utils.refetch({ throwOnError: true })
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
         laterResult.reject(newerError)
         await expect(secondRetry).rejects.toBe(newerError)
-        expect(collection.utils.lastError).toBe(newerError)
-        expect(collection.utils.errorCount).toBe(2)
+        expect(reportedError(collection)).toBe(newerError)
+        expect(reportedError(collection)).toBeDefined()
 
         persistedScan.resolve([])
         expect(await firstRetry).toEqual({ outcome: `fulfilled` })
-        expect(collection.utils.lastError).toBe(newerError)
-        expect(collection.utils.errorCount).toBe(2)
+        expect(reportedError(collection)).toBe(newerError)
+        expect(reportedError(collection)).toBeDefined()
       } finally {
         firstResult.resolve([])
         laterResult.resolve([])
@@ -532,29 +516,28 @@ describe(`query collection ownership lifecycle`, () => {
       await expect(
         collection.utils.refetch({ throwOnError: true }),
       ).rejects.toBe(previousError)
-      expect(collection.utils.errorCount).toBe(1)
-      const retry = collection.utils.clearError().then(
+      expect(reportedError(collection)).toBeDefined()
+      const retry = collection.utils.refetch({ throwOnError: true }).then(
         () => ({ outcome: `fulfilled` as const }),
         (error: unknown) => ({ outcome: `rejected` as const, error }),
       )
       try {
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(4))
         // Query retains its old error while its first retry attempt has failed.
-        expect(collection.utils.lastError).toBe(previousError)
-        expect(collection.utils.errorCount).toBe(1)
+        expect(reportedError(collection)).toBe(previousError)
+        expect(reportedError(collection)).toBeDefined()
         if (outcome === `success`) {
           heldResult.resolve([shared])
           expect(await retry).toEqual({ outcome: `fulfilled` })
-          expect(collection.utils.lastError).toBeUndefined()
-          expect(collection.utils.errorCount).toBe(0)
+          expect(reportedError(collection)).toBeUndefined()
         } else {
           heldResult.reject(finalError)
           expect(await retry).toEqual({
             outcome: `rejected`,
             error: finalError,
           })
-          expect(collection.utils.lastError).toBe(finalError)
-          expect(collection.utils.errorCount).toBe(2)
+          expect(reportedError(collection)).toBe(finalError)
+          expect(reportedError(collection)).toBeDefined()
         }
       } finally {
         heldResult.resolve([shared])
@@ -583,7 +566,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
 
     expect(collection.status).toBe(`idle`)
-    expect(collection.utils.isError).toBe(false)
+    expect(reportedError(collection)).toBeUndefined()
     expect(collection.status).toBe(`idle`)
 
     collection.utils.writeUpsert({
@@ -1250,7 +1233,7 @@ describe(`query collection ownership lifecycle`, () => {
 
     expect(queryFn).toHaveBeenCalledOnce()
     expect(replaced).toBe(true)
-    expect(collection.utils.lastError).toBe(applicationError)
+    expect(reportedError(collection)).toBe(applicationError)
     expect(itemIds(collection.toArray)).toEqual([initial.id])
   })
 
@@ -1308,7 +1291,7 @@ describe(`query collection ownership lifecycle`, () => {
 
     failNextCommit = true
     queryClient.setQueryData(detailKey, [detail, list])
-    await vi.waitFor(() => expect(collection.utils.lastError).toBe(commitError))
+    await vi.waitFor(() => expect(reportedError(collection)).toBe(commitError))
     expect(itemIds(collection.toArray)).toEqual([detail.id])
 
     await collection._sync.loadSubset(listSubset)
@@ -1546,7 +1529,8 @@ describe(`query collection ownership lifecycle`, () => {
    * resources).
    *
    * Reference: the model owns one row through one demand. A failed release
-   * leaves `{ rows: [shared], stored: [shared], status: error }`; a restarted
+   * is a local persistence failure, so it crashes the Collection and leaves
+   * `{ rows: [shared], stored: [shared], status: crashed }`; a restarted
    * load and release give `[shared]` and then `{ rows: [], stored: [] }`. The
    * `durable` history is the control: the release succeeds and the restarted
    * run never refetches, because no demand remains.
@@ -1638,7 +1622,7 @@ describe(`query collection ownership lifecycle`, () => {
         queryCalls: queryFn.mock.calls.length,
       }).toEqual({
         afterRelease: failed
-          ? { rows: [shared.id], stored: [shared.id], status: `error` }
+          ? { rows: [shared.id], stored: [shared.id], status: `crashed` }
           : { rows: [], stored: [], status: `ready` },
         reacquisition:
           history === `failed-then-reacquired`
@@ -1656,7 +1640,8 @@ describe(`query collection ownership lifecycle`, () => {
    * fails. The release's commit is held at the persistence boundary while the
    * Query is reacquired; the reacquired application's commit then fails. The
    * release is durable, so the row leaves; the reacquired result never became
-   * durable, so it cannot keep the row. The Collection enters `error`, the
+   * durable, so it cannot keep the row. The persistence failure crashes the
+   * Collection, the
    * acquisition rejects with the persistence failure, and a restart serves and
    * releases the row normally. A history that keeps the row public after the
    * failure would report a result that storage never accepted.
@@ -1741,7 +1726,7 @@ describe(`query collection ownership lifecycle`, () => {
     }).toEqual({
       held: { rows: [shared.id], status: `ready` },
       reacquired: `Failed to durably persist collection "${id}": storage failed`,
-      failed: { rows: [], status: `error` },
+      failed: { rows: [], status: `crashed` },
       restartedLoad: [shared.id],
       restartedRelease: { rows: [], stored: [] },
     })
@@ -2428,7 +2413,7 @@ describe(`query collection ownership lifecycle`, () => {
     cleanups.push(async () => subscription.unsubscribe())
 
     queryClient.setQueryData(queryKey, [outer])
-    await vi.waitFor(() => expect(collection.utils.errorCount).toBe(1))
+    await vi.waitFor(() => expect(reportedError(collection)).toBeDefined())
     await pendingWaiter
     await expect(Promise.resolve(collection._sync.loadSubset({}))).rejects.toBe(
       applicationError,
@@ -4966,9 +4951,8 @@ describe(`query collection ownership lifecycle`, () => {
       await expect(ownerB._sync.loadSubset({})).rejects.toBe(failure)
       expect(queryFn).toHaveBeenCalledTimes(2)
       expect(ownerB.has(`x`)).toBe(false)
-      expect(ownerB.utils.lastError).toBe(failure)
-      expect(ownerB.utils.isError).toBe(true)
-      expect(ownerB.utils.errorCount).toBe(1)
+      expect(reportedError(ownerB)).toBe(failure)
+      expect(reportedError(ownerB)).toBeDefined()
       expect(ownerA.get(`x`)?.name).toBe(`Manual`)
     },
   )
@@ -6766,7 +6750,7 @@ describe(`query collection ownership lifecycle`, () => {
         .find({ queryKey: [id], exact: true })!
       if (cut === `error`) {
         await collection.utils.refetch()
-        expect(collection.utils.lastError).toBe(fetchError)
+        expect(reportedError(collection)).toBe(fetchError)
       } else {
         if (cut === `invalidation`) {
           await queryClient.invalidateQueries({
@@ -6785,8 +6769,8 @@ describe(`query collection ownership lifecycle`, () => {
       expect(collection.get(`x`)?.name).toBe(`after`)
       expect(query.state.dataUpdatedAt).toBe(updatedAt)
       if (cut === `error`) {
-        expect(collection.utils.lastError).toBe(fetchError)
-        expect(collection.utils.errorCount).toBe(1)
+        expect(reportedError(collection)).toBe(fetchError)
+        expect(reportedError(collection)).toBeDefined()
       } else if (cut === `invalidation`) {
         expect(query.state.isInvalidated).toBe(true)
       } else {
@@ -8397,10 +8381,13 @@ it(`reports a failed Query cache rotation as a terminal Collection error`, async
   })
 
   await collection._sync.loadSubset({ limit: 1 })
+  expect(collection.status).toBe(`ready`)
   const outcome = recover()
   await rotationEntered.promise
   await expect(outcome).rejects.toBe(failure)
-  expect(collection.status).toBe(`error`)
+  // A refused rotation is a persistence failure, so the Collection crashes
+  // even after Collection readiness, and later demand rejects with its cause.
+  expect(collection.status).toBe(`crashed`)
   await expect(collection._sync.loadSubset({ limit: 2 })).rejects.toBe(failure)
 })
 

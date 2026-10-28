@@ -623,7 +623,7 @@ export async function createTerminalFailureHarness(
     ).toBe(adapterError)
   }
 
-  expect(collection.status).toBe(`error`)
+  expect(collection.status).toBe(`crashed`)
   expect(collection._lifecycle.getSyncError()).toBe(terminalError)
 
   return {
@@ -758,7 +758,7 @@ export async function runRejectedHydrationBufferWitness(
       durableRows: rows.filter((row) => adapter.rows.has(row.id)),
       durabilityCalls: adapter.applyCommittedTxCalls.length,
     }).toEqual({
-      status: `error`,
+      status: `crashed`,
       exactPublicError: true,
       receiptOutcomes: rows.map(() => ({
         status: `rejected`,

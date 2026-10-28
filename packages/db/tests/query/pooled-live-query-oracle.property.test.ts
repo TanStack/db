@@ -33,7 +33,8 @@
  * optimistic insert, update, or delete and then confirm or roll it back,
  * optionally after cleaning up and restarting the source while it is pending,
  * with a weighted run that inserts a row most peers see before that cleanup; mount or unmount a peer; or clean up the source and restart it,
- * optionally (re)mounting a peer on the cleaned-up source first.
+ * optionally unmounting a peer just before the cleanup, or (re)mounting a
+ * peer on the cleaned-up source before the restart.
  *
  * Production driver: `createPooledLiveQuery` builds each peer's view from the
  * query builder's IR, and `createLiveQueryObserver` observes it in wholesale
@@ -47,15 +48,27 @@
  * the last checkpoint equal those of a granular observer of the live-query
  * Collection, by type, key, value, and previous value; folded in order, they
  * never insert a held key, update or delete an unheld one, or carry a stale
- * previous value, and they leave the model's rows. A peer mounted when its
- * source starts cleanup is terminal like its live query: status `error` with
- * the rows it had, pending optimistic rows included, through the restart and
- * later writes. A peer mounted after cleanup follows the restarted source.
+ * previous value, and they leave the model's rows. A detached wholesale
+ * observer of each view, which never subscribes, reads its snapshot at the
+ * same checkpoints and must equal the live-query Collection's rows and
+ * status too. It sees no notification, so it re-reads rows only when the
+ * view's state or layout revision advances; a live-query Collection advances
+ * its state revision on every committed batch and on cleanup. Unmounting a
+ * peer keeps its detached reader and its live-query Collection, so later
+ * checkpoints also read views whose groups no listener watches. Cleanup refuses while a
+ * live query reads the source, so the driver cleans up with its dependents:
+ * a peer mounted then ends like its live query, `cleaned-up` with no rows,
+ * through the restart and later writes. A peer mounted after cleanup follows
+ * the restarted source.
  *
  * Calibration: a partition that ignored the previous value, kept group rows
  * in arrival order, or compared literals without normalization fails the
  * pinned histories and campaigns. A view that kept reporting the source's
- * status after cleanup fails the cleanup histories. An update delivered as a
+ * status, or kept its rows, after cleanup fails the cleanup histories. A
+ * view that empties its groups at cleanup without advancing their revisions
+ * leaves the detached reader on its old rows and fails the cleanup
+ * histories that held rows; so does advancing only watched groups, through
+ * the reader of an unmounted peer. An update delivered as a
  * delete and insert, with a stale previous value, or with the previous row as
  * its value fails the in-group update history and both campaigns; so do a
  * partition born terminal on a cleaned-up source and a freeze that drops
@@ -66,7 +79,7 @@
  * and are outside this owner.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
@@ -85,15 +98,26 @@ import {
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { createOracleReach } from '../oracle-reach.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
   withExpectedRejection,
   withOracleCleanup,
 } from '../utils.js'
+import type { Collection } from '../../src/collection/index.js'
 import type { ChangeMessage } from '../../src/types.js'
 
 const property = `pooled-live-query.publication`
+
+// A detached reader distinguishes a view that empties at cleanup from one
+// whose rows stay readable only if it held rows when the cleanup started.
+const reachStates = [
+  `detached-reader-holds-rows-at-cleanup`,
+  // The reader's peer was unmounted, so no listener watches its group.
+  `unwatched-reader-holds-rows-at-cleanup`,
+] as const
+type Reach = ReturnType<typeof createOracleReach<(typeof reachStates)[number]>>
 
 const MISSING = Symbol(`missing`)
 type FieldValue = string | number | boolean | Date | null | typeof MISSING
@@ -125,8 +149,10 @@ type Step =
     }
   | { kind: `mount`; peer: number }
   | { kind: `unmount`; peer: number }
-  // `mount` (re)mounts that peer after cleanup, before the restart.
-  | { kind: `cleanup-restart`; mount?: number }
+  // `mount` (re)mounts that peer after cleanup, before the restart;
+  // `unmountFirst` unmounts that peer just before cleanup, leaving its
+  // detached reader on a group no listener watches.
+  | { kind: `cleanup-restart`; mount?: number; unmountFirst?: number }
 type Op =
   | { type: `insert`; id: number; f: FieldValue; g: string | null }
   // `keepF` keeps the row's current `f`, so the row stays in its group.
@@ -330,9 +356,16 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
         {
           kind: fc.constant(`cleanup-restart` as const),
           mount: fc.nat({ max: 2 }),
+          unmountFirst: fc.nat({ max: 2 }),
         },
         { requiredKeys: [`kind`] },
       ),
+      // A peer unmounted just before cleanup while its group holds rows is
+      // where only a detached reader can see a stale group.
+      fc.record({
+        kind: fc.constant(`cleanup-restart` as const),
+        unmountFirst: fc.nat({ max: 2 }),
+      }),
     ),
     { maxLength: 8 },
   ),
@@ -381,7 +414,7 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
-    name: `a peer mounted at cleanup stays failed while a new one follows the restart`,
+    name: `a peer mounted at cleanup stays cleaned up while a new one follows the restart`,
     history: {
       rows: [{ f: `a`, g: `x` }],
       peers: [{ f: `a` }, { f: `a` }],
@@ -410,6 +443,14 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
         { kind: `cleanup-restart`, mount: 1 },
         { kind: `sync`, ops: [{ type: `update`, id: 3, f: `a`, g: `x` }] },
       ],
+    },
+  },
+  {
+    name: `an unmounted peer's detached reader empties at cleanup`,
+    history: {
+      rows: [{ f: `a`, g: `x` }],
+      peers: [{ f: `a` }, { f: 1 }],
+      steps: [{ kind: `cleanup-restart`, unmountFirst: 0 }],
     },
   },
   {
@@ -581,7 +622,40 @@ function foldChanges(
   }
 }
 
-async function runHistory(history: History): Promise<void> {
+// An app status listener that throws. A live-query Collection's emitter
+// gives each listener its own call and reports a throw as uncaught, so the
+// other listeners still receive the status and cleanup still settles; a
+// pooled view must do the same. The driver counts these uncaught errors.
+const appListenerError = `app status listener threw`
+function throwingStatusListener(): void {
+  throw new Error(appListenerError)
+}
+function captureAppListenerErrors(): {
+  count: () => number
+  restore: () => void
+} {
+  const original = globalThis.queueMicrotask
+  let count = 0
+  globalThis.queueMicrotask = (callback) =>
+    original(() => {
+      try {
+        callback()
+      } catch (error) {
+        if ((error as Error | undefined)?.message === appListenerError) count++
+        else throw error
+      }
+    })
+  return {
+    count: () => count,
+    restore: () => {
+      globalThis.queueMicrotask = original
+    },
+  }
+}
+
+async function runHistory(history: History, reach?: Reach): Promise<void> {
+  const appErrors = captureAppListenerErrors()
+  reach?.beginHistory()
   const id = (n: number) => `r${n}`
   const rows = new Map<string, Row>()
   history.rows.forEach((row, n) =>
@@ -601,7 +675,9 @@ async function runHistory(history: History): Promise<void> {
   const references: Array<ReturnType<typeof createLiveQueryCollection>> = []
   type Mounted = {
     reference: ReturnType<typeof createLiveQueryCollection>
-    // The model rows when the source started cleanup, if it has since.
+    // The model rows when the source's cleanup ended this peer, if it has.
+    // The peer then shows no rows; its granular stream got no deletes, so it
+    // still folds to these rows.
     frozen: Array<string> | undefined
     view: {
       collection?: unknown
@@ -610,6 +686,8 @@ async function runHistory(history: History): Promise<void> {
     }
     layout: { keys: string; revision: number } | undefined
     wholesale: ReturnType<typeof createLiveQueryObserver<any, any>>
+    // A wholesale observer nothing subscribes to, read only at checkpoints.
+    detached: ReturnType<typeof createLiveQueryObserver<any, any>>
     // Rows folded from the pooled granular stream, and contradictions.
     granularRows: Map<string | number, Record<string, unknown>>
     violations: Array<string>
@@ -619,6 +697,13 @@ async function runHistory(history: History): Promise<void> {
     unsubscribe: () => void
   }
   const mounted = new Map<number, Mounted>()
+  // Detached readers of unmounted peers, each beside its live-query
+  // Collection, which nothing subscribes to either.
+  const unwatched: Array<{
+    label: string
+    detached: Mounted[`detached`]
+    reference: Mounted[`reference`]
+  }> = []
   const mount = async (index: number) => {
     const peer = history.peers[index]
     if (!peer || mounted.has(index)) return
@@ -626,16 +711,26 @@ async function runHistory(history: History): Promise<void> {
     // restarts the source.
     const view = createPooledLiveQuery(peerQuery(source, peer)(new Query()))
     expect(view, `peer ${index} is poolable`).toBeDefined()
+    // The throwing app listener subscribes first, so it runs before the
+    // observers' listeners.
+    const offThrowing = (view as unknown as { on: Collection[`on`] }).on(
+      `status:change`,
+      throwingStatusListener,
+    )
     const wholesale = createLiveQueryObserver(view as any, {
       mode: `wholesale`,
     })
     const granular = createLiveQueryObserver(view as any)
+    const detached = createLiveQueryObserver(view as any, {
+      mode: `wholesale`,
+    })
     const entry: Mounted = {
       reference: createLiveQueryCollection(peerQuery(source, peer)),
       frozen: undefined,
       view: view as unknown as Mounted[`view`],
       layout: undefined,
       wholesale,
+      detached,
       granularRows: new Map(),
       violations: [],
       pooledChanges: [],
@@ -649,6 +744,10 @@ async function runHistory(history: History): Promise<void> {
       foldChanges(entry.granularRows, batch, entry.violations)
       entry.pooledChanges.push(...batch.map(describeChange))
     })
+    const offReferenceThrowing = entry.reference.on(
+      `status:change`,
+      throwingStatusListener,
+    )
     await entry.reference.preload()
     const referenceGranular = createLiveQueryObserver(entry.reference as any)
     const offReference = referenceGranular.subscribe((changes) => {
@@ -656,6 +755,8 @@ async function runHistory(history: History): Promise<void> {
       entry.referenceChanges.push(...batch.map(describeChange))
     })
     entry.unsubscribe = () => {
+      offThrowing()
+      offReferenceThrowing()
       offWholesale()
       offGranular()
       offReference()
@@ -665,7 +766,24 @@ async function runHistory(history: History): Promise<void> {
     }
     mounted.set(index, entry)
   }
+  // The rows and status a detached reader shows, and its live-query
+  // Collection's.
+  const expectDetached = (
+    label: string,
+    detached: Mounted[`detached`],
+    reference: Mounted[`reference`],
+  ) => {
+    const snapshot = detached.getSnapshot()
+    expect(
+      (snapshot.data as Array<Record<string, unknown>>).map(describeRow),
+      `${label} detached rows`,
+    ).toEqual(reference.toArray.map((row) => describeRow(row)))
+    expect(snapshot.status, `${label} detached status`).toBe(reference.status)
+  }
   const check = (checkpoint: string) => {
+    for (const { label, detached, reference } of unwatched) {
+      expectDetached(`${checkpoint}, ${label}`, detached, reference)
+    }
     for (const [index, entry] of mounted) {
       const { view, wholesale } = entry
       const peer = history.peers[index]!
@@ -683,11 +801,13 @@ async function runHistory(history: History): Promise<void> {
         `${label} view rows`,
       ).toEqual(reference.toArray.map((row) => describeRow(row)))
       expect(view.status, `${label} view status`).toBe(reference.status)
+      // A reader that never subscribed sees the same rows and status.
+      expectDetached(label, entry.detached, reference)
       const model = entry.frozen ?? expectedRows(rows, peer)
       expect(
         [...snapshot.state!.values()].map(describeFields).sort(),
         `${label} model`,
-      ).toEqual(model)
+      ).toEqual(entry.frozen ? [] : model)
       // The granular stream delivers each change once, with the type and
       // values the live-query Collection's stream has, and folds to the model.
       expect(entry.violations, `${label} granular contradictions`).toEqual([])
@@ -744,19 +864,37 @@ async function runHistory(history: History): Promise<void> {
   }
 
   const unmount = (index: number) => {
-    mounted.get(index)?.unsubscribe()
+    const entry = mounted.get(index)
+    if (!entry) return
+    entry.unsubscribe()
     mounted.delete(index)
+    unwatched.push({
+      label: `unmounted peer ${index}`,
+      detached: entry.detached,
+      reference: entry.reference,
+    })
   }
-  // Every mounted peer freezes with the rows it had, pending writes included.
-  // `beforeRestart` runs once the source is cleaned up.
+  // Cleanup ends every mounted peer first, as it does its live query: the
+  // peer is cleaned up with no rows from then on. `beforeRestart` runs once
+  // the source is cleaned up.
   const cleanupAndRestart = async (
     checkpoint: string,
     beforeRestart: () => Promise<void>,
   ) => {
+    // Each detached reader reads just before the cascade; with rows, a
+    // stale read after it is distinguishable from an empty one.
     for (const [index, entry] of mounted) {
       entry.frozen ??= expectedRows(rows, history.peers[index]!)
+      if (entry.detached.getSnapshot().data.length > 0) {
+        reach?.reach(`detached-reader-holds-rows-at-cleanup`)
+      }
     }
-    await source.cleanup()
+    for (const { detached } of unwatched) {
+      if (detached.getSnapshot().data.length > 0) {
+        reach?.reach(`unwatched-reader-holds-rows-at-cleanup`)
+      }
+    }
+    await source.cleanup({ dependents: true })
     check(`${checkpoint} cleaned up`)
     // The mock source re-syncs its initial rows when it restarts.
     rows.clear()
@@ -774,6 +912,7 @@ async function runHistory(history: History): Promise<void> {
       const checkpoint = `after step ${n} (${step.kind})`
       if (step.kind === `mount`) await mount(step.peer)
       else if (step.kind === `cleanup-restart`) {
+        if (step.unmountFirst !== undefined) unmount(step.unmountFirst)
         const between = step.mount
         await cleanupAndRestart(checkpoint, async () => {
           // A peer mounted on the cleaned-up source restarts it.
@@ -889,10 +1028,15 @@ async function runHistory(history: History): Promise<void> {
     }
   }, [
     () => {
-      for (const entry of mounted.values()) entry.unsubscribe()
+      for (const entry of mounted.values()) {
+        entry.unsubscribe()
+        entry.detached.dispose()
+      }
+      for (const { detached } of unwatched) detached.dispose()
     },
     () => Promise.all(references.map((reference) => reference.cleanup())),
-    () => source.cleanup(),
+    () => source.cleanup({ dependents: true }),
+    () => appErrors.restore(),
   ])
 }
 
@@ -917,6 +1061,13 @@ describe(`pooled live query oracle`, () => {
   // The pinned histories and the fixed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
   // property selects.
+  // Only generated histories count toward reach; a replay asserts nothing.
+  const reach = createOracleReach(property, reachStates)
+  let generatedRan = false
+  const runGenerated = (history: History) => {
+    generatedRan = true
+    return runHistory(history, reach)
+  }
   if (!oracleReplayRequested()) {
     // Generated fields are plain values; this pins a field whose getter
     // throws, which both paths treat as a row that does not match.
@@ -951,7 +1102,7 @@ describe(`pooled live query oracle`, () => {
       const snapshot = pooled.getSnapshot()
       expectSnapshotMatchesReference(snapshot, reference)
       stop()
-      await source.cleanup()
+      await source.cleanup({ dependents: true })
     })
 
     for (const { name, history } of pinnedHistories) {
@@ -961,11 +1112,14 @@ describe(`pooled live query oracle`, () => {
     fcTest.prop([historyArbitrary], {
       seed: 44_502_001,
       numRuns: oracleRuns(80),
-    })(`matches the live-query Collection (fixed)`, runHistory)
+    })(`matches the live-query Collection (fixed)`, runGenerated)
+    afterAll(() => {
+      if (generatedRan) reach.assertReached()
+    })
   }
 
   oracleReplayTest(fcTest, property).prop(
     [historyArbitrary],
     oraclePropertyOptions(80, property),
-  )(`matches the live-query Collection (random)`, runHistory)
+  )(`matches the live-query Collection (random)`, runGenerated)
 })

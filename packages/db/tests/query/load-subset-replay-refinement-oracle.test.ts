@@ -66,22 +66,24 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  *   none otherwise. A windowed query routes child demand only from the rows
  *   it shows (ARCHITECTURE.md), so this also judges child loads through
  *   holds, failures, and marker truncates.
- * - **Terminal error:** a failed lazy join demand load is fatal, because the
- *   join side can no longer be complete, so the query stays in `error` and
- *   convergence does not apply. Either side can be the lazy one: the planner
- *   loads an inner join's root by key when the marker source is eager. A
- *   demand load asks for keys (a `where` with no `orderBy`). A failed load
- *   that reacquires an established request after truncate is not fatal: it
- *   keeps the last publication until the next replay. A load that fails before
- *   the query first becomes ready is fatal too (an initial load failure), except on
- *   a lazy join source, which owns its demand. So a query may end in
- *   `error` only after a newly issued keyed snapshot request failed, or a
- *   load failed while the query was still loading. A truncate may change the
- *   private window and issue a new include request while it commits; that
- *   request still starts fresh lazy demand. Reacquisition of a previously
- *   settled request is an ordinary replay, even when it starts later.
- *   Replay renews demand held by its subscription before the truncate. A new
- *   subscription's first demand remains ordinary during another's replay.
+ * - **Terminal and request errors:** a load that fails before the query
+ *   first becomes ready is fatal (an initial load failure), except on a lazy
+ *   join source, which owns its demand; the query then stays in `error` and
+ *   convergence does not apply. After initial-query readiness a failed load
+ *   is a request error on the query's own node and the query stays `ready`
+ *   (ARCHITECTURE.md law 16): a newly issued keyed snapshot request (lazy join
+ *   demand on either side; the planner loads an inner join's root by key when
+ *   the marker source is eager), or a load that reacquires an established
+ *   request after truncate, which keeps the last publication until the next
+ *   replay. A demand load asks for keys (a `where` with no `orderBy`). A
+ *   truncate may change the private window and issue a new include request
+ *   while it commits; that request still starts fresh lazy demand.
+ *   Reacquisition of a previously settled request is an ordinary replay, even
+ *   when it starts later. Replay renews demand held by its subscription
+ *   before the truncate. A new subscription's first demand remains ordinary
+ *   during another's replay; after readiness both origins are request errors.
+ *   The check permits `error` only after a newly issued keyed snapshot
+ *   request failed, or a load failed while the query was still loading.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Reported faults:** an injected fault may surface as a rejected load, a
@@ -117,7 +119,9 @@ type OrderedRow = { id: number; rank: number }
 type OrderedCommand =
   | { type: `move`; id: number; rank: number }
   | { type: `hold` }
-  | { type: `settle`; ok: boolean }
+  // `keepHolding`: loads that start during the step, such as a retry the
+  // failure starts, stay held.
+  | { type: `settle`; ok: boolean; keepHolding?: boolean }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
@@ -231,6 +235,9 @@ type OrderedReach = {
   markerTruncates: number
   abortedMoves: number
   terminalErrors: number
+  // A failed load after initial-query readiness left a request error on the
+  // query's own node, and the query stayed ready (ARCHITECTURE.md law 16).
+  requestErrors: number
 }
 
 const replayDemandStates = [
@@ -245,10 +252,16 @@ function checkReplayDemandFailure(
   reach: OrderedReach,
   entered: ReadonlySet<ReplayDemandState>,
 ) {
+  // The query is ready before either failure, so neither may end it, and
+  // it stays available for later replay (ARCHITECTURE.md law 16). An
+  // ordinary demand failure is a request error on the query's node; a failed
+  // replay keeps the last publication until the next replay.
+  for (const state of replayDemandStates) {
+    if (!entered.has(state)) continue
+    expect(reach.terminalErrors, `${state} is nonterminal`).toBe(0)
+  }
   if (entered.has(replayDemandStates[0]))
-    expect(reach.terminalErrors, `ordinary failure is terminal`).toBe(1)
-  if (entered.has(replayDemandStates[1]))
-    expect(reach.terminalErrors, `replay failure is nonterminal`).toBe(0)
+    expect(reach.requestErrors, `ordinary failure is a request error`).toBe(1)
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -480,6 +493,7 @@ async function checkOrderedReplay(
     markerTruncates: 0,
     abortedMoves: 0,
     terminalErrors: 0,
+    requestErrors: 0,
   }
   type Marker = { id: number; rowId: number }
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
@@ -817,6 +831,7 @@ async function checkOrderedReplay(
   try {
     await live.preload()
     await peer?.preload()
+    let sawRequestError = false
     for (const command of history) {
       try {
         switch (command.type) {
@@ -848,7 +863,7 @@ async function checkOrderedReplay(
             holding = true
             break
           case `settle`: {
-            holding = false
+            holding = command.keepHolding === true
             held.shift()?.(command.ok)
             break
           }
@@ -946,7 +961,12 @@ async function checkOrderedReplay(
           expect(initiatingFailure(), `history: initiating failure`).toBe(true)
         }
       }
+      // A failed load after initial-query readiness shows as a request error
+      // until a later load of its data succeeds.
+      if (live.status === `ready` && live.health.error !== null)
+        sawRequestError = true
     }
+    if (sawRequestError) reach.requestErrors++
     holding = false
     throwNextUnload = false
     await settleAll()
@@ -1063,13 +1083,13 @@ describe(`Ordered windows across truncate replays`, () => {
   // - a window move that retires lazy joined demand whose release throws (the
   //   subscription reported the release failure as a load error, so the move
   //   rejected with it; core now reports it uncaught);
-  // - a held marker demand load that fails (the model expected convergence,
-  //   but a failed lazy join demand is fatal by design; this replay keeps the
-  //   terminal-error branch reached);
+  // - a held marker demand load that fails (after initial-query readiness a
+  //   failed lazy join demand is a request error on the query's node, and the
+  //   window still converges; this replay keeps that branch reached);
   // - two window moves while a load is held (the model let the older move,
   //   which settled later, restore its window; the newest move wins);
-  // - an inner join whose lazy root demand load fails (the model allowed a
-  //   terminal error only for marker loads; either side can be lazy);
+  // - an inner join whose lazy root demand load fails (either side can be
+  //   lazy, and either side's failure is a request error);
   // - a window move that a deferred newer move supersedes (it resolved when
   //   its own load settled, before the newer move resumed, so awaiting it
   //   showed neither window);
@@ -1159,7 +1179,10 @@ describe(`Ordered windows across truncate replays`, () => {
         { type: `hold` },
         { type: `move`, id: 1, rank: 1 },
         { type: `move`, id: 5, rank: 1 },
-        { type: `settle`, ok: false },
+        // A failure settles the demand and the query retries the data at
+        // once; the held retry keeps the request error visible until it
+        // settles.
+        { type: `settle`, ok: false, keepHolding: true },
       ],
       scenario: {
         ...ordinaryOrderedScenario,
@@ -1169,7 +1192,7 @@ describe(`Ordered windows across truncate replays`, () => {
         joined: `some`,
         markerMode: `on-demand`,
       },
-      reaches: `terminalErrors`,
+      reaches: `requestErrors`,
     },
     {
       name: `a new include demand during another subscription's replay`,
@@ -1246,7 +1269,7 @@ describe(`Ordered windows across truncate replays`, () => {
         { type: `move`, id: 1, rank: 1 },
       ],
       scenario: { ...ordinaryOrderedScenario, limit: 1, joined: `inner` },
-      reaches: `terminalErrors`,
+      reaches: `requestErrors`,
     },
     {
       name: `a window move that a deferred newer move supersedes`,
@@ -1292,7 +1315,9 @@ describe(`Ordered windows across truncate replays`, () => {
         markerMode: `on-demand`,
         includes: true,
       },
-      reaches: `terminalErrors`,
+      // After initial-query readiness the fresh request's failure is a
+      // request error, not a terminal one (ARCHITECTURE.md law 16).
+      reaches: `requestErrors`,
     },
     {
       name: `an established include replay that fails`,
@@ -1393,6 +1418,7 @@ describe(`Ordered windows across truncate replays`, () => {
         markerTruncates: 0,
         abortedMoves: 0,
         terminalErrors: 0,
+        requestErrors: 0,
       }
       // The broad property claims these dimensions, not the rare terminal
       // interaction owned by the subscription-specific property below.
@@ -1400,7 +1426,9 @@ describe(`Ordered windows across truncate replays`, () => {
         Object.keys(total) as Array<keyof OrderedReach>
       ).filter(
         (dimension) =>
-          dimension !== `abortedMoves` && dimension !== `terminalErrors`,
+          dimension !== `abortedMoves` &&
+          dimension !== `terminalErrors` &&
+          dimension !== `requestErrors`,
       )
       const declared = createOracleReach(orderedReplayProperty, dimensions)
       await fc.assert(
@@ -1429,8 +1457,9 @@ describe(`Ordered windows across truncate replays`, () => {
       // starts, and while it settles; loads fail and stay held across a
       // truncate; and the settled-window law is checked.
       // An aborted move needs a truncate to land inside a held move, and a
-      // terminal error needs a held marker demand load to fail; the named
-      // replays above reach both.
+      // request error needs a held demand load to fail after readiness; the
+      // named replays above reach both. A terminal error needs a failed first
+      // load.
       // Counts above are histories, rather than repeated events in one trace.
     },
     120_000,
@@ -1446,7 +1475,9 @@ describe(`Ordered windows across truncate replays`, () => {
  *
  * An include may start new ordinary demand during another owner's
  * replacement; a settled joined owner renews its own demand. The adapter must
- * witness each failed acquisition in normal fixed and random campaigns.
+ * witness each failed acquisition in normal fixed and random campaigns. Both
+ * failures come after initial-query readiness, so neither may end the query;
+ * the ordinary demand failure must leave a request error on its node.
  * Aborted work does not count. Named neighbors above calibrate both witnesses.
  */
 const replayDemandProperty = `replay.subscription-demand-origin`
@@ -1506,8 +1537,8 @@ it.each(replayDemandCampaigns)(
             declared.reach(state)
           },
         )
-        // Ordinary failure must become terminal, not merely be permitted to.
-        // A settled renewal must keep the query available for later replay.
+        // The query is ready before either failure, so neither origin may
+        // end it (ARCHITECTURE.md law 16).
         checkReplayDemandFailure(reach, entered)
       }),
       campaign === `fixed`
@@ -1576,8 +1607,11 @@ it.each(orderedFailureCampaigns)(
               undefined,
               failureReach.reach,
             )
+            // Both failures follow initial-query readiness, so each is a
+            // request error on the query's node and neither ends the query.
             if (fresh) {
-              expect(reach.terminalErrors, `fresh request failure`).toBe(1)
+              expect(reach.terminalErrors, `fresh request failure`).toBe(0)
+              expect(reach.requestErrors, `fresh request failure`).toBe(1)
             }
           }
         },

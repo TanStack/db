@@ -3,7 +3,7 @@ id: UseLiveQueryResult
 title: UseLiveQueryResult
 ---
 
-Defined in: [useLiveQuery.ts:83](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L83)
+Defined in: [useLiveQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L84)
 
 The result of a live query that is always enabled.
 
@@ -37,7 +37,7 @@ The result of a live query that is always enabled.
 collection: TCollection;
 ```
 
-Defined in: [useLiveQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L91)
+Defined in: [useLiveQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L92)
 
 ***
 
@@ -47,22 +47,25 @@ Defined in: [useLiveQuery.ts:91](https://github.com/TanStack/db/blob/main/packag
 data: TData;
 ```
 
-Defined in: [useLiveQuery.ts:90](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L90)
+Defined in: [useLiveQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L91)
 
 ***
 
-### isCleanedUp
+### health
 
 ```ts
-isCleanedUp: boolean;
+health: HealthNode | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L79)
+Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L80)
+
+The health tree for the query and every Collection it depends on, or
+`undefined` for a disabled query.
 
 #### Inherited from
 
 ```ts
-LiveQueryResultFlags.isCleanedUp
+LiveQueryResultFlags.health
 ```
 
 ***
@@ -73,118 +76,24 @@ LiveQueryResultFlags.isCleanedUp
 isEnabled: true;
 ```
 
-Defined in: [useLiveQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L93)
+Defined in: [useLiveQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L94)
 
 ***
 
-### isError
+### isSyncError
 
 ```ts
-isError: boolean;
-```
-
-Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L78)
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.isError
-```
-
-***
-
-### isIdle
-
-```ts
-isIdle: boolean;
-```
-
-Defined in: [useLiveQuery.ts:77](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L77)
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.isIdle
-```
-
-***
-
-### isLoading
-
-```ts
-isLoading: boolean;
-```
-
-Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L72)
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.isLoading
-```
-
-***
-
-### isPersistedReady
-
-```ts
-isPersistedReady: boolean;
+isSyncError: boolean;
 ```
 
 Defined in: [useLiveQuery.ts:75](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L75)
 
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.isPersistedReady
-```
-
-***
-
-### isReady
-
-```ts
-isReady: boolean;
-```
-
-Defined in: [useLiveQuery.ts:73](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L73)
+The data is shown, and a sync problem or failed request is in `health`.
 
 #### Inherited from
 
 ```ts
-LiveQueryResultFlags.isReady
-```
-
-***
-
-### persistedError
-
-```ts
-persistedError: unknown;
-```
-
-Defined in: [useLiveQuery.ts:76](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L76)
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.persistedError
-```
-
-***
-
-### persistedStatus
-
-```ts
-persistedStatus: LiveQueryPersistedStatus;
-```
-
-Defined in: [useLiveQuery.ts:74](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L74)
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.persistedStatus
+LiveQueryResultFlags.isSyncError
 ```
 
 ***
@@ -195,7 +104,7 @@ LiveQueryResultFlags.persistedStatus
 state: ReadonlyMap<TKey, TResult>;
 ```
 
-Defined in: [useLiveQuery.ts:89](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L89)
+Defined in: [useLiveQuery.ts:90](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L90)
 
 ***
 
@@ -205,4 +114,4 @@ Defined in: [useLiveQuery.ts:89](https://github.com/TanStack/db/blob/main/packag
 status: CollectionStatus;
 ```
 
-Defined in: [useLiveQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L92)
+Defined in: [useLiveQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L93)

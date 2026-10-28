@@ -1,12 +1,23 @@
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'
+import type { SyncConfig } from '@tanstack/db'
 
-// Helpers shared by the persisted-readiness oracle and its ordinary example
-// tests. They build controlled adapters and collections and run cleanup. They
-// compare nothing, so the oracle rule does not treat them as oracle parts.
+// The controlled persistence adapter and network-first Collection that the
+// persisted-readiness oracle drives, shared with its fixed examples in
+// persisted-readiness.test.ts. They compare nothing.
 
 export type Row = { id: string; value: string }
+export type Restore = `rows` | `empty` | `failed`
+// One adapter call. The calls of one event happen in the same tick.
+export type Call = `ready` | `report` | `fail`
+
+export const TIMEOUT = 100
+export const DISK_ROW: Row = { id: `disk`, value: `restored` }
+export const REMOTE_ROW: Row = { id: `remote`, value: `synced` }
+export const RESTORE_FAILURE = `restore failed`
+export const REMOTE_FAILURE = `remote gave up`
+export const REMOTE_REPORT = `remote retrying`
 
 export function deferred<T>() {
   let resolve!: (value: T) => void
@@ -18,20 +29,17 @@ export function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-export function recordingAdapter(rows: ReadonlyArray<Row>) {
-  const load = deferred<void>()
+// A persistence adapter whose restore read waits for the history to settle it.
+export function controlledAdapter() {
+  const load = deferred<ReadonlyArray<Row>>()
+  void load.promise.catch(() => undefined)
   const adapter: PersistenceAdapter = {
-    loadSubset: async () => {
-      await load.promise
-      return rows.map((value) => ({ key: value.id, value }))
-    },
+    loadSubset: async () =>
+      (await load.promise).map((value) => ({ key: value.id, value })),
     loadResumeSnapshot: async (_id, options) => {
-      if (options?.includeRows !== false) await load.promise
+      const rows = options?.includeRows === false ? [] : await load.promise
       return {
-        rows:
-          options?.includeRows === false
-            ? []
-            : rows.map((value) => ({ key: value.id, value })),
+        rows: rows.map((value) => ({ key: value.id, value })),
         keySet: { status: `consistent` },
         collectionMetadata: [],
         latestTerm: 0,
@@ -46,68 +54,47 @@ export function recordingAdapter(rows: ReadonlyArray<Row>) {
   return { adapter, load }
 }
 
-export function source(
-  id: string,
-  adapter: PersistenceAdapter,
-  optIn: boolean,
-  networkTimeoutMs = 0,
-) {
-  return createCollection(
+export function networkFirst(id: string, initialRender = true) {
+  const fixture = controlledAdapter()
+  let remote: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+  const collection = createCollection(
     persistedCollectionOptions<Row, string>({
       id,
       getKey: (row) => row.id,
-      persistence: { adapter },
-      ...(optIn
+      persistence: { adapter: fixture.adapter },
+      ...(initialRender
         ? {
             initialRender: {
               strategy: `network-first` as const,
-              networkTimeoutMs,
+              networkTimeoutMs: TIMEOUT,
             },
           }
         : {}),
-      // Upstream never declares Collection readiness. Local restore is a
-      // separately observable boundary even while this stays loading.
-      sync: { sync: () => ({}) },
+      sync: {
+        sync: (params) => {
+          remote = params
+        },
+      },
     }),
   )
-}
-
-export async function checkWithCleanup(
-  check: () => Promise<void> | void,
-  cleanups: ReadonlyArray<() => Promise<unknown> | unknown>,
-): Promise<void> {
-  let hasPrimaryFailure = false
-  let primaryFailure: unknown
-  try {
-    await check()
-  } catch (error) {
-    hasPrimaryFailure = true
-    primaryFailure = error
-  }
-
-  const cleanupFailures: Array<unknown> = []
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-  }
-  if (hasPrimaryFailure) {
-    if (cleanupFailures.length) {
-      throw new AggregateError(
-        [primaryFailure, ...cleanupFailures],
-        `Persisted-readiness check and cleanup both failed`,
-        { cause: primaryFailure },
-      )
-    }
-    throw primaryFailure
-  }
-  if (cleanupFailures.length === 1) throw cleanupFailures[0]
-  if (cleanupFailures.length > 1) {
-    throw new AggregateError(
-      cleanupFailures,
-      `Persisted-readiness cleanup failed`,
-    )
+  return {
+    collection,
+    restore: (outcome: Restore) =>
+      outcome === `failed`
+        ? fixture.load.reject(new Error(RESTORE_FAILURE))
+        : fixture.load.resolve(outcome === `rows` ? [DISK_ROW] : []),
+    // One adapter call, as the remote makes it.
+    call: (call: Call) => {
+      if (call === `ready`) {
+        remote!.begin()
+        remote!.write({ type: `insert`, value: REMOTE_ROW })
+        remote!.commit()
+        remote!.markReady()
+      } else if (call === `report`) {
+        remote!.reportError(new Error(REMOTE_REPORT))
+      } else {
+        remote!.fail(new Error(REMOTE_FAILURE))
+      }
+    },
   }
 }

@@ -107,6 +107,36 @@ Development builds show the full message. For example:
 Cannot perform operation on collection "collection-1" - collection is in error state. Try calling cleanup() and restarting the collection.
 ```
 
+<a id="error-254"></a>
+
+## Error 254: `CollectionHasSubscribersError`
+
+Development builds show the full message. For example:
+
+```text
+Cannot clean up collection "collection-1" while 2 live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them.
+```
+
+<a id="error-255"></a>
+
+## Error 255: `CollectionReloadCrashedError`
+
+Development builds show the full message. For example:
+
+```text
+Cannot reload collection "collection-1" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again.
+```
+
+<a id="error-256"></a>
+
+## Error 256: `CollectionReloadDuringSyncEntryError`
+
+Development builds show the full message. For example:
+
+```text
+Cannot reload collection "collection-1" from inside its sync function or a loadSubset call. Reload after it returns.
+```
+
 <a id="error-9"></a>
 
 ## Error 9: `InvalidCollectionStatusTransitionError`
@@ -1513,7 +1543,7 @@ Source collection '${collectionId}' was cleaned up while effect depends on it
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Source collection '${collectionId}' entered error state
+Source collection '${collectionId}' entered ${status} state
 ```
 
 <a id="error-136"></a>
@@ -1883,7 +1913,7 @@ No secure random number generator available: neither crypto.randomUUID nor crypt
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Source collection '${collectionId}' entered error state
+Source collection '${collectionId}' crashed
 ```
 
 <a id="error-173"></a>
@@ -2558,4 +2588,44 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 The DB stream ended before the server-rendered query snapshot arrived.
+```
+
+<a id="error-257"></a>
+
+## Error 257: `collection/lifecycle.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${operation}() reports on sync after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.
+```
+
+<a id="error-258"></a>
+
+## Error 258: `query/pooled-live-query.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+The pooled live query's source ended
+```
+
+<a id="error-259"></a>
+
+## Error 259: `collection/lifecycle.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${operation}() was called after fail() in the same sync run of Collection "${this.id}". fail() means the sync adapter stopped; a reload starts a new sync run.
+```
+
+<a id="error-260"></a>
+
+## Error 260: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source collection '${collectionId}' failed its first load
 ```

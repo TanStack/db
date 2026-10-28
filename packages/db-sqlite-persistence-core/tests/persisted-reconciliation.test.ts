@@ -1604,8 +1604,8 @@ it.each([`unknown`, `remote-durability`, `local-durability`] as const)(
         durableCursor: adapter.collectionMetadata.get(`probe:cursor`),
         durableTxCount: adapter.applyCommittedTxCalls.length,
       }).toEqual({
-        sourceStatus: `error`,
-        liveStatus: `error`,
+        sourceStatus: `crashed`,
+        liveStatus: `crashed`,
         syncRuns: 1,
         durableIds: [],
         durableCursor: undefined,

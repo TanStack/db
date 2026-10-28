@@ -34,7 +34,9 @@ import type { Scheduler } from 'fast-check'
  * optimistic state, callbacks, and cleanup may still be in flight. The public
  * snapshot must change only when the newest complete replay earns authority.
  * Older, failed, aborted, or released work may settle and release resources,
- * but it must not leak rows or overwrite a newer snapshot. An `unloadSubset`
+ * but it must not leak rows or overwrite a newer snapshot. A newer replay
+ * aborts the older attempts' loads, and an abort ends a load (maintainer
+ * decision): the newest replay does not wait for them. An `unloadSubset`
  * that throws is an adapter bug: the subscription reports it uncaught once,
  * and it is not a replay failure, so the replay continues as if the release
  * had succeeded.
@@ -561,12 +563,15 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       | undefined
 
     // A new attempt supersedes the previous one, and its failure with it.
+    // It aborts the older attempts' loads, and an abort ends a load
+    // (maintainer decision): the replay no longer waits for them.
     const startModelAttempt = (
       state: NonNullable<typeof modelReplayState>,
       attemptIndex: number,
     ): void => {
       state.currentAttemptIndex = attemptIndex
       state.failed = false
+      state.pending.clear()
     }
 
     const writeReplayRows = (
@@ -902,14 +907,15 @@ async function runSequentialReplayScenario(
             nextLoad = undefined
             nextError = undefined
             applyRows(load.rows)
-            if (load.outcome === `throw`) {
-              throw error
-            }
-
+            // A throw is a rejection (maintainer decision): an acquisition
+            // that core releases.
             acquisitionCounts.set(options, {
               acquisitions: 1,
               releases: 0,
             })
+            if (load.outcome === `throw`) {
+              throw error
+            }
             if (load.outcome === `return`) return true
             const deferred = createDeferred<void>()
             pending.push({ load, deferred, error })

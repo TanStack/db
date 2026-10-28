@@ -47,16 +47,15 @@ import type {
 
 /**
  * A fulfilled page fetch advances the committed prefix. A failed request leaves
- * that prefix alone and keeps its error visible until explicit recovery.
- * Source length, not the controller's failed-window cache, decides whether the
- * committed prefix has a continuation, including after later source writes.
+ * that prefix and the `ready` status alone; its rejection reaches the caller,
+ * and a failed source load behind it is a request error in the health tree.
+ * Source length decides whether the committed prefix has a continuation,
+ * including after later source writes.
  */
 function expectedOverlappingWindow(
   source: ReadonlyArray<InfiniteRow>,
   pageSize: number,
   pageSucceeded: boolean,
-  preloadFailed: boolean,
-  failure: Error,
 ) {
   const pageCount = pageSucceeded ? 2 : 1
   const visible = source.slice(0, pageCount * pageSize)
@@ -70,8 +69,6 @@ function expectedOverlappingWindow(
     pageParams: Array.from({ length: pageCount }, (_, page) => page),
     hasNextPage: source.length > pageCount * pageSize,
     isFetchingNextPage: !pageSucceeded,
-    error: preloadFailed ? failure : undefined,
-    status: preloadFailed ? `error` : `ready`,
   }
 }
 
@@ -796,7 +793,7 @@ export function runInfiniteQuerySuite(
 
     scenario(
       `window-failure`,
-      `surfaces a failed window request in state without rejecting`,
+      `keeps pages and status after a failed window request`,
       async () => {
         const source = driver.makeSource(rows(8))
         const handle = driver.mount(
@@ -825,8 +822,8 @@ export function runInfiniteQuerySuite(
           await expect(handle.fetchNextPage()).resolves.toBeUndefined()
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([3])
-          expect(handle.current().status).toBe(`error`)
-          expect(handle.current().error).toBe(failure)
+          expect(handle.current().status).toBe(`ready`)
+          expect(handle.current().isLoadingError).toBe(false)
 
           utils.setWindow = originalSetWindow
           await handle.fetchNextPage()
@@ -834,7 +831,6 @@ export function runInfiniteQuerySuite(
           expect(handle.current().pages.map((page) => page.length)).toEqual([
             3, 3,
           ])
-          expect(handle.current().error).toBeUndefined()
           expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
         } finally {
           utils.setWindow = originalSetWindow
@@ -844,13 +840,13 @@ export function runInfiniteQuerySuite(
 
     scenario(
       `overlapping-window-outcomes`,
-      `retains a window failure while continuation follows committed pages and live source changes`,
+      `keeps continuation on committed pages and live source changes after a window failure`,
       async () => {
         // Contract: after overlapping window requests settle, the latest
-        // committed page count determines continuation. A prior failure remains
-        // visible until explicit recovery. The bounded grammar crosses an
-        // exhausted versus remaining source with both settlement orders, then
-        // changes source extent while the earlier error remains visible.
+        // committed page count determines continuation, and a failed request
+        // changes neither the pages nor the status. The bounded grammar
+        // crosses an exhausted versus remaining source with both settlement
+        // orders, then changes source extent after the failure.
         // This drives the exported DB controller in each package realm. Hooks
         // expose no preload operation, so their scheduling is outside this cell.
         const pageSize = 2
@@ -902,13 +898,11 @@ export function runInfiniteQuerySuite(
             let secondReleased = false
             let preload: Promise<unknown> | undefined
             let fetch: Promise<unknown> | undefined
-            const check = (pageSucceeded: boolean, preloadFailed: boolean) => {
+            const check = (pageSucceeded: boolean) => {
               const expected = expectedOverlappingWindow(
                 currentRows,
                 pageSize,
                 pageSucceeded,
-                preloadFailed,
-                failure,
               )
               const actual = controller.getSnapshot()
               expect(actual.data.map((row) => row.id)).toEqual(expected.ids)
@@ -920,8 +914,7 @@ export function runInfiniteQuerySuite(
               expect(actual.isFetchingNextPage).toBe(
                 expected.isFetchingNextPage,
               )
-              expect(actual.error).toBe(expected.error)
-              expect(actual.status).toBe(expected.status)
+              expect(actual.status).toBe(`ready`)
               checked++
             }
 
@@ -941,20 +934,20 @@ export function runInfiniteQuerySuite(
                 firstReleased = true
                 rejectFirst(failure)
                 expect(await preload).toBe(failure)
-                check(false, true)
+                check(false)
                 secondReleased = true
                 resolveSecond()
                 expect(await fetch).toBeUndefined()
-                check(true, true)
+                check(true)
               } else {
                 secondReleased = true
                 resolveSecond()
                 expect(await fetch).toBeUndefined()
-                check(true, false)
+                check(true)
                 firstReleased = true
                 rejectFirst(failure)
                 expect(await preload).toBe(failure)
-                check(true, true)
+                check(true)
               }
               const fifthRow =
                 rowCount === 4
@@ -972,7 +965,7 @@ export function runInfiniteQuerySuite(
                 await waitForAsync(
                   () => collection.toArray.length === currentRows.length,
                 )
-                check(true, true)
+                check(true)
               } finally {
                 unsubscribe()
               }
@@ -987,9 +980,9 @@ export function runInfiniteQuerySuite(
               await waitForAsync(
                 () => collection.toArray.length === currentRows.length,
               )
-              check(true, true)
+              check(true)
               await controller.preload()
-              check(true, false)
+              check(true)
             } finally {
               if (!firstReleased) rejectFirst(failure)
               if (!secondReleased) resolveSecond()

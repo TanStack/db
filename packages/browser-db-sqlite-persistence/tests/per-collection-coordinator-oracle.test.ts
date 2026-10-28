@@ -2738,7 +2738,8 @@ and one real SQLite file opened by both tabs.
 Independent model: it knows only whether the owner's commit applies in the
 follower. While that apply is outstanding, the consumer has not settled. If it
 applies, the consumer settles successfully with the owner's row. If it fails,
-the consumer rejects without the row and the follower source is in error.
+the consumer rejects without the row. The failed apply is a local persistence
+failure, so the follower source crashes.
 
 Grammar: the owner's source is a receipt-awaiting custom source or a real
 Query Collection source, crossed with the placement of the owner's broadcast
@@ -2789,7 +2790,7 @@ function expectedRealTabFollower(history: RealTabHistory) {
     settled: {
       outcome: applied ? `fulfilled` : `rejected`,
       rows: applied ? [`remote`] : undefined,
-      source: applied ? `ready` : `error`,
+      source: applied ? `ready` : `crashed`,
     },
   }
 }

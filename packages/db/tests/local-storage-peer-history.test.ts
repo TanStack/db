@@ -43,6 +43,18 @@
  * The driver checks admission before and after cleanup and proves that the
  * original owner can restart. Listener counts cannot prove that a failed
  * Collection is no longer retained by a private adapter closure.
+ *
+ * The reload histories use the durable law: a reload's new sync run reads
+ * storage, and when `reload()` resolves the public rows equal the durable
+ * snapshot, as a fresh restore does, with every row the snapshot lacks gone.
+ * Authority: the error-handling guide's adapter obligations (a full-state
+ * load is one snapshot; the adapter removes the rows the backend deleted;
+ * it never inserts a held key) and the storage-is-the-source contract above.
+ * Another tab, a second Storage object over the same bytes, updates or
+ * deletes a kept row and inserts a new one while no event reaches the first
+ * tab; the first tab may also have edited the kept row before. The model is
+ * the authored fold. The driver checks status, the reload outcome, public,
+ * durable, and fresh-restore rows, then a write through the reloaded run.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index'
@@ -677,6 +689,88 @@ it('restores same-tab publication after cleanup and restart', async () => {
     () => [() => second.cleanup(), () => first.cleanup()],
   )
 })
+
+/** A reload re-reads storage that another tab changed without an event. The
+ * kept row 1 is updated or deleted there and row 3 inserted, or the other tab
+ * clears storage, which leaves no snapshot at all. The authored fold predicts
+ * every observation; production storage is read only as the durable
+ * observation. */
+for (const otherTab of [`update`, `delete`, `clear`] as const) {
+  for (const localEdit of [false, true]) {
+    it(`reload shows storage after another tab's ${otherTab}${localEdit ? ` after a local edit` : ``}`, async () => {
+      const data = new Map<string, string>()
+      const host = createHost(data)
+      const first = makeCollection(host, 'shared', 'first')
+      const tab = makeCollection(createHost(data), 'shared', 'other-tab')
+      let reopened: ReturnType<typeof makeCollection> | undefined
+      await withHistoryCleanup(
+        async () => {
+          await first.preload()
+          let authored: Array<Row> = [
+            { id: 1, value: 1 },
+            { id: 2, value: 2 },
+          ]
+          for (const row of authored)
+            await first.insert({ ...row }).isPersisted.promise
+          if (localEdit) {
+            authored = [{ id: 1, value: 10 }, authored[1]!]
+            await first.update(1, (draft) => {
+              draft.value = 10
+            }).isPersisted.promise
+          }
+          await tab.preload()
+          if (otherTab === `update`) {
+            authored = [{ id: 1, value: 11 }, authored[1]!]
+            await tab.update(1, (draft) => {
+              draft.value = 11
+            }).isPersisted.promise
+          } else if (otherTab === `delete`) {
+            authored = [authored[1]!]
+            await tab.delete(1).isPersisted.promise
+          }
+          if (otherTab === `clear`) {
+            authored = []
+            tab.utils.clearStorage()
+          } else {
+            authored = [...authored, { id: 3, value: 3 }]
+            await tab.insert({ id: 3, value: 3 }).isPersisted.promise
+          }
+          const expected = expectedRows(authored)
+          expect(durableRows(host, 'shared'), 'other tab durable').toEqual(
+            expected,
+          )
+          // The law matters only while the first tab is stale.
+          expect(
+            publicRows(first),
+            'no event reached the first tab',
+          ).not.toEqual(expected)
+
+          await expect(first.reload(), 'reload').resolves.toBeUndefined()
+          expect(first.status, 'status after reload').toBe('ready')
+          expect(publicRows(first), 'public after reload').toEqual(expected)
+          reopened = makeCollection(host, 'shared', 'reopened')
+          await reopened.preload()
+          expect(publicRows(reopened), 'fresh restore').toEqual(expected)
+
+          // The reloaded run confirms the first tab's next write.
+          authored = [...authored, { id: 4, value: 4 }]
+          await first.insert({ id: 4, value: 4 }).isPersisted.promise
+          expect(durableRows(host, 'shared'), 'durable after write').toEqual(
+            expectedRows(authored),
+          )
+          expect(publicRows(first), 'public after write').toEqual(
+            expectedRows(authored),
+          )
+        },
+        () => [
+          () => reopened?.cleanup(),
+          () => tab.cleanup(),
+          () => first.cleanup(),
+        ],
+      )
+    })
+  }
+}
 
 /** A restarted Collection can publish restored rows to an existing
  * subscriber before it reports readiness. That callback may synchronously
@@ -1364,7 +1458,7 @@ for (const [name, raw] of [
     await withHistoryCleanup(
       async () => {
         await expect(collection.preload()).rejects.toThrow()
-        expect(collection.status).toBe('error')
+        expect(collection.status).toBe('crashed')
         expect(host.storage.getItem('shared')).toBe(raw)
         collection.utils.clearStorage()
         reopened = makeCollection(host, 'shared', 'reopened')
@@ -1521,7 +1615,7 @@ it('does not retain a failed startup validation run', async () => {
       await expect(collection.preload()).rejects.toThrow(
         'bad row cannot be serialized',
       )
-      expect(collection.status).toBe('error')
+      expect(collection.status).toBe('crashed')
       expect(host.storage.getItem('shared')).toBe(bad)
       expect(begins, 'failed restore opens no transaction').toBe(0)
       host.storage.setItem('shared', good)
@@ -1588,7 +1682,7 @@ for (const failureKind of ['storage', 'parser'] as const) {
     await withHistoryCleanup(
       async () => {
         await expect(collection.preload()).rejects.toThrow('transient')
-        expect(collection.status).toBe('error')
+        expect(collection.status).toBe('crashed')
         expect(host.storage.getItem('shared')).toBe(stored)
         await collection.cleanup()
         collection.startSyncImmediate()

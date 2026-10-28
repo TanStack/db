@@ -7,8 +7,9 @@ import type { StorageApi, StorageEventApi } from '../src/local-storage'
 
 export type Row = { id: string | number; value: number }
 
-export function createHost() {
-  const data = new Map<string, string>()
+// Hosts that share `data` are tabs of one origin: they share the bytes, but
+// each has its own Storage object, so no same-tab publication crosses them.
+export function createHost(data = new Map<string, string>()) {
   const listeners = new Set<(event: StorageEvent) => void>()
   let storageReads = 0
   const storage: StorageApi = {

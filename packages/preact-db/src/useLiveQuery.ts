@@ -19,8 +19,8 @@ import type {
   LiveQueryCollectionConfig,
   LiveQueryKey,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   LiveQuerySourceIdClaims,
+  LiveQueryStatusFlags,
   NonSingleResult,
   PooledLiveQueries,
   QueryBuilder,
@@ -68,24 +68,13 @@ export type ConditionalUseLiveQueryConfig<TContext extends Context> =
         ) => ConfiguredQueryBuilder<TContext> | undefined | null)
   }
 
-interface LiveQueryResultFlags {
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-}
-
 /** The result of a live query that is always enabled. */
 export interface UseLiveQueryResult<
   TResult extends object,
   TKey extends string | number,
   TData,
   TCollection,
-> extends LiveQueryResultFlags {
+> extends LiveQueryStatusFlags {
   state: ReadonlyMap<TKey, TResult>
   data: TData
   collection: TCollection
@@ -99,7 +88,7 @@ export interface UseConditionalLiveQueryResult<
   TKey extends string | number,
   TData,
   TCollection,
-> extends LiveQueryResultFlags {
+> extends LiveQueryStatusFlags {
   state: ReadonlyMap<TKey, TResult> | undefined
   data: TData | undefined
   collection: TCollection | undefined

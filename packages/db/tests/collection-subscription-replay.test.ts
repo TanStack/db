@@ -891,12 +891,14 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
         if (site === `new request throws`) {
+          // A synchronous throw is a rejection: the request fails its load.
           expect(() =>
             subscription.requestSnapshot({
               where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
               optimizedOnly: false,
             }),
-          ).toThrow(`request failed`)
+          ).not.toThrow()
+          await flushPromises()
         }
         subscription.releaseSnapshot(where)
         await flushPromises()
@@ -921,14 +923,13 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
-  it.each([
-    ...[`current`, `pending`].flatMap((scope) =>
+  // A synchronous throw is a rejection (maintainer decision), so no failure
+  // is held by an attempt whose setup stack has not returned yet.
+  it.each(
+    [`current`, `pending`].flatMap((scope) =>
       [`throw`, `reject`].map((failureMode) => ({ scope, failureMode })),
     ),
-    // An async rejection runs after setup; only a sync failure can be held
-    // by an attempt whose setup stack has not returned yet.
-    { scope: `setup`, failureMode: `throw` },
-  ])(
+  )(
     `drops released failure references: $scope, $failureMode`,
     async ({ scope, failureMode }) => {
       let begin!: () => void
@@ -955,20 +956,6 @@ describe(`CollectionSubscription replay oracle`, () => {
                 if (loads === 3) {
                   if (failureMode === `throw`) throw failure
                   return Promise.reject(failure)
-                }
-                if (scope === `setup` && loads === 4) {
-                  expect(retainedFailures()).toEqual([failure])
-                  subscription.requestSnapshot({
-                    where: peerWhere,
-                    optimizedOnly: false,
-                  })
-                  return pendingPeer.promise
-                }
-                if (scope === `setup` && loads === 5) {
-                  begin()
-                  truncate()
-                  commit()
-                  subscription.releaseSnapshot(failedWhere)
                 }
                 return loads === 4 ? pendingPeer.promise : replacement.promise
               },
@@ -1025,7 +1012,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         // This is a retained-state witness, not a row oracle or GC benchmark.
         // Public rows cannot reveal a released owner held by an old error map.
         // Adapt this witness if the replay representation changes again.
-        if (scope !== `setup`) expect(retainedFailures()).toEqual([failure])
+        expect(retainedFailures()).toEqual([failure])
         if (scope === `pending`) await replaySource()
         subscription.releaseSnapshot(failedWhere)
         expect(retainedFailures()).toEqual([])

@@ -6,9 +6,10 @@ import { getLiveQueryHash } from '../src/live-query-options.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { Query, createLiveQueryCollection } from '../src/query/index.js'
-import { createOracleReach } from './oracle-reach.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
+import type { HealthNode } from '../src/types.js'
 
 /**
  * # Is a retained live-query snapshot point-in-time?
@@ -44,6 +45,7 @@ import { declareOracle } from './oracle-declaration.js'
 | stable identity | the same histories | the same | a second read of `data` and `state` returns the first read's objects | this generated oracle |
 | single result | the same histories over `findOne()` | isSingleResultCollection branch | `data` equals the first recorded row or `undefined` | this generated oracle |
 | attached and detached reads | a subscriber is present or absent | publication cache vs refreshDetachedState | the same observations | this generated oracle; listener delivery belongs to `live-query-observer-history-oracle.property.test.ts` |
+| health freshness across attach cuts | report, healthy, write, subscribe, unsubscribe, read; one ready source | detached refreshDetachedState, attach, publishedHealth | `health`, `isSyncError`, and tree identity of each snapshot, at every `read` | this generated oracle (second block below); status scheduling and hydration have other owners |
 
  * The source is a local-only Collection behind an `orderBy` live query, so
  * visible order is key order. Prepared client seeds are checked only for getter
@@ -288,7 +290,10 @@ async function checkHistory(
   }
 }
 
-declareOracle({ check: [checkRead, checkHistory], model: [modelRows] })
+declareOracle({
+  check: [checkRead, checkHistory, checkHealthHistory],
+  model: [modelRows],
+})
 
 const history = fc.array(command, { minLength: 1, maxLength: 24 })
 const reads = fc.array(
@@ -384,5 +389,252 @@ describe(`retained live-query snapshots are point-in-time`, () => {
       await query.cleanup()
       await source.cleanup()
     }
+  })
+})
+
+/**
+ * # Does a snapshot show the health tree that is current when it is built?
+ *
+ * Law (ARCHITECTURE.md law 17; glossary "health tree" and "sync error";
+ * `LiveQuerySnapshot.health` and `isSyncError` in `live-query-observer.ts`):
+ * a snapshot that `getSnapshot()` returns carries the query's current health
+ * tree, and `isSyncError` is `status === 'ready'` and that tree has a problem.
+ * Every change to the tree is announced by `health:change`, so a reader never
+ * has to poll: whether a subscriber is present (attached) or not (detached),
+ * and across the attach cut a framework crosses between its render-time read
+ * and its commit, the next snapshot shows the change. A tree keeps its object
+ * identity until its content changes, so two snapshots with no tree change
+ * between them carry the same tree.
+ *
+ * A health-only change moves no row and no status. It is the case where an
+ * observer that tracks only row revisions and status cannot see that its
+ * cached snapshot is stale.
+ *
+ * The model is the source's failure reason as its frame (maintainer
+ * decision): the list of failures reported since the slot was last clear,
+ * oldest first, with a serial number for the list. A `report` adds a failure
+ * with a fresh message and a new serial; the node's `failureReason` shows
+ * the newest, and its `errors` lists them all. `healthy` empties the list,
+ * and a `healthy` with nothing to clear changes nothing, keeping the
+ * serial. `write` changes a row and never the
+ * tree. `subscribe` and `unsubscribe` move the observer across the attach cut
+ * and change nothing in the model. At each `read` the driver compares the
+ * snapshot's source node `failureReason` (its message, its listed failures'
+ * messages in order, and each listed cause by identity), the root
+ * `hasErrors`, and `isSyncError` with the model, and requires the same tree
+ * object as the previous read when the serial did not change and a
+ * different one when the list differs from the previous read's, also when
+ * only a failure that is not the newest differs. A round trip between reads, such
+ * as `report` then `healthy`, ends at the content the previous read saw; the
+ * glossary requires identity to be stable while content is unchanged and
+ * does not require a new object for equal content, so either identity is
+ * legal there and the model checks only the content. The source is a ready controlled Collection under a direct live query.
+ * Limits: one source, `failureReason` only (`fail()` ends the sync run's
+ * reports and is checked by `source-health-oracle.test.ts`), no hydration
+ * seed, no framework.
+ */
+type HealthCommand =
+  | { type: `report` }
+  | { type: `healthy` }
+  | { type: `write`; version: number }
+  | { type: `subscribe` }
+  | { type: `unsubscribe` }
+  | { type: `read` }
+
+type HealthReach =
+  | `detached-read-after-health-change`
+  | `attached-read-after-health-change`
+  | `read-across-attach-after-health-change`
+  | `unchanged-tree-read`
+  | `read-with-several-failures`
+
+const healthCommand: fc.Arbitrary<HealthCommand> = fc.oneof(
+  { weight: 3, arbitrary: fc.constant({ type: `report` as const }) },
+  { weight: 2, arbitrary: fc.constant({ type: `healthy` as const }) },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`write` as const),
+      version: fc.integer({ min: 0, max: 9 }),
+    }),
+  },
+  { weight: 2, arbitrary: fc.constant({ type: `subscribe` as const }) },
+  { weight: 2, arbitrary: fc.constant({ type: `unsubscribe` as const }) },
+  { weight: 4, arbitrary: fc.constant({ type: `read` as const }) },
+)
+
+type SyncControls = {
+  begin: () => void
+  write: (message: { type: `update`; value: Row }) => void
+  commit: () => void
+  reportError: (error: unknown) => void
+  reportHealthy: () => void
+}
+
+function setupHealth() {
+  let controls: SyncControls | undefined
+  const source = createCollection<Row, string>({
+    id: `snapshot-health-source-${sequence++}`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (params: any) => {
+        controls = params
+        params.begin()
+        params.write({ type: `insert`, value: { id: `a`, version: 0 } })
+        params.commit()
+        params.markReady()
+      },
+    },
+  })
+  const query = createLiveQueryCollection({
+    startSync: true,
+    query: (q) => q.from({ row: source }),
+  })
+  const observer = createLiveQueryObserver(query)
+  return { source, query, observer, controls: () => controls! }
+}
+
+/** Run one history; compare every `read` with the model. */
+async function checkHealthHistory(
+  commands: ReadonlyArray<HealthCommand>,
+  reach?: ReturnType<typeof createOracleReach<HealthReach>>,
+): Promise<void> {
+  const { source, query, observer, controls } = setupHealth()
+  await query.preload()
+  let unsubscribe: (() => void) | undefined
+  // The model: the failure reason's frame, oldest first, and the serial of
+  // the list.
+  let failures: Array<Error> = []
+  let serial = 0
+  let reports = 0
+  // What the last read saw, for the identity law and the reach states.
+  let last:
+    | { serial: number; messages: string; tree: HealthNode | undefined }
+    | undefined
+  let attachedSinceRead = false
+  try {
+    for (const [index, step] of commands.entries()) {
+      if (step.type === `report`) {
+        const failure = new Error(`problem ${reports++}`)
+        controls().reportError(failure)
+        failures = [...failures, failure]
+        serial++
+      } else if (step.type === `healthy`) {
+        controls().reportHealthy()
+        if (failures.length > 0) {
+          failures = []
+          serial++
+        }
+      } else if (step.type === `write`) {
+        const c = controls()
+        c.begin()
+        c.write({ type: `update`, value: { id: `a`, version: step.version } })
+        c.commit()
+      } else if (step.type === `subscribe`) {
+        if (unsubscribe) continue
+        unsubscribe = observer.subscribe(() => {})
+        attachedSinceRead = true
+      } else if (step.type === `unsubscribe`) {
+        if (!unsubscribe) continue
+        unsubscribe()
+        unsubscribe = undefined
+      } else {
+        const snapshot = observer.getSnapshot()
+        const label = `step ${index}`
+        const changed = last !== undefined && last.serial !== serial
+        if (changed) {
+          reach?.reach(
+            unsubscribe
+              ? `attached-read-after-health-change`
+              : `detached-read-after-health-change`,
+          )
+          if (unsubscribe && attachedSinceRead)
+            reach?.reach(`read-across-attach-after-health-change`)
+        } else if (last !== undefined) reach?.reach(`unchanged-tree-read`)
+
+        const node = snapshot.health?.sources[0]
+        const problem = failures.length > 0
+        if (failures.length > 1) reach?.reach(`read-with-several-failures`)
+        expect(snapshot.status, `${label}: status`).toBe(`ready`)
+        expect(
+          {
+            message: node?.failureReason?.message ?? null,
+            errors:
+              node?.failureReason?.errors.map((failure) => failure.message) ??
+              [],
+          },
+          `${label}: failureReason`,
+        ).toEqual({
+          message: failures.at(-1)?.message ?? null,
+          errors: failures.map((failure) => failure.message),
+        })
+        expect(
+          node?.failureReason?.errors.every(
+            (failure, at) => failure.cause === failures[at],
+          ) ?? true,
+          `${label}: each listed failure is the reported value`,
+        ).toBe(true)
+        expect(snapshot.health?.hasErrors, `${label}: hasErrors`).toBe(problem)
+        expect(snapshot.isSyncError, `${label}: isSyncError`).toBe(problem)
+        const messages = JSON.stringify(failures.map((f) => f.message))
+        if (last !== undefined) {
+          if (last.serial === serial)
+            expect(snapshot.health, `${label}: unchanged tree identity`).toBe(
+              last.tree,
+            )
+          else if (last.messages !== messages)
+            expect(snapshot.health, `${label}: changed tree identity`).not.toBe(
+              last.tree,
+            )
+        }
+        last = { serial, messages, tree: snapshot.health }
+        attachedSinceRead = false
+      }
+    }
+  } finally {
+    unsubscribe?.()
+    observer.dispose()
+    await query.cleanup()
+    await source.cleanup()
+  }
+}
+
+describe(`a snapshot shows the current health tree`, () => {
+  it(`every read matches the model across attach cuts`, async () => {
+    const reach = createOracleReach<HealthReach>(
+      `live-query-observer.snapshot-health`,
+      [
+        `detached-read-after-health-change`,
+        `attached-read-after-health-change`,
+        `read-across-attach-after-health-change`,
+        `unchanged-tree-read`,
+        `read-with-several-failures`,
+      ],
+      { minimum: 5 },
+    )
+    const property = fc.asyncProperty(
+      fc.array(healthCommand, { minLength: 1, maxLength: 24 }),
+      async (commands) => {
+        reach.beginHistory()
+        await checkHealthHistory(commands, reach)
+      },
+    )
+    // Fixed campaign: a repeatable baseline. Seed 695 is arbitrary.
+    await fc.assert(property, { numRuns: oracleRuns(80), seed: 695 })
+    await fc.assert(property, oraclePropertyOptions(80))
+    reach.assertReached()
+  })
+
+  it(`shows a health-only change made between a detached read and attach`, async () => {
+    // Replay of the reported trace: a framework renders (detached read), a
+    // source reports a problem before commit, the framework commits
+    // (attach), then reads again.
+    await checkHealthHistory([
+      { type: `read` },
+      { type: `report` },
+      { type: `subscribe` },
+      { type: `read` },
+    ])
   })
 })

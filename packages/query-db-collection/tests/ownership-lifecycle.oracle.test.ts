@@ -30,6 +30,7 @@ import {
   itemIds,
   listOnly,
   persistedOwners,
+  reportedError,
   rows,
   runCleanups,
   shared,
@@ -2786,7 +2787,7 @@ describe(`query collection ownership lifecycle`, () => {
         const refresh = (
           operation === `refetch`
             ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.clearError()
+            : collection.utils.refetch({ throwOnError: true })
         ).then(
           (result) => {
             refetchOutcome = `resolved`
@@ -2918,7 +2919,7 @@ describe(`query collection ownership lifecycle`, () => {
       const refresh = (
         operation === `refetch`
           ? collection.utils.refetch({ throwOnError: true })
-          : collection.utils.clearError()
+          : collection.utils.refetch({ throwOnError: true })
       ).then(
         (result) => {
           refetchOutcome = `resolved`
@@ -3051,7 +3052,7 @@ describe(`query collection ownership lifecycle`, () => {
         const refresh =
           operation === `refetch`
             ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.clearError()
+            : collection.utils.refetch({ throwOnError: true })
         await refresh.then(
           () => {
             refreshOutcome = `resolved`
@@ -3168,7 +3169,7 @@ describe(`query collection ownership lifecycle`, () => {
             const refresh =
               operation === `refetch`
                 ? capturedCollection.utils.refetch({ throwOnError: true })
-                : capturedCollection.utils.clearError()
+                : capturedCollection.utils.refetch({ throwOnError: true })
             await refresh.then(
               () => {
                 refreshOutcome = `resolved`
@@ -3414,7 +3415,7 @@ describe(`query collection ownership lifecycle`, () => {
         handlerCollection: {
           utils: Pick<
             QueryCollectionUtils<Item, string | number, Item, unknown>,
-            `refetch` | `clearError`
+            `refetch`
           >
         },
         transaction: {
@@ -3483,7 +3484,7 @@ describe(`query collection ownership lifecycle`, () => {
         const boundary =
           operation === `refetch`
             ? refetchCollection.utils.refetch({ throwOnError: true })
-            : refetchCollection.utils.clearError()
+            : refetchCollection.utils.refetch({ throwOnError: true })
         await boundary.then(
           () => {
             handlerOutcome = `resolved`
@@ -3727,12 +3728,12 @@ describe(`query collection ownership lifecycle`, () => {
       outcome: `rejected`,
     })
     await vi.waitFor(() => {
-      expect(collection.utils.lastError).toBe(applicationError)
+      expect(reportedError(collection)).toBe(applicationError)
     })
 
     expect({
       refetch: handlerOutcome,
-      applicationErrorRecorded: collection.utils.lastError === applicationError,
+      applicationErrorRecorded: reportedError(collection) === applicationError,
     }).toEqual(observeHandlerRefetchBoundary(model))
   })
 
@@ -4293,7 +4294,7 @@ describe(`query collection ownership lifecycle`, () => {
     }
   })
 
-  it(`does not reuse an eager initial rejection when clearError applies a valid result`, async () => {
+  it(`does not reuse an eager initial rejection when a refetch applies a valid result`, async () => {
     const id = `eager-recovered-result-settlement`
     const invalidResult = 42 as unknown as Array<Item>
     const recovered = { ...shared, name: `Recovered` }
@@ -4330,14 +4331,14 @@ describe(`query collection ownership lifecycle`, () => {
       result: `invalid-shape`,
     })
     expect(collection.status).toBe(`error`)
-    expect(collection.utils.errorCount).toBe(1)
+    expect(reportedError(collection)).toBeDefined()
 
     expected = advanceResultSettlementModel(expected, {
       type: `start-refetch`,
       operation: `recovered`,
     })
     let rejection: unknown
-    const recovery = collection.utils.clearError().then(
+    const recovery = collection.utils.refetch({ throwOnError: true }).then(
       () => ({
         settled: true,
         outcome: `fulfilled` as const,
@@ -4358,9 +4359,10 @@ describe(`query collection ownership lifecycle`, () => {
 
     expectPublicRefetchObservation(expected, `recovered`, await recovery)
     expect(rejection).toBeUndefined()
-    expect(collection.status).toBe(`ready`)
-    expect(collection.utils.lastError).toBeUndefined()
-    expect(collection.utils.errorCount).toBe(0)
+    // An initial error is final for its sync run. The refetch applies its
+    // rows, but the Collection keeps its initial error until a restart.
+    expect(collection.status).toBe(`error`)
+    expect(reportedError(collection)).toBeDefined()
     expect(collection.get(shared.id)?.name).toBe(recovered.name)
   })
 

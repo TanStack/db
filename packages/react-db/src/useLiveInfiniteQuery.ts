@@ -33,8 +33,8 @@ import type {
   DbClient,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryPersistedStatus,
   LiveQuerySourceIdClaims,
+  LiveQueryStatusFlags,
   LiveQueryWindowBinding,
   NonSingleResult,
   QueryBuilder,
@@ -67,33 +67,23 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 export type UseLiveInfiniteQueryReturnWithCollection<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
-> = {
+> = LiveQueryStatusFlags & {
   data: Array<TResult>
   state: Map<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & NonSingleResult
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true
   pages: Array<Array<TResult>>
   pageParams: Array<number>
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
@@ -324,12 +314,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,
-    persistedStatus: snapshot.persistedStatus,
-    isPersistedReady: snapshot.isPersistedReady,
-    persistedError: snapshot.persistedError,
     isIdle: snapshot.isIdle,
-    isError: snapshot.isError,
+    isLoadingError: snapshot.isLoadingError,
+    isCrashed: snapshot.isCrashed,
     isCleanedUp: snapshot.isCleanedUp,
+    isSyncError: snapshot.isSyncError,
     collection:
       snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`],
     isEnabled: snapshot.isEnabled,
@@ -338,6 +327,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     fetchNextPage,
     hasNextPage: snapshot.hasNextPage,
     isFetchingNextPage: snapshot.isFetchingNextPage,
-    error: snapshot.error,
+    health: snapshot.health,
   }
 }

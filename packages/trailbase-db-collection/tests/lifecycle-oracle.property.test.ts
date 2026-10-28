@@ -10,19 +10,22 @@ import {
   failure,
   invalidValue,
   observe,
+  sortedRows,
   source,
   turn,
 } from './lifecycle-support'
 import type { Event, ListResponse } from 'trailbase'
-import type { Row } from './lifecycle-support'
+import type { RaceRow, Row } from './lifecycle-support'
 
 /**
  * # Does a TrailBase sync run publish and retire one valid row history?
  *
  * An eager sync run needs both its list and stream before readiness. An
  * on-demand sync run does not claim an initial list. Stream events update an independent
- * key/value relation. Startup failure rejects; later failure keeps the last
- * rows and reports the error. Cleanup clears rows, cancels work, and fences
+ * key/value relation. Startup failure rejects; any later end of the stream
+ * that the adapter did not cancel keeps the last rows and the `ready` status
+ * and reports the Collection's `error`, because the adapter does not resubscribe.
+ * A failure is that error's `cause`. Cleanup clears rows, cancels work, and fences
  * late results from prior sync runs after restart.
  *
  * A controlled RecordApi and native ReadableStream provide explicit gates for
@@ -301,10 +304,16 @@ async function checkLifecycle(
           assertNoTimers()
           const isFailure =
             plan.ending === `read-error` || plan.ending === `parse-error`
-          if (isFailure && !plan.immediate) {
-            expectedReports.push({
-              epoch,
-              args: [`TrailBase subscription failed`, failure],
+          if (!plan.immediate && plan.ending !== `cleanup`) {
+            expect(
+              collection.health,
+              `${epoch}:${plan.ending} error`,
+            ).toMatchObject({
+              hasErrors: true,
+              failureReason: null,
+              error: expect.objectContaining(
+                isFailure ? { cause: failure } : {},
+              ),
             })
           }
           assertReports()
@@ -729,7 +738,6 @@ it.each(earlyDemandPlans)(
  * no row version to order an event against a page, so the lane only checks a
  * row once all of its events have arrived.
  */
-type RaceRow = { id: number; data: string }
 type RacePlan = {
   mode: `eager` | `on-demand`
   change: `update` | `delete` | `insert` | `insert-then-update`
@@ -767,10 +775,6 @@ function raceChange(change: RacePlan[`change`]): {
     apply: (rows) => rows.set(3, updated),
   }
 }
-
-// Compare only the row fields; the Collection adds virtual properties.
-const sortedRows = (rows: Iterable<RaceRow>) =>
-  [...rows].map(({ id, data }) => ({ id, data })).sort((a, b) => a.id - b.id)
 
 async function checkPageEventRace(plan: RacePlan) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
@@ -1024,8 +1028,12 @@ it.each(heldPlans)(
  * once per sync run and does not resubscribe. After the stream ends, the
  * Collection keeps its rows and stays ready, a later service change does not
  * reach it, and a later on-demand load does not wait for a new subscription.
- * The load lists the service's current rows. This lane makes that limit
- * executable; it does not claim that the limit is the right product behavior.
+ * The load lists the service's current rows. Because the sync adapter stops
+ * receiving changes, it reports the Collection's `error`, so an application can
+ * see that the rows can grow stale; only a reload or restart subscribes again. This
+ * lane makes that limit executable; reconnecting is left to the TrailBase
+ * provider, and the lane does not claim the limit is the right product
+ * behavior.
  *
  * Reference: the same service model. The prediction after the stream ends is
  * the rows that the last delivered event or page established.
@@ -1037,7 +1045,8 @@ it.each(heldPlans)(
  * flight when the stream ends, or cleanup between them.
  *
  * Checkpoints: after the stream ends, after the service change, and after the
- * later load. Each compares rows, status, and subscribe calls.
+ * later load. Each compares rows, status, and subscribe calls. After the end,
+ * The Collection's `error` stays, and nothing clears it in this sync run.
  */
 async function checkStreamEnd(ending: `close` | `read-error`) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
@@ -1077,6 +1086,14 @@ async function checkStreamEnd(ending: `close` | `read-error`) {
     await turn()
     expect(collection.status, `${ending} status after the end`).toBe(`ready`)
     expect(rows(), `${ending} rows after the end`).toEqual(established)
+    const stopped = {
+      hasErrors: true,
+      failureReason: null,
+      error: expect.anything(),
+    }
+    expect(collection.health, `${ending} error after the end`).toMatchObject(
+      stopped,
+    )
 
     service.set(1, { id: 1, data: `v2` })
     await turn()
@@ -1090,6 +1107,9 @@ async function checkStreamEnd(ending: `close` | `read-error`) {
     expect(rows(), `${ending} a later load lists current rows`).toEqual(
       sortedRows(service.values()),
     )
+    expect(collection.health, `${ending} error after the load`).toMatchObject(
+      stopped,
+    )
   } finally {
     await collection.cleanup()
     reported.mockRestore()
@@ -1097,7 +1117,7 @@ async function checkStreamEnd(ending: `close` | `read-error`) {
 }
 
 it.each([`close`, `read-error`] as const)(
-  `keeps rows and does not resubscribe after the stream ends: %s`,
+  `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
   (ending) => checkStreamEnd(ending),
 )
 

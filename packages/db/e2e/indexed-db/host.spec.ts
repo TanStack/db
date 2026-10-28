@@ -177,7 +177,7 @@ test('dedicated worker and page preserve writes, restore and closure', async ({
       await call(page, { type: 'close' }, true)
       expect(await call(page, { type: 'status' }, true)).toEqual({
         nativeClose: 0,
-        collections: [{ store, status: 'error', rows: model.get(store) }],
+        collections: [{ store, status: 'crashed', rows: model.get(store) }],
       })
       await expect(
         call(
@@ -224,7 +224,7 @@ test('native storage clearing reports abnormal closure and retains the public sn
       .poll(() => call(page, { type: 'status' }))
       .toEqual({
         nativeClose: 1,
-        collections: [{ store: 'items', status: 'error', rows }],
+        collections: [{ store: 'items', status: 'crashed', rows }],
       })
     await expect(
       call(page, {

@@ -1785,7 +1785,7 @@ describe(`persistedCollectionOptions`, () => {
         status: collection.status,
         exactPublicError: collection._lifecycle.getSyncError() === receiptError,
       }).toEqual({
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -1869,7 +1869,7 @@ describe(`persistedCollectionOptions`, () => {
         status: collection.status,
         exactPublicError: collection._lifecycle.getSyncError() === receiptError,
       }).toEqual({
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -1972,7 +1972,7 @@ describe(`persistedCollectionOptions`, () => {
       }).toEqual({
         transactionStatus: `rejected`,
         transactionExact: true,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -2359,7 +2359,7 @@ describe(`persistedCollectionOptions`, () => {
         errorName: `PersistedCollectionDurabilityError`,
         cause: adapterError,
         publicErrorIsReceipt: true,
-        status: `error`,
+        status: `crashed`,
         firstVisible: {
           id: `first`,
           title: `published before persistence`,
@@ -2396,7 +2396,7 @@ describe(`persistedCollectionOptions`, () => {
         receiptStatus: `rejected`,
         exactReceipt: true,
         publicErrorIsTerminal: true,
-        status: `error`,
+        status: `crashed`,
         lateVisible: undefined,
         lateDurable: undefined,
         applyCalls: 1,
@@ -2500,7 +2500,7 @@ describe(`persistedCollectionOptions`, () => {
             collectionMetadata: `collection-metadata-before-failure`,
             applyCalls: applyCallsBefore,
             publishCalls: publishCallsBefore,
-            status: `error`,
+            status: `crashed`,
             exactPublicError: true,
           })
         }
@@ -2575,7 +2575,7 @@ describe(`persistedCollectionOptions`, () => {
         publishCalls: publishCallsBefore,
         visibleLate: undefined,
         durableLate: undefined,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -2718,7 +2718,7 @@ describe(`persistedCollectionOptions`, () => {
         secondVisible: undefined,
         secondDurable: undefined,
         publishCalls: 0,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
       })
     } catch (error) {
@@ -2856,7 +2856,7 @@ describe(`persistedCollectionOptions`, () => {
         forceVisible: undefined,
         lateStatus: `rejected`,
         lateErrorName: `CollectionStateError`,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         applyCalls: 1,
         firstVisible: undefined,
@@ -2897,7 +2897,7 @@ describe(`persistedCollectionOptions`, () => {
           `loopback hydration rejected`,
         ),
       ).rejects.toBe(hydrationError)
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(hydrationError)
 
       restoreBaselineRows()
@@ -2969,7 +2969,7 @@ describe(`persistedCollectionOptions`, () => {
         directExact: true,
         localStatus: `rejected`,
         localErrorName: `CollectionStateError`,
-        status: `error`,
+        status: `crashed`,
         exactPublicError: true,
         applyCalls: 0,
         directVisible: undefined,
@@ -3091,7 +3091,7 @@ describe(`persistedCollectionOptions`, () => {
         path: `todos.sqlite`,
         cause: persistenceError,
       })
-      expect(collection.status).toBe(`error`)
+      expect(collection.status).toBe(`crashed`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       releaseHydration?.()
