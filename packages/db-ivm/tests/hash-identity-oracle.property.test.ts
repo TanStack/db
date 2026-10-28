@@ -1,8 +1,6 @@
-import { runInNewContext } from 'node:vm'
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { MultiSet } from '../src/multiset.js'
 import {
   equalHashValues,
   hash,
@@ -13,7 +11,8 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
-import { captureHashSession } from './hash-session'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { colliding } from './hash-collision-support.js'
 
 /**
  * # Which values share D2 value identity?
@@ -58,15 +57,15 @@ import { captureHashSession } from './hash-session'
  * `8283f2e8`, which this file pins before the hash dispatch refactor.
  *
  * Limits:
- * - Arrays from another realm (`node:vm`) are outside the grammar. One pinned
- *   case keeps equality's length check for them.
+ * - Arrays from another realm (`node:vm`) are outside the grammar. An ordinary
+ *   test in hash-identity.test.ts keeps equality's length check for them.
  * - Work and depth caps belong to `hash-work.test.ts`.
  * - Map and Set order sensitivity and ignored Map/Set properties are current
  *   behavior. No contract promises them.
  * - Getters and proxies are outside the grammar.
  * - A RegExp with a `NaN` `lastIndex` is outside the grammar: equality
- *   compares RegExp fields with `===`, but hashing normalizes `NaN`. One
- *   pinned case holds the equality side.
+ *   compares RegExp fields with `===`, but hashing normalizes `NaN`. An
+ *   ordinary test in hash-identity.test.ts holds the equality side.
  * - Cycles run through arrays, Map values, Sets, and plain objects. Cycles
  *   through other carriers, and pairs that differ only in a back-edge target,
  *   would need a bisimulation model.
@@ -727,16 +726,6 @@ const cyclicArb: fc.Arbitrary<CyclicPair> = fc
 // ---------------------------------------------------------------------------
 // Production driver and refinement checks.
 
-// A second module copy whose initialization draws are all equal. Every
-// random constant, including every type marker, gets the same number, so a
-// design that tells types apart by marker number fails here.
-const nativeTape = (await captureHashSession()).tape
-const colliding = await captureHashSession(nativeTape.map(() => 0.5))
-// Loaded right after the colliding module, so it binds to that copy.
-const { topKBatch: collidingTopKBatch } = await import(
-  `../src/operators/topKState.js`
-)
-
 type Module = {
   name: string
   hash: (value: unknown) => number
@@ -789,6 +778,14 @@ function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
     )
   }
 }
+
+// The model is `identity` (and its encoding `canon`): equal identities must
+// share a verdict and hash. The grammar `pairArb` is calibrated below.
+declareOracle({
+  check: [expectPair, expectCyclicPair],
+  model: [identity, canon],
+  grammar: [pairArb],
+})
 
 // ---------------------------------------------------------------------------
 // Campaigns. Each generated property has a fixed campaign and a random
@@ -1038,37 +1035,6 @@ describe(`hash identity oracle`, () => {
       expectPair({ left, right, mutation: `replace` }, seeds)
   })
 
-  // Real Temporal types print distinct formats, so only a polyfill-shaped
-  // value can share text across types. The contract still names the tag.
-  it(`Temporal-shaped values with the same text and different types differ`, () => {
-    const temporalLike = (tag: string) =>
-      new (class {
-        get [Symbol.toStringTag]() {
-          return tag
-        }
-        toString() {
-          return `2024-01`
-        }
-      })()
-    const date = temporalLike(`Temporal.PlainDate`)
-    const month = temporalLike(`Temporal.PlainYearMonth`)
-    expect(equalHashValues(date, temporalLike(`Temporal.PlainDate`))).toBe(true)
-    expect(hash(date)).toBe(hash(temporalLike(`Temporal.PlainDate`)))
-    expect(equalHashValues(date, month)).toBe(false)
-  })
-
-  // Current behavior outside the grammar: an array from another realm takes
-  // the object marker, but equality still compares array lengths.
-  // Current behavior outside the grammar: equality compares RegExp fields
-  // with `===`, so a NaN `lastIndex` never equals itself, and `-0` equals `0`.
-  // Hashing normalizes both, so the NaN pair hashes equal.
-  it(`compares RegExp lastIndex with strict equality`, () => {
-    const withLastIndex = (lastIndex: number) =>
-      Object.assign(/a/g, { lastIndex })
-    expect(equalHashValues(withLastIndex(NaN), withLastIndex(NaN))).toBe(false)
-    expect(equalHashValues(withLastIndex(-0), withLastIndex(0))).toBe(true)
-  })
-
   it(`does not accept a second copy because the first copy matched`, () => {
     const spec: Spec = {
       k: `twice`,
@@ -1084,29 +1050,6 @@ describe(`hash identity oracle`, () => {
     // Some seeds share the child on the left side.
     for (let seed = 1; seed < 20; seed++)
       expectPair({ left: spec, right: split, mutation: `split` }, [seed, seed])
-  })
-
-  it(`keeps the equality length check for arrays from another realm`, () => {
-    const withHole = runInNewContext(`const a = [1]; a.length = 2; a`)
-    const short = runInNewContext(`[1]`)
-    expect(equalHashValues(withHole, short)).toBe(false)
-    expect(
-      equalHashValues(runInNewContext(`[1, 2]`), runInNewContext(`[1, 2]`)),
-    ).toBe(true)
-  })
-
-  // The colliding copy is only a useful control if its markers collide.
-  it(`gives every type marker the same hash number in the colliding module`, () => {
-    const empty = [
-      new Map(),
-      new Set(),
-      {},
-      Object.assign(new RegExp(``), { lastIndex: 0 }),
-    ]
-    const hashes = new Set(empty.map((value) => colliding.hash(value)))
-    expect(hashes.size).toBe(2) // A RegExp still hashes its header fields.
-    expect(colliding.hash(new Map())).toBe(colliding.hash(new Set()))
-    expect(colliding.hash(new Map())).toBe(colliding.hash({}))
   })
 
   it(`keeps distinct identities separate when their digests collide`, () => {
@@ -1125,24 +1068,6 @@ describe(`hash identity oracle`, () => {
     }
     expect(() => expectPair(pair, [1, 2], [digestOnly])).toThrow()
     expectPair(pair, [1, 2])
-  })
-
-  it(`keeps a Map-to-Set replacement in topKBatch when markers collide`, () => {
-    const batch = collidingTopKBatch([
-      new MultiSet<[number, unknown]>([
-        [[1, new Map()], -1],
-        [[1, new Set()], 1],
-      ]),
-    ])
-    expect(
-      [...batch].map(([[, value], weight]) => [
-        value instanceof Map ? `map` : value instanceof Set ? `set` : `other`,
-        weight,
-      ]),
-    ).toEqual([
-      [`map`, -1],
-      [`set`, 1],
-    ])
   })
 
   it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {

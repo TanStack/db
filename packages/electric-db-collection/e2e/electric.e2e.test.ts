@@ -14,6 +14,7 @@ import {
   createDeduplicationTestSuite,
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
+  createLiveUpdatesUnitTestSuite,
   createMovesTestSuite,
   createMutationsTestSuite,
   createPaginationTestSuite,
@@ -631,6 +632,7 @@ describe(`Electric Collection E2E Tests`, () => {
   createDeduplicationTestSuite(getConfig)
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
+  createLiveUpdatesUnitTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
   createProgressiveTestSuite(getConfig)
   createMovesTestSuite(getConfig as any)

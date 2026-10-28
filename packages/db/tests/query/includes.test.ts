@@ -1,3 +1,4 @@
+import { test as fcTest } from '@fast-check/vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   and,
@@ -11,6 +12,7 @@ import {
   gte,
   include,
   materialize,
+  queryOnce,
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -23,6 +25,30 @@ import {
   stripVirtualProps,
 } from '../utils.js'
 import { IncludeOperatorRequiredError } from '../../src/errors.js'
+import {
+  createRouteLifecycleScenario,
+  createVisibleRelationshipScenario,
+  transitionHistoryBranches,
+} from './includes-route-grammar-oracle.js'
+import { classifyScopedNaming } from './includes-scope-identity-oracle.js'
+import {
+  createControlledCollection,
+  plainSubquery,
+  refsInclude,
+  stripVirtualProperties,
+  trackPendingWork,
+  withPendingWorkCleanup,
+} from './includes-structural-support.js'
+import type {
+  ConnectedBranch,
+  RouteTransitionDescriptor,
+} from './includes-route-grammar-oracle.js'
+import type {
+  ChildRow,
+  PendingWork,
+  RootRow,
+} from './includes-structural-support.js'
+import type { ScopedShape } from './includes-scope-identity-oracle.js'
 import type { SyncConfig } from '../../src/types.js'
 
 type Project = {
@@ -7997,6 +8023,497 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+  })
+})
+
+describe(`includes recompute oracle`, () => {
+  fcTest(`parent correlation-key update rematerializes children`, async () => {
+    const roots = createControlledCollection<RootRow>(`correlation-seed-roots`)
+    const children = createControlledCollection<ChildRow>(
+      `correlation-seed-children`,
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ root: roots.collection }).select(({ root }) => ({
+        id: root.id,
+        group: root.group,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, root.group))
+            .select(({ child }) => ({ id: child.id })),
+        ),
+      })),
+    )
+
+    try {
+      await live.preload()
+      children.write(`insert`, {
+        id: 1,
+        parentGroup: 0,
+        group: 0,
+        value: 0,
+        position: 0,
+      })
+      children.write(`insert`, {
+        id: 2,
+        parentGroup: 1,
+        group: 0,
+        value: 0,
+        position: 0,
+      })
+      roots.write(`insert`, { id: 1, group: 1, value: 0, position: 0 })
+      roots.write(`update`, { id: 1, group: 0, value: 0, position: 0 })
+
+      expect(stripVirtualProperties(live.toArray)).toEqual([
+        { id: 1, group: 0, children: [{ id: 1 }] },
+      ])
+    } finally {
+      await live.cleanup()
+      await Promise.all([
+        roots.collection.cleanup(),
+        children.collection.cleanup(),
+      ])
+    }
+  })
+
+  fcTest(
+    `alpha-renaming a duplicate sibling alias preserves results`,
+    async () => {
+      const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
+        { id: 1, group: 1, value: 0, position: 0 },
+      ])
+      const issues = createControlledCollection<ChildRow>(`alias-seed-issues`, [
+        {
+          id: 10,
+          parentGroup: 1,
+          group: 10,
+          value: 10,
+          position: 0,
+        },
+        {
+          id: 11,
+          parentGroup: 1,
+          group: 11,
+          value: 99,
+          position: 1,
+        },
+      ])
+      const tags = createControlledCollection<ChildRow>(`alias-seed-tags`, [
+        {
+          id: 20,
+          parentGroup: 1,
+          group: 20,
+          value: 20,
+          position: 0,
+        },
+        {
+          id: 21,
+          parentGroup: 1,
+          group: 21,
+          value: 99,
+          position: 1,
+        },
+      ])
+
+      try {
+        const uniqueAliases = await queryOnce((q) =>
+          q.from({ root: roots.collection }).select(({ root }) => ({
+            id: root.id,
+            issues: toArray(
+              q
+                .from({ issue: issues.collection })
+                .where(({ issue }) => eq(issue.parentGroup, root.group))
+                .where(({ issue }) => eq(issue.value, 10))
+                .select(({ issue }) => ({ id: issue.id })),
+            ),
+            tags: toArray(
+              q
+                .from({ tag: tags.collection })
+                .where(({ tag }) => eq(tag.parentGroup, root.group))
+                .where(({ tag }) => eq(tag.value, 20))
+                .select(({ tag }) => ({ id: tag.id })),
+            ),
+          })),
+        )
+        const duplicateAliases = await queryOnce((q) =>
+          q.from({ root: roots.collection }).select(({ root }) => ({
+            id: root.id,
+            issues: toArray(
+              q
+                .from({ item: issues.collection })
+                .where(({ item }) => eq(item.parentGroup, root.group))
+                .where(({ item }) => eq(item.value, 10))
+                .select(({ item }) => ({ id: item.id })),
+            ),
+            tags: toArray(
+              q
+                .from({ item: tags.collection })
+                .where(({ item }) => eq(item.parentGroup, root.group))
+                .where(({ item }) => eq(item.value, 20))
+                .select(({ item }) => ({ id: item.id })),
+            ),
+          })),
+        )
+
+        const expected = [{ id: 1, issues: [{ id: 10 }], tags: [{ id: 20 }] }]
+        expect(stripVirtualProperties(uniqueAliases)).toEqual(expected)
+        expect(stripVirtualProperties(duplicateAliases)).toEqual(expected)
+      } finally {
+        await Promise.all([
+          roots.collection.cleanup(),
+          issues.collection.cleanup(),
+          tags.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(`optimistic child reorder matches recomputation`, async () => {
+    const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
+      { id: 1, group: 1, value: 0, position: 0 },
+    ])
+    const children = createControlledCollection<ChildRow>(
+      `order-seed-children`,
+      [
+        {
+          id: 1,
+          parentGroup: 1,
+          group: 1,
+          value: 1,
+          position: 0,
+        },
+        {
+          id: 2,
+          parentGroup: 1,
+          group: 1,
+          value: 2,
+          position: 1,
+        },
+      ],
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ root: roots.collection }).select(({ root }) => ({
+        id: root.id,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, root.group))
+            .orderBy(({ child }) => child.position)
+            .select(({ child }) => ({
+              id: child.id,
+              position: child.position,
+            })),
+        ),
+      })),
+    )
+
+    const pending = new Set<PendingWork>()
+    await withPendingWorkCleanup(
+      pending,
+      [live, roots.collection, children.collection],
+      async () => {
+        await live.preload()
+        const transaction = children.collection.update([1, 2], (drafts) => {
+          drafts[0]!.position = 1
+          drafts[1]!.position = 0
+        })
+        trackPendingWork(pending, transaction, children.resolveSync)
+
+        expect(stripVirtualProperties(live.toArray)).toEqual([
+          {
+            id: 1,
+            children: [
+              { id: 2, position: 0 },
+              { id: 1, position: 1 },
+            ],
+          },
+        ])
+      },
+    )
+  })
+
+  fcTest(`rejects subscriber lifecycle labels on reparent transitions`, () => {
+    expect(() =>
+      createRouteLifecycleScenario({
+        depth: 3,
+        branches: transitionHistoryBranches,
+        descriptors: [
+          {
+            kind: `reparent`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: 2_100 },
+          } as unknown as RouteTransitionDescriptor,
+        ],
+      }),
+    ).toThrow(/reparent transitions only support live merge destinations/)
+  })
+
+  fcTest(`scopes rekey route histories to their include level`, () => {
+    expect(() =>
+      createRouteLifecycleScenario({
+        depth: 3,
+        branches: transitionHistoryBranches,
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 1,
+            row: 0,
+            destination: { strategy: `fresh`, route: 2_100 },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: 2_100 },
+          },
+        ],
+      }),
+    ).not.toThrow()
+  })
+
+  fcTest(`rejects invalid route destination strategies`, () => {
+    const branches = transitionHistoryBranches
+    const ownRoute = branches[0].groupBase + 2
+    const otherRoute = branches[1].groupBase + 2
+    const freshRoute = 2_100
+    const invalidCases: ReadonlyArray<{
+      descriptors: ReadonlyArray<RouteTransitionDescriptor>
+      message: RegExp
+    }> = [
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: otherRoute },
+          },
+        ],
+        message: /fresh route must never have been used/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `restore`, route: ownRoute },
+          },
+        ],
+        message: /restore route must have been retired by this row/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: freshRoute },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 1,
+            destination: { strategy: `restore`, route: ownRoute },
+          },
+        ],
+        message: /restore route must have been retired by this row/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `merge`, route: freshRoute },
+          },
+        ],
+        message: /merge route must be live and different/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `merge`, route: ownRoute },
+          },
+        ],
+        message: /merge route must be live and different/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `split`, route: freshRoute },
+          },
+        ],
+        message: /split source route must be shared/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `merge`, route: otherRoute },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `split`, route: ownRoute },
+          },
+        ],
+        message: /split destination must be unused/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `retired`, route: otherRoute },
+          },
+        ],
+        message: /retired route must have been retired by another row/,
+      },
+      {
+        descriptors: [
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `fresh`, route: freshRoute },
+          },
+          {
+            kind: `rekey`,
+            level: 2,
+            row: 0,
+            destination: { strategy: `retired`, route: ownRoute },
+          },
+        ],
+        message: /retired route must have been retired by another row/,
+      },
+    ]
+
+    for (const invalidCase of invalidCases) {
+      expect(() =>
+        createRouteLifecycleScenario({
+          depth: 3,
+          branches,
+          descriptors: invalidCase.descriptors,
+        }),
+      ).toThrow(invalidCase.message)
+    }
+  })
+
+  fcTest(`rejects overlapping visible relationship keys`, () => {
+    const base = {
+      depth: 4,
+      transition: `rekey`,
+      targetLevel: 1,
+      sourceBranch: 0,
+      noise: [],
+    } as const
+    const collisions: Array<{
+      branches: readonly [ConnectedBranch, ConnectedBranch]
+      rekeyGroup: number
+    }> = [
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 102, groupBase: 1_600 },
+        ],
+        rekeyGroup: 2_100,
+      },
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 1_100, groupBase: 602 },
+        ],
+        rekeyGroup: 2_100,
+      },
+      {
+        branches: [
+          { idBase: 100, groupBase: 600 },
+          { idBase: 1_100, groupBase: 1_600 },
+        ],
+        rekeyGroup: 603,
+      },
+    ]
+
+    for (const collision of collisions) {
+      expect(() =>
+        createVisibleRelationshipScenario({
+          ...base,
+          ...collision,
+        }),
+      ).toThrow(/overlap/)
+    }
+  })
+})
+
+describe(`includes alpha-renaming across lexical scopes`, () => {
+  fcTest(`legality admits shadowing and rejects same-scope reuse`, () => {
+    const shape: ScopedShape = {
+      topology: `fromSubquery`,
+      subquery: { ...plainSubquery, joins: `refsThenNotes` },
+      include: refsInclude,
+    }
+    const legal = {
+      outer: `a`,
+      sub: `a`,
+      joined: `b`,
+      noted: `c`,
+      include: `b`,
+    }
+    expect(classifyScopedNaming(shape, legal)).toBe(`legal`)
+    expect(classifyScopedNaming(shape, { ...legal, include: `a` })).toBe(
+      `shadowing`,
+    )
+    expect(classifyScopedNaming(shape, { ...legal, noted: `b` })).toBe(
+      `sameScope`,
+    )
+    expect(
+      classifyScopedNaming(
+        { ...shape, topology: `unionBranch` },
+        { ...legal, inactive: `c` },
+      ),
+    ).toBe(`sameScope`)
+    expect(
+      classifyScopedNaming(
+        { topology: `wrapper`, wrapperJoin: `left` },
+        { wrapped: `x`, joinSub: `x`, joinSource: `y` },
+      ),
+    ).toBe(`sameScope`)
+    const nestedShape: ScopedShape = {
+      ...shape,
+      include: { ...refsInclude, body: `nestedFrom` },
+    }
+    expect(
+      classifyScopedNaming(nestedShape, {
+        ...legal,
+        include: `a`,
+        includeOuter: `c`,
+      }),
+    ).toBe(`shadowing`)
+    expect(
+      classifyScopedNaming(nestedShape, {
+        ...legal,
+        include: `c`,
+        includeOuter: `c`,
+      }),
+    ).toBe(`shadowing`)
+    expect(
+      classifyScopedNaming(
+        { topology: `unionParent`, includeSource: `refs` },
+        { activeBranch: `a`, inactiveBranch: `a`, anchor: `b`, include: `c` },
+      ),
+    ).toBe(`sameScope`)
   })
 })
 

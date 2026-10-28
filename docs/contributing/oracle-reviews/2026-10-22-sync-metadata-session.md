@@ -1017,6 +1017,11 @@ Evidence:
   `persisted-reads-seeds` at four times the runs.
 - **Limits.** The abandon action covers one buffered transaction with no
   successor; dependent suffixes belong to the abort-graph oracle.
+- **Files.** Under `oracle/no-unit-test` (#2278), the session model module
+  declares its check, model, and grammar. Its fixed boundary tests moved to
+  `packages/db/tests/sync-metadata-session.test.ts`, and the persisted fixed
+  witnesses to
+  `packages/db-sqlite-persistence-core/tests/persisted-sync-metadata-session.test.ts`.
 
 ## Open
 

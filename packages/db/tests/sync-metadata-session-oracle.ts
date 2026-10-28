@@ -1,4 +1,5 @@
 import { fc } from '@fast-check/vitest'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # What does a sync source read back, and what do consumers see?
@@ -2512,3 +2513,17 @@ export function describeMismatch(
     `actual:   ${JSON.stringify(mismatch.actual)}`,
   ].join(`\n`)
 }
+
+// The check runs a history through a driver and compares each observation
+// with the model; the model enacts the session laws; the grammar generates
+// legal histories and names the regimes they reach.
+declareOracle({
+  check: [
+    runSessionHistory,
+    runHoldInvariance,
+    runKeyIndependence,
+    runSeedOrderInvariance,
+  ],
+  model: [SessionModel, createSessionModel, modelCheckpoints],
+  grammar: [sessionActionArbitrary, sessionHistoryArbitrary, historyRegimes],
+})

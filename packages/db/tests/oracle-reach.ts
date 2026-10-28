@@ -20,12 +20,21 @@ import { readOracleRunConfig } from './oracle-config.js'
 export function createOracleReach<TState extends string>(
   property: string,
   states: ReadonlyArray<TState>,
-  { minimum = 1 }: { minimum?: number } = {},
+  {
+    minimum = 1,
+    replaying: replayOverride,
+  }: { minimum?: number; replaying?: boolean } = {},
 ) {
   const counts = new Map<TState, number>(states.map((state) => [state, 0]))
   let current = new Set<TState>()
-  const { replaySeed, replayPath } = readOracleRunConfig()
-  const replaying = replaySeed !== undefined || replayPath !== undefined
+  // Other packages use their own replay prefixes. An explicit campaign choice
+  // must not inherit an unrelated DB replay selector from the environment.
+  const replaying =
+    replayOverride ??
+    (() => {
+      const { replaySeed, replayPath } = readOracleRunConfig()
+      return replaySeed !== undefined || replayPath !== undefined
+    })()
   return {
     /** Starts one generated history. */
     beginHistory(): void {

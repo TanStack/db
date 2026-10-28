@@ -33,6 +33,7 @@
  * than the WASM response belong to the OPFS page lifecycle oracle.
  */
 import { expect } from 'vitest'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 
 /*
  * ## History grammar
@@ -259,3 +260,11 @@ export function expectOpenOutcome(
 export function describeHistory(history: OpenHistory): string {
   return `lookup ${history.lookup}, worker ${history.workerStart}, wasm ${history.wasm}, init ${history.init}, interrupt ${history.interrupt}`
 }
+
+// The model predicts each settlement from the history; the check compares the
+// driver's observation with that prediction. The grammar generates the histories.
+declareOracle({
+  check: [expectOpenOutcome],
+  model: [expectedOpenOutcome],
+  grammar: [openHistories],
+})

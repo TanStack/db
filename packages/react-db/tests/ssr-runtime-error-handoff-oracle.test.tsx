@@ -31,6 +31,7 @@ import {
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -284,6 +285,10 @@ async function checkRuntimeHistory(
       `SSR runtime receiver cleanup failed`,
     )
 }
+
+// checkRuntimeHistory compares the server view, the browser's first hydration
+// view and its committed view with the shared runtime model's expected views.
+declareOracle({ check: [checkRuntimeHistory] })
 
 describe(`runtime errors across SSR hydration`, () => {
   for (const hook of [`ordinary`, `infinite`] as const) {

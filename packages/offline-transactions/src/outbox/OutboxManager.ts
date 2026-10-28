@@ -1,8 +1,13 @@
 import {
   MissingTemporalConstructorError,
+  MutationCodecError,
   TransactionSerializer,
 } from './TransactionSerializer'
-import type { OfflineTransaction, StorageAdapter } from '../types'
+import type {
+  MutationValueCodec,
+  OfflineTransaction,
+  StorageAdapter,
+} from '../types'
 import type { Collection } from '@tanstack/db'
 
 export class OutboxTransactionNotFoundError extends Error {}
@@ -19,9 +24,10 @@ export class OutboxManager {
     storage: StorageAdapter,
 
     collections: Record<string, Collection<any, any, any, any, any>>,
+    mutationCodec?: MutationValueCodec,
   ) {
     this.storage = storage
-    this.serializer = new TransactionSerializer(collections)
+    this.serializer = new TransactionSerializer(collections, mutationCodec)
   }
 
   private getStorageKey(id: string): string {
@@ -61,7 +67,10 @@ export class OutboxManager {
     try {
       return this.serializer.deserialize(data)
     } catch (error) {
-      if (error instanceof MissingTemporalConstructorError) {
+      if (
+        error instanceof MissingTemporalConstructorError ||
+        error instanceof MutationCodecError
+      ) {
         error.message = `transaction ${id}: ${error.message}`
         throw error
       }
@@ -94,7 +103,10 @@ export class OutboxManager {
             const transaction = this.serializer.deserialize(data)
             transactions.push(transaction)
           } catch (error) {
-            if (error instanceof MissingTemporalConstructorError) {
+            if (
+              error instanceof MissingTemporalConstructorError ||
+              error instanceof MutationCodecError
+            ) {
               error.message = `transaction ${key.slice(this.keyPrefix.length)}: ${error.message}`
               throw error
             }

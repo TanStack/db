@@ -1,5 +1,11 @@
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { serialize } from '../src/pg-serializer'
+import {
+  parseFiniteArray,
+  parseFiniteNumber,
+} from './pg-serializer-finite-decoder'
+import { serializerProp } from './pg-serializer-property-support'
 
 describe(`pg-serializer`, () => {
   describe(`serialize`, () => {
@@ -121,6 +127,74 @@ describe(`pg-serializer`, () => {
       it(`should throw for functions`, () => {
         expect(() => serialize(() => {})).toThrow(`Cannot serialize value:`)
       })
+    })
+  })
+})
+
+describe(`pg-serializer property-based tests`, () => {
+  describe(`null/undefined serialization`, () => {
+    serializerProp(`pg-serializer.nullish-empty`, [
+      fc.constantFrom(null, undefined),
+    ])(`null and undefined both serialize to empty string`, (val) => {
+      expect(serialize(val)).toBe(``)
+    })
+  })
+
+  describe(`date serialization`, () => {
+    it.each([
+      [new Date(`0000-01-01T00:00:00.000Z`), `0000-01-01T00:00:00.000Z`],
+      [new Date(`9999-12-31T23:59:59.999Z`), `9999-12-31T23:59:59.999Z`],
+    ] as const)(`serializes the bounded Date endpoint %s`, (date, text) => {
+      expect(serialize(date)).toBe(text)
+    })
+  })
+
+  describe(`finite scalar and array checker calibration`, () => {
+    it.each([
+      [`0`, 0],
+      [`-0`, -0],
+      [`1.25`, 1.25],
+      [`5e-324`, Number.MIN_VALUE],
+      [`1.7976931348623157e+308`, Number.MAX_VALUE],
+      [`-2.5E-3`, -0.0025],
+    ] as const)(`reads the complete finite token %s`, (text, value) => {
+      expect(parseFiniteNumber(text)).toBe(value)
+    })
+
+    it.each([
+      ``,
+      ` `,
+      `1.25junk`,
+      `1.25\n`,
+      `1.25 2`,
+      `0x10`,
+      `NaN`,
+      `Infinity`,
+      `1e999`,
+      `1e`,
+      `1.2.3`,
+    ])(`rejects the invalid finite numeric token %j`, (text) => {
+      expect(() => parseFiniteNumber(text)).toThrow(
+        `invalid finite numeric output`,
+      )
+    })
+
+    it.each([
+      ``,
+      `[]`,
+      `{`,
+      `}`,
+      `{1`,
+      `{1,}`,
+      `{,1}`,
+      `{true,,false}`,
+      `{1}tail`,
+      `{"unterminated}`,
+      `{"a" "b"}`,
+      `{"a"b"}`,
+      `{"trailing\\`,
+    ])(`rejects malformed array output %j`, (output) => {
+      expect(() => parseFiniteArray(output)).toThrow()
     })
   })
 })
