@@ -1010,6 +1010,54 @@ it(`starts a new subset after retiring an incomplete old stream transaction`, as
   }
 })
 
+// A progressive Collection opens its atomic swap as a reserved transaction.
+// A throw inside the swap leaves that transaction open. When the SDK then
+// gives up, the source has stopped for good and must abandon the transaction,
+// as for any other reserved transaction. Otherwise a subset load that waits
+// for the reservation never runs.
+it(`releases a waiting subset when the SDK gives up after a failed atomic swap`, async () => {
+  const { adapter } = tagPersistence()
+  let poisoned = false
+  const collection = createCollection(
+    persistedCollectionOptions<
+      TestRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<TestRow>
+    >({
+      ...descriptor(`once-spread`, false, `progressive`),
+      id: `failed-atomic-swap`,
+      getKey: (row) => {
+        if (poisoned) throw new Error(`getKey failed`)
+        return row.id
+      },
+      persistence: { adapter },
+    }),
+  )
+  let demand: Promise<string> | undefined
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(streams).toHaveLength(1))
+    const stream = streams[0]!
+    stream.send([insert(1, `buffered`)])
+    poisoned = true
+    expect(() => stream.send([upToDate])).toThrow(`getKey failed`)
+    demand = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+      () => `ran`,
+      () => `rejected`,
+    )
+    stream.giveUp(new Error(`SDK gave up`))
+    // An abandon releases a waiting load as a commit does, so it runs.
+    expect(
+      await atCheckpoint(demand, `subset after the failed atomic swap`),
+    ).toBe(`ran`)
+  } finally {
+    poisoned = false
+    await atCheckpoint(collection.cleanup(), `failed atomic swap cleanup`)
+    await demand
+  }
+})
+
 it(`rejects torn or reverted tag-recovery histories even when their last snapshot is correct`, () => {
   const cached = [{ id: 1, name: `cached`, stable: `stable-1` }]
   const replacement = [{ id: 2, name: `replacement`, stable: `stable-2` }]
