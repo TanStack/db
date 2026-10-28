@@ -5,6 +5,7 @@ import {
   OrderedSourceLoader,
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors } from '../utils.js'
 import {
   oraclePropertyOptions,
@@ -22,6 +23,14 @@ import type {
   Observed,
   RequestOptions,
 } from './ordered-source-loader-state-support.js'
+
+// The leading order value that a tie request asks for: its `where` is
+// `eq(rank, value)`. Other requests have no tie value.
+function tieValue(options: RequestOptions): unknown {
+  const where = options.where as
+    { name?: string; args?: Array<{ value?: unknown }> } | undefined
+  return where?.name === `eq` ? where.args?.[1]?.value : undefined
+}
 
 /**
  * # Request authority under generated settlement orders
@@ -60,15 +69,34 @@ import type {
  *   invalidation reads no full source, and it issues at most one chain (in
  *   this fake, a prefix, a tie, and a refill) per ordering epoch move.
  * - **Ignored report:** a sync adapter's report that served pages may have
- *   shifted issues no authoritative request when nothing it describes can
- *   be wrong: before any request settled (a request in flight still owes an
- *   exact result for its own options), or while the loader's coverage is
- *   its own first ordered prefix of at least `offset + limit` rows, with
- *   only that prefix's tie after it, and a row past the page sorts strictly
- *   after its end with no more rows needed (ARCHITECTURE.md). The law judges
- *   only quiet histories: every earlier step settled a request successfully,
- *   ran a pass, inserted a row, reported, or changed joined work, and no
- *   release callback has side effects, so no earlier event owes a repair.
+ *   shifted issues no authoritative request before any request settled: a
+ *   request in flight still owes an exact result for its own options. The
+ *   loader ignores the report, and so issues no request at all, while its
+ *   coverage is a held full-source read since the last truncate, whatever
+ *   came before (an ordering invalidation owes such coverage nothing), or,
+ *   in a quiet history, while its coverage is the loader's own
+ *   first ordered prefix of at least `offset + limit` rows, with only that
+ *   prefix's tie after it, and a row past the page sorts strictly after its
+ *   end with no more rows needed (ARCHITECTURE.md). That row is evidence
+ *   only when the page read it, or when the tie the loader read is the tie
+ *   of the page's end. The law judges only quiet histories: every earlier
+ *   step settled a request successfully, ran a pass, inserted a row,
+ *   reported, shrank the window, or changed joined work, and no release
+ *   callback has side effects, so no earlier event owes a repair.
+ * - **Owed repair:** a report while the loader already owes a repair
+ *   repairs instead (ARCHITECTURE.md): the pass that reacts to it reads no
+ *   tie or page before the repair's prefix.
+ * - **Unexpressible tie:** the loader never reads the tie of a rank that no
+ *   cursor can express, such as NaN or an infinity; it reads the full source
+ *   or repairs instead (ARCHITECTURE.md; `canExpressCursorOrder`).
+ * - **Reset:** a truncate resets ordered loading, so the first finite
+ *   request after it starts at the beginning of the order, with no cursor.
+ * - **Unproven report:** in such a quiet history, a report over the loader's
+ *   own first prefix that no row it read proves starts a repair on its pass,
+ *   or reads the tie of the page's end, which completes the proof.
+ *   An installed row past the page can come from another request, and a
+ *   refetch can move the page's end before the tie the loader read, so the
+ *   loader cannot use either as proof.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -130,6 +158,10 @@ import type {
  * - `invalidate` invalidates source ordering, and `report` delivers a
  *   loaded-subset report; either can run an ordinary pass at once or leave
  *   the reaction deferred, as pending joined work or a later graph run can;
+ * - `headInsert` delivers a new row that sorts before every installed row,
+ *   as a refetch that moved a provider row into the first page does, so the
+ *   page's end moves one row earlier. The row's rank may be `-Infinity`,
+ *   which no cursor can express;
  * - `pass` runs an ordinary `loadMore()`;
  * - `move` is an explicit window move, which may also widen the window, so
  *   an unindexed loader reads a longer prefix;
@@ -189,8 +221,9 @@ import type {
  *
  * ## Limits
  *
- * The fake subscription's rows do not move except for the unexpressible
- * boundary, so cursor values are fixed. Publication holds are outside this
+ * The fake subscription's installed rows move only through the unexpressible
+ * boundary and a head insert. Its ordered reads apply a tie's equality, a
+ * cursor, and a limit as the subscription's reads do. Publication holds are outside this
  * property; other tests here own them. The laws do not judge requests issued
  * before a truncate, which the replay owns. The loader has no request
  * timeout, so a hung authoritative request may hold its work slot: progress
@@ -232,6 +265,8 @@ type AuthorityCommand =
   | { type: `settle`; pick: number; ok: boolean }
   | { type: `invalidate`; react: boolean }
   | { type: `report`; react: boolean }
+  // `unexpressible` gives the row a rank that no cursor can express.
+  | { type: `headInsert`; unexpressible?: boolean }
   | { type: `failOldest` }
   | { type: `settleNewest` }
   | { type: `invalidateThenFailOldest` }
@@ -314,6 +349,13 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
     arbitrary: fc.record({
       type: fc.constant(`report` as const),
       react: fc.boolean(),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`headInsert` as const),
+      unexpressible: fc.boolean(),
     }),
   },
   // The oldest in-flight request is the one most often superseded.
@@ -423,6 +465,20 @@ type AuthorityObservation = {
   joinedDeferrals: number
   ignoredReportsBeforeSettle: number
   ignoredReportsInsideFirstPage: number
+  ignoredReportsOverFullSource: number
+  ignoredReportsOverFallback: number
+  repairedReportsOnOwnPage: number
+  // Reports after a refetch moved the page's end, while a repair was owed,
+  // and while authoritative work was in flight.
+  movedEndReports: number
+  // Reports whose own first page read past a window that then shrank, and
+  // reports to a disposed loader.
+  reportsPastWindow: number
+  reportsAfterDispose: number
+  // Reports whose page's end, moved by a head insert, has no cursor.
+  unexpressibleEndReports: number
+  reportsOwingRepair: number
+  reportsDuringWork: number
   truncates: number
   replayFailures: number
   optimisticDepartures: number
@@ -449,6 +505,11 @@ async function checkAuthorityCase(
   let joinedPending = false
   let truncatePending = false
   let boundaryUnexpressible = false
+  // Rows a refetch delivered before every installed row, in rank order.
+  const headRows: Array<{ id: number; rank: number }> = []
+  // Whether an event since the last authoritative start owes a repair: an
+  // ordering invalidation, a visible delete, or an unexpressible boundary.
+  let repairOwed = false
   const info = createOrderByInfo({
     limit: testCase.limit,
     ...(testCase.indexed ? {} : { index: undefined }),
@@ -456,7 +517,22 @@ async function checkAuthorityCase(
     ...(testCase.syncRepair ? { sourceHoldsAllRows: true } : {}),
     requiresFullSource: testCase.requiresFullSource,
     ...(testCase.joined ? { joinedFilterSourceId: `markers` } : {}),
-    dataNeeded: () => (testCase.needsMore ? 1 : 0),
+    // A window that needs more always needs one row, as behind a joined
+    // filter that drops rows. Otherwise it needs the window's rows that do
+    // not sort at or before the loaded boundary.
+    dataNeeded: (boundary?: Record<string, unknown>) =>
+      testCase.needsMore
+        ? 1
+        : Math.max(
+            0,
+            info.offset +
+              info.limit -
+              (boundary === undefined
+                ? 0
+                : snapshot().filter(
+                    ({ value }) => value.rank <= (boundary.rank as number),
+                  ).length),
+          ),
     offset: testCase.offset,
   })
   let revision = 0
@@ -494,6 +570,8 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  let unexpressibleTieViolation: string | undefined
+  let resetViolation: string | undefined
   // A disposed loader owns nothing: it issues no request and releases no
   // lease, even as requests it issued earlier settle.
   let disposed = false
@@ -515,21 +593,25 @@ async function checkAuthorityCase(
   let releaseFaults = 0
   let syncRepairs = 0
   let invalidatingPages = 0
+  // The rank each continuation's cursor starts after, so a read of its
+  // acquisition's rows applies the cursor as the subscription does.
+  const cursorStarts = new WeakMap<object, unknown>()
   const record = (method: Observed[`method`], options: RequestOptions) => {
     // Like the real subscription, a continuation's acquisition carries a
     // cursor, so the loader does not take it for a prefix read.
+    const cursor =
+      options.minValues === undefined
+        ? undefined
+        : ({
+            whereFrom: new PropRef([`row`, `rank`]),
+            whereCurrent: new PropRef([`row`, `rank`]),
+          } as unknown as NonNullable<LoadSubsetOptions[`cursor`]>)
+    if (cursor) cursorStarts.set(cursor, options.minValues![0])
     const acquisition: LoadSubsetOptions = {
       orderBy: options.orderBy,
       limit: options.limit,
       where: options.where,
-      ...(options.minValues === undefined
-        ? {}
-        : {
-            cursor: {
-              whereFrom: new PropRef([`row`, `rank`]),
-              whereCurrent: new PropRef([`row`, `rank`]),
-            } as unknown as NonNullable<LoadSubsetOptions[`cursor`]>,
-          }),
+      ...(cursor ? { cursor } : {}),
     }
     const fullSource =
       method === `snapshot` &&
@@ -565,6 +647,29 @@ async function checkAuthorityCase(
       failedAt: -1,
     }
     ledger.push(request)
+    // No cursor expresses a NaN or infinite rank, so the loader reads the
+    // full source or repairs instead of reading that value's tie
+    // (ARCHITECTURE.md; `canExpressCursorOrder`).
+    // A truncate resets ordered loading (ARCHITECTURE.md), so the first
+    // finite request after it starts at the beginning of the order. A cursor
+    // there would continue from a boundary the truncate discarded.
+    if (
+      truncates > 0 &&
+      !fullSource &&
+      options.minValues !== undefined &&
+      ledger.every(
+        (other) =>
+          other === request ||
+          other.fullSource ||
+          other.issuedTruncates !== truncates,
+      )
+    ) {
+      resetViolation ??= `request ${request.index}, the first finite request after a truncate, continued from a cursor`
+    }
+    const tie = tieValue(options)
+    if (typeof tie === `number` && !Number.isFinite(tie)) {
+      unexpressibleTieViolation ??= `request ${request.index} read the tie of rank ${tie}, which no cursor can express`
+    }
     if (disposed) {
       disposeViolation ??= `request ${request.index} was issued after dispose`
     }
@@ -578,7 +683,10 @@ async function checkAuthorityCase(
     ) {
       concurrencyViolation ??= `request ${request.index}, a step of a repair chain whose epoch moved, was issued before its replacement`
     }
-    if (startsAuthority(request)) epochMovesAtLastStart = epochMoves
+    if (startsAuthority(request)) {
+      epochMovesAtLastStart = epochMoves
+      repairOwed = false
+    }
     // An issued request consumes an owed continuation. An ordinary page also
     // shows the chain finished, since none is issued while a repair runs.
     continuationOwed = false
@@ -698,25 +806,40 @@ async function checkAuthorityCase(
       // The page's own delivery changes source order before it returns.
       invalidateNextPage = false
       invalidatingPages++
+      repairOwed = true
       loader.invalidateSourceOrdering()
     }
     answering.push(request)
     options.onLoadSubsetResult?.(request.deferred.promise, acquisition, release)
   }
   // Installed rows in ascending rank. An unexpressible boundary makes the
-  // last one NaN, which no cursor can express.
-  const snapshot = () =>
-    Array.from({ length: testCase.snapshotRows }, (_, index) => ({
-      type: `insert`,
-      key: index + 1,
-      value: {
-        id: index + 1,
-        rank:
-          boundaryUnexpressible && index === testCase.snapshotRows - 1
-            ? Number.NaN
-            : index + 1,
-      },
-    }))
+  // last one NaN, which no cursor can express. A read applies a tie's
+  // equality, a cursor (rows strictly after its start), and the limit, as
+  // the subscription's ordered read does.
+  const snapshot = (options?: LoadSubsetOptions) => {
+    const tie = options === undefined ? undefined : tieValue(options)
+    const after = options?.cursor && cursorStarts.get(options.cursor)
+    return [
+      ...headRows.map((row) => ({ type: `insert`, key: row.id, value: row })),
+      ...Array.from({ length: testCase.snapshotRows }, (_, index) => ({
+        type: `insert`,
+        key: index + 1,
+        value: {
+          id: index + 1,
+          rank:
+            boundaryUnexpressible && index === testCase.snapshotRows - 1
+              ? Number.NaN
+              : index + 1,
+        },
+      })),
+    ]
+      .filter(
+        ({ value }) =>
+          (tie === undefined || value.rank === tie) &&
+          (after === undefined || value.rank > (after as number)),
+      )
+      .slice(0, options?.limit)
+  }
   const subscription = {
     readOrderedSnapshot: snapshot,
     setOrderByIndex: () => {},
@@ -789,6 +912,53 @@ async function checkAuthorityCase(
   let joinedDeferrals = 0
   let ignoredReportsBeforeSettle = 0
   let ignoredReportsInsideFirstPage = 0
+  let ignoredReportsOverFullSource = 0
+  let ignoredReportsOverFallback = 0
+  let repairedReportsOnOwnPage = 0
+  let movedEndReports = 0
+  let reportsPastWindow = 0
+  let reportsAfterDispose = 0
+  let unexpressibleEndReports = 0
+  let reportsOwingRepair = 0
+  let reportsDuringWork = 0
+  // Steps that settle a request successfully, run a pass, report, or change
+  // joined work. None of them owes a repair.
+  const quietCommand = (command: AuthorityCommand) =>
+    (command.type === `settle` && command.ok) ||
+    command.type === `settleNewest` ||
+    command.type === `pass` ||
+    command.type === `report` ||
+    command.type === `headInsert` ||
+    // A window that shrinks shows only rows that were already proven.
+    (command.type === `move` && command.delta === -1) ||
+    command.type === `joinedBusy` ||
+    command.type === `joinedIdle`
+  // An unproven report whose pass pending joined work deferred: the ledger
+  // index at the report and the window size it judged.
+  let owedProof:
+    { from: number; endRank: unknown; expressible: boolean } | undefined
+  // The proof is a bounded repair or the tie of the page's end. With every
+  // installed rank expressible, a full-source read is not a repair: the
+  // bounded repair is available (ARCHITECTURE.md), and a full-source read is
+  // the cost the report path avoids.
+  const expectProofRequest = (
+    from: number,
+    endRank: unknown,
+    expressible: boolean,
+  ) => {
+    const issued = ledger
+      .slice(from)
+      .some(
+        ({ authoritative, fullSource, options }) =>
+          (authoritative && (!fullSource || !expressible)) ||
+          tieValue(options) === endRank,
+      )
+    if (!issued) {
+      throw new Error(
+        `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
+      )
+    }
+  }
   let truncates = 0
   let replayFailures = 0
   let optimisticDepartures = 0
@@ -917,6 +1087,14 @@ async function checkAuthorityCase(
     if (releaseViolation) {
       throw new Error(`release ${checkpoint}: ${releaseViolation}`)
     }
+    if (resetViolation) {
+      throw new Error(`reset ${checkpoint}: ${resetViolation}`)
+    }
+    if (unexpressibleTieViolation) {
+      throw new Error(
+        `unexpressible tie ${checkpoint}: ${unexpressibleTieViolation}`,
+      )
+    }
     if (concurrencyViolation) {
       throw new Error(
         `one request at a time ${checkpoint}: ${concurrencyViolation}`,
@@ -1008,6 +1186,9 @@ async function checkAuthorityCase(
     await flush()
     if (testCase.settledFirst && ledger[0]) await settle(ledger[0], true)
     for (const [step, command] of testCase.history.entries()) {
+      // An event outside the quiet set, such as a truncate, a failure, a
+      // move, or a disposal, can change or end what a deferred report owes.
+      if (owedProof && !quietCommand(command)) owedProof = undefined
       switch (command.type) {
         case `settle`: {
           const open = inflight()
@@ -1044,6 +1225,7 @@ async function checkAuthorityCase(
         // or a later graph run defers it, while the oldest in-flight request
         // fails before the loader reacts.
         case `invalidateThenFailOldest`: {
+          repairOwed = true
           loader.invalidateSourceOrdering()
           const request = inflight()[0]
           if (!request) break
@@ -1057,6 +1239,7 @@ async function checkAuthorityCase(
           break
         }
         case `invalidate`:
+          repairOwed = true
           loader.invalidateSourceOrdering()
           if (command.react) graphPass()
           await flush()
@@ -1069,25 +1252,21 @@ async function checkAuthorityCase(
             !testCase.releaseTruncates &&
             !testCase.releaseDisposes &&
             !boundaryUnexpressible &&
-            testCase.history
-              .slice(0, step)
-              .every(
-                (earlier) =>
-                  (earlier.type === `settle` && earlier.ok) ||
-                  earlier.type === `settleNewest` ||
-                  earlier.type === `pass` ||
-                  earlier.type === `report` ||
-                  earlier.type === `joinedBusy` ||
-                  earlier.type === `joinedIdle`,
-              ) &&
+            testCase.history.slice(0, step).every(quietCommand) &&
             ledger.every(({ outcome }) => outcome !== `failed`)
           const windowSize = testCase.offset + info.limit
           const [first, ...later] = ledger
           const beforeSettle = ledger.every(({ outcome }) => outcome !== `ok`)
-          const insideFirstPage =
+          // The page's end is the installed row at the window's last position.
+          const ranks = snapshot().map(({ value }) => value.rank)
+          const endRank = ranks[windowSize - 1]
+          const expressible = ranks.every((rank) => Number.isFinite(rank))
+          // The loader's coverage is its own first page with only tie
+          // requests after it.
+          const ownFirstPage =
             !testCase.requiresFullSource &&
             !testCase.needsMore &&
-            testCase.snapshotRows > windowSize &&
+            ranks.length > windowSize &&
             first !== undefined &&
             first.outcome === `ok` &&
             !first.authoritative &&
@@ -1104,11 +1283,89 @@ async function checkAuthorityCase(
                 options.cursor === undefined &&
                 options.orderBy === undefined,
             )
+          // A row past the page proves the source's next row only when the
+          // page read it, or when it ties with the page's end and the loader
+          // read that tie. Any other installed row can come from another
+          // request, so it proves nothing, and neither does a tie of an older
+          // end that a head insert moved.
+          const insideFirstPage =
+            ownFirstPage &&
+            ((first.options.limit ?? 0) > windowSize ||
+              later.some(({ options }) => tieValue(options) === endRank))
+          if (ownFirstPage && (first.options.limit ?? 0) > windowSize) {
+            reportsPastWindow++
+          }
+          if (
+            ownFirstPage &&
+            later.some(({ options }) => tieValue(options) !== undefined) &&
+            !insideFirstPage
+          ) {
+            movedEndReports++
+          }
+          // Coverage is a held full-source read since the last truncate. It
+          // owes nothing whatever came before, so this premise needs no quiet
+          // history.
+          const coversSource =
+            !replayPending() &&
+            !isDisposed() &&
+            ledger.some(
+              ({ fullSource, outcome, released, issuedTruncates }) =>
+                fullSource &&
+                outcome === `ok` &&
+                !released &&
+                issuedTruncates === truncates,
+            )
+          if (isDisposed()) reportsAfterDispose++
+          if (
+            ownFirstPage &&
+            typeof endRank === `number` &&
+            !Number.isFinite(endRank)
+          ) {
+            unexpressibleEndReports++
+          }
+          const owesRepair =
+            repairOwed && !replayPending() && !isDisposed() && command.react
+          if (owesRepair) reportsOwingRepair++
+          if (
+            ledger.some(
+              ({ outcome, authoritative, hung }) =>
+                outcome === `inflight` && authoritative && !hung,
+            )
+          ) {
+            reportsDuringWork++
+          }
           const before = ledger.length
           loader.revalidateLoadedCoverage()
           if (command.react) graphPass()
           await flush()
-          if (quiet && (beforeSettle || insideFirstPage)) {
+          // A report while a repair is owed repairs instead: no tie or page
+          // comes before the repair's prefix.
+          const firstIssued = ledger[before]
+          if (owesRepair && firstIssued && !firstIssued.authoritative) {
+            throw new Error(
+              `owed repair: request ${firstIssued.index}, an ordinary read, came before the repair a report owed`,
+            )
+          }
+          // A report the loader cannot prove covers nothing it could change
+          // owes a repair, which its next pass starts, or a tie request for
+          // the page's end, which completes the proof. Pending joined work
+          // defers ordinary loading, so the pass that runs when that work
+          // finishes owes the request instead.
+          if (
+            command.react &&
+            quiet &&
+            !beforeSettle &&
+            ownFirstPage &&
+            !insideFirstPage
+          ) {
+            if (joinedPending && testCase.joined) {
+              owedProof = { from: before, endRank, expressible }
+            } else {
+              expectProofRequest(before, endRank, expressible)
+              repairedReportsOnOwnPage++
+            }
+          }
+          if (quiet && beforeSettle) {
             const issued = ledger
               .slice(before)
               .find(({ authoritative }) => authoritative)
@@ -1117,9 +1374,48 @@ async function checkAuthorityCase(
                 `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
               )
             }
-            if (beforeSettle) ignoredReportsBeforeSettle++
-            else ignoredReportsInsideFirstPage++
+            ignoredReportsBeforeSettle++
+          } else if ((quiet && insideFirstPage) || coversSource) {
+            // The loader ignores the report, so it reads nothing for it.
+            const issued = ledger[before]
+            if (issued) {
+              throw new Error(
+                `ignored report: request ${issued.index} was read for a report over coverage that ${coversSource ? `a full-source read` : `the loader's own first page`} proves`,
+              )
+            }
+            if (!coversSource) ignoredReportsInsideFirstPage++
+            else if (testCase.requiresFullSource) ignoredReportsOverFullSource++
+            // A paged loader whose boundary fell back to a full-source read.
+            else ignoredReportsOverFallback++
           }
+          break
+        }
+        // A refetch delivered a row that sorts before every installed row.
+        case `headInsert`: {
+          // One `-Infinity` row at most: a second would tie with it, which
+          // the fake's subtraction order cannot compare.
+          const unexpressible =
+            command.unexpressible === true &&
+            headRows.every(({ rank }) => Number.isFinite(rank))
+          const row = {
+            id: 1001 + headRows.length,
+            rank: unexpressible
+              ? Number.NEGATIVE_INFINITY
+              : -1 -
+                headRows.filter(({ rank }) => Number.isFinite(rank)).length,
+          }
+          headRows.push(row)
+          headRows.sort((left, right) =>
+            left.rank === right.rank ? 0 : left.rank < right.rank ? -1 : 1,
+          )
+          loader.onSourceChanges(
+            [{ type: `insert`, key: row.id, value: row }],
+            sentRows,
+            () => false,
+          )
+          sentRows.set(row.id, row)
+          graphPass()
+          await flush()
           break
         }
         case `pass`:
@@ -1146,6 +1442,7 @@ async function checkAuthorityCase(
         case `unexpressibleBoundary`:
           boundaryUnexpressible = !boundaryUnexpressible
           if (boundaryUnexpressible) unexpressibleBoundaries++
+          repairOwed = true
           loader.invalidateSourceOrdering()
           graphPass()
           await flush()
@@ -1159,6 +1456,15 @@ async function checkAuthorityCase(
           joinedPending = false
           graphPass()
           await flush()
+          if (owedProof) {
+            expectProofRequest(
+              owedProof.from,
+              owedProof.endRank,
+              owedProof.expressible,
+            )
+            owedProof = undefined
+            repairedReportsOnOwnPage++
+          }
           break
         case `truncate`:
           truncate()
@@ -1188,6 +1494,7 @@ async function checkAuthorityCase(
           await flush()
           break
         case `sourceDelete`:
+          repairOwed = true
           sourceDeletes++
           loader.onSourceChanges(
             [{ type: `delete`, key: 1, value: { id: 1, rank: 1 } }],
@@ -1377,16 +1684,20 @@ async function checkAuthorityCase(
         // Cost: a full-source read is very expensive, so a repair avoids one
         // whenever a bounded read is available (ARCHITECTURE.md). That holds
         // after a settled request in this incarnation, for a plan that does
-        // not need the full source, with an expressible boundary, unless an
-        // unindexed window still needs rows past a repeated prefix (the
-        // documented fallback). One repair is then one chain per ordering
-        // epoch move: in this fake, a prefix, a tie, and a refill.
+        // not need the full source, with an expressible boundary. An
+        // unindexed window that still needs rows grows its prefix instead
+        // (ARCHITECTURE.md, "an underfilled unindexed prefix grows"). One
+        // repair is then one chain per ordering epoch move: a prefix, then a
+        // tie and a refill page for each boundary it reaches (ARCHITECTURE.md,
+        // ordered repair). Each boundary is a different installed row, so a
+        // chain issues at most one prefix plus two requests per row.
         await drain()
         const repair = ledger.slice(before)
         const boundedRepair =
           !testCase.requiresFullSource &&
-          !boundaryUnexpressible &&
-          (testCase.indexed || !testCase.needsMore) &&
+          // Every installed rank is expressible, so no boundary needs the
+          // full-source fallback.
+          snapshot().every(({ value }) => Number.isFinite(value.rank)) &&
           repair.every(({ outcome }) => outcome === `ok`) &&
           ledger.some(
             (request) =>
@@ -1406,10 +1717,29 @@ async function checkAuthorityCase(
             (request) => request.authoritative,
           ).length
           const chains = epochMoves - movesBefore
-          if (authoritative > 3 * chains) {
+          if (authoritative > chains * (1 + 2 * snapshot().length)) {
             throw new Error(
               `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
             )
+          }
+          // Each boundary is a different read: no chain reads the same
+          // prefix, tie, or page twice.
+          const reads = new Map<string, number>()
+          for (const { authoritative: owed, options } of repair) {
+            if (!owed) continue
+            const read = JSON.stringify([
+              options.limit,
+              tieValue(options),
+              options.minValues,
+            ])
+            reads.set(read, (reads.get(read) ?? 0) + 1)
+          }
+          for (const [read, count] of reads) {
+            if (count > chains) {
+              throw new Error(
+                `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+              )
+            }
           }
         }
       }
@@ -1445,6 +1775,15 @@ async function checkAuthorityCase(
     joinedDeferrals,
     ignoredReportsBeforeSettle,
     ignoredReportsInsideFirstPage,
+    ignoredReportsOverFullSource,
+    ignoredReportsOverFallback,
+    repairedReportsOnOwnPage,
+    movedEndReports,
+    reportsPastWindow,
+    reportsAfterDispose,
+    unexpressibleEndReports,
+    reportsOwingRepair,
+    reportsDuringWork,
     truncates,
     replayFailures,
     optimisticDepartures,
@@ -1870,9 +2209,85 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
-      // Without the first-page check, the report repaired a window that the
-      // loader's own first prefix already proves.
-      name: `a report while the window is inside the loader's first page`,
+      // The first page and its tie settle, then joined work starts. A report
+      // over the moved end stages only that end's tie, and pending joined
+      // work defers it. The pass after the joined work finishes must read it;
+      // a loader that dropped the staged tie read nothing.
+      name: `a staged end tie that waits for joined work`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `joinedBusy` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // A truncate after a deferred unproven report hands the window to its
+      // replay, so the pass after the joined work owes no repair or tie.
+      name: `an unproven report whose deferred pass a truncate replaces`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: true },
+          { type: `truncate` },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // Pending joined work defers the pass after an unproven report, so the
+      // repair or tie that the report owes waits for that work. The pass that
+      // runs when it finishes must start it. A random campaign found the law
+      // judging the deferred pass instead.
+      name: `an unproven report while joined work defers loading`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // The first page read only the window, and the loader's tie request
+      // read a value past it, not the page's end. An installed row past the
+      // page can come from another request, so it proves nothing, and the
+      // report must repair. Ignoring it kept a window that missed a row tied
+      // with a refetched page's end.
+      name: `a report over a first page that read only the window`,
       testCase: {
         indexed: false,
         limit: 1,
@@ -1883,6 +2298,7 @@ describe(`Ordered source request authority`, () => {
         snapshotRows: 3,
         needsMore: false,
         history: [
+          { type: `settle`, pick: 0, ok: true },
           { type: `settle`, pick: 0, ok: true },
           { type: `report`, react: true },
         ],
@@ -1925,6 +2341,7 @@ describe(`Ordered source request authority`, () => {
         joinedDeferrals: 0,
         ignoredReportsBeforeSettle: 0,
         ignoredReportsInsideFirstPage: 0,
+        repairedReportsOnOwnPage: 0,
         truncates: 0,
         replayFailures: 0,
         optimisticDepartures: 0,
@@ -1986,12 +2403,178 @@ describe(`Ordered source request authority`, () => {
         for (const [dimension, count] of Object.entries(later)) {
           if (
             dimension === `startThrowsDuringFailure` ||
-            dimension === `ignoredReportsInsideFirstPage`
+            dimension === `ignoredReportsInsideFirstPage` ||
+            dimension === `repairedReportsOnOwnPage`
           )
             continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The report laws need premises that the broad grammar rarely lines up.
+  // Each history here starts with one of these prefixes over random case
+  // parameters, then a random suffix:
+  // - the first page and its tie settle, then a report: the window is
+  //   inside the loader's own first page, so the report is ignored;
+  // - the same, but a head insert first moves the page's end before the tie
+  //   the loader read, so the report is unproven;
+  // - an invalidation whose reaction waits, then a report that reacts: a
+  //   repair is owed;
+  // - an invalidation that starts its repair, then a report while that
+  //   repair is in flight;
+  // - a two-row window whose first page and tie settle, then shrinks to one
+  //   row before a report: the page read past the window, which proves it;
+  // - the moved-end prefix with the loader disposed before the report, which
+  //   the dispose law then judges;
+  // - the moved-end prefix with a `-Infinity` head row, so no cursor can
+  //   express the page's new end;
+  // - a one-row window whose page and tie settle, then a `-Infinity` head
+  //   row and an invalidation: the repair's boundary has no cursor, so it
+  //   falls back to a full-source read, and a report follows over it;
+  // - a plan that reads only the full source, then a report over it.
+  // A release that truncates or disposes would end the quiet history, so
+  // no prefix allows one.
+  const unprovenReportProperty = `ordered-loader.unproven-report`
+  const reportPrefixes: Array<{
+    history: Array<AuthorityCommand>
+    fullSource?: boolean
+    narrow?: boolean
+    wide?: boolean
+  }> = [
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert` },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `invalidate`, react: false },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `invalidate`, react: true },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `move`, delta: -1 },
+        { type: `report`, react: true },
+      ],
+      wide: true,
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert` },
+        { type: `dispose` },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert`, unexpressible: true },
+        { type: `report`, react: true },
+      ],
+      // The end is the `-Infinity` row only in a one-row window.
+      narrow: true,
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert`, unexpressible: true },
+        { type: `invalidate`, react: true },
+        { type: `settleNewest` },
+        { type: `settleNewest` },
+        { type: `settleNewest` },
+        { type: `report`, react: true },
+      ],
+      narrow: true,
+    },
+    { history: [{ type: `report`, react: true }], fullSource: true },
+  ]
+  const unprovenReportCase: fc.Arbitrary<AuthorityCase> = fc
+    .tuple(
+      authorityCaseArbitrary,
+      fc.constantFrom(...reportPrefixes),
+      fc.array(authorityCommand, { maxLength: 8 }),
+    )
+    .map(([testCase, prefix, rest]) => ({
+      ...testCase,
+      settledFirst: true,
+      requiresFullSource: prefix.fullSource === true,
+      ...(prefix.wide ? { limit: 2 as const, offset: 0 as const } : {}),
+      ...(prefix.narrow ? { limit: 1 as const, offset: 0 as const } : {}),
+      snapshotRows: 3,
+      needsMore: false,
+      releaseTruncates: false,
+      releaseDisposes: false,
+      history: [...prefix.history, ...rest],
+    }))
+  const unprovenReportCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === unprovenReportProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(unprovenReportCampaigns)(
+    `answers each loaded-subset report as its coverage requires (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: histories where each report law judged a report.
+      const reportStates = [
+        `repairedReportsOnOwnPage`,
+        `ignoredReportsInsideFirstPage`,
+        `ignoredReportsOverFullSource`,
+        `ignoredReportsOverFallback`,
+        `movedEndReports`,
+        `reportsPastWindow`,
+        `reportsAfterDispose`,
+        `unexpressibleEndReports`,
+        `reportsOwingRepair`,
+        `reportsDuringWork`,
+      ] as const
+      const reach = createOracleReach(unprovenReportProperty, reportStates, {
+        minimum: 20,
+      })
+      await fc.assert(
+        fc.asyncProperty(unprovenReportCase, async (testCase) => {
+          reach.beginHistory()
+          const observation = await checkAuthorityCase(testCase)
+          for (const state of reportStates) {
+            if (observation[state] > 0) reach.reach(state)
+          }
+        }),
+        campaign === `fixed`
+          ? { seed: 20261023, numRuns: oracleRuns(1000) }
+          : oraclePropertyOptions(1000, unprovenReportProperty),
+      )
+      reach.assertReached()
     },
     120_000,
   )

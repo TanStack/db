@@ -1321,6 +1321,11 @@ export interface SubscribeChangesOptions<
     readonly succeed: () => void
     /** The replay could not load every active demand again: its failures, in failure order. */
     readonly fail?: (errors: Array<Error>) => void
+    /**
+     * The replays of the graph's other subscriptions to this collection that
+     * still load. They share one barrier, so this replay waits for them.
+     */
+    readonly siblingReplays: () => Promise<unknown> | undefined
   }
 }
 

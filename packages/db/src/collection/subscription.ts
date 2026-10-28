@@ -22,6 +22,7 @@ import type {
   CollectionDependent,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
+  SubscribeChangesOptions,
   Subscription,
   SubscriptionEvents,
   SubscriptionLoadSubsetErrorEvent,
@@ -93,14 +94,9 @@ type CollectionSubscriptionOptions = {
   owner?: CollectionDependent
 }
 
-type TruncateReplayPublicationControl = Readonly<{
-  // `retired`: a reload retired the sync run and no truncate came.
-  start: (retired: boolean) => void
-  succeed: () => void
-  // The replay could not load every active demand again; a live query
-  // reports each failure on its node, in failure order.
-  fail?: (errors: Array<Error>) => void
-}>
+type TruncateReplayPublicationControl = NonNullable<
+  SubscribeChangesOptions[`truncateReplayPublication`]
+>
 
 type TruncatePublicationState = {
   loadedInitialState: boolean
@@ -737,6 +733,12 @@ export class CollectionSubscription
       if (activeFailures.length > 0) {
         this.abandonTruncateReplay(replayState, activeFailures)
       } else {
+        if (
+          this.awaitsSiblingReplays(replayState, () =>
+            this.checkTruncateReplayComplete(replayState),
+          )
+        )
+          return
         this.flushTruncateReplay(replayState)
       }
     } finally {
@@ -852,13 +854,9 @@ export class CollectionSubscription
   }
 
   private setReadyIfIdle(): void {
-    const replayState = this.truncateReplayState
-    const hasPendingReplayWork =
-      replayState &&
-      (replayState.pendingSetups > 0 || replayState.pending.size > 0)
     if (
       this.pendingLoadSubsetParticipants.size === 0 &&
-      !hasPendingReplayWork
+      !this.hasTruncateReplayWork
     ) {
       this.setStatus(`ready`)
     }
@@ -872,6 +870,53 @@ export class CollectionSubscription
     if (this.truncateReplayState !== replayState) return
     this.discardTruncateReplay()
     this.stalePublishedRows.clear()
+  }
+
+  /**
+   * A lazy demand that failed outside this subscription's replay, while a
+   * failed replay of another of the graph's subscriptions to this collection
+   * holds publication, fails this subscription's replacement too. It keeps
+   * the last publication until every demand load that joins this replay
+   * loads, a later replay succeeds, or this subscription's last demand
+   * retires. The failed demand's retry joins it, so it cannot publish
+   * without that demand's rows.
+   */
+  failReplacement(error: Error): void {
+    if (this.truncateReplayState) return
+    const replayState = this.createTruncateReplayState(
+      this.collection._sync.getSyncRunGeneration(),
+      () => new Map(),
+    )
+    replayState.pendingSetups = 0
+    replayState.failed = true
+    replayState.completion.reject(error)
+    this.truncateReplayState = replayState
+    this.truncateReplacementPending = true
+  }
+
+  /**
+   * A graph's subscriptions to one collection share a barrier. While another
+   * one's replay still loads, this replay stays open, so demand this one
+   * starts meanwhile joins it; it finishes once those replays settle.
+   */
+  private awaitsSiblingReplays(
+    replayState: TruncateReplayState,
+    finish: () => void,
+  ): boolean {
+    const siblings = this.options.truncateReplayPublication?.siblingReplays()
+    void siblings?.then(() => {
+      if (this.truncateReplayState === replayState) finish()
+    })
+    return siblings !== undefined
+  }
+
+  /** Whether this subscription's replay still waits on its own work. */
+  public get hasTruncateReplayWork(): boolean {
+    const replayState = this.truncateReplayState
+    return (
+      replayState !== undefined &&
+      (replayState.pendingSetups > 0 || replayState.pending.size > 0)
+    )
   }
 
   /** Drop the replay without publishing; an unfinished wait rejects as aborted. */
@@ -1508,6 +1553,8 @@ export class CollectionSubscription
       this.flushTruncateReplay(replayState)
       return
     }
+    if (this.awaitsSiblingReplays(replayState, () => this.retireEmptyReplay()))
+      return
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()
