@@ -888,7 +888,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 }
 
 /**
- * Type for the awaitTxId utility function
+ * Type for the awaitTxId utility function. It resolves when the txid
+ * appears in the Electric stream (the server's confirmation), before this
+ * tab's persistence accepts the transaction. If that commit later rejects,
+ * the Collection goes to `error` instead (maintainer decision on PR #2265).
  */
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
