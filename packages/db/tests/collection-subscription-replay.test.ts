@@ -3037,4 +3037,58 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  // An open review finding, recorded in the coverage map (Ordered
+  // acquisition). A demand that fails while a failed replay of another of the
+  // query's subscriptions to the source holds publication fails this
+  // subscription's replacement too. That hold lasts until a later replay of
+  // the source succeeds or the subscription's last demand retires
+  // (ARCHITECTURE.md, "Replay participants and failure"). The replay that
+  // `failReplacement` creates records no failed demand, so a later demand
+  // that joins it and settles completes it as a success: it publishes, and a
+  // live query's `succeed` clears the failed demand's request error.
+  // Maintainer decision: pinned and left unfixed for now.
+  it.fails(
+    `keeps a failed replacement's hold when a later demand settles`,
+    async () => {
+      const succeed = vi.fn()
+      const collection = createCollection<{ id: string }>({
+        id: `failed-replacement-hold`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => Promise.resolve(),
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+        truncateReplayPublication: {
+          siblingReplays: () => undefined,
+          start: () => {},
+          succeed,
+        },
+      })
+
+      try {
+        subscription.failReplacement(new Error(`sibling replay failed`))
+        subscription.requestSnapshot({
+          where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
+          optimizedOnly: false,
+        })
+        await flushPromises()
+
+        expect(succeed).not.toHaveBeenCalled()
+        expect(subscription.hasFailedTruncateReplacement).toBe(true)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 })
