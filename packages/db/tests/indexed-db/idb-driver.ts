@@ -38,12 +38,26 @@ export function holdStore(db: IDBDatabase, stores = ['items', '_versions']) {
   }
 }
 
+/**
+ * Records native transaction admission and outcome. `until` resumes a test at
+ * the native event that makes its condition true, so a schedule cut depends on
+ * provider events rather than on elapsed time or a polling interval.
+ */
 export function observeTransactions(db: IDBDatabase) {
   const entries: Array<{
     mode: IDBTransactionMode
     status: 'pending' | 'complete' | 'abort'
     transaction: IDBTransaction
   }> = []
+  const waiters = new Set<{ ready: () => boolean; resolve: () => void }>()
+  function notify() {
+    for (const waiter of waiters) {
+      if (waiter.ready()) {
+        waiters.delete(waiter)
+        waiter.resolve()
+      }
+    }
+  }
   const original = db.transaction
   db.transaction = function (...args) {
     const transaction = original.apply(this, args)
@@ -55,14 +69,21 @@ export function observeTransactions(db: IDBDatabase) {
     entries.push(entry)
     transaction.addEventListener('complete', () => {
       entry.status = 'complete'
+      notify()
     })
     transaction.addEventListener('abort', () => {
       entry.status = 'abort'
+      notify()
     })
+    notify()
     return transaction
   }
   return {
     entries,
+    until: (ready: () => boolean) =>
+      ready()
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => waiters.add({ ready, resolve })),
     restore: () => {
       db.transaction = original
     },

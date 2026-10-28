@@ -14,6 +14,8 @@
  * Additional histories put closure before admission, between native commit and
  * confirmation, after sync acceptance, and during initial/replacement/key reads.
  * Native gates issue real requests; no IndexedDB transaction awaits a test gate.
+ * Each schedule cut resumes at the native admission or outcome event that
+ * establishes it, not after a polling interval.
  * These finite schedules cover the semantic cuts, not every TLC interleaving.
  */
 import { forceCloseDatabase } from 'fake-indexeddb'
@@ -185,8 +187,8 @@ describe('admitted native writes retain their actual outcome after closure', () 
               return sorted(subjects[slot]!.base.values())
             },
           )
-          await vi.waitFor(() =>
-            expect(native.entries.length).toBe(callers.filter(Boolean).length),
+          await native.until(
+            () => native.entries.length === callers.filter(Boolean).length,
           )
         }
         expect(
@@ -390,19 +392,15 @@ for (const reason of reasons) {
         h.disposers.push(() => native.restore())
         const loading = read === 'initial' ? observe(c.preload()) : undefined
         while (Channel.pending.length) Channel.dispatch()
-        await vi.waitFor(() =>
-          expect(
-            native.entries.some((entry) => entry.mode === 'readonly'),
-          ).toBe(true),
+        await native.until(() =>
+          native.entries.some((entry) => entry.mode === 'readonly'),
         )
         await close(h, reason)
         closed(c, statuses)
         await gate.release()
         await Channel.drain()
-        await vi.waitFor(() =>
-          expect(
-            native.entries.every((entry) => entry.status === 'complete'),
-          ).toBe(true),
+        await native.until(() =>
+          native.entries.every((entry) => entry.status === 'complete'),
         )
         await loading?.done
         if (loading) expect(loading.result.state).toBe('rejected')
@@ -566,19 +564,28 @@ it.each(mixedCells)(
       h.disposers.push(() => gate.release())
       await gate.started
       const beforeAdmission = native.entries.length
+      // At most one operation is active, so its native transaction is the first
+      // one admitted after the gate. Its caller settlement is checked against
+      // that native outcome at the settlement itself, independent of when the
+      // test resumes after admission.
+      const nativeAtCaller: Array<string> = []
       for (const slot of order) {
         const op = operations[slot]!
         if (op.prefix === 'active' || op.prefix === 'deciding')
           callers[slot] = observe(
             start(subjects[slot]!, op.kind, slot + 1),
-            capture(slot),
+            () => {
+              nativeAtCaller[slot] =
+                native.entries[beforeAdmission]?.status ?? 'notAdmitted'
+              return capture(slot)()
+            },
           )
       }
       const activeCount = operations.filter(
         (op) => op.prefix === 'active',
       ).length
-      await vi.waitFor(() =>
-        expect(native.entries.length).toBe(beforeAdmission + activeCount),
+      await native.until(
+        () => native.entries.length === beforeAdmission + activeCount,
       )
       for (const slot of [0, 1])
         expect(callers[slot]!.result.state).toBe(
@@ -615,6 +622,16 @@ it.each(mixedCells)(
         expect(callers[slot]!.result.state).toBe(
           success ? 'fulfilled' : 'rejected',
         )
+        // As in the paired matrix, a rejection may precede the abort event.
+        if (op.prefix === 'active' && success)
+          expect(nativeAtCaller[slot], 'native commit at caller success').toBe(
+            'complete',
+          )
+        else if (op.prefix === 'active')
+          expect(
+            nativeAtCaller[slot],
+            'rejected caller cannot report a commit',
+          ).not.toBe('complete')
         const rows = success ? apply(initial, op.kind, slot + 1) : initial
         assertRows(
           callers[slot]!.snapshot()!,
@@ -697,10 +714,8 @@ for (const reason of reasons)
       const caller = observe(c.insert(row).isPersisted.promise, () =>
         sorted(c.base.values()),
       )
-      await vi.waitFor(() =>
-        expect(native.entries.some((entry) => entry.mode === 'readwrite')).toBe(
-          true,
-        ),
+      await native.until(() =>
+        native.entries.some((entry) => entry.mode === 'readwrite'),
       )
       const inspector = await close(h, reason)
       await gate.release()
@@ -805,7 +820,7 @@ for (const phase of ['idle', 'ready', 'loading', ...kinds] as const) {
             ? undefined
             : observe(start(c, phase, 1))
       if (pending)
-        await vi.waitFor(() => expect(native.entries.length).toBeGreaterThan(0))
+        await native.until(() => native.entries.length > 0)
       const terminated = new Promise<void>((resolve) =>
         h.db.db.addEventListener('close', () => resolve(), { once: true }),
       )
