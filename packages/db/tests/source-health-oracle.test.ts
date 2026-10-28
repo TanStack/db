@@ -5281,6 +5281,8 @@ type Demand = {
   // its own.
   replayIssued: boolean
   // Demand-change loads that failed: they cover nothing (law 10).
+  // Held keys that a load loaded since the query last asked for them.
+  loaded: Set<number>
   failedLoads: Set<number>
   // The latest adapter request's serial, and how many parked acquisitions
   // followed it; a parked acquisition is ordered between the two requests.
@@ -5331,6 +5333,7 @@ function freshOnDemandModel(held: Iterable<number>): OnDemandModel {
       succeeded: new Set(),
       replayIssued: false,
       failedLoads: new Set(),
+      loaded: new Set(),
       lastSerial: 0,
       parks: 0,
       clock: 0,
@@ -5385,6 +5388,8 @@ function settleDemandLoad(
   const decidedByVerdict = load.replay && verdictPending(demand)
   if (succeeded) {
     demand.succeeded.add(load.serial)
+    for (const key of load.keys)
+      if (demand.held.has(key)) demand.loaded.add(key)
     // A load's success clears the request errors of its keys (the
     // glossary: a later subset load for that demand fulfills).
     if (!decidedByVerdict)
@@ -5394,8 +5399,15 @@ function settleDemandLoad(
   }
   demand.failedAt.set(load.serial, ++demand.clock)
   // A failed demand load covers nothing. A replay's own request keeps the
-  // coverage of the acquisition it replays, which the replay judges.
-  if (!load.fromReplay) demand.failedLoads.add(load.serial)
+  // coverage of the acquisition it replays, which the replay judges. A
+  // parked acquisition never loaded, so a replay's request of it is that
+  // demand's own first load: its failure covers nothing either, and the next
+  // demand change retries the key (law 10).
+  if (
+    !load.fromReplay ||
+    [...load.keys].every((key) => !demand.loaded.has(key))
+  )
+    demand.failedLoads.add(load.serial)
   // Only the latest load of a key the query still holds decides it.
   const held = [...load.keys].filter(
     (key) => demand.held.has(key) && latestLoadFor(demand, key) === load.serial,
@@ -5529,6 +5541,7 @@ function changeDemand(
   if (kind === `parent`) demand.held.add(key)
   else {
     demand.held.delete(key)
+    demand.loaded.delete(key)
     // The error leaves when its demand retires.
     demand.failed.delete(key)
   }
@@ -8028,6 +8041,27 @@ describe(`lazy join demand grammar`, () => {
   // replay's failure still belongs to key 1, which the query holds, so its
   // request error stays (law 16; a failed replay stays open while the query
   // holds demand).
+  // A parked demand's acquisition never loaded, so the truncate replay's
+  // request of it is its own first load: when it fails, it covers nothing,
+  // and the next demand change parks a retry that holds the failed replay
+  // open (law 10; a 30-times counterexample of the model, which let the
+  // failed request cover the key and judged the replay a success).
+  it(`a demand change retries a parked key whose replay request failed`, () =>
+    runLazyHistory(
+      [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `reload` },
+        { kind: `child-ready` },
+        { kind: `settle-ok` },
+      ],
+      { holdChildReady: true },
+    ))
   it(`a failed replay's error stays when parked demand retires after the child restarts`, () =>
     runLazyHistory(
       [
