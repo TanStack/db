@@ -251,6 +251,14 @@ With `initialRender: { strategy: 'network-first', networkTimeoutMs }`, the Colle
 - the SQLite restore completed and installed at least one row, and
 - the deadline passed, or the sync adapter failed its first load.
 
+To render cached rows as soon as the restore completes, set `networkTimeoutMs: 0`. Use this when a fast first render is more important than fresh data:
+
+```ts
+initialRender: { strategy: 'network-first', networkTimeoutMs: 0 },
+```
+
+A Collection with restored rows then becomes `ready` from them immediately. Network sync continues, and its changes apply over the restored rows when they arrive. An empty restore still waits for the network, so the Collection never shows an empty list that the network did not confirm. An on-demand Collection applies this to each query demand, as [On-demand Collections offline](#on-demand-collections-offline) describes.
+
 The status is the only signal. Every hook, Suspense, and `preload()` follow it, so you do not need a separate persisted flag:
 
 ```tsx
