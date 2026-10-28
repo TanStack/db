@@ -157,12 +157,13 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * the marker barrier from a throw to the end of its episode (a barrier
  * raised while an earlier one in the episode is ambiguous inherits that). So
  * a design that dropped a thrown demand and let its replay succeed would pass
- * wherever only retention could see it. The request-error account shares the
- * model's replay across a query's subscriptions to a source, so it owes a
- * failure in a replay only after every load of that source settled; it does
- * not judge one subscription's request error while another load is held. It
- * reads only the query's own node and permits extra listed failures. The
- * replay-error identity law judges only rejections with a failure of a replay
+ * wherever only retention could see it. The request-error account judges a
+ * failure in a replay by its own subscription's verdict, using the
+ * subscription that each load names; publication retention stays shared
+ * across the query's subscriptions to a source. It reads only the query's
+ * own node and permits extra listed failures. With a peer, either query's
+ * node may list a failure, and the replay-error identity law skips peer
+ * histories. The replay-error identity law judges only rejections with a failure of a replay
  * the move waited on; a move that resumes into another failed replay is not
  * judged.
  */
@@ -309,6 +310,9 @@ type OrderedReach = {
   requestErrors: number
   // Cuts where the request-error account owed a request error.
   requestErrorChecks: number
+  // A subscription's load succeeds while a failure of that subscription is
+  // still owed.
+  successWhileSubscriptionOwes: number
   // Deferred window moves that rejected with a failure of a replay they
   // waited on.
   deferredMoveRejections: number
@@ -697,8 +701,10 @@ async function checkOrderedReplay(
   // - a later load of the same source covers its keys;
   // - a replay of its source that rose after the failure completes, since a
   //   replay asks again for every held demand.
-  // A failure that joins a replay waits for that replay's verdict, which
-  // comes once every participant settled, so it owes no error before then. Keys come from evaluating the request's
+  // A failure that joins a replay waits for its subscription's verdict,
+  // which comes once that subscription's participants settled, so it owes
+  // no error before then. The barrier that holds publication stays shared
+  // across the query's subscriptions to the source. Keys come from evaluating the request's
   // `where` over a small key domain, independent of production's bookkeeping.
   // The account combines the production concepts of a failed request and the
   // replay verdict that decides it; it names no production structure.
@@ -734,8 +740,26 @@ async function checkOrderedReplay(
   const recoveries: Array<{ source: BarrierSource; raisedAt: number }> = []
   const unloaded = new WeakSet<LoadSubsetOptions>()
   const allReady = () => queries.every(({ status }) => status === `ready`)
-  const recordLoaded = (source: BarrierSource, keys: Set<number>) =>
+  const recordLoaded = (
+    source: BarrierSource,
+    keys: Set<number>,
+    options: LoadSubsetOptions,
+  ) => {
+    // A load of a subscription succeeds while a failure of that subscription
+    // that it does not cover is still owed: the state in which a hold that
+    // records no failed demand could complete early.
+    if (
+      requestFailures.some(
+        (failure) =>
+          failure.source === source &&
+          failure.options.subscription === options.subscription &&
+          requestErrorOwed(failure) &&
+          [...failure.keys].some((key) => !keys.has(key)),
+      )
+    )
+      reach.successWhileSubscriptionOwes++
     loadedKeys.push({ source, keys, at: ++requestClock })
+  }
   const recordRequestFailure = (
     load: Load,
     source: BarrierSource,
@@ -757,13 +781,17 @@ async function checkOrderedReplay(
   const requestErrorOwed = (failure: RequestFailure) => {
     if (failure.options.signal?.aborted || unloaded.has(failure.options))
       return false
-    // A replay gives its verdict once every participant settled, failed or
-    // not (ARCHITECTURE.md law 17).
+    // A subscription's replay fails once its own participants settled
+    // (ARCHITECTURE.md law 17); only a success also waits for the query's
+    // other subscriptions to the source. Each load names the subscription
+    // that issued it, so the verdict waits for that subscription's loads.
     const { barrier } = failure
     if (
       barrier &&
       barriers.get(failure.source) === barrier &&
-      barrier.pending.size > 0
+      [...barrier.pending.values()].some(
+        ({ subscription }) => subscription === failure.options.subscription,
+      )
     )
       return false
     const at = loads.indexOf(failure.load)
@@ -860,6 +888,7 @@ async function checkOrderedReplay(
     terminalErrors: 0,
     requestErrors: 0,
     requestErrorChecks: 0,
+    successWhileSubscriptionOwes: 0,
     deferredMoveRejections: 0,
     replayLoads: 0,
     abortRejections: 0,
@@ -1080,9 +1109,13 @@ async function checkOrderedReplay(
               }
               await operations.commit()
               load.outcome = `ok`
-              recordLoaded(`markers`, requestedKeys(`markers`, options))
               // The load settles once its rows apply.
               settleParticipant(`markers`, load, options, true)
+              recordLoaded(
+                `markers`,
+                requestedKeys(`markers`, options),
+                options,
+              )
             })()
           },
           unloadSubset: (options) => {
@@ -1208,6 +1241,8 @@ async function checkOrderedReplay(
             }
             await sync.commit()
             load.outcome = `ok`
+            // The load settles once its rows apply.
+            settleParticipant(`rows`, load, options, true)
             // An ordered load covers the rows it selected; a keyed load, the
             // keys it asked for.
             recordLoaded(
@@ -1215,9 +1250,8 @@ async function checkOrderedReplay(
               options.orderBy
                 ? new Set(selected.map(({ id }) => id))
                 : requestedKeys(`rows`, options),
+              options,
             )
-            // The load settles once its rows apply.
-            settleParticipant(`rows`, load, options, true)
           },
           unloadSubset: (options) => {
             unloaded.add(options)
@@ -1568,7 +1602,12 @@ async function checkOrderedReplay(
             const waited = [...barriers.values()].filter(
               ({ pending }) => pending.size > 0,
             )
-            const judged = waited.every(({ failures }) => failures.size === 0)
+            // A peer is another query over the same sources, and the adapter
+            // cannot tell which query a failed load served, so peer histories
+            // are not judged (see Limits).
+            const judged =
+              !scenario.peer &&
+              waited.every(({ failures }) => failures.size === 0)
             const raisedBefore = raisedBarriers.length
             // A load that throws while it starts is a rejection
             // (ARCHITECTURE.md), so a move never throws: a throw here is an
@@ -2414,6 +2453,7 @@ describe(`Ordered windows across truncate replays`, () => {
         terminalErrors: 0,
         requestErrors: 0,
         requestErrorChecks: 0,
+        successWhileSubscriptionOwes: 0,
         deferredMoveRejections: 0,
         replayLoads: 0,
         abortRejections: 0,
@@ -2453,6 +2493,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `discardedReplayMoves`,
         `requestErrorChecks`,
         `deferredMoveRejections`,
+        `successWhileSubscriptionOwes`,
       ])
       // Counts are histories, rather than repeated events in one trace.
       const dimensions = (
@@ -2669,11 +2710,9 @@ describe(`Ordered windows across truncate replays`, () => {
   // A demand fails behind a sibling's failed replay, and its retry stays
   // held. A later command starts another demand of the same source, whose
   // load then succeeds, so a replay's success, publication, and request
-  // errors are judged while a failed demand is still unloaded. The model's
-  // replay is shared across the query's subscriptions to the source, so it
-  // gives its verdict only when every load of the source settled; it cannot
-  // judge one subscription's request error while another load is held (see
-  // Limits).
+  // errors are judged while a failed demand is still unloaded. Declared
+  // reach: a subscription's load succeeds while a failure of that
+  // subscription is still owed.
   const heldRetryCase = fc
     .tuple(
       failedReplayScenario,
@@ -2909,6 +2948,7 @@ describe(`Ordered windows across truncate replays`, () => {
           `partialFailureRetirements`,
           `requestErrorChecks`,
           `deferredMoveRejections`,
+          `successWhileSubscriptionOwes`,
         ] as const,
         { minimum: 5 },
       )
@@ -2945,6 +2985,9 @@ describe(`Ordered windows across truncate replays`, () => {
           }
           if (observed.deferredMoveRejections > 0) {
             reach.reach(`deferredMoveRejections`)
+          }
+          if (observed.successWhileSubscriptionOwes > 0) {
+            reach.reach(`successWhileSubscriptionOwes`)
           }
         }),
         campaign === `fixed`
