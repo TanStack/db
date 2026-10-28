@@ -2876,6 +2876,36 @@ remount behavior during pending writes, or browser-native Enter dispatch.
 This component suite owns the first two extensions; a browser form witness
 is needed for native keyboard dispatch.
 
+## Oracle tooling
+
+`scripts/run-budget-oracle.property.test.js` owns run-budget tracking
+(`scripts.run-budget`): every lowered budget, and every budget whose key is in
+no tracked oracle file at head, is reported. A budget belongs to the oracle
+file that uses it, including campaigns and constants in the test modules that
+it imports. The removal rule is the maintainer's decision of 2026-10-27; a move
+into an imported support module is not a removal. Its grammar varies where the
+count, key, and campaign are written at base and head, a base oracle file above
+1 MiB, `.ts` and `.js` files, an untracked second oracle file, and a fixed seed
+shared with an unrelated campaign. Its driver fails on a crashed script. It
+does not establish that a lowered budget moved between two oracle files is
+compared when its fixed seed was already in the destination at base: a fixed
+seed is not unique, so the script cannot attribute it, and neither removal nor
+lowering is reported there. A budget moved into an ordinary test file whose
+seed another oracle file shares is therefore not reported.
+
+`scripts/lint-scope-oracle.property.test.js` owns lint selection after an
+edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
+and the Claude edit hook. Its model is a fixed-point closure over the drawn
+import graph, independent of the script's forward search. It covers
+oracle-to-oracle imports, untracked oracle files, and `.js` oracle files. It
+does not draw `.js` support modules or drivers, because the rule resolves only
+TypeScript test modules, and it passes file names in their real-path spelling:
+a name given through a symlinked path is not covered.
+
+`packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
+from its cwd, the command's files exist, its target is the owner, and a Vitest
+config applies.
+
 ## Reusable-law backlog
 
 RFC #1659 reviews found several green oracles whose stated laws remained valid
