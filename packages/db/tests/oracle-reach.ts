@@ -14,8 +14,9 @@ import { readOracleRunConfig } from './oracle-config.js'
  * histories entered. A history counts once per state, however often it
  * enters it.
  *
- * A replay of one seed or path checks one history, not reach, so the check
- * does nothing then.
+ * A path replay checks one recorded history, not reach, so the check does
+ * nothing then. A seed alone reseeds the whole campaign, which runs its full
+ * budget, so its reach is checked like an ordinary run's.
  */
 export function createOracleReach<TState extends string>(
   property: string,
@@ -32,8 +33,8 @@ export function createOracleReach<TState extends string>(
   const replaying =
     replayOverride ??
     (() => {
-      const { replaySeed, replayPath } = readOracleRunConfig()
-      return replaySeed !== undefined || replayPath !== undefined
+      const { replayPath } = readOracleRunConfig()
+      return replayPath !== undefined
     })()
   return {
     /** Starts one generated history. */

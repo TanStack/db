@@ -3403,6 +3403,21 @@ does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
 
+`packages/db/tests/oracle-reach.ts` (`createOracleReach`, ORC-015) checks
+declared reach in an ordinary run and in a run with only
+`TANSTACK_DB_ORACLE_SEED`, which reseeds the whole campaign at its full budget.
+Only a path replay, which runs one recorded history, skips the check. A declared
+state that only random histories reach can still miss by chance at the normal
+budget. In `packages/db/tests/source-health-oracle.test.ts`, the
+`source-health.history`, `source-health.on-demand`, and
+`source-health.lazy-demand` properties run each reach prefix, and each driver
+option that a declared state needs, as fast-check `examples` before their random
+histories. The examples alone reach every declared state of those three
+properties, so their reach check does not depend on the seed (#2287). Other
+properties have not been measured for this. Owner: none (oracle machinery).
+Needed witness: per property, the declared states that its fixed examples do
+not reach, and how often a normal-budget run misses each one.
+
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
 config applies.

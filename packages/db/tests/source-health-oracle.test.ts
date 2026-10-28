@@ -3372,7 +3372,16 @@ describe(`source failure and health oracle`, () => {
         ]),
       fc.boolean(),
     ],
-    oraclePropertyOptions(60, `source-health.history`),
+    {
+      ...oraclePropertyOptions(60, `source-health.history`),
+      // Each prefix runs once in every run, before the random histories, so
+      // the states only a prefix enters cannot miss by chance (#2287). The
+      // `join` shape queries both sources that the prefixes drive.
+      examples: reachPrefixes.map((prefix): [[Shape, Array<Step>], boolean] => [
+        [prefixShapes.get(prefix) ?? `join`, [...prefix]],
+        true,
+      ]),
+    },
   )(
     `generated histories refine the model`,
     ([shape, steps], directSubscribers) => {
@@ -5244,7 +5253,13 @@ describe(`on-demand demand grammar`, () => {
         ]),
       fc.boolean(),
     ],
-    oraclePropertyOptions(60, `source-health.on-demand`),
+    {
+      ...oraclePropertyOptions(60, `source-health.on-demand`),
+      // Each prefix runs once in every run, before the random histories.
+      examples: demandReachPrefixes.map(
+        (prefix): [Array<WindowStep>, boolean] => [[...prefix], true],
+      ),
+    },
   )(
     `generated demand histories refine the model`,
     (steps, directSubscriber) => {
@@ -6953,6 +6968,16 @@ describe(`lazy join demand grammar`, () => {
   afterAll(() => {
     if (lazyHistoriesRan) lazyReach.assertReached()
   })
+  // A reload whose replay fails. A row the provider deletes after it stays.
+  const failedReload = {
+    steps: [{ kind: `settle-ok` }, { kind: `reload` }, { kind: `settle-fail` }],
+  } as const satisfies { steps: ReadonlyArray<LazyStep> }
+  const reloadNotices: ReadonlyArray<ReloadNotice> = [
+    `source-health`,
+    `query-health`,
+    `loading-subset`,
+    `subscription-status`,
+  ]
   // Prefixes that enter a declared reach state that random steps alone rarely
   // reach at the base run count, with the driver options the state needs.
   // Random steps follow each one.
@@ -6988,13 +7013,7 @@ describe(`lazy join demand grammar`, () => {
         { kind: `reload` },
       ],
     },
-    {
-      steps: [
-        { kind: `settle-ok` },
-        { kind: `reload` },
-        { kind: `settle-fail` },
-      ],
-    },
+    failedReload,
     { steps: [{ kind: `truncate` }, { kind: `truncate` }] },
     {
       steps: [{ kind: `settle-ok` }, { kind: `fail` }, { kind: `truncate` }],
@@ -7060,6 +7079,43 @@ describe(`lazy join demand grammar`, () => {
       holdChildReady: false,
     },
   ]
+  type LazyExample = [
+    {
+      prefix: (typeof lazyReachPrefixes)[number] | null
+      rest: Array<LazyStep>
+    },
+    boolean,
+    boolean,
+    boolean,
+    boolean,
+    boolean,
+    `plain` | `reload-in-first-load` | undefined,
+    { at: ReloadNotice; dependents: boolean } | undefined,
+  ]
+  const lazyExample = (
+    prefix: (typeof lazyReachPrefixes)[number] | null,
+    rest: Array<LazyStep>,
+    {
+      withEffect = false,
+      windowed = false,
+      deferredStart,
+      ending,
+    }: {
+      withEffect?: boolean
+      windowed?: boolean
+      deferredStart?: `reload-in-first-load`
+      ending?: { at: ReloadNotice; dependents: boolean }
+    } = {},
+  ): LazyExample => [
+    { prefix, rest },
+    false,
+    false,
+    true,
+    withEffect,
+    windowed,
+    deferredStart,
+    ending,
+  ]
   fcTest.prop(
     [
       fc
@@ -7080,18 +7136,39 @@ describe(`lazy join demand grammar`, () => {
       ),
       fc.option(
         fc.record({
-          at: fc.constantFrom<ReloadNotice>(
-            `source-health`,
-            `query-health`,
-            `loading-subset`,
-            `subscription-status`,
-          ),
+          at: fc.constantFrom(...reloadNotices),
           dependents: fc.boolean(),
         }),
         { freq: 2, nil: undefined },
       ),
     ],
-    oraclePropertyOptions(100, `source-health.lazy-demand`),
+    {
+      ...oraclePropertyOptions(100, `source-health.lazy-demand`),
+      // Each prefix runs once in every run, before the random histories,
+      // and so does each driver option that a declared state needs. Each
+      // example has a direct subscriber and no other option it does not name.
+      examples: [
+        ...lazyReachPrefixes.map((prefix) => lazyExample(prefix, [])),
+        // The provider deletes a row after a reload's run ended.
+        lazyExample(failedReload, [{ kind: `remote-delete`, key: 1 }]),
+        lazyExample(null, [{ kind: `settle-ok` }], { withEffect: true }),
+        lazyExample(null, [{ kind: `settle-ok` }], {
+          deferredStart: `reload-in-first-load`,
+        }),
+        // A cleanup at each notice of a reload. The loadingSubset notice
+        // needs a windowed query whose first load is still open.
+        ...reloadNotices.map((at) =>
+          at === `loading-subset`
+            ? lazyExample(null, [], {
+                windowed: true,
+                ending: { at, dependents: false },
+              })
+            : lazyExample(null, [{ kind: `settle-ok` }], {
+                ending: { at, dependents: false },
+              }),
+        ),
+      ],
+    },
   )(
     `generated lazy demand histories refine the model`,
     (
