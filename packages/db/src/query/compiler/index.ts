@@ -509,6 +509,7 @@ function compileQueryInternal(
     aliasRemapping,
     sourceWhereClauses,
     parentKeyStream,
+    publishCollectionRoot,
   )
   Object.assign(sources, fromSources)
   const sourceCarriesInternalRouteState =
@@ -621,7 +622,7 @@ function compileQueryInternal(
       ignoreWindow,
       rawQuery,
       query.from,
-      (...args) => compileQueryInternal(args, true),
+      (...args) => compileQueryInternal(args, true, publishCollectionRoot),
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
@@ -1035,6 +1036,10 @@ function compileQueryInternal(
     includesRoutingFns = []
   }
 
+  const sourceBindings = new Map(
+    getAllSources(query).map((source) => [source.alias, source.bindingId]),
+  )
+  const unionRows = query.from.type === `unionAll`
   // Process the SELECT clause early - always create $selected
   // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
@@ -1043,6 +1048,7 @@ function compileQueryInternal(
       validateFnSelectResult(selected)
       return selected
     }
+    const sourceAliases = [...sourceBindings.keys()]
     // Handle functional select - apply the function to transform the row
     const projectRow = (namespacedRow: NamespacedRow) => {
       const callbackRow = sourceCarriesInternalRouteState
@@ -1060,9 +1066,7 @@ function compileQueryInternal(
           : { ...selectResults }
         if (
           publishCollectionRoot &&
-          ![...sourceBindings.keys()].some(
-            (alias) => selectResults === callbackRow[alias],
-          )
+          !sourceAliases.some((alias) => selectResults === callbackRow[alias])
         ) {
           // New functional objects are projections. Equal field values cannot
           // prove which source (if any) authored them.
@@ -1128,10 +1132,6 @@ function compileQueryInternal(
   // A ref reads the query's own rows when it is bound to one of its sources.
   // A ref bound to an ancestor scope can reuse a source alias. After a
   // unionAll, an unbound ref names a field of the union's rows.
-  const sourceBindings = new Map(
-    getAllSources(query).map((source) => [source.alias, source.bindingId]),
-  )
-  const unionRows = query.from.type === `unionAll`
   const isSourceRef = (ref: PropRef) => {
     const binding = sourceBindings.get(ref.path[0]!)
     if (binding !== undefined) return (ref.bindingId ?? binding) === binding
@@ -1221,8 +1221,10 @@ function compileQueryInternal(
   }
 
   const metadataSource = query.select
-    ? getWholeRowSourceAlias(query.select)
-    : mainSource
+    ? getWholeRowSourceAliases(query.select)
+    : query.from.type === `unionAll`
+      ? undefined
+      : [mainSource]
   const finalizeRow = (
     key: unknown,
     row: Record<string, any>,
@@ -1595,6 +1597,7 @@ function processFromClause(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
 ): {
   alias: string
   pipeline: NamespacedAndKeyedStream
@@ -1622,6 +1625,7 @@ function processFromClause(
       aliasRemapping,
       sourceWhereClauses,
       parentKeyStream,
+      publishCollectionRoot,
     )
   }
 
@@ -1642,6 +1646,7 @@ function processFromClause(
         aliasRemapping,
         sourceWhereClauses,
         parentKeyStream,
+        publishCollectionRoot,
       )
 
     return {
@@ -1688,6 +1693,7 @@ function processFromClause(
       aliasRemapping,
       sourceWhereClauses,
       parentKeyStream,
+      publishCollectionRoot,
     )
 
     if (!mainAlias) {
@@ -1756,6 +1762,7 @@ function processUnionAll(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
 ): {
   alias: string
   pipeline: NamespacedAndKeyedStream
@@ -1806,6 +1813,7 @@ function processUnionAll(
         undefined,
       ],
       true,
+      publishCollectionRoot,
     )
 
     if (!mainCollectionId) {
@@ -1927,6 +1935,7 @@ function processFrom(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
 ): {
   alias: string
   input: KeyedStream
@@ -1980,6 +1989,7 @@ function processFrom(
           undefined,
         ],
         true,
+        publishCollectionRoot,
       )
 
       // Pull up alias mappings from subquery to parent scope.
@@ -2076,23 +2086,19 @@ function unwrapValue(value: any): any {
   return value instanceof ValClass ? value.value : value
 }
 
-function getWholeRowSourceAlias(select: unknown): string | undefined {
-  if (select instanceof PropRef && select.path.length === 1) {
-    return select.path[0]
-  }
-  if (!isPlainObject(select)) return undefined
-  let sourceAlias: string | undefined
-  for (const [name, value] of Object.entries(select)) {
-    if (
-      name.startsWith(`__SPREAD_SENTINEL__`) &&
-      value instanceof PropRef &&
-      value.path.length === 1
-    ) {
-      // Later spreads replace earlier virtual fields in a selected object.
-      sourceAlias = value.path[0]
-    }
-  }
-  return sourceAlias
+// A nullish spread contributes no properties. Keep source order so the last
+// present whole-row spread supplies metadata, just as it supplies row fields.
+function getWholeRowSourceAliases(select: unknown): Array<string> {
+  if (select instanceof PropRef && select.path.length === 1)
+    return [select.path[0]!]
+  if (!isPlainObject(select)) return []
+  return Object.entries(select).flatMap(([name, value]) =>
+    name.startsWith(`__SPREAD_SENTINEL__`) &&
+    value instanceof PropRef &&
+    value.path.length === 1
+      ? [value.path[0]!]
+      : [],
+  )
 }
 
 function copySelectedRow(selected: Record<PropertyKey, any>) {
@@ -2103,7 +2109,7 @@ function attachVirtualPropsToSelected(
   selected: any,
   row: Record<string, any>,
   isCollectionRoot: boolean,
-  metadataSource: string | undefined,
+  metadataSources: ReadonlyArray<string> | undefined,
 ): any {
   if (
     !selected ||
@@ -2114,7 +2120,14 @@ function attachVirtualPropsToSelected(
   }
 
   const selectedRecord = selected as Record<PropertyKey, any>
-  const source = metadataSource === undefined ? undefined : row[metadataSource]
+  // Union output is already a branch row, rather than an aliased source.
+  const source =
+    metadataSources === undefined
+      ? row
+      : metadataSources.reduce<unknown>(
+          (prior, alias) => row[alias] ?? prior,
+          undefined,
+        )
   const sourceRecord =
     isCollectionRoot && source !== null && typeof source === `object`
       ? (source as Record<PropertyKey, any>)

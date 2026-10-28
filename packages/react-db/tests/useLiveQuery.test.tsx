@@ -3539,7 +3539,7 @@ describe(`retained useLiveQuery results`, () => {
     },
   )
 
-  it(`accepts getKey without queryKey and replaces the query when getKey changes`, async () => {
+  it(`retains getKey until the query identity changes`, async () => {
     const source = createCollection(
       localOnlyCollectionOptions<{ id: string; value: string }, string>({
         id: `hook-opaque-config-identity`,
@@ -3566,8 +3566,9 @@ describe(`retained useLiveQuery results`, () => {
 
       rerender({ getKey: secondKey })
       await waitFor(() => expect(result.current.isReady).toBe(true))
-      expect(result.current.collection).not.toBe(firstCollection)
-      expect(result.current.collection.has(`other-one`)).toBe(true)
+      expect(result.current.collection).toBe(firstCollection)
+      expect(result.current.collection.has(`one`)).toBe(true)
+      expect(result.current.collection.has(`other-one`)).toBe(false)
     } finally {
       unmount()
       await firstCollection?.cleanup()

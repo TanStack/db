@@ -13,6 +13,7 @@ import { LiveQueryObserverClient } from './live-query-observer-client.js'
 import { createDeferred } from './deferred.js'
 import {
   getLiveQueryHash,
+  getLiveQueryRowOptions,
   getPreparedLiveQuerySources,
   prepareLiveQueryValue,
   resumeDeferredLiveQueryCollections,
@@ -36,6 +37,7 @@ import type {
 import type {
   DeferredLiveQueryCollections,
   LiveQueryOptions,
+  LiveQueryRowOptions,
 } from './live-query-options.js'
 import type {
   CollectionStateManager,
@@ -201,6 +203,7 @@ type CollectionRecord = {
 }
 
 type LiveQueryRecord = {
+  rowOptions?: LiveQueryRowOptions
   queryHash: string
   sources?: ReadonlyArray<AnyCollection>
   dehydratedAt: number
@@ -516,7 +519,8 @@ export class DbClient {
     const queryHash = getLiveQueryHash(prepared, options.queryKey)
     const sources = getPreparedLiveQuerySources(prepared)
     const existing = this.liveQueries.get(queryHash)
-    this._assertLiveQuerySources(queryHash, sources)
+    const rowOptions = getLiveQueryRowOptions(prepared)
+    this._assertLiveQuerySources(queryHash, sources, rowOptions)
     if (
       existing &&
       (existing.status === `pending` ||
@@ -547,6 +551,7 @@ export class DbClient {
       queryHash,
       collection.preload().then(() => observer.dehydrate()),
       sources,
+      rowOptions,
     )
     return {
       result,
@@ -887,23 +892,32 @@ export class DbClient {
     )
   }
 
-  /** @internal Reject a local stream whose hash already names different sources. */
+  /** @internal Reject incompatible local sources or row behavior for a reusable stream. */
   _assertLiveQuerySources(
     queryHash: string,
     sources: ReadonlyArray<AnyCollection>,
+    rowOptions?: LiveQueryRowOptions,
   ): void {
     const record = this.liveQueries.get(queryHash)
     // A failed or consumed stream has no result to reuse and claims no sources.
     if (!record || record.status === `error`) return
     const priorSources =
       record.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources
-    if (priorSources && !sameSourcesAtEachPosition(priorSources, sources)) {
+    if (
+      (priorSources && !sameSourcesAtEachPosition(priorSources, sources)) ||
+      (rowOptions &&
+        record.rowOptions &&
+        rowOptions.some(
+          (option, index) => option !== record.rowOptions![index],
+        ))
+    ) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
-          ? `DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.`
+          ? `DbClient cannot reuse live query "${queryHash}" with different source Collections or getKey/schema options. Use the same Collection objects and options, or a distinct query key.`
           : codedMessage(234, { queryHash }),
       )
     }
+    record.rowOptions ??= rowOptions
     // Hydration has a portable hash but no server-side Collection objects.
     // The first local consumer claims them for later same-hash requests.
     if (!record.sources) record.sources = [...sources]
@@ -922,10 +936,11 @@ export class DbClient {
     queryHash: string,
     snapshot: DehydratedLiveQueryResult,
     sources?: ReadonlyArray<AnyCollection>,
+    rowOptions?: LiveQueryRowOptions,
   ): void {
     const existing = this.liveQueries.get(queryHash)
     if (existing) {
-      if (sources) this._assertLiveQuerySources(queryHash, sources)
+      if (sources) this._assertLiveQuerySources(queryHash, sources, rowOptions)
       if (
         existing.snapshot &&
         (snapshot.status === undefined || existing.initialSnapshot)
@@ -943,6 +958,7 @@ export class DbClient {
       queryHash,
       this.nextLiveQueryTimestamp(),
     )
+    record.rowOptions = rowOptions
     record.sources = sources
     if (snapshot.status !== undefined) record.initialSnapshot = snapshot
     this.liveQueries.set(queryHash, record)
@@ -955,10 +971,11 @@ export class DbClient {
     queryHash: string,
     promise: Promise<DehydratedLiveQueryResult>,
     sources?: ReadonlyArray<AnyCollection>,
+    rowOptions?: LiveQueryRowOptions,
   ): Promise<void> {
     // Observe even a rejected incoming promise when a source conflict discards it.
     void Promise.resolve(promise).catch(() => {})
-    if (sources) this._assertLiveQuerySources(queryHash, sources)
+    if (sources) this._assertLiveQuerySources(queryHash, sources, rowOptions)
     const existing = this.liveQueries.get(queryHash)
     if (
       existing &&
@@ -973,6 +990,7 @@ export class DbClient {
       queryHash,
       this.nextLiveQueryTimestamp(),
     )
+    record.rowOptions = rowOptions
     record.sources = sources
     record.initialSnapshot = existing?.initialSnapshot
 

@@ -3,6 +3,7 @@ import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   expectHistoryOutcome,
   observeHistoryPromise,
@@ -274,3 +275,47 @@ describe(`Outcome observer calibration`, () => {
     }
   })
 })
+
+/** The admission grammar reaches every transaction state through public calls,
+ * then attempts external completion 1–3 times. It replays the primary model's
+ * rows, state and outcome comparisons after each attempt. The pending neighbor
+ * must complete; all other states reject without changing their verdict.
+ * A failed transaction cannot be resurrected by an internal helper.
+ */
+it.each([`pending`, `persisting`, `completed`, `failed`] as const)(
+  `external completion preserves admission and outcomes from %s`,
+  async (state) => {
+    const reach = createOracleReach(`external completion ${state}`, [`attempt`])
+    for (const attempts of [1, 2, 3]) {
+      reach.beginHistory()
+      const steps: Array<OptimisticStep> = [
+        {
+          type: `edit`,
+          key: 1,
+          fields: { a: 1 },
+          optimistic: true,
+          pending: state === `pending`,
+        },
+      ]
+      if (state === `completed` || state === `failed`)
+        steps.push({
+          type: `settle`,
+          slot: 0,
+          success: state === `completed`,
+          cascade: false,
+        })
+      for (let i = 0; i < attempts; i++)
+        steps.push({ type: `complete`, slot: 0 })
+      const counts = await runOptimisticHistory(
+        [{ id: 1, a: 0, b: 0, c: 0 }],
+        steps,
+      )
+      expect(counts.completionAttempts).toBe(attempts)
+      expect(counts.completionRejections).toBe(
+        attempts - (state === `pending` ? 1 : 0),
+      )
+      reach.reach(`attempt`)
+    }
+    reach.assertReached()
+  },
+)

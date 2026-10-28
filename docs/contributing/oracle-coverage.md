@@ -696,20 +696,26 @@ owners.
 The virtual-row-fields owner
 (`packages/db/tests/query/virtual-row-fields-oracle.test.ts`) checks all four
 public fields on row roots and keeps inline values in their selected shape.
-Its finite 50-history attribution grammar crosses single/joined sources,
+Its finite 400-history attribution grammar crosses single/joined sources,
 structured projections/spreads and functional projections/spreads/direct
-source returns, and none/each/all reserved-field collisions. Comparisons at
+source returns, and none/each/all reserved-field collisions. Each form crosses
+direct output, QueryRef depths one/two, joined and functional QueryRef
+consumers, either union branch position and a union consumed through QueryRef.
+Eight further histories cross nullable later spreads, spread order and which
+source has a pending write. Comparisons at
 preload, a held optimistic source update, and settlement enforce the maintainer
 rule: structured source spreads and direct functional source returns retain
 source metadata; new objects and ordinary projections receive output Collection
 metadata. Each collision is an independent axis, including `$collectionId` by
 itself; selecting a reserved name cannot choose a source. The reach check
 requires joined and single pending-source observations, colliding projections,
-and direct functional returns. The original source-guessing compiler fails the
+direct functional returns, QueryRef and union pending observations, and a null
+later spread. Authored ordinary fields can select source pending state without
+changing output metadata. The original source-guessing compiler fails the
 same comparisons. Supplemental regressions for two spread orders, unmatched
 RIGHT joins, facade projection metadata and inline values live in
 `virtual-row-fields.test.ts`. This boundary does not establish arbitrary
-nested projection histories, every join kind under source changes, framework
+nested projection histories beyond these two QueryRef levels, every join kind under source changes, framework
 receiving paths or provider behavior.
 
 The generated persistence option type/admission owner is
@@ -1424,6 +1430,20 @@ source cases for an existing stream hash. The former completes its own preload
 and reads the first source; the latter rejects before borrowing the first
 stream. Pooled views have no query Collection config, so this receiving path
 needs a separate source-identity witness.
+The local live-query cache option owner is
+`packages/db/tests/live-query-cache-options-oracle.ts`, with core DbClient and
+React receiving drivers in the adjacent `.test.ts` and
+`packages/react-db/tests/cache-options-oracle.test.tsx`. The maintainer-approved
+law rejects different getKey/schema references from independent same-identity
+callers while retaining inline options within a mounted binding. The finite
+core grammar crosses each/both options, same/different references, distinct-key
+controls, derived/keyed identities, pending/settled result reuse and explicit
+preload/observer preload/subscription admission (144 cases). React supplies 24
+real-host initial-render cases. The existing source-ID owner continues to judge
+rerender retention. This option owner does not claim arbitrary SSR transport
+schedules, every framework or semantic equivalence of distinct functions.
+Hydration carries no function references; only local consumers claim them.
+
 `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` also checks
 a two-source descriptor union when the first sync start fails: the second source
 still starts and reaches ready on direct preload, and a preparation error stays
@@ -3139,6 +3159,15 @@ semantics, index-expression compilation, native hosts, OPFS, or multi-process
 execution. The existing SQLite owners above retain their separate reset/resume,
 order, driver, and host contracts. Broader class closure needs witnesses at those
 remaining paths.
+
+The optimistic history owner now includes an external completion action.
+`optimistic-history-outcomes-oracle.test.ts` exhausts pending, persisting,
+completed and failed states with 1–3 completion attempts. Pending work completes;
+other attempts reject without changing state, settlement verdict or visible
+rows. The same primary row/outcome/publication comparison runs after each
+attempt. Offline Executor and interruption-settlement histories supply the
+restoration caller witness. This admission grammar does not add a new promise
+about already-running handlers, which external completion cannot take over.
 
 ## Acceptance map
 

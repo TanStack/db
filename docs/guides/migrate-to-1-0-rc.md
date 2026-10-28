@@ -22,10 +22,11 @@ The first candidate is `1.0.0-rc.1`. `@tanstack/query-db-collection` and
 `@tanstack/offline-transactions` were both accidentally released as 1.0 before
 the RC. Keep them on 1.x and update to their latest 1.x releases. These
 releases use the app's `@tanstack/db` as a peer dependency, so the RC and stable
-packages share one DB instance. The accompanying Offline Transactions minor
-release requires `@tanstack/db@^1.0.0-rc.0`; upgrade DB at the same time. Its
-outbox restoration uses `Transaction.completeWithoutCommit()`, which DB 0.15
-does not provide. Query Collection continues to support DB 0.15 and the RC.
+packages share one DB instance. Both accompanying minor releases require
+`@tanstack/db@^1.0.0-rc.0`; upgrade DB at the same time. Query Collection uses
+the RC's status and health API, and Offline Transactions uses the RC's
+restoration settlement API. DB 0.15 is no longer a supported peer for either
+new minor. Apps staying on DB 0.15 must keep their earlier adapter versions.
 
 ## Replace `$synced` with `$hasPendingWrites`
 
@@ -276,7 +277,9 @@ useLiveQuery({
 ```
 
 For config-object queries, `getKey` and runtime `schema` options bind when the
-query identity changes. Allocating an inline callback or schema object during a
+query identity changes. Independent `DbClient` callers that reuse a cached query
+identity must use the same `getKey` and `schema` references. Use distinct
+`queryKey` values for different row behavior. Allocating an inline callback or schema object during a
 render does not rebuild the Collection. Change the query or a nonempty
 `queryKey` when you need to apply different options.
 

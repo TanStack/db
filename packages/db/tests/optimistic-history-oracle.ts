@@ -74,6 +74,12 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * writes are `'remote'` unless another active local transaction touches their
  * key; if it aborts, its writes never apply, and both its receipt and its acceptance
  * moment (`whenSyncAccepted`) reject.
+ * External completion, used when work was applied outside commit, admits only
+ * pending transactions. A completion attempt in persisting, completed or failed
+ * state rejects and preserves the state, settlement verdict and visible rows.
+ * Authority: commit admission and terminal request outcomes in the public
+ * transaction contract; the internal completion path cannot revoke them.
+ *
  * A manual local transaction can remain pending before its mutation function
  * starts. Source writes on its key apply at once and receive local attribution;
  * rolling it back exposes that source row with the same origin. A pending
@@ -188,6 +194,8 @@ export type OptimisticStep =
       cascade: boolean
       failure?: `rollback` | `reject`
     }
+  // External completion never runs a handler and admits only pending work.
+  | { type: `complete`; slot: number }
   | SourceBatch
   // A sync transaction that begins and writes now but commits or aborts at its
   // `close` step. While it is open, other sync batches are skipped, because the
@@ -980,6 +988,8 @@ export async function runOptimisticHistory(
     edits: 0,
     deletes: 0,
     settlements: 0,
+    completionAttempts: 0,
+    completionRejections: 0,
     replacements: 0,
     queued: 0,
     failures: 0,
@@ -1304,6 +1314,10 @@ export async function runOptimisticHistory(
                 : `rejected`,
           )
           expect(
+            operation.tx.state,
+            `${label}: transaction state ${index}`,
+          ).toBe(model.transactions[index]!.state)
+          expect(
             operation.tx.mutations[0]!.modified,
             `${label}: immutable request ${index}`,
           ).toMatchObject(plain(model.transactions[index]!.row))
@@ -1482,6 +1496,26 @@ export async function runOptimisticHistory(
           expect(handlerBatch, `handler wrote its source batch`).toBeUndefined()
           counts.edits++
           if (step.type === `delete`) counts.deletes++
+        } else if (step.type === `complete`) {
+          if (!operations.length) continue
+          const index = step.slot % operations.length
+          const op = operations[index]!
+          const admitted = model.transactions[index]!.state === `pending`
+          counts.completionAttempts++
+          if (admitted) {
+            model.settle(index, true, false)
+            cuts = [sorted(model.visible().values())]
+            op.expected = { status: `fulfilled`, value: op.tx }
+            op.tx.completeWithoutCommit()
+            op.tx.touchCollection()
+            await op.outcome.settled
+          } else {
+            counts.completionRejections++
+            expect(
+              () => op.tx.completeWithoutCommit(),
+              `external completion rejects ${model.transactions[index]!.state}`,
+            ).toThrow()
+          }
         } else if (step.type === `settle`) {
           const active = model.transactions.flatMap((entry, index) =>
             entry.state === `persisting` || entry.state === `pending`

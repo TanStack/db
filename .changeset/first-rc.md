@@ -31,8 +31,8 @@ published row metadata precedence over colliding selected fields. Structured
 source spreads and direct source-row returns keep source attribution; new
 functional objects and other projections receive output Collection metadata.
 Keep the two packages accidentally released as stable 1.x on their stable
-release lines. Query Collection supports DB 0.15 and the RC. Offline Transactions
-requires `@tanstack/db@^1.0.0-rc.0` for restoration settlement; upgrade DB with it.
+release lines. Both stable minor releases require `@tanstack/db@^1.0.0-rc.0`
+for the RC health and restoration settlement APIs; upgrade DB with them.
 
 Remove Query Collection’s automatic refetch after mutation handlers. Handlers
 return `Promise<void>` and must await `collection.utils.refetch()` or write

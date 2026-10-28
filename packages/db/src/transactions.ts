@@ -409,6 +409,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /** Complete a transaction whose work was already applied outside commit(). @internal */
   completeWithoutCommit(): void {
+    if (this.state !== `pending`) throw new TransactionNotPendingCommitError()
     this.setState(`completed`)
     settlementFor(this).resolve(this)
   }

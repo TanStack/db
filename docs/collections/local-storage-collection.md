@@ -115,7 +115,7 @@ that contains any of these:
 - a `Map`, `Set`, `WeakMap`, `WeakSet`, `RegExp`, `Promise`, `ArrayBuffer`,
   `SharedArrayBuffer`, or typed array
 
-The rejected mutation's `isPersisted` promise rejects with
+The rejected mutation's `when('settled')` promise rejects with
 `SerializationError`. Nothing is written to storage and the optimistic row
 rolls back. An automatic write's `onInsert` or `onUpdate` handler does not run;
 a manual `acceptMutations` call rejects with the same error.

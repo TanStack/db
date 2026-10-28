@@ -11,7 +11,6 @@ import {
   inArray,
   include,
   or,
-  resetWarnings,
 } from '@tanstack/db'
 import {
   afterAll,
@@ -2476,7 +2475,6 @@ describe(`QueryCollection`, () => {
     })
 
     it(`fetches exactly once when a handler explicitly refetches`, async () => {
-      resetWarnings()
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
       const options = queryCollectionOptions<TestItem>({
@@ -2505,7 +2503,6 @@ describe(`QueryCollection`, () => {
         expect(warning).not.toHaveBeenCalled()
       } finally {
         await collection.cleanup()
-        resetWarnings()
         warning.mockRestore()
       }
     })

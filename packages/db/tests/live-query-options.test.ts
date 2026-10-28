@@ -392,7 +392,7 @@ describe(`live query identity`, () => {
     expect(getLiveQueryHash(first, [])).not.toBe(getLiveQueryHash(second, []))
   })
 
-  it(`keys opaque row identity and schema behavior by reference`, () => {
+  it(`binds row identity and schema options outside query identity`, () => {
     const source = createCollection<{ id: string }>({
       id: `live-query-config-identity-source`,
       getKey: (row) => row.id,
@@ -408,12 +408,12 @@ describe(`live query identity`, () => {
     const second = { query, getKey: otherGetKey, schema }
     const third = { query, getKey, schema: otherSchema }
 
-    expect(getPreparedLiveQueryIdentity(first)).not.toEqual(
+    expect(getPreparedLiveQueryIdentity(first)).toEqual(
       getPreparedLiveQueryIdentity(second),
     )
     expect(getLiveQueryHash(first)).toBe(getLiveQueryHash(same))
-    expect(getLiveQueryHash(first)).not.toBe(getLiveQueryHash(second))
-    expect(getLiveQueryHash(first)).not.toBe(getLiveQueryHash(third))
+    expect(getLiveQueryHash(first)).toBe(getLiveQueryHash(second))
+    expect(getLiveQueryHash(first)).toBe(getLiveQueryHash(third))
   })
 
   it(`uses exact custom comparator identity in live-query config hashes`, () => {

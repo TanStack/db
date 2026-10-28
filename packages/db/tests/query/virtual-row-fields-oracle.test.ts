@@ -15,6 +15,11 @@
  * A directly selected unmatched nullable row is `{}` because direct selection
  * merges the source row into a new object. Its known row fields are optional.
  *
+ * The attribution grammar crosses direct queries, QueryRef depths one/two,
+ * joined and functional QueryRef consumers, both union branch positions and
+ * a union consumed through a QueryRef. Null later spreads contribute nothing.
+ * Every form observes the same metadata law at preload, pending and settlement.
+ *
  * The legal query forms exercised here are expression-projected, unprojected,
  * and functional root rows; unprojected and directly selected whole-row
  * children; an unmatched left-joined whole row; matched and unmatched
@@ -48,6 +53,7 @@
  */
 import { afterAll, describe, expect, test, vi } from 'vitest'
 import {
+  Query,
   createLiveQueryCollection,
   eq,
   materialize,
@@ -133,8 +139,18 @@ const metadataReach = createOracleReach(`root metadata`, [
   `single-pending-source`,
   `colliding-projection`,
   `functional-direct`,
+  `query-ref-pending`,
+  `union-pending`,
+  `null-later-spread`,
 ])
-afterAll(() => metadataReach.assertReached())
+afterAll(() => {
+  metadataReach.assertReached()
+  if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+    console.info(
+      `root metadata reach`,
+      Object.fromEntries(metadataReach.counts()),
+    )
+})
 
 /**
  * Projection shape controls attribution, not the spelling of selected fields.
@@ -159,12 +175,23 @@ test.each(
         .filter(
           (shape) => shape !== `functional-direct` || collision === `none`,
         )
-        .map((shape) => ({ joined, collision, shape })),
+        .flatMap((shape) =>
+          [
+            `direct`,
+            `query-ref`,
+            `nested-query-ref`,
+            `joined-query-ref`,
+            `functional-query-ref`,
+            `union`,
+            `union-last`,
+            `union-query-ref`,
+          ].map((composition) => ({ joined, collision, shape, composition })),
+        ),
     ),
   ),
 )(
   `attributes root metadata by projection shape: %j`,
-  async ({ joined, collision, shape }) => {
+  async ({ joined, collision, shape, composition }) => {
     metadataReach.beginHistory()
     const parents = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
@@ -189,7 +216,8 @@ test.each(
       if (collision === field || collision === `all`)
         overrides[field] = field === `$hasPendingWrites` ? false : `spoof`
     }
-    const live = createLiveQueryCollection((q) => {
+    const selectedQuery = (() => {
+      const q = new Query()
       const base = joined
         ? q
             .from({ parent: parents })
@@ -212,27 +240,68 @@ test.each(
       return base.select(({ chosen }) => ({
         id: chosen.id,
         label: chosen.label,
+        hasPendingWrites: chosen.$hasPendingWrites,
         ...overrides,
       }))
-    })
-    const clean = createLiveQueryCollection((q) => {
-      const base = joined
-        ? q
-            .from({ parent: parents })
-            .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
-              eq(parent.id, chosen.parentId),
-            )
-        : q.from({ chosen: rows })
-      return base.select(({ chosen }) => ({
-        id: chosen.id,
-        label: chosen.label,
-      }))
-    })
+    })()
+    const compose = (query: typeof selectedQuery) => {
+      if (composition === `direct`) return query
+      if (composition.startsWith(`union`)) {
+        const emptyBranch = new Query()
+          .from({ empty: parents })
+          .where(({ empty }) => eq(empty.id, `absent`))
+          .select(({ empty }) => ({ id: empty.id, label: empty.id }))
+        const union =
+          composition === `union-last`
+            ? new Query().unionAll(emptyBranch, query)
+            : new Query().unionAll(query, emptyBranch)
+        return composition === `union-query-ref`
+          ? new Query().from({ union })
+          : union
+      }
+      if (composition === `joined-query-ref`)
+        return new Query()
+          .from({ peer: rows })
+          .innerJoin({ nested: query }, ({ peer, nested }) =>
+            eq(peer.id, nested.id),
+          )
+          .select(({ nested }) => nested)
+      const once = new Query().from({ nested: query })
+      if (composition === `functional-query-ref`)
+        return once.fn.select(({ nested }) => nested)
+      return composition === `query-ref`
+        ? once
+        : new Query().from({ outer: once })
+    }
+    const live = createLiveQueryCollection(() => compose(selectedQuery))
+    const clean = createLiveQueryCollection(() =>
+      compose(
+        (() => {
+          const q = new Query()
+          const base = joined
+            ? q
+                .from({ parent: parents })
+                .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
+                  eq(parent.id, chosen.parentId),
+                )
+            : q.from({ chosen: rows })
+          return base.select(({ chosen }) => ({
+            id: chosen.id,
+            label: chosen.label,
+          }))
+        })(),
+      ),
+    )
     const sourceOwned = sourceOwnsMetadata(shape)
     const check = () => {
       const sourceRow = rows.get(`child`)!
       const actual = live.toArray[0]!
-      expect(actual.label).toBe(sourceRow.label)
+      expect(actual).toMatchObject({ label: sourceRow.label })
+      if (shape === `structured-projection`)
+        expect(
+          (actual as { hasPendingWrites?: boolean }).hasPendingWrites,
+          `selected pending badge`,
+        ).toBe(sourceRow.$hasPendingWrites)
       const expected = sourceOwned
         ? sourceRow
         : {
@@ -249,7 +318,9 @@ test.each(
       const mutation = rows.update(`child`, (row) => {
         row.label = `pending`
       })
-      await vi.waitFor(() => expect(live.toArray[0]?.label).toBe(`pending`))
+      await vi.waitFor(() =>
+        expect(live.toArray[0]).toMatchObject({ label: `pending` }),
+      )
       expect(rows.get(`child`)!.$hasPendingWrites).toBe(true)
       metadataReach.reach(
         joined ? `joined-pending-source` : `single-pending-source`,
@@ -257,6 +328,9 @@ test.each(
       if (collision !== `none`) metadataReach.reach(`colliding-projection`)
       if (shape === `functional-direct`)
         metadataReach.reach(`functional-direct`)
+      if (composition.startsWith(`union`)) metadataReach.reach(`union-pending`)
+      if (composition.endsWith(`query-ref`))
+        metadataReach.reach(`query-ref-pending`)
       check()
       rows.utils.resolveSync()
       await mutation.when(`settled`)
@@ -458,3 +532,78 @@ describe(`virtual row field runtime boundary`, () => {
     ])
   })
 })
+
+/** A nullish source contributes no fields to a JS spread. The last present
+ * structured source owns metadata, independent of join side and spread order.
+ * This finite grammar crosses match presence, spread order and which source
+ * has a held optimistic update. All checkpoints compare the same public law.
+ */
+test.each(
+  [false, true].flatMap((matched) =>
+    [false, true].flatMap((reverse) =>
+      [false, true].map((pendingRight) => ({ matched, reverse, pendingRight })),
+    ),
+  ),
+)(
+  `retains metadata from the last present spread: %j`,
+  async ({ matched, reverse, pendingRight }) => {
+    metadataReach.beginHistory()
+    const left = createCollection(
+      mockSyncCollectionOptions<{ id: string; label: string }>({
+        id: `spread-left`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `left`, label: `left` }],
+      }),
+    )
+    const right = createCollection(
+      mockSyncCollectionOptions<{
+        id: string
+        parentId: string
+        label: string
+      }>({
+        id: `spread-right`,
+        getKey: (row) => row.id,
+        initialData: [
+          {
+            id: `right`,
+            parentId: matched ? `left` : `missing`,
+            label: `right`,
+          },
+        ],
+      }),
+    )
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ left })
+        .leftJoin({ right }, ({ left: a, right: b }) => eq(a.id, b.parentId))
+        .select(({ left: a, right: b }) =>
+          reverse ? { ...b, ...a } : { ...a, ...b },
+        ),
+    )
+    const owner = matched && !reverse ? right : left
+    const key = owner === right ? `right` : `left`
+    const check = () => checkRootMetadata(live.toArray[0]!, owner.get(key)!)
+    await checkWithCleanup(async () => {
+      await live.preload()
+      check()
+      const mutation = pendingRight
+        ? right.update(`right`, (row) => {
+            row.label = `pending`
+          })
+        : left.update(`left`, (row) => {
+            row.label = `pending`
+          })
+      await vi.waitFor(() =>
+        expect(
+          (pendingRight ? right.get(`right`) : left.get(`left`))!
+            .$hasPendingWrites,
+        ).toBe(true),
+      )
+      if (!matched && !reverse) metadataReach.reach(`null-later-spread`)
+      check()
+      ;(pendingRight ? right : left).utils.resolveSync()
+      await mutation.when(`settled`)
+      check()
+    }, [() => live.cleanup(), () => left.cleanup(), () => right.cleanup()])
+  },
+)

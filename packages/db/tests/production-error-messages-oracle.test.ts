@@ -35,6 +35,8 @@
  *   expressions in the same scope give the same message for every input.
  *   Descriptor error 113 follows the same missing-client condition from source
  *   construction to query consumption; its new template is framework-neutral.
+ *   Cache conflict 234 also names getKey/schema options after the maintainer's
+ *   decision to reject incompatible local row behavior under one query identity.
  *   Every interpolated expression whose values production can show, or one of
  *   its sub-expressions, is passed to the code line. Plain objects, such as
  *   rows, never reach it (maintainer decision, 2026-10-07). `AggregateError` messages count too. A message built only

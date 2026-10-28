@@ -1576,7 +1576,7 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
       '@tanstack/db':
-        specifier: ^0.15.0 || ^1.0.0-rc.0
+        specifier: ^1.0.0-rc.0
         version: link:../db
       typescript:
         specifier: '>=4.7'

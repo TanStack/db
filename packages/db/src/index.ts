@@ -51,7 +51,6 @@ export * from './sync-persistence'
 export * from './sync-receipt'
 export { deepEquals, equalPersistedSnapshotValues } from './utils'
 /** @internal Used by first-party collection adapters. */
-export { warnOnce, resetWarnings } from './utils'
 /** @internal Reports an adapter contract breach uncaught, as core does. */
 export { reportUncaught } from './utils/callbacks'
 export * from './paced-mutations'

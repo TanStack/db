@@ -25,7 +25,7 @@ test('stable packages keep their release line and require a compatible DB API', 
     'utf8',
   )
   for (const [directory, bump, peer] of [
-    ['query-db-collection', 'minor', '^0.15.0 || ^1.0.0-rc.0'],
+    ['query-db-collection', 'minor', '^1.0.0-rc.0'],
     ['offline-transactions', 'minor', '^1.0.0-rc.0'],
   ]) {
     const manifest = JSON.parse(
