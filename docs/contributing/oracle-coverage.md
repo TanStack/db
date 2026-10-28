@@ -3649,6 +3649,13 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       commits an older row and closes for good. Generated histories never
       close a tab for good, and an `it.fails` replay through the same driver
       and checks pins that history.
+      A random CI campaign (seed `-1660880085`, path
+      `55:0:1:4:4:4:1:1:1:1:3:4:4:4:4`) found a second Law 2 history that
+      reproduces on `main`: row 1 reaches v2 and both tabs catch up, then
+      tab B stops, tab A catches up, and tab A stops, and the durable rows
+      lose row 1. The maintainer chose to leave it open with #2281; an
+      `it.fails` replay through the same driver and checks pins it, and the
+      random campaign can still draw it. Owner: this oracle.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in
@@ -3848,7 +3855,15 @@ must equal the model's, which a restart would read.
 `persisted-peers-full` repeats the lane under full row updates, where an
 update replaces its row in storage too; `persisted-peers-on-demand` repeats
 it on demand with a demand for every row. A reset over metadata of a missing
-row is too rare in generated histories to declare; a replay pins it. A reset
+row is too rare in generated histories to declare; a replay pins it. A
+random CI campaign (seed `654774679`) found a `persisted-peers-full` history
+that reproduces on `main`: an outer transaction inserts over a bare seed, an
+inner one re-inserts the row and commits, and a peer's full reload leaves the
+row with the cached seed's metadata, where the model expects none (law:
+the source reads its row metadata). The maintainer chose to leave it open,
+tracked with #2281; an `it.fails` replay through the same model, driver, and
+comparison pins its shrunk prefix, and the random campaign can still draw it.
+Owner: this oracle. A reset
 may rewrite its rows, which its reload then applies as source writes.
 `persisted-reads-seeds` crosses read holds with seeds and the cached row and
 aborts a buffered commit's signal, which abandons it at the read's end
