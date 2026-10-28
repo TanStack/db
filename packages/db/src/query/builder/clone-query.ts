@@ -138,6 +138,7 @@ function cloneSelectValueForPlacement(
       value.correlationField,
       value.childCorrelationField,
       value.fieldName,
+      value.runtime,
       value.parentFilters,
       value.parentProjection,
       value.materialization,

@@ -1,5 +1,12 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  createLiveQueryCollection,
+  eq,
+  materialize,
+  queryOnce,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -9,18 +16,11 @@ import { SubsetDemandController } from '../../src/query/live/subset-demand-contr
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createEffect } from '../../src/query/effect.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
-import {
-  createLiveQueryCollection,
-  eq,
-  materialize,
-  queryOnce,
-  toArray,
-} from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
@@ -3343,19 +3343,15 @@ async function expectLaggingSourceTraceMatches(
 // Each generated lane uses one grammar and one check in both campaigns. A
 // seed-and-path replay selects only its requested random lane.
 function temporalCampaigns(property: string, fixedSeed: number) {
-  const replay = readOracleRunConfig()
   return [
     {
       label: `fixed seed ${fixedSeed}`,
-      test: replay.replayPath === undefined ? fcTest : fcTest.skip,
+      test: oracleReplayTest(fcTest),
       options: { numRuns: oracleRuns(20), seed: fixedSeed },
     },
     {
       label: `random or replayed seed`,
-      test:
-        replay.replayPath === undefined || replay.replayProperty === property
-          ? fcTest
-          : fcTest.skip,
+      test: oracleReplayTest(fcTest, property),
       options: oraclePropertyOptions(20, property),
     },
   ]

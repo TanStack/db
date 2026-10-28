@@ -782,7 +782,9 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: true,
       })
+      subscription.resumeDeferredAcquisition()
       const where = new Func(`eq`, [
         new PropRef([`id`]),
         new Value(`requested`),
@@ -1491,7 +1493,9 @@ describe(`CollectionSubscription status tracking`, () => {
       if (start === `deferred`) expect(collection._deferSyncStart()).toBe(true)
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
+        deferAcquisition: start === `deferred`,
       })
+      if (start === `deferred`) subscription.resumeDeferredAcquisition()
       unsubscribeDuringLoad = () => subscription.unsubscribe()
 
       try {

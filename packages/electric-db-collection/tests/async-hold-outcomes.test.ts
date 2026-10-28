@@ -36,6 +36,7 @@ vi.mock(`@electric-sql/client`, async () => {
     ...actual,
     ShapeStream: vi.fn(() => ({
       subscribe: mockSubscribe,
+      unsubscribeAll: vi.fn(),
       fetchSnapshot: mockFetchSnapshot,
       requestSnapshot: vi.fn(),
     })),

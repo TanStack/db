@@ -11,7 +11,7 @@ function claimLiveQuerySourceIds(
    bindingName): void;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L97)
+Defined in: [packages/db/src/live-query-adapter.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L99)
 
 Record a query's sources, or throw before recording any.
 

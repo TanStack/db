@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
+import { toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -11,7 +12,6 @@ import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
-import { toArray } from '../../src/query/index.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
   oracleRandomParameters,

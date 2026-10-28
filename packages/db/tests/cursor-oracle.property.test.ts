@@ -5,8 +5,8 @@ import { PropRef, Value } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import { evaluateReferenceExpression } from './reference-expression-oracle.js'
@@ -31,13 +31,9 @@ import type { OrderBy } from '../src/query/ir.js'
  * paginated query's acquisition and publication behavior.
  */
 
-const replay = readOracleRunConfig()
-const it = replay.replayPath === undefined ? vitestIt : vitestIt.skip
-const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
-const randomCampaign = (property: string) =>
-  replay.replayPath === undefined || replay.replayProperty === property
-    ? fcTest
-    : fcTest.skip
+const it = oracleReplayTest(vitestIt)
+const fixedCampaign = oracleReplayTest(fcTest)
+const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 const fixedSeed = 20260930
 

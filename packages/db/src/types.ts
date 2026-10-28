@@ -787,9 +787,18 @@ export interface BaseCollectionConfig<
   /**
    * Time in milliseconds after which the collection will be garbage collected
    * when it has no active subscribers. Defaults to 5 minutes (300000ms).
-   * Sync started without subscribers gets a minimum 50ms grace period.
+   * Sync started without subscribers gets a minimum 50ms handoff grace period
+   * until a subscriber attaches. After the last subscriber leaves, gcTime
+   * applies without that startup minimum.
    * Pending preloads retain the collection until they settle. Preloading ready
-   * data refreshes the retention period. A non-positive or non-finite value
+   * data refreshes the retention period. A persisting transaction that touches
+   * the collection also retains it, and the period starts again when the last
+   * one completes or fails, preserving any remaining startup grace. Pending
+   * manual transactions do not retain it; keep a subscription for draft
+   * visibility until commit or rollback. Rolling
+   * back a manual transaction that stayed pending preserves the existing GC
+   * deadline. Cleanup runs at a host idle opportunity after the delay.
+   * A non-positive or non-finite value
    * disables automatic garbage collection.
    */
   gcTime?: number

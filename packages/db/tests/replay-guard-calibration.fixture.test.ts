@@ -8,7 +8,9 @@ import { oraclePropertyOptions } from './oracle-config.js'
  * Ordinary discovery runs one real positive property and one unrelated test.
  * A child process may inject exactly one fault: setup, property, unrelated test,
  * skip, zero runs, expected failure, precondition exhaustion, or wrong replay
- * coordinates. The parent uses these variants to prove it neither accepts a
+ * coordinates. The `sync` variant registers the property as a synchronous
+ * fast-check property, which the guarded runner witnesses in its synchronous
+ * mode. The parent uses these variants to prove it neither accepts a
  * false-green run nor rewrites fast-check's real failure.
  */
 const fault = process.env.TANSTACK_DB_ORACLE_REPLAY_CALIBRATION
@@ -31,15 +33,26 @@ fcTest.prop([fc.constant(1)], { numRuns: 1, seed: 20260930 })(
       process.stdout.write(`unrelated fixed campaign ran\n`)
   },
 )
-propertyTest.prop([fc.integer({ min: 0, max: 100 })], options)(
-  `executes the replay calibration property`,
-  (value) => {
-    if (fault === `precondition`) fc.pre(false)
-    if (fault === `property` || fault === `expected`)
-      throw new Error(`replay property sentinel`)
-    expect(value + 1).toBeGreaterThan(value)
-  },
-)
+if (fault === `sync`) {
+  it(`executes the replay calibration property`, () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 100 }), (value) => {
+        expect(value + 1).toBeGreaterThan(value)
+      }),
+      options,
+    )
+  })
+} else {
+  propertyTest.prop([fc.integer({ min: 0, max: 100 })], options)(
+    `executes the replay calibration property`,
+    (value) => {
+      if (fault === `precondition`) fc.pre(false)
+      if (fault === `property` || fault === `expected`)
+        throw new Error(`replay property sentinel`)
+      expect(value + 1).toBeGreaterThan(value)
+    },
+  )
+}
 
 it(`executes an unrelated calibration assertion`, () => {
   if (fault === `unrelated`) throw new Error(`replay unrelated sentinel`)

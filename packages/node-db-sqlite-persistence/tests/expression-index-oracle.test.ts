@@ -45,10 +45,12 @@
  *
  * Reach, challenge, replay, and cleanup: the expression-index matrix and both
  * generated BigInt range checks run in fixed-seed and seedless-random campaigns.
- * Supplying both TANSTACK_DB_WS5A_SEED and TANSTACK_DB_WS5A_PATH selects only
- * the exact replay campaign; TANSTACK_DB_WS5A_PROPERTY selects a BigInt check
- * instead of the default expression-index matrix. Either replay value alone
- * rejects. Per-axis grammar ablations and same-path SQL/compiler faults must
+ * A path replay sets TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_SEED, and
+ * TANSTACK_DB_ORACLE_PROPERTY to one of sqlite-persistence.expression-index,
+ * sqlite-persistence.bigint-roundtrip, or sqlite-persistence.bigint-rejection.
+ * That property's random campaign replays only its recorded history; the fixed
+ * campaigns and the other properties stand aside. A seed alone reseeds the
+ * random campaigns. Per-axis grammar ablations and same-path SQL/compiler faults must
  * fail the expression-index property. The
  * retained fixed campaign reconstructs the known valid matrix. The bounds
  * above state its range; exact grammar checks reject missing, duplicate, and
@@ -70,6 +72,12 @@ import {
   decodePersistedStorageKey,
   persistedCollectionOptions,
 } from '@tanstack/db-sqlite-persistence-core'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import {
   Temporal,
   temporalFamilies,
@@ -133,84 +141,35 @@ const legalPathArbitrary = fc
   )
   .map(([root, tail]) => [root, ...tail])
 
-type OracleReplayConfiguration = {
-  seed: number
-  path: string
-  numRuns: 1
-}
+const EXPRESSION_INDEX_PROPERTY = `sqlite-persistence.expression-index`
+const BIGINT_ROUNDTRIP_PROPERTY = `sqlite-persistence.bigint-roundtrip`
+const BIGINT_REJECTION_PROPERTY = `sqlite-persistence.bigint-rejection`
 
 type GeneratedPropertyCampaign = {
-  name: `fixed` | `random` | `replay`
-  seed?: number
-  path?: string
-  numRuns: number
+  name: `fixed` | `random`
+  parameters: ReturnType<typeof oraclePropertyOptions>
 }
 
-function oracleReplayConfiguration(
-  environment: NodeJS.ProcessEnv = process.env,
-): OracleReplayConfiguration | undefined {
-  const seedText = environment.TANSTACK_DB_WS5A_SEED
-  const path = environment.TANSTACK_DB_WS5A_PATH
-  if (seedText !== undefined && !/^-?\d+$/.test(seedText)) {
-    throw new Error(`TANSTACK_DB_WS5A_SEED must be an integer`)
-  }
-  if (seedText !== undefined && !Number.isSafeInteger(Number(seedText))) {
-    throw new Error(`TANSTACK_DB_WS5A_SEED must be an integer`)
-  }
-  if (path !== undefined && !/^\d+(?::\d+)*$/.test(path)) {
-    throw new Error(
-      `TANSTACK_DB_WS5A_PATH must contain colon-separated nonnegative integers`,
-    )
-  }
-  if (seedText === undefined && path === undefined) return undefined
-  if (seedText === undefined) {
-    throw new Error(
-      `TANSTACK_DB_WS5A_PATH requires TANSTACK_DB_WS5A_SEED for exact replay`,
-    )
-  }
-  if (path === undefined) {
-    throw new Error(
-      `TANSTACK_DB_WS5A_SEED requires TANSTACK_DB_WS5A_PATH for exact replay`,
-    )
-  }
+// The fixed campaign pins its seed and stands aside on every path replay. The
+// random campaign runs in ordinary and seed-only runs, and as the replay of
+// its property, where oraclePropertyOptions returns the recorded path.
+const fixedGeneratedCampaign: GeneratedPropertyCampaign = {
+  name: `fixed`,
+  parameters: {
+    seed: DEFAULT_ORACLE_SEED,
+    numRuns: oracleRuns(DEFAULT_ORACLE_RUNS),
+  },
+}
 
+function randomGeneratedCampaign(property: string): GeneratedPropertyCampaign {
   return {
-    seed: Number(seedText),
-    path,
-    numRuns: 1,
+    name: `random`,
+    parameters: oraclePropertyOptions(DEFAULT_ORACLE_RUNS, property),
   }
 }
-
-const requestedReplay = oracleReplayConfiguration()
-const requestedReplayProperty =
-  process.env.TANSTACK_DB_WS5A_PROPERTY ?? `expression-index`
-if (
-  ![`expression-index`, `bigint-roundtrip`, `bigint-rejection`].includes(
-    requestedReplayProperty,
-  )
-) {
-  throw new Error(`TANSTACK_DB_WS5A_PROPERTY must name a generated property`)
-}
-
-const generatedPropertyCampaigns: Array<GeneratedPropertyCampaign> =
-  requestedReplay === undefined
-    ? [
-        {
-          name: `fixed`,
-          seed: DEFAULT_ORACLE_SEED,
-          numRuns: DEFAULT_ORACLE_RUNS,
-        },
-        { name: `random`, numRuns: DEFAULT_ORACLE_RUNS },
-      ]
-    : [{ name: `replay`, ...requestedReplay }]
 
 function generatedCampaignParameters(campaign: GeneratedPropertyCampaign) {
-  return {
-    numRuns: campaign.numRuns,
-    verbose: 2 as const,
-    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-    ...(campaign.path === undefined ? {} : { path: campaign.path }),
-  }
+  return { verbose: 2 as const, ...campaign.parameters }
 }
 
 function createNestedRow(
@@ -1335,44 +1294,61 @@ async function assertExpressionIndexHistory(
 }
 
 describe(`SQLite expression-index oracle`, () => {
-  const it = requestedReplay === undefined ? vitestIt : vitestIt.skip
+  const it = oracleReplayTest(vitestIt)
 
   it.each([
     {
       label: `empty seed`,
-      environment: { TANSTACK_DB_WS5A_SEED: `` },
-      message: `TANSTACK_DB_WS5A_SEED must be an integer`,
-    },
-    {
-      label: `seed without path`,
-      environment: { TANSTACK_DB_WS5A_SEED: `1659005` },
-      message: `TANSTACK_DB_WS5A_SEED requires TANSTACK_DB_WS5A_PATH for exact replay`,
+      environment: { TANSTACK_DB_ORACLE_SEED: `` },
+      message: `TANSTACK_DB_ORACLE_SEED must be an integer`,
     },
     {
       label: `path without seed`,
-      environment: { TANSTACK_DB_WS5A_PATH: `0` },
-      message: `TANSTACK_DB_WS5A_PATH requires TANSTACK_DB_WS5A_SEED for exact replay`,
+      environment: { TANSTACK_DB_ORACLE_PATH: `0` },
+      message: `TANSTACK_DB_ORACLE_PATH requires TANSTACK_DB_ORACLE_SEED`,
+    },
+    {
+      label: `property without path`,
+      environment: {
+        TANSTACK_DB_ORACLE_SEED: `1659005`,
+        TANSTACK_DB_ORACLE_PROPERTY: `sqlite-persistence.expression-index`,
+      },
+      message: `TANSTACK_DB_ORACLE_PROPERTY requires TANSTACK_DB_ORACLE_PATH`,
     },
     {
       label: `invalid shrink path`,
       environment: {
-        TANSTACK_DB_WS5A_SEED: `1659005`,
-        TANSTACK_DB_WS5A_PATH: `0:`,
+        TANSTACK_DB_ORACLE_SEED: `1659005`,
+        TANSTACK_DB_ORACLE_PATH: `0:`,
+        TANSTACK_DB_ORACLE_PROPERTY: `sqlite-persistence.expression-index`,
       },
-      message: `TANSTACK_DB_WS5A_PATH must contain colon-separated nonnegative integers`,
+      message: `TANSTACK_DB_ORACLE_PATH must contain colon-separated nonnegative integers`,
     },
   ])(`rejects a $label replay configuration`, ({ environment, message }) => {
-    expect(() => oracleReplayConfiguration(environment)).toThrow(message)
+    expect(() => readOracleRunConfig(environment)).toThrow(message)
   })
 
-  it(`accepts only a checked seed and shrink-path replay pair`, () => {
+  it(`accepts a seed alone and a checked seed and shrink-path replay pair`, () => {
+    expect(readOracleRunConfig({ TANSTACK_DB_ORACLE_SEED: `1659005` })).toEqual(
+      {
+        multiplier: 1,
+        replaySeed: 1659005,
+        replayPath: undefined,
+        replayProperty: undefined,
+      },
+    )
     expect(
-      oracleReplayConfiguration({
-        TANSTACK_DB_WS5A_SEED: `-1659005`,
-        TANSTACK_DB_WS5A_PATH: `0:1:2`,
+      readOracleRunConfig({
+        TANSTACK_DB_ORACLE_SEED: `-1659005`,
+        TANSTACK_DB_ORACLE_PATH: `0:1:2`,
+        TANSTACK_DB_ORACLE_PROPERTY: `sqlite-persistence.expression-index`,
       }),
-    ).toEqual({ seed: -1659005, path: `0:1:2`, numRuns: 1 })
-    expect(oracleReplayConfiguration({})).toBeUndefined()
+    ).toEqual({
+      multiplier: 1,
+      replaySeed: -1659005,
+      replayPath: `0:1:2`,
+      replayProperty: `sqlite-persistence.expression-index`,
+    })
   })
 
   it.each([
@@ -2912,112 +2888,114 @@ describe(`SQLite expression-index oracle`, () => {
     }, [() => driver.close()])
   })
 
-  const generatedBigIntRoundTripTest =
-    requestedReplay === undefined ||
-    requestedReplayProperty === `bigint-roundtrip`
-      ? vitestIt
-      : vitestIt.skip
-
-  generatedBigIntRoundTripTest.each(generatedPropertyCampaigns)(
-    `round-trips generated signed-64-bit BigInts through the real adapter in the $name campaign`,
-    async (campaign) => {
-      await fc.assert(
-        fc.asyncProperty(
-          fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
-          async (value) => {
-            const driver = new BetterSqlite3SQLiteDriver({
-              filename: `:memory:`,
-            })
-            const adapter = createSQLiteCorePersistenceAdapter({ driver })
-            const collectionId = `generated-bigint-in-range`
-
-            await withFailurePreservingCleanup(async () => {
-              await adapter.applyCommittedTx(
-                { kind: `eager`, collectionId: collectionId },
-                {
-                  txId: `seed-${value}`,
-                  term: 1,
-                  seq: 1,
-                  rowVersion: 1,
-                  mutations: [
-                    {
-                      type: `insert`,
-                      key: `match`,
-                      value: { nested: { count: value } },
-                    },
-                  ],
-                },
-              )
-
-              const rows = await adapter.loadSubset(
-                { kind: `eager`, collectionId: collectionId },
-                {
-                  where: new IR.Func(`eq`, [
-                    new IR.PropRef([`nested`, `count`]),
-                    new IR.Value(value),
-                  ]),
-                },
-              )
-              expect(rows.map((row) => row.key)).toEqual([`match`])
-              expect(rows[0]?.value).toEqual({ nested: { count: value } })
-            }, [() => driver.close()])
-          },
-        ),
-        generatedCampaignParameters(campaign),
-      )
-    },
-  )
-
-  const generatedBigIntRejectionTest =
-    requestedReplay === undefined ||
-    requestedReplayProperty === `bigint-rejection`
-      ? vitestIt
-      : vitestIt.skip
-
-  generatedBigIntRejectionTest.each(generatedPropertyCampaigns)(
-    `rejects generated BigInts immediately outside the signed range in the $name campaign`,
-    async (campaign) => {
-      const outOfRangeBigIntArbitrary = fc.oneof(
-        fc
-          .bigInt({ min: 1n, max: 1_000n })
-          .map((distance) => SQLITE_BIGINT_MIN - distance),
-        fc
-          .bigInt({ min: 1n, max: 1_000n })
-          .map((distance) => SQLITE_BIGINT_MAX + distance),
-      )
-
-      await fc.assert(
-        fc.asyncProperty(outOfRangeBigIntArbitrary, async (value) => {
-          const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+  async function roundTripGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
+        async (value) => {
+          const driver = new BetterSqlite3SQLiteDriver({
+            filename: `:memory:`,
+          })
           const adapter = createSQLiteCorePersistenceAdapter({ driver })
+          const collectionId = `generated-bigint-in-range`
 
           await withFailurePreservingCleanup(async () => {
-            await expect(
-              adapter.applyCommittedTx(
-                {
-                  kind: `eager`,
-                  collectionId: `generated-bigint-out-of-range`,
-                },
-                {
-                  txId: `reject-${value}`,
-                  term: 1,
-                  seq: 1,
-                  rowVersion: 1,
-                  mutations: [
-                    {
-                      type: `insert`,
-                      key: `rejected`,
-                      value: { nested: { count: value } },
-                    },
-                  ],
-                },
-              ),
-            ).rejects.toThrow(bigintRangeError(value))
+            await adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: collectionId },
+              {
+                txId: `seed-${value}`,
+                term: 1,
+                seq: 1,
+                rowVersion: 1,
+                mutations: [
+                  {
+                    type: `insert`,
+                    key: `match`,
+                    value: { nested: { count: value } },
+                  },
+                ],
+              },
+            )
+
+            const rows = await adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionId },
+              {
+                where: new IR.Func(`eq`, [
+                  new IR.PropRef([`nested`, `count`]),
+                  new IR.Value(value),
+                ]),
+              },
+            )
+            expect(rows.map((row) => row.key)).toEqual([`match`])
+            expect(rows[0]?.value).toEqual({ nested: { count: value } })
           }, [() => driver.close()])
-        }),
-        generatedCampaignParameters(campaign),
-      )
-    },
+        },
+      ),
+      generatedCampaignParameters(campaign),
+    )
+  }
+  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
+    `round-trips generated signed-64-bit BigInts through the real adapter in the $name campaign`,
+    roundTripGeneratedBigInt,
+  )
+  oracleReplayTest(vitestIt, BIGINT_ROUNDTRIP_PROPERTY).each([
+    randomGeneratedCampaign(BIGINT_ROUNDTRIP_PROPERTY),
+  ])(
+    `round-trips generated signed-64-bit BigInts through the real adapter in the $name campaign`,
+    roundTripGeneratedBigInt,
+  )
+
+  async function rejectGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
+    const outOfRangeBigIntArbitrary = fc.oneof(
+      fc
+        .bigInt({ min: 1n, max: 1_000n })
+        .map((distance) => SQLITE_BIGINT_MIN - distance),
+      fc
+        .bigInt({ min: 1n, max: 1_000n })
+        .map((distance) => SQLITE_BIGINT_MAX + distance),
+    )
+
+    await fc.assert(
+      fc.asyncProperty(outOfRangeBigIntArbitrary, async (value) => {
+        const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+        const adapter = createSQLiteCorePersistenceAdapter({ driver })
+
+        await withFailurePreservingCleanup(async () => {
+          await expect(
+            adapter.applyCommittedTx(
+              {
+                kind: `eager`,
+                collectionId: `generated-bigint-out-of-range`,
+              },
+              {
+                txId: `reject-${value}`,
+                term: 1,
+                seq: 1,
+                rowVersion: 1,
+                mutations: [
+                  {
+                    type: `insert`,
+                    key: `rejected`,
+                    value: { nested: { count: value } },
+                  },
+                ],
+              },
+            ),
+          ).rejects.toThrow(bigintRangeError(value))
+        }, [() => driver.close()])
+      }),
+      generatedCampaignParameters(campaign),
+    )
+  }
+  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
+    `rejects generated BigInts immediately outside the signed range in the $name campaign`,
+    rejectGeneratedBigInt,
+  )
+  oracleReplayTest(vitestIt, BIGINT_REJECTION_PROPERTY).each([
+    randomGeneratedCampaign(BIGINT_REJECTION_PROPERTY),
+  ])(
+    `rejects generated BigInts immediately outside the signed range in the $name campaign`,
+    rejectGeneratedBigInt,
   )
 
   it(`does not confuse an alias-qualified field ref with a nested JSON path`, async () => {
@@ -3252,33 +3230,35 @@ describe(`SQLite expression-index oracle`, () => {
     )
   })
 
-  const generatedExpressionIndexTest =
-    requestedReplay === undefined ||
-    requestedReplayProperty === `expression-index`
-      ? vitestIt
-      : vitestIt.skip
+  async function reachGeneratedExpressionIndex(
+    campaign: GeneratedPropertyCampaign,
+  ) {
+    const details = await runGeneratedScenarioProperty(campaign)
+    const parameters = generatedCampaignParameters(campaign)
 
-  generatedExpressionIndexTest.each(generatedPropertyCampaigns)(
+    expect(details.numRuns).toBe(campaign.parameters.numRuns)
+    expect(`seed` in parameters).toBe(campaign.parameters.seed !== undefined)
+    expect(`path` in parameters).toBe(campaign.parameters.path !== undefined)
+    if (campaign.parameters.seed !== undefined) {
+      expect(details.seed).toBe(campaign.parameters.seed)
+    }
+    if (campaign.parameters.path !== undefined) {
+      expect(details.runConfiguration.path).toBe(campaign.parameters.path)
+    }
+    expect(details.seed).toEqual(expect.any(Number))
+  }
+  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
     `reaches every declared generated expression-index scenario in the $name campaign`,
-    async (campaign) => {
-      const details = await runGeneratedScenarioProperty(campaign)
-      const parameters = generatedCampaignParameters(campaign)
-
-      expect(details.numRuns).toBe(campaign.numRuns)
-      expect(`seed` in parameters).toBe(campaign.seed !== undefined)
-      expect(`path` in parameters).toBe(campaign.path !== undefined)
-      if (campaign.seed !== undefined) {
-        expect(details.seed).toBe(campaign.seed)
-      }
-      if (campaign.path !== undefined) {
-        expect(details.runConfiguration.path).toBe(campaign.path)
-      }
-      expect(details.seed).toEqual(expect.any(Number))
-    },
+    reachGeneratedExpressionIndex,
+  )
+  oracleReplayTest(vitestIt, EXPRESSION_INDEX_PROPERTY).each([
+    randomGeneratedCampaign(EXPRESSION_INDEX_PROPERTY),
+  ])(
+    `reaches every declared generated expression-index scenario in the $name campaign`,
+    reachGeneratedExpressionIndex,
   )
 
-  const generatedControlTest =
-    requestedReplay === undefined ? vitestIt : vitestIt.skip
+  const generatedControlTest = oracleReplayTest(vitestIt)
 
   generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
     `rejects the generated grammar when the %s axis is ablated`,
@@ -3349,22 +3329,21 @@ describe(`SQLite expression-index oracle`, () => {
       expect(details.error ?? ``, evidence).not.toContain(`did not reach`)
       expect(details.error, evidence).toContain(`"kind": "${kind}"`)
 
-      const replayPath = details.counterexamplePath
-      if (replayPath === null) {
+      if (details.counterexamplePath === null) {
         throw new Error(`${kind} wrong-answer control did not shrink to a path`)
       }
       const replay = await fc.check(
         generatedScenarioProperty({ faultKind: kind }),
         {
           seed: details.seed,
-          path: replayPath,
+          path: details.counterexamplePath,
           numRuns: 1,
           verbose: 2,
         },
       )
       const replayEvidence = JSON.stringify({
         seed: replay.seed,
-        requestedPath: replayPath,
+        requestedPath: details.counterexamplePath,
         replayPath: replay.counterexamplePath,
         error: replay.error,
       })
@@ -3378,7 +3357,7 @@ describe(`SQLite expression-index oracle`, () => {
 // Native values add a bounded rank/text dimension to this SQL/plan owner.
 // The common model is independent; this driver observes real SQL before cleanup.
 describe(`Temporal expression-index refinement`, () => {
-  const it = requestedReplay === undefined ? vitestIt : vitestIt.skip
+  const it = oracleReplayTest(vitestIt)
   it.each(temporalFamilies)(
     `uses native keys and identity for $kind / $name`,
     async (family) => {
