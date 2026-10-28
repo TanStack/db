@@ -19,6 +19,7 @@ const ownerGroups: ReadonlyArray<
     `part-reach`,
   ],
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
+  [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [
     `db/tests/ssr-stream-record-wait-oracle.test.ts`,
     `ssr`,

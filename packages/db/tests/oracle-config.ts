@@ -6,6 +6,7 @@ type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
   `lint.part-reach`,
+  `scripts.lint-scope`,
   `scripts.run-budget`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
