@@ -8426,6 +8426,32 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
+  it.each([false, true])(
+    `revalidates an empty joined prefix after an ineligible insert (indexed: %s)`,
+    async (indexed) => {
+      await checkEagerWindow({
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [
+          { type: `upsert`, id: 0, rank: 0, eligible: false },
+          { type: `flip`, id: 1 },
+        ],
+      })
+    },
+  )
+
   fcTest.prop([eagerCase], { numRuns: runs, seed: 2044 })(
     `keeps rows and per-change work bounded for a fixed seed`,
     checkEagerWindow,
