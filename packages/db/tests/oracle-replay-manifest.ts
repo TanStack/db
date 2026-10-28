@@ -610,6 +610,24 @@ const ownerGroups: ReadonlyArray<
     `settled-history`,
   ],
   [`db/tests/query/compiler/evaluators-oracle.test.ts`, `evaluators`, `like`],
+  [
+    `db/tests/sync-metadata-session-oracle.property.test.ts`,
+    `sync-metadata-session`,
+    [
+      `flat nested seeds seeds-full nested-seeds nested-conflicts`,
+      `flat.hold-invariance nested.hold-invariance seeds.hold-invariance`,
+      `seeds-full.hold-invariance nested-seeds.hold-invariance`,
+      `nested-conflicts.hold-invariance flat.key-independence`,
+      `nested.key-independence seeds.key-independence`,
+      `nested-seeds.key-independence nested-conflicts.key-independence`,
+      `seeds.seed-order nested-seeds.seed-order seeds-full.seed-order`,
+    ].join(` `),
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`,
+    `sync-metadata-session`,
+    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand`,
+  ],
 ]
 
 const owners = new Map<string, string>()

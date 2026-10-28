@@ -5,7 +5,7 @@
  */
 
 import { QueryClient, hashKey } from '@tanstack/query-core'
-import { IR, createCollection } from '@tanstack/db'
+import { DbClient, IR, collectionOptions, createCollection } from '@tanstack/db'
 import { expect, vi } from 'vitest'
 
 import { createDeferred } from '../../db/src/deferred.js'
@@ -152,6 +152,99 @@ export function recordMetadata(
   }
 }
 
+/**
+ * Diagnosis for a race seen only on CI: the held-cleanup retention witnesses
+ * sometimes see no expiry transaction staged. A fixture with a retention
+ * time-to-live records each timer that Query DB sets during the test, where
+ * it was set, whether it fired, and what cleared it, and each Query fetch. A
+ * failed retention wait reports that trace.
+ */
+type RetentionTrace = {
+  started: number
+  timers: Array<{
+    delay: number
+    set: string
+    fired?: number
+    cleared?: string
+  }>
+  fetches: Array<string>
+}
+let retentionTrace: RetentionTrace | undefined
+
+const queryDbCaller = () =>
+  (new Error().stack ?? ``)
+    .split(`\n`)
+    .filter((line) => line.includes(`query-db-collection/src/`))
+    .slice(0, 3)
+    .map((line) => line.trim().replace(/^at /, ``))
+    .join(` < `)
+
+function traceRetentionTimers(): RetentionTrace {
+  const trace: RetentionTrace = { started: Date.now(), timers: [], fetches: [] }
+  const elapsed = () => `+${Date.now() - trace.started}ms`
+  const realSetTimeout = globalThis.setTimeout
+  const realClearTimeout = globalThis.clearTimeout
+  const traced = new Map<unknown, RetentionTrace[`timers`][number]>()
+  const setSpy = vi.spyOn(globalThis, `setTimeout`).mockImplementation(((
+    callback: (...args: Array<unknown>) => void,
+    delay?: number,
+    ...args: Array<unknown>
+  ) => {
+    const caller = queryDbCaller()
+    if (!caller) return realSetTimeout(callback, delay, ...args)
+    const timer: RetentionTrace[`timers`][number] = {
+      delay: delay ?? 0,
+      set: `${elapsed()} ${caller}`,
+    }
+    trace.timers.push(timer)
+    const handle = realSetTimeout(
+      (...callbackArgs: Array<unknown>) => {
+        timer.fired = Date.now() - trace.started
+        callback(...callbackArgs)
+      },
+      delay,
+      ...args,
+    )
+    traced.set(handle, timer)
+    return handle
+  }) as typeof setTimeout)
+  const clearSpy = vi.spyOn(globalThis, `clearTimeout`).mockImplementation(((
+    handle?: Parameters<typeof clearTimeout>[0],
+  ) => {
+    const timer = traced.get(handle)
+    if (timer) timer.cleared = `${elapsed()} ${queryDbCaller()}`
+    realClearTimeout(handle)
+  }) as typeof clearTimeout)
+  retentionTrace = trace
+  cleanups.push(() => {
+    setSpy.mockRestore()
+    clearSpy.mockRestore()
+    if (retentionTrace === trace) retentionTrace = undefined
+    return Promise.resolve()
+  })
+  return trace
+}
+
+export async function waitForRetention(
+  check: () => void,
+  options: { timeout: number },
+) {
+  try {
+    await vi.waitFor(check, options)
+  } catch (error) {
+    const trace = retentionTrace
+    const report = trace
+      ? [
+          `Query DB timers:`,
+          ...trace.timers.map((timer) => `  ${JSON.stringify(timer)}`),
+          `Query fetches: ${JSON.stringify(trace.fetches)}`,
+        ].join(`\n`)
+      : `no retention trace`
+    if (error instanceof Error) error.message = `${error.message}\n${report}`
+    throw error
+  }
+}
+
 export function createOwnershipFixture({
   id,
   results,
@@ -165,11 +258,19 @@ export function createOwnershipFixture({
   persistedGcTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient(customHash, staleTime)
+  const trace =
+    persistedGcTime === undefined ? undefined : traceRetentionTimers()
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
-  results.forEach((result) =>
-    queryFn.mockImplementationOnce(() => Promise.resolve(result)),
+  results.forEach((result, index) =>
+    queryFn.mockImplementationOnce(() => {
+      trace?.fetches.push(`+${Date.now() - trace.started}ms result ${index}`)
+      return Promise.resolve(result)
+    }),
   )
-  queryFn.mockRejectedValue(new Error(`Unexpected ownership refetch`))
+  queryFn.mockImplementation(() => {
+    trace?.fetches.push(`+${Date.now() - trace.started}ms unexpected`)
+    return Promise.reject(new Error(`Unexpected ownership refetch`))
+  })
   const baseOptions = queryCollectionOptions<Item>({
     id,
     queryClient,
@@ -285,13 +386,52 @@ export function persistedOwners(
   return owners && typeof owners === `object` ? Object.keys(owners).sort() : []
 }
 
+// Reads a row's published metadata through the public dehydrate boundary of a
+// DbClient. Owner keys are opaque, so owners are counted, not named. The seed's
+// non-owner field `user` is read by name, and absence is `undefined`.
+export function publishedRowMetadata(
+  client: DbClient,
+  rowId: string,
+): { user: unknown; owners: number } {
+  const metadata = client
+    .dehydrate({ shouldDehydrateCollection: () => true })
+    .collections.flatMap((chunk) => chunk.rows)
+    .find((row) => row.key === rowId)?.metadata
+  return {
+    user: (metadata as Record<string, unknown> | undefined)?.user,
+    owners: persistedOwners(new Map([[rowId, metadata]]), rowId).length,
+  }
+}
+
+// A DbClient over one on-demand Query collection whose every fetch returns
+// `shared`. A hydration check builds a server and a browser client from it, so
+// a browser release reads only the owners that the dehydrated state recorded.
+export function createSharedRowClient(id: string, persistedGcTime?: number) {
+  const queryClient = createQueryClient()
+  const descriptor = collectionOptions(
+    queryCollectionOptions<Item>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: () => Promise.resolve([shared]),
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      persistedGcTime,
+      startSync: true,
+    }),
+  )
+  return { client: new DbClient({ queryClient }), queryClient, descriptor }
+}
+
 export type StoredOwnership = {
   rows: Map<string | number, Item>
   rowMetadata: Map<string | number, unknown>
   collectionMetadata: Map<string, unknown>
 }
 
-export function categorySubset(category: `detail` | `list`): LoadSubsetOptions {
+export function categorySubset(
+  category: `detail` | `list` | `peer`,
+): LoadSubsetOptions {
   return {
     where: new IR.Func(`in`, [
       new IR.PropRef([`category`]),

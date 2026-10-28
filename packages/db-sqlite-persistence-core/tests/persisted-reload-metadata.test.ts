@@ -264,7 +264,11 @@ describe(`persistedCollectionOptions`, () => {
     await readyPromise
   })
 
-  it(`preserves metadata only for rows supplied by the owning hydration`, async () => {
+  // A row the storage read supplies is a previous run's cache, a seed
+  // (decision 9). A source insert without metadata names the whole row, so
+  // it clears that row's metadata as it does for any seed (decision 12: a
+  // write during a storage read follows the same rules).
+  it(`clears a cached row's metadata when the source inserts it during the owning hydration`, async () => {
     const adapter = createRecordingAdapter([
       { id: `hydrated`, title: `Persisted baseline` },
     ])
@@ -338,9 +342,12 @@ describe(`persistedCollectionOptions`, () => {
       }).toEqual({
         publicHydrated: { id: `hydrated`, title: `Source replacement` },
         publicNew: { id: `new`, title: `Genuinely new row` },
-        hydratedMetadata: { source: `persisted` },
+        hydratedMetadata: undefined,
         newMetadata: undefined,
-        durableMetadataMutations: [{ type: `delete`, key: `new` }],
+        durableMetadataMutations: [
+          { type: `delete`, key: `hydrated` },
+          { type: `delete`, key: `new` },
+        ],
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -480,8 +487,9 @@ describe(`persistedCollectionOptions`, () => {
           Promise.allSettled(receipts),
           `source begun during hydration settled`,
         )
-        // Accepted source writes follow the baseline; metadata survival belongs
-        // to the rows supplied by the original owning hydration, not later loads.
+        // Accepted source writes follow the baseline. The source's insert
+        // without metadata names the whole row, so it clears the cached row's
+        // metadata whichever load supplied it (decisions 9 and 12).
         expect({
           outcomes,
           loads,
@@ -500,7 +508,7 @@ describe(`persistedCollectionOptions`, () => {
           status: `ready`,
           publicRow: { ...baseline, title: `source` },
           durableRow: { ...baseline, title: `source` },
-          metadata: ownerSuppliesRow ? { owner: `persisted` } : undefined,
+          metadata: undefined,
         })
       } catch (error) {
         hasPrimaryFailure = true
@@ -977,14 +985,16 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  // A full-reload notice makes row metadata for absent public keys obsolete,
-  // even when no subset demand remains. The reference snapshot has zero orphan
-  // metadata keys; a public row's presence changes whether the wrapper reads
-  // a durable row snapshot, but not that judgment. The sync metadata API is
-  // the observable boundary at the settled notice checkpoint. A source
-  // metadata-only transaction establishes the orphan through the real path.
+  // Row metadata of a key with no row is not durable, but this tab keeps it
+  // until a source deletes the row (decision 16 in docs/contributing/
+  // oracle-reviews/2026-10-22-sync-metadata-session.md; a full-reload notice
+  // cleared it before). That holds when no subset demand remains: a public
+  // row's presence changes whether the wrapper reads a durable row snapshot,
+  // not that judgment. The sync metadata API is the observable boundary at
+  // the settled notice checkpoint. A source metadata-only transaction
+  // establishes the orphan through the real path.
   it.each([false, true])(
-    `clears orphan row metadata after a no-demand peer reload (public row=%s)`,
+    `keeps orphan row metadata after a no-demand peer reload (public row=%s)`,
     async (hasPublicRow) => {
       const row = { id: `visible`, title: `Visible row` }
       const adapter = createRecordingAdapter(hasPublicRow ? [row] : [])
@@ -1047,7 +1057,7 @@ describe(`persistedCollectionOptions`, () => {
           orphan: source.metadata?.row.get(`ghost`),
           publicRow: stripVirtualProps(collection.get(row.id)),
         }).toEqual({
-          orphan: undefined,
+          orphan: { obsolete: true },
           publicRow: hasPublicRow ? row : undefined,
         })
       } catch (error) {
@@ -1934,7 +1944,11 @@ describe(`persistedCollectionOptions`, () => {
     },
   )
 
-  it(`rejects a source transaction that crosses a hydration cycle`, async () => {
+  // A source transaction binds to a storage read when it commits, so it may
+  // stay open across one (decision 12). Its insert is the last write to the
+  // row: it follows the read's row, and without metadata it clears the
+  // cached row's metadata.
+  it(`commits a source transaction that stays open across a hydration cycle`, async () => {
     const adapter = createRecordingAdapter()
     const firstEntered = createEventGate()
     const releaseFirst = createEventGate()
@@ -1995,11 +2009,10 @@ describe(`persistedCollectionOptions`, () => {
 
       const second = Promise.resolve(collection._sync.loadSubset(secondOptions))
       await secondEntered.promise
-      expect(() => sourceParams.commit()).toThrow(
-        `cannot cross a hydration cycle`,
-      )
+      const receipt = Promise.resolve(sourceParams.commit())
       releaseSecond.resolve()
       await second
+      await receipt
 
       expect({
         publicRow: stripVirtualProps(collection.get(`shared`)),
@@ -2007,9 +2020,9 @@ describe(`persistedCollectionOptions`, () => {
         durableMetadata: adapter.rowMetadata.get(`shared`),
         status: collection.status,
       }).toEqual({
-        publicRow: { id: `shared`, title: `second hydration` },
-        durableRow: { id: `shared`, title: `second hydration` },
-        durableMetadata: { owner: `second hydration` },
+        publicRow: { id: `shared`, title: `source value` },
+        durableRow: { id: `shared`, title: `source value` },
+        durableMetadata: undefined,
         status: `ready`,
       })
     } catch (error) {
@@ -2027,7 +2040,9 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`rejects a source transaction begun before hydration and committed after it`, async () => {
+  // Decision 12: a transaction begun before a storage read and committed
+  // after it applies. Its insert is the last write to the row.
+  it(`commits a source transaction begun before hydration and committed after it`, async () => {
     const adapter = createRecordingAdapter()
     const hydrationEntered = createEventGate()
     const releaseHydration = createEventGate()
@@ -2077,18 +2092,16 @@ describe(`persistedCollectionOptions`, () => {
       releaseHydration.resolve()
       await hydration
 
-      expect(() => sourceParams.commit()).toThrow(
-        `cannot cross a hydration cycle`,
-      )
+      await Promise.resolve(sourceParams.commit())
       expect({
         publicRow: stripVirtualProps(collection.get(`shared`)),
         durableRow: adapter.rows.get(`shared`),
         durableMetadata: adapter.rowMetadata.get(`shared`),
         status: collection.status,
       }).toEqual({
-        publicRow: { id: `shared`, title: `hydrated value` },
-        durableRow: { id: `shared`, title: `hydrated value` },
-        durableMetadata: { owner: `hydration` },
+        publicRow: { id: `shared`, title: `source value` },
+        durableRow: { id: `shared`, title: `source value` },
+        durableMetadata: undefined,
         status: `ready`,
       })
     } catch (error) {
@@ -2104,7 +2117,11 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`preserves full-reload metadata only for rows supplied by that reload`, async () => {
+  // A row the storage read supplies is a previous run's cache, a seed
+  // (decision 9). A source insert without metadata names the whole row, so
+  // it clears that row's metadata as it does for any seed (decision 12: a
+  // write during a storage read follows the same rules).
+  it(`clears a cached row's metadata when the source inserts it during a full reload`, async () => {
     const adapter = createRecordingAdapter()
     adapter.rowMetadata.set(`hydrated`, { source: `persisted` })
     adapter.rowMetadata.set(`new`, { source: `orphaned` })
@@ -2221,9 +2238,12 @@ describe(`persistedCollectionOptions`, () => {
       }).toEqual({
         publicHydrated: { id: `hydrated`, title: `Source replacement` },
         publicNew: { id: `new`, title: `Genuinely new row` },
-        hydratedMetadata: { source: `persisted` },
+        hydratedMetadata: undefined,
         newMetadata: undefined,
-        durableMetadataMutations: [{ type: `delete`, key: `new` }],
+        durableMetadataMutations: [
+          { type: `delete`, key: `hydrated` },
+          { type: `delete`, key: `new` },
+        ],
       })
     } catch (error) {
       hasPrimaryFailure = true

@@ -805,7 +805,11 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`rejects a transaction begun before hydration at its write cut`, async () => {
+  // Decision 12: a transaction begun before a storage read may write and
+  // commit while it runs. When the read fails, its partial update publishes
+  // over the recovered durable baseline, as one begun during the read does
+  // (the next test).
+  it(`commits a transaction begun before a failing storage read`, async () => {
     const requestFailure = new Error(`incremental subset rejected`)
     const baseline: Todo = {
       id: `shared`,
@@ -849,32 +853,26 @@ describe(`persistedCollectionOptions`, () => {
       void load.catch(() => undefined)
       await loadEntered.promise
 
-      expect(() =>
-        sourceParams.write({
-          type: `update`,
-          value: { id: baseline.id, title: `Source update` },
-        }),
-      ).toThrow(`cannot cross a hydration cycle`)
-      expect(() => sourceParams.commit()).toThrow(
-        `cannot cross a hydration cycle`,
-      )
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `Source update` },
+      })
+      const receipt = Promise.resolve(sourceParams.commit())
       rejectLoad.resolve()
 
       await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      const expected: Todo = { ...baseline, title: `Source update` }
       expect({
         status: collection.status,
         publicError: collection._lifecycle.getSyncError(),
         publicRow: stripVirtualProps(collection.get(baseline.id)),
         durableRow: adapter.rows.get(baseline.id),
-        recoverySnapshotCalls: adapter.loadResumeSnapshotCalls.filter(
-          ({ includeRows }) => includeRows === true,
-        ).length,
       }).toEqual({
         status: `ready`,
         publicError: undefined,
-        publicRow: undefined,
-        durableRow: baseline,
-        recoverySnapshotCalls: 0,
+        publicRow: expected,
+        durableRow: expected,
       })
     } catch (error) {
       hasPrimaryFailure = true

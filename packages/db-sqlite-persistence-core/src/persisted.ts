@@ -6,10 +6,12 @@ import {
   SyncTransactionAbortedError,
   collectionOptionsClaim,
   compileSingleRowExpression,
+  deepEquals,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
   reportUncaught,
   safeRandomUUID,
+  syncWriteNamesWholeRow,
   toBooleanPredicate,
   whenSyncAccepted,
   withAcceptedReceipt,
@@ -1269,13 +1271,19 @@ function toMetadataMutations<K>(
 type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   operations: Array<NormalizedSyncOperation<T, TKey>>
   partialUpdateOperationIndexes: Set<number>
+  // Operations written as inserts. An insert names the whole row, so it
+  // replaces the row it lands on, in the Collection and in storage.
+  insertOperations: Set<NormalizedSyncOperation<T, TKey>>
   rowMetadataWrites: Map<TKey, MetadataWrite>
   collectionMetadataWrites: Map<string, MetadataWrite>
-  deferredHydrationMetadataDeleteKeys: Set<TKey>
-  hydrationContext?: { suppliedRowKeys: Set<TKey> }
   hydrationSequence?: number
   truncate: boolean
   internal: boolean
+  /**
+   * For each key whose row a DbClient seed held when the transaction reached
+   * the Collection, that row. Storage lacks it (decision 17).
+   */
+  seedBases?: Map<TKey, T | undefined>
   lifecycleGeneration: number
   admittedStorageCollectionId?: string
   expectedResumeGenerationOwner?: symbol
@@ -1288,6 +1296,10 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   resolveApplied?: () => void
   rejectApplied?: (error: unknown) => void
 }
+
+// A transaction's row for one key: a whole row, or the merged fields of
+// partial updates to apply over the row before the transaction.
+type StagedRow<T> = { present: boolean; value?: T; partial: boolean }
 
 type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   BufferedSyncTransaction<T, TKey>,
@@ -1305,6 +1317,20 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   // Every outcome of the transaction releases its admission waiters.
   publicationAdmissionWaiters?: Set<() => void>
   terminalFailure?: { error: unknown }
+  // Each key's row as this transaction leaves it: a whole row, or the merged
+  // fields of partial updates to apply over the row before the transaction.
+  stagedRows: Map<TKey, StagedRow<T>>
+  // Each key's inserts without metadata since the last write that named its
+  // metadata, and that write. Their kinds, and so whether they clear, can
+  // change when an inner transaction commits first.
+  implicitMetadata: Map<
+    TKey,
+    {
+      // Each insert's value and the transaction's row just before it.
+      inserts: Array<{ value: T; before?: StagedRow<T> }>
+      previous?: MetadataWrite
+    }
+  >
   // Set just before the transaction is handed to the Collection; from then
   // on core holds its keys itself.
   handedToCollection?: boolean
@@ -1567,7 +1593,7 @@ class PersistedCollectionRuntime<
 > {
   private readonly applyMutex = new ApplyMutex()
   private readonly activeSubsets = new Map<string, LoadSubsetOptions>()
-  private activeHydrationContext: { suppliedRowKeys: Set<TKey> } | undefined
+  private activeHydrationContext: object | undefined
   private hydrationSequence = 0
   private waitForReservedCommit: WaitForReservedCommit | undefined
   private abandonReservedCommit: (() => void) | undefined
@@ -1629,6 +1655,27 @@ class PersistedCollectionRuntime<
   private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
+  // Keys a source wrote in this sync run: this tab's, as the wrapper hands
+  // its transactions to the Collection, and peers', from their committed
+  // notices. A stored row with such a key is a source row, not a previous
+  // run's cache (decisions 9 and 11). A source truncate names no keys, so
+  // after one every stored row may be this run's. A notice that requires a
+  // full reload names none either, so every stored row may be a peer's write
+  // until this tab's source writes the key; a storage read records each row
+  // it finds changed as a source's write.
+  private runWrittenKeys = new Set<TKey>()
+  // Row metadata is a separate object (D5): keys whose metadata a source
+  // wrote in this run, a delete included.
+  private runWrittenMetadataKeys = new Set<TKey>()
+  private runWritesUnknown = false
+  private peerWritesUnknown = false
+  private keysKnownSincePeerWrites = new Set<TKey>()
+  // Judges the open source transactions' inserts again after an internal
+  // write lands rows ahead of them, on the keys it wrote (every key after a
+  // truncate, as undefined).
+  private internalApplyListener:
+    ((keys: Iterable<TKey> | undefined) => void) | undefined
+  private internalApplyKeys: Set<TKey> | undefined
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
@@ -1917,7 +1964,15 @@ class PersistedCollectionRuntime<
     this.syncControls = {
       ...syncControls,
       commit: commit
-        ? (signal) => this.trackAppliedReceipt(commit(signal))
+        ? (signal) => {
+            const transaction =
+              this.collection?._state.pendingSyncedTransactions.at(-1)
+            if (transaction?.truncate) this.internalApplyKeys = undefined
+            else
+              for (const operation of transaction?.operations ?? [])
+                this.internalApplyKeys?.add(operation.key as TKey)
+            return this.trackAppliedReceipt(commit(signal))
+          }
         : null,
     }
   }
@@ -2152,10 +2207,6 @@ class PersistedCollectionRuntime<
     return this.hydratingGeneration === this.lifecycleGeneration
   }
 
-  getActiveHydrationContext(): { suppliedRowKeys: Set<TKey> } | undefined {
-    return this.activeHydrationContext
-  }
-
   getHydrationSequence(): number {
     return this.hydrationSequence
   }
@@ -2244,6 +2295,11 @@ class PersistedCollectionRuntime<
     const previousCollection = this.collection
     const previousControls = this.syncControls
     this.setSyncControls(syncControls)
+    this.runWrittenKeys.clear()
+    this.runWrittenMetadataKeys.clear()
+    this.runWritesUnknown = false
+    this.peerWritesUnknown = false
+    this.keysKnownSincePeerWrites.clear()
     if (this.collection === collection) {
       this.boundCollection ??= collection
       return
@@ -3415,12 +3471,173 @@ class PersistedCollectionRuntime<
     this.resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   }
 
+  /** Whether a source may have written this key in this sync run. */
+  isRunWritten(key: TKey): boolean {
+    return this.writesUnknown(key) || this.runWrittenKeys.has(key)
+  }
+
+  /** Whether a source may have written this key without naming it. */
+  private writesUnknown(key: TKey): boolean {
+    return (
+      this.runWritesUnknown ||
+      (this.peerWritesUnknown && !this.keysKnownSincePeerWrites.has(key))
+    )
+  }
+
+  /** Records keys whose rows and metadata this tab's source wrote. */
+  noteRunWrites(
+    keys: Iterable<TKey>,
+    metadataKeys: Iterable<TKey>,
+    truncated: boolean,
+  ): void {
+    if (truncated) this.runWritesUnknown = true
+    for (const key of keys) {
+      this.runWrittenKeys.add(key)
+      this.keysKnownSincePeerWrites.add(key)
+    }
+    for (const key of metadataKeys) {
+      this.runWrittenMetadataKeys.add(key)
+      this.keysKnownSincePeerWrites.add(key)
+    }
+  }
+
+  setInternalApplyListener(
+    listener: ((keys: Iterable<TKey> | undefined) => void) | undefined,
+  ): void {
+    this.internalApplyListener = listener
+  }
+
+  /**
+   * Whether a DbClient seed holds this key against stored rows. A source
+   * write in this run supersedes the seed (decision 11).
+   */
+  holdsHydrationSeed(key: TKey): boolean {
+    return (
+      this.collection?._hasHydratedKey(key) === true &&
+      !this.runWrittenKeys.has(key)
+    )
+  }
+
+  /**
+   * How a row read from storage meets this tab. A row and metadata equal to
+   * what this tab holds are no write: the row keeps its status, a seed
+   * staying a seed (decision 15). Otherwise the row is a previous run's
+   * cache, a seed older than every source write (decision 9), unless the
+   * Collection holds it as a source row, a source wrote it in this run
+   * (decision 11), or this run's writes are unknown (decisions 13 and 15).
+   */
+  private storedStatus(row: {
+    key: TKey
+    value: T
+    metadata?: unknown
+  }): `seed` | `kept` | `written` {
+    const state = this.collection?._state
+    if (!state) return `written`
+    const seeded = state.hydrationSeedKeys.has(row.key)
+    if (
+      equalPersistedSnapshotValues(
+        state.getAcceptedSyncedRow(row.key),
+        row.value,
+      ) &&
+      (this.keepsSeedMetadata(row.key) ||
+        equalPersistedSnapshotValues(
+          this.syncControls.metadata?.row.get(row.key),
+          row.metadata,
+        ))
+    )
+      return seeded ? `seed` : `kept`
+    return !this.writesUnknown(row.key) &&
+      !this.runWrittenKeys.has(row.key) &&
+      (seeded || !state.syncedData.has(row.key))
+      ? `seed`
+      : `written`
+  }
+
+  /**
+   * Opens a storage read's transaction. Core keeps the status of each key it
+   * lists, a seed's included, so a later seed can still replace a seed, and
+   * records adapter authority for every other write. Without a list, the
+   * read is adapter work. A `begin` that opened no transaction, as in a
+   * retired sync run, marks nothing.
+   */
+  private beginStorageRead(
+    statuses: ReadonlyMap<TKey, `seed` | `kept`> | undefined,
+    sourceTruncate = false,
+  ): void {
+    const state = this.collection?._state
+    const queued = state?.pendingSyncedTransactions.length ?? 0
+    this.syncControls.begin?.()
+    const pending =
+      state && state.pendingSyncedTransactions.length > queued
+        ? state.pendingSyncedTransactions.at(-1)
+        : undefined
+    if (!pending || !statuses) return
+    pending.preserveHydrationSeedKeys = new Set(statuses.keys())
+    pending.sourceTruncate = sourceTruncate
+    for (const [key, status] of statuses)
+      if (status === `seed`) state!.hydrationSeedKeys.add(key)
+  }
+
+  /**
+   * Writes a stored row over the row this tab holds. A stored row is whole,
+   * so it replaces that row. Its metadata replaces this tab's unless this
+   * tab held the row and keeps its metadata as a seed's (decision 18).
+   */
+  private writeStoredRow(
+    row: { key: TKey; value: T; metadata?: unknown },
+    keepsSeedMetadata: boolean,
+  ): void {
+    this.syncControls.write?.({
+      type: `update`,
+      value: row.value,
+      [syncWriteNamesWholeRow]: true,
+    } as { type: `update`; value: T })
+    if (!keepsSeedMetadata || !this.keepsSeedMetadata(row.key))
+      this.writeStoredMetadata(row.key, row.metadata)
+  }
+
+  /**
+   * Whether a reload keeps this tab's metadata for the key: no source wrote
+   * it in this run, so it is a seed's (decision 18). When this run's writes
+   * are unknown, stored metadata that differs is a source write instead
+   * (decision 15).
+   */
+  private keepsSeedMetadata(key: TKey): boolean {
+    return !this.writesUnknown(key) && !this.runWrittenMetadataKeys.has(key)
+  }
+
+  private writeStoredMetadata(key: TKey, metadata: unknown): void {
+    const rowMetadata = this.syncControls.metadata?.row
+    if (equalPersistedSnapshotValues(rowMetadata?.get(key), metadata)) return
+    if (metadata === undefined) rowMetadata?.delete(key)
+    else rowMetadata?.set(key, metadata)
+  }
+
+  /**
+   * The keys among stored rows whose status a storage read keeps. Under
+   * unknown writes every other row is a source's write (decision 15), which
+   * later reads must judge as this run's.
+   */
+  private keptStatuses(
+    rows: ReadonlyArray<{ key: TKey; value: T; metadata?: unknown }>,
+  ): Map<TKey, `seed` | `kept`> {
+    const statuses = new Map<TKey, `seed` | `kept`>()
+    for (const row of rows) {
+      const status = this.storedStatus(row)
+      if (status !== `written`) statuses.set(row.key, status)
+      else if (this.writesUnknown(row.key)) this.runWrittenKeys.add(row.key)
+    }
+    return statuses
+  }
+
   private withInternalApply<TResult>(task: () => TResult): TResult {
-    this.internalApplyDepth++
+    if (this.internalApplyDepth++ === 0) this.internalApplyKeys = new Set()
     try {
       return task()
     } finally {
       this.internalApplyDepth--
+      if (this.internalApplyDepth === 0)
+        this.internalApplyListener?.(this.internalApplyKeys)
     }
   }
 
@@ -3499,7 +3716,7 @@ class PersistedCollectionRuntime<
     let boundRowVersion: number | undefined
     let replayFailure: { reason: unknown } | undefined
     const resetSequence = this.resetSequence
-    const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
+    const hydrationContext = {}
     this.activeHydrationContext = hydrationContext
     try {
       this.throwIfTerminal()
@@ -3558,9 +3775,6 @@ class PersistedCollectionRuntime<
           !config.bindKeySetEvidence ||
           this.persistedKeySetEvidence?.status !== `incompatible`
         ) {
-          for (const row of rows) {
-            hydrationContext.suppliedRowKeys.add(row.key)
-          }
           const applied = this.applyRowsToCollection(rows, validationRows)
           await whenSyncAccepted(applied)
           if (boundRowVersion !== undefined) {
@@ -3672,12 +3886,11 @@ class PersistedCollectionRuntime<
             transactionPresence.set(key, recovered)
             return recovered
           }
-          const present =
-            this.collection?._hasHydratedKey(key) === true
-              ? `present`
-              : snapshotInvalidatedByTruncate
-                ? `absent`
-                : `unknown`
+          const present = this.holdsHydrationSeed(key)
+            ? `present`
+            : snapshotInvalidatedByTruncate
+              ? `absent`
+              : `unknown`
           transactionPresence.set(key, present)
           return present
         }
@@ -3782,81 +3995,43 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    return this.withInternalApply(() => {
-      this.syncControls.begin?.()
+    const base = this.collection?.base
+    const readRows = rows.filter(
+      (row) =>
+        !(validationRows && base?.has(row.key)) &&
+        !this.holdsHydrationSeed(row.key),
+    )
+    // An accepted row a hold keeps from consumers is this tab's too.
+    const held = new Set(
+      readRows
+        .filter(
+          (row) =>
+            base?.has(row.key) ||
+            this.collection?._state.getAcceptedSyncedRow(row.key) !== undefined,
+        )
+        .map((row) => row.key),
+    )
 
-      // A full durable snapshot validates already public keys. Only the
-      // requested subset may add keys to the public Collection.
+    return this.withInternalApply(() => {
+      // One read publishes once.
+      this.beginStorageRead(this.keptStatuses(readRows))
+      // A full durable snapshot validates already public keys. Only
+      // the requested subset may add keys to the public Collection.
       if (validationRows) {
         const durableRows = new Map(validationRows.map((row) => [row.key, row]))
-        for (const key of this.collection?.base.keys() ?? []) {
-          if (this.collection?._hasHydratedKey(key)) continue
+        for (const key of base?.keys() ?? []) {
+          if (this.holdsHydrationSeed(key)) continue
           const durable = durableRows.get(key)
-          if (!durable) {
-            this.syncControls.write?.({ type: `delete`, key })
-          } else {
-            const valueChanged = !equalPersistedSnapshotValues(
-              this.collection?.base.get(key),
-              durable.value,
-            )
-            const metadataChanged = !equalPersistedSnapshotValues(
-              this.syncControls.metadata?.row.get(key),
-              durable.metadata,
-            )
-            if (
-              valueChanged ||
-              (metadataChanged && durable.metadata !== undefined)
-            ) {
-              // A persisted read supplies a complete row. In partial-update
-              // mode, deleting it within this sync transaction removes fields
-              // that are absent from the durable value before replacement.
-              if (valueChanged) {
-                this.syncControls.write?.({ type: `delete`, key })
-              }
-              this.syncControls.write?.({
-                type: `update`,
-                value: durable.value,
-                metadata: durable.metadata as
-                  Record<string, unknown> | undefined,
-              })
-            }
-            if (metadataChanged && durable.metadata === undefined) {
-              this.syncControls.metadata?.row.delete(key)
-            }
-          }
-        }
-        for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
-          []) {
-          this.syncControls.metadata?.row.delete(key)
+          if (!durable) this.syncControls.write?.({ type: `delete`, key })
+          else if (!equalPersistedSnapshotValues(base?.get(key), durable.value))
+            this.writeStoredRow(durable, true)
+          else if (!this.keepsSeedMetadata(key))
+            this.writeStoredMetadata(key, durable.metadata)
         }
       }
-
-      for (const row of rows) {
-        if (
-          (validationRows && this.collection?.base.has(row.key)) ||
-          this.collection?._hasHydratedKey(row.key)
-        ) {
-          continue
-        }
-        if (
-          this.collection?.base.has(row.key) &&
-          !equalPersistedSnapshotValues(
-            this.collection.base.get(row.key),
-            row.value,
-          )
-        ) {
-          this.syncControls.write?.({ type: `delete`, key: row.key })
-        }
-        this.syncControls.write?.({
-          type: `update`,
-          value: row.value,
-          metadata: row.metadata as Record<string, unknown> | undefined,
-        })
-      }
-
+      for (const row of readRows) this.writeStoredRow(row, held.has(row.key))
       if (collectionMetadata)
         this.applyCollectionMetadataSnapshot(collectionMetadata)
-
       return this.syncControls.commit?.() ?? true
     })
   }
@@ -3940,49 +4115,80 @@ class PersistedCollectionRuntime<
     }
 
     const base = this.collection?.base
+    // A seed accepted during a hold holds its row before it is public.
     const hydratedKeys = new Set(
-      Array.from(base?.keys() ?? []).filter(
-        (key) => this.collection?._hasHydratedKey(key) === true,
+      Array.from(this.collection?._state.hydratedKeys ?? []).filter((key) =>
+        this.holdsHydrationSeed(key),
       ),
     )
     const rowKeys = new Set(rows.map((row) => row.key))
-    // A truncate replays the Collection's demand. A follower routes that
-    // demand to its leader, whose source loads and commits again, so a
-    // follower replaces its rows in place, except after a reset, which owes
-    // the replay.
+    // A truncate replays the Collection's demand and publishes each durable
+    // row's exact shape. A follower routes that demand to its leader, whose
+    // source loads and commits again, so a follower replaces its rows in
+    // place, except after a reset, which owes the replay. A reset's truncate
+    // keeps the seeds this tab holds (decision 20).
     const followsLeader =
       this.canRouteRemoteDemandThroughCoordinator() &&
       !this.persistence.coordinator.isLeader(this.storageCollectionId)
-    const truncate = hydratedKeys.size === 0 && (replayDemand || !followsLeader)
+    const truncate = replayDemand || (hydratedKeys.size === 0 && !followsLeader)
+
+    // An accepted row a hold keeps from consumers is this tab's too.
+    const state = this.collection?._state
+    const held = new Set(
+      rows
+        .filter(
+          (row) =>
+            base?.has(row.key) ||
+            state?.getAcceptedSyncedRow(row.key) !== undefined,
+        )
+        .map((row) => row.key),
+    )
+
+    // Each accepted row that storage lacks is a source's delete, a row a
+    // hold keeps from consumers included.
+    const dropped = Array.from(
+      state?.acceptedSyncedEntries() ?? [],
+      ([key]) => key,
+    ).filter((key) => !hydratedKeys.has(key) && !rowKeys.has(key))
+    // A reset's truncate clears a kept seed's row, which it writes back.
+    const seedRows = replayDemand
+      ? Array.from(hydratedKeys, (key) => state?.getAcceptedSyncedRow(key))
+      : []
+    // A reset truncated everything before it, so what storage holds after it
+    // a source wrote in this run.
+    if (replayDemand) {
+      const restored = rows
+        .filter((row) => !hydratedKeys.has(row.key))
+        .map((row) => row.key)
+      this.noteRunWrites(restored, restored, false)
+    }
 
     return this.withInternalApply(() => {
-      this.syncControls.begin?.()
-      if (truncate) {
-        this.syncControls.truncate?.()
-      } else {
-        for (const key of base?.keys() ?? []) {
-          if (!hydratedKeys.has(key) && !rowKeys.has(key)) {
-            this.syncControls.write?.({ type: `delete`, key })
-          }
-        }
-        for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
-          []) {
-          this.syncControls.metadata?.row.delete(key)
-        }
-      }
+      // A reload is a storage read, not a source write, so its truncate
+      // replaces rows without truncating source authority, and a row it
+      // finds unchanged keeps its status (decisions 9, 11, and 15). A reset
+      // is a source truncate of all but the seeds this tab holds.
+      // A reload's truncate keeps row metadata in core, so metadata of a row
+      // that storage lacks stays until a source deletes the row (decision 16).
+      const statuses = replayDemand
+        ? new Map(Array.from(hydratedKeys, (key) => [key, `seed` as const]))
+        : this.keptStatuses(rows.filter((row) => !hydratedKeys.has(row.key)))
+      this.beginStorageRead(statuses, replayDemand)
+      if (truncate) this.syncControls.truncate?.()
+      for (const key of dropped)
+        this.syncControls.write?.({ type: `delete`, key })
+      for (const value of seedRows)
+        if (value !== undefined)
+          this.syncControls.write?.({
+            type: `update`,
+            value,
+            [syncWriteNamesWholeRow]: true,
+          } as { type: `update`; value: T })
 
       for (const row of rows) {
         if (hydratedKeys.has(row.key)) continue
-        if (!truncate && base?.has(row.key)) {
-          // Remove stale fields before applying a complete persisted row in
-          // the default partial-update mode, without truncating seed keys.
-          this.syncControls.write?.({ type: `delete`, key: row.key })
-        }
-        this.syncControls.write?.({
-          type: `update`,
-          value: row.value,
-          metadata: row.metadata as Record<string, unknown> | undefined,
-        })
+        // A reset's truncate clears metadata; a reload's keeps it.
+        this.writeStoredRow(row, !replayDemand && held.has(row.key))
       }
 
       this.applyCollectionMetadataSnapshot(collectionMetadata)
@@ -4309,6 +4515,36 @@ class PersistedCollectionRuntime<
     transaction: BufferedSyncTransaction<T, TKey>,
     streamPosition: { term: number; seq: number; rowVersion: number },
   ): PersistedTx {
+    // Only a partial update merges into its row; every other write replaces
+    // it. Storage lacks a DbClient seed's row, so a partial update that merges
+    // over it stores the row this tab shows (decision 17). The seed's metadata
+    // stays a seed's (decision 18).
+    const written = new Set<TKey>()
+    const mutations = transaction.operations.map((operation, index) => {
+      const key = operation.key
+      const partial = transaction.partialUpdateOperationIndexes.has(index)
+      const seedBase =
+        partial && !written.has(key)
+          ? transaction.seedBases?.get(key)
+          : undefined
+      written.add(key)
+      return operation.type === `update`
+        ? {
+            type:
+              partial && seedBase === undefined
+                ? (`update` as const)
+                : (`insert` as const),
+            key: operation.key,
+            value: (seedBase === undefined
+              ? operation.value
+              : { ...seedBase, ...operation.value }) as Record<string, unknown>,
+          }
+        : {
+            type: `delete` as const,
+            key: operation.key,
+            value: operation.value as Record<string, unknown>,
+          }
+    })
     return {
       txId: safeRandomUUID(),
       term: streamPosition.term,
@@ -4316,19 +4552,7 @@ class PersistedCollectionRuntime<
       rowVersion: streamPosition.rowVersion,
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
       truncate: transaction.truncate,
-      mutations: transaction.operations.map((operation) =>
-        operation.type === `update`
-          ? {
-              type: `update` as const,
-              key: operation.key,
-              value: operation.value as Record<string, unknown>,
-            }
-          : {
-              type: `delete` as const,
-              key: operation.key,
-              value: operation.value as Record<string, unknown>,
-            },
-      ),
+      mutations,
       rowMetadataMutations: toMetadataMutations(transaction.rowMetadataWrites),
       collectionMetadataMutations: toMetadataMutations(
         transaction.collectionMetadataWrites,
@@ -4896,7 +5120,7 @@ class PersistedCollectionRuntime<
         // This payload could have been committed before the schema reset.
         // The current durable snapshot is the only safe row authority.
         await this.runInHydrationScope((adapter) =>
-          this.reloadActiveSubsetsUnsafe(adapter),
+          this.reloadUnknownWritesUnsafe(adapter),
         )
         return
       }
@@ -4995,15 +5219,8 @@ class PersistedCollectionRuntime<
     // it moves the stream position. A sync transaction that begins later
     // straddles it; one that ends before then never crosses it.
     this.throwIfReservedCommitOpen()
-    // Every reload in this recovery continues its hydration cycle.
-    const reloadInCycle = (adapter: HydrationPersistenceAdapter) =>
-      this.reloadActiveSubsetsUnsafe(
-        adapter,
-        /* skipUnchangedReplace */ false,
-        /* restoreResetBaseline */ false,
-        /* replayDemand */ false,
-        /* continuesHydrationCycle */ true,
-      )
+    // Every reload in this recovery continues its hydration cycle, under
+    // unknown writes: the missed notices named no keys.
     if (this.persistence.coordinator.pullSince && this.latestRowVersion >= 0) {
       let pullResponse: PullSinceResponse | undefined
       try {
@@ -5040,7 +5257,9 @@ class PersistedCollectionRuntime<
             pullResponse.latestRowVersion,
           )
           if (pullResponse.requiresFullReload) {
-            await this.runInHydrationScope((adapter) => reloadInCycle(adapter))
+            await this.runInHydrationScope((adapter) =>
+              this.reloadUnknownWritesUnsafe(adapter, false, true),
+            )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
               pullResponse.latestRowVersion,
@@ -5049,7 +5268,9 @@ class PersistedCollectionRuntime<
           }
           const deltas = pullResponse.deltas
           if (!deltas) {
-            await this.runInHydrationScope((adapter) => reloadInCycle(adapter))
+            await this.runInHydrationScope((adapter) =>
+              this.reloadUnknownWritesUnsafe(adapter, false, true),
+            )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
               pullResponse.latestRowVersion,
@@ -5092,8 +5313,10 @@ class PersistedCollectionRuntime<
     if (lifecycleGeneration !== this.lifecycleGeneration) return false
     // A gap is not a schema reset. Replace the durable snapshot in one
     // publication so readers never see an empty intermediate Collection.
+    // The missed notices named no keys, so every stored row may be this
+    // run's.
     await this.runInHydrationScope((adapter) =>
-      this.reloadActiveSubsetsUnsafe(adapter),
+      this.reloadUnknownWritesUnsafe(adapter),
     )
     this.publicRowVersion = Math.max(
       this.publicRowVersion,
@@ -5214,7 +5437,24 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
     continuesHydrationCycle = false,
   ): Promise<void> {
+    if (!txCommitted.requiresFullReload) {
+      for (const key of [
+        ...txCommitted.changedRows.map((row) => row.key),
+        ...txCommitted.deletedKeys,
+      ])
+        this.runWrittenKeys.add(key as TKey)
+      // A peer's row comes with its metadata (decision 11).
+      for (const key of [
+        ...txCommitted.changedRows.map((row) => row.key),
+        ...txCommitted.deletedKeys,
+        ...(txCommitted.rowMetadataMutations ?? []).map(
+          (mutation) => mutation.key,
+        ),
+      ])
+        this.runWrittenMetadataKeys.add(key as TKey)
+    }
     if (this.scopedRecovery) {
+      if (txCommitted.requiresFullReload) this.runWritesUnknown = true
       this.refreshScopedSubsets()
       return
     }
@@ -5232,7 +5472,14 @@ class PersistedCollectionRuntime<
       )
 
     if (txCommitted.requiresFullReload) {
-      await reloadActiveSubsets(txCommitted.reconciliationReload === true)
+      await this.runInHydrationScope(
+        (scopedAdapter) =>
+          this.reloadUnknownWritesUnsafe(
+            scopedAdapter,
+            txCommitted.reconciliationReload === true,
+          ),
+        adapter,
+      )
       return
     }
 
@@ -5259,15 +5506,20 @@ class PersistedCollectionRuntime<
     const hasChangedAndDeletedKey = txCommitted.deletedKeys.some((key) =>
       changedKeys.has(key),
     )
-    const hasChangedPublicKey = txCommitted.changedRows.some((row) =>
-      this.collection?.base.has(row.key as TKey),
-    )
+    // A row that held transactions write is ambiguous in the same way while
+    // consumers still see the earlier row, unless the notice carries exactly
+    // that row: a commit this tab already knows rereads nothing.
+    const hasChangedPublicKey = txCommitted.changedRows.some((row) => {
+      if (this.collection?.base.has(row.key as TKey)) return true
+      const held = this.collection?._state.getAcceptedSyncedRow(row.key as TKey)
+      return (
+        held !== undefined && !equalPersistedSnapshotValues(held, row.value)
+      )
+    })
     const hasUnseenDemandedKey =
       this.activeSubsets.size > 0 &&
       txCommitted.changedRows.some(
-        (row) =>
-          !this.collection?.base.has(row.key as TKey) &&
-          !this.collection?._hasHydratedKey(row.key as TKey),
+        (row) => !this.collection?.base.has(row.key as TKey),
       )
     if (
       hasRepeatedChange ||
@@ -5289,6 +5541,10 @@ class PersistedCollectionRuntime<
     await reloadActiveSubsets()
   }
 
+  /**
+   * Applies a notice that names its keys. Its keys are this run's source
+   * writes, over any seed they land on (decision 11).
+   */
   private async applyTargetedInvalidationUnsafe(
     txCommitted: TxCommitted & { requiresFullReload: false },
   ): Promise<void> {
@@ -5304,7 +5560,6 @@ class PersistedCollectionRuntime<
         value: newValue,
       } of txCommitted.changedRows) {
         const key = changedKey as TKey
-        if (this.collection?._hasHydratedKey(key)) continue
         const previous = this.collection?.base.get(key)
         if (previous === undefined && this.activeSubsets.size === 0) continue
         const completeValue = {
@@ -5326,17 +5581,10 @@ class PersistedCollectionRuntime<
         }
       }
 
-      for (const deletedKey of txCommitted.deletedKeys) {
-        const key = deletedKey as TKey
-        if (!this.collection?._hasHydratedKey(key)) {
-          this.syncControls.write?.({ type: `delete`, key })
-        }
-      }
+      for (const deletedKey of txCommitted.deletedKeys)
+        this.syncControls.write?.({ type: `delete`, key: deletedKey as TKey })
 
       txCommitted.rowMetadataMutations?.forEach((mutation) => {
-        // A DbClient hydration seed owns both its row and row metadata until
-        // an accepted source transaction confirms the key.
-        if (this.collection?._hasHydratedKey(mutation.key as TKey)) return
         applyMetadataWrite(
           this.syncControls.metadata?.row,
           mutation.key as TKey,
@@ -5355,6 +5603,27 @@ class PersistedCollectionRuntime<
       return this.syncControls.commit?.() ?? true
     })
     await whenSyncAccepted(applied)
+  }
+
+  /**
+   * Reloads storage after notices that named no keys: any stored row or
+   * metadata of a key this tab has not written since may be a source's
+   * write (decisions 13 and 15).
+   */
+  private async reloadUnknownWritesUnsafe(
+    adapter: HydrationPersistenceAdapter,
+    skipUnchangedReplace = false,
+    continuesHydrationCycle = false,
+  ): Promise<void> {
+    this.peerWritesUnknown = true
+    this.keysKnownSincePeerWrites.clear()
+    await this.reloadActiveSubsetsUnsafe(
+      adapter,
+      skipUnchangedReplace,
+      /* restoreResetBaseline */ false,
+      /* replayDemand */ false,
+      continuesHydrationCycle,
+    )
   }
 
   private async reloadActiveSubsetsUnsafe(
@@ -5392,13 +5661,13 @@ class PersistedCollectionRuntime<
       : Array.from(this.collection?.base ?? [])
           .filter(
             ([key, row]) =>
-              !this.collection?._hasHydratedKey(key) &&
+              !this.holdsHydrationSeed(key) &&
               !matchesAnySubset(row, evaluators),
           )
           .map(([key]) => key)
 
     this.hydratedDemands.clear()
-    const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
+    const hydrationContext = {}
     this.activeHydrationContext = hydrationContext
     this.hydratingGeneration = lifecycleGeneration
     try {
@@ -5473,10 +5742,6 @@ class PersistedCollectionRuntime<
       )
         return
 
-      for (const key of mergedRows.keys()) {
-        hydrationContext.suppliedRowKeys.add(key)
-      }
-
       if (activeSubsetOptions.length === 0) {
         // Retired demand does not hide already public rows. Validate only
         // those keys; do not publish unrelated durable rows without demand.
@@ -5492,30 +5757,17 @@ class PersistedCollectionRuntime<
           ),
         )
       } else if (
-        skipUnchangedReplace &&
-        this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
+        // Equal public rows do not republish.
+        !skipUnchangedReplace ||
+        !this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
       ) {
-        // A full replacement would also clear metadata for missing rows.
-        // Clear only those entries so equal public rows do not republish.
-        const orphanKeys =
-          this.collection?._syncedRowMetadataKeysOutsideBase() ?? []
-        if (orphanKeys.length > 0) {
-          const applied = this.withInternalApply(() => {
-            this.syncControls.begin?.()
-            for (const key of orphanKeys) {
-              this.syncControls.metadata?.row.delete(key)
-            }
-            return this.syncControls.commit?.() ?? true
-          })
-          await whenSyncAccepted(applied)
-        }
-      } else {
+        const rows = Array.from(mergedRows, ([key, row]) => ({
+          key,
+          value: row.value,
+          metadata: row.metadata,
+        }))
         const applied = this.replaceCollectionSnapshot(
-          Array.from(mergedRows.entries()).map(([key, row]) => ({
-            key,
-            value: row.value,
-            metadata: row.metadata,
-          })),
+          rows,
           collectionMetadata,
           replayDemand,
         )
@@ -5823,19 +6075,10 @@ function createWrappedSyncConfig<
       const bindToCurrentHydration = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
+        // A transaction binds to a storage read when it commits (decision 12).
         if (transaction.internal || !runtime.isHydratingNow()) return
-        const hydrationSequence = runtime.getHydrationSequence()
-        if (
-          transaction.hydrationSequence !== undefined &&
-          transaction.hydrationSequence !== hydrationSequence
-        ) {
-          throw new InvalidPersistedCollectionConfigError(
-            `a persisted sync transaction cannot cross a hydration cycle`,
-          )
-        }
         transaction.queuedBecauseHydrating = true
-        transaction.hydrationSequence = hydrationSequence
-        transaction.hydrationContext = runtime.getActiveHydrationContext()
+        transaction.hydrationSequence = runtime.getHydrationSequence()
       }
       const assertHydrationSequenceCurrent = (
         transaction: OpenSyncTransaction<T, TKey>,
@@ -5864,18 +6107,29 @@ function createWrappedSyncConfig<
         if (index === -1) return
         pendingPublicationTransactions.splice(index, 1)
         // A deferred transaction that never reaches the Collection releases
-        // the optimistic rows it held.
-        if (!transaction.handedToCollection)
+        // the optimistic rows it held, and enclosing inserts judged against
+        // its writes are judged again without them.
+        if (!transaction.handedToCollection) {
           params.collection._state.recomputeOptimisticState(false)
+          rejudgeEnclosing(
+            transaction.truncate ? undefined : transaction.operationKeys,
+          )
+        }
       }
       // Committed source transactions not yet handed to the Collection. Core
-      // holds settled optimistic rows on their keys until they apply.
-      params.collection._state.setDeferredSyncKeys((key) =>
-        pendingPublicationTransactions.some(
-          (transaction) =>
-            !transaction.handedToCollection &&
-            transaction.operationKeys.has(key),
-        ),
+      // holds settled optimistic rows on their keys until they apply, and a
+      // late hydration seed cannot supersede them.
+      params.collection._state.setDeferredSyncKeys(
+        (key) =>
+          pendingPublicationTransactions.some(
+            (transaction) =>
+              !transaction.handedToCollection &&
+              transaction.operationKeys.has(key),
+          ),
+        () =>
+          pendingPublicationTransactions.filter(
+            (transaction) => !transaction.handedToCollection,
+          ),
       )
       // A source receipt is accepted once its rows are durable, and resolves
       // when core makes them visible.
@@ -5899,9 +6153,99 @@ function createWrappedSyncConfig<
       }
       const metadataValue = (write: MetadataWrite) =>
         write.type === `delete` ? undefined : write.value
-      // A metadata read sees the open transaction's write, then the newest
-      // staged one, then the Collection's. A truncate hides older row
-      // metadata. Reading a staged write makes its transaction a dependency.
+      // The row that the source's staged writes leave, in commit order then
+      // the open transactions, or undefined when none writes the key. Each
+      // transaction keeps its row per key, so the read folds one entry per
+      // transaction. `before` stops at one transaction, using the row it had
+      // left just before one of its inserts.
+      const stagedRow = (
+        key: TKey,
+        before?: {
+          transaction: OpenSyncTransaction<T, TKey>
+          row?: StagedRow<T>
+        },
+      ): { present: boolean; value?: T } | undefined => {
+        let row: { present: boolean; value?: T } | undefined
+        for (const transactions of [
+          pendingPublicationTransactions,
+          transactionStack,
+        ])
+          for (const transaction of transactions) {
+            if (transaction.truncate) row = { present: false }
+            const staged =
+              transaction === before?.transaction
+                ? before.row
+                : transaction.stagedRows.get(key)
+            if (staged)
+              row = staged.partial
+                ? {
+                    present: true,
+                    value: {
+                      ...(row === undefined
+                        ? params.collection._state.getAcceptedSyncedRow(key)
+                        : row.value),
+                      ...staged.value,
+                    } as T,
+                  }
+                : staged
+            if (transaction === before?.transaction) return row
+          }
+        return row
+      }
+      // A transaction begun inside an open one commits ahead of it, so an
+      // enclosing insert of a key it wrote can land on a different row, or
+      // on no row. An insert replaces the row it lands on (decision C1), so
+      // the enclosing transaction stays valid, but whether its insert clears
+      // metadata follows the row it now lands on, as in core.
+      // Only the keys that landed ahead are judged again; without keys, as
+      // after a truncate, every key is.
+      const rejudgeEnclosing = (written?: Iterable<TKey>) => {
+        for (const transaction of transactionStack) {
+          const keys = written ?? transaction.implicitMetadata.keys()
+          // An insert without metadata clears it unless it now re-inserts;
+          // when every one re-inserts, the write before them stands.
+          for (const key of keys) {
+            const implicit = transaction.implicitMetadata.get(key)
+            if (!implicit) continue
+            const clears = implicit.inserts.some(
+              (insert) =>
+                !isEqualReinsert(key, insert.value, {
+                  transaction,
+                  row: insert.before,
+                }),
+            )
+            if (clears)
+              transaction.rowMetadataWrites.set(key, { type: `delete` })
+            else if (implicit.previous)
+              transaction.rowMetadataWrites.set(key, implicit.previous)
+            else transaction.rowMetadataWrites.delete(key)
+          }
+        }
+      }
+      // An insert equal to a row a source wrote in this run, this tab's or a
+      // peer's, keeps its metadata (the row-metadata rules of 2026-10-05 and
+      // decision 11); over a cached or seeded row it is an insert. Without a
+      // staged write, core classifies the insert against its accepted rows.
+      const isEqualReinsert = (
+        key: TKey,
+        value: T,
+        before?: {
+          transaction: OpenSyncTransaction<T, TKey>
+          row?: StagedRow<T>
+        },
+      ): boolean => {
+        const staged = stagedRow(key, before)
+        if (staged) return staged.present && deepEquals(staged.value, value)
+        return (
+          runtime.isRunWritten(key) &&
+          params.collection._state.classifyPendingSyncedInsert(key, value) ===
+            `update`
+        )
+      }
+      // A metadata read sees the open transactions' writes, innermost first,
+      // then the newest staged one, then the Collection's. A truncate hides
+      // older row metadata. Reading a staged write makes its transaction a
+      // dependency.
       const readStagedMetadata = <K>(
         key: K,
         getMap: (
@@ -5911,10 +6255,12 @@ function createWrappedSyncConfig<
         stored: () => unknown,
       ): unknown => {
         if (startupState.cleanedUp) return undefined
-        const openTransaction = getOpenTransaction()
-        const openWrite = openTransaction && getMap(openTransaction).get(key)
-        if (openWrite) return metadataValue(openWrite)
-        if (truncates && openTransaction?.truncate) return undefined
+        for (let index = transactionStack.length - 1; index >= 0; index--) {
+          const transaction = transactionStack[index]!
+          const write = getMap(transaction).get(key)
+          if (write) return metadataValue(write)
+          if (truncates && transaction.truncate) return undefined
+        }
         for (
           let index = pendingPublicationTransactions.length - 1;
           index >= 0;
@@ -6043,30 +6389,40 @@ function createWrappedSyncConfig<
         }
         try {
           assertHydrationSequenceCurrent(transaction)
-          for (const key of transaction.deferredHydrationMetadataDeleteKeys) {
-            if (
-              !transaction.hydrationContext?.suppliedRowKeys.has(key) &&
-              !transaction.rowMetadataWrites.has(key)
-            ) {
-              transaction.rowMetadataWrites.set(key, { type: `delete` })
-            }
-          }
-          transaction.deferredHydrationMetadataDeleteKeys.clear()
 
           params.begin(transaction.beginOptions)
           if (transaction.truncateOptions)
             params.truncate(transaction.truncateOptions)
-          for (const operation of transaction.operations) {
+          if (transaction.seedBases) {
+            for (const key of transaction.operationKeys)
+              if (runtime.holdsHydrationSeed(key))
+                transaction.seedBases.set(
+                  key,
+                  params.collection._state.getAcceptedSyncedRow(key),
+                )
+          }
+          transaction.operations.forEach((operation) => {
             if (operation.type === `delete`) {
               params.write({ type: `delete`, key: operation.key })
-            } else {
-              params.write({
-                type: `update`,
-                value: operation.value,
-                metadata: operation.metadata,
-              })
+              return
             }
-          }
+            // An insert names the whole row, so it replaces the row it lands
+            // on: a seeded or cached row, which is older than every source
+            // write, or a row an enclosing open transaction hid when it was
+            // written and this insert committed ahead of. The wrapper judged
+            // its metadata when the source wrote it: an insert that clears
+            // metadata staged a delete, and an equal re-insert keeps it
+            // without writing it. Core applies it as an update that names the
+            // whole row, so only those writes change its metadata.
+            params.write({
+              type: `update`,
+              value: operation.value,
+              metadata: operation.metadata,
+              ...(transaction.insertOperations.has(operation)
+                ? { [syncWriteNamesWholeRow]: true }
+                : {}),
+            } as ChangeMessageOrDeleteKeyMessage<T, TKey>)
+          })
           if (params.metadata) {
             for (const [key, write] of transaction.rowMetadataWrites) {
               applyMetadataWrite(params.metadata.row, key, write)
@@ -6080,6 +6436,14 @@ function createWrappedSyncConfig<
           // aborted; only then do core's own holds cover its keys.
           transaction.handedToCollection = signal?.aborted !== true
           const applied = params.commit(signal)
+          // Only a transaction core received is a source write of this run;
+          // an abandoned one wrote nothing.
+          if (!transaction.internal && transaction.handedToCollection)
+            runtime.noteRunWrites(
+              transaction.operationKeys,
+              transaction.rowMetadataWrites.keys(),
+              transaction.truncate,
+            )
           transaction.applicationReceipt = applied
           // Core accepted the transaction, so it is no longer staged here;
           // the receipt resolves when it is visible.
@@ -6103,6 +6467,9 @@ function createWrappedSyncConfig<
           fail: params.fail,
         },
       )
+      // Rows a storage read or a peer's notice lands in the Collection come
+      // ahead of the open source transactions (decisions 7, 10, and 11).
+      runtime.setInternalApplyListener(rejudgeEnclosing)
 
       const findReservedTransaction = () =>
         transactionStack.find(
@@ -6260,29 +6627,20 @@ function createWrappedSyncConfig<
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
             partialUpdateOperationIndexes: new Set(),
+            insertOperations: new Set(),
+            implicitMetadata: new Map(),
+            stagedRows: new Map(),
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
-            deferredHydrationMetadataDeleteKeys: new Set(),
             truncate: options?.snapshot === true,
             beginOptions: options,
             internal,
             lifecycleGeneration: runtime.getLifecycleGeneration(),
             operationKeys: new Set(),
             hasDependentSuccessor: false,
-            queuedBecauseHydrating:
-              terminalFailure === undefined &&
-              !internal &&
-              runtime.isHydratingNow(),
-            hydrationSequence:
-              terminalFailure === undefined && !internal
-                ? runtime.getHydrationSequence()
-                : undefined,
-            hydrationContext:
-              terminalFailure === undefined &&
-              !internal &&
-              runtime.isHydratingNow()
-                ? runtime.getActiveHydrationContext()
-                : undefined,
+            // A transaction binds to a storage read when it commits
+            // (decision 12), so it may stay open across one.
+            queuedBecauseHydrating: false,
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
           transactionStack.push(transaction)
@@ -6300,8 +6658,10 @@ function createWrappedSyncConfig<
           if (!openTransaction) {
             throw new NoPendingSyncTransactionWriteError()
           }
-          bindToCurrentHydration(openTransaction)
           const normalization = runtime.normalizeSyncWriteMessage(message)
+          const reinserts =
+            message.type === `insert` &&
+            isEqualReinsert(normalization.operation.key, message.value)
 
           if (
             message.type === `update` &&
@@ -6322,8 +6682,39 @@ function createWrappedSyncConfig<
             }
           }
 
+          if (message.type === `insert` && !openTransaction.internal)
+            openTransaction.insertOperations.add(normalization.operation)
           openTransaction.operations.push(normalization.operation)
           openTransaction.operationKeys.add(normalization.operation.key)
+          const staged = openTransaction.stagedRows.get(
+            normalization.operation.key,
+          )
+          openTransaction.stagedRows.set(
+            normalization.operation.key,
+            normalization.operation.type === `delete`
+              ? { present: false, partial: false }
+              : openTransaction.partialUpdateOperationIndexes.has(
+                    openTransaction.operations.length - 1,
+                  )
+                ? {
+                    present: true,
+                    value: {
+                      ...staged?.value,
+                      ...normalization.operation.value,
+                    },
+                    partial: staged?.partial ?? true,
+                  }
+                : {
+                    present: true,
+                    value: normalization.operation.value,
+                    partial: false,
+                  },
+          )
+          // A write that names the row's metadata ends the inserts that
+          // decided it. An update without metadata keeps it, and an insert
+          // without metadata joins those inserts.
+          if (message.type === `delete` || message.metadata !== undefined)
+            openTransaction.implicitMetadata.delete(normalization.operation.key)
           if (normalization.operation.type === `delete`) {
             openTransaction.rowMetadataWrites.set(normalization.operation.key, {
               type: `delete`,
@@ -6332,25 +6723,19 @@ function createWrappedSyncConfig<
             message.type === `insert` &&
             normalization.operation.metadata === undefined
           ) {
-            // Reset stale metadata for a fresh insert, but don't clobber an
-            // explicit metadata write already queued for this key in the same
-            // transaction (e.g. query reconcile stamps owners, then inserts).
-            if (openTransaction.queuedBecauseHydrating) {
-              openTransaction.deferredHydrationMetadataDeleteKeys.add(
-                normalization.operation.key,
-              )
-            } else if (
-              !openTransaction.rowMetadataWrites.has(
-                normalization.operation.key,
-              )
-            ) {
-              openTransaction.rowMetadataWrites.set(
-                normalization.operation.key,
-                {
-                  type: `delete`,
-                },
-              )
-            }
+            // An insert names the row's whole metadata, so one without
+            // metadata clears it; the last write for a key wins.
+            const key = normalization.operation.key
+            const implicit = openTransaction.implicitMetadata.get(key)
+            const insert = { value: message.value, before: staged }
+            if (implicit) implicit.inserts.push(insert)
+            else
+              openTransaction.implicitMetadata.set(key, {
+                inserts: [insert],
+                previous: openTransaction.rowMetadataWrites.get(key),
+              })
+            if (!reinserts)
+              openTransaction.rowMetadataWrites.set(key, { type: `delete` })
           } else if (normalization.operation.metadata !== undefined) {
             openTransaction.rowMetadataWrites.set(normalization.operation.key, {
               type: `set`,
@@ -6370,6 +6755,7 @@ function createWrappedSyncConfig<
                     () => params.metadata!.row.get(key),
                   ),
                 set: (key: TKey, value: unknown) => {
+                  getOpenTransaction()?.implicitMetadata.delete(key)
                   updateMetadataWrite(
                     key,
                     { type: `set`, value },
@@ -6378,6 +6764,7 @@ function createWrappedSyncConfig<
                   )
                 },
                 delete: (key: TKey) => {
+                  getOpenTransaction()?.implicitMetadata.delete(key)
                   updateMetadataWrite(
                     key,
                     { type: `delete` },
@@ -6435,12 +6822,11 @@ function createWrappedSyncConfig<
                   for (const owner of new Set(pendingOwners.values())) {
                     markPendingMetadataDependency(owner)
                   }
-                  const openTransaction = getOpenTransaction()
-                  if (openTransaction) {
+                  for (const transaction of transactionStack) {
                     for (const [
                       key,
                       metadataWrite,
-                    ] of openTransaction.collectionMetadataWrites) {
+                    ] of transaction.collectionMetadataWrites) {
                       applyMetadataWrite(merged, key, metadataWrite)
                     }
                   }
@@ -6467,8 +6853,10 @@ function createWrappedSyncConfig<
           openTransaction.operations = []
           openTransaction.operationKeys.clear()
           openTransaction.partialUpdateOperationIndexes.clear()
+          openTransaction.insertOperations.clear()
+          openTransaction.implicitMetadata.clear()
+          openTransaction.stagedRows.clear()
           openTransaction.rowMetadataWrites.clear()
-          openTransaction.deferredHydrationMetadataDeleteKeys.clear()
           // Intentionally preserve collectionMetadataWrites across truncate.
           // Callers (for example electric resume/reset handling) may stage
           // collection-scoped metadata before truncating row data, and those
@@ -6506,25 +6894,19 @@ function createWrappedSyncConfig<
             const error = new SyncTransactionAbortedError()
             return abortPublicationTransaction(openTransaction, error)
           }
-          try {
-            bindToCurrentHydration(openTransaction)
-            assertHydrationSequenceCurrent(openTransaction)
-          } catch (error) {
-            settlePublicationAdmissionWaiters(openTransaction)
-            throw error
-          }
+          bindToCurrentHydration(openTransaction)
           const transaction = {
             operations: openTransaction.operations,
             partialUpdateOperationIndexes:
               openTransaction.partialUpdateOperationIndexes,
+            insertOperations: openTransaction.insertOperations,
             rowMetadataWrites: openTransaction.rowMetadataWrites,
             collectionMetadataWrites: openTransaction.collectionMetadataWrites,
-            deferredHydrationMetadataDeleteKeys:
-              openTransaction.deferredHydrationMetadataDeleteKeys,
-            hydrationContext: openTransaction.hydrationContext,
             hydrationSequence: openTransaction.hydrationSequence,
             truncate: openTransaction.truncate,
             internal: false,
+            // The handoff fills it; the durable step reads it.
+            seedBases: (openTransaction.seedBases = new Map()),
             lifecycleGeneration: openTransaction.lifecycleGeneration,
             expectedResumeGenerationOwner:
               openTransaction.expectedResumeGenerationOwner,
@@ -6543,7 +6925,16 @@ function createWrappedSyncConfig<
               openTransaction.operations = baselineOperations.concat(
                 openTransaction.operations,
               )
-              for (const { key, metadata } of rows) {
+              for (const { key, value, metadata } of rows) {
+                // The baseline row comes first, under the transaction's own
+                // writes of the key.
+                const staged = openTransaction.stagedRows.get(key)
+                if (!staged || staged.partial)
+                  openTransaction.stagedRows.set(key, {
+                    present: true,
+                    value: { ...value, ...staged?.value },
+                    partial: false,
+                  })
                 if (
                   metadata !== undefined &&
                   !openTransaction.rowMetadataWrites.has(key)
@@ -6561,6 +6952,11 @@ function createWrappedSyncConfig<
           }
           openTransaction.signal = signal
           pendingPublicationTransactions.push(openTransaction)
+          rejudgeEnclosing(
+            openTransaction.truncate
+              ? undefined
+              : openTransaction.operationKeys,
+          )
           if (
             openTransaction.queuedBecauseHydrating &&
             runtime.isHydratingNow()
