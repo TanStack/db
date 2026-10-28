@@ -138,9 +138,10 @@ the harness's own edit tools make. After an edit through a shell command, or
 in a harness without these hooks, run `pnpm lint:changed` before you finish.
 
 The end-of-turn hook and `pnpm lint:changed` also report every oracle run
-budget that the branch lowered, and CI prints it as a warning. A lowered
-budget can be deliberate. Restore it, or explain the reason in the pull
-request.
+budget that the branch lowered or removed, and CI prints it as a warning. A
+budget is removed when its key is in no oracle file, or in a module that an
+oracle file imports, any more. A lowered or removed budget can be deliberate.
+Restore it, or explain the reason in the pull request.
 
 Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
 pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
@@ -728,6 +729,15 @@ state model, differential or metamorphic comparison, or reusable law checker.
 Modules that define the model, checker, or its history grammar also qualify.
 Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
+
+An oracle file holds only oracle tests. It declares its check, model, and history
+grammar with `declareOracle` from `packages/db/tests/oracle-declaration.ts`. A
+type-level oracle names its model types in `typeModel`. Each
+part is optional. Every test in the file must use a declared part, directly
+or through a driver, or run a generated property that states its law inline.
+A test that compares production with a hand-written value is a unit test:
+put it in an ordinary test file. The `oracle/no-unit-test` lint rule reports
+a test that does neither.
 
 Ordinary example tests, type assertions, fixtures, registration wrappers, and
 runner utilities keep their ordinary names. A module that only drives production

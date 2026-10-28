@@ -1,3 +1,4 @@
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
 
 /**
@@ -531,3 +532,5 @@ export function coverageViolations(
   }
   return violations
 }
+
+declareOracle({ check: [coverageViolations], model: [expectedObservations] })

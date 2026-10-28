@@ -12,6 +12,7 @@ import {
   SQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
 } from '../src/index.js'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createSerializedNodeSqliteDriver as createDriver } from './helpers/node-sqlite-driver.js'
 import {
   drain,
@@ -2284,6 +2285,12 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+declareOracle({
+  check: [coverageViolations, firstMismatch, sameObservation],
+  model: [expectedTrace],
+  grammar: [ALL_CELLS],
+})
+
 describe(`persisted demand coverage oracle`, () => {
   // -------------------------------------------------------------------------
   // Calibration: the comparison rejects wrong answers, and each block
@@ -2316,24 +2323,6 @@ describe(`persisted demand coverage oracle`, () => {
         { queryStatus: `ready`, preload: `resolved`, rows: [] },
       ),
     ).toBe(false)
-  })
-
-  it(`preserves a primary failure when cleanup also fails`, async () => {
-    const mismatch = new Error(`wrong rows`)
-    const cleanupFailure = new Error(`cleanup failed`)
-    await expect(
-      withCleanup(
-        () => Promise.reject(mismatch),
-        [
-          () => {
-            throw cleanupFailure
-          },
-        ],
-      ),
-    ).rejects.toMatchObject({
-      cause: mismatch,
-      errors: [mismatch, cleanupFailure],
-    })
   })
 
   const wrongDesigns: ReadonlyArray<{ design: Design; witness: Cell }> = [

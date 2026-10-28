@@ -96,7 +96,7 @@ const todosCollection = createCollection(
     ...electricCollectionOptions({
       id: 'todos',
       shapeOptions: { url: '/api/electric/todos' },
-      getKey: (item) => item.id,
+      getKey: (item: { id: string }) => item.id,
     }),
     persistence,
     schemaVersion: 1,

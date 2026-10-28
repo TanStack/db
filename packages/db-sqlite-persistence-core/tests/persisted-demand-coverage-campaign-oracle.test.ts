@@ -12,6 +12,7 @@ import {
   oracleReplayRequested,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   SQLiteCorePersistenceAdapter,
@@ -1062,6 +1063,25 @@ async function campaign(options: Parameters<typeof fc.assert>[1]) {
   return reach.counts()
 }
 
+// The release law: a released load owns no wait, so the source Collection is
+// not loading a subset after the release, nor after the wait would have
+// passed.
+function checkRelease(
+  steps: number,
+  observed: { loadingAfterRelease: boolean; loadingAfterWait: boolean },
+): void {
+  expect({ steps, ...observed }).toEqual({
+    steps,
+    loadingAfterRelease: false,
+    loadingAfterWait: false,
+  })
+}
+
+declareOracle({
+  check: [coverageViolations, checkFault, checkRelease],
+  grammar: [historyArb],
+})
+
 describe(`persisted demand coverage over generated histories`, () => {
   it(`keeps the law when any one storage call fails`, async () => {
     quietConsole()
@@ -1114,14 +1134,10 @@ describe(`persisted demand coverage over generated histories`, () => {
     )
     for (let steps = 0; steps <= 24; steps++) {
       reach.beginHistory()
-      const observed = await runReleaseAt(driver, steps, (state) =>
-        reach.reach(state),
-      )
-      expect({ steps, ...observed }).toEqual({
+      checkRelease(
         steps,
-        loadingAfterRelease: false,
-        loadingAfterWait: false,
-      })
+        await runReleaseAt(driver, steps, (state) => reach.reach(state)),
+      )
     }
     reach.assertReached()
   }, 300_000)

@@ -23,7 +23,7 @@
     "dev": "vite build --watch",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit --project tsconfig.test.json",
     "lint": "eslint src"
   },
   "type": "module",

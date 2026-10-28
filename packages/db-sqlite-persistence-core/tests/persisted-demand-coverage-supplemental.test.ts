@@ -194,3 +194,25 @@ describe(`persisted demand coverage beside other owners' laws`, () => {
     })
   })
 })
+
+describe(`demand coverage test driver`, () => {
+  // The harness keeps an oracle mismatch as the primary failure even when
+  // cleanup fails too (ORC-010).
+  it(`preserves a primary failure when cleanup also fails`, async () => {
+    const mismatch = new Error(`wrong rows`)
+    const cleanupFailure = new Error(`cleanup failed`)
+    await expect(
+      withCleanup(
+        () => Promise.reject(mismatch),
+        [
+          () => {
+            throw cleanupFailure
+          },
+        ],
+      ),
+    ).rejects.toMatchObject({
+      cause: mismatch,
+      errors: [mismatch, cleanupFailure],
+    })
+  })
+})

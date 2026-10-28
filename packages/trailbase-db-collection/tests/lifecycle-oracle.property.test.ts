@@ -2,9 +2,20 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
+import {
+  deferred,
+  failure,
+  invalidValue,
+  observe,
+  sortedRows,
+  source,
+  turn,
+} from './lifecycle-support'
 import type { Event, ListResponse } from 'trailbase'
+import type { RaceRow, Row } from './lifecycle-support'
 
 /**
  * # Does a TrailBase sync run publish and retire one valid row history?
@@ -27,7 +38,6 @@ import type { Event, ListResponse } from 'trailbase'
  * the boundary intentionally left to service-backed tests.
  */
 
-type Row = { id: number; value: number }
 type Change = { operation: `set` | `delete`; id: number; value: number }
 type Ending =
   `close` | `buffered-close` | `read-error` | `parse-error` | `cleanup`
@@ -51,65 +61,6 @@ type SyncRunPlan =
 type Scenario = {
   mode: `eager` | `on-demand`
   syncRuns: Array<SyncRunPlan>
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes
-    reject = no
-  })
-  // Every adapter promise is observed even when its sync run is abandoned.
-  void promise.catch(() => undefined)
-  return { promise, resolve, reject }
-}
-
-function observe(promise: Promise<unknown>) {
-  let result: `pending` | `fulfilled` | `rejected` = `pending`
-  let error: unknown
-  void promise.then(
-    () => {
-      result = `fulfilled`
-    },
-    (failure: unknown) => {
-      result = `rejected`
-      error = failure
-    },
-  )
-  return {
-    get result() {
-      return result
-    },
-    get error() {
-      return error
-    },
-  }
-}
-
-// All adapter I/O is gated. One host turn drains native stream microtasks and
-// exposes detached rejections; it does not stand in for a network completion.
-const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-const failure = new Error(`oracle stream failure`)
-const invalidValue = -10_000
-
-function source() {
-  let controller!: ReadableStreamDefaultController<Event>
-  const cancel = vi.fn((): void | Promise<void> => {})
-  const stream = new ReadableStream<Event>({
-    start(value) {
-      controller = value
-    },
-    cancel,
-  })
-  return {
-    stream,
-    cancel,
-    controller,
-    subscription: deferred<ReadableStream<Event>>(),
-    list: deferred<ListResponse<Row>>(),
-    listCalls: 0,
-  }
 }
 
 /**
@@ -484,91 +435,6 @@ const corpus: Array<{
     syncRuns: [{ kind }, live(`close`)],
   })),
 ]
-it.each([`resolve`, `reject`] as const)(
-  `rejects startup before stream cancellation can %s`,
-  async (cancellation) => {
-    const reports: Array<Array<unknown>> = []
-    const unhandled: Array<unknown> = []
-    const failures: Array<unknown> = []
-    const onUnhandled = (error: unknown) => unhandled.push(error)
-    const reported = vi
-      .spyOn(console, `error`)
-      .mockImplementation((...args) => {
-        reports.push(args)
-      })
-    process.on(`unhandledRejection`, onUnhandled)
-    const active = source()
-    const cancelled = deferred<void>()
-    active.cancel.mockImplementation(() => cancelled.promise)
-    const api = new MockRecordApi<Row>()
-    api.subscribe.mockResolvedValue(active.stream)
-    api.list.mockImplementation(() => active.list.promise)
-    const collection = createCollection(
-      trailBaseCollectionOptions({
-        recordApi: api,
-        getKey: (row: Row) => row.id,
-        syncMode: `eager`,
-        parse: {
-          value: () => {
-            throw failure
-          },
-        },
-        serialize: {},
-      }),
-    )
-    const preload = observe(collection.preload())
-    try {
-      await turn()
-      expect(api.list).toHaveBeenCalledOnce()
-      active.controller.enqueue({ Insert: { id: 1, value: invalidValue } })
-      await turn()
-      expect(active.cancel).toHaveBeenCalledOnce()
-      // Cleanup I/O is still pending, but it cannot postpone the load error.
-      expect(preload.result).toBe(`rejected`)
-      expect(preload.error).toBe(failure)
-      expect(collection.status).toBe(`error`)
-      active.list.resolve({ records: [] })
-      await turn()
-      expect(preload.result).toBe(`rejected`)
-      expect(collection.status).toBe(`error`)
-    } catch (error) {
-      failures.push(error)
-    } finally {
-      if (cancellation === `resolve`) cancelled.resolve()
-      else cancelled.reject(new Error(`cancel failure`))
-      active.list.resolve({ records: [] })
-      try {
-        await collection.cleanup()
-      } catch (error) {
-        failures.push(error)
-      }
-      await turn()
-      try {
-        // Observe the final cancellation/list continuations before restoring
-        // either recorder. Loading failure is reported through preload, not
-        // console.error, and canceled transport errors must stay observed.
-        expect(reports).toEqual([])
-        expect(unhandled).toEqual([])
-        expect(preload.result).toBe(`rejected`)
-        expect(preload.error).toBe(failure)
-        expect(active.stream.locked).toBe(false)
-        expect(active.cancel).toHaveBeenCalledOnce()
-        expect(collection.status).toBe(`cleaned-up`)
-      } catch (error) {
-        failures.push(error)
-      } finally {
-        process.off(`unhandledRejection`, onUnhandled)
-        reported.mockRestore()
-      }
-    }
-    if (failures.length === 1) throw failures[0]
-    if (failures.length > 1)
-      throw new AggregateError(failures, `Startup and cleanup checks failed`, {
-        cause: failures[0],
-      })
-  },
-)
-
 it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
@@ -872,7 +738,6 @@ it.each(earlyDemandPlans)(
  * no row version to order an event against a page, so the lane only checks a
  * row once all of its events have arrived.
  */
-type RaceRow = { id: number; data: string }
 type RacePlan = {
   mode: `eager` | `on-demand`
   change: `update` | `delete` | `insert` | `insert-then-update`
@@ -910,10 +775,6 @@ function raceChange(change: RacePlan[`change`]): {
     apply: (rows) => rows.set(3, updated),
   }
 }
-
-// Compare only the row fields; the Collection adds virtual properties.
-const sortedRows = (rows: Iterable<RaceRow>) =>
-  [...rows].map(({ id, data }) => ({ id, data })).sort((a, b) => a.id - b.id)
 
 async function checkPageEventRace(plan: RacePlan) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
@@ -1187,277 +1048,20 @@ it.each(heldPlans)(
  * later load. Each compares rows, status, and subscribe calls. After the end,
  * The Collection's `error` stays, and nothing clears it in this sync run.
  */
-it.each([`close`, `read-error`] as const)(
-  `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
-  async (ending) => {
-    const service = new Map(raceServiceRows.map((row) => [row.id, row]))
-    let controller!: ReadableStreamDefaultController<Event>
-    const stream = new ReadableStream<Event>({
-      start(value) {
-        controller = value
-      },
-    })
-    const api = new MockRecordApi<RaceRow>()
-    api.subscribe.mockImplementation(() => Promise.resolve(stream))
-    api.list.mockImplementation(() =>
-      Promise.resolve({ records: [...service.values()] }),
-    )
-    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const collection = createCollection(
-      trailBaseCollectionOptions({
-        recordApi: api,
-        getKey: (row: RaceRow) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        parse: {},
-        serialize: {},
-      }),
-    )
-    const rows = () => sortedRows(collection.toArray)
-
-    try {
-      await turn()
-      await collection._sync.loadSubset({})
-      await turn()
-      const established = sortedRows(service.values())
-      expect(rows(), `${ending} first page`).toEqual(established)
-
-      if (ending === `close`) controller.close()
-      else controller.error(failure)
-      await turn()
-      expect(collection.status, `${ending} status after the end`).toBe(`ready`)
-      expect(rows(), `${ending} rows after the end`).toEqual(established)
-      const stopped = {
-        hasErrors: true,
-        failureReason: null,
-        error: expect.anything(),
-      }
-      expect(collection.health, `${ending} error after the end`).toMatchObject(
-        stopped,
-      )
-
-      service.set(1, { id: 1, data: `v2` })
-      await turn()
-      expect(rows(), `${ending} a later change is not delivered`).toEqual(
-        established,
-      )
-
-      await collection._sync.loadSubset({ limit: 10 } as never)
-      await turn()
-      expect(api.subscribe, `${ending} subscribe calls`).toHaveBeenCalledTimes(
-        1,
-      )
-      expect(rows(), `${ending} a later load lists current rows`).toEqual(
-        sortedRows(service.values()),
-      )
-      expect(collection.health, `${ending} error after the load`).toMatchObject(
-        stopped,
-      )
-    } finally {
-      await collection.cleanup()
-      reported.mockRestore()
-    }
-  },
-)
-
-/**
- * ## Does a reload recover a failed startup?
- *
- * Law (the error surface's reload contract): `reload()` runs `sync` again
- * while the Collection still shows `error`. The new run's own outcome decides
- * the reload: a subscription that listens makes it ready and the reload
- * resolves; a subscription that rejects fails the reload, and the status stays
- * `error`. The adapter cannot read Collection status to learn whether this run
- * is ready, because status still shows the failed run.
- *
- * Grammar (exhaustive, 2 histories): the first subscription rejects; the
- * reload's subscription listens or rejects. Checkpoints: after the reload
- * settles (or a bounded wait), compare its outcome, status, and subscribe
- * calls.
- */
-it.each([`listens`, `rejects`] as const)(
-  `a reload after a failed startup settles when the new subscription %s`,
-  async (outcome) => {
-    const stream = new ReadableStream<Event>({ start() {} })
-    const api = new MockRecordApi<RaceRow>()
-    api.subscribe
-      .mockImplementationOnce(() => Promise.reject(failure))
-      .mockImplementationOnce(() =>
-        outcome === `listens`
-          ? Promise.resolve(stream)
-          : Promise.reject(new Error(`reload subscription failed`)),
-      )
-    api.list.mockImplementation(() => Promise.resolve({ records: [] }))
-    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const collection = createCollection(
-      trailBaseCollectionOptions({
-        recordApi: api,
-        getKey: (row: RaceRow) => row.id,
-        startSync: true,
-        parse: {},
-        serialize: {},
-      }),
-    )
-    try {
-      await collection.preload().catch(() => undefined)
-      expect(collection.status).toBe(`error`)
-      const settled = await Promise.race([
-        collection.reload().then(
-          () => `resolved`,
-          () => `rejected`,
-        ),
-        new Promise((resolve) => setTimeout(() => resolve(`pending`), 500)),
-      ])
-      expect(settled).toBe(outcome === `listens` ? `resolved` : `rejected`)
-      expect(collection.status).toBe(outcome === `listens` ? `ready` : `error`)
-      expect(api.subscribe).toHaveBeenCalledTimes(2)
-    } finally {
-      await collection.cleanup()
-      reported.mockRestore()
-    }
-  },
-)
-
-/**
- * ## Does a reload of a ready Collection end with the service's rows?
- *
- * Law (the reload contract, maintainer decision F19): a reload keeps the rows
- * on screen until it completes. The new run's writes apply on the kept rows,
- * and only a snapshot or the run's own truncate replaces them; a run that
- * sends neither completes the reload at its `markReady()`. Once the reload
- * settles, an eager Collection holds the service's current rows, so a row
- * the service deleted between the runs is gone.
- *
- * Reference: the service is a key/value relation that `list` reads at the
- * moment it is called, in key order, 256 rows to a page with a cursor. The
- * expected rows never come from the adapter.
- *
- * Grammar (exhaustive, 10 histories): the service holds 3 rows (one page)
- * or 258 rows (two pages); between the runs it changes nothing, updates row
- * 1, deletes row 2, or inserts a new row; or, while the reload's last page
- * is held, it inserts a new row that page does not list and the listener
- * delivers its `Insert` event (`insert-event`). Checkpoints: while the
- * reload's last page is held, every row the Collection showed before the
- * reload that the service still has is still shown, and the reload has not
- * settled; after the page is released, the reload resolves, the status is
- * `ready`, and the rows equal the service's.
- */
-it.each(
-  [3, 258].flatMap((size) =>
-    ([`none`, `update`, `delete`, `insert`, `insert-event`] as const).map(
-      (change) => ({
-        size,
-        change,
-      }),
-    ),
-  ),
-)(
-  `a reload of a ready eager Collection over $size rows ends with the service's rows after a $change`,
-  async ({ size, change }) => {
-    const service = new Map<number, RaceRow>()
-    for (let id = 1; id <= size; id++) service.set(id, { id, data: `v1` })
-    const api = new MockRecordApi<RaceRow>()
-    let listener: WritableStreamDefaultWriter<Event> | undefined
-    api.subscribe.mockImplementation(() => {
-      const stream = new TransformStream<Event>()
-      listener = stream.writable.getWriter()
-      return Promise.resolve(stream.readable)
-    })
-    let holdLastPage: Promise<void> | undefined
-    api.list.mockImplementation(async (options) => {
-      const after = Number(options?.pagination?.cursor ?? 0)
-      const records = [...service.values()]
-        .sort((a, b) => a.id - b.id)
-        .filter((row) => row.id > after)
-        .slice(0, 256)
-      if (records.length < 256) await holdLastPage
-      return { records, cursor: String(records.at(-1)?.id ?? after) }
-    })
-    const collection = createCollection(
-      trailBaseCollectionOptions({
-        recordApi: api,
-        getKey: (row: RaceRow) => row.id,
-        startSync: true,
-        parse: {},
-        serialize: {},
-      }),
-    )
-    try {
-      await collection.preload()
-      const before = sortedRows(collection.toArray)
-      expect(before).toEqual(sortedRows(service.values()))
-
-      if (change === `update`) service.set(1, { id: 1, data: `v2` })
-      else if (change === `delete`) service.delete(2)
-      else if (change === `insert`)
-        service.set(size + 1, { id: size + 1, data: `v1` })
-
-      let releaseLastPage!: () => void
-      holdLastPage = new Promise((resolve) => (releaseLastPage = resolve))
-      const reload = observe(collection.reload())
-      await turn()
-      if (change === `insert-event`) {
-        const row = { id: size + 1, data: `v1` }
-        service.set(row.id, row)
-        await listener!.write({ Insert: row })
-        await turn()
-      }
-      const shown = new Set(collection.toArray.map((row) => row.id))
-      expect(
-        before.filter((row) => service.has(row.id) && !shown.has(row.id)),
-        `kept rows the service still has stay while the reload runs`,
-      ).toEqual([])
-      expect(reload.result).toBe(`pending`)
-
-      releaseLastPage()
-      for (let i = 0; i < 5 && reload.result === `pending`; i++) await turn()
-      expect(reload.result).toBe(`fulfilled`)
-      expect(collection.status).toBe(`ready`)
-      expect(sortedRows(collection.toArray)).toEqual(
-        sortedRows(service.values()),
-      )
-    } finally {
-      await collection.cleanup()
-    }
-  },
-)
-
-/**
- * ## Does an unchanged row survive an on-demand reload?
- *
- * Law (maintainer decisions F19 and snapshot-api §8): an on-demand reload
- * keeps the rows; core replays the live query's demand through the new
- * run, and the replayed pages apply on the kept rows (every page row is a
- * full-row `update`, so a held key is never inserted). Core does not sweep
- * after a reload (issue #2269), and a page cannot say a row is gone, so a
- * row the service deleted while no stream listened stays: that is this
- * adapter's limit for on-demand reloads.
- *
- * Reference: the same service as the eager reload lane. Between the runs
- * the service updates row 1 and deletes row 2 with no change event; row 3
- * is untouched. Checkpoint: once the reload settles and the replayed load
- * has applied, row 1 shows its edit, row 3 survives, and row 2 keeps its
- * last value.
- */
-it(`an unchanged row survives an on-demand reload`, async () => {
-  const service = new Map<number, RaceRow>(
-    [1, 2, 3].map((id) => [id, { id, data: `v1` }]),
-  )
-  const api = new MockRecordApi<RaceRow>()
-  api.subscribe.mockImplementation(() =>
-    Promise.resolve(new ReadableStream<Event>({ start() {} })),
-  )
-  api.list.mockImplementation((options) => {
-    const after = Number(options?.pagination?.cursor ?? 0)
-    const records = [...service.values()]
-      .sort((a, b) => a.id - b.id)
-      .filter((row) => row.id > after)
-      .slice(0, 256)
-    return Promise.resolve({
-      records,
-      cursor: String(records.at(-1)?.id ?? after),
-    })
+async function checkStreamEnd(ending: `close` | `read-error`) {
+  const service = new Map(raceServiceRows.map((row) => [row.id, row]))
+  let controller!: ReadableStreamDefaultController<Event>
+  const stream = new ReadableStream<Event>({
+    start(value) {
+      controller = value
+    },
   })
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() => Promise.resolve(stream))
+  api.list.mockImplementation(() =>
+    Promise.resolve({ records: [...service.values()] }),
+  )
+  const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
   const collection = createCollection(
     trailBaseCollectionOptions({
       recordApi: api,
@@ -1468,80 +1072,54 @@ it(`an unchanged row survives an on-demand reload`, async () => {
       serialize: {},
     }),
   )
-  const live = createLiveQueryCollection({
-    query: (q) => q.from({ row: collection }),
-  })
+  const rows = () => sortedRows(collection.toArray)
+
   try {
-    await live.preload()
-    expect(sortedRows(collection.toArray)).toEqual(sortedRows(service.values()))
+    await turn()
+    await collection._sync.loadSubset({})
+    await turn()
+    const established = sortedRows(service.values())
+    expect(rows(), `${ending} first page`).toEqual(established)
+
+    if (ending === `close`) controller.close()
+    else controller.error(failure)
+    await turn()
+    expect(collection.status, `${ending} status after the end`).toBe(`ready`)
+    expect(rows(), `${ending} rows after the end`).toEqual(established)
+    const stopped = {
+      hasErrors: true,
+      failureReason: null,
+      error: expect.anything(),
+    }
+    expect(collection.health, `${ending} error after the end`).toMatchObject(
+      stopped,
+    )
 
     service.set(1, { id: 1, data: `v2` })
-    service.delete(2)
-    await collection.reload()
-    await vi.waitFor(() =>
-      expect(sortedRows(collection.toArray)).toEqual(
-        sortedRows([...service.values(), { id: 2, data: `v1` }]),
-      ),
-    )
-    expect(collection.status).toBe(`ready`)
-  } finally {
-    await live.cleanup()
-    await collection.cleanup()
-  }
-})
-
-/**
- * ## Does an aborted load write no rows?
- *
- * Law (snapshot-api §8): an abort ends the load. Core stops listening to it
- * at once, and the adapter must honor the signal: stop the fetch and write
- * no rows for it. Reference: the service holds 3 rows; a subset load's list
- * is held, the caller aborts, then the list answers. Checkpoints: the load
- * rejects with `AbortError`, and after the late answer the Collection holds
- * no row, while a later load lists every row.
- */
-it(`an aborted load writes no rows and its late result changes nothing`, async () => {
-  const service = [1, 2, 3].map((id) => ({ id, data: `v1` }))
-  const page = deferred<ListResponse<RaceRow>>()
-  const api = new MockRecordApi<RaceRow>()
-  api.subscribe.mockImplementation(() =>
-    Promise.resolve(new ReadableStream<Event>({ start() {} })),
-  )
-  api.list
-    .mockImplementationOnce(() => page.promise)
-    .mockImplementation(() => Promise.resolve({ records: service }))
-  const collection = createCollection(
-    trailBaseCollectionOptions({
-      recordApi: api,
-      getKey: (row: RaceRow) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      parse: {},
-      serialize: {},
-    }),
-  )
-  try {
-    await collection.preload()
-    const abort = new AbortController()
-    const load = observe(
-      Promise.resolve(
-        collection._sync.loadSubset({ limit: 10, signal: abort.signal }),
-      ),
-    )
-    await vi.waitFor(() => expect(api.list).toHaveBeenCalledOnce())
-    abort.abort()
-    page.resolve({ records: service })
     await turn()
-    expect(load.result).toBe(`rejected`)
-    expect(load.error).toMatchObject({ name: `AbortError` })
-    expect(collection.toArray).toEqual([])
+    expect(rows(), `${ending} a later change is not delivered`).toEqual(
+      established,
+    )
 
-    await collection._sync.loadSubset({ limit: 10 })
-    expect(sortedRows(collection.toArray)).toEqual(sortedRows(service))
+    await collection._sync.loadSubset({ limit: 10 } as never)
+    await turn()
+    expect(api.subscribe, `${ending} subscribe calls`).toHaveBeenCalledTimes(1)
+    expect(rows(), `${ending} a later load lists current rows`).toEqual(
+      sortedRows(service.values()),
+    )
+    expect(collection.health, `${ending} error after the load`).toMatchObject(
+      stopped,
+    )
   } finally {
     await collection.cleanup()
+    reported.mockRestore()
   }
-})
+}
+
+it.each([`close`, `read-error`] as const)(
+  `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
+  (ending) => checkStreamEnd(ending),
+)
 
 /**
  * ## Do several pages, several changes, and overlapping loads still converge?
@@ -1904,7 +1482,7 @@ fcTest.prop(
  * clock makes the old run's event and the new run's list call share a
  * millisecond, the case a wall-clock fence cannot order.
  */
-it(`loads a row in a fresh run that an earlier run's event touched`, async () => {
+async function checkFreshRunAfterEvent() {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
   const streams: Array<WritableStreamDefaultWriter<Event>> = []
   const api = new MockRecordApi<RaceRow>()
@@ -1953,4 +1531,20 @@ it(`loads a row in a fresh run that an earlier run's event touched`, async () =>
     for (const writer of streams) void writer.close().catch(() => undefined)
     await turn()
   }
+}
+
+it(`loads a row in a fresh run that an earlier run's event touched`, () =>
+  checkFreshRunAfterEvent())
+
+declareOracle({
+  check: [
+    checkLifecycle,
+    checkEarlyDemand,
+    checkPageEventRace,
+    checkHeldPage,
+    checkStreamEnd,
+    checkPageHistory,
+    checkFreshRunAfterEvent,
+  ],
+  model: [expectedEarlyDemand],
 })

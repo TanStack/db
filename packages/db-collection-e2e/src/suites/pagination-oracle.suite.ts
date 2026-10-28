@@ -6,6 +6,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import {
   assertAllItemsMatch,
   assertCollectionSize,
@@ -1516,3 +1517,5 @@ export function createPaginationTestSuite(
     })
   })
 }
+
+declareOracle({ check: [withPaginationHistory], model: [createWindowOracle] })

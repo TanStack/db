@@ -21,6 +21,7 @@
  */
 import { expect, it } from 'vitest'
 import { executeTransaction } from '../../src'
+import { declareOracle } from '../oracle-declaration'
 import { deferred, readStore, withHarness } from './harness'
 
 type NativeOutcome = 'complete' | 'abort'
@@ -35,6 +36,7 @@ function expectedCaller(
   if (native === 'abort') return 'rejected'
   return callbackFulfilled ? 'fulfilled' : 'pending'
 }
+declareOracle({ model: [expectedCaller] })
 
 for (const native of ['complete', 'abort'] as const) {
   for (const registration of [

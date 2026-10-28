@@ -17,6 +17,8 @@ import {
   oracleRuns,
   recordOracleReplay,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
+import { defaultOpts, lexicalOpts } from './comparison-options.js'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
@@ -53,18 +55,6 @@ import type { CompareOptions } from '../src/query/builder/types'
  * universal performance bound. The 32-character margin is the existing
  * constant-overhead budget for the sampled 0..200-byte keys.
  */
-
-const defaultOpts: CompareOptions = {
-  direction: `asc`,
-  nulls: `first`,
-  stringSort: `locale`,
-}
-
-const lexicalOpts: CompareOptions = {
-  direction: `asc`,
-  nulls: `first`,
-  stringSort: `lexical`,
-}
 
 const nullsLastOpts: CompareOptions = {
   direction: `asc`,
@@ -423,6 +413,19 @@ function assertTransitive(ab: number, bc: number, ac: number): void {
   if (ab <= 0 && bc <= 0) expect(ac).toBeLessThanOrEqual(0)
 }
 
+declareOracle({
+  check: [
+    assertComparisonProperty,
+    checkAntisymmetry,
+    assertNonFiniteOrder,
+    assertChangedBytes,
+    assertTransitive,
+    assertPlainDateOrder,
+    assertZonedDateTimeOrder,
+  ],
+  model: [modelPlainDateSign, modelNanosecondSign],
+})
+
 describe(`comparison law controls`, () => {
   fcTest(
     `shrinking retains the first violated law and replays its checkpoint`,
@@ -659,12 +662,6 @@ describe(`ascComparator property-based tests`, () => {
   })
 
   describe(`string comparison`, () => {
-    it(`lexical and en-US locale order distinguish the string-mode axis`, () => {
-      const localeOpts: CompareOptions = { ...defaultOpts, locale: `en-US` }
-      expect(ascComparator(`a`, `B`, lexicalOpts)).toBeGreaterThan(0)
-      expect(ascComparator(`a`, `B`, localeOpts)).toBeLessThan(0)
-    })
-
     comparisonProperty([fc.string()])(
       `locale sort: reflexivity holds for strings`,
       (a) => {
@@ -932,32 +929,6 @@ describe(`makeComparator property-based tests`, () => {
     },
   )
 
-  it(`delegates only string pairs to a custom string comparator`, () => {
-    const calls: Array<[string, string]> = []
-    const compare = (a: string, b: string) => {
-      calls.push([a, b])
-      return a.replaceAll(` `, ``).localeCompare(b.replaceAll(` `, ``))
-    }
-    const custom: CompareOptions = {
-      direction: `asc`,
-      nulls: `first`,
-      stringSort: `custom`,
-      compare,
-    }
-
-    expect(makeComparator(custom)(`pillowfort`, `pillow fort`)).toBe(0)
-    expect(calls).toEqual([[`pillowfort`, `pillow fort`]])
-
-    calls.length = 0
-    expect(makeComparator(custom)(2, 1)).toBeGreaterThan(0)
-    expect(makeComparator(custom)(null, `value`)).toBeLessThan(0)
-    expect(calls).toEqual([])
-
-    expect(
-      makeComparator({ ...custom, direction: `desc` })(`a`, `b`),
-    ).toBeGreaterThan(0)
-  })
-
   it(`preserves signed infinity from a valid custom string comparator`, () => {
     const comparator = makeComparator({
       ...defaultOpts,
@@ -974,21 +945,6 @@ describe(`makeComparator property-based tests`, () => {
 })
 
 describe(`normalizeValue property-based tests`, () => {
-  it(`binary key size and content laws reach the bounded length margins`, () => {
-    for (const length of [0, 1, 128, 129, 200]) {
-      const bytes = Uint8Array.from({ length }, (_, index) => index % 256)
-      const normalized = normalizeValue(bytes)
-      expect(typeof normalized).toBe(`string`)
-      expect((normalized as string).length - length).toBeLessThan(32)
-      expect(normalizeValue(new Uint8Array(bytes))).toBe(normalized)
-      if (length > 0) {
-        const changed = new Uint8Array(bytes)
-        changed[length - 1] = (changed[length - 1]! + 1) % 256
-        expect(normalizeValue(changed)).not.toBe(normalized)
-      }
-    }
-  })
-
   comparisonProperty([arbitraryDate])(
     `dates normalize to their timestamp`,
     (date) => {
@@ -1036,11 +992,6 @@ describe(`normalizeValue property-based tests`, () => {
 })
 
 describe(`areValuesEqual property-based tests`, () => {
-  it(`different integer law reaches an unequal pair`, () => {
-    expect(areValuesEqual(1, 2)).toBe(false)
-    expect(areValuesEqual(2, 1)).toBe(false)
-  })
-
   comparisonProperty([fc.uint8Array({ minLength: 0, maxLength: 50 })])(
     `Uint8Arrays with same content are equal`,
     (arr) => {

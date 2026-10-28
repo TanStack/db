@@ -1,4 +1,5 @@
 import { fc } from '@fast-check/vitest'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # Which subscription histories are legal?
@@ -1443,3 +1444,16 @@ export function expectedStartHandoff(history: StartHandoffHistory) {
     starts: 1,
   } as const
 }
+
+declareOracle({
+  model: [
+    createLifecycleModel,
+    reduceLifecycle,
+    expectedCleanedRestartDemand,
+    expectedParkedReloadDemand,
+    expectedDeferralBatches,
+    expectedStartHandoff,
+    modelSubscriberStartCleanup,
+  ],
+  grammar: [parkedReloadDemandCases],
+})

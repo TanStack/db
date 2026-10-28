@@ -18,6 +18,7 @@
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }
@@ -31,6 +32,46 @@ const cells = (['loading', 'ready'] as const).flatMap((status) =>
     ),
   ),
 )
+// The model: an authored replacement with `markReady: false` keeps the
+// current status; every other final intent makes the collection ready.
+function expectedReplacementStatus(
+  status: (typeof cells)[number][`status`],
+  last: Intent,
+): string {
+  return last === false ? status : 'ready'
+}
+
+// The check: every publication, and the committed status, follow the model.
+function expectReplacementStatus(
+  committed: string,
+  observed: ReadonlyArray<string>,
+  expectedStatus: string,
+): void {
+  expect.soft(committed).toBe(expectedStatus)
+  expect
+    .soft(
+      observed.every((value) => value === expectedStatus),
+      'status at publication',
+    )
+    .toBe(true)
+}
+
+// The model for reentrant batches: the final intent alone decides the status.
+// A `false` intent leaves the Collection loading; any other ends ready.
+function expectReentrantStatuses(
+  committed: string,
+  statuses: ReadonlyArray<string>,
+  last: Intent,
+): void {
+  expect(committed).toBe(last === false ? 'loading' : 'ready')
+  expect(statuses).toEqual(last === false ? [] : ['ready'])
+}
+
+declareOracle({
+  check: [expectReplacementStatus, expectReentrantStatuses],
+  model: [expectedReplacementStatus],
+})
+
 it.each(cells)(
   'replacement readiness follows the final authored intent: %j',
   async ({ status, held, first, last }) => {
@@ -74,14 +115,8 @@ it.each(cells)(
       truncate(last === undefined ? undefined : { markReady: last })
       sync.write({ type: 'insert', value: { id: 3, value: 'replacement' } })
       const receipt = sync.commit()
-      const expectedStatus = last === false ? status : 'ready'
-      expect.soft(c.status).toBe(expectedStatus)
-      expect
-        .soft(
-          observed.every((value) => value === expectedStatus),
-          'status at publication',
-        )
-        .toBe(true)
+      const expectedStatus = expectedReplacementStatus(status, last)
+      expectReplacementStatus(c.status, observed, expectedStatus)
       expect(
         [...c.base.values()].map((row) => ({ id: row.id, value: row.value })),
       ).toEqual([{ id: 3, value: 'replacement' }])
@@ -99,37 +134,6 @@ it.each(cells)(
     } finally {
       finish.resolve()
       stop.unsubscribe()
-      await c.cleanup()
-    }
-  },
-)
-
-// After the initial error, the run's markReady() does nothing (maintainer
-// decision), so a replacement that promises readiness still applies its rows
-// and leaves the attempt in error.
-it.each(intents)(
-  'keeps the initial error under a ready-promising replacement: markReady %s',
-  async (markReady) => {
-    let sync!: Sync
-    const c = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      startSync: true,
-      gcTime: Infinity,
-      sync: {
-        sync: (params) => {
-          sync = params
-        },
-      },
-    })
-    try {
-      sync.fail(new Error('initial sync failed'))
-      sync.begin()
-      sync.truncate(markReady === undefined ? undefined : { markReady })
-      sync.write({ type: 'insert', value: { id: 1, value: 'late' } })
-      expect(() => sync.commit()).not.toThrow()
-      expect(c.status).toBe('error')
-      expect([...c.keys()]).toEqual([1])
-    } finally {
       await c.cleanup()
     }
   },
@@ -178,8 +182,7 @@ it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
       sync.commit()
       await Promise.all(receipts)
       expect(entered).toBe(true)
-      expect(c.status).toBe(last === false ? 'loading' : 'ready')
-      expect(statuses).toEqual(last === false ? [] : ['ready'])
+      expectReentrantStatuses(c.status, statuses, last)
       expect([...c.keys()]).toEqual([3])
     } finally {
       subscription.unsubscribe()

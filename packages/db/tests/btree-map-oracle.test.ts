@@ -6,6 +6,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * # When does the B+ tree behave like a sorted Map?
@@ -279,6 +280,8 @@ function expectRefinement(
   expectPair(tree.nextHigherPair(undefined), sorted[0], model)
   expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
 }
+
+declareOracle({ check: [expectRefinement], model: [stepModel] })
 
 describe(`BTree Map oracle`, () => {
   // The 120,000-operation corpus takes about nine seconds with CI coverage.

@@ -28,7 +28,7 @@ const todosCollection = createCollection(
     shapeOptions: {
       url: '/api/todos',
     },
-    getKey: (item) => item.id,
+    getKey: (item: { id: string }) => item.id,
   })
 )
 ```
@@ -143,7 +143,7 @@ For quick prototyping or when you're confident about timing, you can use a simpl
 const todosCollection = createCollection(
   electricCollectionOptions({
     id: 'todos',
-    getKey: (item) => item.id,
+    getKey: (item: { id: string }) => item.id,
     shapeOptions: {
       url: '/api/todos',
       params: { table: 'todos' },
