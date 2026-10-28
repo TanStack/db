@@ -52,3 +52,7 @@ tsconfig.vitest-temp.json
 # The part-reach oracle lints scratch programs inside the repository; an
 # interrupted run can leave them behind.
 /part-reach-scratch-*/
+
+# Other checkouts and scratch copies. A plain directory here is not part of
+# this checkout's branch, so the oracle lint hooks must not see its files.
+/.worktrees/

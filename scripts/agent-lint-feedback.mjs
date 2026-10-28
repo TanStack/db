@@ -32,9 +32,16 @@
  * shell command reaches the model at the end of the turn, when the stop hook
  * lints every changed file. When a harness's hook input names no file that
  * this script can find, the edit hook lints every changed file as well.
+ *
+ * A hook lints the checkout that the agent works in, which the hook input's
+ * `cwd` names. A harness can run this script from the checkout where the
+ * session started while the agent works in a worktree under `.worktrees/`.
+ * When `cwd` is in another checkout that has its own copy of this script, that
+ * copy runs instead, so a branch is linted by its own rule, as CI lints it.
+ * Without `cwd`, the checkout is the one that holds this script.
  */
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -45,11 +52,9 @@ import { resolveImportedTestModule } from './eslint-plugin-oracle/rules/no-unit-
 import {
   describeLoweredRunBudget,
   isOracleFile,
-  loweredRunBudgets,
+  loweredRunBudgetsBetween,
   mergeBase,
 } from './check-oracle-run-counts.mjs'
-
-const root = fileURLToPath(new URL(`../`, import.meta.url))
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -68,6 +73,30 @@ if (![`edit`, `stop`].includes(options.event)) {
   throw new Error(`--event must be edit or stop`)
 }
 const isHook = options.format !== `text`
+const inputText = isHook ? readFileSync(0, `utf8`) : ``
+const input = inputText.trim() === `` ? {} : JSON.parse(inputText)
+const scriptRoot = realpathSync(fileURLToPath(new URL(`../`, import.meta.url)))
+
+/** The top level of the git checkout that holds `cwd`, or undefined. */
+function checkoutOf(cwd) {
+  try {
+    return realpathSync(
+      execFileSync(`git`, [`rev-parse`, `--show-toplevel`], {
+        cwd,
+        encoding: `utf8`,
+        stdio: [`ignore`, `pipe`, `ignore`],
+      }).trim(),
+    )
+  } catch {
+    return undefined
+  }
+}
+
+const root =
+  (typeof input.cwd === `string` ? checkoutOf(input.cwd) : undefined) ??
+  scriptRoot
+const ownScript = join(root, `scripts`, `agent-lint-feedback.mjs`)
+const delegate = root !== scriptRoot && existsSync(ownScript)
 
 function git(...args) {
   return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
@@ -83,8 +112,9 @@ function repositoryFiles(...outputs) {
 /**
  * Every oracle file in the working tree, tracked or new. A new file that an
  * agent has not added yet is linted like any other. Git leaves out ignored
- * builds, and lists another checkout nested in this one, such as a worktree
- * under `.worktrees/`, as a directory, which is not an oracle file.
+ * files: builds, and `.worktrees/`, where other checkouts and scratch copies
+ * live. A plain directory there has no `.git` entry, so without the ignore rule
+ * git would list each of its files as new work on this branch.
  */
 function oracleFilesInTree() {
   return repositoryFiles(
@@ -153,7 +183,7 @@ function affectedOracleFiles(files) {
  * uncommitted work.
  */
 function changedFiles() {
-  const base = mergeBase()
+  const base = mergeBase(root)
   return repositoryFiles(
     git(`diff`, `--name-only`, `--diff-filter=ACMR`, base),
     git(`ls-files`, `--others`, `--exclude-standard`),
@@ -195,12 +225,6 @@ function editedFiles(input) {
   return [...found].map((file) =>
     isAbsolute(file) ? file : resolve(base, file),
   )
-}
-
-function readHookInput() {
-  if (!isHook) return {}
-  const text = readFileSync(0, `utf8`)
-  return text.trim() === `` ? {} : JSON.parse(text)
 }
 
 function createLinter() {
@@ -337,7 +361,7 @@ function selectFiles(input) {
  */
 function runBudgetReport(scope) {
   if (scope !== `changed`) return ``
-  return loweredRunBudgets()
+  return loweredRunBudgetsBetween(root, mergeBase(root))
     .map(
       (budget) =>
         `${budget.file}: ${describeLoweredRunBudget(budget)}. Restore it, or explain why in the pull request.`,
@@ -345,12 +369,21 @@ function runBudgetReport(scope) {
     .join(`\n`)
 }
 
-const input = readHookInput()
-const { scope, files } = selectFiles(input)
-const report = [
-  reportText(await lint(createLinter(), files)),
-  runBudgetReport(scope),
-]
-  .filter(Boolean)
-  .join(`\n`)
-respond(report, input, scope)
+if (delegate) {
+  // The session's checkout runs its own copy, which writes the response.
+  const result = spawnSync(
+    process.execPath,
+    [ownScript, ...process.argv.slice(2)],
+    { cwd: root, input: inputText, stdio: [`pipe`, `inherit`, `inherit`] },
+  )
+  process.exitCode = result.status ?? 1
+} else {
+  const { scope, files } = selectFiles(input)
+  const report = [
+    reportText(await lint(createLinter(), files)),
+    runBudgetReport(scope),
+  ]
+    .filter(Boolean)
+    .join(`\n`)
+  respond(report, input, scope)
+}

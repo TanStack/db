@@ -10,9 +10,22 @@
  * `oracle`, in TypeScript or JavaScript, tracked or new and untracked: an
  * agent's new oracle file is linted like any other.
  *
+ * The files belong to the checkout that the agent works in. A hook command can
+ * run the script of the checkout where the session started, while the agent
+ * works in a worktree nested under that checkout's `.worktrees/`. The hook
+ * input's `cwd` names the agent's checkout, so the hooks select and lint that
+ * checkout's files, with that checkout's own copy of the script and the rule,
+ * as CI does for its branch. A directory under `.worktrees/` that is not a
+ * checkout, such as a scratch copy, is never one of the launch checkout's
+ * changed files.
+ *
  * Authority: AGENTS.md "Lint feedback while you work" says the hooks and
  * `pnpm lint:changed` return the oracle reports for the files that were edited,
- * and that the pre-commit hook lints the staged files. AGENTS.md "Name oracle
+ * and that the pre-commit hook lints the staged files. Issue #2280, written by
+ * the maintainer, states the checkout rule: a session that started in the main
+ * checkout and works in `.worktrees/<name>` gets reports only for that
+ * worktree's branch, a plain directory under `.worktrees/` produces no report,
+ * and `pnpm lint:changed` in a worktree lints that worktree. AGENTS.md "Name oracle
  * files for discovery" defines an oracle file by its name. The rule's header
  * contract (scripts/eslint-plugin-oracle/rules/no-unit-test.js) states that the
  * rule follows relative imports of test modules and does not follow production
@@ -30,17 +43,25 @@
  * are drawn for support modules only, and star re-exports are the only form.
  * The driver runs the lint command-line script in temporary git repositories.
  * The pre-commit leg is covered only by the script's file selection: the glob in
- * lint-staged.config.js is not evaluated here.
+ * lint-staged.config.js is not evaluated here. A session works in the launch
+ * checkout or in one worktree at `.worktrees/wt`, and a launch checkout can hold
+ * one scratch directory. The hooks always pass `cwd`, and the hook process runs
+ * in the launch checkout: a hook input without `cwd` is not generated, and
+ * neither is a worktree outside the launch checkout or one whose branch has no
+ * copy of the script. The repository's own `.gitignore` is copied into each
+ * temporary repository, so its rules are part of what is tested.
  *
  * Structure:
  *   1. The grammar draws a module graph, the edited and untracked modules, and
  *      the file that an edit hook names.
  *   2. The model predicts the oracle files to lint for each scope, by a
  *      fixed-point closure over the graph's edges.
- *   3. The driver writes the base commit and the edited working tree, then runs
- *      the CLI's changed scope, its named scope, and its edit-hook form. A
- *      crashed CLI is a failure, not an empty selection.
- *   4. The comparison checks that each observed selection equals the prediction.
+ *   3. The driver writes the base commit and the edited working tree, in the
+ *      launch checkout or a worktree, then runs the CLI's changed scope, its
+ *      named scope, and its edit-hook and stop-hook forms. A crashed CLI is a
+ *      failure, not an empty selection.
+ *   4. The comparison checks that each observed selection equals the prediction,
+ *      and that every report came from the session checkout's own rule.
  *   5. Reach counts the graph states that the campaign enters, and the
  *      campaigns run the same predicate with a fixed seed and a random seed.
  */
@@ -56,7 +77,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
@@ -163,6 +184,12 @@ const programArbitrary = fc
       { weight: 2, arbitrary: fc.constant(`rule`) },
     ),
     hookIndex: fc.nat({ max: 9 }),
+    // The checkout that the session works in: the one where it started, or a
+    // worktree nested in it.
+    session: fc.constantFrom(`launch`, `worktree`),
+    // A plain directory under the launch checkout's `.worktrees/`, holding an
+    // oracle-named file that the rule reports.
+    scratch: fc.boolean(),
   })
   .map(({ shape, ...skeleton }) => {
     const drawn =
@@ -359,6 +386,8 @@ function buildProgram(skeleton) {
     driver,
     production,
     ruleEdited: skeleton.ruleEdited,
+    session: skeleton.session,
+    scratch: skeleton.scratch,
     edges,
     reexports,
     modules,
@@ -385,6 +414,8 @@ function editedByScope(program) {
     changed: [...tracked, ...untracked, ...rule],
     named: [...tracked, ...rule],
     hook: [program.hookTarget],
+    // The stop hook lints the changed files of the session's checkout.
+    stop: [...tracked, ...untracked, ...rule],
   }
 }
 
@@ -419,17 +450,44 @@ function predictSelected(program, edited) {
     .sort()
 }
 
+// Each checkout is linted by its own copy of the rule. The driver marks the
+// message of the rule copy that a branch edits, and only that copy, so a report
+// carries the mark exactly when the session checkout's branch edited the rule.
+// The launch checkout's copy is unmarked in a worktree session, so a report
+// that the launch checkout's rule makes for a worktree carries no mark.
+
+/** Whether the session checkout's reports carry the edited rule's mark. */
+function predictRuleMarked(program) {
+  return program.ruleEdited
+}
+
 // -- 3. Driver ----------------------------------------------------------------
 //
 // The driver runs the lint script that a developer or hook runs. It writes the
 // modules and the copy of the script and the rule into a temporary repository,
-// commits the tracked modules, edits them in the working tree, and writes the
-// untracked oracle files. It runs the changed scope (`lint:changed`), the named
-// scope (the pre-commit hook), and the edit hook in that one repository: the
-// hook selects from the file its input names, not from the working tree's
-// edits. Each report line names its oracle file. The driver reads those names;
-// it does not compute them. An exit status or stderr that is not a report is a
-// failed run, so a crashed script cannot pass as an empty selection.
+// the launch checkout, with the repository's `.gitignore`, and commits the
+// tracked modules. A worktree session then adds a worktree of that commit at
+// `.worktrees/wt`, on its own branch. The session checkout gets the edits and
+// the untracked oracle files. A scratch directory is a plain directory of
+// untracked files under the launch checkout's `.worktrees/`.
+//
+// The changed scope (`lint:changed`) and the named scope (the pre-commit hook)
+// run the session checkout's own script there, as a developer runs them. The
+// edit hook and the stop hook run the launch checkout's script from the launch
+// checkout, as a harness that started there runs them, with the session
+// checkout as the input's `cwd`. The edit hook selects from the file that its
+// input names, not from the working tree's edits. Each report line names its
+// oracle file, and the driver reads those names and whether the line carries
+// the edited rule's mark; it does not compute them. An exit status or stderr
+// that is not a report is a failed run, so a crashed script cannot pass as an
+// empty selection.
+
+const WORKTREE = `.worktrees/wt`
+const SCRATCH = `.worktrees/scratch/${APP}/tests/scratch-oracle.test.ts`
+// The rule's message for these generated files, and the mark that an edited
+// copy of the rule adds to it.
+const RULE_MESSAGE = `registers tests and declares no oracle part.`
+const RULE_MARK = `[branch rule]`
 
 /** The text of one module, with or without its edit. */
 function moduleText(program, module, edited) {
@@ -444,18 +502,20 @@ function moduleText(program, module, edited) {
       reexported.has(target) ? `export * from '${spec}'` : `import '${spec}'`,
     )
   }
-  if (module.kind === `oracle`) {
-    lines.push(`it('reads one value', () => { expect(1).toBe(1) })`)
-  }
+  if (module.kind === `oracle`) lines.push(UNDECLARED_TEST)
   if (module.kind === `production`) lines.push(`export const prod = 1`)
   if (edited) lines.push(`// edited`)
   return `${lines.join(`\n`)}\n`
 }
 
+// A test in a file that declares nothing, so the rule reports the file.
+const UNDECLARED_TEST = `it('reads one value', () => { expect(1).toBe(1) })`
+
 let work
 let pluginDir
 let feedbackScript
 let runCountScript
+let gitignoreFile
 
 beforeAll(() => {
   // Each run has its own directory, so concurrent runs cannot remove each
@@ -463,111 +523,151 @@ beforeAll(() => {
   // passes in the spelling that the script's repository root uses.
   work = realpathSync(mkdtempSync(join(tmpdir(), `lint-scope-oracle-`)))
   pluginDir = join(repoRoot, `scripts`, `eslint-plugin-oracle`)
-  // A mutant is run from a copy: LINT_SCOPE_SCRIPT names the copy under test.
+  // A mutant is run from a copy: LINT_SCOPE_SCRIPT names the copy of the
+  // script under test, and LINT_SCOPE_GITIGNORE the copy of `.gitignore`.
   feedbackScript =
     process.env.LINT_SCOPE_SCRIPT ??
     join(repoRoot, `scripts`, `agent-lint-feedback.mjs`)
   runCountScript = join(repoRoot, `scripts`, `check-oracle-run-counts.mjs`)
+  gitignoreFile =
+    process.env.LINT_SCOPE_GITIGNORE ?? join(repoRoot, `.gitignore`)
 })
 
 afterAll(() => {
   rmSync(work, { recursive: true, force: true })
 })
 
-/** Writes the base files, commits them, then writes the edited working tree. */
+function gitIn(cwd, ...args) {
+  return execFileSync(
+    `git`,
+    [
+      `-c`,
+      `user.name=oracle`,
+      `-c`,
+      `user.email=oracle@example.invalid`,
+      ...args,
+    ],
+    { cwd, encoding: `utf8`, stdio: [`ignore`, `pipe`, `pipe`] },
+  )
+}
+
+/** The path of a module in a checkout. */
+function modulePath(checkout, name) {
+  if (name === RULE) return join(checkout, RULE)
+  if (name === PRODUCTION) return join(checkout, APP, `src`, `prod.ts`)
+  return join(checkout, APP, `tests`, name)
+}
+
+/**
+ * Writes the base files and commits them in the launch checkout, adds the
+ * session's worktree, then writes the edited working tree of the session
+ * checkout and the scratch directory.
+ */
 function repositoryOf(program) {
-  const directory = mkdtempSync(join(work, `r`))
-  const git = (...args) =>
-    execFileSync(
-      `git`,
-      [
-        `-c`,
-        `user.name=oracle`,
-        `-c`,
-        `user.email=oracle@example.invalid`,
-        ...args,
-      ],
-      {
-        cwd: directory,
-        encoding: `utf8`,
-        stdio: [`ignore`, `pipe`, `pipe`],
-      },
-    )
-  git(`init`, `-q`, `-b`, `main`)
+  const launch = mkdtempSync(join(work, `r`))
+  gitIn(launch, `init`, `-q`, `-b`, `main`)
   writeFileSync(
-    join(directory, `package.json`),
+    join(launch, `package.json`),
     // The repository's root is an ES module package, as here.
     JSON.stringify({ name: `root`, type: `module` }),
   )
-  mkdirSync(join(directory, APP, `tests`), { recursive: true })
-  mkdirSync(join(directory, APP, `src`), { recursive: true })
+  writeFileSync(join(launch, `.gitignore`), readFileSync(gitignoreFile, `utf8`))
+  mkdirSync(join(launch, APP, `tests`), { recursive: true })
+  mkdirSync(join(launch, APP, `src`), { recursive: true })
   writeFileSync(
-    join(directory, APP, `package.json`),
+    join(launch, APP, `package.json`),
     JSON.stringify({ name: `app` }),
   )
   // The plugin's sources, without its tests: its own oracle file would be an
   // oracle file of this repository too.
-  cpSync(pluginDir, join(directory, `scripts`, `eslint-plugin-oracle`), {
+  cpSync(pluginDir, join(launch, `scripts`, `eslint-plugin-oracle`), {
     recursive: true,
     filter: (source) => !source.endsWith(`.test.js`),
   })
   writeFileSync(
-    join(directory, `scripts`, `agent-lint-feedback.mjs`),
+    join(launch, `scripts`, `agent-lint-feedback.mjs`),
     readFileSync(feedbackScript, `utf8`),
   )
   writeFileSync(
-    join(directory, `scripts`, `check-oracle-run-counts.mjs`),
+    join(launch, `scripts`, `check-oracle-run-counts.mjs`),
     readFileSync(runCountScript, `utf8`),
   )
-  const pathOf = (name) =>
-    name === RULE
-      ? join(directory, RULE)
-      : name === PRODUCTION
-        ? join(directory, APP, `src`, `prod.ts`)
-        : join(directory, APP, `tests`, name)
   for (const module of program.modules) {
     if (!module.untracked)
-      writeFileSync(pathOf(module.name), moduleText(program, module, false))
+      writeFileSync(
+        modulePath(launch, module.name),
+        moduleText(program, module, false),
+      )
   }
-  git(`add`, `-A`)
-  git(`commit`, `-q`, `-m`, `base`)
-  symlinkSync(join(repoRoot, `node_modules`), join(directory, `node_modules`))
+  gitIn(launch, `add`, `-A`)
+  gitIn(launch, `commit`, `-q`, `-m`, `base`)
+  // A worktree nested in the launch checkout finds these packages by walking
+  // up from its own files.
+  symlinkSync(join(repoRoot, `node_modules`), join(launch, `node_modules`))
+  let checkout = launch
+  if (program.session === `worktree`) {
+    gitIn(launch, `worktree`, `add`, `-q`, `-b`, `feature`, WORKTREE)
+    checkout = join(launch, WORKTREE)
+  }
+  if (program.scratch) {
+    mkdirSync(dirname(join(launch, SCRATCH)), { recursive: true })
+    writeFileSync(join(launch, SCRATCH), `${UNDECLARED_TEST}\n`)
+  }
   for (const module of program.modules) {
     if (module.edited || module.untracked)
-      writeFileSync(pathOf(module.name), moduleText(program, module, true))
+      writeFileSync(
+        modulePath(checkout, module.name),
+        moduleText(program, module, true),
+      )
   }
   if (program.ruleEdited) {
-    const rule = pathOf(RULE)
-    writeFileSync(rule, `${readFileSync(rule, `utf8`)}\n// edited\n`)
+    const rule = modulePath(checkout, RULE)
+    const text = readFileSync(rule, `utf8`)
+    if (!text.includes(RULE_MESSAGE))
+      throw new Error(`the rule no longer has the message ${RULE_MESSAGE}`)
+    writeFileSync(
+      rule,
+      `${text.replace(RULE_MESSAGE, `${RULE_MESSAGE} ${RULE_MARK}`)}\n// edited\n`,
+    )
   }
-  return { directory, pathOf }
+  return {
+    launch,
+    checkout,
+    pathOf: (name) => modulePath(checkout, name),
+  }
 }
 
 const lintLine = /^(\S+?):\d+:\d+ .* \((oracle\/[\w-]+|parse)\)$/
 const budgetLine = /^\S+: .+: run budget (lowered|removed) /
 
-/** The oracle basenames in a report's lint lines. */
+/**
+ * The oracle basenames in a report's lint lines, and the set of the lines'
+ * marks: whether each one carries the edited rule's mark.
+ */
 function reportedOracles(lines) {
   const found = new Set()
+  const marks = new Set()
   for (const line of lines) {
     const match = lintLine.exec(line)
-    if (match !== null) found.add(match[1].split(`/`).pop())
+    if (match === null) continue
+    found.add(match[1].split(`/`).pop())
+    marks.add(line.includes(RULE_MARK))
   }
-  return [...found].sort()
+  return { oracles: [...found].sort(), marks }
 }
 
 /**
- * Runs the CLI and returns the oracle files that it reported. In text format
- * the CLI exits 0 with no output, or 1 with report lines on stderr. As a
- * Claude edit hook it exits 0 with no output, or 2 with a report on stderr.
+ * Runs a copy of the CLI from `cwd` and returns what it reported. In text
+ * format the CLI exits 0 with no output, or 1 with report lines on stderr. As a
+ * Claude hook it exits 0 with no output, or 2 with a report on stderr.
  * Anything else, such as a crash, which exits 1 with a stack trace, fails.
  */
-function runCli(directory, args, input) {
-  const result = spawnSync(
-    process.execPath,
-    [`scripts/agent-lint-feedback.mjs`, ...args],
-    { cwd: directory, encoding: `utf8`, input },
-  )
+function runCli(cwd, script, args, input) {
+  const result = spawnSync(process.execPath, [script, ...args], {
+    cwd,
+    encoding: `utf8`,
+    input,
+  })
   const lines = result.stderr.split(`\n`).filter(Boolean)
   const hook = args.includes(`--format=claude`)
   const reported = hook ? 2 : 1
@@ -587,28 +687,41 @@ function runCli(directory, args, input) {
   return reportedOracles(lines)
 }
 
-/** The oracle files that each scope lints, from one repository. */
+/** What each scope reports, from one repository. */
 function observedSelections(program) {
-  const { directory, pathOf } = repositoryOf(program)
+  const { launch, checkout, pathOf } = repositoryOf(program)
   try {
     const scopes = editedByScope(program)
-    const changed = runCli(directory, [`--format=text`])
+    const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
+    const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
+    const changed = runCli(checkout, own, [`--format=text`])
     // lint-staged runs the named scope once per nonempty chunk of staged
     // files; without files the script runs its changed scope instead.
     const named =
       scopes.named.length === 0
         ? undefined
-        : runCli(directory, [
+        : runCli(checkout, own, [
             `--format=text`,
             ...scopes.named.map((name) => pathOf(name)),
           ])
-    const input = JSON.stringify({
-      tool_input: { file_path: pathOf(program.hookTarget) },
-    })
-    const hook = runCli(directory, [`--format=claude`, `--event=edit`], input)
-    return { changed, named, hook }
+    const hook = runCli(
+      launch,
+      launchScript,
+      [`--format=claude`, `--event=edit`],
+      JSON.stringify({
+        cwd: checkout,
+        tool_input: { file_path: pathOf(program.hookTarget) },
+      }),
+    )
+    const stop = runCli(
+      launch,
+      launchScript,
+      [`--format=claude`, `--event=stop`],
+      JSON.stringify({ cwd: checkout }),
+    )
+    return { changed, named, hook, stop }
   } finally {
-    rmSync(directory, { recursive: true, force: true })
+    rmSync(launch, { recursive: true, force: true })
   }
 }
 
@@ -622,6 +735,14 @@ function observedSelections(program) {
 /** Each observation equals the model's prediction, as sorted basenames. */
 function compareSelected(observed, expected) {
   expect(observed).toEqual(expected)
+}
+
+/**
+ * Every report line came from the session checkout's own rule: each line
+ * carries the edited rule's mark exactly when the model predicts it.
+ */
+function compareRuleSource(marks, marked) {
+  expect([...marks].filter((mark) => mark !== marked)).toEqual([])
 }
 
 // -- 5. Reach -----------------------------------------------------------------
@@ -642,6 +763,12 @@ function compareSelected(observed, expected) {
 //   js-oracle: a JavaScript oracle file is selected.
 //   hook-oracle, hook-support, hook-driver, hook-production, hook-rule: the
 //     kind of file that the edit hook names.
+//   worktree-session: the session works in a worktree, and the hooks run the
+//     launch checkout's script.
+//   worktree-own-rule: the worktree's branch edited the rule, so its reports
+//     must come from its own copy.
+//   scratch-directory: a launch session's checkout holds a scratch directory
+//     under `.worktrees/`.
 
 const STATES = [
   `direct-dependent`,
@@ -659,6 +786,9 @@ const STATES = [
   `hook-driver`,
   `hook-production`,
   `hook-rule`,
+  `worktree-session`,
+  `worktree-own-rule`,
+  `scratch-directory`,
 ]
 const reach = createOracleReach(PROPERTY, STATES, { minimum: 2 })
 
@@ -759,6 +889,12 @@ function recordStates(program) {
     (module) => module.name === program.hookTarget,
   )
   states.add(`hook-${target?.kind ?? `rule`}`)
+  if (program.session === `worktree`) {
+    states.add(`worktree-session`)
+    if (program.ruleEdited) states.add(`worktree-own-rule`)
+  } else if (program.scratch) {
+    states.add(`scratch-directory`)
+  }
   for (const state of states) reach.reach(state)
 }
 
@@ -771,10 +907,15 @@ function campaign(name) {
     recordStates(program)
     const observed = observedSelections(program)
     const scopes = editedByScope(program)
-    compareSelected(observed.changed, predictSelected(program, scopes.changed))
-    if (observed.named !== undefined)
-      compareSelected(observed.named, predictSelected(program, scopes.named))
-    compareSelected(observed.hook, predictSelected(program, scopes.hook))
+    const marked = predictRuleMarked(program)
+    for (const scope of [`changed`, `named`, `hook`, `stop`]) {
+      if (observed[scope] === undefined) continue
+      compareSelected(
+        observed[scope].oracles,
+        predictSelected(program, scopes[scope]),
+      )
+      compareRuleSource(observed[scope].marks, marked)
+    }
   }
   it(`${name}: fixed-seed campaign`, async () => {
     await fc.assert(fc.asyncProperty(programArbitrary, predicate), {
@@ -791,7 +932,7 @@ function campaign(name) {
 }
 
 describe(`lint selection after an edit`, () => {
-  campaign(`changed, named, and edit-hook scopes`)
+  campaign(`changed, named, edit-hook, and stop-hook scopes`)
   // Every declared state must be entered by the campaigns above.
   afterAll(() => {
     if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
@@ -802,7 +943,7 @@ describe(`lint selection after an edit`, () => {
 
 // The declaration names the parts above. It runs nothing, so it follows them.
 declareOracle({
-  model: [predictSelected],
-  check: [compareSelected],
+  model: [predictSelected, predictRuleMarked],
+  check: [compareSelected, compareRuleSource],
   grammar: [programArbitrary],
 })
