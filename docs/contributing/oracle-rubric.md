@@ -425,7 +425,9 @@ An oracle file also registers no test through a helper from an ordinary module.
 The rule reports a call to such a helper, because the helper's tests then appear
 under the oracle file. The ordinary runner registers those tests, and passes the
 shared suite a registrar when the suite needs one. A helper from an oracle-named
-module is linted on its own, so the rule does not report a call to it.
+module is linted on its own, so the rule does not report a call to it. An
+`oracle-` machinery module, such as `oracle-config.ts`, is not linted, so the
+rule judges a call to its helpers as it judges an ordinary module's.
 
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
 files. Fixed regressions replay the shared law; supplemental examples live in
