@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
+import { oracleRuns } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * # Does the murmur stream hash the bytes it is given?
@@ -80,13 +82,24 @@ function digests(
   })
 }
 
+// The law of the byte framing: the stream digests each history as the
+// byte-at-a-time reference stream does, for every prefix.
+function expectDigestsMatchReference(
+  Stream: typeof Current,
+  Model: typeof Current,
+  chunks: Array<Chunk>,
+): void {
+  expect(digests(Stream, chunks)).toEqual(digests(Model, chunks))
+}
+declareOracle({ check: [expectDigestsMatchReference] })
+
 describe(`MurmurHashStream`, () => {
   it(`digests every chunk sequence as the byte-at-a-time stream does`, () => {
     fc.assert(
       fc.property(fc.array(chunk, { minLength: 1, maxLength: 8 }), (chunks) => {
         expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
       }),
-      { numRuns: 2000 },
+      { numRuns: oracleRuns(2000) },
     )
   })
 
@@ -97,7 +110,7 @@ describe(`MurmurHashStream`, () => {
   ] as Array<[string, Array<Chunk>]>)(
     `digests the words that follow a block offset of %s`,
     (_, chunks) => {
-      expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
+      expectDigestsMatchReference(Current, Reference, chunks)
     },
   )
 })

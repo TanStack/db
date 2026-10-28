@@ -77,6 +77,14 @@ This Collection has no `sync` option. Its normal insert, update, and delete hand
 
 ### Manual transactions on a local Collection
 
+Local persistence reserves the utility names `acceptMutations`,
+`getLeadershipState`, and `forceReloadSubset`. If caller-supplied `utils`
+contains one of these properties, `persistedCollectionOptions` throws
+`InvalidPersistedCollectionConfigError` before it resolves persistence.
+This also applies to inherited properties and properties whose value is
+`undefined`. Other custom utility names remain available. Collections with a
+`sync` option retain their adapter utilities without this local-only restriction.
+
 For a Collection without a `sync` option, normal Collection mutations persist automatically. A manual transaction must call `acceptMutations` in its mutation function:
 
 ```ts
@@ -217,7 +225,7 @@ const syncedTodos = createCollection(
 
 Install `@tanstack/query-core` and `@tanstack/query-db-collection` to use this example. Change the URL to your server. You can wrap another Collection sync adapter in the same way.
 
-The `initialRender` option is optional. It lets live queries report when SQLite restore completes. It also lets React and Solid Suspense use restored rows for the first render while the Collection is not ready.
+The `initialRender` option is optional. It lets the Collection become ready from restored SQLite rows when the network is slow or unavailable. See [Render after SQLite restore](#render-after-sqlite-restore).
 
 Keep `syncedDatabase` open while `syncedTodos` runs. During normal shutdown, await `syncedTodos.cleanup()` and then `syncedDatabase.close?.()`.
 
@@ -236,43 +244,43 @@ An on-demand cache is not yet a certified offline snapshot. The first managed ge
 
 ## Render after SQLite restore
 
-`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot. Set it on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback.
+Without `initialRender`, a persisted Collection becomes `ready` when its sync adapter calls `markReady()`, like any other Collection. The restored rows are in the Collection while it loads, but `status` stays `loading`. Eager and on-demand Collections both support `initialRender`; [on-demand Collections](#on-demand-collections-offline) apply it to each query demand.
 
-Install the React binding to use the following components:
+With `initialRender: { strategy: 'network-first', networkTimeoutMs }`, the Collection prefers the network for `networkTimeoutMs` (default 3 seconds). It becomes `ready` from the restored rows when both of these are true:
 
-```sh
-npm install @tanstack/react-db
-```
+- the SQLite restore completed and installed at least one row, and
+- the deadline passed, or the sync adapter failed its first load.
 
-A regular React live query exposes both readiness signals:
+The status is the only signal. Every hook, Suspense, and `preload()` follow it, so you do not need a separate persisted flag:
 
 ```tsx
 import { useLiveQuery } from '@tanstack/react-db'
 
 function TodosView() {
-  const result = useLiveQuery((q) => q.from({ syncedTodos }))
-  const readiness = result.isReady
-    ? 'Collection ready'
-    : result.isPersistedReady
-      ? 'SQLite restore complete. Collection readiness pending'
-      : 'Waiting for Collection or SQLite restore'
-
+  const { data, isLoading, isLoadingError, isSyncError } = useLiveQuery((q) =>
+    q.from({ syncedTodos }),
+  )
+  if (isLoading) return <p>Loading todos...</p>
+  if (isLoadingError) return <p>Could not load todos.</p>
   return (
     <>
-      <p>{readiness}</p>
-      <ul>{result.data.map((todo) => <li key={todo.id}>{todo.title}</li>)}</ul>
+      {isSyncError && <p>Showing saved todos. Sync is having trouble.</p>}
+      <ul>{data.map((todo: Todo) => <li key={todo.id}>{todo.title}</li>)}</ul>
     </>
   )
 }
 ```
 
-`isReady` reports Collection readiness. `isPersistedReady` reports that every opted-in source finished its current eager restore, even when SQLite had no rows. These flags do not identify where each visible row came from. A regular `useLiveQuery` does not wait for the network-first deadline before it renders rows.
+These rules keep `ready` meaningful:
 
-The hooks also expose `persistedStatus` and `persistedError`. The status is `unavailable` if a source did not opt in, `loading` during restore, `ready` after every restore completes, or `error` if a restore fails. `persistedError` keeps the restore error. An SSR seed does not count as a SQLite restore.
+- **An empty restore waits for the network.** The Collection stays `loading` until the sync adapter answers, so an empty list always means "no rows". A Collection that last synced to zero rows also waits, because the restore cannot tell the two cases apart.
+- **The restore comes first.** If the sync adapter answers before the restore completes, the answer waits for the restore. A remote failure then opens the Collection from restored rows and shows the failure as a sync error (`isSyncError`, `collection.health.error`). Without restored rows, the first load fails (`status: 'error'`).
+- **A failed restore is a crash.** The Collection becomes `crashed`, because local storage cannot serve reads.
+- **The deadline does not stop network sync.** Network changes apply over the restored rows when they arrive.
 
-React, Solid, and Svelte read these values as properties. Angular reads signals such as `result.isPersistedReady()`. Vue reads refs such as `result.isPersistedReady.value`.
+`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot.
 
-React and Solid Suspense can use the same option for network-first initial rendering. This React component uses the `syncedTodos` Collection configured above:
+Suspense uses the same status. This React component uses the `syncedTodos` Collection configured above:
 
 ```tsx
 import { Suspense } from 'react'
@@ -292,15 +300,48 @@ function TodosScreen() {
 }
 ```
 
-Place `TodosScreen` inside an [Error Boundary](./error-handling.md#using-suspense-and-error-boundaries-react) to handle initial failures.
+Place `TodosScreen` inside an [Error Boundary](./error-handling.md#using-suspense-and-error-boundaries-react) to handle a failed first load or a crash.
 
-Suspense prefers Collection readiness. If it remains pending after `networkTimeoutMs`, a completed SQLite restore can release the first render. The default is 3 seconds. Set `networkTimeoutMs: 0` to allow fallback as soon as restore completes. For a query with multiple sources, the longest configured deadline applies. The deadline does not stop network sync.
+Restored rows do not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately: a remote failure can open the Collection from restored rows.
 
-A source failure can allow fallback before the deadline. React also waits for restore if its client query stream fails before the first render, including before the component mounts. Once every restore succeeds, React renders the derived query result, even if it is empty.
+### On-demand Collections offline
 
-A derived-query failure still reaches the surrounding React Error Boundary. If the network-first wait rejects, its error reaches that boundary. A successful network load can render even if restore failed or a source did not opt in.
+An on-demand Collection loads rows for each query demand: the filter, order, and limit that a query asks the source for. With `initialRender`, a demand can settle on its rows from SQLite when the network does not answer. This includes Electric's `syncMode: 'progressive'`, which loads query subsets on demand until its full sync completes.
 
-Persisted readiness does not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately. The fallback does not classify source errors.
+```ts
+type Issue = { id: string; title: string }
+
+const issues = createCollection(
+  persistedCollectionOptions({
+    ...electricCollectionOptions<Issue>({
+      id: 'issues',
+      shapeOptions: { url: 'http://localhost:3000/v1/shape', params: { table: 'issues' } },
+      syncMode: 'progressive',
+      getKey: (issue) => issue.id,
+    }),
+    persistence: syncedPersistence,
+    initialRender: { strategy: 'network-first', networkTimeoutMs: 3_000 },
+  }),
+)
+```
+
+The rule applies to each demand separately:
+
+- A demand is covered after a load of that exact demand settles online and its rows are saved in SQLite. Another filter, order, or limit is a different demand, even when its rows overlap.
+- A later load of a covered demand first shows its rows from SQLite. If the network does not answer within `networkTimeoutMs`, or it fails, the load settles on those rows. `isReady`, `preload()`, and Suspense then proceed as they do after a network load. Only the load settles from SQLite; the on-demand Collection's own status does not change.
+- The network load keeps running. Its rows replace the restored rows when they arrive. If it fails after the load settled, the query stays ready on the rows it shows.
+- A demand that never settled online is not covered. Offline, it waits for the network. A query that has never run therefore stays loading offline unless a completed progressive full sync already holds every row.
+- A source truncate, such as an Electric must-refetch, ends coverage for every demand, and so does a snapshot transaction (`begin({ snapshot: true })`), which replaces every row. A new cache generation starts without coverage.
+- Scoped recovery also ends coverage. For the rest of that sync run, no load settles from SQLite and no load records coverage.
+- A load that is released before it settles records no coverage, even if its source finishes it afterward.
+- Coverage also ends when SQLite holds fewer rows for the demand than it held when the demand settled. A row that the source deletes, or that Query DB retention removes after `gcTime`, therefore ends coverage until the demand loads online again, unless another row of the demand reached SQLite meanwhile, for example through another query. Coverage counts the rows of an unordered demand; it does not record which rows they were.
+- An ordered window with a `limit` stays covered only while SQLite holds the same rows for it, in any order. A row that leaves, joins, or replaces a row of the window ends its coverage.
+- A load with `refetch: true` always waits for the network.
+- Only the default single-process coordinator supports this. If you pass a multi-tab coordinator, such as `BrowserCollectionCoordinator`, on-demand loads do not settle from SQLite. They wait for the network, as they did before this option.
+
+Coverage proves that the rows were complete when the earlier load settled. It does not prove that they are current. The wait changes when readiness arrives, not which rows the source has. A cursor page or a demand built from other rows' values is covered only if the restored rows produce the same demand again.
+
+For a query that joins eager and on-demand sources, the query becomes ready when every eager source is ready, which network-first allows from its restored rows after the deadline, and every demand that the query reaches on an on-demand source has settled. A network failure alone does not settle an on-demand demand that is not covered.
 
 ## Browser tabs and Electron renderers
 
@@ -356,7 +397,9 @@ The Node package prunes its applied transaction log by default. Its [README](htt
 
 ## Errors and limits
 
-An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and puts the Collection in its error state.
+An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and crashes the Collection: it moves to `crashed` even after it was ready, and so does every live query and Effect over it. `reload()` rejects; recover with `cleanup({ dependents: true })` and `preload()` (see [When a Collection crashes](./error-handling.md#when-a-collection-crashes)).
+
+Failures from the wrapped sync adapter keep their usual meaning. Before the Collection is ready, the adapter's `fail` fails the first load (see [Render after SQLite restore](#render-after-sqlite-restore) for `initialRender`). After it, the adapter's `reportError`, `reportHealthy`, and `fail` appear in `collection.health` and in each live query's `health` tree, and the persisted rows stay. A failure of persistence itself crashes the Collection. In a follower tab, a failed request routed to the leader appears as a request error on the query that asked for the data.
 
 If a coordinated write loses its response, the result can be uncertain. `IndeterminateCommitError` means the application must check the durable state before it retries that write.
 

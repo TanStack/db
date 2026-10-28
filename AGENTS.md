@@ -106,6 +106,9 @@ is not ready:
   the owner and the maintainer decision.
 - **Pinned-only coverage:** a named example where the law needs a generator
   dimension.
+- **Unit tests inside oracles:** ordinary examples or concrete type assertions
+  placed in an oracle file. A fixed regression must replay the shared model,
+  production driver, and comparison without its own expected answer.
 - **"Pre-existing" as a dismissal:** a reachable counterexample that an agent
   labels as older than the change, but does not fix, record in the coverage
   map with its trace, or bring to the maintainer for a decision.
@@ -133,6 +136,12 @@ shortcuts that a syntactic check can see. The repository's agent hooks
 after each edit and at the end of each turn. A hook sees only the edits that
 the harness's own edit tools make. After an edit through a shell command, or
 in a harness without these hooks, run `pnpm lint:changed` before you finish.
+
+The end-of-turn hook and `pnpm lint:changed` also report every oracle run
+budget that the branch lowered or removed, and CI prints it as a warning. A
+budget is removed when its key is in no oracle file, or in a module that an
+oracle file imports, any more. A lowered or removed budget can be deliberate.
+Restore it, or explain the reason in the pull request.
 
 Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
 pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
@@ -694,6 +703,25 @@ explain why extending its owner, creating a new independent oracle, or adding a
 receiving witness is not practical. Bug fixes cannot use this focused-test-only
 exception. They must provide evidence that closes the entire declared bug class.
 
+### Keep Unit Tests Out of Oracles
+
+Oracle files contain reusable laws, independent models, input or history
+grammars, shared comparisons, and their execution. Do not put ordinary unit
+tests or concrete type assertions in an oracle file. A filename, coverage-map
+entry, contract comment, or table of fixtures does not turn examples into an
+oracle.
+
+Keep a fixed regression as input to the same model, production driver, and
+comparison that the generated campaign uses. It must not carry a separate
+expected answer or its own assertions. Checker calibration may supply a wrong
+observation to that same comparison. Put supplemental unit tests in ordinary
+test files; they do not discharge an oracle-owned coverage obligation.
+
+For compile-time contracts, generate legal TypeScript inputs and check their
+public types against a reusable independent type law. A list of
+`expectTypeOf` calls or `@ts-expect-error` examples is not an oracle. Negative
+checks derived by the shared law from generated inputs are permitted.
+
 ### Name Oracle Files for Discovery
 
 Include `oracle` in filenames that own an independent reference computation,
@@ -701,6 +729,15 @@ state model, differential or metamorphic comparison, or reusable law checker.
 Modules that define the model, checker, or its history grammar also qualify.
 Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
+
+An oracle file holds only oracle tests. It declares its check, model, and history
+grammar with `declareOracle` from `packages/db/tests/oracle-declaration.ts`. A
+type-level oracle names its model types in `typeModel`. Each
+part is optional. Every test in the file must use a declared part, directly
+or through a driver, or run a generated property that states its law inline.
+A test that compares production with a hand-written value is a unit test:
+put it in an ordinary test file. The `oracle/no-unit-test` lint rule reports
+a test that does neither.
 
 Ordinary example tests, type assertions, fixtures, registration wrappers, and
 runner utilities keep their ordinary names. A module that only drives production

@@ -1,0 +1,39 @@
+{
+  "starting_head": "8c24922026fb4a714cb54b992ac85faa2e876742",
+  "binding": "current working-tree SHA-256 contents; excludes local install workaround and self/record",
+  "files_sha256": {
+    ".changeset/convex-collection.md": "c7ad56ad983fe653f0054f0a82fcd47cad46c1d59087d62d79a21ffb077eb324",
+    "docs/collections/convex-collection.md": "3901d5d040f8e101369f1a16a160d4e5d0df391ec48408f99d995191ad013105",
+    "docs/contributing/oracle-coverage.md": "a1f250ff60d734264475f69d293773d01259d7c9ded1ceb5e624f99d7bd06258",
+    "packages/convex-db-collection/README.md": "53b984ef9156a52cea7cb92a81d34d6543508d2dbf048d8f2aeb361ae996d259",
+    "packages/convex-db-collection/e2e/lazy-paging-oracle.test.ts": "7a5c1390879e4e01757d020e22bfa24f5852a2cf5bb4e18faa4174ce47a02e48",
+    "packages/convex-db-collection/e2e/local-backend.ts": "e38be0c546a885f55b004f23bc894ab86d3c3b5880bfd9dde8208866a42aea5d",
+    "packages/convex-db-collection/package.json": "8f6f781a3f005920033d44d237e86598b0e81157df73ff8955b4c44d36abb63b",
+    "packages/convex-db-collection/src/index.ts": "4247e2bbd168a80791861f4553c10d0d878504a7cdc6a65d4bc648e15b1e51ba",
+    "packages/convex-db-collection/src/offline.ts": "55e70bdbbc310226a9f0175d0c0912218413ba67433b5b47ccc78d6e7dadd5c3",
+    "packages/convex-db-collection/src/options.ts": "ea2c2efc4d574080c5e03da8e121b79406640c667a1e260ead9eff22f6253d33",
+    "packages/convex-db-collection/src/paginated-options.ts": "de0e92849d363f2545823d96829964084b1a115b890f0f521f9bdc0958ea2b76",
+    "packages/convex-db-collection/src/pagination-demand.ts": "d2be74c1f3610c153c2b7c3c9411aa6ea216db7e76c9b0a7f32d63ef2bde57ce",
+    "packages/convex-db-collection/src/pagination.ts": "0308668d07db701d1f7f891d001a4aca2798973ea29bf1d4b00931eaa0e05f1d",
+    "packages/convex-db-collection/src/subscription.ts": "a0c312caf2af3667c18e96c565ceb159c20d65550426cdd44aca69a43a3543e5",
+    "packages/convex-db-collection/tests/helpers.ts": "11f2c79c6872373e8f77efae62d2fabfead0e5af6673c86920ae2ef4abdb7274",
+    "packages/convex-db-collection/tests/lazy-paging-driver.ts": "b6cdef3d9f929be6cd0104d531d4177a0dff72c0d2e8ff61260659acffa3dffe",
+    "packages/convex-db-collection/tests/lazy-paging-history-oracle.property.test.ts": "5bc8808d6f71648f48e40acb05943132448f3e8f5bba31d97e261f1741674384",
+    "packages/convex-db-collection/tests/lazy-paging-model-oracle.ts": "5c25e5765413eb6ad3d7e26bd10e7cd20c75a9c094cdca0e142b87da56d5dfc5",
+    "packages/convex-db-collection/tests/lazy-paging-oracle.property.test.ts": "3a7b5b6284076bc8dbdb59ac1d735f509c6bc19201ad355a0382e7a797a2d569",
+    "packages/convex-db-collection/tests/lazy-paging-receipt-model.ts": "4f0387612c6e18caae83a24af1183586c426ddad65a6b3ad8d7cfb5b3de1067a",
+    "packages/convex-db-collection/tests/lazy-paging-receipt-oracle.property.test.ts": "06b60b0a86926070dd57dd068f4abe572d48924e2cea29acb77f417bf8115d6a",
+    "packages/convex-db-collection/tests/sdk-cache-oracle.test.ts": "0e011a20ce991195742bdfa0cd570d831105604ad8e3e2cc4b8fab4b62daad58",
+    "packages/convex-db-collection/tests/types.test-d.ts": "3ff1a42d6caf95d14e5270b632340524a9f796b978ccd031835bd1f2d0dab6dd",
+    "packages/convex-db-collection/tsconfig.json": "623bc70a72fd718e7d209c90a08df12cced0e9045a3565058623e34e946a5710",
+    "packages/convex-db-collection/vitest.lazy.e2e.config.ts": "e377ee3a835edd1215c48654db863d9ed27406ca67ae3b34c846e4ed253a030c",
+    "packages/react-db/tests/convex-lazy-paging-oracle.test.tsx": "0a33955d45816d766100b89e45dd63ce32125864cf3e2f0ea46533a582b0333b"
+  },
+  "production_files_changed_this_round": [
+    "packages/convex-db-collection/src/subscription.ts"
+  ],
+  "prior_analytical_freeze_verified": 250,
+  "loss_audit_artifacts_unchanged": 9,
+  "prior_original_records_unchanged": 2,
+  "local_install_files_unchanged": true
+}

@@ -27,6 +27,9 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   // Collection state errors
   CollectionStateError: [['State error']],
   CollectionInErrorStateError: [['operation', 'collection-1']],
+  CollectionHasSubscribersError: [['collection-1', 2]],
+  CollectionReloadCrashedError: [['collection-1']],
+  CollectionReloadDuringSyncEntryError: [['collection-1']],
   InvalidCollectionStatusTransitionError: [
     ['pending', 'ready', 'collection-1'],
   ],
@@ -91,6 +94,9 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
     ['join clause', 'number'],
     ['unionAll clause', 'undefined'],
   ],
+  IncludeOperatorRequiredError: [['issues']],
+  GroupingOperatorRequiredError: [[]],
+  InvalidPoolOptionError: [[]],
   JoinConditionMustBeEqualityError: [[]],
   QueryMustHaveFromClauseError: [[]],
   InvalidWhereExpressionError: [['boolean']],
@@ -158,6 +164,7 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
 
   // Window errors
   UnhashableQueryIRError: [['query.fnSelect', 'function select']],
+  SourceCollectionIdReuseError: [['useLiveQuery', 'todos']],
   DatabaseRequiredError: [[]],
   ObjectStoreNotFoundError: [['todos', 'app', ['users', 'posts']]],
   NameRequiredError: [[]],

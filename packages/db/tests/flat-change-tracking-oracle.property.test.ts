@@ -79,15 +79,23 @@ import {
 } from '../src/proxy.js'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
+import {
+  FRESH_OBJECT,
+  MISSING,
+  buildRow,
+  domainValue,
+  fields,
+  plainRow,
+} from './flat-change-tracking-fixture.js'
+import type { Row, RowShape } from './flat-change-tracking-fixture.js'
 
 const property = `flat-change-tracking.equivalence`
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
-const MISSING = Symbol(`missing`)
-const FRESH_OBJECT = Symbol(`fresh object`)
 const fn = () => 1
 const values: ReadonlyArray<unknown> = [
   0,
@@ -102,8 +110,6 @@ const values: ReadonlyArray<unknown> = [
   undefined,
   fn,
 ]
-const fields = [`a`, `b`, `c`] as const
-type Row = Record<string, unknown>
 type Operation =
   | { kind: `set`; field: string; value: unknown }
   | { kind: `revert`; field: string }
@@ -119,12 +125,6 @@ type Operation =
   | { kind: `store-draft`; field: string; row: number }
   // Writes the opposite-signed zero over every field the row holds as a zero.
   | { kind: `flip-zeros` }
-type RowShape = {
-  fields: Array<unknown>
-  nullPrototype: boolean
-  frozen: boolean
-  hidden: unknown
-}
 type History = {
   rows: Array<RowShape>
   operations: Array<Array<Operation>>
@@ -189,9 +189,6 @@ function expectedChanges(
     return changes
   })
 }
-
-const domainValue = (value: unknown) =>
-  value === FRESH_OBJECT ? { nested: 1 } : value
 
 // Shared by the model and the driver; `drafts` are the callback's drafts.
 function applyOperation(
@@ -258,22 +255,6 @@ function normalize(value: unknown, copies = new Map<object, Row>()): unknown {
     copy[key] = normalize(field, copies)
   }
   return copy
-}
-
-function buildRow(shape: RowShape): Row {
-  const row: Row = shape.nullPrototype ? Object.create(null) : {}
-  shape.fields.forEach((value, index) => {
-    if (value !== MISSING) row[fields[index]!] = value
-  })
-  if (shape.hidden !== MISSING) {
-    Object.defineProperty(row, `h`, {
-      value: domainValue(shape.hidden),
-      enumerable: false,
-      writable: true,
-      configurable: true,
-    })
-  }
-  return shape.frozen ? Object.freeze(row) : row
 }
 
 // Captures a row's own properties, including non-enumerable ones.
@@ -390,69 +371,9 @@ const historyArbitrary: fc.Arbitrary<History> = fc
     }),
   )
 
-const plainRow = (rowFields: Array<unknown>, nullPrototype = false) => ({
-  fields: rowFields,
-  nullPrototype,
-  frozen: false,
-  hidden: MISSING,
-})
-
-const firstDraft = (draft: Array<Row> | Row) =>
-  Array.isArray(draft) ? draft[0]! : draft
 // Each witness pins a shape the trackers once disagreed on to the change
 // set both must now report: defining a field acts as assigning it, and a
 // non-enumerable field is not row data unless the callback writes it.
-const descriptorLaws: ReadonlyArray<{
-  name: string
-  shape: RowShape
-  callback: (draft: Array<Row> | Row) => void
-  expected: Row
-}> = [
-  {
-    name: `an enumerable accessor defined in the callback reports its value`,
-    shape: plainRow([1, MISSING, MISSING]),
-    callback: (draft) => {
-      Object.defineProperty(firstDraft(draft), `g`, {
-        get: () => 7,
-        enumerable: true,
-        configurable: true,
-      })
-    },
-    expected: { g: 7 },
-  },
-  {
-    name: `defining a field with its own value is not a change`,
-    shape: plainRow([1, MISSING, MISSING]),
-    callback: (draft) => {
-      Object.defineProperty(firstDraft(draft), `a`, {
-        value: 1,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      })
-    },
-    expected: {},
-  },
-  {
-    name: `an equal object written to a non-enumerable object field is not a change`,
-    shape: { ...plainRow([1, MISSING, MISSING]), hidden: FRESH_OBJECT },
-    callback: (draft) => {
-      firstDraft(draft).h = { nested: 1 }
-    },
-    expected: {},
-  },
-  {
-    name: `a non-enumerable field written and then deleted is not a change`,
-    shape: { ...plainRow([1, MISSING, MISSING]), hidden: `x` },
-    callback: (draft) => {
-      firstDraft(draft).h = `y`
-      delete firstDraft(draft).h
-    },
-    expected: {},
-  },
-]
-
-// Each history isolates one place a plausible flat diff goes wrong.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
   {
     name: `a changed field defined back to its own value is not a change`,
@@ -659,70 +580,22 @@ function runHistory(history: History): void {
   expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
 }
 
+declareOracle({ check: [runHistory], model: [expectedChanges] })
+
 describe(`flat change tracking oracle`, () => {
-  if (requestedReplayProperty === undefined) {
+  if (!oracleReplayRequested()) {
     for (const { name, history } of pinnedHistories) {
       it(`matches the draft proxy when ${name}`, () => runHistory(history))
-    }
-
-    it(`falls back to the proxy for rows that are not flat`, () => {
-      const callback = () => {}
-      for (const row of [
-        { a: { nested: 1 } },
-        { a: [1] },
-        { a: new Date(0) },
-        { [Symbol(`s`)]: 1 },
-        new (class Row {
-          a = 1
-        })(),
-        // A getter can return a new value on each read, so only the proxy,
-        // which reads it once, reports a stable change set.
-        Object.defineProperty({}, `a`, { get: () => 1, enumerable: true }),
-      ]) {
-        expect(withFlatChangeTracking([row], callback, true)).toBeUndefined()
-      }
-    })
-
-    it(`detaches an assigned object from later mutation`, () => {
-      const assigned = { nested: 1 }
-      const [changes] = withFlatChangeTracking(
-        [{ a: 1 }],
-        (drafts) => {
-          ;(drafts as Array<Row>)[0]!.a = assigned
-        },
-        true,
-      )!
-      assigned.nested = 2
-      expect(changes).toStrictEqual({ a: { nested: 1 } })
-    })
-
-    for (const { name, shape, callback, expected } of descriptorLaws) {
-      it(`reports the same change set when ${name}`, () => {
-        expect(
-          withFlatChangeTracking([buildRow(shape)], callback, false),
-          `flat`,
-        ).toStrictEqual([expected])
-        expect(
-          withChangeTracking(buildRow(shape), callback),
-          `proxy`,
-        ).toStrictEqual(expected)
-      })
     }
 
     fcTest.prop([historyArbitrary], {
       seed: 44_502_101,
       numRuns: oracleRuns(200),
     })(`matches the draft proxy (fixed)`, runHistory)
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(200, property))(
-      `matches the draft proxy (random)`,
-      runHistory,
-    )
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop([historyArbitrary], oraclePropertyOptions(200, property))(
-      `matches the draft proxy (replay)`,
-      runHistory,
-    )
-  } else {
-    it.skip(`runs only when its replay property is selected`, () => {})
   }
+  // A path replay of this property runs its one recorded history here.
+  oracleReplayTest(fcTest, property).prop(
+    [historyArbitrary],
+    oraclePropertyOptions(200, property),
+  )(`matches the draft proxy (random)`, runHistory)
 })

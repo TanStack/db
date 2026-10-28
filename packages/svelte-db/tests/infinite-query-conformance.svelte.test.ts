@@ -11,12 +11,14 @@ import {
   createCollection,
   createLiveQueryCollection,
   createLiveQueryWindowController,
+  eq,
   gt,
 } from '@tanstack/db'
 import { flushSync, untrack } from 'svelte'
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
@@ -40,11 +42,12 @@ function finishSetup(dispose: () => void, initialize: () => void = flushSync) {
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
+  collectionId?: string,
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
-      id: `infinite-conformance-svelte-${sourceSequence++}`,
+      id: collectionId ?? `infinite-conformance-svelte-${sourceSequence++}`,
       getKey: (row) => row.id,
       initialData: [...initialData],
     }),
@@ -113,7 +116,7 @@ function makeHandle(
         pageParams: result.pageParams,
         hasNextPage: result.hasNextPage,
         isFetchingNextPage: result.isFetchingNextPage,
-        error: result.error,
+        isLoadingError: result.isLoadingError,
         status: result.status,
         collection: result.collection,
       }
@@ -245,7 +248,10 @@ function mountInputControllable(
 
 const svelteInfiniteDriver: InfiniteQueryDriver = {
   name: `svelte`,
+  // Reactive reads decide when the query compiles again.
+  comparesQueryIdentity: false,
   gt,
+  eq,
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
@@ -267,7 +273,7 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(svelteInfiniteDriver)
+runInfiniteQuerySuite(svelteInfiniteDriver, registerInfiniteQueryUnitScenarios)
 
 describe(`infinite driver post-root ownership`, () => {
   it(`retains successful root until its owner disposes`, () => {

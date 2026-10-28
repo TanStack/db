@@ -208,9 +208,9 @@ export class UserListComponent {
 
 > **Note:** React hooks derive query identity from structured query IR by
 > default. Dependency arrays are still accepted for backwards compatibility,
-> but warn in development and will be removed in 1.0. Unhashable queries also
-> warn and keep legacy mount-stable identity until 1.0; add `queryKey` to make
-> captured opaque values reactive. See the [React Adapter
+> but warn in development and will be removed in 1.0. In React and Preact, an
+> unhashable query without `queryKey` throws `UnhashableQueryIRError`. See the
+> [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 
 For server rendering and hydration, live query preloading transports the ordered
@@ -240,18 +240,29 @@ function UserSearch({ search }: { search: string }) {
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
 
-React development builds detect both cases. Before 1.0, opaque, unhashable IR
-warns and keeps legacy mount-stable identity; repeated expensive identity
-derivation also warns once. Both warnings point to the same `queryKey` escape
-hatch.
+Query identity matters where a hook compares it to decide whether to compile
+again: React and Preact compare it on every render, and a `DbClient` matches
+preloaded and hydrated queries by it. Those hooks throw
+`UnhashableQueryIRError` when they compile an opaque, unhashable query without
+`queryKey`; an empty `queryKey` counts as none. React development builds also
+warn once when deriving identity becomes expensive, pointing to the same
+`queryKey` escape hatch. Vue, Solid, Angular, and Svelte without a `DbClient`
+compile again whenever their reactive reads change, so they need no identity
+and accept any query.
 
-For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
+The derived identity names each source by its Collection ID. While a hook that
+compares identity is mounted, each Collection ID its queries read must keep
+naming one source Collection object; a different object under an ID the hook
+already read throws `SourceCollectionIdReuseError` instead of returning rows
+from the old source.
+
+For more details on framework integration, see the [React](../framework/react/overview), [Preact](../framework/preact/overview), [Vue](../framework/vue/overview), [Solid](../framework/solid/overview), [Svelte](../framework/svelte/overview), and [Angular](../framework/angular/overview) adapter documentation.
 
 ### Using with React Suspense
 
 For React applications, you can use the `useLiveSuspenseQuery` hook to integrate with React Suspense boundaries. This hook suspends rendering while data loads initially, then streams updates without re-suspending.
 
-For eager SQLite persisted Collections, you can opt into a network-first initial render on every query source. A completed restore can release React or Solid Suspense after a network deadline or source failure. React also handles a failed client query stream this way. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for setup and limits.
+For SQLite persisted Collections, you can opt into a network-first initial render on every query source. A completed restore can release React or Solid Suspense after a network deadline or source failure. On-demand sources apply this to each query demand that settled online before. React also handles a failed client query stream this way. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for setup and limits.
 
 ```tsx
 import { useLiveSuspenseQuery } from '@tanstack/react-db'
@@ -424,6 +435,45 @@ function UserList() {
 }
 ```
 
+### Stale Data and the Health Tree
+
+Every live query hook also returns `health`, a health tree with one node for
+the query and one for each source alias. After the query is ready, a source
+that loses its sync connection keeps its rows, and `status` stays `ready`. The
+problem appears only in `health`, and `isSyncError` becomes `true`:
+
+```tsx
+function UserList() {
+  const { data, isLoading, isLoadingError, isCrashed, isSyncError } =
+    useLiveQuery((q) => q.from({ user: usersCollection }))
+
+  if (isLoading) return <div>Loading...</div>
+  if (isLoadingError) return <div>Error loading users</div>
+  if (isCrashed) return <div>Local storage failed</div>
+
+  return (
+    <>
+      {isSyncError && <div>Users may be out of date</div>}
+      <ul>
+        {data.map((user) => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </>
+  )
+}
+```
+
+> **Important:** `isLoadingError` means the first load failed and there is
+> nothing to show; offer `collection.reload()`. `isCrashed` means local storage
+> broke: only cleanup with its dependents and a fresh start recover. To show a
+> "data may be out of date" banner, check `isSyncError` or `health`.
+> `useLiveSuspenseQuery` also returns `health`, and after its first render it
+> throws only for a crash.
+
+See [Loading and Sync Errors](./error-handling.md#loading-and-sync-errors)
+for the shape of the tree, `failureReason` and `error`, and how to reload.
+
 ### Conditional Queries
 
 For optional inputs, prefer rendering the query component only after the inputs exist. That avoids creating a live query before all required values exist.
@@ -471,10 +521,10 @@ const { data, isEnabled, status } = useLiveQuery({
 
 The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
-- `data`, `state`, and `collection` are `undefined`
+- `data`, `state`, `collection`, and `health` are `undefined`
 - `isEnabled` is `false`
 - `isReady` is `true`
-- `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
+- `isLoading`, `isIdle`, `isLoadingError`, `isCrashed`, `isSyncError`, and `isCleanedUp` are all `false`
 
 ### Alternative Input Forms
 
@@ -905,7 +955,7 @@ The result type of a join will take into account the join type, with the optiona
 
 ### Method Signature
 
-```ts
+```ts nocheck
 join(
   { [alias]: Collection | Query },
   condition: (row: TRow) => Expression<boolean>, // `eq(...)` or `and(eq(...), ...)`
@@ -1194,7 +1244,7 @@ In this example, the `activeUsers` subquery is used twice but executed only once
 Build complex queries with multiple levels of nesting:
 
 ```ts
-import { count } from '@tanstack/db'
+import { count, createCollection, eq, liveQueryCollectionOptions } from '@tanstack/db'
 
 const topUsers = createCollection(liveQueryCollectionOptions({
   query: (q) => {
@@ -1218,7 +1268,7 @@ const topUsers = createCollection(liveQueryCollectionOptions({
         name: user.name,
         postCount: postCount.count,
       }))
-      .orderBy(({ userStats }) => userStats.postCount, 'desc')
+      .orderBy(({ $selected }) => $selected.postCount, 'desc')
       .limit(10)
     
     // Use the user stats subquery in the main query
@@ -1231,20 +1281,22 @@ const topUsers = createCollection(liveQueryCollectionOptions({
 
 Includes let you nest subqueries inside `.select()` to produce hierarchical results. Instead of joins that flatten 1:N relationships into repeated rows, each parent row gets a nested collection of its related items.
 
+Wrap a child query in `include()` to get a live child Collection, or in `toArray()` or `materialize()` to get inline values. A child query in `.select()` without one of these throws `IncludeOperatorRequiredError`. These functions bring the include code with them, so an app that never includes subqueries does not bundle it.
+
 ```ts
-import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { createLiveQueryCollection, eq, include } from '@tanstack/db'
 
 const projectsWithIssues = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: q
+    issues: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
       .select(({ i }) => ({
         id: i.id,
         title: i.title,
-      })),
+      }))),
   })),
 )
 ```
@@ -1277,7 +1329,7 @@ Child queries support additional `.where()` clauses beyond the correlation condi
 q.from({ p: projectsCollection }).select(({ p }) => ({
   id: p.id,
   name: p.name,
-  issues: q
+  issues: include(q
     .from({ i: issuesCollection })
     .where(({ i }) => eq(i.projectId, p.id))       // correlation
     .where(({ i }) => eq(i.createdBy, p.createdBy)) // parent-referencing filter
@@ -1285,7 +1337,7 @@ q.from({ p: projectsCollection }).select(({ p }) => ({
     .select(({ i }) => ({
       id: i.id,
       title: i.title,
-    })),
+    }))),
 }))
 ```
 
@@ -1299,7 +1351,7 @@ Child queries support `.orderBy()` and `.limit()`, applied per parent:
 q.from({ p: projectsCollection }).select(({ p }) => ({
   id: p.id,
   name: p.name,
-  issues: q
+  issues: include(q
     .from({ i: issuesCollection })
     .where(({ i }) => eq(i.projectId, p.id))
     .orderBy(({ i }) => i.createdAt, 'desc')
@@ -1307,7 +1359,7 @@ q.from({ p: projectsCollection }).select(({ p }) => ({
     .select(({ i }) => ({
       id: i.id,
       title: i.title,
-    })),
+    }))),
 }))
 ```
 
@@ -1315,7 +1367,7 @@ Each project gets its own top-5 issues, not 5 issues shared across all projects.
 
 ### toArray
 
-By default, each child result is a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
+`include()` makes each child result a live `Collection`. If you want a plain array instead, wrap the child query with `toArray()`:
 
 ```ts
 import { createLiveQueryCollection, eq, toArray } from '@tanstack/db'
@@ -1337,7 +1389,7 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
 )
 ```
 
-With `toArray()`, the project row is re-emitted whenever its issues change. Without it, the child `Collection` updates independently.
+With `toArray()`, the project row is re-emitted whenever its issues change. With `include()`, the child `Collection` updates independently.
 
 ### materialize
 
@@ -1388,16 +1440,16 @@ Do not return child queries, `toArray()`, `materialize()`, or query expressions 
 You can use aggregate functions in child queries. Aggregates are computed per parent:
 
 ```ts
-import { createLiveQueryCollection, eq, count } from '@tanstack/db'
+import { count, createLiveQueryCollection, eq, include } from '@tanstack/db'
 
 const projectsWithCounts = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issueCount: q
+    issueCount: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
-      .select(({ i }) => ({ total: count(i.id) })),
+      .select(({ i }) => ({ total: count(i.id) }))),
   })),
 )
 ```
@@ -1413,20 +1465,20 @@ const tree = createLiveQueryCollection((q) =>
   q.from({ p: projectsCollection }).select(({ p }) => ({
     id: p.id,
     name: p.name,
-    issues: q
+    issues: include(q
       .from({ i: issuesCollection })
       .where(({ i }) => eq(i.projectId, p.id))
       .select(({ i }) => ({
         id: i.id,
         title: i.title,
-        comments: q
+        comments: include(q
           .from({ c: commentsCollection })
           .where(({ c }) => eq(c.issueId, i.id))
           .select(({ c }) => ({
             id: c.id,
             body: c.body,
-          })),
-      })),
+          }))),
+      }))),
   })),
 )
 ```
@@ -1439,7 +1491,7 @@ When using includes with React, each child `Collection` needs its own `useLiveQu
 
 ```tsx
 import { useLiveQuery } from '@tanstack/react-db'
-import { eq } from '@tanstack/db'
+import { eq, include } from '@tanstack/db'
 
 function ProjectList() {
   const { data: projects } = useLiveQuery({
@@ -1447,13 +1499,13 @@ function ProjectList() {
       q.from({ p: projectsCollection }).select(({ p }) => ({
         id: p.id,
         name: p.name,
-        issues: q
+        issues: include(q
           .from({ i: issuesCollection })
           .where(({ i }) => eq(i.projectId, p.id))
           .select(({ i }) => ({
             id: i.id,
             title: i.title,
-          })),
+          }))),
       })),
   })
 
@@ -1492,6 +1544,29 @@ Each `IssueList` component independently subscribes to its project's issues. Whe
 ## groupBy and Aggregations
 
 Use `groupBy` to group your data and apply aggregate functions. When you use aggregates in `select` without `groupBy`, the entire result set is treated as a single group.
+
+Aggregate functions such as `count()` bring the grouping code with them. A `groupBy` with no aggregate wraps its keys in `groupKeys()` instead; without it, the query throws `GroupingOperatorRequiredError`:
+
+```ts
+import { createLiveQueryCollection, groupKeys } from '@tanstack/db'
+
+const departments = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .groupBy(groupKeys(({ user }) => user.departmentId))
+    .select(({ user }) => ({ departmentId: user.departmentId })),
+)
+```
+
+`groupKeys()` built outside `.groupBy()` needs the query's context as a type argument. Without it, the callback is untyped:
+
+```ts
+import { groupKeys } from '@tanstack/db'
+import type { ContextFromSource } from '@tanstack/db'
+
+type UserQuery = ContextFromSource<{ user: typeof usersCollection }>
+export const byDepartment = groupKeys<UserQuery>(({ user }) => user.departmentId)
+```
 
 ### Method Signature
 
@@ -1660,8 +1735,9 @@ const engineeringStats = deptStats.get(1)
 ```
 
 > **Note**: Grouped results are keyed differently based on the grouping:
-> - **Single column grouping**: Keyed by the actual value (e.g., `deptStats.get(1)`)
+> - **Single column grouping**: A string or number group value is the key (e.g., `deptStats.get(1)`). A `null`, `undefined`, boolean, or bigint group value gets a string key instead, because Collection keys are strings or numbers. A string that starts with TanStack DB's reserved `\u0000tanstack-db:` prefix also gets a different string key. Read these keys from the row's `$key`.
 > - **Multiple column grouping**: Keyed by a JSON string of the grouped values (e.g., `userStats.get('[1,"admin"]')`)
+> - **Custom keys**: A `getKey` option on the live query replaces these keys.
 
 ## findOne
 
@@ -1986,6 +2062,11 @@ const topCustomers = createLiveQueryCollection((q) =>
 )
 ```
 
+An aggregate in `orderBy`, such as `.orderBy(({ order }) => sum(order.amount))`,
+reads the value of the same aggregate in `select()`, as an aggregate in
+`having` does. Select it as a field first. Otherwise the query throws
+`AggregateFunctionNotInSelectError`.
+
 ### Descending Order
 
 Use `desc` for descending order:
@@ -2020,6 +2101,31 @@ const page2Users = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+## Pooled Live Queries
+
+Apps that mount many live queries of the same shape at once, such as one per
+list row, can share their work. Pass `pooledLiveQueries` as `pool` in a hook's
+query config. Queries that filter one eager source with `eq(field, literal)`
+then read one shared partition instead of compiling a graph each:
+
+```tsx
+import { eq, pooledLiveQueries } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/react-db'
+
+function TodoRow({ listId }: { listId: string }) {
+  const { data } = useLiveQuery({
+    query: (q) =>
+      q.from({ todo: todosCollection }).where(({ todo }) => eq(todo.listId, listId)),
+    pool: pooledLiveQueries,
+  })
+  // ...
+}
+```
+
+Results are the same with or without pooling. Without `pool`, each query
+compiles its own live-query Collection, and the app does not bundle pooling.
+Suspense hooks and queries with a `DbClient` never pool.
 
 ## Composable Queries
 
@@ -2083,7 +2189,7 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 You can use the `Query` class to create reusable query definitions. This is useful for building complex queries where you want to reuse the same query builder instance multiple times throughout your application.
 
 ```ts
-import { Query, eq } from '@tanstack/db'
+import { Query, createLiveQueryCollection, eq } from '@tanstack/db'
 
 // Create a reusable query builder
 const userQuery = new Query()
@@ -2320,7 +2426,8 @@ const effect = createEffect({
 | `onExit` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row exiting the query result. |
 | `onBatch` | `(events, ctx) => void \| Promise<void>` (optional) | Called once per graph run with the full unfiltered batch of delta events. |
 | `onError` | `(error, event) => void` (optional) | Called when `onEnter`, `onUpdate`, `onExit`, or `onBatch` throws or rejects. |
-| `onSourceError` | `(error) => void` (optional) | Called when a source collection enters an error or cleaned-up state. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
+| `onHealthChange` | `(health) => void` (optional) | Called with the Effect's health tree when a source's sync errors or a request error change after the Effect's initial load. |
+| `onSourceError` | `(error) => void` (optional) | Called when a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
 | `skipInitial` | `boolean` (optional) | When `true`, deltas from the initial data load are suppressed. Only subsequent changes fire handlers. Defaults to `false`. |
 
 ### Delta Events
@@ -2441,7 +2548,7 @@ createEffect({
 })
 ```
 
-If a source collection enters an error or cleaned-up state, the effect automatically disposes itself. Use `onSourceError` to handle this:
+If a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`, the effect automatically disposes itself. Use `onSourceError` to handle this. Other problems after the effect's initial load do not dispose it; they reach `onHealthChange`:
 
 ```ts
 createEffect({
