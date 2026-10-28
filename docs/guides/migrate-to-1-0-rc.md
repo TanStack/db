@@ -313,6 +313,10 @@ a network or backend failure keeps the rows and `status: 'ready'`; the problem
 appears in `health`. Local storage failures, a throwing sync function, and
 internal invariant failures use the new terminal `crashed` status.
 
+Live-query hooks no longer expose `isError`. Replace it with `isLoadingError`
+for a failed first load, `isCrashed` for a crash, and `isSyncError` for sync
+problems while ready rows remain visible.
+
 Update status switches, hook result destructuring, error screens, and retry
 buttons:
 
