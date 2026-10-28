@@ -594,6 +594,25 @@ The repair keeps the existing structures and changes these rules.
 
 ### Code weight
 
+Final head `d1166fe6f`, against the merge-base `4c39add29`: `app` grows
+232 bytes gzip, `@tanstack/db` 523, `db-sqlite-persistence-core` 1,331, and
+`query-db-collection` shrinks 21. Each fix commit since the eighth round,
+measured against its parent:
+
+| Commit | `app` | `db` | persistence |
+|---|---|---|---|
+| `d3847dbb6` notice-carried reload | 0 | 0 | −6 |
+| `e4fb7a71d` decisions 19 and 20 (reset truncate, kept seeds) | +76 | +134 | +76 |
+| `3b1973276` per-key unknown writes | 0 | 0 | +151 |
+| `18f7df562` drop read knowledge from unknown writes | 0 | 0 | −30 |
+| `4b6081698` H1, H2, H5, H6, decisions 21 and 22 | +28 | −15 | −31 |
+
+The rest of the change from the eighth round's figures comes from the merges
+of `origin/main`. The `app` growth since the eighth round is the source
+truncate that a reset opens (`sourceTruncate`, `truncatesSourceKey`) and
+the H1 reader check that uses it. The H5 and H6 dead-code removals paid for
+the H2 move of `noteRunWrites` after the commit.
+
 Eighth round, against `7e46f81ad`: `app` grows 125 bytes, 20 fewer than
 before, because `_syncedRowMetadataKeysOutsideBase` left the Collection
 class; the staging check for preserved keys and the metadata reader's check
