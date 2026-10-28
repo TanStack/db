@@ -17,7 +17,7 @@ import {
   source,
   turn,
 } from './lifecycle-support'
-import type { Event } from 'trailbase'
+import type { Event, ListResponse } from 'trailbase'
 import type { RaceRow, Row } from './lifecycle-support'
 
 it.each([`resolve`, `reject`] as const)(
