@@ -26747,8 +26747,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       history.fails === group || history.fails === `both`
     const allSettled = settled === 2
     const ended = allSettled && !fails(`a`) && !fails(`b`)
-    // A failed reacquisition is reported when it settles.
-    const failed = history.order.slice(0, settled).some(fails)
+    // A failed reacquisition is reported when it settles, and the next
+    // remote request that succeeds clears it (maintainer decision: a coarse
+    // clear). A released demand's aborted ensure is neither.
+    let failed = false
+    for (const group of history.order.slice(0, settled))
+      if (fails(group)) failed = true
+      else if (!(group === `b` && history.fails === `released`)) failed = false
     return {
       rows: ended
         ? {
