@@ -5794,7 +5794,7 @@ describe(`QueryCollection`, () => {
     // Helper to create test collection with common configuration
     const createErrorHandlingTestCollection = (
       testId: string,
-      queryFn: ReturnType<typeof vi.fn>,
+      queryFn: QueryCollectionConfig<TestItem>[`queryFn`],
     ) => {
       const config: QueryCollectionConfig<TestItem> = {
         id: testId,
