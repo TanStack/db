@@ -3643,8 +3643,14 @@ those cases; a gate that ignores the
 eager deadline fails the persisted-readiness oracle instead. The Electric
 progressive witness in
 `packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
-receives the law: with the opt-in, a subset-only session 1 settles offline on
-its restored rows, and a never-loaded subset still waits. The Query DB witness
+receives the law as a production driver for the shared model: it records
+Electric's own log at its `loadSubset` boundary, and session 2 reads either
+the subset session 1 loaded or one no query read. A subset-only session 1
+settles the loaded subset offline and leaves the other waiting; after a
+completed progressive full sync, the never-loaded subset is ready too,
+because Electric settles every later load at once from its complete rows
+(model rule `full sync completes`). A mutant that drops the complete resume's
+full-snapshot resolution fails only that never-loaded history. The Query DB witness
 in `packages/query-db-collection/tests/persisted-on-demand-offline-witness.test.ts`
 receives it with a fresh QueryClient per session: a covered on-demand query
 stays loading until the wait and then shows its restored rows, a rejected

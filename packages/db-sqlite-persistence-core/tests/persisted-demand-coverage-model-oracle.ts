@@ -21,7 +21,12 @@ import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
  * not certify the new generation for offline reuse
  * (`docs/collections/electric-collection.md`), so for the rest of that sync
  * run no load records coverage and none settles from SQLite; the persisted
- * subset restore publishes no rows then. Any other load waits
+ * subset restore publishes no rows then. A source whose full sync completed,
+ * such as Electric's progressive mode, holds every row locally: it resumes
+ * from those rows and settles every later load at once, so a query that
+ * never ran is ready on its restored rows (`ARCHITECTURE.md`: "A source that
+ * resumes from complete local rows settles its loads at once"), until a
+ * truncate or generation change. Any other load waits
  * for its upstream load, and fails with it. A query is ready when every load
  * it sent has settled; a query over an eager and an on-demand source is ready
  * on the same condition for the on-demand loads, once the eager source has
@@ -78,6 +83,10 @@ import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
  *   does not use core's demand key.
  * - Scoped recovery combines two production facts: it ends the persisted
  *   cache generation, and it leaves the rest of its sync run uncertified.
+ * - `full sync completes` is a source fact, not a wrapper record: the source
+ *   reached its first complete sync of every row (Electric's progressive
+ *   `up-to-date`). The model predicts the source's later settlements from it
+ *   rather than reading them from the log.
  * - Coverage is judged with the records at the checkpoint, not at the instant
  *   the load checked. No supplied history records a demand while another load
  *   of it waits to check.
@@ -106,6 +115,7 @@ export type SourceEvent = InCollection &
     | { type: `generation ends` }
     | { type: `scoped recovery starts` }
     | { type: `sync run starts` }
+    | { type: `full sync completes` }
     | {
         type: `settled`
         load: LoadSubsetOptions
@@ -154,6 +164,7 @@ export type CoverageReach =
   | `aborted load settled`
   | `demand settled only by an aborted load`
   | `covered during scoped recovery`
+  | `settled from a completed full sync`
   | `obsolete load settled`
   | `row moved between demands`
   | `coverage recorded twice`
@@ -338,6 +349,8 @@ export function expectedObservations(
   // demands that settled online during it, which record nothing.
   const recovering = new Set<string>()
   const settledWhileRecovering = new Set<string>()
+  // The Collections whose source completed a full sync of every row.
+  const complete = new Set<string>()
   // Demands whose only settlement since their coverage ended was aborted.
   const settledOnlyAborted = new Set<string>()
   const writeRows = (
@@ -359,6 +372,7 @@ export function expectedObservations(
       reach(by)
     }
     rowsIn(collection).clear()
+    complete.delete(collection)
     for (const keys of [records, settledOnlyAborted]) {
       for (const key of [...keys.keys()]) {
         if (key.startsWith(`${collection} `)) keys.delete(key)
@@ -370,6 +384,9 @@ export function expectedObservations(
     switch (event.type) {
       case `sync run starts`:
         recovering.delete(collection)
+        break
+      case `full sync completes`:
+        complete.add(collection)
         break
       case `rows`:
         writeRows(collection, event.rows)
@@ -456,6 +473,10 @@ export function expectedObservations(
     const waitPassed = (load: LoadSubsetOptions) =>
       typeof premise === `function` ? premise(load) : premise
     const loads = query.sent.map((load) => {
+      if (complete.has(collection) && load.refetch !== true) {
+        reach(`settled from a completed full sync`)
+        return `settled` as const
+      }
       if (settledByUpstream.has(load)) return `settled` as const
       const upstreamFailed =
         failed.has(load) || record.upstream === `fails at once`

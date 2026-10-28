@@ -8,8 +8,14 @@ import {
 } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import { createSerializedNodeSqliteDriver as createDriver } from '../../db-sqlite-persistence-core/tests/helpers/node-sqlite-driver'
+import { coverageViolations } from '../../db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle'
+import type {
+  CoverageRecord,
+  QuerySpec,
+  SourceEvent,
+} from '../../db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle'
 import type { Message, Row } from '@electric-sql/client'
-import type { Collection } from '@tanstack/db'
+import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 import type { SQLiteDriver } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 
@@ -29,6 +35,13 @@ import type { ElectricCollectionUtils } from '../src/electric'
  * offline network. The checkpoint is a delay after session 2's live query
  * starts. It records query readiness, visible rows, and whether session 2
  * resumed the stream from a persisted offset.
+ *
+ * The network-first block is a production driver for the shared judgment in
+ * `persisted-demand-coverage-model-oracle.ts`; it states no expected result
+ * (ORC-014). Session 2 reads either group a, which session 1 loaded, or
+ * group b, which no query of session 1 read. After a completed full sync the
+ * model expects both ready: Electric holds every row and settles each later
+ * load at once. Without one, only a covered subset settles.
  */
 
 type Item = Row & { id: number; group: string }
@@ -69,11 +82,56 @@ function insert(value: Item): Message<Item> {
   }
 }
 
+// What Electric received and settled, for the shared judgment.
+type SourceLog = {
+  events: Array<SourceEvent>
+  sent: Array<LoadSubsetOptions>
+}
+
+// Records each load at Electric's own `loadSubset` boundary.
+function recordingSync(
+  sync: SyncConfig<Item, string | number>,
+  log: SourceLog,
+): SyncConfig<Item, string | number> {
+  return {
+    ...sync,
+    sync: (params) => {
+      const result = sync.sync(params)
+      if (!result || typeof result === `function` || !result.loadSubset) {
+        return result
+      }
+      const loadSubset = result.loadSubset
+      return {
+        ...result,
+        loadSubset: (options: LoadSubsetOptions) => {
+          log.sent.push(options)
+          const settled = (): void => {
+            log.events.push({ type: `settled`, load: options, current: true })
+          }
+          const loaded = loadSubset(options)
+          if (loaded === true) {
+            settled()
+            return loaded
+          }
+          return loaded.then(settled)
+        },
+      }
+    },
+  }
+}
+
 function progressive(
   driver: SQLiteDriver,
   networkFirst: boolean,
   syncMode: `progressive` | `on-demand` = `progressive`,
+  log?: SourceLog,
 ) {
+  const electric = electricCollectionOptions({
+    id: `${syncMode}-offline-witness`,
+    shapeOptions: { url: `http://test-url`, params: { table: `items` } },
+    syncMode,
+    getKey: (item: Item) => item.id,
+  })
   return createCollection(
     persistedCollectionOptions<
       Item,
@@ -81,12 +139,8 @@ function progressive(
       never,
       ElectricCollectionUtils<Item>
     >({
-      ...electricCollectionOptions({
-        id: `${syncMode}-offline-witness`,
-        shapeOptions: { url: `http://test-url`, params: { table: `items` } },
-        syncMode,
-        getKey: (item: Item) => item.id,
-      }),
+      ...electric,
+      ...(log ? { sync: recordingSync(electric.sync, log) } : {}),
       ...(networkFirst
         ? { initialRender: { strategy: `network-first`, networkTimeoutMs: 0 } }
         : {}),
@@ -96,10 +150,22 @@ function progressive(
 }
 
 function groupA(source: Collection<Item, string | number, any>) {
+  return groupQuery(source, `a`)
+}
+
+function groupQuery(
+  source: Collection<Item, string | number, any>,
+  group: `a` | `b`,
+) {
   return createLiveQueryCollection((q) =>
-    q.from({ item: source }).where(({ item }) => eq(item.group, `a`)),
+    q.from({ item: source }).where(({ item }) => eq(item.group, group)),
   )
 }
+
+const rowsEvent = (items: ReadonlyArray<Item>): SourceEvent => ({
+  type: `rows`,
+  rows: items.map((item) => [String(item.id), { group: item.group }]),
+})
 
 async function settle(ms = 50) {
   await new Promise((resolve) => setTimeout(resolve, ms))
@@ -186,24 +252,92 @@ describe(`persisted progressive Electric query while offline (current behavior)`
   })
 })
 
-// Receiving witness for persisted demand coverage
-// (`db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`)
-// through Electric's progressive mode. With network-first opted in, the
-// subset that session 1 loaded is covered, so session 2 settles it offline on
-// its restored rows after the wait. A never-loaded subset still waits.
+// Receiving driver for persisted demand coverage
+// (`db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts`)
+// through Electric's progressive mode, with network-first opted in. The driver
+// records Electric's own log: the rows it delivered, each load it received
+// and settled, and the completion of its full sync. The shared model judges
+// session 2's query from that log.
+async function recordHistory(
+  session1: Session1,
+  group: `a` | `b`,
+): Promise<CoverageRecord> {
+  const driver = createDriver(new DatabaseSync(`:memory:`))
+  const events: Array<SourceEvent> = [{ type: `sync run starts` }]
+  if (session1 !== `nothing`) {
+    subscribers = []
+    const groupRows = rows.filter((row) => row.group === `a`)
+    fetchSnapshot = () => {
+      events.push(rowsEvent(groupRows))
+      return Promise.resolve({ metadata: {}, data: groupRows.map(insert) })
+    }
+    const log: SourceLog = { events, sent: [] }
+    const first = progressive(driver, true, `progressive`, log)
+    const firstQuery = groupA(first)
+    await firstQuery.preload()
+    if (session1 === `full-sync`) {
+      events.push(rowsEvent(rows))
+      for (const subscriber of subscribers) {
+        subscriber([
+          ...rows.map(insert),
+          { headers: { control: `up-to-date` } },
+        ])
+      }
+      await vi.waitFor(() => expect(first.status).toBe(`ready`))
+      events.push({ type: `full sync completes` })
+    }
+    await settle()
+    await firstQuery.cleanup()
+    await first.cleanup()
+  }
+
+  // Session 2: the network is offline.
+  subscribers = []
+  fetchSnapshot = () => new Promise(() => {})
+  const log: SourceLog = { events: [{ type: `sync run starts` }], sent: [] }
+  const second = progressive(driver, true, `progressive`, log)
+  const query = groupQuery(second, group)
+  void query.preload().catch(() => undefined)
+  await settle()
+  const record: CoverageRecord = {
+    events: [...events, ...log.events],
+    queries: {
+      [group]: {
+        spec: { group } satisfies QuerySpec,
+        sent: [...log.sent],
+        observed:
+          query.status === `ready`
+            ? {
+                status: `ready`,
+                rows: query.toArray.map((item) => String(item.id)),
+              }
+            : { status: query.status === `error` ? `error` : `loading` },
+      },
+    },
+    upstream: `never answers`,
+    waitPassed: true,
+  }
+  await query.cleanup()
+  await second.cleanup()
+  return record
+}
+
 describe(`persisted progressive Electric query while offline with network-first`, () => {
-  it.each([
-    [`full-sync`, { ready: true, rows: [1, 2] }],
-    [`subset-only`, { ready: true, rows: [1, 2] }],
-    [`nothing`, { ready: false, rows: [] }],
-  ] as const)(`session 1: %s`, async (session1, expected) => {
-    const observation = await runHistory(session1, true)
-    expect(observation.sourceStatus).toBe(`loading`)
-    expect({
-      ready: observation.queryReady,
-      rows: observation.queryRows,
-    }).toEqual(expected)
-    expect(observation.preloaded).toBe(expected.ready)
+  it.each(
+    ([`full-sync`, `subset-only`, `nothing`] as const).flatMap((session1) =>
+      ([`a`, `b`] as const).map((group) => [session1, group] as const),
+    ),
+  )(`session 1: %s; session 2 reads group %s`, async (session1, group) => {
+    const record = await recordHistory(session1, group)
+    const reached = new Set<string>()
+    expect(coverageViolations(record, (state) => reached.add(state))).toEqual(
+      [],
+    )
+    // Positive witness: a completed full sync reached the model's rule that
+    // the source settles every later load at once.
+    expect(reached.has(`settled from a completed full sync`)).toBe(
+      session1 === `full-sync`,
+    )
   })
 })
 

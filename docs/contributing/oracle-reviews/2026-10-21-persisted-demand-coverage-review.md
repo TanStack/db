@@ -594,3 +594,47 @@ source has opened and its demands on the on-demand source have settled.
 Limits: the Collection observation is not yet part of the receiving
 contract, so hosts and frameworks do not check it; the wrapper is the only
 production path that decides it.
+
+## 2026-10-28: high code review of the head after #2168
+
+Reviewed head: `83b10fd97` (clean worktree, files matched `gh pr diff`).
+Repairs: `de9fec4c3`; merge of #2278: `32404fa2a`. Each oracle change ran on
+the parent production code before the repair.
+
+| ID | Claim | Verdict and evidence | Action |
+| --- | --- | --- | --- |
+| R1 | An unordered demand that loses one row and gains another stays covered | True. This is the approved row-count law (maintainer decision, 2026-10-26); a fixed history pins it. The guide overclaimed that a removed row "therefore ends coverage". | Accepted design. The guide now says a row that arrived meanwhile keeps the count. |
+| R2 | A failed coverage commit fails a load whose rows applied; the synchronous path ignores it | The asymmetry is real, the consequence is not. A probe failed the coverage write before and after its effect: the Collection crashed both times, as for any durable write (glossary, "crash"), so the load's outcome decides nothing. The one non-durable rejection, an abort while scoped recovery is pending, also aborts the load's own row transactions. | Refuted as stated. The storage sweep now asserts the crash (`coverage write failed`). No mutant separates this path from the general crash law. |
+| R3 | A released load whose source resolves anyway records coverage | Confirmed. The glossary's "abort" says an aborted load's later outcome decides nothing, and the signal contract lets a source stop and resolve. RED: the campaign's new `stops and resolves` source; counterexample `start w, release w` settled `w` offline. A first run reached the state only at teardown, where production cannot record either; teardown now drops waiting loads first, and the declared reach `demand settled only by an aborted load` forced the distinguishing case. | Fixed: `recordCoverage` treats an aborted request as obsolete. Mutant P41 killed. |
+| R4 | `begin({ snapshot: true })` does not delete coverage records | Confirmed. A snapshot transaction replaces every row as a truncate does (glossary). RED: new `snapshot` command; counterexample `cover a, snapshot` settled `a` offline. | Fixed: truncate and snapshot share `endDemandCoverage`. Mutant P40 killed. |
+| R5 | `readDemandRows` lacks the scoped-recovery guard | Confirmed. Coverage counts only while the persisted subset restore returns the rows (glossary), the restore publishes none during scoped recovery, and scoped recovery does not certify the generation for offline reuse (Electric guide). RED: Part 2b `a load after scoped recovery reloaded the demand` showed `ready` on `a1`, `a2`. The first RED was false: the history started recovery before any sync run, and the driver's hook silently did nothing; the driver now throws on that premise. | Fixed: the coverage read proves nothing during scoped recovery, so no load settles from SQLite or records. The reviewer's proposed fix (reuse the restore read) would have recorded a zero-row coverage that every later restore satisfies. Mutant P42 killed. |
+| R6 | Up to three SQLite reads per load | True, and the hydrated fast path now reads when a record exists. | No change: H7 kept the read; no work promise exists. Reusing the restore's rows for the check remains an optimization. |
+| R7 | Coverage metadata grows without bound | True: one record per demand key until a truncate or rotation. | Accepted design: expiry is deferred to #2211 by maintainer decision. |
+| R8 | The model imports core's demand key | True, against AGENTS.md ("Keep Oracles Independent"). | Fixed: the model compares request data itself (offset 0 as none). Every existing history agreed. Mutant K01 (coverage keyed without cursor and offset) is killed. Mutating core's own key is not distinguishable: core's deduplication uses the same key, so the merged key changes which loads core sends, and the model reads those from the record. |
+| R9 | On-demand Collections install a no-op deadline timer; `onDemand` duplicates `syncMode` | True. `failUpstream` also calls `openFromDisk`, so its guard stays either way; skipping the timer adds a branch. | No change. |
+| R10 | The abort listener stays after the timer or upstream settles | True but bounded: core creates one signal per subset request (`subscription.ts`, `subset-demand-controller.ts`), so the listener lives only as long as its request. The "repeated loads on one signal" premise does not occur. | Refuted as a leak. |
+
+Totals: 10 items; 4 fixed (R3, R4, R5, R8), 2 accepted design (R1, R7),
+2 refuted (R2, R10), 2 no-change confirmations (R6, R9). R1 also fixed a doc
+overclaim, and R2 added a sweep assertion.
+
+Why the suite missed R3 to R5: the grammar had no snapshot transaction, no
+source that resolves an aborted load, and no online load after scoped
+recovery in the same sync run. The model shared core's demand key (R8).
+
+### Never-run queries after a completed progressive full sync
+
+The guide claims that a query that never ran renders offline once a
+progressive full sync completed. No witness checked it: the Electric witness's
+session 2 read only the subset session 1 had loaded. The shared model gains a
+`full sync completes` source event (authority: `ARCHITECTURE.md`, "A source
+that resumes from complete local rows settles its loads at once"), and the
+Electric witness's network-first block becomes a production driver for it,
+over session 1 ∈ {full sync, subset only, nothing} × session 2 reads
+{the loaded subset, a never-loaded subset}. All six histories pass; the
+full-sync, never-loaded history shows `ready` on its restored row and reaches
+`settled from a completed full sync`. Mutant E01 (drop the complete resume's
+`resolveFullSnapshot(true)` in `electric.ts`) fails exactly that history. This
+covers #2202 without a new adapter API, unlike #2203's
+`isPersistedSnapshotComplete`.
+
