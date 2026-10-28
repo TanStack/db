@@ -9,24 +9,39 @@
  * A registration that reaches none is reported as a unit test. A file that
  * declares no part and has no reaching test gets one `undeclared` report. An
  * unparseable companion reaches nothing, and an oracle file that calls a helper
- * from an ordinary module that registers tests gets one report for the call.
+ * that registers tests of its own gets one report for the call, unless the
+ * helper's module is linted on its own.
+ *
+ * A binding is reached however it is bound: a named, namespace, or default
+ * import; a `let` that a hook assigns; or a `for...of` loop variable, which
+ * runs one test per element, so every element must reach. A helper that
+ * registers its caller's body, directly or wrapped in a function of its own,
+ * is judged at the call by the argument it registers. The test also reaches
+ * when the wrapper itself uses a part. A generated property counts as its own
+ * check when one of its arbitraries generates values and its predicate reads
+ * its input. The arbitrary may be named, and the predicate may be imported.
  *
  * Authority: the header contract of `rules/no-unit-test.js`, which states the
  * reach rules and the report rules, and its laws L1 (reports are a pure
  * function of the source files), L2 (every registration form is checked), L3
  * (every declared part counts), and L6 (an oracle file registers only oracle
  * tests, including tests that its imported functions register);
- * docs/contributing/oracle-rubric.md "Name oracle files consistently"; and
- * AGENTS.md "Name Oracle Files for Discovery".
+ * docs/contributing/oracle-rubric.md "Name oracle files consistently", which
+ * says that an oracle-named helper "is linted on its own"; and AGENTS.md "Name
+ * Oracle Files for Discovery". `export *` does not re-export a default export
+ * (ECMAScript, ExportDeclaration semantics), so a default import resolves only
+ * a module's own default.
  *
- * Limits. The grammar does not generate function parameters, fast-check
- * properties, `describe` placeholders, declared import bindings, or type models
- * built from other models. It builds at most three companion modules, three
- * functions per module, and six registrations per oracle file. The receiving
- * paths are a long-lived ESLint instance, a single-file Linter call, the lint
- * CLI on changed files, and the CLI's edit-hook form. The CLI lints only files
- * inside its repository, so its paths write scratch files there and remove
- * them afterwards.
+ * Limits. The grammar does not generate function parameters other than a
+ * helper's, `describe` placeholders, declared import bindings, type models
+ * built from other models, a `let` assigned more than once, a `for...of` over
+ * a named array, or a predicate or arbitrary from a package. It builds at most
+ * three companion modules, three functions per module, and six registrations
+ * per oracle file. The receiving paths are a long-lived ESLint instance, a
+ * single-file Linter call, the lint CLI on changed files, and the CLI's
+ * edit-hook form. The CLI lints only files inside its repository, so its paths
+ * write scratch files in `part-reach-scratch-*` directories there, which git
+ * ignores, and remove them afterwards.
  *
  * Structure:
  *   1. The grammar draws a skeleton and builds a legal program from it.
@@ -100,9 +115,18 @@ const slotSkeleton = fc.record({
   refs: fc.array(refSkeleton, { maxLength: REFS }),
 })
 
+// A named import is the common form. A namespace import reads the same export
+// through a member, and a default import reads the target's default export.
+const importForm = fc.oneof(
+  { weight: 3, arbitrary: fc.constant(`named`) },
+  { weight: 1, arbitrary: fc.constant(`namespace`) },
+  { weight: 1, arbitrary: fc.constant(`default`) },
+)
+
 const linkSkeleton = fc.record({
   target: fc.nat({ max: 9 }),
   slot: fc.nat({ max: SLOTS - 1 }),
+  form: importForm,
 })
 
 // A re-export imports one name and exports it under another, drawn from the
@@ -122,6 +146,12 @@ const moduleSkeleton = fc.record({
   typeNames: fc.array(fc.nat({ max: 3 }), { maxLength: 2 }),
   missingPart: fc.boolean(),
   stringKeys: fc.boolean(),
+  // The slot that the module exports as its default, if any.
+  defaultSlot: fc.option(fc.nat({ max: SLOTS - 1 }), { nil: undefined }),
+  // Whether the declaration takes its first part list from a spread object.
+  spread: fc.boolean(),
+  // Whether a companion is a JavaScript module, which holds no type syntax.
+  js: fc.boolean(),
 })
 
 const FORMS = [
@@ -135,7 +165,16 @@ const FORMS = [
   `for`,
   `helper-plain`,
   `helper-prop`,
+  `property`,
+  `prop-named`,
+  `let-driver`,
+  `for-of`,
 ]
+
+// How a caller-passed-body helper registers the body: as its argument, with a
+// trailing timeout after it, or wrapped in a function of the helper's own,
+// which may await the body or use a declared part of a companion.
+const WRAPS = [`direct`, `timed`, `wrap`, `wrap-async`, `wrap-part`]
 
 // The form index is taken modulo the forms that the feature set enables, so
 // each enabled form gets an equal share of the registrations.
@@ -153,12 +192,32 @@ const registrationSkeleton = fc.record({
     ),
     { minLength: 1, maxLength: 3 },
   ),
+  // A caller-passed-body helper's layout, and what follows a timed body.
+  wrap: fc.nat({ max: WRAPS.length - 1 }),
+  trailing: fc.constantFrom(`literal`, `name`),
+  // A generated property's arbitrary is written inline or bound to a name;
+  // its predicate is inline, a local function, or imported, and reads its
+  // input or not.
+  arbNamed: fc.boolean(),
+  predicate: fc.constantFrom(`inline`, `local`, `imported`),
+  readsInput: fc.boolean(),
+  // The functions that a `for...of` driver runs, one test each.
+  elements: fc.array(fc.nat({ max: 9 }), { minLength: 1, maxLength: 2 }),
 })
 
 const programSkeleton = fc.record({
   companions: fc.array(moduleSkeleton, { maxLength: 3 }),
   broken: fc.boolean(),
-  registrarName: fc.constantFrom(`reg.ts`, `reg-oracle.ts`),
+  // An ordinary module, an oracle-named module that is linted on its own, and
+  // an `oracle-` machinery module, which the rule does not lint.
+  registrarName: fc.constantFrom(`reg.ts`, `reg-oracle.ts`, `oracle-reg.ts`),
+  registrarImport: importForm,
+  helperName: fc.constantFrom(
+    `reg-helper.ts`,
+    `reg-helper-oracle.ts`,
+    `oracle-reg-helper.ts`,
+  ),
+  helperImport: fc.constantFrom(`named`, `namespace`),
   oracle: fc.record({
     module: moduleSkeleton,
     objectRefs: fc.array(refSkeleton, { maxLength: REFS }),
@@ -176,6 +235,13 @@ const BASE = {
   registrar: false,
   stringKeys: false,
   typeModels: false,
+  // Off: every import is named, and every helper is a direct `regPlain` in an
+  // ordinary module, imported by name.
+  importForms: false,
+  helperLayouts: false,
+  helperNames: false,
+  spreads: false,
+  jsCompanions: false,
 }
 const ALL = {
   companions: true,
@@ -185,7 +251,16 @@ const ALL = {
   registrar: true,
   stringKeys: true,
   typeModels: true,
+  importForms: true,
+  helperLayouts: true,
+  helperNames: true,
+  spreads: true,
+  jsCompanions: true,
 }
+
+/** A module that the lint selection lints as an oracle file. */
+const lintedOnItsOwn = (file) =>
+  file.includes(`oracle`) && !file.startsWith(`oracle-`)
 
 function programArbitrary(features) {
   return programSkeleton.map((skeleton) => buildProgram(skeleton, features))
@@ -193,7 +268,7 @@ function programArbitrary(features) {
 
 // -- Program: the builder ----------------------------------------------------
 
-const stemOf = (file) => file.replace(/\.ts$/, ``)
+const stemOf = (file) => file.replace(/\.(ts|js)$/, ``)
 const specOf = (file) => `./${stemOf(file)}.js`
 const nodeKey = (file, name) => `${file}\0${name}`
 
@@ -208,7 +283,10 @@ function buildProgram(skeleton, features) {
   // A single-file program has no companion, so its recursion is only the
   // oracle's own functions.
   const companions = features.companions ? skeleton.companions : []
-  const companionFiles = companions.map((_, index) => `c${index}.ts`)
+  const companionFiles = companions.map(
+    (companion, index) =>
+      `c${index}.${features.jsCompanions && companion.js ? `js` : `ts`}`,
+  )
   const brokenFile =
     features.broken && skeleton.broken ? `broken.ts` : undefined
   const registrarFile =
@@ -261,22 +339,39 @@ function buildProgram(skeleton, features) {
       stringKeys: false,
     })
   }
+  const emptyModule = (file, role, fields = {}) => ({
+    file,
+    role,
+    bindings: new Map(),
+    exportEntries: [],
+    stars: [],
+    imports: new Map(),
+    types: new Set(),
+    typeNames: [],
+    parts: new Map(),
+    missing: [],
+    declares: false,
+    stringKeys: false,
+    spread: false,
+    ...fields,
+  })
   if (registrarFile !== undefined) {
-    modules.set(registrarFile, {
-      file: registrarFile,
-      role: `registrar`,
-      bindings: new Map([[`regAll`, { kind: `fn`, refs: [], exported: true }]]),
-      exportEntries: [{ name: `regAll`, local: `regAll` }],
-      stars: [],
-      imports: new Map(),
-      types: new Set(),
-      typeNames: [],
-      parts: new Map(),
-      missing: [],
-      declares: false,
-      stringKeys: false,
-    })
+    modules.set(
+      registrarFile,
+      emptyModule(registrarFile, `registrar`, {
+        bindings: new Map([
+          [`regAll`, { kind: `fn`, refs: [], exported: true }],
+        ]),
+        exportEntries: [
+          { name: `regAll`, local: `regAll` },
+          { name: `default`, local: `regAll` },
+        ],
+      }),
+    )
   }
+  const registrarImport = features.importForms
+    ? skeleton.registrarImport
+    : `named`
   const oracleSkeleton = skeleton.oracle
   const oracle = buildModule({
     file: ORACLE,
@@ -294,10 +389,20 @@ function buildProgram(skeleton, features) {
       { name: `owrap`, kind: `fn`, refs: [] },
     ],
     registrarFile,
+    registrarImport,
   })
   modules.set(ORACLE, oracle)
+  const helperFile = features.helperNames
+    ? skeleton.helperName
+    : `reg-helper.ts`
+  const context = {
+    oracle,
+    features,
+    companionFiles,
+    helperFile,
+  }
   const tests = oracleSkeleton.tests.map((test, index) =>
-    buildRegistration(test, index, oracle, features),
+    buildRegistration(test, index, context),
   )
   const isRegistrarAlias = (alias) =>
     registrarFile !== undefined &&
@@ -307,25 +412,53 @@ function buildProgram(skeleton, features) {
     calls.push({ alias: `regAll`, file: registrarFile })
   }
   // An imported helper that registers the body its caller passes. The oracle
-  // file imports it, and the helper's own module is not an oracle.
+  // file imports it by name or through a namespace.
   if (tests.some((test) => test.helper !== undefined)) {
-    const helperFile = `reg-helper.ts`
-    oracle.imports.set(`regPlain`, { from: helperFile, imported: `regPlain` })
-    oracle.imports.set(`regProp`, { from: helperFile, imported: `regProp` })
-    modules.set(helperFile, {
-      file: helperFile,
-      role: `helper`,
-      bindings: new Map(),
-      exportEntries: [],
-      stars: [],
-      imports: new Map(),
-      types: new Set(),
-      typeNames: [],
-      parts: new Map(),
-      missing: [],
-      declares: false,
-      stringKeys: false,
+    const form = features.importForms ? skeleton.helperImport : `named`
+    for (const name of HELPER_EXPORTS) {
+      oracle.imports.set(name, { from: helperFile, imported: name, form })
+    }
+    // `regWrapPart`'s wrapper uses the first companion's first function.
+    const helperImports = new Map()
+    if (companionFiles.length > 0) {
+      helperImports.set(`hpart`, {
+        from: companionFiles[0],
+        imported: slotName(companionFiles[0], 0),
+        form: `named`,
+      })
+    }
+    modules.set(
+      helperFile,
+      emptyModule(helperFile, `helper`, {
+        imports: helperImports,
+        bindings: new Map([
+          [
+            `hpart-wrapper`,
+            {
+              kind: `fn`,
+              refs: helperImports.has(`hpart`)
+                ? [{ kind: `import`, alias: `hpart` }]
+                : [],
+            },
+          ],
+        ]),
+      }),
+    )
+  }
+  // The module that exports the imported predicates, which read their input
+  // or ignore it.
+  if (tests.some((test) => test.property?.predicate === `imported`)) {
+    oracle.imports.set(`predReads`, {
+      from: `pred.ts`,
+      imported: `predReads`,
+      form: `named`,
     })
+    oracle.imports.set(`predIgnores`, {
+      from: `pred.ts`,
+      imported: `predIgnores`,
+      form: `named`,
+    })
+    modules.set(`pred.ts`, emptyModule(`pred.ts`, `pred`))
   }
   for (const test of tests) {
     const { body } = test
@@ -341,7 +474,24 @@ function buildProgram(skeleton, features) {
       })
     }
   }
-  return { oracle: ORACLE, modules, tests, calls }
+  return { oracle: ORACLE, modules, tests, calls, helperFile }
+}
+
+// The helper module's exports, in the order HELPER_TEXT defines them.
+const HELPER_EXPORTS = [
+  `regPlain`,
+  `regTimed`,
+  `regWrap`,
+  `regWrapAsync`,
+  `regWrapPart`,
+  `regProp`,
+]
+const HELPER_OF_WRAP = {
+  direct: `regPlain`,
+  timed: `regTimed`,
+  wrap: `regWrap`,
+  'wrap-async': `regWrapAsync`,
+  'wrap-part': `regWrapPart`,
 }
 
 /** The prefix of a module's own function names: `ofn` in an oracle, `c0f` in c0. */
@@ -363,6 +513,7 @@ function buildModule({
   features,
   extras,
   registrarFile,
+  registrarImport = `named`,
 }) {
   const prefix = prefixOf(file, role)
   const pick = (index) =>
@@ -382,6 +533,17 @@ function buildModule({
     })
     if (slot.exported) exportEntries.push({ name, local: name })
   })
+  // A default export names one of the module's own functions.
+  if (
+    features.importForms &&
+    skeleton.defaultSlot !== undefined &&
+    bindings.has(`${prefix}${skeleton.defaultSlot}`)
+  ) {
+    exportEntries.push({
+      name: `default`,
+      local: `${prefix}${skeleton.defaultSlot}`,
+    })
+  }
   for (const extra of extras) {
     bindings.set(extra.name, {
       kind: extra.kind,
@@ -392,7 +554,12 @@ function buildModule({
     })
   }
   if (registrarFile !== undefined) {
-    imports.set(`regAll`, { from: registrarFile, imported: `regAll` })
+    // A default import reads the registrar's default export, which is regAll.
+    imports.set(`regAll`, {
+      from: registrarFile,
+      imported: registrarImport === `default` ? `default` : `regAll`,
+      form: registrarImport,
+    })
   }
   const stars = features.stars
     ? skeleton.stars.map(pick).filter((from) => from !== undefined)
@@ -411,7 +578,12 @@ function buildModule({
     const from =
       targets.length === 0 ? undefined : targets[link.target % targets.length]
     if (from === undefined) return
-    imports.set(`i${index}`, { from, imported: slotName(from, link.slot) })
+    const form = features.importForms ? link.form : `named`
+    imports.set(`i${index}`, {
+      from,
+      imported: form === `default` ? `default` : slotName(from, link.slot),
+      form,
+    })
   })
 
   // References resolve only after every name exists, so a helper such as
@@ -422,23 +594,31 @@ function buildModule({
   const names = [...bindings.keys()].filter((name) => !helpers.has(name))
   const aliases = [...imports.keys()]
   const resolve = (ref) => resolveRef(ref, names, aliases)
+  const javascript = file.endsWith(`.js`)
   for (const binding of bindings.values()) {
     binding.refs = binding.skeleton
       .map(resolve)
-      .filter((ref) => ref !== undefined)
+      .filter(
+        (ref) => ref !== undefined && !(javascript && ref.kind === `type`),
+      )
     delete binding.skeleton
   }
 
   const types = new Set(
-    [`T0`, `T1`, `T2`].filter((_, index) => skeleton.typeAliases[index]),
+    [`T0`, `T1`, `T2`].filter(
+      (_, index) => !javascript && skeleton.typeAliases[index],
+    ),
   )
-  const typeNames = features.typeModels
-    ? [
-        ...new Set(
-          skeleton.typeNames.map((index) => (index === 3 ? `TX` : `T${index}`)),
-        ),
-      ]
-    : []
+  const typeNames =
+    !javascript && features.typeModels
+      ? [
+          ...new Set(
+            skeleton.typeNames.map((index) =>
+              index === 3 ? `TX` : `T${index}`,
+            ),
+          ),
+        ]
+      : []
   const parts = new Map()
   for (const [name, binding] of bindings) {
     if (binding.part !== undefined && binding.part !== `none`) {
@@ -459,6 +639,7 @@ function buildModule({
     missing,
     declares: parts.size > 0 || typeNames.length > 0 || missing.length > 0,
     stringKeys: features.stringKeys && skeleton.stringKeys,
+    spread: features.spreads && skeleton.spread,
   }
 }
 
@@ -481,7 +662,8 @@ function resolveRef(ref, names, aliases) {
  * falls back to a plain registration, so a gated form never appears by
  * accident.
  */
-function buildRegistration(skeleton, index, oracle, features) {
+function buildRegistration(skeleton, index, context) {
+  const { oracle, features, companionFiles } = context
   const title = `t${index}`
   const names = [...oracle.bindings.keys()]
   const aliases = [...oracle.imports.keys()]
@@ -493,15 +675,53 @@ function buildRegistration(skeleton, index, oracle, features) {
   const requested =
     skeleton.form ?? features.forms[skeleton.formIndex % features.forms.length]
   let form = features.forms.includes(requested) ? requested : `plain`
-  if (form === `identifier` && functionNames.length === 0) form = `plain`
+  if (
+    (form === `identifier` || form === `for-of`) &&
+    functionNames.length === 0
+  ) {
+    form = `plain`
+  }
   const refs = skeleton.refs.map(resolve).filter((ref) => ref !== undefined)
   const test = { title, form, wrapped: skeleton.wrapped, refs }
+  const pickFunction = (value) => functionNames[value % functionNames.length]
   if (form === `helper-plain` || form === `helper-prop`) {
+    // A layout that needs a companion falls back to a plain wrapper.
+    let wrap = features.helperLayouts
+      ? WRAPS[(skeleton.wrap ?? 0) % WRAPS.length]
+      : `direct`
+    if (wrap === `wrap-part` && companionFiles.length === 0) wrap = `wrap`
+    const trailing =
+      skeleton.trailing === `name` && functionNames.length > 0
+        ? { kind: `name`, name: pickFunction(skeleton.callee) }
+        : { kind: `literal` }
     test.helper = {
       prop: form === `helper-prop`,
       constant: skeleton.constantArb,
+      arbNamed: form === `helper-prop` && (skeleton.arbNamed ?? false),
+      // A property helper registers its body directly, as serializerProp does.
+      wrap: form === `helper-prop` ? `direct` : wrap,
+      trailing,
+      // A plain helper's body ignores its input unless the test is a property.
+      readsInput: form === `helper-prop` ? (skeleton.readsInput ?? true) : true,
     }
     test.body = { kind: `arrow`, refs }
+  } else if (form === `property` || form === `prop-named`) {
+    test.property = {
+      constant: skeleton.constantArb,
+      arbNamed: skeleton.arbNamed ?? false,
+      predicate: skeleton.predicate ?? `inline`,
+      readsInput: skeleton.readsInput ?? true,
+    }
+    test.body = { kind: `arrow`, refs: [] }
+  } else if (form === `let-driver`) {
+    test.driver = { kind: `let`, refs }
+    test.body = { kind: `arrow`, refs: [] }
+  } else if (form === `for-of`) {
+    test.driver = {
+      kind: `for-of`,
+      elements: (skeleton.elements ?? [0]).map(pickFunction),
+    }
+    test.body = { kind: `arrow`, refs: [] }
   } else if (form === `identifier`) {
     test.body = {
       kind: `ident`,
@@ -549,11 +769,31 @@ function buildRegistration(skeleton, index, oracle, features) {
 // set ends a cycle of exports. A type reference reaches a part only when its
 // name is a declared type model with an alias in the same file.
 //
+// A namespace import names an export through a member, so it resolves like a
+// named import. A default import resolves the target's own `default` entry:
+// `export *` does not carry a default (ECMAScript), so stars are not followed.
+//
+// A registration's test reaches a part in one of these ways:
+// - Its body, or a function in its `.each` or `.for` table, uses one.
+// - It registers through a helper that passes on its caller's body. The
+//   test is the argument at the body's position, so a trailing timeout or a
+//   trailing name says nothing. A wrapper that the helper writes around the
+//   body reaches when the wrapper uses a part itself.
+// - It runs a generated property: some arbitrary is not `fc.constant`, under
+//   any name, and the predicate reads its input, wherever it is defined.
+// - It runs a `let` driver, which reaches when the value assigned to it does.
+// - It runs inside a `for...of` loop, which registers one test per element,
+//   so every element must reach (rubric: every test uses a declared part).
+//
 // The predicted report list follows the rule's contract. Each unreached
 // registration is a unit test. A file with no declared part and no reaching
 // registration gets one `undeclared` report, on its first unreached test. Each
 // declared type-model name without an alias is reported. Each call to a helper
-// from an ordinary module is reported.
+// that registers its own tests is reported, unless the helper's module is
+// linted on its own: an oracle-named module, but not an `oracle-` machinery
+// module, which no lint reads (rubric "Name oracle files consistently"). A
+// helper that passes on its caller's body from a module linted on its own is
+// judged there, so its calls are not judged in the oracle file.
 
 /** The reports that the rule should give for a program, as sorted keys. */
 function predictReports(program) {
@@ -577,6 +817,7 @@ function predictReports(program) {
         ? [nodeKey(file, entry.local)]
         : []
     }
+    if (name === `default`) return []
     return module.stars.flatMap((star) => exportNodes(star, name, seen))
   }
   for (const [file, module] of program.modules) {
@@ -618,9 +859,20 @@ function predictReports(program) {
   }
 
   const refOfOracle = (ref) => refReaches(program.oracle, oracle, ref)
+  const functionReaches = (name) => reached.has(nodeKey(program.oracle, name))
   const reachesPart = (test) => {
-    // A generated property: a non-constant arbitrary, and a body that reads its value.
-    if (test.helper?.prop && !test.helper.constant) return true
+    const { helper, property, driver } = test
+    if (helper !== undefined) {
+      // A generated property: a non-constant arbitrary, and a body that reads its value.
+      if (helper.prop && !helper.constant && helper.readsInput) return true
+      const wrapperReaches =
+        helper.wrap === `wrap-part` &&
+        reached.has(nodeKey(program.helperFile, `hpart-wrapper`))
+      return wrapperReaches || test.body.refs.some(refOfOracle)
+    }
+    if (property !== undefined) return !property.constant && property.readsInput
+    if (driver?.kind === `let`) return driver.refs.some(refOfOracle)
+    if (driver?.kind === `for-of`) return driver.elements.every(functionReaches)
     const { body } = test
     const bodyReaches =
       body.kind === `arrow`
@@ -637,10 +889,13 @@ function predictReports(program) {
       )
     return bodyReaches || tableReaches
   }
-  const unreached = program.tests
+  const judged = program.tests.filter(
+    (test) => test.helper === undefined || !lintedOnItsOwn(program.helperFile),
+  )
+  const unreached = judged
     .filter((test) => !reachesPart(test))
     .map((test) => test.title)
-  const anyReached = unreached.length < program.tests.length
+  const anyReached = unreached.length < judged.length
   const declaresParts = oracle.parts.size > 0 || oracle.typeNames.length > 0
 
   const keys = []
@@ -653,7 +908,7 @@ function predictReports(program) {
     if (!oracle.types.has(name)) keys.push(`typeModel:${name}`)
   }
   for (const call of program.calls) {
-    if (!call.file.includes(`oracle`)) keys.push(`imported:${call.alias}`)
+    if (!lintedOnItsOwn(call.file)) keys.push(`imported:${call.alias}`)
   }
   return keys.sort()
 }
@@ -665,11 +920,51 @@ function predictReports(program) {
 // name, or the helper), so the comparison does not depend on line numbers.
 // The renderer records the line of each subject, and a report's line finds it.
 
-const REGISTRAR_TEXT = `import { it } from 'vitest'\nexport function regAll() { it('reg inner', () => { void 0 }) }\n`
+const REGISTRAR_TEXT = `import { it } from 'vitest'\nexport function regAll() { it('reg inner', () => { void 0 }) }\nexport default regAll\n`
 const BROKEN_TEXT = `export function brokenFn() {\n`
-// A helper that registers the body its caller passes: a plain test, and a
-// curried fast-check property, as serializerProp does.
-const HELPER_TEXT = `import { it } from 'vitest'\nimport { test as fcTest } from '@fast-check/vitest'\nexport function regPlain(name, body) { it(name, body) }\nexport function regProp(arbitraries) {\n  return (name, check) => { fcTest.prop(arbitraries)(name, check) }\n}\n`
+const PRED_TEXT = `export function predReads(value) {\n  void value\n}\nexport function predIgnores(value) {\n  void 0\n}\n`
+
+/**
+ * Helpers that register the body their caller passes: directly, before a
+ * timeout, wrapped in a function, awaited in an async wrapper, beside a use of
+ * a companion's function, and as a curried fast-check property, as
+ * serializerProp does. Their order is HELPER_EXPORTS.
+ */
+function helperText(module) {
+  const lines = [
+    `import { it } from 'vitest'`,
+    `import { test as fcTest } from '@fast-check/vitest'`,
+  ]
+  for (const [alias, link] of module.imports) {
+    lines.push(
+      `import { ${link.imported} as ${alias} } from '${specOf(link.from)}'`,
+    )
+  }
+  lines.push(
+    `export function regPlain(name, body) { it(name, body) }`,
+    `export function regTimed(name, body, timeout) { it(name, body, timeout) }`,
+    `export function regWrap(name, body) { it(name, () => { body() }) }`,
+    `export function regWrapAsync(name, body) { it(name, async () => { await body() }) }`,
+    `export function regWrapPart(name, body) { it(name, () => { void hpart; body() }) }`,
+    `export function regProp(arbitraries) {`,
+    `  return (name, check) => { fcTest.prop(arbitraries)(name, check) }`,
+    `}`,
+  )
+  return `${lines.join(`\n`)}\n`
+}
+
+/** The text that uses an imported alias: a namespace import reads a member. */
+function useText(module, alias) {
+  const link = module.imports.get(alias)
+  return link?.form === `namespace` ? `${alias}.${link.imported}` : alias
+}
+
+function importText(alias, link) {
+  const from = specOf(link.from)
+  if (link.form === `namespace`) return `import * as ${alias} from '${from}'`
+  if (link.form === `default`) return `import ${alias} from '${from}'`
+  return `import { ${link.imported} as ${alias} } from '${from}'`
+}
 
 /** The files for a program, and the subject that each line of the oracle names. */
 function renderProgram(program) {
@@ -681,7 +976,9 @@ function renderProgram(program) {
     } else if (module.role === `registrar`) {
       files.set(file, REGISTRAR_TEXT)
     } else if (module.role === `helper`) {
-      files.set(file, HELPER_TEXT)
+      files.set(file, helperText(module))
+    } else if (module.role === `pred`) {
+      files.set(file, PRED_TEXT)
     } else {
       const rendered = renderModule(module, program)
       files.set(file, rendered.text)
@@ -700,18 +997,29 @@ function renderModule(module, program) {
     lines.push(...text.split(`\n`))
     if (subject !== undefined) subjects.set(start, subject)
   }
+  const use = (alias) => useText(module, alias)
   if (module.declares) {
     push(`import { declareOracle } from './oracle-declaration.js'`)
   }
-  for (const [alias, link] of module.imports) {
-    push(`import { ${link.imported} as ${alias} } from '${specOf(link.from)}'`)
+  if (module.role === `oracle`) {
+    if (
+      program.tests.some(
+        (test) => test.property !== undefined || test.helper?.prop,
+      )
+    ) {
+      push(`import fc from 'fast-check'`)
+    }
+    if (program.tests.some((test) => test.form === `prop-named`)) {
+      push(`import { test as fcTest } from '@fast-check/vitest'`)
+    }
   }
+  for (const [alias, link] of module.imports) push(importText(alias, link))
   for (const name of module.types) push(`type ${name}<X> = X`)
   for (const [name, binding] of module.bindings) {
     if (binding.kind === `obj`) {
       push(`const ${name} = {`)
       push(`  m: () => {`)
-      for (const statement of statementsOf(binding.refs))
+      for (const statement of statementsOf(binding.refs, use))
         push(`    ${statement}`)
       push(`  },`)
       push(`}`)
@@ -719,10 +1027,11 @@ function renderModule(module, program) {
       push(`const ${name} = { timeout: 1000 }`)
     } else {
       const exported = module.exportEntries.some(
-        (entry) => entry.local === name,
+        (entry) => entry.local === name && entry.name !== `default`,
       )
       push(`${exported ? `export ` : ``}function ${name}() {`)
-      for (const statement of statementsOf(binding.refs)) push(`  ${statement}`)
+      for (const statement of statementsOf(binding.refs, use))
+        push(`  ${statement}`)
       push(`}`)
     }
   }
@@ -731,6 +1040,8 @@ function renderModule(module, program) {
       push(
         `export { ${entry.imported} as ${entry.name} } from '${specOf(entry.from)}'`,
       )
+    } else if (entry.name === `default`) {
+      push(`export default ${entry.local}`)
     }
   }
   for (const star of module.stars) push(`export * from '${specOf(star)}'`)
@@ -740,10 +1051,10 @@ function renderModule(module, program) {
     for (const call of program.calls.filter(
       (entry) => entry.test === undefined,
     )) {
-      push(`${call.alias}()`, { id: call.alias })
+      push(`${use(call.alias)}()`, { id: call.alias })
     }
     for (const test of program.tests) {
-      renderTest(test, push)
+      renderTest(test, push, use)
     }
   } else if (module.declares) {
     renderDeclaration(module, push)
@@ -751,17 +1062,26 @@ function renderModule(module, program) {
   return { text: `${lines.join(`\n`)}\n`, subjects }
 }
 
-/** Each declared part is a list; each type-model name gets its own line. */
+/**
+ * Each declared part is a list; each type-model name gets its own line. A
+ * module with `spread` writes its first part list in a const object that the
+ * declaration spreads.
+ */
 function renderDeclaration(module, push) {
   const partKey = (part) => (module.stringKeys ? `'${part}'` : part)
-  push(`declareOracle({`)
+  const lists = []
   for (const part of [`check`, `model`, `grammar`]) {
     const names = [...module.parts]
       .filter(([, kind]) => kind === part)
       .map(([name]) => name)
     if (part === `check`) names.push(...module.missing)
-    if (names.length > 0) push(`  ${partKey(part)}: [${names.join(`, `)}],`)
+    if (names.length > 0) lists.push(`${partKey(part)}: [${names.join(`, `)}]`)
   }
+  const spread = module.spread && lists.length > 0 ? lists.shift() : undefined
+  if (spread !== undefined) push(`const sharedParts = { ${spread} }`)
+  push(`declareOracle({`)
+  if (spread !== undefined) push(`  ...sharedParts,`)
+  for (const list of lists) push(`  ${list},`)
   if (module.typeNames.length > 0) {
     push(`  ${partKey(`typeModel`)}: [`)
     for (const name of module.typeNames) {
@@ -772,15 +1092,15 @@ function renderDeclaration(module, push) {
   push(`})`)
 }
 
-function statementsOf(refs) {
+function statementsOf(refs, use = (alias) => alias) {
   return refs.map((ref, index) => {
     if (ref.kind === `type`) return `type _t${index} = ${ref.name}<number>`
-    return `void ${ref.kind === `local` ? ref.name : ref.alias}`
+    return `void ${ref.kind === `local` ? ref.name : use(ref.alias)}`
   })
 }
 
-function arrowText(refs) {
-  return `() => {\n    expect(1).toBe(1)\n    ${statementsOf(refs).join(`\n    `)}\n  }`
+function arrowText(refs, use) {
+  return `() => {\n    expect(1).toBe(1)\n    ${statementsOf(refs, use).join(`\n    `)}\n  }`
 }
 
 /** Renders one registration. The first line carries its subject. */
@@ -791,9 +1111,32 @@ function callHelper(test) {
     : undefined
 }
 
-function renderTest(test, push) {
+function renderTest(test, push, use) {
+  // The bindings that one registration uses are written just before it.
+  const arbitrary = (constant) => (constant ? `fc.constant(1)` : `fc.integer()`)
+  const named = test.property ?? (test.helper?.prop ? test.helper : undefined)
+  if (named?.arbNamed) {
+    push(`const arb${test.title} = ${arbitrary(named.constant)}`)
+  }
+  if (test.property?.predicate === `local`) {
+    push(`function pred${test.title}(value) {`)
+    push(`  expect(1).toBe(1)`)
+    push(test.property.readsInput ? `  void value` : `  void 0`)
+    push(`}`)
+  }
+  if (test.driver?.kind === `let`) {
+    push(`let drv${test.title}`)
+    push(`beforeAll(() => {`)
+    push(`  drv${test.title} = {`)
+    push(`    run: () => {`)
+    for (const statement of statementsOf(test.driver.refs, use))
+      push(`      ${statement}`)
+    push(`    },`)
+    push(`  }`)
+    push(`})`)
+  }
   if (test.wrapped) push(`describe('d${test.title}', () => {`)
-  const text = registrationText(test)
+  const text = registrationText(test, use)
   text.forEach((line, offset) => {
     push(
       line,
@@ -803,16 +1146,65 @@ function renderTest(test, push) {
   if (test.wrapped) push(`})`)
 }
 
-function registrationText(test) {
+function registrationText(test, use) {
   const { body, title } = test
   if (test.helper !== undefined) {
-    const arbitrary = test.helper.constant ? `fc.constant(1)` : `fc.integer()`
-    const head = test.helper.prop ? `regProp([${arbitrary}])` : `regPlain`
+    const { helper } = test
+    const arbitrary = helper.arbNamed
+      ? `arb${title}`
+      : helper.constant
+        ? `fc.constant(1)`
+        : `fc.integer()`
+    const head = helper.prop
+      ? `${use(`regProp`)}([${arbitrary}])`
+      : use(HELPER_OF_WRAP[helper.wrap])
+    const trailing =
+      helper.wrap !== `timed`
+        ? ``
+        : helper.trailing.kind === `name`
+          ? `, ${helper.trailing.name}`
+          : `, 1000`
     return [
       `${head}('${title}', (value) => {`,
       `    expect(1).toBe(1)`,
-      `    void value`,
-      `    ${statementsOf(body.refs).join(`\n    `)}`,
+      helper.readsInput ? `    void value` : `    void 0`,
+      `    ${statementsOf(body.refs, use).join(`\n    `)}`,
+      `  }${trailing})`,
+    ]
+  }
+  if (test.property !== undefined) {
+    const { property } = test
+    const arbitrary = property.arbNamed
+      ? `arb${title}`
+      : property.constant
+        ? `fc.constant(1)`
+        : `fc.integer()`
+    const predicate =
+      property.predicate === `local`
+        ? `pred${title}`
+        : property.predicate === `imported`
+          ? property.readsInput
+            ? `predReads`
+            : `predIgnores`
+          : `(value) => {\n    expect(1).toBe(1)\n    ${property.readsInput ? `void value` : `void 0`}\n  }`
+    if (test.form === `prop-named`) {
+      return [`fcTest.prop([${arbitrary}])('${title}', ${predicate})`]
+    }
+    return [
+      `it('${title}', () => {`,
+      `    fc.assert(fc.property(${arbitrary}, ${predicate}))`,
+      `  })`,
+    ]
+  }
+  if (test.driver?.kind === `let`) {
+    return [`it('${title}', () => {`, `    drv${title}.run()`, `  })`]
+  }
+  if (test.driver?.kind === `for-of`) {
+    // The loop and its registration share a line, so the report's line
+    // names this test.
+    return [
+      `for (const drive${title} of [${test.driver.elements.join(`, `)}]) it('${title}', () => {`,
+      `    drive${title}()`,
       `  })`,
     ]
   }
@@ -820,7 +1212,7 @@ function registrationText(test) {
     const rows = test.table.rows.map((row) =>
       row.fn === undefined
         ? `[1]`
-        : `[() => {\n    ${statementsOf(row.fn).join(`\n    `)}\n  }]`,
+        : `[() => {\n    ${statementsOf(row.fn, use).join(`\n    `)}\n  }]`,
     )
     const runner = test.table.kind === `each` ? `it.each` : `it.for`
     return [
@@ -833,16 +1225,16 @@ function registrationText(test) {
   if (body.kind === `member`) return [`it('${title}', ${body.object}.m)`]
   if (body.kind === `call`) {
     const callee =
-      body.callee.kind === `local` ? body.callee.name : body.callee.alias
-    return [`it('${title}', ${callee}(${arrowText(body.refs)}))`]
+      body.callee.kind === `local` ? body.callee.name : use(body.callee.alias)
+    return [`it('${title}', ${callee}(${arrowText(body.refs, use)}))`]
   }
   if (test.options !== undefined) {
     const options = test.options.literal ? `{ timeout: 5000 }` : `oopt`
     return test.options.at === `first`
-      ? [`it('${title}', ${options}, ${arrowText(body.refs)})`]
-      : [`it('${title}', ${arrowText(body.refs)}, ${options})`]
+      ? [`it('${title}', ${options}, ${arrowText(body.refs, use)})`]
+      : [`it('${title}', ${arrowText(body.refs, use)}, ${options})`]
   }
-  return [`it('${title}', ${arrowText(body.refs)})`]
+  return [`it('${title}', ${arrowText(body.refs, use)})`]
 }
 
 /**
@@ -947,10 +1339,11 @@ beforeAll(() => {
   scratch = mkdtempSync(join(repoRoot, `part-reach-scratch-`))
 })
 
+// Every history writes its own directory, so removing them can take a while.
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
   rmSync(scratch, { recursive: true, force: true })
-})
+}, 300_000)
 
 /** Writes a program's files into `directory`; returns the oracle's path, text, and subjects. */
 function writeProgram(directory, program) {
@@ -1067,6 +1460,35 @@ const STATES = [
   `imported-registration`,
   `caller-passed-body-helper`,
   `companion-edited-between-lints`,
+  // Import forms: a namespace member, a default, and a default import of a
+  // module whose only exports of that name come through `export *`.
+  `namespace-import`,
+  `default-import`,
+  `default-import-through-star`,
+  // ...whose star target does have a default, and that default is a part: the
+  // history that tells "`export *` carries no default" from its rival.
+  `default-import-star-target-has-part`,
+  // Registration helpers by import form and module name.
+  `member-callee-registration`,
+  `default-import-registration`,
+  `prefixed-oracle-registrar`,
+  `prefixed-oracle-helper`,
+  `oracle-named-helper`,
+  // Caller-passed-body layouts.
+  `caller-body-trailing-name`,
+  `caller-body-wrapper`,
+  `caller-body-wrapper-reaches-part`,
+  // Drivers and declarations.
+  `let-assigned-driver`,
+  `for-of-driver`,
+  `for-of-mixed-elements`,
+  `declaration-spread`,
+  // A test imports a declared part from a JavaScript companion.
+  `javascript-companion-import-reaches-part`,
+  // Generated properties.
+  `named-constant-arbitrary`,
+  `imported-predicate`,
+  `predicate-ignores-input`,
 ]
 const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
 
@@ -1121,11 +1543,87 @@ function recordStates(program) {
     if (test.body.kind === `member`) states.add(`form-member-body`)
     if (test.options !== undefined) states.add(`form-options`)
   }
-  if (program.calls.some((call) => !call.file.includes(`oracle`))) {
+  if (program.calls.some((call) => !lintedOnItsOwn(call.file))) {
     states.add(`imported-registration`)
   }
   if (program.tests.some((test) => test.helper !== undefined)) {
     states.add(`caller-passed-body-helper`)
+  }
+  const oracle = program.modules.get(program.oracle)
+  for (const [, module] of program.modules) {
+    for (const [, link] of module.imports) {
+      if (link.form === `namespace`) states.add(`namespace-import`)
+      if (link.form !== `default`) continue
+      states.add(`default-import`)
+      const target = program.modules.get(link.from)
+      if (
+        target !== undefined &&
+        target.stars.length > 0 &&
+        !target.exportEntries.some((entry) => entry.name === `default`)
+      ) {
+        states.add(`default-import-through-star`)
+        const starDefaultIsPart = target.stars.some((star) => {
+          const starModule = program.modules.get(star)
+          const entry = starModule?.exportEntries.find(
+            (candidate) => candidate.name === `default`,
+          )
+          return entry !== undefined && starModule.parts.has(entry.local)
+        })
+        if (starDefaultIsPart) states.add(`default-import-star-target-has-part`)
+      }
+    }
+    if (module.spread && module.declares) states.add(`declaration-spread`)
+    if (module.role === `oracle`) {
+      for (const test of program.tests) {
+        for (const ref of test.refs) {
+          const link = ref.kind === `import` && module.imports.get(ref.alias)
+          if (
+            link &&
+            link.from.endsWith(`.js`) &&
+            program.modules.get(link.from)?.parts.has(link.imported)
+          ) {
+            states.add(`javascript-companion-import-reaches-part`)
+          }
+        }
+      }
+    }
+  }
+  for (const call of program.calls) {
+    const link = oracle.imports.get(call.alias)
+    if (link?.form === `namespace`) states.add(`member-callee-registration`)
+    if (link?.form === `default`) states.add(`default-import-registration`)
+    if (call.file.startsWith(`oracle-`)) states.add(`prefixed-oracle-registrar`)
+  }
+  const companion = program.modules.get(`c0.ts`)
+  for (const test of program.tests) {
+    const { helper, property, driver } = test
+    if (helper !== undefined) {
+      if (program.helperFile.startsWith(`oracle-`))
+        states.add(`prefixed-oracle-helper`)
+      else if (lintedOnItsOwn(program.helperFile))
+        states.add(`oracle-named-helper`)
+      if (helper.wrap === `timed` && helper.trailing.kind === `name`)
+        states.add(`caller-body-trailing-name`)
+      if ([`wrap`, `wrap-async`, `wrap-part`].includes(helper.wrap))
+        states.add(`caller-body-wrapper`)
+      if (helper.wrap === `wrap-part` && companion?.parts.has(`c0f0`))
+        states.add(`caller-body-wrapper-reaches-part`)
+    }
+    const arbitrary = property ?? (helper?.prop ? helper : undefined)
+    if (arbitrary?.arbNamed && arbitrary.constant)
+      states.add(`named-constant-arbitrary`)
+    if (property?.predicate === `imported`) states.add(`imported-predicate`)
+    if (arbitrary !== undefined && !arbitrary.constant && !arbitrary.readsInput)
+      states.add(`predicate-ignores-input`)
+    if (driver?.kind === `let`) states.add(`let-assigned-driver`)
+    if (driver?.kind === `for-of`) {
+      states.add(`for-of-driver`)
+      const reaching = driver.elements.map((name) =>
+        localReachesPart(oracle, name),
+      )
+      if (reaching.includes(true) && reaching.includes(false))
+        states.add(`for-of-mixed-elements`)
+    }
   }
   for (const state of states) reach.reach(state)
 }
@@ -1230,6 +1728,51 @@ describe(`declared reach in oracle files`, () => {
     ...BASE,
     forms: [...BASE.forms, `helper-plain`, `helper-prop`],
   })
+  // A wrapper that uses a part needs a companion whose first function is one.
+  campaign(
+    `caller-passed body layouts: trailing arguments and wrappers`,
+    {
+      ...BASE,
+      forms: [...BASE.forms, `helper-plain`, `helper-prop`],
+      helperLayouts: true,
+    },
+    IN_PROCESS,
+    200,
+  )
+  campaign(`registration helpers by module name and import form`, {
+    ...BASE,
+    forms: [...BASE.forms, `call`, `helper-plain`, `helper-prop`],
+    registrar: true,
+    helperNames: true,
+    importForms: true,
+  })
+  // A default import through a star needs a star and a default link together.
+  campaign(
+    `namespace and default imports`,
+    { ...BASE, importForms: true, stars: true },
+    IN_PROCESS,
+    200,
+  )
+  // A loop over a reaching and an unreached function is what tells "every
+  // element" from "some element", and it needs two elements of each kind.
+  campaign(
+    `let and for...of drivers`,
+    { ...BASE, forms: [...BASE.forms, `let-driver`, `for-of`] },
+    IN_PROCESS,
+    300,
+  )
+  campaign(`declaration spreads`, { ...BASE, spreads: true })
+  // A test must import a part from a JavaScript companion, which is rare.
+  campaign(
+    `JavaScript companion modules`,
+    { ...BASE, jsCompanions: true },
+    IN_PROCESS,
+    300,
+  )
+  campaign(`generated properties: named arbitraries and predicates`, {
+    ...BASE,
+    forms: [...BASE.forms, `property`, `prop-named`, `helper-prop`],
+  })
   campaign(`all families`, ALL)
 })
 
@@ -1244,7 +1787,7 @@ describe(`receiving paths`, () => {
           compareReports(`cli`, lintWithCli(program), expected)
           compareReports(`edit-hook`, lintWithEditHook(program), expected)
         }),
-        { numRuns: 4, seed },
+        { numRuns: oracleRuns(4), seed },
       )
     }
   }, 900_000)
@@ -1435,6 +1978,9 @@ const moduleOf = (fields = {}) => ({
   typeNames: [],
   missingPart: false,
   stringKeys: false,
+  defaultSlot: undefined,
+  spread: false,
+  js: false,
   ...fields,
 })
 const reg = (fields) => ({
@@ -1444,6 +1990,13 @@ const reg = (fields) => ({
   literalOptions: false,
   wrapped: false,
   rows: [{ value: 1 }],
+  wrap: 0,
+  trailing: `literal`,
+  constantArb: false,
+  arbNamed: false,
+  predicate: `inline`,
+  readsInput: true,
+  elements: [0],
   ...fields,
 })
 const local = (index) => ({ kind: `local`, index })
@@ -1453,6 +2006,9 @@ const fixed = (fields) => ({
   companions: [],
   broken: false,
   registrarName: `reg.ts`,
+  registrarImport: `named`,
+  helperName: `reg-helper.ts`,
+  helperImport: `named`,
   oracle: {
     module: moduleOf({
       slots: [slot(false), slot(false), slot(true, [], { part: `check` })],
@@ -1566,6 +2122,165 @@ const helpers = fixed({
   },
 })
 
+// The second review's repros. The oracle's only function is the check `ofn2`.
+const checkOnly = moduleOf({
+  slots: [slot(false), slot(false), slot(true, [], { part: `check` })],
+})
+const WRAP = Object.fromEntries(WRAPS.map((wrap, index) => [wrap, index]))
+
+// A body before a trailing timeout: the body reaches through `ofn2`, and the
+// trailing argument is a literal. A unit body before a trailing `ofn2`.
+const trailingArguments = fixed({
+  oracle: {
+    module: checkOnly,
+    objectRefs: [],
+    registrarCall: false,
+    tests: [
+      reg({ form: `helper-plain`, wrap: WRAP.timed, refs: [local(0)] }),
+      reg({ form: `helper-plain`, wrap: WRAP.timed, trailing: `name` }),
+    ],
+  },
+})
+
+// A helper that awaits its caller's body inside its own async wrapper, a
+// wrapper around a unit body, and a wrapper that uses the companion's check.
+const wrappedBody = fixed({
+  companions: [
+    moduleOf({
+      slots: [
+        slot(true, [], { exported: true, part: `check` }),
+        slot(false),
+        slot(false),
+      ],
+    }),
+  ],
+  oracle: {
+    module: checkOnly,
+    objectRefs: [],
+    registrarCall: false,
+    tests: [
+      reg({ form: `helper-plain`, wrap: WRAP[`wrap-async`], refs: [local(0)] }),
+      reg({ form: `helper-plain`, wrap: WRAP.wrap }),
+      reg({ form: `helper-plain`, wrap: WRAP[`wrap-part`] }),
+    ],
+  },
+})
+
+// A registrar in an `oracle-` module through a namespace member call, and a
+// caller-passed-body helper in an `oracle-` module with a unit body.
+const machineryHelpers = fixed({
+  registrarName: `oracle-reg.ts`,
+  registrarImport: `namespace`,
+  helperName: `oracle-reg-helper.ts`,
+  oracle: {
+    module: checkOnly,
+    objectRefs: [],
+    registrarCall: true,
+    tests: [reg({ form: `helper-plain` })],
+  },
+})
+
+// A registrar through a default import.
+const defaultRegistrar = fixed({
+  registrarImport: `default`,
+  oracle: {
+    module: checkOnly,
+    objectRefs: [],
+    registrarCall: true,
+    tests: [reg({ refs: [local(0)] })],
+  },
+})
+
+// Drivers: a `let` that a hook assigns, a `for...of` over the check, and a
+// namespace import of a companion's exported check.
+const drivers = fixed({
+  companions: [
+    moduleOf({
+      slots: [
+        slot(true, [], { exported: true, part: `check` }),
+        slot(false),
+        slot(false),
+      ],
+    }),
+  ],
+  oracle: {
+    module: moduleOf({
+      slots: [slot(false), slot(false), slot(true, [], { part: `check` })],
+      imports: [{ target: 0, slot: 0, form: `namespace` }],
+    }),
+    objectRefs: [],
+    registrarCall: false,
+    tests: [
+      reg({ form: `let-driver`, refs: [local(0)] }),
+      reg({ form: `for-of`, elements: [0] }),
+      reg({ refs: [imported(0)] }),
+    ],
+  },
+})
+
+// A declaration that spreads its first part list, and generated properties:
+// a named constant arbitrary, and an imported predicate that reads or
+// ignores its input, through `fc.property` and through `.prop`.
+const declarationsAndProperties = fixed({
+  oracle: {
+    module: moduleOf({
+      slots: [
+        slot(true, [], { part: `model` }),
+        slot(false),
+        slot(true, [], { part: `check` }),
+      ],
+      spread: true,
+    }),
+    objectRefs: [],
+    registrarCall: false,
+    tests: [
+      reg({ refs: [local(0)] }),
+      reg({ form: `property`, constantArb: true, arbNamed: true }),
+      reg({ form: `prop-named`, predicate: `imported` }),
+      reg({ form: `property`, predicate: `imported`, readsInput: false }),
+    ],
+  },
+})
+
+// A default import of c0, which has no default of its own and star-exports
+// c1, whose default is a check. `export *` carries no default, so the test
+// reaches nothing.
+const defaultThroughStar = fixed({
+  companions: [
+    moduleOf({ stars: [0] }),
+    moduleOf({
+      slots: [slot(true, [], { part: `check` }), slot(false), slot(false)],
+      defaultSlot: 0,
+    }),
+  ],
+  oracle: {
+    module: moduleOf({ imports: [{ target: 0, slot: 0, form: `default` }] }),
+    objectRefs: [],
+    registrarCall: false,
+    tests: [reg({ refs: [imported(0)] })],
+  },
+})
+
+// An oracle file whose only test imports the check from a JavaScript companion.
+const javascriptCompanion = fixed({
+  companions: [
+    moduleOf({
+      slots: [
+        slot(true, [], { exported: true, part: `check` }),
+        slot(false),
+        slot(false),
+      ],
+      js: true,
+    }),
+  ],
+  oracle: {
+    module: moduleOf({ imports: [{ target: 0, slot: 0, form: `named` }] }),
+    objectRefs: [],
+    registrarCall: false,
+    tests: [reg({ refs: [imported(0)] })],
+  },
+})
+
 describe(`fixed inputs through every receiving path`, () => {
   const paths = [
     { name: `eslint`, run: lintWithEslint },
@@ -1589,6 +2304,17 @@ describe(`fixed inputs through every receiving path`, () => {
     ],
     [`each registration form`, forms],
     [`broken companion, string-keyed type model, registration helper`, helpers],
+    [`a caller-passed body before a trailing argument`, trailingArguments],
+    [`a caller-passed body inside the helper's wrapper`, wrappedBody],
+    [`helpers in oracle- machinery modules`, machineryHelpers],
+    [`a registrar through a default import`, defaultRegistrar],
+    [`let, for...of, and namespace drivers`, drivers],
+    [
+      `a spread declaration and generated properties`,
+      declarationsAndProperties,
+    ],
+    [`a check imported from a JavaScript companion`, javascriptCompanion],
+    [`a default import through a star export`, defaultThroughStar],
   ]) {
     it(`${name}`, async () => {
       const program = buildProgram(skeleton, ALL)
@@ -1597,10 +2323,10 @@ describe(`fixed inputs through every receiving path`, () => {
   }
 })
 
-describe(`declared reach ledger`, () => {
-  it(`every declared reach state is entered`, () => {
-    reach.assertReached()
-  })
+// The reach ledger is checked once every campaign above has run. A state that
+// no generated history entered fails the file, so its law is not claimed.
+afterAll(() => {
+  reach.assertReached()
 })
 
 // A dependency chain. The oracle imports `c1f0`, which imports the check
