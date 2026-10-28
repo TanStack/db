@@ -3099,6 +3099,10 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       error on its health node, which the histories judge, and a loading tab
       goes to `error` (#2168). A reset that waits and
       accepts the stale commit fails both campaigns.
+      Electric's updates carry only changed columns by default, so an update
+      for a row the tab does not hold applies nothing; the fold follows that
+      rule (a CI random campaign found the history where a lagging tab's
+      update follows a peer's delete).
       A delivery may also commit only a prefix of what a stream owes, as a
       server answering at an earlier moment does, so lagging commits are
       generated. The final checkpoint requires the server head (Law 2).

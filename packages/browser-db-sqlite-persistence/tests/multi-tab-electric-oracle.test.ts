@@ -1025,25 +1025,33 @@ describe(`multi-tab Electric over one persisted database`, () => {
         model.version = count > 0 ? owed[count - 1]!.version : model.version
         if (messages.length > 0) model.open ??= []
       }
-      // Known gap: a resumed tab that lags behind a peer can receive an
-      // update for a row the peer's commit already deleted from the shared
-      // durable rows. Electric's resume check then reports an unseen row and
-      // puts the Collection in `error` (issue #2267).
-      // Generated campaigns leave that history out; the pinned replay below
-      // keeps it.
-      if (model.resumed && !model.truncates) {
-        const held = new Set(durable.keys())
-        for (const message of [...(model.open ?? []), ...messages]) {
-          if (!(`key` in message)) continue
-          const { id } = message.value
-          if (message.headers.operation === `update` && !held.has(id)) {
-            onKnownGap()
-          }
-          if (message.headers.operation === `delete`) held.delete(id)
-          else held.add(id)
-        }
+      // Electric's updates carry only changed columns (the shape's default
+      // replica), so an update cannot create a row the tab does not hold,
+      // and Electric drops it. The tab holds the durable rows, or, inside a
+      // refetch, the snapshot it has received. Known gap: a resumed tab
+      // instead reports an unseen row and fails (issue #2267). Generated
+      // campaigns leave that history out; the pinned replay below keeps it.
+      const held = new Set<number>(model.truncates ? [] : durable.keys())
+      const track = (message: Message<Item>) => {
+        if (!(`key` in message)) return
+        if (message.headers.operation === `delete`)
+          held.delete(message.value.id)
+        else held.add(message.value.id)
       }
-      model.open?.push(...messages)
+      for (const message of model.open ?? []) track(message)
+      const applied = messages.filter((message) => {
+        if (
+          `key` in message &&
+          message.headers.operation === `update` &&
+          !held.has(message.value.id)
+        ) {
+          if (model.resumed && !model.truncates) onKnownGap()
+          return false
+        }
+        track(message)
+        return true
+      })
+      model.open?.push(...applied)
       const complete = commits
       if (messages.length === 0 && !complete) return
       tab.deliver(
