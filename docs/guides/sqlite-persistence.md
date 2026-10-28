@@ -309,9 +309,11 @@ Restored rows do not prove current authorization. Isolate SQLite data by user or
 An on-demand Collection loads rows for each query demand: the filter, order, and limit that a query asks the source for. With `initialRender`, a demand can settle on its rows from SQLite when the network does not answer. This includes Electric's `syncMode: 'progressive'`, which loads query subsets on demand until its full sync completes.
 
 ```ts
+type Issue = { id: string; title: string }
+
 const issues = createCollection(
   persistedCollectionOptions({
-    ...electricCollectionOptions({
+    ...electricCollectionOptions<Issue>({
       id: 'issues',
       shapeOptions: { url: 'http://localhost:3000/v1/shape', params: { table: 'issues' } },
       syncMode: 'progressive',
