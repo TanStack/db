@@ -7,7 +7,7 @@ title: DbClientLiveQuery
 type DbClientLiveQuery = object;
 ```
 
-Defined in: [packages/db/src/client.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L159)
+Defined in: [packages/db/src/client.ts:166](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L166)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/client.ts:159](https://github.com/TanStack/db/blob/
 readonly dehydratedAt: number;
 ```
 
-Defined in: [packages/db/src/client.ts:161](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L161)
+Defined in: [packages/db/src/client.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L168)
 
 ***
 
@@ -27,7 +27,19 @@ Defined in: [packages/db/src/client.ts:161](https://github.com/TanStack/db/blob/
 readonly optional error: unknown;
 ```
 
-Defined in: [packages/db/src/client.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L165)
+Defined in: [packages/db/src/client.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L174)
+
+***
+
+### initialSnapshot?
+
+```ts
+readonly optional initialSnapshot: DehydratedLiveQueryResult;
+```
+
+Defined in: [packages/db/src/client.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L172)
+
+Initial hydration view retained while a local preload completes.
 
 ***
 
@@ -37,7 +49,7 @@ Defined in: [packages/db/src/client.ts:165](https://github.com/TanStack/db/blob/
 readonly promise: Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:163](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L163)
+Defined in: [packages/db/src/client.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L170)
 
 ***
 
@@ -47,7 +59,7 @@ Defined in: [packages/db/src/client.ts:163](https://github.com/TanStack/db/blob/
 readonly queryHash: string;
 ```
 
-Defined in: [packages/db/src/client.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L160)
+Defined in: [packages/db/src/client.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L167)
 
 ***
 
@@ -57,7 +69,7 @@ Defined in: [packages/db/src/client.ts:160](https://github.com/TanStack/db/blob/
 readonly optional snapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L164)
+Defined in: [packages/db/src/client.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L173)
 
 ***
 
@@ -67,4 +79,4 @@ Defined in: [packages/db/src/client.ts:164](https://github.com/TanStack/db/blob/
 readonly status: DbClientLiveQueryState;
 ```
 
-Defined in: [packages/db/src/client.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L162)
+Defined in: [packages/db/src/client.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L169)

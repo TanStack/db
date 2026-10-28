@@ -3,7 +3,7 @@ id: SetWindowReentrancyError
 title: SetWindowReentrancyError
 ---
 
-Defined in: [packages/db/src/errors.ts:1172](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1172)
+Defined in: [packages/db/src/errors.ts:1202](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1202)
 
 Error thrown when setWindow is called from inside another setWindow call.
 
@@ -19,7 +19,7 @@ Error thrown when setWindow is called from inside another setWindow call.
 new SetWindowReentrancyError(): SetWindowReentrancyError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1173](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1173)
+Defined in: [packages/db/src/errors.ts:1203](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1203)
 
 #### Returns
 

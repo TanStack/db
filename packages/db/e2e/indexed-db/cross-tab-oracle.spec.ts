@@ -590,7 +590,12 @@ for (const obsolete of [false, true])
       )
       const state = await observe(receiver)
       expect(state.reads).toContain('abort')
-      expect(state.status).toBe(obsolete ? 'ready' : 'error')
+      // After Collection readiness, an active receiver that misses a peer
+      // change stops syncing: the Collection's `error`, with its rows and
+      // status kept.
+      expect(state.status).toBe('ready')
+      if (obsolete) expect(state.syncError).toBeNull()
+      else expect(state.syncError).toEqual(expect.any(String))
       if (obsolete)
         assertStatuses(
           state.statuses,
@@ -987,7 +992,7 @@ test('an old native deletion receipt cannot complete a newer blocked deletion', 
     const before = await observe(peer)
     await old.evaluate(() => window.crossTab!.releaseDeletionReceipt())
     const after = await observe(peer)
-    expect(after.status).toBe('error')
+    expect(after.status).toBe('crashed')
     expect(after.callbacks.completed).toBe(before.callbacks.completed)
     const durable = await owner.evaluate(() => window.crossTab!.blockerRows())
     const state = await observe(owner)
@@ -1012,7 +1017,7 @@ test('an old native deletion receipt cannot complete a newer blocked deletion', 
 // Native receiving lane for the formal finish policy. A real transaction holds
 // each admitted adapter write while another page requests upgrade/deletion (or
 // the owner explicitly closes). Success/abort, caller-time source rows, retained
-// error status, and raw storage are separate observations. The unmanaged read
+// crashed status, and raw storage are separate observations. The unmanaged read
 // connection keeps administrative deletion pending until those checks finish.
 for (const reason of ['explicit', 'upgrade', 'delete'] as const)
   for (const kind of ['insert', 'update', 'delete', 'clear', 'import'] as const)
@@ -1049,7 +1054,7 @@ for (const reason of ['explicit', 'upgrade', 'delete'] as const)
               () => window.crossTab!.observe().versionChanges === 1,
             )
           }
-          expect.soft((await observe(a)).status).toBe('error')
+          expect.soft((await observe(a)).status).toBe('crashed')
           await a.evaluate(() => window.crossTab!.releaseBarrier())
           await a.evaluate(() => window.crossTab!.retirementDone())
           const after = await observe(a)
@@ -1082,13 +1087,13 @@ for (const reason of ['explicit', 'upgrade', 'delete'] as const)
             expected,
             'native retired disk rows',
           )
-          expect(after.status).toBe('error')
-          const retiredAt = after.statuses.indexOf('error')
+          expect(after.status).toBe('crashed')
+          const retiredAt = after.statuses.indexOf('crashed')
           expect(retiredAt).toBeGreaterThanOrEqual(0)
           expect(
             after.statuses
               .slice(retiredAt)
-              .every((status) => status === 'error'),
+              .every((status) => status === 'crashed'),
           ).toBe(true)
           await a.evaluate(() => window.crossTab!.closeBlocker())
           if (reason !== 'explicit')
@@ -1114,7 +1119,7 @@ for (const transactionFirst of [false, true])
       await a.waitForFunction(
         () => window.crossTab!.observe().versionChanges === 1,
       )
-      expect((await observe(a)).status).toBe('error')
+      expect((await observe(a)).status).toBe('crashed')
       if (transactionFirst) {
         await a.evaluate(() => window.crossTab!.releaseBarrier())
         expect((await observe(a)).writes.at(-1)).toBe('complete')
@@ -1135,7 +1140,7 @@ for (const transactionFirst of [false, true])
       await b.waitForFunction(
         () => window.crossTab!.observe().schema.status === 'complete',
       )
-      expect((await observe(a)).status).toBe('error')
+      expect((await observe(a)).status).toBe('crashed')
     })
   })
 
@@ -1199,7 +1204,7 @@ for (const phase of [
         if (!loading)
           await page.evaluate(() => window.crossTab!.retirementDone())
         const after = await observe(page)
-        expect(after.status).toBe('error')
+        expect(after.status).toBe('crashed')
         assertSnapshot(after.rows, before, 'forced-close retained snapshot')
         if (loading) expect(after.reads.at(-1)).toBe('abort')
         else {

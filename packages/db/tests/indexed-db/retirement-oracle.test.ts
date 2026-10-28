@@ -96,13 +96,13 @@ function recordStatus(c: Subject) {
   return statuses
 }
 function closed(c: Subject, statuses: Array<string>) {
-  expect.soft(c.status, 'closed connection status').toBe('error')
-  const firstError = statuses.indexOf('error')
-  expect.soft(firstError, 'retirement is observable').toBeGreaterThanOrEqual(0)
+  expect.soft(c.status, 'closed connection status').toBe('crashed')
+  const firstCrash = statuses.indexOf('crashed')
+  expect.soft(firstCrash, 'retirement is observable').toBeGreaterThanOrEqual(0)
   expect
     .soft(
-      statuses.slice(firstError).every((status) => status === 'error'),
-      'retired status stays error',
+      statuses.slice(firstCrash).every((status) => status === 'crashed'),
+      'retired status stays crashed',
     )
     .toBe(true)
 }
@@ -650,7 +650,7 @@ for (const reason of reasons)
       h.disposers.push(() => native.restore())
       const attempts: Array<ReturnType<typeof observe>> = []
       c.on('status:change', ({ status }) => {
-        if (status !== 'error') return
+        if (status !== 'crashed') return
         attempts.push(
           observe(sibling.utils.importData([{ id: 1, name: 'forbidden' }])),
         )
@@ -668,7 +668,7 @@ for (const reason of reasons)
         'rejected',
       ])
       expect(native.entries).toHaveLength(0)
-      expect([c.status, sibling.status]).toEqual(['error', 'error'])
+      expect([c.status, sibling.status]).toEqual(['crashed', 'crashed'])
       assertRows(
         (await readStore<Row>(inspector, 'other')).rows,
         [],
@@ -757,7 +757,7 @@ it('notifies sibling Collections while preserving listener error reporting', asy
       sibling = await h.open('other')
     const failure = new Error('application status listener')
     first.on('status:change', ({ status }) => {
-      if (status === 'error') throw failure
+      if (status === 'crashed') throw failure
     })
     const errors: Array<VoidFunction> = []
     const scheduled = vi
@@ -767,7 +767,7 @@ it('notifies sibling Collections while preserving listener error reporting', asy
       })
     try {
       expect(() => h.db.close()).not.toThrow()
-      expect([first.status, sibling.status]).toEqual(['error', 'error'])
+      expect([first.status, sibling.status]).toEqual(['crashed', 'crashed'])
       expect(errors).toHaveLength(1)
       expect(errors[0]).toThrow(failure)
       await expect(sibling.utils.clearObjectStore()).rejects.toThrow()

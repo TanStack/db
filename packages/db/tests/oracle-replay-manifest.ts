@@ -25,7 +25,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
     `pooled-live-query`,
-    `late-cleanup bootstrap-ownership cleanup-peers`,
+    `late-cleanup bootstrap-ownership cleanup-peers cleanup-admission`,
   ],
   [
     `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
@@ -182,7 +182,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `history-statistics async-history sync-history`,
+    `history-statistics async-history sync-history demand-change`,
+  ],
+  [
+    `db/tests/source-health-oracle.test.ts`,
+    `source-health`,
+    `history on-demand lazy-demand request-errors`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
@@ -703,6 +708,10 @@ const replayTestNames = new Map([
   [
     `pooled-live-query.cleanup-peers`,
     `cleanup status reaches every observer.*random`,
+  ],
+  [
+    `pooled-live-query.cleanup-admission`,
+    `matches a live-query Collection's cleanup admission \\(random\\)`,
   ],
   [
     `live-query-observer.partial-attach`,

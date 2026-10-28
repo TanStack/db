@@ -226,10 +226,8 @@ describe(`DbClient preload source identity`, () => {
         getKey: (row: Row) => row.id,
         startSync: true,
         sync: {
-          sync: ({
-            markError,
-          }: Parameters<SyncConfig<Row, string>[`sync`]>[0]) => {
-            failFirst = () => markError(new Error(`first source failed`))
+          sync: ({ fail }: Parameters<SyncConfig<Row, string>[`sync`]>[0]) => {
+            failFirst = () => fail(new Error(`first source failed`))
           },
         },
       })
@@ -264,7 +262,8 @@ describe(`DbClient preload source identity`, () => {
         }).liveQueries?.[0]
         expect(stream?.queryHash).toBe(queryHash)
         failFirst()
-        await expect(pending).rejects.toThrow(/entered error state/)
+        // The live query reports its source's own failure.
+        await expect(pending).rejects.toThrow(/first source failed/)
         expect(client.dehydrate().liveQueries).toBeUndefined()
 
         client.hydrate({
@@ -486,8 +485,8 @@ describe(`DbClient preload source identity`, () => {
         observer?.dispose()
         await view?.cleanup()
         await client.cleanup()
-        await first.cleanup()
-        await second.cleanup()
+        await first.cleanup({ dependents: true })
+        await second.cleanup({ dependents: true })
       }
     },
   )
@@ -567,8 +566,8 @@ describe(`DbClient preload source identity`, () => {
         await nextView?.cleanup()
         await firstView?.cleanup()
         await client.cleanup()
-        await first.cleanup()
-        await second.cleanup()
+        await first.cleanup({ dependents: true })
+        await second.cleanup({ dependents: true })
       }
     },
   )
@@ -618,8 +617,8 @@ describe(`DbClient preload source identity`, () => {
       } finally {
         observer?.dispose()
         await client.cleanup()
-        await first.cleanup()
-        await second.cleanup()
+        await first.cleanup({ dependents: true })
+        await second.cleanup({ dependents: true })
       }
     },
   )

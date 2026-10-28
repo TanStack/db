@@ -1702,8 +1702,10 @@ describe(`standalone descriptor query binding`, () => {
 /**
  * React receives the source-error premise through actual descriptor startup.
  * The shared conformance contract exposes ordinary hook errors as a readable
- * status. The start-handoff judgment distinguishes a returned markError from
- * a synchronous throw; neither permits a failed commit to retain ownership.
+ * status. The start-handoff judgment distinguishes a returned fail() (a loading
+ * error) from a synchronous throw (a crash); neither permits a failed commit
+ * to retain ownership. A readable result shows the model's status through
+ * exactly one of `isLoadingError` and `isCrashed`.
  * Each hook has independent campaigns and reach checks. The grammar varies
  * defined/absent causes, callback return/throw, and failure before/during commit.
  * Before-commit failures come from independent DbClient startup, whose throw
@@ -1735,8 +1737,8 @@ describe(`descriptor error handoff at React commit`, () => {
       for (const campaign of [`fixed`, `random`] as const) {
         it(`${hook} ${observation} after descriptor failure (${campaign})`, async () => {
           const reach = createOracleReach(`react-error-handoff-${hook}`, [
-            `mark-error-before-release`,
-            `mark-error-during-release`,
+            `fail-before-release`,
+            `fail-during-release`,
             `throw-before-release`,
             `throw-during-release`,
             `undefined-cause`,
@@ -1744,10 +1746,7 @@ describe(`descriptor error handoff at React commit`, () => {
           await fc.assert(
             fc.asyncProperty(
               fc.record({
-                outcome: fc.constantFrom(
-                  `mark-error` as const,
-                  `throw` as const,
-                ),
+                outcome: fc.constantFrom(`fail` as const, `throw` as const),
                 cause: fc.constantFrom(`error` as const, `undefined` as const),
                 timing: fc.constantFrom(
                   `before-release` as const,
@@ -1773,10 +1772,10 @@ describe(`descriptor error handoff at React commit`, () => {
                     startSync: true,
                     gcTime: 0,
                     sync: {
-                      sync: ({ markError }) => {
+                      sync: ({ fail }) => {
                         starts++
                         if (history.outcome === `throw`) throw failure
-                        markError(failure)
+                        fail(failure)
                       },
                     },
                   }),
@@ -1787,7 +1786,8 @@ describe(`descriptor error handoff at React commit`, () => {
                 const caught: Array<unknown> = []
                 let current:
                   | {
-                      isError?: boolean
+                      isLoadingError?: boolean
+                      isCrashed?: boolean
                       status: string
                       collection?: {
                         subscriberCount: number
@@ -1819,7 +1819,9 @@ describe(`descriptor error handoff at React commit`, () => {
                       threw,
                       `independent startup owns its exception`,
                     ).toBe(history.outcome === `throw`)
-                    expect(client.collection(descriptor).status).toBe(`error`)
+                    expect(client.collection(descriptor).status).toBe(
+                      expectedStartHandoff(history).status,
+                    )
                     expect(starts).toBe(1)
                   }
                   mounted = render(
@@ -1843,7 +1845,12 @@ describe(`descriptor error handoff at React commit`, () => {
                         [],
                       )
                       expect(current?.status).toBe(expected.status)
-                      expect(current?.isError).toBe(true)
+                      expect(current?.isLoadingError).toBe(
+                        expected.status === `error`,
+                      )
+                      expect(current?.isCrashed).toBe(
+                        expected.status === `crashed`,
+                      )
                     } else {
                       expect(
                         caught,
@@ -1984,8 +1991,8 @@ describe(`SSR snapshot admission`, () => {
             data-ready={result.isReady}
             data-loading={result.isLoading}
             data-idle={result.isIdle}
-            data-error={result.isError}
-            data-persisted={result.persistedStatus}
+            data-loading-error={result.isLoadingError}
+            data-crashed={result.isCrashed}
           >
             {result.data.map((row) => (
               <span key={row.id}>{row.name}</span>
@@ -2636,14 +2643,14 @@ async function checkStreamCut(
     id: `stream-render-cut`,
     getKey: (row: { id: string; name: string }) => row.id,
     sync: {
-      sync: ({ begin, write, commit, markReady, markError }) => {
+      sync: ({ begin, write, commit, markReady, fail }) => {
         const rows =
           owner !== client && history.browserWrite
             ? [{ id: `0`, name: `browser only` }]
             : authoredRows
         const publish = () => {
           if (owner === client && history.sourceError) {
-            markError(sourceError)
+            fail(sourceError)
             return
           }
           begin()

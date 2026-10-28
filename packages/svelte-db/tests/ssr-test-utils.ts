@@ -9,7 +9,8 @@ export type Person = {
 
 export type SsrHookFlags = {
   isReady: boolean
-  isError: boolean
+  isLoadingError: boolean
+  isCrashed: boolean
   isLoading: boolean
   isIdle: boolean
 }

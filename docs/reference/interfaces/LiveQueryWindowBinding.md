@@ -3,7 +3,7 @@ id: LiveQueryWindowBinding
 title: LiveQueryWindowBinding
 ---
 
-Defined in: [packages/db/src/live-query-window-binding.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L86)
+Defined in: [packages/db/src/live-query-window-binding.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L93)
 
 Validated infinite-query page shape.
 
@@ -19,7 +19,7 @@ Validated infinite-query page shape.
 collection: Collection<any, any, any>;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L91)
+Defined in: [packages/db/src/live-query-window-binding.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L98)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/live-query-window-binding.ts:91](https://github.com
 controller: LiveQueryWindowController<any, any>;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L94)
+Defined in: [packages/db/src/live-query-window-binding.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L103)
 
 ***
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/live-query-window-binding.ts:94](https://github.com
 dependencies: readonly unknown[] | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L89)
+Defined in: [packages/db/src/live-query-window-binding.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L96)
 
 ***
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/live-query-window-binding.ts:89](https://github.com
 initialPageParam: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L36)
+Defined in: [packages/db/src/live-query-window-binding.ts:40](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L40)
 
 First result-page label, not a server cursor or remote offset.
 
@@ -65,7 +65,7 @@ First result-page label, not a server cursor or remote offset.
 ownsCollection: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L93)
+Defined in: [packages/db/src/live-query-window-binding.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L102)
 
 Whether this binding created `collection` from a query.
 
@@ -77,11 +77,23 @@ Whether this binding created `collection` from a query.
 pageSize: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L34)
+Defined in: [packages/db/src/live-query-window-binding.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L38)
 
 #### Inherited from
 
 [`LiveQueryWindowPageShape`](LiveQueryWindowPageShape.md).[`pageSize`](LiveQueryWindowPageShape.md#pagesize)
+
+***
+
+### queryHash
+
+```ts
+queryHash: string | undefined;
+```
+
+Defined in: [packages/db/src/live-query-window-binding.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L100)
+
+The transport identity of this binding's initial query window.
 
 ***
 
@@ -91,7 +103,7 @@ Defined in: [packages/db/src/live-query-window-binding.ts:34](https://github.com
 scope: unknown;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L90)
+Defined in: [packages/db/src/live-query-window-binding.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L97)
 
 ***
 
@@ -103,7 +115,7 @@ supplied:
   | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L88)
+Defined in: [packages/db/src/live-query-window-binding.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L95)
 
 The supplied Collection; `undefined` for a query input.
 
@@ -115,7 +127,7 @@ The supplied Collection; `undefined` for a query input.
 warning: string | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L99)
+Defined in: [packages/db/src/live-query-window-binding.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L108)
 
 A developer hint about a newly bound supplied collection's window, for the
 adapter to print once. Production builds carry none.

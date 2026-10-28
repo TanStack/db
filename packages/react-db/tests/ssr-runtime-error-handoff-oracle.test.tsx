@@ -41,7 +41,8 @@ type RuntimeView = {
   rows: Array<string>
   status: string
   isReady: boolean
-  isError: boolean
+  isLoadingError: boolean
+  isCrashed: boolean
   isLoading: boolean
   isIdle: boolean
 }
@@ -87,12 +88,12 @@ async function checkRuntimeHistory(
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
-      sync: ({ markReady, markError }) => {
+      sync: ({ markReady, fail }) => {
         const runtime = owner === server ? `server` : `browser`
         starts[runtime]++
         const outcome =
           runtime === `server` ? history.serverOutcome : history.browserOutcome
-        if (outcome === `error`) markError(sourceError)
+        if (outcome === `error`) fail(sourceError)
         else markReady()
       },
     },
@@ -111,7 +112,8 @@ async function checkRuntimeHistory(
       rows: result.data.map((row) => row.id),
       status: result.status,
       isReady: result.isReady,
-      isError: result.isError,
+      isLoadingError: result.isLoadingError,
+      isCrashed: result.isCrashed,
       isLoading: result.isLoading,
       isIdle: result.isIdle,
     }

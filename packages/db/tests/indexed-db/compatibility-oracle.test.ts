@@ -609,7 +609,7 @@ for (const count of [2, 3]) {
           'managed initial handles do not orphan an upgrade blocker',
         ).toBe(0)
         for (const collection of collections)
-          expect(collection.status).toBe('error')
+          expect(collection.status).toBe('crashed')
       })
     })
   }
