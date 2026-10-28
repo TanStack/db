@@ -87,7 +87,7 @@ const transaction = tasks.update(taskId, (task) => {
 await transaction.isPersisted.promise
 ```
 
-DB applies optimistic writes immediately. Successful Convex mutation promises wait for the client's queries to catch up. Before a handler settles, the adapter reads the latest cached result and waits for DB to accept its sync writes. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.cleanup()`, then `collection.preload()`, before retrying replay. A provider query error can recover when a later valid result arrives. A rejected handler rolls back its optimistic writes.
+DB applies optimistic writes immediately. Successful Convex mutation promises wait for the client's queries to catch up. Before a handler settles, the adapter reads the latest cached result and waits for DB to accept its sync writes. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.reload()` before retrying replay. After readiness, a provider query error can recover when a later valid result arrives. A failed first load requires `reload()`. A rejected handler rolls back its optimistic writes.
 
 Awaiting an HTTP mutation, an action, a different client's mutation, or a detached promise does not provide this query synchronization guarantee. Avoid applying Convex optimistic updates to the same query, because the adapter would receive those local results as source data.
 
@@ -288,7 +288,7 @@ Use the offline action to create durable writes. Calling `tasks.insert()` direct
 
 The opt-in codec preserves Convex BigInt, binary data, special floats, and undefined fields in mutation changes. Keep the same codec configured across reloads. Missing or incompatible codecs stop replay and retain the stored work. Transaction metadata keeps the outbox’s existing JSON/Date/Temporal behavior.
 
-The outbox records the transaction before sending it. After a reload, the executor restores pending optimistic writes and replays their named mutation functions. The bridge supplies the original `idempotencyKey`, waits for the Convex mutation, then waits for each configured Collection to accept its source snapshot. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.cleanup()`, then `collection.preload()`, before retrying replay. A provider query error can recover when a later valid result arrives.
+The outbox records the transaction before sending it. After a reload, the executor restores pending optimistic writes and replays their named mutation functions. The bridge supplies the original `idempotencyKey`, waits for the Convex mutation, then waits for each configured Collection to accept its source snapshot. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.reload()` before retrying replay. After readiness, a provider query error can recover when a later valid result arrives. A failed first load requires `reload()`.
 
 Convex handles WebSocket interruptions without rejecting the mutation promise. Argument-construction errors and rejected mutation calls are terminal failures. The bridge turns them into `NonRetriableError`, so the executor rolls back instead of retrying invalid writes indefinitely. A later source-sync failure can retry with the original key.
 
@@ -321,9 +321,9 @@ convexCollectionOptions({
 })
 ```
 
-An initial subscription error rejects `preload()` with the original error. Later errors preserve existing rows and call `onError`. `collection.utils.getSyncError()` returns the latest error. This getter is not reactive. A valid query result clears provider or projection errors and allows initial sync to recover.
+An initial subscription or projection error rejects `preload()` with the original error and ends that sync run. Call `collection.reload()` to try again. Later recoverable errors preserve existing rows, set `collection.health.failureReason`, and call `onError`. A valid query result clears that failure reason. `collection.utils.getSyncError()` returns the latest error, but this getter is not reactive. A rejected source acceptance stops the run and sets its health error; it also requires `reload()`.
 
-Collection cleanup unsubscribes and invalidates callbacks from that sync run. It does not close the shared Convex client. After a restart, the first result replaces retained data, including when the result is empty. Close the client separately when your application no longer needs it.
+Collection cleanup rejects while live queries or Effects read it. Unmount those consumers first, or use `collection.cleanup({ dependents: true })`. Cleanup unsubscribes and invalidates callbacks from that sync run. It does not close the shared Convex client. After a restart, the first result replaces retained data, including when the result is empty. Close the client separately when your application no longer needs it.
 
 ## Scope
 

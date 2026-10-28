@@ -98,6 +98,8 @@ describe(`Convex collection`, () => {
     transport.error(error)
     await expect(ready).rejects.toBe(error)
     transport.emit([])
+    expect(collection.status).toBe(`error`)
+    await collection.reload()
     expect(collection.status).toBe(`ready`)
     await collection.cleanup()
   })
@@ -245,6 +247,8 @@ it.each([null, {}, [null], [1], [[`nested`]]])(
     transport.emit(result as unknown as Array<Row>)
     await expect(ready).rejects.toBeInstanceOf(TypeError)
     transport.emit([])
+    expect(collection.status).toBe(`error`)
+    await collection.reload()
     expect(collection.status).toBe(`ready`)
     await collection.cleanup()
   },
@@ -291,7 +295,8 @@ it(`recovers from a projection failure before opening a sync transaction`, async
   transport.emit([{ _id: `a`, text: `valid` }])
   await expect(ready).rejects.toBe(error)
   broken = false
-  transport.emit([{ _id: `a`, text: `valid` }])
+  transport.cache([{ _id: `a`, text: `valid` }])
+  await collection.reload()
   expect(collection.get(`a`)?.text).toBe(`valid`)
   await collection.cleanup()
 })

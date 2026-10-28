@@ -50,14 +50,23 @@ export function createConvexOptions<
       commit,
       truncate,
       markReady,
-      markError,
-      collection,
+      fail: failSync,
+      reportError,
+      reportHealthy,
     }) => {
       let active = true
+      let ready = false
+      const markValidReady = (): void => {
+        if (!active || stopped) return
+        if (!ready) {
+          ready = true
+          markReady()
+        }
+      }
       let previous = new Map<TKey, TItem>()
       let initialized = false
       let visible: true | Promise<void> = true
-      let acceptanceFailure: { error: unknown } | undefined
+      let stopped: { error: unknown } | undefined
       let resolveFirst!: () => void
       let rejectFirst!: (error: unknown) => void
       const firstResult = new Promise<void>((resolve, reject) => {
@@ -67,18 +76,19 @@ export function createConvexOptions<
       // A subscription may fail before any caller asks to await its source.
       void firstResult.catch(() => {})
       const accepting = new Set<Promise<void>>()
-      const fail = (error: unknown): void => {
-        if (!active) return
+      const fail = (error: unknown, terminal = false): void => {
+        if (!active || stopped) return
         syncError = error
         rejectFirst(error)
-        if (collection.status === `loading` || collection.status === `error`) {
-          markError(error)
-        }
+        if (!ready || terminal) {
+          stopped = { error }
+          failSync(error)
+        } else reportError(error)
         onError?.(error)
       }
       const accept = (result: TResult): void => {
         if (!active) return
-        if (acceptanceFailure) throw acceptanceFailure.error
+        if (stopped) throw stopped.error
         // Validate the entire result before opening a sync transaction. A bad
         // snapshot must never leave a half-written transaction behind.
         const rows: unknown = select ? select(result) : result
@@ -117,7 +127,8 @@ export function createConvexOptions<
           [...next].every(([key, row]) => previous.get(key) === row)
         ) {
           syncError = undefined
-          if (visible === true) markReady()
+          if (ready) reportHealthy()
+          if (visible === true) markValidReady()
           return
         }
         begin()
@@ -137,6 +148,7 @@ export function createConvexOptions<
         previous = next
         initialized = true
         syncError = undefined
+        if (ready) reportHealthy()
         const receipt = commit()
         visible = receipt
         // Never await visibility from a mutation handler: DB may hold it until
@@ -150,18 +162,17 @@ export function createConvexOptions<
               accepting.delete(accepted)
               // Later diffs may depend on this rejected source proposal.
               // A new sync run must establish an authoritative base again.
-              acceptanceFailure = { error }
-              fail(error)
+              fail(error, true)
             },
           )
         }
         resolveFirst()
-        if (receipt === true) markReady()
+        if (receipt === true) markValidReady()
         else
           void receipt.then(() => {
             if (active && visible === receipt) {
               visible = true
-              markReady()
+              markValidReady()
             }
           }, fail)
       }
@@ -174,7 +185,7 @@ export function createConvexOptions<
       }
       let subscription: ConvexSubscription<TResult> | undefined
       const refresh = async (): Promise<void> => {
-        if (acceptanceFailure) throw acceptanceFailure.error
+        if (stopped) throw stopped.error
         if (!active || !subscription) {
           if (syncError !== undefined) throw syncError
           throw new Error(`The Convex collection has no active subscription.`)

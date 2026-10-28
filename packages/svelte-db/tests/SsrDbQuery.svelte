@@ -40,7 +40,8 @@
       people.status,
       {
         isReady: people.isReady,
-        isError: people.isError,
+        isLoadingError: people.isLoadingError,
+        isCrashed: people.isCrashed,
         isLoading: people.isLoading,
         isIdle: people.isIdle,
       },
@@ -53,7 +54,8 @@
       people.status,
       {
         isReady: people.isReady,
-        isError: people.isError,
+        isLoadingError: people.isLoadingError,
+        isCrashed: people.isCrashed,
         isLoading: people.isLoading,
         isIdle: people.isIdle,
       },

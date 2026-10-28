@@ -149,6 +149,36 @@ export class CollectionInErrorStateError extends CollectionStateError {
   }
 }
 
+export class CollectionHasSubscribersError extends CollectionStateError {
+  constructor(collectionId: string, dependents: number) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot clean up collection "${collectionId}" while ${dependents} live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them.`
+        : codedMessage(254, { collectionId, dependents }),
+    )
+  }
+}
+
+export class CollectionReloadCrashedError extends CollectionStateError {
+  constructor(collectionId: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot reload collection "${collectionId}" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again.`
+        : codedMessage(255, { collectionId }),
+    )
+  }
+}
+
+export class CollectionReloadDuringSyncEntryError extends CollectionStateError {
+  constructor(collectionId: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot reload collection "${collectionId}" from inside its sync function or a loadSubset call. Reload after it returns.`
+        : codedMessage(256, { collectionId }),
+    )
+  }
+}
+
 export class InvalidCollectionStatusTransitionError extends CollectionStateError {
   constructor(from: string, to: string, collectionId: string) {
     super(
@@ -207,11 +237,16 @@ export class CollectionOperationError extends TanStackDBError {
   }
 }
 
+// Development messages show a bigint key or field instead of failing to
+// serialize it.
+const showBigint = (_key: string, value: unknown) =>
+  typeof value === `bigint` ? `${value}n` : value
+
 export class UndefinedKeyError extends CollectionOperationError {
   constructor(item: any) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `An object was created without a defined key: ${JSON.stringify(item)}`
+        ? `An object was created without a defined key: ${JSON.stringify(item, showBigint)}`
         : codedMessage(14, { item }),
     )
   }
@@ -221,7 +256,7 @@ export class InvalidKeyError extends CollectionOperationError {
   constructor(key: unknown, item: unknown) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key)}. Item: ${JSON.stringify(item)}`
+        ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key, showBigint)}. Item: ${JSON.stringify(item, showBigint)}`
         : codedMessage(15, { key, type: key === null ? `null` : typeof key }),
     )
   }

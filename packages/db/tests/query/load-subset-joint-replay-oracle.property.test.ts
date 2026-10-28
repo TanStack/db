@@ -1,6 +1,7 @@
 /**
- * A truncate replacement owes every uncancelable participant, including older
- * overlapping work. Failure leaves the last complete publication visible;
+ * A truncate replacement owes every current participant and accepted receipt.
+ * Under #2168 and architecture law 16, abort ends an obsolete load for core,
+ * even while its provider promise remains pending. Failure leaves the last complete publication visible;
  * ordinary later writes cannot supply the missing authority. Each live-query
  * owner has its own publication barrier; a peer holds no authority over it. Retiring one
  * logical owner removes only its obligations. Cleanup terminates old graphs.
@@ -73,6 +74,9 @@ class ReplayPublicationModel {
     if (this.closed) throw new Error(`model: replay after cleanup`)
     for (const owner of this.owners) this.replaying.add(owner)
     this.failed.clear()
+    // A replacement aborts the prior attempts. Accepted writes still owe
+    // their receipts, but obsolete provider settlement holds no readiness.
+    this.participants.clear()
     const attempt = ++this.latest
     for (const owner of this.owners)
       this.participants.set(`${attempt}:${owner}`, { owner, attempt })
@@ -340,8 +344,8 @@ async function runHistory(h: Scenario) {
     await Promise.all([main.preload(), peer.preload()])
     expect(normalize(main.toArray)).toEqual(normalize(rows(1)))
     expect(normalize(peer.toArray)).toEqual(normalize(rows(1)))
-    await start() // A remains uncancelably pending.
-    await start() // B is authoritative, but A still participates.
+    await start() // A provider promise remains pending after its abort.
+    await start() // B is authoritative; A no longer gates publication.
     expect(loads.filter((load) => load.attempt === 1)).toHaveLength(2)
     expect(loads.filter((load) => load.attempt === 2)).toHaveLength(2)
     expect(
@@ -367,8 +371,8 @@ async function runHistory(h: Scenario) {
     expect(
       loads.filter((load) => load.attempt === 1).every((load) => !load.settled),
     ).toBe(true)
-    expect(normalize(main.toArray)).toEqual(normalize(rows(1)))
-    reaches.add(`newest-done-older-pending`)
+    expect(normalize(main.toArray)).toEqual(normalize(rows(3)))
+    reaches.add(`newest-done-older-aborted`)
     await settle(1, false)
     await checkpoint(`all overlapping work settled`)
     expect(normalize(main.toArray)).toEqual(normalize(rows(3)))
@@ -406,8 +410,11 @@ async function runHistory(h: Scenario) {
     accept(11)
     if (h.releaseBeforeCleanup) await release()
     model.cleanup()
-    await source.cleanup()
-    expect(main.status).toBe(`error`)
+    // Internal teardown retains the crash boundary. Public cleanup refuses
+    // this active dependent under architecture law 14.
+    await expect(source.cleanup()).rejects.toThrow(`dependent(s) read it`)
+    await source._lifecycle.cleanup()
+    expect(main.status).toBe(`crashed`)
     await release()
     // Old completions and their errors may release resources but cannot revive
     // the terminal graph. A fresh dependent belongs to the restarted sync run.
@@ -418,7 +425,7 @@ async function runHistory(h: Scenario) {
     await fresh.preload()
     await checkpoint(`cleanup and restarted source`)
     expect(normalize(main.toArray)).toEqual(normalize(rows(10)))
-    expect(main.status).toBe(`error`)
+    expect(main.status).toBe(`crashed`)
     expect(normalize(fresh.toArray)).toEqual(normalize(rows(20)))
     reaches.add(`cleanup-holds-old-graph-terminal`)
   }, [
@@ -441,7 +448,7 @@ it(`composes overlapping replay receipts, failure, surviving ownership and resta
     `JOINT_REPLAY_ORACLE`,
     [
       `overlap-with-held-receipt`,
-      `newest-done-older-pending`,
+      `newest-done-older-aborted`,
       `failure-keeps-ordinary-writes-private`,
       `retired-peer-does-not-block-retry`,
       `cleanup-holds-old-graph-terminal`,
@@ -453,7 +460,7 @@ it(`composes overlapping replay receipts, failure, surviving ownership and resta
           const observed = await runHistory(h)
           for (const state of [
             `overlap-with-held-receipt`,
-            `newest-done-older-pending`,
+            `newest-done-older-aborted`,
             `failure-keeps-ordinary-writes-private`,
             `retired-peer-does-not-block-retry`,
             `cleanup-holds-old-graph-terminal`,

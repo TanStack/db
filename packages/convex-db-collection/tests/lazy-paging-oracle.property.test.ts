@@ -628,7 +628,12 @@ it(`waits for applied receipts, respects abort and fences callbacks across resta
                   dependentPublications.push(copyLazyRows(dependent.toArray)),
                 { includeInitialState: false },
               )
-              const cleaning = f.source.cleanup()
+              // Public cleanup now refuses active dependents. Internal teardown
+              // still owns this stale-callback and terminal-graph boundary.
+              await expect(f.source.cleanup()).rejects.toThrow(
+                `dependent(s) read it`,
+              )
+              const cleaning = f.source._lifecycle.cleanup()
               const staleCheckpoint = async () => {
                 const before = {
                   base: [...f.source.base.values()],
@@ -663,7 +668,7 @@ it(`waits for applied receipts, respects abort and fences callbacks across resta
               }
               await staleCheckpoint()
               expect(f.source.has(`obsolete`)).toBe(false)
-              expect(dependent.status).toBe(`error`)
+              expect(dependent.status).toBe(`crashed`)
               expect(() => f.source.startSyncImmediate()).toThrow()
               reach.reach(`cleanup-start-fences-callback`)
               await f.remote.pump()
@@ -692,7 +697,7 @@ it(`waits for applied receipts, respects abort and fences callbacks across resta
                 h.descending,
               )
               reach.reach(`stale-after-restart`)
-              expect(dependent.status).toBe(`error`)
+              expect(dependent.status).toBe(`crashed`)
               reach.reach(`old-dependent-stays-terminal`)
               reach.reach(`retired-error-and-status-fenced`)
               const fresh = createLiveQueryCollection((q) =>
@@ -711,7 +716,7 @@ it(`waits for applied receipts, respects abort and fences callbacks across resta
                 expectedLazyRows(changed, { limit: 3 }, h.descending),
               )
               expect(fresh.status).toBe(`ready`)
-              expect(dependent.status).toBe(`error`)
+              expect(dependent.status).toBe(`crashed`)
               reach.reach(`fresh-dependent-after-restart`)
               await fresh.cleanup()
               stopDependentStatuses()

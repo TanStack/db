@@ -24,7 +24,7 @@ export const copyLazyRows = (rows: ReadonlyArray<LazyRow>): Array<LazyRow> =>
   rows.map(({ id, rank, text }) => ({ id, rank, text }))
 
 /** Cleanup law 14 in live/ARCHITECTURE.md: the old graph keeps its last
- * complete value and terminal error, including after a fresh run recovers.
+ * complete value and terminal crash, including after a fresh run recovers.
  * Only cleanup authority and the last public value have scientific meaning. */
 export class LazyTerminalGraphModel {
   private snapshot: Array<LazyRow> | undefined
@@ -35,7 +35,7 @@ export class LazyTerminalGraphModel {
 
   observe(status: string, rows: ReadonlyArray<LazyRow>): void {
     if (!this.snapshot) return
-    if (status !== `error`)
+    if (status !== `crashed`)
       throw new Error(`native lifecycle: old graph recovered`)
     if (JSON.stringify(copyLazyRows(rows)) !== JSON.stringify(this.snapshot))
       throw new Error(`native lifecycle: dead graph published`)

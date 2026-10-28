@@ -16,7 +16,10 @@
  * uppercases text; the reference states that transformation independently.
  *
  * The real Collection receives controlled Convex callbacks. After each
- * synchronous delivery, typed public entries and the error flag are compared.
+ * delivery, typed public entries, status, health and the error flag are compared.
+ * The health migration in #2168 makes first-load failure terminal for its sync
+ * run. A valid result recovers that case through reload; after readiness, valid
+ * results clear recoverable sync failure reasons in the same run.
  * Reach counts only histories that pass those checks. This owner does not
  * establish provider ordering, intermediate publication, SDK transport,
  * mutation timing or cleanup scheduling; receiving tests own those boundaries.
@@ -146,7 +149,7 @@ it(`refines complete snapshots throughout generated histories`, async () => {
               const seen: Array<string | number> = []
               let previousInvalid = false
               await withTestCleanup(
-                () => {
+                async () => {
                   // Both startup forms remain reachable: prepending a
                   // duplicate must reject without publishing even one row.
                   const deliveries = initiallyInvalid
@@ -174,7 +177,14 @@ it(`refines complete snapshots throughout generated histories`, async () => {
                     )
                     const prior = expected
                     if (valid) expected = selected
-                    transport.emit(snapshot)
+                    if (valid && collection.status === `error`) {
+                      transport.cache(snapshot)
+                      await collection.reload()
+                    } else transport.emit(snapshot)
+                    expect(collection.status).toBe(
+                      deliveryIndex === 0 && !valid ? `error` : `ready`,
+                    )
+                    expect(collection.health.hasErrors).toBe(!valid)
                     expect(collection.utils.getSyncError() !== undefined).toBe(
                       !valid,
                     )

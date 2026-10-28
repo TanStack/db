@@ -57,6 +57,8 @@ interface PendingSyncedTransaction<
   applicationStarted: boolean
   layoutChanged: boolean
   operations: Array<PendingSyncOperation<T, TKey>>
+  // The transaction replaces every row: the adapter began it as a snapshot
+  // or called truncate() in it.
   truncate?: boolean
   truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
@@ -841,6 +843,16 @@ export class CollectionStateManager<
     this.commitPendingTransactions()
   }
 
+  /** A retired sync run's open transaction can never commit. */
+  discardOpenSyncTransactions(): void {
+    const committed = this.pendingSyncedTransactions.filter(
+      (transaction) => transaction.committed,
+    )
+    if (committed.length === this.pendingSyncedTransactions.length) return
+    this.pendingSyncedTransactions = committed
+    this.refreshPendingSyncedProjection()
+  }
+
   /** Whether the newest sync transaction is still open for writes. */
   hasOpenSyncTransaction(): boolean {
     return this.pendingSyncedTransactions.at(-1)?.committed === false
@@ -853,7 +865,11 @@ export class CollectionStateManager<
     )
   }
 
-  /** Every synced row once every accepted sync transaction applies. */
+  /**
+   * Every synced row once every accepted sync transaction applies: the
+   * baseline a diffing adapter writes against, also during a reload. Inside
+   * an open snapshot or truncate, only that transaction's writes.
+   */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
     const { states, truncated } = this.pendingSyncedProjection
     if (!truncated) {
@@ -1095,7 +1111,6 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      const syncedInsertedOrUpdatedKeys = new Set<TKey>()
       const firstSyncOperations = new Map<
         TKey,
         OptimisticChangeMessage<TOutput>
@@ -1106,7 +1121,6 @@ export class CollectionStateManager<
           changedKeys.add(key)
           if (!firstSyncOperations.has(key))
             firstSyncOperations.set(key, operation)
-          if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1179,7 +1193,8 @@ export class CollectionStateManager<
             currentVisibleState.delete(key)
           }
 
-          // Emit truncate event so subscriptions can reset their cursor tracking state
+          // Emit truncate event so subscriptions reset their tracking state
+          // and replay their on-demand demand.
           this._events.emit(`truncate`, {
             type: `truncate`,
             collection: this.collection,
@@ -1310,6 +1325,16 @@ export class CollectionStateManager<
             ? syncPreviousValue
             : currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
+
+        if (previousVisibleValue === undefined) {
+          if (newVisibleValue === undefined) continue
+          // Subscribers last saw this key absent, whatever a completed
+          // optimistic request held. Batching composes a buffered delete with
+          // this insert into an update.
+          events.push({ type: `insert`, key, value: newVisibleValue })
+          continue
+        }
+        // Only deletes and updates describe the previous row.
         const previousVirtualProps =
           this.preSyncVirtualState.get(key) ??
           this.getVirtualPropsSnapshotForState(key, {
@@ -1317,10 +1342,6 @@ export class CollectionStateManager<
             optimisticUpserts: previousOptimisticUpserts,
             optimisticDeletes: previousOptimisticDeletes,
           })
-        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
-        const virtualChanged =
-          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
-          previousVirtualProps.$origin !== nextVirtualProps.$origin
         const withPreviousVirtualProps = (value: TOutput) =>
           enrichRowWithVirtualProps(
             value,
@@ -1330,20 +1351,18 @@ export class CollectionStateManager<
             () => previousVirtualProps.$origin,
           )
 
-        if (previousVisibleValue === undefined) {
-          if (newVisibleValue === undefined) continue
-          // Subscribers last saw this key absent, whatever a completed
-          // optimistic request held. Batching composes a buffered delete with
-          // this insert into an update.
-          events.push({ type: `insert`, key, value: newVisibleValue })
-        } else if (newVisibleValue === undefined) {
+        if (newVisibleValue === undefined) {
           events.push({
             type: `delete`,
             key,
             value: withPreviousVirtualProps(previousVisibleValue),
           })
-        } else if (
-          virtualChanged ||
+          continue
+        }
+        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
+        if (
+          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
+          previousVirtualProps.$origin !== nextVirtualProps.$origin ||
           !deepEquals(previousVisibleValue, newVisibleValue)
         ) {
           events.push({
@@ -1389,9 +1408,13 @@ export class CollectionStateManager<
       // A truncate that makes the Collection ready publishes its batch after
       // the status reads ready and before status listeners and ready
       // callbacks run, so their writes follow the batch they describe.
+      // During a reload, that is the reload's completion.
       if (truncateMarksReady && this.lifecycle.status !== `ready`)
         capture(() => this.lifecycle.markReady(emit))
       if (!emitted) emit()
+      // A replacement that applies completes a reload of a ready Collection.
+      if (hasTruncateSync && this.lifecycle.status === `ready`)
+        capture(() => this.lifecycle.completeReload())
 
       if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()

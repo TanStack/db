@@ -3558,7 +3558,12 @@ describe(`SQLite resume snapshots`, () => {
             source = params
             params.markReady()
             // This controlled source has no delayed provider callbacks.
-            return { restartAfterScopedRecovery: () => {} }
+            return {
+              // An on-demand source serves the subsets that recovery
+              // reacquires in the new generation.
+              loadSubset: () => true,
+              restartAfterScopedRecovery: () => {},
+            }
           },
         },
         persistence: { adapter },
@@ -3603,6 +3608,8 @@ describe(`SQLite resume snapshots`, () => {
       source.begin()
       source.write({ type: `insert`, value: { id: `fresh` } })
       await whenSyncAccepted(source.commit())
+      // Recovery succeeded: the Collection still accepts sync data.
+      expect(collection.status).toBe(`ready`)
       expect(collection.get(`fresh`)).toMatchObject({ id: `fresh` })
       const claims = database
         .prepare(

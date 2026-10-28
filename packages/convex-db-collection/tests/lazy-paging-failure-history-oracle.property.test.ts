@@ -288,7 +288,7 @@ async function runFailureHistory(h: History) {
       // itself grant terminal authority. A new run can serve a fresh graph.
       const terminal = terminalMonitor(graph)
       terminal.cleanup(graph.toArray)
-      const cleaning = f.source.cleanup()
+      const cleaning = f.source._lifecycle.cleanup()
       terminal.observe(graph.status, graph.toArray)
       await cleaning
       f.remote.scopes.set(permission, {})
@@ -322,7 +322,7 @@ async function runFailureHistory(h: History) {
       const freshTerminal = terminalMonitor(fresh)
       freshTerminal.cleanup(fresh.toArray)
       cleanupHold = gate()
-      const heldCleaning = f.source.cleanup()
+      const heldCleaning = f.source._lifecycle.cleanup()
       reaches.add(`held-cleanup-after-failure-recovery`)
       const staleCheckpoint = async () => {
         const baseline = {
@@ -436,9 +436,9 @@ it(`rejects old graphs recovering or changing after cleanup`, () => {
   const row = { id: `one`, rank: 1, text: `authored` }
   const model = new LazyTerminalGraphModel()
   model.cleanup([row])
-  model.observe(`error`, [row])
+  model.observe(`crashed`, [row])
   expect(() => model.observe(`ready`, [row])).toThrow(`old graph recovered`)
-  expect(() => model.observe(`error`, [{ ...row, text: `new run` }])).toThrow(
+  expect(() => model.observe(`crashed`, [{ ...row, text: `new run` }])).toThrow(
     `dead graph published`,
   )
 })

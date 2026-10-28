@@ -66,7 +66,11 @@ Returns an object with Angular `Signal<T>` properties — call with `()` in temp
 const query = injectLiveQuery((q) => q.from({ todo: todoCollection }))
 // query.data()       → Array<T>
 // query.status()     → CollectionStatus | 'disabled'
-// query.isLoading(), query.isReady(), query.isError()
+// query.isLoading(), query.isReady()
+// query.isLoadingError() → the first load failed: nothing to show
+// query.isCrashed()      → status 'crashed': local storage broke
+// query.isSyncError()    → data is shown, but a sync problem is in health
+// query.health()     → health tree: one node for the query and one per source
 // query.isIdle(), query.isCleanedUp()  (seldom used)
 // query.state()      → Map<TKey, T>
 // query.collection() → Collection | null

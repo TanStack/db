@@ -43,7 +43,6 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 export type UseLiveInfiniteQueryReturnWithCollection<
@@ -60,7 +59,6 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
@@ -154,23 +152,20 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     get isReady() {
       return snapshot.isReady
     },
-    get persistedStatus() {
-      return snapshot.persistedStatus
-    },
-    get isPersistedReady() {
-      return snapshot.isPersistedReady
-    },
-    get persistedError() {
-      return snapshot.persistedError
-    },
     get isIdle() {
       return snapshot.isIdle
     },
-    get isError() {
-      return snapshot.isError
+    get isLoadingError() {
+      return snapshot.isLoadingError
+    },
+    get isCrashed() {
+      return snapshot.isCrashed
     },
     get isCleanedUp() {
       return snapshot.isCleanedUp
+    },
+    get isSyncError() {
+      return snapshot.isSyncError
     },
     get pages() {
       return snapshot.pages as Array<Array<InferResultType<TContext>[number]>>
@@ -184,8 +179,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     get isFetchingNextPage() {
       return snapshot.isFetchingNextPage
     },
-    get error() {
-      return snapshot.error
+    get health() {
+      return snapshot.health
     },
     fetchNextPage,
   }

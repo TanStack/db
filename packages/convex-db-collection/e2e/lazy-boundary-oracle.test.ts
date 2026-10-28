@@ -514,7 +514,7 @@ async function receive(h: History, kind: `javascript` | `react`) {
       receipts.cleanup()
       const pending = batches.filter((batch) => batch.state === `pending`)
       expect(pending.length).toBeGreaterThan(0)
-      cleaning = source.cleanup()
+      cleaning = source._lifecycle.cleanup()
       terminal.observe(graph.status, graph.toArray.map(project))
       await waitFor(
         () =>

@@ -435,6 +435,45 @@ function UserList() {
 }
 ```
 
+### Stale Data and the Health Tree
+
+Every live query hook also returns `health`, a health tree with one node for
+the query and one for each source alias. After the query is ready, a source
+that loses its sync connection keeps its rows, and `status` stays `ready`. The
+problem appears only in `health`, and `isSyncError` becomes `true`:
+
+```tsx
+function UserList() {
+  const { data, isLoading, isLoadingError, isCrashed, isSyncError } =
+    useLiveQuery((q) => q.from({ user: usersCollection }))
+
+  if (isLoading) return <div>Loading...</div>
+  if (isLoadingError) return <div>Error loading users</div>
+  if (isCrashed) return <div>Local storage failed</div>
+
+  return (
+    <>
+      {isSyncError && <div>Users may be out of date</div>}
+      <ul>
+        {data.map((user) => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </>
+  )
+}
+```
+
+> **Important:** `isLoadingError` means the first load failed and there is
+> nothing to show; offer `collection.reload()`. `isCrashed` means local storage
+> broke: only cleanup with its dependents and a fresh start recover. To show a
+> "data may be out of date" banner, check `isSyncError` or `health`.
+> `useLiveSuspenseQuery` also returns `health`, and after its first render it
+> throws only for a crash.
+
+See [Loading and Sync Errors](./error-handling.md#loading-and-sync-errors)
+for the shape of the tree, `failureReason` and `error`, and how to reload.
+
 ### Conditional Queries
 
 For optional inputs, prefer rendering the query component only after the inputs exist. That avoids creating a live query before all required values exist.
@@ -482,10 +521,10 @@ const { data, isEnabled, status } = useLiveQuery({
 
 The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
-- `data`, `state`, and `collection` are `undefined`
+- `data`, `state`, `collection`, and `health` are `undefined`
 - `isEnabled` is `false`
 - `isReady` is `true`
-- `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
+- `isLoading`, `isIdle`, `isLoadingError`, `isCrashed`, `isSyncError`, and `isCleanedUp` are all `false`
 
 ### Alternative Input Forms
 
@@ -1696,8 +1735,9 @@ const engineeringStats = deptStats.get(1)
 ```
 
 > **Note**: Grouped results are keyed differently based on the grouping:
-> - **Single column grouping**: Keyed by the actual value (e.g., `deptStats.get(1)`)
+> - **Single column grouping**: A string or number group value is the key (e.g., `deptStats.get(1)`). A `null`, `undefined`, boolean, or bigint group value gets a string key instead, because Collection keys are strings or numbers. A string that starts with TanStack DB's reserved `\u0000tanstack-db:` prefix also gets a different string key. Read these keys from the row's `$key`.
 > - **Multiple column grouping**: Keyed by a JSON string of the grouped values (e.g., `userStats.get('[1,"admin"]')`)
+> - **Custom keys**: A `getKey` option on the live query replaces these keys.
 
 ## findOne
 
@@ -2386,7 +2426,8 @@ const effect = createEffect({
 | `onExit` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row exiting the query result. |
 | `onBatch` | `(events, ctx) => void \| Promise<void>` (optional) | Called once per graph run with the full unfiltered batch of delta events. |
 | `onError` | `(error, event) => void` (optional) | Called when `onEnter`, `onUpdate`, `onExit`, or `onBatch` throws or rejects. |
-| `onSourceError` | `(error) => void` (optional) | Called when a source collection enters an error or cleaned-up state. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
+| `onHealthChange` | `(health) => void` (optional) | Called with the Effect's health tree when a source's sync errors or a request error change after the Effect's initial load. |
+| `onSourceError` | `(error) => void` (optional) | Called when a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
 | `skipInitial` | `boolean` (optional) | When `true`, deltas from the initial data load are suppressed. Only subsequent changes fire handlers. Defaults to `false`. |
 
 ### Delta Events
@@ -2507,7 +2548,7 @@ createEffect({
 })
 ```
 
-If a source collection enters an error or cleaned-up state, the effect automatically disposes itself. Use `onSourceError` to handle this:
+If a source collection fails its first load, crashes, or is cleaned up with `{ dependents: true }`, the effect automatically disposes itself. Use `onSourceError` to handle this. Other problems after the effect's initial load do not dispose it; they reach `onHealthChange`:
 
 ```ts
 createEffect({

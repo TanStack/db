@@ -41,7 +41,6 @@ interface InfiniteQueryPagination<TRow> {
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 export type UseLiveInfiniteQueryReturn<TContext extends Context> =
@@ -167,12 +166,11 @@ export function useLiveInfiniteQuery(
     status: snapshot.status as CollectionStatus,
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,
-    persistedStatus: snapshot.persistedStatus,
-    isPersistedReady: snapshot.isPersistedReady,
-    persistedError: snapshot.persistedError,
     isIdle: snapshot.isIdle,
-    isError: snapshot.isError,
+    isLoadingError: snapshot.isLoadingError,
+    isCrashed: snapshot.isCrashed,
     isCleanedUp: snapshot.isCleanedUp,
+    isSyncError: snapshot.isSyncError,
     collection: snapshot.collection,
     isEnabled: true,
     pages: snapshot.pages,
@@ -180,6 +178,6 @@ export function useLiveInfiniteQuery(
     fetchNextPage,
     hasNextPage: snapshot.hasNextPage,
     isFetchingNextPage: snapshot.isFetchingNextPage,
-    error: snapshot.error,
+    health: snapshot.health,
   } as UseLiveInfiniteQueryReturn<any>
 }

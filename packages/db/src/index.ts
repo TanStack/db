@@ -4,7 +4,6 @@
 import * as IR from './query/ir.js'
 
 export * from './collection/index.js'
-export * from './SortedMap'
 export * from './transactions'
 export * from './client.js'
 export { withCollectionConfigFactory } from './client.js'
@@ -17,8 +16,6 @@ export * from './optimistic-action'
 export type { LiveQueryKey, LiveQueryOptions } from './live-query-options'
 /** @internal Unstable layer for the first-party framework adapters. */
 export * from './live-query-adapter'
-/** @internal First-party persistence adapter capability. */
-export * from './persisted-readiness'
 export * from './local-only'
 export * from './local-storage'
 export {
@@ -53,6 +50,8 @@ export * from './sync-receipt'
 export { deepEquals, equalPersistedSnapshotValues } from './utils'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'
+/** @internal Reports an adapter contract breach uncaught, as core does. */
+export { reportUncaught } from './utils/callbacks'
 export * from './paced-mutations'
 export * from './strategies/index.js'
 

@@ -344,7 +344,10 @@ async function receiptHistory(
       model.observe(`true`, `success`)
       model.acquire(`throw`, [])
       const throwing = { limit: 99 }
-      expect(() => source._sync.loadSubset(throwing)).toThrow(`authored throw`)
+      // Core normalizes a synchronous adapter throw into a rejected load.
+      await expect(source._sync.loadSubset(throwing)).rejects.toThrow(
+        `authored throw`,
+      )
       model.observe(`throw`, `rejected`)
       model.complete()
     },

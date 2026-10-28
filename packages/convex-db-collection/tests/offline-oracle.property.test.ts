@@ -116,7 +116,9 @@ it(`preserves ordered replay and retry classification across bridge failures`, a
  * replay. Real Collections receive held provider callbacks. The independent
  * judgment is whether a valid source snapshot arrived: pending data cannot
  * fulfill replay, a provider failure rejects with its cause, and a valid empty
- * snapshot counts as acceptance. Provider errors can recover on a valid result.
+ * snapshot counts as acceptance. Provider errors before first readiness fail that sync run. The #2168
+ * health contract requires reload before valid-result recovery; later sync
+ * failures can recover in the same ready run.
  *
  * Every generated history crosses idle/pending/failed startup with each first
  * delivery, using generated text. Startup failure has no live provider and is
@@ -210,7 +212,8 @@ it(`requires real source acceptance through cold replay histories`, async () => 
                     )
                     if (delivery === `error`) {
                       expect(outcome.error).toBe(cause)
-                      transport.emit([{ _id: `a`, text }])
+                      transport.cache([{ _id: `a`, text }])
+                      await collection.reload()
                       await persist({
                         transaction: { mutations: [] },
                         idempotencyKey: `source-key`,
