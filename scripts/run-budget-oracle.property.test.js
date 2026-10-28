@@ -275,16 +275,15 @@ afterAll(() => {
   rmSync(work, { recursive: true, force: true })
 })
 
-/**
- * Runs the script in a fresh repository whose base commit holds the base files
- * and whose working tree holds the head files. Returns the reported keys.
- */
 // Child processes run asynchronously so a long campaign never blocks the
 // test worker's event loop.
 const run = promisify(execFile)
 
+/**
+ * Runs the script in a fresh repository whose base commit holds the base files
+ * and whose working tree holds the head files. Returns the reported keys.
+ */
 async function reportOf(program) {
-  mkdirSync(work, { recursive: true })
   mkdirSync(work, { recursive: true })
   const directory = mkdtempSync(join(work, `r`))
   const git = (...args) =>

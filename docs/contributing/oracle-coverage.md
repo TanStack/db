@@ -2498,9 +2498,12 @@ Three callback-lifetime calibrations distinguish nested scopes and both overlap
 exit orders. Forwarding-wrapper and explicit-adapter controls cover coordinator
 composition and the ordinary registered fallback.
 
-The receiving
-`packages/browser-db-sqlite-persistence/e2e/hydration-commit-oracle.opfs.spec.ts`
-runs 24 real Chromium OPFS histories plus one cleanup-failure calibration.
+The receiving fixed tests in
+`packages/browser-db-sqlite-persistence/e2e/hydration-commit.opfs.spec.ts`
+run 24 real Chromium OPFS histories plus one cleanup-failure calibration.
+They have no oracle owner: their expected rows come from a written table keyed
+by baseline and source history, not from a model. An oracle owner is tracked in
+#2264.
 It crosses the original phases/coordinators/baselines with single-insert and
 rich source histories, and checks three distinct Collection schemas, a cold
 peer, metadata, durable rows, and reopen. Sixteen startup/subscription histories
