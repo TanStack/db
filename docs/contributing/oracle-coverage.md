@@ -3029,13 +3029,18 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       broadcast again. The loop checks for a reservation after each flush; a
       temporary hook that opened one there showed the loop on `7a6f32fd7`
       settling the routed load in 2 cells before the owner's row was public.
-      Not reached by a public timing: that history needs the reservation to
-      end in the same microtask window, between the loop's first flush and
-      its check. A reservation lasts through its own durable write, so a
-      held write after the commit does not open the window; a follow-up that
-      held an unreserved write and then reserved again passed on both loops.
-      The missing witness is a source that ends its reservation in a
-      microtask after a publication from the follower's first flush. A peer reset for a
+      A third registration reaches it without a hook. The owner's reply is
+      held while its broadcast waits; the source commits 0 to 8 microtasks
+      after the reply and reserves an empty second transaction 0 to 6
+      microtasks later. On `7a6f32fd7` the 6 cells that commit 3 microtasks
+      after the reply settle the routed load before the owner's row is
+      public; all 63 cells pass on the current loop. A held write after the
+      commit does not open the window, because a reservation lasts through
+      its own durable write.
+      Open (law question on PR #2265): a second reservation that opens 7 or
+      more microtasks after the commit makes the broadcast wait twice, and
+      the notice asks the leader once per wait. The pullSince bound counts
+      one request per waited notice, so those delays are not registered. A peer reset for a
       storage generation this Collection no longer uses abandons nothing.
       Known limit (maintainer decision on PR #2265): Electric publishes a
       transaction's txids as stream evidence before persistence accepts its

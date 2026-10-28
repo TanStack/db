@@ -17673,12 +17673,23 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // the reset superseded. After an aborted demand, the follow-up
   // `peer change after the abort` delivers a peer's targeted change while the aborted
   // load still waits for its turn. No live demand covers that row, so it
-  // stays out of the Collection and nothing reads for it.
+  // stays out of the Collection and nothing reads for it. For a follower's
+  // routed subset, `owner replies, then the source reserves again` releases
+  // the owner's held reply while the owner's broadcast waits for the
+  // reservation. The source commits a few microtasks later and reserves an
+  // empty second transaction a few microtasks after that, as a source that
+  // reacts through promise continuations does. The follower can then find no
+  // reservation open while the broadcast still waits, and the second
+  // reservation defers the broadcast again. Law 7 still requires the load to
+  // settle after the owner's row is public. The delays range over 0 to 8 and
+  // 0 to 6 microtasks; a later second reservation makes the broadcast wait
+  // twice, which the pullSince bound does not yet decide.
   //
-  // Two registrations share this one driver and model: the row-algebra cross
-  // (every operation and truncate replay; committed endings; the original
-  // routes and timings), and the reservation cross (every route, timing,
-  // ending, and follow-up, with one insert and no truncate replay). The
+  // Three registrations share this one driver and model: the row-algebra
+  // cross (every operation and truncate replay; committed endings; the
+  // original routes and timings), the reservation cross (every route, timing,
+  // ending, and follow-up, with one insert and no truncate replay), and the
+  // follower window (the second-reservation delays above). The
   // controlled coordinator does not prove host delivery; the Browser-host
   // receiving witness is the multi-tab Electric oracle.
   type PersistedReadRoute =
@@ -17716,12 +17727,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     truncateReplay: `none` | `before` | `after`
     commitTiming: PersistedReadTiming
     ending: PersistedReadEnding
+    // For `owner replies, then the source reserves again`: the microtasks
+    // the source takes after the owner replies to commit its reservation,
+    // then to reserve a second transaction.
+    reReserveDelays?: readonly [number, number]
     followUp:
       | `none`
       | `reset then pre-reset commit`
       | `reset, re-reserve, then pre-reset commit`
       | `retired-storage reset`
       | `peer change after the abort`
+      | `owner replies, then the source reserves again`
   }
   type PersistedReadReach =
     | `route performed a persisted read`
@@ -17736,6 +17752,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     | `reset and pre-reset commit announced while waiting`
     | `retired-storage reset announced while reserved`
     | `peer change announced after the demand aborted`
+    | `source reserved again after the owner replied`
 
   // The rows of the persisted-reads histories. Each history gets fresh
   // objects, so no history can observe another's.
@@ -18185,11 +18202,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const requestEnsureRemoteSubset =
       coordinator.requestEnsureRemoteSubset.bind(coordinator)
     let ownerCommitted = false
+    const ownerReply = createEventGate()
+    if (followUp !== `owner replies, then the source reserves again`) {
+      ownerReply.resolve()
+    }
     coordinator.requestEnsureRemoteSubset = async (...args) => {
       sourceLoads++
       if (route === `routed subset` && !ownerCommitted) {
         ownerCommitted = true
         await peerCommit(remoteRow, `owner-commit`)
+        await ownerReply.promise
         return
       }
       return requestEnsureRemoteSubset(...args)
@@ -18333,6 +18355,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           : []),
         ...(followUp === `peer change after the abort`
           ? ([`peer change announced after the demand aborted`] as const)
+          : []),
+        ...(followUp === `owner replies, then the source reserves again`
+          ? ([`source reserved again after the owner replied`] as const)
           : []),
       ],
     )
@@ -18610,6 +18635,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           deletedKeys: [],
         })
       }
+      // With `owner replies, then the source reserves again`, the owner's
+      // reply is released first; the source then ends its reservation and
+      // reserves an empty second transaction after the history's delays.
+      const endStraddledReservation = async () => {
+        if (followUp !== `owner replies, then the source reserves again`) {
+          return endReservation()
+        }
+        const [commitDelay, reserveDelay] = history.reReserveDelays!
+        ownerReply.resolve()
+        for (let i = 0; i < commitDelay; i++) await Promise.resolve()
+        endReservation()
+        for (let i = 0; i < reserveDelay; i++) await Promise.resolve()
+        sourceParams.begin()
+        sourceParams.metadata!.persistence!.reserveCommitTurn()
+        reservationOpen = true
+        reach.reach(`source reserved again after the owner replied`)
+        await persistenceQuiesced(`owner's broadcast waits again`)
+        reservationOpen = false
+        commitSourceTransaction()
+      }
       let remainingSteps: ReadonlyArray<(typeof sourceSteps)[number]> =
         commitTiming === `open across startup`
           ? sourceSteps.slice(1)
@@ -18674,7 +18719,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         firstPublication.unsubscribe()
         await persistenceQuiesced(`straddled hydration finished`)
         observeWhileReserved()
-        endReservation()
+        await endStraddledReservation()
         remainingSteps = sourceSteps.slice(1)
       } else if (commitTiming === `open during the read`) {
         heldRead = { entered: createEventGate(), release: createEventGate() }
@@ -18689,7 +18734,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         release.resolve()
         await persistenceQuiesced(`straddled read finished`)
         observeWhileReserved()
-        endReservation()
+        await endStraddledReservation()
         remainingSteps = sourceSteps.slice(1)
       } else {
         if (commitTiming === `open during pullSince`) {
@@ -19190,6 +19235,23 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           })),
         )
       }),
+  )
+  // The follower window: a second reservation after the owner replied.
+  const reReserveHistories = Array.from({ length: 9 }, (_, commitDelay) =>
+    Array.from({ length: 7 }, (_, reserveDelay): PersistedReadHistory => ({
+      syncMode: `on-demand`,
+      route: `routed subset`,
+      operation: `insert`,
+      truncateReplay: `none`,
+      commitTiming: `open during the read`,
+      ending: `commits`,
+      followUp: `owner replies, then the source reserves again`,
+      reReserveDelays: [commitDelay, reserveDelay],
+    })),
+  ).flat()
+  it.each(reReserveHistories)(
+    `keeps a follower's load behind a second reservation (delays=$reReserveDelays)`,
+    runPersistedReadHistory,
   )
   it.each(reservationHistories)(
     `keeps reserved commits and their neighbours lawful ($syncMode, $route, timing=$commitTiming, ending=$ending, follow-up=$followUp)`,
