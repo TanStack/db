@@ -1012,6 +1012,17 @@ const peerReplays: Array<[string, Array<SessionAction>]> = [
     ],
   ],
   [
+    `a named notice after a full reload keeps another row's seed metadata`,
+    [
+      { type: `peer`, key: 1, notice: `reload` },
+      { type: `seed`, key: 2 },
+      { type: `begin` },
+      { type: `upsert`, key: 2, metadata: false },
+      { type: `commit` },
+      { type: `peer`, key: 1, notice: `row`, keepsValue: true },
+    ],
+  ],
+  [
     `a held reload's writes stay beneath an open re-insert`,
     [
       { type: `seed`, key: 2, bare: true },

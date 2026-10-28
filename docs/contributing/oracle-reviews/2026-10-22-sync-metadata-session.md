@@ -928,7 +928,7 @@ witness (M10).
 | M10: Query's storage-scan owners omit accepted edges | Open; see "Open" |
 | Lane: a reset kept a held seed but cleared the authority a peer's metadata write had fixed over it, so a later seed's metadata replaced the peer's | Fixed: the reset's truncate keeps the authority entries of kept keys |
 | Survey: a source row write after an on-demand reset closed the kept seed's metadata to a later seed | Fixed: a kept key stays exempt for its metadata; a row write fixes row authority through the applied row |
-| Survey: after a full-reload notice, a named notice that the wrapper turns into a reload erased a seed's metadata of another row | Open; see "Open" |
+| Survey: after a full-reload notice, a named notice that the wrapper turns into a reload erased a seed's metadata of another row (`peer(1,reload) seed(2) begin upsert(2) commit peer(1,row,keeps)`, also on `2156c9c57`) | Fixed: a notice that names no keys makes writes unknown per key, not for the rest of the run. A key is known again once a storage read has judged its row, or once this tab's source writes it; a row such a read finds changed is recorded as this run's source write. This tab's own truncate still makes every later write unknown. Ending the unknown state with the reload instead failed two `persisted-oracle` witnesses: an on-demand reload with no demand reads no rows, so a row it never read must still beat a later seed. Marking keys known before the read wrote them failed both oracles widely |
 
 Evidence:
 
@@ -936,16 +936,18 @@ Evidence:
   replays and the fixed and random campaigns of both new lanes. A
   replay of the kept-authority case failed on the first M4 repair.
 - **GREEN.** Every persisted session lane and replay passes at the
-  configured runs. Two surveys at four times the runs found two families:
-  one on the reset path, fixed and pinned, and one that `2156c9c57`
-  already had, left open.
+  configured runs. Two surveys at four times the runs found two families,
+  one on the reset path and one that `2156c9c57` already had; both are
+  fixed and pinned, and two more surveys at four times the runs pass.
 - **Mutants.** Killed: an update over a seed merging under full rows; no
   seed base for partial updates (now by both partial campaigns, through the
   storage check); every update replacing; a reset that keeps no seeds; no
   rewrite of a kept seed's row; reload deletes from `base` only;
   authority that ignores kept keys; a truncate that clears kept metadata.
-  Survived: a session reader that stops at the reset's truncate for kept
-  keys. A truncating transaction applies at once, so no read sees it
+  For the scoped unknown writes, the committed sticky flag fails the
+  family's replay, and not recording changed rows fails the fixed
+  campaigns of all three peer lanes. Survived: a session reader that stops
+  at the reset's truncate for kept keys. A truncating transaction applies at once, so no read sees it
   pending; the reader change was removed.
 - **Limits.** The reset's term fence is exercised only through the
   driver's single-term peer. The full-row and on-demand lanes cover the
@@ -985,20 +987,6 @@ Evidence:
   committed during a storage read, which the wrapper buffers (decision 12),
   with a retained Query's scan before the buffer flushes. That history is
   the missing witness; no production change without its RED.
-
-- **A named notice's reload after a full-reload notice (survey).**
-  `peer(1,reload) seed(2) begin upsert(2) commit peer(1,row,keeps)` fails
-  in every peer lane and on `2156c9c57`: row 2's metadata stays the seed's
-  in the model, but production reads it as absent. The named notice carries
-  a row other than the one this tab holds, so the wrapper reloads (P2). The
-  first notice set `runWritesUnknown` for the rest of the run, so that
-  reload judges row 2's stored metadata, which a seed's never reaches, as a
-  source write (decision 15), where a named notice keeps it (decision 18).
-  Scoping the flag to the full reload it belongs to fixes this history but
-  fails six others: the full reload must then record the rows and metadata
-  it wrote as this run's source writes, which it does not yet do. The
-  history is the missing witness; the repair is that recording plus the
-  scoped flag.
 
 Nothing else in this bug class is known to be open. The limits in the
 evidence block still apply.

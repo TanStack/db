@@ -1630,14 +1630,18 @@ class PersistedCollectionRuntime<
   // Keys a source wrote in this sync run: this tab's, as the wrapper hands
   // its transactions to the Collection, and peers', from their committed
   // notices. A stored row with such a key is a source row, not a previous
-  // run's cache (decisions 9 and 11). A truncate, or a notice that requires a
-  // full reload, names no keys, so after one every stored row may be this
-  // run's.
+  // run's cache (decisions 9 and 11). A source truncate names no keys, so
+  // after one every stored row may be this run's. A notice that requires a
+  // full reload names none either, so every stored row may be a peer's write
+  // until this tab knows the key again: a storage read judges its row, or
+  // this tab's source writes it.
   private runWrittenKeys = new Set<TKey>()
   // Row metadata is a separate object (D5): keys whose metadata a source
   // wrote in this run, a delete included.
   private runWrittenMetadataKeys = new Set<TKey>()
   private runWritesUnknown = false
+  private peerWritesUnknown = false
+  private keysKnownSincePeerWrites = new Set<TKey>()
   // Judges the open source transactions' inserts again after an internal
   // write lands rows ahead of them, on the keys it wrote (every key after a
   // truncate, as undefined).
@@ -2139,6 +2143,8 @@ class PersistedCollectionRuntime<
     this.runWrittenKeys.clear()
     this.runWrittenMetadataKeys.clear()
     this.runWritesUnknown = false
+    this.peerWritesUnknown = false
+    this.keysKnownSincePeerWrites.clear()
     if (this.collection === collection) {
       this.boundCollection ??= collection
       return
@@ -3299,7 +3305,15 @@ class PersistedCollectionRuntime<
 
   /** Whether a source may have written this key in this sync run. */
   isRunWritten(key: TKey): boolean {
-    return this.runWritesUnknown || this.runWrittenKeys.has(key)
+    return this.writesUnknown(key) || this.runWrittenKeys.has(key)
+  }
+
+  /** Whether a source may have written this key without naming it. */
+  private writesUnknown(key: TKey): boolean {
+    return (
+      this.runWritesUnknown ||
+      (this.peerWritesUnknown && !this.keysKnownSincePeerWrites.has(key))
+    )
   }
 
   /** Records keys whose rows and metadata this tab's source wrote. */
@@ -3309,8 +3323,14 @@ class PersistedCollectionRuntime<
     truncated: boolean,
   ): void {
     if (truncated) this.runWritesUnknown = true
-    for (const key of keys) this.runWrittenKeys.add(key)
-    for (const key of metadataKeys) this.runWrittenMetadataKeys.add(key)
+    for (const key of keys) {
+      this.runWrittenKeys.add(key)
+      this.keysKnownSincePeerWrites.add(key)
+    }
+    for (const key of metadataKeys) {
+      this.runWrittenMetadataKeys.add(key)
+      this.keysKnownSincePeerWrites.add(key)
+    }
   }
 
   setInternalApplyListener(
@@ -3358,7 +3378,7 @@ class PersistedCollectionRuntime<
         ))
     )
       return seeded ? `seed` : `kept`
-    return !this.runWritesUnknown &&
+    return !this.writesUnknown(row.key) &&
       !this.runWrittenKeys.has(row.key) &&
       (seeded || !state.syncedData.has(row.key))
       ? `seed`
@@ -3415,7 +3435,7 @@ class PersistedCollectionRuntime<
    * (decision 15).
    */
   private keepsSeedMetadata(key: TKey): boolean {
-    return !this.runWritesUnknown && !this.runWrittenMetadataKeys.has(key)
+    return !this.writesUnknown(key) && !this.runWrittenMetadataKeys.has(key)
   }
 
   private writeStoredMetadata(key: TKey, metadata: unknown): void {
@@ -3425,7 +3445,11 @@ class PersistedCollectionRuntime<
     else rowMetadata?.set(key, metadata)
   }
 
-  /** The keys among stored rows whose status a storage read keeps. */
+  /**
+   * The keys among stored rows whose status a storage read keeps. Under
+   * unknown writes every other row is a source's write (decision 15), which
+   * later reads must judge as this run's.
+   */
   private keptStatuses(
     rows: ReadonlyArray<{ key: TKey; value: T; metadata?: unknown }>,
   ): Map<TKey, `seed` | `kept`> {
@@ -3433,8 +3457,18 @@ class PersistedCollectionRuntime<
     for (const row of rows) {
       const status = this.storedStatus(row)
       if (status !== `written`) statuses.set(row.key, status)
+      else if (this.writesUnknown(row.key)) this.runWrittenKeys.add(row.key)
     }
     return statuses
+  }
+
+  /** Once a storage read has judged its rows, this tab knows their keys. */
+  private commitStorageRead(
+    rows: ReadonlyArray<{ key: TKey }>,
+  ): SyncAppliedReceipt {
+    const receipt = this.syncControls.commit?.() ?? true
+    for (const row of rows) this.keysKnownSincePeerWrites.add(row.key)
+    return receipt
   }
 
   private withInternalApply<TResult>(task: () => TResult): TResult {
@@ -3839,7 +3873,7 @@ class PersistedCollectionRuntime<
       for (const row of readRows) this.writeStoredRow(row, held.has(row.key))
       if (collectionMetadata)
         this.applyCollectionMetadataSnapshot(collectionMetadata)
-      return this.syncControls.commit?.() ?? true
+      return this.commitStorageRead(readRows)
     })
   }
 
@@ -3991,7 +4025,7 @@ class PersistedCollectionRuntime<
       }
 
       this.applyCollectionMetadataSnapshot(collectionMetadata)
-      return this.syncControls.commit?.() ?? true
+      return this.commitStorageRead(rows)
     })
   }
 
@@ -4887,9 +4921,8 @@ class PersistedCollectionRuntime<
       if (txCommitted.term <= this.resetTermFence) {
         // This payload could have been committed before the schema reset.
         // The current durable snapshot is the only safe row authority.
-        this.runWritesUnknown = true
         await this.runInHydrationScope((adapter) =>
-          this.reloadActiveSubsetsUnsafe(adapter),
+          this.reloadUnknownWritesUnsafe(adapter),
         )
         return
       }
@@ -5017,9 +5050,8 @@ class PersistedCollectionRuntime<
             pullResponse.latestRowVersion,
           )
           if (pullResponse.requiresFullReload) {
-            this.runWritesUnknown = true
             await this.runInHydrationScope((adapter) =>
-              this.reloadActiveSubsetsUnsafe(adapter),
+              this.reloadUnknownWritesUnsafe(adapter),
             )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
@@ -5029,9 +5061,8 @@ class PersistedCollectionRuntime<
           }
           const deltas = pullResponse.deltas
           if (!deltas) {
-            this.runWritesUnknown = true
             await this.runInHydrationScope((adapter) =>
-              this.reloadActiveSubsetsUnsafe(adapter),
+              this.reloadUnknownWritesUnsafe(adapter),
             )
             this.publicRowVersion = Math.max(
               this.publicRowVersion,
@@ -5076,9 +5107,8 @@ class PersistedCollectionRuntime<
     // publication so readers never see an empty intermediate Collection.
     // The missed notices named no keys, so every stored row may be this
     // run's.
-    this.runWritesUnknown = true
     await this.runInHydrationScope((adapter) =>
-      this.reloadActiveSubsetsUnsafe(adapter),
+      this.reloadUnknownWritesUnsafe(adapter),
     )
     this.publicRowVersion = Math.max(
       this.publicRowVersion,
@@ -5182,8 +5212,7 @@ class PersistedCollectionRuntime<
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
-    if (txCommitted.requiresFullReload) this.runWritesUnknown = true
-    else {
+    if (!txCommitted.requiresFullReload) {
       for (const key of [
         ...txCommitted.changedRows.map((row) => row.key),
         ...txCommitted.deletedKeys,
@@ -5200,6 +5229,7 @@ class PersistedCollectionRuntime<
         this.runWrittenMetadataKeys.add(key as TKey)
     }
     if (this.scopedRecovery) {
+      if (txCommitted.requiresFullReload) this.runWritesUnknown = true
       this.refreshScopedSubsets()
       return
     }
@@ -5211,7 +5241,14 @@ class PersistedCollectionRuntime<
       )
 
     if (txCommitted.requiresFullReload) {
-      await reloadActiveSubsets(txCommitted.reconciliationReload === true)
+      await this.runInHydrationScope(
+        (scopedAdapter) =>
+          this.reloadUnknownWritesUnsafe(
+            scopedAdapter,
+            txCommitted.reconciliationReload === true,
+          ),
+        adapter,
+      )
       return
     }
 
@@ -5345,6 +5382,20 @@ class PersistedCollectionRuntime<
       return this.syncControls.commit?.() ?? true
     })
     await whenSyncAccepted(applied)
+  }
+
+  /**
+   * Reloads storage after notices that named no keys: any stored row or
+   * metadata this tab has not read since may be a source's write
+   * (decisions 13 and 15).
+   */
+  private async reloadUnknownWritesUnsafe(
+    adapter: HydrationPersistenceAdapter,
+    skipUnchangedReplace = false,
+  ): Promise<void> {
+    this.peerWritesUnknown = true
+    this.keysKnownSincePeerWrites.clear()
+    await this.reloadActiveSubsetsUnsafe(adapter, skipUnchangedReplace)
   }
 
   private async reloadActiveSubsetsUnsafe(
