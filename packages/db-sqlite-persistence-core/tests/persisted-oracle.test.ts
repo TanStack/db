@@ -17615,9 +17615,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   //   A hydration that already began when the reservation opened continues;
   //   the transaction straddles it.
   // - A notice that waited may be retried as gap recovery, because the
-  //   reserved commit lands first and takes the next stream position: at
-  //   most one more pullSince request for each reservation it waited for,
-  //   and no added upstream request (maintainer decision on PR #2265).
+  //   reserved commit lands first and takes the next stream position. A tab
+  //   asks the leader only to fill a gap it has not already filled, and
+  //   sends no added upstream request. Each reservation a notice waited for
+  //   can open one gap, so the oracle allows one more pullSince request per
+  //   wait (maintainer decision on PR #2265).
   // - A source that stops for good abandons its reserved transaction; waiting
   //   hydrations then proceed and the abandoned writes never apply.
   // - A peer change that starts no hydration is not delayed. A load aborted
@@ -17958,9 +17960,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const noWaitPullSinceCalls =
       route === `seq-gap pull` || route === `seq-gap deltas` ? 1 : 0
     // A route notice waits in the waiting timings; a follower's owner notice
-    // arrives during a straddled reservation and waits there. A notice may
-    // ask the leader once more for each reservation it waited for; nothing
-    // else may. A second reservation can hold the owner's notice again.
+    // arrives during a straddled reservation and waits there. A tab asks the
+    // leader only to fill a new gap, and each reservation a notice waited
+    // for can open one, so the bound is one request per wait; nothing else
+    // opens a gap. A second reservation can hold the owner's notice again.
     const waitedNotices =
       (noticeWaited &&
         (route === `full-reload` ||

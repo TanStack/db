@@ -2970,9 +2970,10 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Further maintainer decisions fix its edges. Readers keep the rows from
       before a hydration while it waits; a transaction opened after a
       hydration began straddles it. A notice that waited may be retried as
-      gap recovery, with at most one more pullSince request for each
-      reservation it waited for (maintainer decision on PR #2265) and no
-      added upstream request. A source that stops for good abandons its
+      gap recovery. A tab asks the leader only to fill a gap it has not
+      already filled, and sends no added upstream request. Each reservation
+      a notice waited for can open one gap, so the oracle checks at most one
+      more pullSince request per wait (maintainer decision on PR #2265). A source that stops for good abandons its
       reservation.
       A second registration crosses the routes with the reserving timings,
       ending, and follow-up dimensions. The routes are subset, complete
