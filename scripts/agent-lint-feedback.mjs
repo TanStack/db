@@ -35,7 +35,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
@@ -44,6 +44,7 @@ import oraclePlugin from './eslint-plugin-oracle/index.js'
 import { resolveImportedTestModule } from './eslint-plugin-oracle/rules/no-unit-test.js'
 import {
   describeLoweredRunBudget,
+  isOracleFile,
   loweredRunBudgets,
   mergeBase,
 } from './check-oracle-run-counts.mjs'
@@ -80,14 +81,16 @@ function repositoryFiles(...outputs) {
 }
 
 /**
- * Every tracked oracle file. Git leaves out builds and untracked checkouts,
- * such as other branches' worktrees under `.worktrees/`.
+ * Every oracle file in the working tree, tracked or new. A new file that an
+ * agent has not added yet is linted like any other. Git leaves out ignored
+ * builds, and lists another checkout nested in this one, such as a worktree
+ * under `.worktrees/`, as a directory, which is not an oracle file.
  */
-function trackedOracleFiles() {
-  return repositoryFiles(git(`ls-files`, `*oracle*.ts`, `*oracle*.tsx`))
+function oracleFilesInTree() {
+  return repositoryFiles(
+    git(`ls-files`, `--cached`, `--others`, `--exclude-standard`),
+  ).filter((file) => isOracleFile(file))
 }
-
-const isOracleFile = (file) => /oracle.*\.tsx?$/.test(basename(file))
 
 // A relative import or re-export. Reading too much is harmless: a specifier
 // that names no test module resolves to nothing.
@@ -137,7 +140,7 @@ const pluginSources = join(root, `scripts`, `eslint-plugin-oracle`) + sep
 function affectedOracleFiles(files) {
   const edited = new Set(files)
   const oracles = new Set(
-    [...trackedOracleFiles(), ...files].filter(isOracleFile),
+    [...oracleFilesInTree(), ...files].filter((file) => isOracleFile(file)),
   )
   if ([...edited].some((file) => file.startsWith(pluginSources)))
     return [...oracles]
@@ -206,9 +209,17 @@ function createLinter() {
     overrideConfigFile: true,
     overrideConfig: [
       { ignores: [`**/dist/**`] },
-      { files: [`**/*.ts`, `**/*.tsx`], languageOptions: { parser: tsParser } },
+      {
+        files: [`**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.mjs`, `**/*.jsx`],
+        languageOptions: { parser: tsParser },
+      },
       { linterOptions: { noInlineConfig: true } },
-      oraclePlugin.configs.recommended,
+      // `lint` passes only oracle files, chosen by `isOracleFile`, so the rules
+      // apply to every file that it passes.
+      {
+        ...oraclePlugin.configs.recommended,
+        files: [`**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.mjs`, `**/*.jsx`],
+      },
     ],
   })
 }
@@ -306,7 +317,7 @@ function respond(report, input, scope) {
  * or changed files affect.
  */
 function selectFiles(input) {
-  if (options.all) return { scope: `all`, files: trackedOracleFiles() }
+  if (options.all) return { scope: `all`, files: oracleFilesInTree() }
   if (positionals.length > 0) {
     return {
       scope: `named`,
@@ -320,8 +331,8 @@ function selectFiles(input) {
 }
 
 /**
- * Lowered run budgets, for a report over the branch's changed files. A
- * lowered budget can be deliberate, so it is a report for review, not a lint
+ * Lowered and removed run budgets, for a report over the branch's changed
+ * files. Either can be deliberate, so it is a report for review, not a lint
  * error.
  */
 function runBudgetReport(scope) {
