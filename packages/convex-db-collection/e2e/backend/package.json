@@ -1,0 +1,8 @@
+{
+  "name": "convex-adapter-backend",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "convex": "^1.47.0"
+  }
+}

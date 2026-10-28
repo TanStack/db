@@ -3,6 +3,7 @@ export {
   // Types
   type OfflineTransaction,
   type OfflineConfig,
+  type MutationValueCodec,
   type OfflineMode,
   type StorageAdapter,
   type StorageDiagnostic,
