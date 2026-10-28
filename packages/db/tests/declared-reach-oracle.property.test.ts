@@ -293,7 +293,30 @@ const reachStates = [
   `a state below a minimum above one`,
   `a ledger that passes`,
 ] as const
-const ledgerReach = createOracleReach(`oracle.declared-reach`, reachStates)
+// One fixed ledger enters each reach state, first in every run, so this
+// property's own reach cannot miss by chance.
+function fixedLedger(
+  run: RunKind,
+  minimum: number,
+  fixedHistories: number,
+  histories: Ledger[`histories`],
+): [Ledger, number, Array<number>] {
+  return [
+    { run, states: [`state 0`, `state 1`], minimum, fixedHistories, histories },
+    60,
+    [1],
+  ]
+}
+const ledgerExamples = [
+  fixedLedger(`seed`, 1, 0, []),
+  fixedLedger(`path`, 1, 0, []),
+  fixedLedger(`ordinary`, 1, 1, [[0], [1]]),
+  fixedLedger(`ordinary`, 2, 0, [[0, 1]]),
+  fixedLedger(`ordinary`, 1, 0, [[0, 1]]),
+]
+const ledgerReach = createOracleReach(`oracle.declared-reach`, reachStates, {
+  fixedHistories: ledgerExamples.length,
+})
 let ledgersRan = false
 afterAll(() => {
   if (ledgersRan) ledgerReach.assertReached()
@@ -305,7 +328,7 @@ fcTest.prop(
     fc.integer({ min: 1, max: 200 }),
     fc.array(fc.integer(), { maxLength: 5 }),
   ],
-  oraclePropertyOptions(200, property),
+  oraclePropertyOptions(200, property, { examples: ledgerExamples }),
 )(
   `reach ledgers refine the declared reach model`,
   async (ledger, baseRuns, examples) => {
