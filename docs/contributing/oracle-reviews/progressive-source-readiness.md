@@ -314,3 +314,46 @@ outcome of every async hold.
   Model D.
 - Before the full sync, an Electric progressive query's rows do not receive
   live changes. The source contract owns that behavior, not this law.
+
+## Effect without `skipInitial` round
+
+Base: `db476b8ed`. This entry covers the change that adds the
+`effect-initial-rows` consumer to Model D
+([TanStack/db#2117](https://github.com/TanStack/db/issues/2117)).
+
+Law (ARCHITECTURE.md, Effects and initial readiness): every Effect passes its
+gate at initial-query readiness, but `skipInitial` "only decides whether the
+initial rows are delivered", and "other ordinary initial/refinement requests
+keep their existing callback timing". So an Effect without `skipInitial` shows
+the query's current result at every checkpoint, before readiness too. The
+architecture sentence on the gate could also be read as holding initial rows
+until readiness. The callback-timing sentence and the current production
+behavior agree on the first reading, and the lane enacts it.
+
+Grammar and observation: the same 156 histories as the `skipInitial` Effect
+lane (direct, lazy join, and both eager roots, with truncate and rekey
+disturbances). The observation is the callback-visible result rebuilt from
+`enter`, `exit`, and `update` events, with a count of events inconsistent with
+that result. Between a truncate and its settlement the model does not judge
+the rows; the metamorphic twin does.
+
+Reach (`createOracleReach`, bounded exhaustive cells): rows visible before
+initial-query readiness, 117 cells; a row written after readiness is visible,
+46 cells; truncate replay before settlement, 80 cells.
+
+Mutants, run against the whole Model D lane. Only the new cells reject either
+one; every other cell of every consumer passes:
+
+| Mutant                                              | Rejecting cells                                   | Outcome                         |
+| --------------------------------------------------- | ------------------------------------------------- | ------------------------------- |
+| Without `skipInitial`, hold callbacks until the gate | 52 `direct`, 92 `join`, 4 `eager-root`, 4 `eager-default` | Assertion failure, checkpoint 1–5 |
+| Ignore `skipInitial: false` (drop initial rows)      | the same 152 cells                                | Assertion failure               |
+
+Each eager shape has two survivors: histories in which `source-ready` comes
+first. No row is visible before readiness there, so both mutants are
+equivalent within those histories. The earlier record's survivor, "tracking
+initial loads without `skipInitial`", stays equivalent; the first mutant is
+the non-equivalent neighbor that makes the argument executable.
+
+Open: Effects without `skipInitial` over an ordered window, an include, or a
+single result, and `useLiveQueryEffect`, have no lane.

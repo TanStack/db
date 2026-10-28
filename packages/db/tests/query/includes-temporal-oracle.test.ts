@@ -17,6 +17,7 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createEffect } from '../../src/query/effect.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { runTrace } from '../trace-runner.js'
+import { createOracleReach } from '../oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
@@ -2568,6 +2569,13 @@ async function expectProgressiveTraceMatches(
 // already visible; the live query itself preloads from the start. A read
 // that starts after readiness resolves with the rows it sees then. An Effect with `skipInitial`
 // suppresses every delta until the same point and delivers every later delta.
+// An Effect without `skipInitial` passes the same gate, but the gate holds no
+// callback: "other ordinary initial/refinement requests keep their existing
+// callback timing", and `skipInitial` "only decides whether the initial rows
+// are delivered" (ARCHITECTURE.md, Effects and initial readiness). Its
+// callback-visible result is the query's current result at every checkpoint,
+// before readiness too. Its cells reject an Effect that holds or drops its
+// initial deltas until readiness.
 //
 // Each on-demand cell also runs a metamorphic twin: the same consumer over an
 // on-demand source that is ready from its start, receiving every other step.
@@ -2600,9 +2608,9 @@ async function expectProgressiveTraceMatches(
 // The live-query shapes put the lagging source at a direct root, a
 // single-result root, an ordered root window, a correlated include child,
 // the lazy side of a join, an eager root that sets `syncMode: 'eager'`, and
-// an eager root that leaves `syncMode` at its default. The Effect lane uses
-// the direct, lazy-join, and both eager-root shapes; Effects over an ordered
-// window or an include are not covered here. The eager roots are the nearby
+// an eager root that leaves `syncMode` at its default. Both Effect lanes, with
+// and without `skipInitial`, use the direct, lazy-join, and both eager-root
+// shapes; Effects over an ordered window or an include are not covered here. The eager roots are the nearby
 // witnesses: a design that ignores source readiness entirely completes them
 // too early, and one that exempts every source not configured as eager
 // misses the default. A design that waits for every source's Collection
@@ -2617,7 +2625,8 @@ async function expectProgressiveTraceMatches(
 // without the truncate replacement reports rows too early. A live query that
 // treats an aborted lazy-demand load as a failure enters error. Between a
 // truncate and its settlement the replay barrier owns publication, so the
-// model does not judge live-query rows there; the metamorphic twin does.
+// model does not judge live-query rows or an Effect's callback-visible rows
+// there; the metamorphic twin does.
 //
 // The driver uses real Collections, a live-query preload or `createEffect`,
 // and controlled source writes. Each step is followed by a timer turn. Each
@@ -2639,6 +2648,7 @@ type LaggingSourceShape =
 type LaggingSourceConsumer =
   | `live-query`
   | `effect`
+  | `effect-initial-rows`
   | `query-once`
   | `to-array-when-ready`
   | `state-when-ready`
@@ -2765,6 +2775,17 @@ type EffectObservation = {
   acquisitions: number
 }
 
+// An Effect without `skipInitial` has a callback-visible result: the rows it
+// entered and has not exited. The recorder counts an `enter` for a visible
+// key, and an `exit` or `update` for an absent key, as inconsistent, so a
+// duplicate or lost delta reaches the comparison. `visible` is `null` between
+// a truncate and its settlement, where the replay barrier owns publication.
+type InitialRowsEffectObservation = {
+  visible: { rows: number; postIds: Array<number> } | null
+  inconsistentEvents: number
+  acquisitions: number
+}
+
 // An unordered shape publishes held rows as a partial result. The `find-one`
 // shape is the reported trace (TanStack/db#2113): a single result filtered by
 // the initial post's id, so the later change never matches it. The ordered
@@ -2816,6 +2837,31 @@ function expectedEffectObservation(
     enteredPostIds: [...facts.writtenAfterReadiness],
     otherEvents: facts.exitsAfterReadiness,
     acquisitions: mode === `on-demand` ? 1 : 0,
+  }
+}
+
+// Without `skipInitial`, initial-query readiness holds the Effect's gate but
+// no callback: ordinary initial requests keep their callback timing. So the
+// callback-visible result is the shape's current result at every checkpoint,
+// before readiness too. A left-join parent always shows one row, matched or
+// unmatched.
+function expectedInitialRowsEffectObservation(
+  shape: LaggingSourceShape,
+  facts: LaggingSourceFacts,
+): InitialRowsEffectObservation {
+  const postIds = facts.posts
+    .filter((post) => postMatchesShape(shape, facts, post))
+    .map(({ id }) => id)
+    .sort((a, b) => a - b)
+  return {
+    visible: facts.replayPending
+      ? null
+      : {
+          rows: shape === `join` ? Math.max(postIds.length, 1) : postIds.length,
+          postIds,
+        },
+    inconsistentEvents: 0,
+    acquisitions: LAGGING_SOURCE_SHAPES[shape] === `on-demand` ? 1 : 0,
   }
 }
 
@@ -3006,8 +3052,9 @@ function rowPostIds(
   return [row.id as number]
 }
 
-// One consumer of a lagging source: a live query with its preload, or a
-// `skipInitial` Effect with the deltas it reported.
+// One consumer of a lagging source: a live query with its preload, a
+// `skipInitial` Effect with the deltas it reported, or an Effect without
+// `skipInitial` with its callback-visible rows.
 type LaggingSourceConsumerState = {
   source: LaggingPosts
   resolvedIds: Array<number> | undefined
@@ -3016,6 +3063,8 @@ type LaggingSourceConsumerState = {
   effect: Effect | undefined
   enteredPostIds: Array<number>
   otherEvents: number
+  visibleRows: Map<unknown, Record<string, unknown>>
+  inconsistentEvents: number
   // Starts a live query's `toArrayWhenReady()` or `stateWhenReady()` read.
   startRead: (() => void) | undefined
 }
@@ -3049,6 +3098,8 @@ function startLaggingSourceConsumer(
     effect: undefined,
     enteredPostIds: [],
     otherEvents: 0,
+    visibleRows: new Map(),
+    inconsistentEvents: 0,
     startRead: undefined,
   }
   const query = laggingSourceQuery(shape, source.collection, users)
@@ -3076,14 +3127,23 @@ function startLaggingSourceConsumer(
       }
     }
   } else {
+    const skipInitial = consumer === `effect`
     state.effect = createEffect({
       query,
-      skipInitial: true,
+      skipInitial,
       onBatch: (events) => {
         for (const event of events) {
-          if (event.type === `enter`)
-            state.enteredPostIds.push(...rowPostIds(shape, event.value))
-          else state.otherEvents += 1
+          if (skipInitial) {
+            if (event.type === `enter`)
+              state.enteredPostIds.push(...rowPostIds(shape, event.value))
+            else state.otherEvents += 1
+            continue
+          }
+          const visible = state.visibleRows.has(event.key)
+          if (event.type === `enter` ? visible : !visible)
+            state.inconsistentEvents += 1
+          if (event.type === `exit`) state.visibleRows.delete(event.key)
+          else state.visibleRows.set(event.key, event.value)
         }
       },
     })
@@ -3258,12 +3318,25 @@ function observeLaggingSourceConsumer(
   shape: LaggingSourceShape,
   facts: LaggingSourceFacts,
   state: LaggingSourceConsumerState,
-): LiveQueryObservation | EffectObservation | ReadObservation {
+): LaggingSourceObservation {
   if (isReadConsumer(consumer))
     return {
       resolvedIds: state.resolvedIds,
       acquisitions: observedAcquisitions(shape, facts, state.source),
     }
+  if (consumer === `effect-initial-rows`) {
+    const rows = [...state.visibleRows.values()]
+    return {
+      visible: {
+        rows: rows.length,
+        postIds: rows
+          .flatMap((row) => rowPostIds(shape, row))
+          .sort((a, b) => a - b),
+      },
+      inconsistentEvents: state.inconsistentEvents,
+      acquisitions: observedAcquisitions(shape, facts, state.source),
+    }
+  }
   return consumer === `live-query`
     ? {
         ready: state.live!.isReady(),
@@ -3281,7 +3354,10 @@ function observeLaggingSourceConsumer(
 }
 
 type LaggingSourceObservation =
-  LiveQueryObservation | EffectObservation | ReadObservation
+  | LiveQueryObservation
+  | EffectObservation
+  | InitialRowsEffectObservation
+  | ReadObservation
 
 type LaggingSourceCheck = {
   observation: LaggingSourceObservation
@@ -3289,9 +3365,38 @@ type LaggingSourceCheck = {
   twinDisagreement: LaggingSourceObservation | undefined
 }
 
+// The states the `effect-initial-rows` cells exist to reach. Each is read from
+// the production observation together with the model's facts at a checkpoint.
+const INITIAL_ROWS_EFFECT_REACH_STATES = [
+  `rows visible before initial-query readiness`,
+  `row written after initial-query readiness is visible`,
+  `truncate replay before settlement`,
+] as const
+type InitialRowsEffectReach = ReturnType<
+  typeof createOracleReach<(typeof INITIAL_ROWS_EFFECT_REACH_STATES)[number]>
+>
+
+function recordInitialRowsEffectReach(
+  reach: InitialRowsEffectReach,
+  shape: LaggingSourceShape,
+  facts: LaggingSourceFacts,
+  { visible }: InitialRowsEffectObservation,
+): void {
+  if (facts.replayPending) reach.reach(`truncate replay before settlement`)
+  if (visible === null) return
+  if (
+    visible.postIds.length > 0 &&
+    !initiallyReady(LAGGING_SOURCE_SHAPES[shape], facts)
+  )
+    reach.reach(`rows visible before initial-query readiness`)
+  if (facts.writtenAfterReadiness.some((id) => visible.postIds.includes(id)))
+    reach.reach(`row written after initial-query readiness is visible`)
+}
+
 function laggingSourceProjection(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
+  reach: InitialRowsEffectReach | undefined,
 ): TraceProjection<LaggingSourceContext, LaggingSourceCheck> {
   return {
     observe: ({ facts, main, twin }) => {
@@ -3303,11 +3408,16 @@ function laggingSourceProjection(
       )
       const twinObservation =
         twin && observeLaggingSourceConsumer(consumer, shape, facts, twin)
+      if (reach && `visible` in observation)
+        recordInitialRowsEffectReach(reach, shape, facts, observation)
       return {
-        observation:
-          facts.replayPending && `postIds` in observation
+        observation: !facts.replayPending
+          ? observation
+          : `postIds` in observation
             ? { ...observation, postIds: null }
-            : observation,
+            : `visible` in observation
+              ? { ...observation, visible: null }
+              : observation,
         twinDisagreement:
           twinObservation &&
           JSON.stringify(twinObservation) !== JSON.stringify(observation)
@@ -3321,7 +3431,9 @@ function laggingSourceProjection(
           ? expectedLiveQueryObservation(shape, facts)
           : isReadConsumer(consumer)
             ? expectedReadObservation(consumer, mode, facts)
-            : expectedEffectObservation(mode, facts),
+            : consumer === `effect-initial-rows`
+              ? expectedInitialRowsEffectObservation(shape, facts)
+              : expectedEffectObservation(mode, facts),
       twinDisagreement: undefined,
     }),
     assertEqual: (observed, expected) => {
@@ -3335,11 +3447,12 @@ async function expectLaggingSourceTraceMatches(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
   steps: ReadonlyArray<LaggingSourceStep>,
+  reach?: InitialRowsEffectReach,
 ): Promise<void> {
   await runTrace({
     steps,
     driver: createLaggingSourceDriver(consumer, shape),
-    projection: laggingSourceProjection(consumer, shape),
+    projection: laggingSourceProjection(consumer, shape, reach),
   })
 }
 
@@ -3534,6 +3647,7 @@ describe(`includes temporal oracle`, () => {
         `eager-default`,
       ],
       effect: [`direct`, `join`, `eager-root`, `eager-default`],
+      'effect-initial-rows': [`direct`, `join`, `eager-root`, `eager-default`],
       'query-once': [`direct`, `eager-root`],
       'to-array-when-ready': [`direct`, `find-one`, `join`, `eager-root`],
       'state-when-ready': [`direct`, `find-one`, `eager-root`],
@@ -3548,9 +3662,28 @@ describe(`includes temporal oracle`, () => {
         })),
       ),
     )
-    it.each(cells)(`$consumer $shape: $history`, ({ consumer, shape, steps }) =>
-      expectLaggingSourceTraceMatches(consumer, shape, steps),
+    const initialRowsReach = createOracleReach(
+      `includes-temporal.effect-initial-rows`,
+      INITIAL_ROWS_EFFECT_REACH_STATES,
     )
+    it.each(cells)(
+      `$consumer $shape: $history`,
+      ({ consumer, shape, steps }) => {
+        if (consumer !== `effect-initial-rows`)
+          return expectLaggingSourceTraceMatches(consumer, shape, steps)
+        initialRowsReach.beginHistory()
+        return expectLaggingSourceTraceMatches(
+          consumer,
+          shape,
+          steps,
+          initialRowsReach,
+        )
+      },
+    )
+    // The cells are a bounded exhaustive enumeration, so each declared state
+    // must be reached by at least one of them.
+    it(`effect-initial-rows cells reach every declared state`, () =>
+      initialRowsReach.assertReached())
   })
 
   // Grammar: one parent receives 2..4 distinct-key children while its acquisition
