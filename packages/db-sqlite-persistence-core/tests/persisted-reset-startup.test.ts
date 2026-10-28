@@ -2,7 +2,6 @@
  * Ordinary regression tests for persisted reset reload failure, resume evidence, startup baselines, and key encoding, as fixed scenarios. The reset and startup laws are owned by persisted-oracle.test.ts.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { test as fcTest } from '@fast-check/vitest'
 import { BasicIndex, IR, coalesce, createCollection } from '@tanstack/db'
 import {
   InvalidPersistedStorageKeyEncodingError,
@@ -13,13 +12,8 @@ import {
   encodePersistedStorageKey,
   persistedCollectionOptions,
 } from '../src'
-import {
-  oraclePropertyOptions,
-  oracleRuns,
-} from '../../db/tests/oracle-config.js'
 import { Temporal } from './temporal-value-oracle'
 import {
-  assertGenerationNoticeHistory,
   atPersistedOracleCheckpoint,
   cleanupPersistedOracle,
   createCoordinatorHarness,
@@ -30,7 +24,6 @@ import {
   createRecordingAdapter,
   createTerminalFailureHarness,
   flushAsyncWork,
-  generationNoticeHistory,
   installHydrationRoutingProbe,
   observeSettlement,
   recordedStorageId,
@@ -52,22 +45,6 @@ import type {
 } from './persisted-support'
 
 describe(`persistedCollectionOptions`, () => {
-  fcTest.prop([generationNoticeHistory], {
-    seed: 2069,
-    numRuns: oracleRuns(24),
-  })(
-    `checks generated cache-generation notice histories (fixed)`,
-    assertGenerationNoticeHistory,
-  )
-
-  fcTest.prop(
-    [generationNoticeHistory],
-    oraclePropertyOptions(24, `persistence.generation-notice`),
-  )(
-    `checks generated cache-generation notice histories (random or replayed)`,
-    assertGenerationNoticeHistory,
-  )
-
   it(`fail-stops queued and later work when reset reload fails after truncation`, async () => {
     const seed = { id: `seed`, title: `durable baseline` }
     const adapter = createRecordingAdapter([seed])

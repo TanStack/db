@@ -25,6 +25,7 @@ import {
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
+  assertGenerationNoticeHistory,
   atPersistedOracleCheckpoint,
   cleanupPersistedOracle,
   configureHydrationScope,
@@ -38,6 +39,7 @@ import {
   expectExactSnapshot,
   expectHydrationReceiptsPending,
   flushAsyncWork,
+  generationNoticeHistory,
   hydrationScopeModes,
   installHydrationRoutingProbe,
   itUnlessAnyOracleReplay,
@@ -5640,5 +5642,31 @@ describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
         )
       }
     },
+  )
+})
+
+// A follower's cache-generation notices: the check and its history grammar
+// live in persisted-support.ts, beside the law they state. The fixed and
+// random campaigns run the same property and budget.
+declareOracle({
+  check: [assertGenerationNoticeHistory],
+  grammar: [generationNoticeHistory],
+})
+
+describe(`persistedCollectionOptions`, () => {
+  fcTest.prop([generationNoticeHistory], {
+    seed: 2069,
+    numRuns: oracleRuns(24),
+  })(
+    `checks generated cache-generation notice histories (fixed)`,
+    assertGenerationNoticeHistory,
+  )
+
+  fcTest.prop(
+    [generationNoticeHistory],
+    oraclePropertyOptions(24, `persistence.generation-notice`),
+  )(
+    `checks generated cache-generation notice histories (random or replayed)`,
+    assertGenerationNoticeHistory,
   )
 })
