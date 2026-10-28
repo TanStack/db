@@ -42,6 +42,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createCollection } from '@tanstack/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   SQLiteCorePersistenceAdapter,
@@ -335,140 +336,159 @@ const reached = <T>(promise: Promise<T>, label: string): Promise<T> =>
     ),
   ])
 
+// The model: a peer reset abandons the reservation, which began before it,
+// so only a committing transaction on another route is accepted. An accepted
+// commit shows its rows; a waited subset load runs after the reservation and
+// succeeds either way.
+const expectedAdapterOutcome = ({ route, nesting, ending }: AdapterHistory) => {
+  const commitAccepted = ending === 'commits' && route !== 'peer reset'
+  return {
+    commitAccepted,
+    observation: {
+      outcomes: Array.from({ length: nesting === 'nested' ? 2 : 1 }, () =>
+        commitAccepted ? 'fulfilled' : 'rejected (AbortError)',
+      ),
+      nestedRow: nesting === 'nested' && commitAccepted ? 'nested' : undefined,
+      status: 'ready',
+      loadOutcome:
+        route === 'subset admitted earlier' ? 'fulfilled' : undefined,
+    },
+  }
+}
+
 describe('reserved commits across real-adapter hydrations', () => {
   const cleanups: Array<() => Promise<void> | void> = []
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
   })
 
+  // The driver runs one history on the real adapter and compares it with the
+  // model.
+  const runAdapterHistory = async (history: AdapterHistory) => {
+    const { route, timing, nesting, ending } = history
+    const harness = await openPeerTabHarness({
+      sharedScheduling: timing === 'scheduler hold',
+      onDemand: route === 'subset admitted earlier',
+    })
+    cleanups.push(() => harness.database.close())
+    cleanups.push(() => harness.collection.cleanup())
+    const reach = createOracleReach('sqlite.reserved-commit-hydration', [
+      'hydration entered its scope while reserved',
+    ])
+    reach.beginHistory()
+    // row-1's durable value just before the reservation, from the history.
+    let durableBefore = 'initial'
+    const notice =
+      route === 'peer full reload'
+        ? await harness.commitFromPeer('peer edit')
+        : undefined
+    if (notice) durableBefore = 'peer edit'
+    // The subset load's settlement, judged after the reservation ends.
+    let load: Promise<'fulfilled' | 'rejected'> | undefined
+    const admitRoute = () => {
+      if (notice) harness.coordinator.deliverFromPeer(COLLECTION_ID, notice)
+      else if (route === 'peer reset') {
+        harness.coordinator.deliverFromPeer(COLLECTION_ID, {
+          type: 'collection:reset',
+          schemaVersion: 1,
+          resetEpoch: 1,
+        })
+      } else {
+        load = Promise.resolve(
+          harness.collection._sync.loadSubset({ limit: 1 }),
+        ).then(
+          () => 'fulfilled' as const,
+          () => 'rejected' as const,
+        )
+      }
+    }
+    if (timing === 'mutex turn') {
+      // This Collection's held write is ahead of the route on the mutex.
+      const write = harness.holdNextWrite()
+      harness.reserve('durable predecessor')
+      durableBefore = 'durable predecessor'
+      const blocker = Promise.resolve(harness.commit()).catch(() => undefined)
+      await write.wasReached
+      admitRoute()
+      // One task lets the route take its mutex turn before the reservation.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      harness.reserve('refetched')
+      if (nesting === 'nested') harness.reserveNested()
+      const entered = harness.nextScopeEntry()
+      write.release()
+      await blocker
+      await reached(entered, 'hydration entered its scope')
+    } else {
+      // Another Collection's held write holds the shared scheduler, so the
+      // route's scope waits after its mutex turn began.
+      await harness.adapter.loadSubset(
+        eagerStorageTarget('other_collection'),
+        {},
+      )
+      const otherWrite = harness.holdNextWrite()
+      const blocker = harness.adapter.applyCommittedTx(
+        eagerStorageTarget('other_collection'),
+        { mutations: [], rowVersion: 1, seq: 1, term: 1, txId: 'blocker' },
+      )
+      await otherWrite.wasReached
+      let turnBegan!: () => void
+      const began = new Promise<void>((resolve) => {
+        turnBegan = resolve
+      })
+      const runInHydrationScope = harness.adapter.runInHydrationScope.bind(
+        harness.adapter,
+      )
+      harness.adapter.runInHydrationScope = (task) => {
+        turnBegan()
+        return runInHydrationScope(task)
+      }
+      admitRoute()
+      await reached(began, 'route turn began')
+      harness.reserve('refetched')
+      if (nesting === 'nested') harness.reserveNested()
+      const entered = harness.nextScopeEntry()
+      otherWrite.release()
+      await blocker
+      await reached(entered, 'hydration entered its scope')
+    }
+    reach.reach('hydration entered its scope while reserved')
+    // Commits the innermost transaction first; a rejection keeps its name,
+    // so an abort and a cross-cycle failure stay distinct.
+    const settle = async () => {
+      try {
+        await (ending === 'commits' ? harness.commit() : harness.abandon())
+        return 'fulfilled'
+      } catch (error) {
+        return `rejected (${(error as Error).name})`
+      }
+    }
+    const outcomes: Array<string> = []
+    if (nesting === 'nested') outcomes.push(await settle())
+    outcomes.push(await settle())
+    const loadOutcome = await load
+    reach.assertReached()
+    const expected = expectedAdapterOutcome(history)
+    const expectedValue = expected.commitAccepted ? 'refetched' : durableBefore
+    await waitFor(() =>
+      expect(harness.collection.get('row-1')).toMatchObject({
+        value: expectedValue,
+      }),
+    )
+    // A subset load that waited runs after the reservation and succeeds.
+    expect({
+      outcomes,
+      nestedRow: harness.collection.get('row-2')?.value,
+      status: harness.collection.status,
+      loadOutcome,
+    }).toEqual(expected.observation)
+  }
+  declareOracle({
+    check: [runAdapterHistory],
+    model: [expectedAdapterOutcome],
+    grammar: [adapterHistories],
+  })
   it.each(adapterHistories)(
     'keeps a reserved commit lawful across a real-adapter hydration ($route, $timing, $nesting, $ending)',
-    async ({ route, timing, nesting, ending }) => {
-      const harness = await openPeerTabHarness({
-        sharedScheduling: timing === 'scheduler hold',
-        onDemand: route === 'subset admitted earlier',
-      })
-      cleanups.push(() => harness.database.close())
-      cleanups.push(() => harness.collection.cleanup())
-      const reach = createOracleReach('sqlite.reserved-commit-hydration', [
-        'hydration entered its scope while reserved',
-      ])
-      reach.beginHistory()
-      // row-1's durable value just before the reservation, from the history.
-      let durableBefore = 'initial'
-      const notice =
-        route === 'peer full reload'
-          ? await harness.commitFromPeer('peer edit')
-          : undefined
-      if (notice) durableBefore = 'peer edit'
-      // The subset load's settlement, judged after the reservation ends.
-      let load: Promise<'fulfilled' | 'rejected'> | undefined
-      const admitRoute = () => {
-        if (notice) harness.coordinator.deliverFromPeer(COLLECTION_ID, notice)
-        else if (route === 'peer reset') {
-          harness.coordinator.deliverFromPeer(COLLECTION_ID, {
-            type: 'collection:reset',
-            schemaVersion: 1,
-            resetEpoch: 1,
-          })
-        } else {
-          load = Promise.resolve(
-            harness.collection._sync.loadSubset({ limit: 1 }),
-          ).then(
-            () => 'fulfilled' as const,
-            () => 'rejected' as const,
-          )
-        }
-      }
-      if (timing === 'mutex turn') {
-        // This Collection's held write is ahead of the route on the mutex.
-        const write = harness.holdNextWrite()
-        harness.reserve('durable predecessor')
-        durableBefore = 'durable predecessor'
-        const blocker = Promise.resolve(harness.commit()).catch(() => undefined)
-        await write.wasReached
-        admitRoute()
-        // One task lets the route take its mutex turn before the reservation.
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        harness.reserve('refetched')
-        if (nesting === 'nested') harness.reserveNested()
-        const entered = harness.nextScopeEntry()
-        write.release()
-        await blocker
-        await reached(entered, 'hydration entered its scope')
-      } else {
-        // Another Collection's held write holds the shared scheduler, so the
-        // route's scope waits after its mutex turn began.
-        await harness.adapter.loadSubset(
-          eagerStorageTarget('other_collection'),
-          {},
-        )
-        const otherWrite = harness.holdNextWrite()
-        const blocker = harness.adapter.applyCommittedTx(
-          eagerStorageTarget('other_collection'),
-          { mutations: [], rowVersion: 1, seq: 1, term: 1, txId: 'blocker' },
-        )
-        await otherWrite.wasReached
-        let turnBegan!: () => void
-        const began = new Promise<void>((resolve) => {
-          turnBegan = resolve
-        })
-        const runInHydrationScope = harness.adapter.runInHydrationScope.bind(
-          harness.adapter,
-        )
-        harness.adapter.runInHydrationScope = (task) => {
-          turnBegan()
-          return runInHydrationScope(task)
-        }
-        admitRoute()
-        await reached(began, 'route turn began')
-        harness.reserve('refetched')
-        if (nesting === 'nested') harness.reserveNested()
-        const entered = harness.nextScopeEntry()
-        otherWrite.release()
-        await blocker
-        await reached(entered, 'hydration entered its scope')
-      }
-      reach.reach('hydration entered its scope while reserved')
-      // Commits the innermost transaction first; a rejection keeps its name,
-      // so an abort and a cross-cycle failure stay distinct.
-      const settle = async () => {
-        try {
-          await (ending === 'commits' ? harness.commit() : harness.abandon())
-          return 'fulfilled'
-        } catch (error) {
-          return `rejected (${(error as Error).name})`
-        }
-      }
-      const outcomes: Array<string> = []
-      if (nesting === 'nested') outcomes.push(await settle())
-      outcomes.push(await settle())
-      const loadOutcome = await load
-      reach.assertReached()
-      // A peer reset abandons the reservation, which began before it.
-      const commitAccepted = ending === 'commits' && route !== 'peer reset'
-      const expectedValue = commitAccepted ? 'refetched' : durableBefore
-      await waitFor(() =>
-        expect(harness.collection.get('row-1')).toMatchObject({
-          value: expectedValue,
-        }),
-      )
-      // A subset load that waited runs after the reservation and succeeds.
-      expect({
-        outcomes,
-        nestedRow: harness.collection.get('row-2')?.value,
-        status: harness.collection.status,
-        loadOutcome,
-      }).toEqual({
-        outcomes: Array.from({ length: nesting === 'nested' ? 2 : 1 }, () =>
-          commitAccepted ? 'fulfilled' : 'rejected (AbortError)',
-        ),
-        nestedRow:
-          nesting === 'nested' && commitAccepted ? 'nested' : undefined,
-        status: 'ready',
-        loadOutcome:
-          route === 'subset admitted earlier' ? 'fulfilled' : undefined,
-      })
-    },
+    runAdapterHistory,
   )
 })

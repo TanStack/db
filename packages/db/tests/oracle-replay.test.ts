@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
@@ -451,6 +451,56 @@ describe(`named oracle replay manifest`, () => {
         ).toBe(true)
       }
     }
+  })
+
+  it(`replays every owner from a directory where its command finds the owner`, () => {
+    // A replay command runs from its entry's cwd. From the wrong directory,
+    // the runner's file filter matches no test file, and the replay reports
+    // only that its target never executed. So, for every owner, each file
+    // that the command names must exist from that directory, its last file
+    // must be the owner itself, and a test-runner config must apply there:
+    // the one that `--config` names, or a default config in the directory.
+    const defaultConfigs = [`vitest`, `vite`].flatMap((name) =>
+      [`ts`, `mts`, `js`, `mjs`].map(
+        (extension) => `${name}.config.${extension}`,
+      ),
+    )
+    const failures: Array<string> = []
+    for (const entry of oracleReplayManifest) {
+      if (entry.command === undefined || entry.file === undefined) continue
+      const cwd = resolve(repositoryDirectory, entry.cwd ?? `.`)
+      const owner = resolve(repositoryDirectory, entry.file)
+      const words = entry.command.split(` `)
+      const configAt = words.indexOf(`--config`)
+      const config = configAt === -1 ? undefined : words[configAt + 1]
+      const files = words.filter(
+        (word, index) =>
+          index !== configAt + 1 &&
+          /\.(m?[jt]sx?)$/.test(word) &&
+          !word.startsWith(`-`),
+      )
+      const problems = [
+        ...files
+          .filter((file) => !existsSync(resolve(cwd, file)))
+          .map((file) => `${file} is missing`),
+        ...(resolve(cwd, files.at(-1) ?? ``) === owner
+          ? []
+          : [`the target ${files.at(-1)} is not the owner`]),
+        ...((
+          config === undefined
+            ? defaultConfigs.some((name) => existsSync(join(cwd, name)))
+            : existsSync(resolve(cwd, config))
+        )
+          ? []
+          : [`no test-runner config applies`]),
+      ]
+      if (problems.length > 0) {
+        failures.push(
+          `${entry.property} (cwd ${entry.cwd}): ${problems.join(`, `)}`,
+        )
+      }
+    }
+    expect(failures).toEqual([])
   })
 
   it(`names an owner for every registered property`, () => {

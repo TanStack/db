@@ -41,7 +41,12 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import {
+  checkWithCleanup,
+  virtualFieldNames,
+} from './virtual-row-fields-support.js'
 
 type Profile = { label: string }
 
@@ -61,173 +66,41 @@ type VirtualFieldSubject =
   | `nested-value`
   | `opaque-value`
 
-const virtualFieldNames = [
-  `$key`,
-  `$hasPendingWrites`,
-  `$synced`,
-  `$origin`,
-  `$collectionId`,
-] as const
-
 // Only row roots and unprojected whole-row children carry virtual row fields.
 function expectsVirtualFields(subject: VirtualFieldSubject): boolean {
   return subject === `row-root` || subject === `whole-row-child`
 }
 
-function assertPublishedRootFields(row: unknown, name: string): void {
-  for (const field of virtualFieldNames) {
-    if (!(field in Object(row))) {
-      throw new Error(`${name} root must expose ${field}`)
-    }
-  }
-  expect(hasVirtualProps(row), `${name} root classification`).toBe(true)
-}
-
-async function checkWithCleanup(
-  check: () => Promise<void>,
-  cleanups: ReadonlyArray<() => Promise<void>>,
-): Promise<void> {
-  let primaryFailure: unknown
-  let checkFailed = false
-  try {
-    await check()
-  } catch (error) {
-    primaryFailure = error
-    checkFailed = true
-  }
-
-  const cleanupFailures: Array<unknown> = []
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-  }
-
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(
-      cleanupFailures,
-      `Virtual row oracle check and cleanup failed`,
-      {
-        cause: primaryFailure,
-      },
+// Each observed value publishes the virtual row fields exactly when the model
+// classifies its subject as a row, so a missing or leaked field fails at the
+// observation that shows it.
+function expectPublishedFieldClassification(
+  observations: Array<{
+    name: string
+    subject: VirtualFieldSubject
+    value: unknown
+  }>,
+): void {
+  for (const observation of observations) {
+    const expectsFields = expectsVirtualFields(observation.subject)
+    expect(hasVirtualProps(observation.value), observation.name).toBe(
+      expectsFields,
     )
+    for (const field of virtualFieldNames) {
+      expect(
+        field in Object(observation.value),
+        `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
+      ).toBe(expectsFields)
+    }
   }
-  if (checkFailed) throw primaryFailure
 }
+
+declareOracle({
+  check: [expectPublishedFieldClassification],
+  model: [expectsVirtualFields],
+})
 
 describe(`virtual row field runtime boundary`, () => {
-  test(`publishes every virtual field on implicit, expression, and functional root shapes`, async () => {
-    const rows = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `virtual-row-fields-root-shapes-source`,
-        getKey: (row) => row.id,
-        initialData: [
-          {
-            id: `row-1`,
-            profile: { label: `nested` },
-            createdAt: new Date(`2026-09-20T12:34:56.000Z`),
-            tags: [`one`],
-          },
-        ],
-      }),
-    )
-    const implicit = createLiveQueryCollection((q) => q.from({ row: rows }))
-    const expression = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        label: row.profile.label,
-      })),
-    )
-    const functional = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).fn.select(({ row }) => ({
-        id: row.id,
-        label: row.profile.label,
-      })),
-    )
-
-    await checkWithCleanup(async () => {
-      await Promise.all([
-        implicit.preload(),
-        expression.preload(),
-        functional.preload(),
-      ])
-
-      const observed = [
-        { name: `implicit`, row: implicit.toArray[0] },
-        { name: `expression`, row: expression.toArray[0] },
-        { name: `functional`, row: functional.toArray[0] },
-      ]
-      for (const { name, row } of observed) {
-        expect(row, `${name} root must publish`).toBeDefined()
-        assertPublishedRootFields(row, name)
-        expect(row!.$hasPendingWrites, `${name} has no pending write`).toBe(
-          false,
-        )
-        expect(row!.$hasPendingWrites, `${name} legacy inverse`).toBe(
-          !row!.$synced,
-        )
-      }
-
-      expect(implicit.toArray[0]?.id).toBe(`row-1`)
-      expect(expression.toArray[0]).toMatchObject({
-        id: `row-1`,
-        label: `nested`,
-      })
-      expect(functional.toArray[0]).toMatchObject({
-        id: `row-1`,
-        label: `nested`,
-      })
-
-      // Wrong rule: functional projection outputs are treated as ordinary
-      // values and never receive root fields. The direct field check above
-      // rejects this observation at the same post-preload checkpoint.
-      const wrongFunctionalRoot = Object.fromEntries(
-        Object.entries(functional.toArray[0]!).filter(
-          ([field]) => field !== `$collectionId`,
-        ),
-      )
-      expect(() =>
-        assertPublishedRootFields(wrongFunctionalRoot, `functional`),
-      ).toThrow(`functional root must expose $collectionId`)
-    }, [
-      () => functional.cleanup(),
-      () => expression.cleanup(),
-      () => implicit.cleanup(),
-      () => rows.cleanup(),
-    ])
-  })
-
-  test(`keeps the primary mismatch and attempts every cleanup`, async () => {
-    const mismatch = new Error(`published row mismatch`)
-    const firstCleanupError = new Error(`first cleanup failed`)
-    const lastCleanupError = new Error(`last cleanup failed`)
-    const attempted: Array<string> = []
-
-    await expect(
-      checkWithCleanup(async () => {
-        throw mismatch
-      }, [
-        async () => {
-          attempted.push(`first`)
-          throw firstCleanupError
-        },
-        async () => {
-          attempted.push(`middle`)
-        },
-        async () => {
-          attempted.push(`last`)
-          throw lastCleanupError
-        },
-      ]),
-    ).rejects.toMatchObject({
-      cause: mismatch,
-      errors: [firstCleanupError, lastCleanupError],
-    })
-    expect(attempted).toEqual([`first`, `middle`, `last`])
-  })
-
   test(`matches the row and value classification after publication`, async () => {
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
@@ -384,19 +257,7 @@ describe(`virtual row field runtime boundary`, () => {
         },
       ]
 
-      for (const observation of observations) {
-        const expectsFields = expectsVirtualFields(observation.subject)
-        expect(hasVirtualProps(observation.value), observation.name).toBe(
-          expectsFields,
-        )
-        for (const field of virtualFieldNames) {
-          expect(
-            field in Object(observation.value),
-            `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
-          ).toBe(expectsFields)
-        }
-      }
-
+      expectPublishedFieldClassification(observations)
       expect(result.$key).toBe(`row-1`)
       expect(result.$hasPendingWrites).toBe(!result.$synced)
       expect(result.wholeRows[0]!.$hasPendingWrites).toBe(

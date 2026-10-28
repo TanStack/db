@@ -38,6 +38,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   observeHistoryPromise,
   withHistoryCleanup,
@@ -371,6 +372,11 @@ async function runHistory({ entry, handler, payload }: History) {
     ],
   )
 }
+
+declareOracle({
+  check: [runHistory],
+  model: [restoredArray, restoredObject],
+})
 
 describe(`LocalStorage value fidelity oracle`, () => {
   if (!oracleReplayRequested()) {

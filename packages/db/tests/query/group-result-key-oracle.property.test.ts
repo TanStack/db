@@ -50,6 +50,7 @@ import { count } from '../../src/query/builder/functions.js'
 import { createCollection } from '../../src/collection/index.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 const property = `group-result-key.groups`
@@ -256,6 +257,8 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
     }
   }, [() => live.cleanup(), () => source.cleanup()])
 }
+
+declareOracle({ check: [runHistory], model: [expectedGroups] })
 
 describe(`grouped result key oracle`, () => {
   for (const [index, history] of pinnedHistories.entries()) {

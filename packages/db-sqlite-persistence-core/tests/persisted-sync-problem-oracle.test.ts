@@ -1,5 +1,6 @@
 import { createCollection } from '@tanstack/db'
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src/index.js'
 import type {
@@ -592,3 +593,5 @@ describe(`persisted sync problem oracle`, () => {
     }
   })
 })
+
+declareOracle({ model: [expected], grammar: [histories] })

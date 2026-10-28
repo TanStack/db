@@ -8,9 +8,11 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
+import { orderBy } from './cursor-order-terms.js'
 import { evaluateReferenceExpression } from './reference-expression-oracle.js'
-import type { OrderBy } from '../src/query/ir.js'
+import type { Term } from './cursor-order-terms.js'
 
 /**
  * A cursor denotes the strict suffix after one ordered boundary. The
@@ -36,11 +38,6 @@ const fixedCampaign = oracleReplayTest(fcTest)
 const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
 
 const fixedSeed = 20260930
-
-type Term = {
-  direction: `asc` | `desc`
-  nulls: `first` | `last`
-}
 
 const termArbitrary = fc.record<Term>({
   direction: fc.constantFrom(`asc`, `desc`),
@@ -81,13 +78,6 @@ function compareTuple(
     if (compared !== 0) return compared
   }
   return 0
-}
-
-function orderBy(terms: ReadonlyArray<Term>): OrderBy {
-  return terms.map((compareOptions, index) => ({
-    expression: new PropRef([`column${index}`]),
-    compareOptions,
-  }))
 }
 
 function row(values: ReadonlyArray<unknown>): Record<string, unknown> {
@@ -231,6 +221,11 @@ const assertRepeatedCursor = (
   )
 }
 
+declareOracle({
+  check: [expectCursorDenotation, expectLocalTupleOrder, assertRepeatedCursor],
+  model: [compareValue, compareTuple],
+})
+
 // Boundary width distinguishes one-value continuation from rejected composite
 // values; one value remains legal with several order terms. Direction reverses
 // numeric order, null placement reverses null-versus-number order, and equal
@@ -356,16 +351,6 @@ describe(`buildCursor properties`, () => {
         () => new Value(++calls === 1),
       ),
     ).toThrow()
-  })
-
-  it(`returns no cursor without boundary values and rejects a boundary without an order`, () => {
-    expect(() => buildCursor([], [1])).toThrow(
-      `Only leading-column cursors are supported`,
-    )
-    expect(buildCursor([], [])).toBeUndefined()
-    expect(
-      buildCursor(orderBy([{ direction: `asc`, nulls: `first` }]), []),
-    ).toBeUndefined()
   })
 
   fixedCampaign.prop([exactCursorArbitrary], {

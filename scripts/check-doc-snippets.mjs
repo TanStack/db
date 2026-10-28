@@ -27,6 +27,8 @@ import prettier from 'prettier'
 import ts from 'typescript'
 import {
   componentScript,
+  externalImports,
+  externalName,
   fingerprint,
   frameworkOf,
   misspelling,
@@ -167,7 +169,7 @@ const ambient = join(root, `.snippet-check`, `ambient.d.ts`)
 const missingModules = new Set()
 const ambientSource = () =>
   [...missingModules]
-    .map((name) => `declare module ${JSON.stringify(name)}\n`)
+    .map((name) => `declare module ${JSON.stringify(externalName(name))}\n`)
     .join(``) || `export {}\n`
 
 function check(sources) {
@@ -176,6 +178,25 @@ function check(sources) {
   host.readFile = (path) => sources.get(path) ?? read(path)
   const exists = host.fileExists
   host.fileExists = (path) => sources.has(path) || exists(path)
+  // pnpm keeps an adapter's provider types beside that adapter. A guide's
+  // imports must resolve there before an absent root dependency becomes `any`.
+  host.resolveModuleNames = (names, containingFile) => {
+    const snippet = snippets.find((entry) => entry.name === containingFile)
+    const collection = snippet?.file.match(
+      /^docs\/collections\/(.+)-collection\.md$/,
+    )?.[1]
+    const owner = collection
+      ? join(root, `packages`, `${collection}-db-collection`, `src`, `index.ts`)
+      : undefined
+    return names.map(
+      (name) =>
+        ts.resolveModuleName(name, containingFile, options, host)
+          .resolvedModule ??
+        (owner && !name.startsWith(`.`)
+          ? ts.resolveModuleName(name, owner, options, host).resolvedModule
+          : undefined),
+    )
+  }
   const program = ts.createProgram([...sources.keys()], options, host)
   return { program, diagnostics: ts.getPreEmitDiagnostics(program) }
 }
@@ -233,7 +254,7 @@ function sourceOf(snippet, declared, autoImported) {
           `declare const ${name}: ${/collection$/i.test(name) ? `SnippetCollection<Record<string, any>, string | number>` : `any`}\ntype ${name} = any\n`,
       )
       .join(``) +
-    snippet.code +
+    externalImports(snippet.code, missingModules) +
     `\nexport {}\n`
   )
 }

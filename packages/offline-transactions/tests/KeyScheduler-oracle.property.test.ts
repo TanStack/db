@@ -6,6 +6,8 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { BASE_TIME, createTransaction } from './key-scheduler-support'
 import type { OfflineTransaction } from '../src/types'
 
 const FIFO_LEDGER_PROPERTY = `offline.key-scheduler-fifo-ledger`
@@ -61,7 +63,6 @@ type Snapshot = {
   runningCount: number
 }
 
-const BASE_TIME = Date.parse(`2026-01-01T00:00:00.000Z`)
 const FIXED_SEED = 1815
 const RUNS = oracleRuns(150)
 
@@ -280,26 +281,6 @@ const legalHistory = fc
   .array(commandToken, { minLength: 1, maxLength: 50 })
   .map(buildLegalHistory)
 
-function createTransaction(
-  id: string,
-  createdAt: number,
-  nextAttemptAt: number,
-  payload: number,
-): OfflineTransaction {
-  return {
-    id,
-    mutationFnName: `syncData`,
-    mutations: [],
-    keys: [],
-    idempotencyKey: `idempotency-${id}`,
-    createdAt: new Date(createdAt),
-    retryCount: 0,
-    nextAttemptAt,
-    metadata: { payload },
-    version: 1,
-  }
-}
-
 function cloneTransaction(transaction: OfflineTransaction): OfflineTransaction {
   return {
     ...transaction,
@@ -513,6 +494,8 @@ function runHistory(
 
   return coverage
 }
+
+declareOracle({ check: [runHistory], model: [expectedSnapshot] })
 
 describe(`KeyScheduler generated lifecycle`, () => {
   afterEach(() => vi.useRealTimers())
@@ -820,27 +803,5 @@ describe(`KeyScheduler generated lifecycle`, () => {
         }),
       }),
     ).toThrow()
-  })
-
-  it(`selectively removes only unissued work`, () => {
-    const scheduler = new KeyScheduler()
-    const active = createTransaction(``, BASE_TIME, BASE_TIME, 1)
-    const removed = createTransaction(`removed`, BASE_TIME + 1, BASE_TIME, 2)
-    const retained = createTransaction(`retained`, BASE_TIME + 2, BASE_TIME, 3)
-    scheduler.schedule(active)
-    scheduler.schedule(removed)
-    scheduler.schedule(retained)
-    scheduler.markStarted(active)
-
-    expect(
-      scheduler.removePendingTransactions([active.id, removed.id, `missing`]),
-    ).toEqual([removed.id, `missing`])
-
-    expect({
-      pending: scheduler.getAllPendingTransactions().map(({ id }) => id),
-      running: scheduler.getRunningCount(),
-    }).toEqual({ pending: [active.id, retained.id], running: 1 })
-    scheduler.markCompleted(active)
-    expect(scheduler.getNext()?.id).toBe(retained.id)
   })
 })

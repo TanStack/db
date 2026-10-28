@@ -3,6 +3,9 @@ import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import { createOracleReach } from './oracle-reach'
+import { declareOracle } from './oracle-declaration'
+import { expectMap, expectView, modelOrder } from './sorted-map-support'
+import type { ModelKey, Row } from './sorted-map-support'
 
 /**
  * SortedMap is the ordered map behind Collection state: synced rows, ordered
@@ -51,14 +54,6 @@ import { createOracleReach } from './oracle-reach'
  * inconsistent views of the same state, and work that grows with the map.
  */
 
-type Order = `key` | `ascending` | `descending`
-
-// Production stores row objects so the driver can change one in place. The
-// model stores each row's rank as a number and never shares an object.
-type Row = { rank: number }
-
-type ModelKey = number
-
 // A burst writes more keys than one small batch holds, in an order derived
 // from its seed value, so ordered restoration has many pending keys to place.
 function burstEntries(seed: number): Array<[number, number]> {
@@ -68,85 +63,10 @@ function burstEntries(seed: number): Array<[number, number]> {
   return keys.map((key) => [key, ((key * 7) % 5) - 2])
 }
 
-const probeKeys: Array<ModelKey> = [
-  -3,
-  -2,
-  -1,
-  0,
-  1,
-  2,
-  3,
-  Number.NaN,
-  10,
-  26,
-  50,
-]
-
-// The generated keys are numbers, which key order sorts ascending with `NaN`
-// after every other number.
-const compareModelKeys = (a: ModelKey, b: ModelKey) =>
-  Number.isNaN(a) || Number.isNaN(b)
-    ? Number(Number.isNaN(a)) - Number(Number.isNaN(b))
-    : a - b
-
-function modelOrder(model: Map<ModelKey, number>, order: Order) {
-  return [...model].sort(
-    ([ka, va], [kb, vb]) =>
-      (order === `key` ? 0 : order === `ascending` ? va - vb : vb - va) ||
-      compareModelKeys(ka, kb),
-  )
-}
-
 // The work law's bound for restoring k deferred keys among n others.
 function restoreBound(k: number, n: number): number {
   if (k === 0) return 0
   return k * (Math.ceil(Math.log2(k)) + Math.ceil(Math.log2(n + 1)) + 2)
-}
-
-const byKey = (entries: Array<[ModelKey, number]>) =>
-  [...entries].sort(([a], [b]) => compareModelKeys(a, b))
-
-// Compare one observed view with the model. Without the order promise, the
-// view must still hold each key once with its current value.
-function expectView(
-  actual: Array<[ModelKey, number]>,
-  expected: Array<[ModelKey, number]>,
-  orderPromised: boolean,
-) {
-  if (orderPromised) expect(actual).toEqual(expected)
-  else expect(byKey(actual)).toEqual(byKey(expected))
-}
-
-function expectMap(
-  actual: SortedMap<number, Row>,
-  model: Map<ModelKey, number>,
-  order: Order,
-  orderPromised = true,
-) {
-  // Recompute from a plain Map; do not copy SortedMap's binary insertion logic.
-  const expected = modelOrder(model, order)
-  const ranks = (entries: Iterable<[number, Row]>) =>
-    // A stale slot reads no row; keep it visible to the comparison.
-    [...entries].map(([key, row]): [ModelKey, number] => [
-      key,
-      (row as Row | undefined)?.rank as number,
-    ])
-  expect(actual.size).toBe(model.size)
-  expectView(ranks(actual), expected, orderPromised)
-  expectView(ranks(actual.entries()), expected, orderPromised)
-  const values = [...actual.values()]
-  expectView(
-    [...actual.keys()].map((key, index) => [
-      key,
-      (values[index] as Row | undefined)?.rank as number,
-    ]),
-    expected,
-    orderPromised,
-  )
-  for (const key of probeKeys) {
-    expect(actual.has(key)).toBe(model.has(key))
-    expect(actual.get(key)?.rank).toBe(model.get(key))
-  }
 }
 
 type Action = {
@@ -213,6 +133,8 @@ const fixedHistories: Array<Array<Action>> = [
     fixedStep(`delete`, Number.NaN, 0, false, true),
   ],
 ]
+
+declareOracle({ check: [expectMap], model: [modelOrder, restoreBound] })
 
 describe.each([`key`, `ascending`, `descending`] as const)(
   `SortedMap %s history`,
@@ -430,60 +352,3 @@ describe.each([`key`, `ascending`, `descending`] as const)(
     )
   },
 )
-
-it(`rejects wrong default ordering, missing tied entries, stale overwrites, and lost keys`, () => {
-  const byValue = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
-  byValue.set(1, { rank: 3 }).set(-1, { rank: 4 })
-  expect(() =>
-    expectMap(
-      byValue,
-      new Map([
-        [1, 3],
-        [-1, 4],
-      ]),
-      `key`,
-    ),
-  ).toThrow()
-  const missingTie = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
-  missingTie.set(1, { rank: 3 })
-  expect(() =>
-    expectMap(
-      missingTie,
-      new Map([
-        [1, 3],
-        [-1, 3],
-      ]),
-      `ascending`,
-    ),
-  ).toThrow()
-  const stale = new SortedMap<number, Row>()
-  stale.set(1, { rank: 3 })
-  expect(() => expectMap(stale, new Map([[1, 2]]), `key`)).toThrow()
-  // Without the order promise, a view may reorder keys but must hold each
-  // key once with its current value.
-  const expected: Array<[ModelKey, number]> = [
-    [1, 3],
-    [2, 3],
-  ]
-  expect(() =>
-    expectView(
-      [
-        [2, 3],
-        [1, 3],
-      ],
-      expected,
-      false,
-    ),
-  ).not.toThrow()
-  expect(() =>
-    expectView(
-      [
-        [1, 3],
-        [1, 3],
-      ],
-      expected,
-      false,
-    ),
-  ).toThrow()
-  expect(() => expectView([[1, 3]], expected, false)).toThrow()
-})

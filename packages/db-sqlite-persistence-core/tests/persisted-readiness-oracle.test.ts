@@ -1,4 +1,4 @@
-import { createCollection, createLiveQueryCollection } from '@tanstack/db'
+import { createLiveQueryCollection } from '@tanstack/db'
 import {
   afterAll,
   afterEach,
@@ -8,10 +8,18 @@ import {
   it,
   vi,
 } from 'vitest'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
-import { persistedCollectionOptions } from '../src/index.js'
-import type { PersistenceAdapter } from '../src/index.js'
-import type { SyncConfig } from '@tanstack/db'
+import {
+  DISK_ROW,
+  REMOTE_FAILURE,
+  REMOTE_REPORT,
+  REMOTE_ROW,
+  RESTORE_FAILURE,
+  TIMEOUT,
+  networkFirst,
+} from './persisted-readiness-support.js'
+import type { Call, Restore } from './persisted-readiness-support.js'
 
 /**
  * # When does a persisted Collection open from restored rows?
@@ -82,11 +90,10 @@ import type { SyncConfig } from '@tanstack/db'
  * The adapter is a controlled in-memory persistence adapter, not native
  * SQLite. Restarts, cross-tab coordination, and on-demand persistence are
  * outside this owner (on-demand rejects network-first configuration). Calls
- * that break the adapter contract are fixed examples below, not generated.
+ * that break the adapter contract, and the option and deadline examples, are
+ * fixed examples in persisted-readiness.test.ts, not generated.
  */
 
-type Row = { id: string; value: string }
-type Restore = `rows` | `empty` | `failed`
 type Remote = `ready` | `ready-report` | `ready-fail` | `fail`
 type Effects = `quiet` | `throwing`
 type Event =
@@ -95,8 +102,6 @@ type Event =
   | { kind: `give-up` }
   | { kind: `deadline` }
 
-// One adapter call. The calls of one event happen in the same tick.
-type Call = `ready` | `report` | `fail`
 const REMOTE_CALLS: Record<Remote, ReadonlyArray<Call>> = {
   ready: [`ready`],
   'ready-report': [`ready`, `report`],
@@ -105,12 +110,6 @@ const REMOTE_CALLS: Record<Remote, ReadonlyArray<Call>> = {
 }
 const GIVE_UP_CALLS: ReadonlyArray<Call> = [`report`, `fail`]
 
-const TIMEOUT = 100
-const DISK_ROW: Row = { id: `disk`, value: `restored` }
-const REMOTE_ROW: Row = { id: `remote`, value: `synced` }
-const RESTORE_FAILURE = `restore failed`
-const REMOTE_FAILURE = `remote gave up`
-const REMOTE_REPORT = `remote retrying`
 const READY_CALLBACK_FAILURE = `ready callback threw`
 const STATUS_LISTENER_FAILURE = `status listener threw`
 
@@ -272,85 +271,8 @@ const reachStates = [
 // Production driver
 // ---------------------------------------------------------------------------
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes
-    reject = no
-  })
-  return { promise, resolve, reject }
-}
-
-// A persistence adapter whose restore read waits for the history to settle it.
-function controlledAdapter() {
-  const load = deferred<ReadonlyArray<Row>>()
-  void load.promise.catch(() => undefined)
-  const adapter: PersistenceAdapter = {
-    loadSubset: async () =>
-      (await load.promise).map((value) => ({ key: value.id, value })),
-    loadResumeSnapshot: async (_id, options) => {
-      const rows = options?.includeRows === false ? [] : await load.promise
-      return {
-        rows: rows.map((value) => ({ key: value.id, value })),
-        keySet: { status: `consistent` },
-        collectionMetadata: [],
-        latestTerm: 0,
-        latestSeq: 0,
-        latestRowVersion: 0,
-        resetEpoch: 0,
-      }
-    },
-    applyCommittedTx: async () => {},
-    ensureIndex: async () => {},
-  }
-  return { adapter, load }
-}
-
-function networkFirst(id: string, initialRender = true) {
-  const fixture = controlledAdapter()
-  let remote: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
-  const collection = createCollection(
-    persistedCollectionOptions<Row, string>({
-      id,
-      getKey: (row) => row.id,
-      persistence: { adapter: fixture.adapter },
-      ...(initialRender
-        ? {
-            initialRender: {
-              strategy: `network-first` as const,
-              networkTimeoutMs: TIMEOUT,
-            },
-          }
-        : {}),
-      sync: {
-        sync: (params) => {
-          remote = params
-        },
-      },
-    }),
-  )
-  return {
-    collection,
-    restore: (outcome: Restore) =>
-      outcome === `failed`
-        ? fixture.load.reject(new Error(RESTORE_FAILURE))
-        : fixture.load.resolve(outcome === `rows` ? [DISK_ROW] : []),
-    // One adapter call, as the remote makes it.
-    call: (call: Call) => {
-      if (call === `ready`) {
-        remote!.begin()
-        remote!.write({ type: `insert`, value: REMOTE_ROW })
-        remote!.commit()
-        remote!.markReady()
-      } else if (call === `report`) {
-        remote!.reportError(new Error(REMOTE_REPORT))
-      } else {
-        remote!.fail(new Error(REMOTE_FAILURE))
-      }
-    },
-  }
-}
+// The controlled adapter and network-first Collection live in
+// persisted-readiness-support.ts, shared with the fixed examples.
 
 // Registers ready effects that throw: a first-ready callback and a status
 // listener. Both run after the status reads `ready`.
@@ -460,117 +382,6 @@ describe(`persisted readiness oracle`, () => {
       await source.collection.cleanup({ dependents: true })
     }
   })
-
-  // The wrapper delivers the adapter's calls after startup, so a contract
-  // violation cannot throw back at the adapter. It crashes the Collection
-  // with the violation as its cause, as a throwing sync function does.
-  it.each([
-    {
-      violation: `reportError() before markReady()`,
-      calls: [`report`] as const,
-      cause: /reportError/,
-    },
-  ])(`crashes on $violation`, async ({ violation, calls, cause }) => {
-    const source = networkFirst(`contract-violation ${violation}`, false)
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    try {
-      void source.collection.preload().catch(() => undefined)
-      source.restore(`empty`)
-      await vi.advanceTimersByTimeAsync(0)
-      calls.forEach(source.call)
-      await vi.advanceTimersByTimeAsync(0)
-      expect(source.collection.status).toBe(`crashed`)
-      expect(source.collection.health.error?.message).toMatch(cause)
-    } finally {
-      consoleError.mockRestore()
-      await source.collection.cleanup({ dependents: true })
-    }
-  })
-
-  // A run's markReady() after its fail() does nothing (core API decision
-  // F18/F6): the stopped Collection stays ready with its error.
-  it(`ignores markReady() after fail() on a ready Collection`, async () => {
-    const source = networkFirst(`mark-ready-after-fail`, false)
-    try {
-      void source.collection.preload().catch(() => undefined)
-      source.restore(`empty`)
-      await vi.advanceTimersByTimeAsync(0)
-      for (const call of [`ready`, `fail`, `ready`] as const) source.call(call)
-      await vi.advanceTimersByTimeAsync(0)
-      expect({
-        status: source.collection.status,
-        error: source.collection.health.error?.message,
-      }).toEqual({ status: `ready`, error: REMOTE_FAILURE })
-    } finally {
-      await source.collection.cleanup({ dependents: true })
-    }
-  })
-
-  it(`keeps a Collection without initialRender on the network boundary`, async () => {
-    const source = networkFirst(`no-initial-render`, false)
-    try {
-      void source.collection.preload().catch(() => undefined)
-      source.restore(`rows`)
-      await vi.advanceTimersByTimeAsync(TIMEOUT * 10)
-      expect(source.collection.status).toBe(`loading`)
-      source.call(`ready`)
-      await vi.advanceTimersByTimeAsync(0)
-      expect(source.collection.status).toBe(`ready`)
-    } finally {
-      await source.collection.cleanup({ dependents: true })
-    }
-  })
-
-  it(`defaults the network-first deadline to three seconds`, async () => {
-    const fixture = controlledAdapter()
-    const collection = createCollection(
-      persistedCollectionOptions<Row, string>({
-        id: `default-network-deadline`,
-        getKey: (row) => row.id,
-        persistence: { adapter: fixture.adapter },
-        initialRender: { strategy: `network-first` },
-        sync: { sync: () => {} },
-      }),
-    )
-    try {
-      void collection.preload().catch(() => undefined)
-      fixture.load.resolve([DISK_ROW])
-      await vi.advanceTimersByTimeAsync(2_999)
-      expect(collection.status).toBe(`loading`)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(collection.status).toBe(`ready`)
-    } finally {
-      await collection.cleanup({ dependents: true })
-    }
-  })
-
-  it(`rejects network-first initial rendering for on-demand persistence`, () => {
-    const fixture = controlledAdapter()
-    expect(() =>
-      persistedCollectionOptions<Row, string>({
-        id: `local-on-demand`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        initialRender: { strategy: `network-first`, networkTimeoutMs: 100 },
-        persistence: { adapter: fixture.adapter },
-      }),
-    ).toThrow(/network-first.*eager/i)
-  })
-
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
-    `rejects an invalid network timeout (%s)`,
-    (networkTimeoutMs) => {
-      const fixture = controlledAdapter()
-      expect(() =>
-        persistedCollectionOptions<Row, string>({
-          id: `invalid-network-deadline`,
-          getKey: (row) => row.id,
-          persistence: { adapter: fixture.adapter },
-          initialRender: { strategy: `network-first`, networkTimeoutMs },
-        }),
-      ).toThrow(/networkTimeoutMs/)
-    },
-  )
 })
 
 // Marks the declared states the history enters with its next event, as the
@@ -611,3 +422,5 @@ function describe_(events: ReadonlyArray<Event>): string {
     )
     .join(` > `)
 }
+
+declareOracle({ model: [expected], grammar: [histories] })

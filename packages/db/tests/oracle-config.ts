@@ -5,6 +5,9 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `lint.part-reach`,
+  `scripts.lint-scope`,
+  `scripts.run-budget`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
   `react.ssr-stream-cut`,
@@ -713,6 +716,8 @@ export function oracleCalibrationTest<TRegistration extends { skip: unknown }>(
       process.env.TANSTACK_DB_ORACLE_CALIBRATION !== fault)
   return standsAside ? (registration.skip as TRegistration) : registration
 }
+
+export { declareOracle } from './oracle-declaration.js'
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
 export function oracleRuns(baseRuns: number): number {

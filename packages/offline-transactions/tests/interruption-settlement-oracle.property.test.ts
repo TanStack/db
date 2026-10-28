@@ -5,6 +5,7 @@ import {
   oraclePropertyOptions,
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   atOracleCheckpoint,
@@ -309,6 +310,8 @@ async function checkInterruption({
     )
   }
 }
+
+declareOracle({ check: [checkInterruption] })
 
 /**
  * Fixed histories designed to reach each interruption landing deterministically.

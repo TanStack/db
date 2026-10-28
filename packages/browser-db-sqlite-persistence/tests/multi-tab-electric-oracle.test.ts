@@ -99,6 +99,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { createCollection } from '@tanstack/db'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
@@ -579,184 +580,195 @@ describe(`multi-tab Electric over one persisted database`, () => {
       ),
     ),
   )
-  it.each(stormHistories)(
-    `commits every reserved refetch across tabs ($tabCount tabs, $syncMode, $finisher finishes first, $arrival, open $open, stop: $stop, recovery: $recovery)`,
-    async ({ tabCount, syncMode, finisher, arrival, open, stop, recovery }) => {
-      host = openHost()
-      const tabs = await openWarmTabs(host, tabCount, syncMode)
-      for (const tab of tabs) {
-        tab.deliver([...beforeDeploy.map(insert), upToDate], {
-          handle: `h1`,
-          offset: `10_0`,
-        })
-        await host.quiesce(`tab ${tab.tab} warm`)
-      }
-      type RefetchReach =
-        | `peer commit announced during an open refetch`
-        | `stopped tab resumed from the persisted position`
-        | `peer commit announced during the stopped tab's open transaction`
-        | `a source stopped while its transaction was open`
-        | `restarted tab opened a new stream`
-      const reach = createOracleReach<RefetchReach>(
-        `browser.multi-tab-reserved-refetch`,
-        [
-          ...(arrival === `storm`
-            ? ([`peer commit announced during an open refetch`] as const)
-            : []),
-          ...(open === `resumed batch`
-            ? ([`stopped tab resumed from the persisted position`] as const)
-            : []),
-          ...(stop === `none`
-            ? []
-            : ([
-                `peer commit announced during the stopped tab's open transaction`,
-                `a source stopped while its transaction was open`,
-                `restarted tab opened a new stream`,
-              ] as const)),
-        ],
-      )
-      reach.beginHistory()
+  // The storm driver: it runs one cell on real tabs and checks every tab's
+  // rows and status against the law at each checkpoint.
+  const runStormHistory = async ({
+    tabCount,
+    syncMode,
+    finisher,
+    arrival,
+    open,
+    stop,
+    recovery,
+  }: (typeof stormHistories)[number]) => {
+    host = openHost()
+    const tabs = await openWarmTabs(host, tabCount, syncMode)
+    for (const tab of tabs) {
+      tab.deliver([...beforeDeploy.map(insert), upToDate], {
+        handle: `h1`,
+        offset: `10_0`,
+      })
+      await host.quiesce(`tab ${tab.tab} warm`)
+    }
+    type RefetchReach =
+      | `peer commit announced during an open refetch`
+      | `stopped tab resumed from the persisted position`
+      | `peer commit announced during the stopped tab's open transaction`
+      | `a source stopped while its transaction was open`
+      | `restarted tab opened a new stream`
+    const reach = createOracleReach<RefetchReach>(
+      `browser.multi-tab-reserved-refetch`,
+      [
+        ...(arrival === `storm`
+          ? ([`peer commit announced during an open refetch`] as const)
+          : []),
+        ...(open === `resumed batch`
+          ? ([`stopped tab resumed from the persisted position`] as const)
+          : []),
+        ...(stop === `none`
+          ? []
+          : ([
+              `peer commit announced during the stopped tab's open transaction`,
+              `a source stopped while its transaction was open`,
+              `restarted tab opened a new stream`,
+            ] as const)),
+      ],
+    )
+    reach.beginHistory()
 
-      // The last tab to finish is the one whose source may stop.
-      const finishOrder = finisher === `first` ? tabs : [...tabs].reverse()
-      const stoppedIndex =
-        stop === `none` ? undefined : tabs.indexOf(finishOrder.at(-1)!)
-      if (open === `resumed batch`) {
-        // A page reload: the tab closes and reopens over the same database,
-        // resuming from its persisted position. Its first batch after the
-        // resume stays open, as a batch with no up-to-date does.
-        const closing = tabs[stoppedIndex!]!
-        const streamsBefore = closing.streamCount()
-        await closing.close()
-        await host.quiesce(`stopped tab closed`)
-        const reopened = host.openTab(closing.tab, syncMode)
-        await waitForStream(reopened, streamsBefore + 1)
-        tabs[stoppedIndex!] = reopened
-        if (reopened.startedAt().handle === `h1`) {
-          reach.reach(`stopped tab resumed from the persisted position`)
-        }
-        reopened.deliver([upToDate], { handle: `h1`, offset: `10_0` })
-        await host.quiesce(`stopped tab resumed`)
-        reopened.deliver([update({ id: 1, label: `one, unfinished` })], {
-          handle: `h1`,
-          offset: `11_0`,
-        })
-        await host.quiesce(`resumed batch open`)
+    // The last tab to finish is the one whose source may stop.
+    const finishOrder = finisher === `first` ? tabs : [...tabs].reverse()
+    const stoppedIndex =
+      stop === `none` ? undefined : tabs.indexOf(finishOrder.at(-1)!)
+    if (open === `resumed batch`) {
+      // A page reload: the tab closes and reopens over the same database,
+      // resuming from its persisted position. Its first batch after the
+      // resume stays open, as a batch with no up-to-date does.
+      const closing = tabs[stoppedIndex!]!
+      const streamsBefore = closing.streamCount()
+      await closing.close()
+      await host.quiesce(`stopped tab closed`)
+      const reopened = host.openTab(closing.tab, syncMode)
+      await waitForStream(reopened, streamsBefore + 1)
+      tabs[stoppedIndex!] = reopened
+      if (reopened.startedAt().handle === `h1`) {
+        reach.reach(`stopped tab resumed from the persisted position`)
       }
-      const stoppedTab =
-        stoppedIndex === undefined ? undefined : tabs[stoppedIndex]
-      const refetchingTabs = (
-        finisher === `first` ? tabs : [...tabs].reverse()
-      ).filter((tab) => open === `refetch` || tab !== stoppedTab)
-      const noticesBefore = host.commitNotices()
-      const stopSource = async () => {
-        if (!stoppedTab || stop === `none`) return
-        if (host!.commitNotices() > noticesBefore) {
-          reach.reach(
-            `peer commit announced during the stopped tab's open transaction`,
-          )
-        }
-        void Promise.resolve(stoppedTab.stopStream(stop)).catch(() => undefined)
-        await host!.quiesce(`tab ${stoppedTab.tab} source stopped`)
-        reach.reach(`a source stopped while its transaction was open`)
-      }
-      const refetch = (tab: Tab) =>
-        tab.deliver([...afterDeploy.map(insert), upToDate], {
-          handle: `h2`,
-          offset: `20_0`,
-        })
-      if (arrival === `storm`) {
-        for (const tab of refetchingTabs)
-          tab.deliver([mustRefetch], { handle: `h1`, offset: `10_0` })
-        const noticesBeforeRefetch = host.commitNotices()
-        await host.quiesce(`every refetch open`)
-        // Each tab's reset marker is a peer notice for every other tab while
-        // its own reserved refetch is open.
-        if (host.commitNotices() > noticesBeforeRefetch) {
-          reach.reach(`peer commit announced during an open refetch`)
-        }
-        for (const tab of refetchingTabs) {
-          if (tab === stoppedTab) continue
-          refetch(tab)
-          await host.quiesce(`tab ${tab.tab} refetched`)
-        }
-        await stopSource()
-      } else {
-        for (const tab of refetchingTabs) {
-          tab.deliver([mustRefetch], { handle: `h1`, offset: `10_0` })
-          await host.quiesce(`tab ${tab.tab} refetch open`)
-          if (tab === stoppedTab) continue
-          refetch(tab)
-          await host.quiesce(`tab ${tab.tab} refetched`)
-        }
-        await stopSource()
-      }
-
-      // Checkpoint 1, every source has delivered or stopped. A rejected
-      // reserved commit would fail its source. A stopped tab that is still
-      // open shows its peers' refetch, including one whose source failed on
-      // resume invalidation (Law 3); a cleaned-up tab has no rows. Eager rows
-      // must equal the head snapshot; on-demand rows are not judged (above).
-      // Resume invalidation comes after the tab was ready, so the tab stays
-      // `ready` and its health node records the source's error (#2168: after
-      // readiness, sync failures never change Collection status).
-      const stoppedStatus = stop === `cleanup` ? `cleaned-up` : `ready`
-      const judgesRowsBeforeRestart = (tab: Tab) =>
-        syncMode === `eager` && (tab !== stoppedTab || stop !== `cleanup`)
-      const judgesSourceError = (tab: Tab) =>
-        tab === stoppedTab && stop === `resume invalidated`
-      const observe = (judgesRows: (tab: Tab) => boolean) =>
-        tabs.map((tab) => ({
-          tab: tab.tab,
-          status: tab.collection.status,
-          ...(judgesRows(tab) ? { rows: tab.publicRows() } : {}),
-          ...(judgesSourceError(tab)
-            ? { sourceError: tab.collection.health.error !== null }
-            : {}),
-        }))
-      expect(observe(judgesRowsBeforeRestart)).toEqual(
-        tabs.map((tab) => ({
-          tab: tab.tab,
-          status: tab === stoppedTab ? stoppedStatus : `ready`,
-          ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
-          ...(judgesSourceError(tab) ? { sourceError: true } : {}),
-        })),
-      )
-
-      // Checkpoint 2, after the application recovers the stopped tab and the
-      // server answers its new stream from where it starts. A restart cleans
-      // up and starts the same Collection again; a reload closes the tab and
-      // opens it again over the same database, so it reads only durable
-      // state.
-      if (stoppedTab) {
-        const streamsBefore = stoppedTab.streamCount()
-        let recovered = stoppedTab
-        if (recovery === `restart`) await stoppedTab.restart()
-        else {
-          await stoppedTab.close()
-          await host.quiesce(`tab ${stoppedTab.tab} closed`)
-          recovered = host.openTab(stoppedTab.tab, syncMode)
-          tabs[stoppedIndex!] = recovered
-        }
-        await waitForStream(recovered, streamsBefore + 1)
-        reach.reach(`restarted tab opened a new stream`)
-        const restartedAt = recovered.startedAt()
-        await serveHead(host, recovered, restartedAt)
-        if (stop === `resume invalidated`) {
-          expect(restartedAt).toEqual({ handle: undefined, offset: `-1` })
-        }
-        // The new sync run starts without the retired run's problems.
-        expect(observe(() => syncMode === `eager`)).toEqual(
-          tabs.map((tab) => ({
-            tab: tab.tab,
-            status: `ready`,
-            ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
-            ...(judgesSourceError(tab) ? { sourceError: false } : {}),
-          })),
+      reopened.deliver([upToDate], { handle: `h1`, offset: `10_0` })
+      await host.quiesce(`stopped tab resumed`)
+      reopened.deliver([update({ id: 1, label: `one, unfinished` })], {
+        handle: `h1`,
+        offset: `11_0`,
+      })
+      await host.quiesce(`resumed batch open`)
+    }
+    const stoppedTab =
+      stoppedIndex === undefined ? undefined : tabs[stoppedIndex]
+    const refetchingTabs = (
+      finisher === `first` ? tabs : [...tabs].reverse()
+    ).filter((tab) => open === `refetch` || tab !== stoppedTab)
+    const noticesBefore = host.commitNotices()
+    const stopSource = async () => {
+      if (!stoppedTab || stop === `none`) return
+      if (host!.commitNotices() > noticesBefore) {
+        reach.reach(
+          `peer commit announced during the stopped tab's open transaction`,
         )
       }
-      reach.assertReached()
-    },
+      void Promise.resolve(stoppedTab.stopStream(stop)).catch(() => undefined)
+      await host!.quiesce(`tab ${stoppedTab.tab} source stopped`)
+      reach.reach(`a source stopped while its transaction was open`)
+    }
+    const refetch = (tab: Tab) =>
+      tab.deliver([...afterDeploy.map(insert), upToDate], {
+        handle: `h2`,
+        offset: `20_0`,
+      })
+    if (arrival === `storm`) {
+      for (const tab of refetchingTabs)
+        tab.deliver([mustRefetch], { handle: `h1`, offset: `10_0` })
+      const noticesBeforeRefetch = host.commitNotices()
+      await host.quiesce(`every refetch open`)
+      // Each tab's reset marker is a peer notice for every other tab while
+      // its own reserved refetch is open.
+      if (host.commitNotices() > noticesBeforeRefetch) {
+        reach.reach(`peer commit announced during an open refetch`)
+      }
+      for (const tab of refetchingTabs) {
+        if (tab === stoppedTab) continue
+        refetch(tab)
+        await host.quiesce(`tab ${tab.tab} refetched`)
+      }
+      await stopSource()
+    } else {
+      for (const tab of refetchingTabs) {
+        tab.deliver([mustRefetch], { handle: `h1`, offset: `10_0` })
+        await host.quiesce(`tab ${tab.tab} refetch open`)
+        if (tab === stoppedTab) continue
+        refetch(tab)
+        await host.quiesce(`tab ${tab.tab} refetched`)
+      }
+      await stopSource()
+    }
+
+    // Checkpoint 1, every source has delivered or stopped. A rejected
+    // reserved commit would fail its source. A stopped tab that is still
+    // open shows its peers' refetch, including one whose source failed on
+    // resume invalidation (Law 3); a cleaned-up tab has no rows. Eager rows
+    // must equal the head snapshot; on-demand rows are not judged (above).
+    // Resume invalidation comes after the tab was ready, so the tab stays
+    // `ready` and its health node records the source's error (#2168: after
+    // readiness, sync failures never change Collection status).
+    const stoppedStatus = stop === `cleanup` ? `cleaned-up` : `ready`
+    const judgesRowsBeforeRestart = (tab: Tab) =>
+      syncMode === `eager` && (tab !== stoppedTab || stop !== `cleanup`)
+    const judgesSourceError = (tab: Tab) =>
+      tab === stoppedTab && stop === `resume invalidated`
+    const observe = (judgesRows: (tab: Tab) => boolean) =>
+      tabs.map((tab) => ({
+        tab: tab.tab,
+        status: tab.collection.status,
+        ...(judgesRows(tab) ? { rows: tab.publicRows() } : {}),
+        ...(judgesSourceError(tab)
+          ? { sourceError: tab.collection.health.error !== null }
+          : {}),
+      }))
+    expect(observe(judgesRowsBeforeRestart)).toEqual(
+      tabs.map((tab) => ({
+        tab: tab.tab,
+        status: tab === stoppedTab ? stoppedStatus : `ready`,
+        ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
+        ...(judgesSourceError(tab) ? { sourceError: true } : {}),
+      })),
+    )
+
+    // Checkpoint 2, after the application recovers the stopped tab and the
+    // server answers its new stream from where it starts. A restart cleans
+    // up and starts the same Collection again; a reload closes the tab and
+    // opens it again over the same database, so it reads only durable
+    // state.
+    if (stoppedTab) {
+      const streamsBefore = stoppedTab.streamCount()
+      let recovered = stoppedTab
+      if (recovery === `restart`) await stoppedTab.restart()
+      else {
+        await stoppedTab.close()
+        await host.quiesce(`tab ${stoppedTab.tab} closed`)
+        recovered = host.openTab(stoppedTab.tab, syncMode)
+        tabs[stoppedIndex!] = recovered
+      }
+      await waitForStream(recovered, streamsBefore + 1)
+      reach.reach(`restarted tab opened a new stream`)
+      const restartedAt = recovered.startedAt()
+      await serveHead(host, recovered, restartedAt)
+      if (stop === `resume invalidated`) {
+        expect(restartedAt).toEqual({ handle: undefined, offset: `-1` })
+      }
+      // The new sync run starts without the retired run's problems.
+      expect(observe(() => syncMode === `eager`)).toEqual(
+        tabs.map((tab) => ({
+          tab: tab.tab,
+          status: `ready`,
+          ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
+          ...(judgesSourceError(tab) ? { sourceError: false } : {}),
+        })),
+      )
+    }
+    reach.assertReached()
+  }
+  it.each(stormHistories)(
+    `commits every reserved refetch across tabs ($tabCount tabs, $syncMode, $finisher finishes first, $arrival, open $open, stop: $stop, recovery: $recovery)`,
+    runStormHistory,
     30_000,
   )
 
@@ -1332,6 +1344,14 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | `peer commit after signal aborted mid-transaction`
     | `peer reset abandoned an open transaction`
     | `reset-abandoned commit put the Collection in error`
+  // The storm driver and the generated-history driver are the checks; the
+  // generated driver folds committed batches into its own model of durable
+  // rows. The storm cells and the generated-history arbitrary are the grammar.
+  declareOracle({
+    check: [runStormHistory, runGeneratedHistory],
+    grammar: [stormHistories, generatedHistory],
+  })
+
   const createGeneratedReach = () =>
     createOracleReach<GeneratedReach>(`browser.multi-tab-reserved-history`, [
       `must-refetch delivered`,

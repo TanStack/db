@@ -29,6 +29,7 @@ const groups = {
     `@tanstack/angular-db`,
   ],
   collections: [
+    `@tanstack/convex-db-collection`,
     `@tanstack/electric-db-collection`,
     `@tanstack/query-db-collection`,
     `@tanstack/powersync-db-collection`,
