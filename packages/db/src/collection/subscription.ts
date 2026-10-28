@@ -854,13 +854,9 @@ export class CollectionSubscription
   }
 
   private setReadyIfIdle(): void {
-    const replayState = this.truncateReplayState
-    const hasPendingReplayWork =
-      replayState &&
-      (replayState.pendingSetups > 0 || replayState.pending.size > 0)
     if (
       this.pendingLoadSubsetParticipants.size === 0 &&
-      !hasPendingReplayWork
+      !this.hasTruncateReplayWork
     ) {
       this.setStatus(`ready`)
     }
@@ -905,7 +901,7 @@ export class CollectionSubscription
     replayState: TruncateReplayState,
     finish: () => void,
   ): boolean {
-    const siblings = this.options.truncateReplayPublication?.siblingReplays?.()
+    const siblings = this.options.truncateReplayPublication?.siblingReplays()
     void siblings?.then(() => {
       if (this.truncateReplayState === replayState) finish()
     })

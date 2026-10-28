@@ -1354,8 +1354,11 @@ applies only after its replacement is complete. A failed replay rejects the
 move without advancing the reported window. A replay that a newer truncate or
 the retirement of its last demand discards did not fail, even though its
 completion rejects with `AbortError`: the move waits for any replay that still
-holds publication and then applies. A reload of the query or of a source ends
-the sync run the move waits in, and the move rejects. Replay completion callbacks carry
+holds publication and then applies. When a replay it waits on is discarded and
+the query's or a source's sync run changed meanwhile, as a reload changes it,
+the move rejects with that replay's `AbortError`. The move compares the sync
+runs only when a replay it waits on rejects, so a reload of another source
+whose replay it does not wait on leaves the move to apply. Replay completion callbacks carry
 their sync-run identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.

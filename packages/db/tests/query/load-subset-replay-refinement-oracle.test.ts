@@ -1141,8 +1141,11 @@ describe(`loadSubset replay refinement`, () => {
  *   it starts, as a synchronous adapter does, is a rejection: a throw inside
  *   an open replay fails that replay. The throw happens while the
  *   subscription registers the demand, so it joins a replay only if that
- *   replay still has a participant or a failure. So a query may end in
- *   `error` only after a load failed while the query was still loading.
+ *   replay still has a participant, a failure, or no participant yet. So a
+ *   query may end in `error` only after a load failed while that query was
+ *   still loading. At each history cut, the query lists every request failure
+ *   that the request-error account still owes, by its injected error object.
+ *   After recovery replays every source, no request error stays.
  * - **Status:** with no failed load, a quiet live query and its peer are
  *   `ready`; a release that throws does not change status.
  * - **Initial readiness:** when the history starts during the initial
@@ -1188,8 +1191,13 @@ describe(`loadSubset replay refinement`, () => {
  * the marker barrier from a throw to the end of its episode (a barrier
  * raised while an earlier one in the episode is ambiguous inherits that). So
  * a design that dropped a thrown demand and let its replay succeed would pass
- * wherever only retention could see it. The request-error witness reads the
- * query's own health node; it does not check which request each error names.
+ * wherever only retention could see it. The request-error account shares the
+ * model's replay across a query's subscriptions to a source, so it owes a
+ * failure in a replay only after every load of that source settled; it does
+ * not judge one subscription's request error while another load is held. It
+ * reads only the query's own node and permits extra listed failures. Which
+ * failure a deferred window move rejects with, when its replay has several,
+ * is not judged.
  */
 type OrderedFailureState =
   `initiating-keyed-request-failed` | `keyed-reacquisition-failed`
@@ -1332,6 +1340,8 @@ type OrderedReach = {
   // A failed load after initial-query readiness left a request error on the
   // query's own node, and the query stayed ready (ARCHITECTURE.md law 16).
   requestErrors: number
+  // Cuts where the request-error account owed a request error.
+  requestErrorChecks: number
   replayLoads: number
   abortRejections: number
   preloadChecks: number
@@ -1471,7 +1481,12 @@ async function checkOrderedReplay(
   const installed = new Map<number, OrderedRow>()
   // Each load records the truncate count it was issued after, so a fault can
   // be placed before or after the replay's loads settle.
-  type Load = { epoch: number; outcome: `pending` | `ok` | `failed` }
+  type Load = {
+    epoch: number
+    outcome: `pending` | `ok` | `failed`
+    // The error this history injected when the load failed.
+    error?: Error
+  }
   const loads: Array<Load> = []
   // Retention model. Each source with an open or failed replay has a
   // barrier. `pending` holds the loads that still hold its publication: the
@@ -1482,6 +1497,8 @@ async function checkOrderedReplay(
   type BarrierSource = `rows` | `markers`
   type Barrier = {
     failures: Map<Load, LoadSubsetOptions>
+    // When the barrier rose, on the request-error account's clock.
+    raisedAt: number
     // A release threw while this replay started, which may fail it.
     ambiguous: boolean
     pending: Map<Load, LoadSubsetOptions>
@@ -1504,20 +1521,23 @@ async function checkOrderedReplay(
       retainedRows = JSON.stringify(live.toArray)
       retainedAfterReady = live.status === `ready`
     }
-    barriers.set(source, {
+    const barrier: Barrier = {
       failures: new Map(),
+      raisedAt: ++requestClock,
       // The retained publication dates from the first barrier, so an
       // ambiguous barrier earlier in this episode leaves it ambiguous.
       ambiguous: [...barriers.values()].some(({ ambiguous }) => ambiguous),
       pending: new Map(barriers.get(source)?.pending),
       own: new Set(),
-    })
+    }
+    barriers.set(source, barrier)
   }
   // A replay whose participants all settled without a failure publishes.
   const lowerSettledBarriers = () => {
     for (const [source, barrier] of barriers) {
       if (barrier.failures.size === 0 && barrier.pending.size === 0) {
         barriers.delete(source)
+        recoveries.push({ source, raisedAt: barrier.raisedAt })
       }
     }
     if (barriers.size === 0) retainedRows = undefined
@@ -1603,7 +1623,13 @@ async function checkOrderedReplay(
   // A failed initial load is fatal too (error 229). The queries are created
   // below; a load can only fail after they start.
   const queries: Array<{ status: string }> = []
-  let failedWhileLoading = false
+  // The queries that were still loading when a load failed: each may end in
+  // an initial load failure.
+  const failedWhileLoading = new Set<{ status: string }>()
+  const noteLoadingFailure = () => {
+    for (const query of queries)
+      if (query.status === `loading`) failedWhileLoading.add(query)
+  }
   // The driver observes each initiating keyed snapshot request's result
   // receipt and matches only the exact errors this history injected into
   // loads, so it uses no replay state, callback timing, or predicate
@@ -1660,6 +1686,95 @@ async function checkOrderedReplay(
     options.where !== undefined &&
     options.orderBy === undefined &&
     !readsRank(options.where)
+  // Request-error account (ARCHITECTURE.md law 16; glossary, "request
+  // error"). After initial-query readiness, a failed lazy demand load is a
+  // request error on the query's own node. The error stays until one of these
+  // meets it:
+  // - its demand retires, which aborts its request and unloads it;
+  // - a later load of the same source covers its keys;
+  // - a replay of its source that rose after the failure completes, since a
+  //   replay asks again for every held demand.
+  // A failure that joins a replay waits for that replay's verdict, which
+  // comes once every participant settled, so it owes no error before then. Keys come from evaluating the request's
+  // `where` over a small key domain, independent of production's bookkeeping.
+  // The account combines the production concepts of a failed request and the
+  // replay verdict that decides it; it names no production structure.
+  let requestClock = 0
+  const keyDomain = Array.from({ length: 14 }, (_, index) => index - 2)
+  const requestedKeys = (source: BarrierSource, options: LoadSubsetOptions) =>
+    new Set(
+      keyDomain.filter(
+        (id) =>
+          !options.where ||
+          evaluateReferenceExpression(
+            options.where,
+            source === `markers` ? { id, rowId: id } : { id, rank: 0 },
+          ) === true,
+      ),
+    )
+  type RequestFailure = {
+    // The failed load; its injected error is the failure the node lists.
+    load: Load
+    source: BarrierSource
+    options: LoadSubsetOptions
+    keys: Set<number>
+    at: number
+    // The replay the load joined, whose verdict decides it.
+    barrier?: Barrier
+  }
+  const requestFailures: Array<RequestFailure> = []
+  const loadedKeys: Array<{
+    source: BarrierSource
+    keys: Set<number>
+    at: number
+  }> = []
+  const recoveries: Array<{ source: BarrierSource; raisedAt: number }> = []
+  const unloaded = new WeakSet<LoadSubsetOptions>()
+  const allReady = () => queries.every(({ status }) => status === `ready`)
+  const recordLoaded = (source: BarrierSource, keys: Set<number>) =>
+    loadedKeys.push({ source, keys, at: ++requestClock })
+  const recordRequestFailure = (
+    load: Load,
+    source: BarrierSource,
+    options: LoadSubsetOptions,
+    startedReady: boolean,
+    participant: boolean,
+  ) => {
+    if (!startedReady || !allReady() || !isDemand(options)) return
+    if (options.signal?.aborted) return
+    requestFailures.push({
+      load,
+      source,
+      options,
+      keys: requestedKeys(source, options),
+      at: ++requestClock,
+      barrier: participant ? barriers.get(source) : undefined,
+    })
+  }
+  const requestErrorOwed = (failure: RequestFailure) => {
+    if (failure.options.signal?.aborted || unloaded.has(failure.options))
+      return false
+    // A replay gives its verdict once every participant settled, failed or
+    // not (ARCHITECTURE.md law 17).
+    const { barrier } = failure
+    if (
+      barrier &&
+      barriers.get(failure.source) === barrier &&
+      barrier.pending.size > 0
+    )
+      return false
+    const covered = loadedKeys.some(
+      (loaded) =>
+        loaded.source === failure.source &&
+        loaded.at > failure.at &&
+        [...failure.keys].every((key) => loaded.keys.has(key)),
+    )
+    const recovered = recoveries.some(
+      (recovery) =>
+        recovery.source === failure.source && recovery.raisedAt > failure.at,
+    )
+    return !covered && !recovered
+  }
   // The truncate count of its source when each request was first issued. A
   // replay asks again for a held demand with the same request data, because
   // request data is immutable (ARCHITECTURE.md), and a new demand builds a
@@ -1732,6 +1847,7 @@ async function checkOrderedReplay(
     markerTruncates: 0,
     terminalErrors: 0,
     requestErrors: 0,
+    requestErrorChecks: 0,
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
@@ -1789,11 +1905,15 @@ async function checkOrderedReplay(
               // The throw happens while the subscription registers the
               // demand, so the barrier here is the replay's state then. One
               // whose participants all retired or settled has completed, and
-              // the demand does not join it.
+              // the demand does not join it. A replay that no participant
+              // joined yet is still starting its loads, which hold
+              // publication (ARCHITECTURE.md), so a throw then joins it.
               const open = barriers.get(`markers`)
               const participant =
                 open !== undefined &&
-                (open.pending.size > 0 || open.failures.size > 0) &&
+                (open.pending.size > 0 ||
+                  open.failures.size > 0 ||
+                  open.own.size === 0) &&
                 joinBarrier(`markers`, load, options)
               // A throw that joins a replay that is only loading.
               const strict =
@@ -1812,15 +1932,15 @@ async function checkOrderedReplay(
               if (recovery && strict && isDemand(options)) {
                 reach.thrownReplayDemands++
               }
-              if (queries.some(({ status }) => status === `loading`)) {
-                failedWhileLoading = true
-              }
+              noteLoadingFailure()
               reach.failedLoads++
               const thrown = inject(new Error(`marker load threw`))
+              load.error = thrown
               injectedLoadFaults.add(thrown)
               throw thrown
             }
             return (async () => {
+              const startedReady = allReady()
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
               const load: Load = { epoch: truncates, outcome: `pending` }
               loads.push(load)
@@ -1882,12 +2002,19 @@ async function checkOrderedReplay(
                     }
                   }
                   if (queries.some(({ status }) => status === `loading`)) {
-                    failedWhileLoading = true
                     // Lazy demand in a replay failed before the first ready.
                     if (participant && isDemand(options)) {
                       reach.preloadReplayFailures++
                     }
                   }
+                  noteLoadingFailure()
+                  recordRequestFailure(
+                    load,
+                    `markers`,
+                    options,
+                    startedReady,
+                    participant,
+                  )
                   if (!options.signal?.aborted) {
                     if (newDemandDuringReplay)
                       recordReach(`new-demand-failed-during-marker-replay`)
@@ -1895,7 +2022,11 @@ async function checkOrderedReplay(
                       recordReach(`settled-marker-demand-replay-failed`)
                   }
                   reach.failedLoads++
-                  throw injectLoad(new Error(`marker load failed`), options)
+                  load.error = injectLoad(
+                    new Error(`marker load failed`),
+                    options,
+                  )
+                  throw load.error
                 }
               } else await Promise.resolve()
               if (options.signal?.aborted) {
@@ -1926,11 +2057,13 @@ async function checkOrderedReplay(
               }
               await operations.commit()
               load.outcome = `ok`
+              recordLoaded(`markers`, requestedKeys(`markers`, options))
               // The load settles once its rows apply.
               settleParticipant(`markers`, load, options, true)
             })()
           },
           unloadSubset: (options) => {
+            unloaded.add(options)
             retireParticipants(`markers`, options)
             const count = acquired.get(options) ?? 0
             if (count === 0) {
@@ -1954,6 +2087,7 @@ async function checkOrderedReplay(
         sync.markReady()
         return {
           loadSubset: async (options) => {
+            const startedReady = allReady()
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = { epoch: truncates, outcome: `pending` }
             loads.push(load)
@@ -1985,14 +2119,22 @@ async function checkOrderedReplay(
                   reach.participantDemandFailures++
                 }
                 if (queries.some(({ status }) => status === `loading`)) {
-                  failedWhileLoading = true
                   // Lazy demand in a replay failed before the first ready.
                   if (participant && isDemand(options)) {
                     reach.preloadReplayFailures++
                   }
                 }
+                noteLoadingFailure()
+                recordRequestFailure(
+                  load,
+                  `rows`,
+                  options,
+                  startedReady,
+                  participant,
+                )
                 reach.failedLoads++
-                throw injectLoad(new Error(`load failed`), options)
+                load.error = injectLoad(new Error(`load failed`), options)
+                throw load.error
               }
             } else await Promise.resolve()
             if (options.signal?.aborted) {
@@ -2037,10 +2179,19 @@ async function checkOrderedReplay(
             }
             await sync.commit()
             load.outcome = `ok`
+            // An ordered load covers the rows it selected; a keyed load, the
+            // keys it asked for.
+            recordLoaded(
+              `rows`,
+              options.orderBy
+                ? new Set(selected.map(({ id }) => id))
+                : requestedKeys(`rows`, options),
+            )
             // The load settles once its rows apply.
             settleParticipant(`rows`, load, options, true)
           },
           unloadSubset: (options) => {
+            unloaded.add(options)
             retireParticipants(`rows`, options)
             const count = acquired.get(options) ?? 0
             if (count === 0) {
@@ -2121,8 +2272,28 @@ async function checkOrderedReplay(
   // After initial-query readiness no load failure ends the query
   // (ARCHITECTURE.md law 16), so a terminal error needs a load that failed
   // while the query was still loading: an initial load failure.
-  const checkTerminal = (label: string) => {
-    expect(failedWhileLoading, `${label}: terminal error`).toBe(true)
+  const checkTerminal = (label: string, shown: { status: string }) => {
+    expect(failedWhileLoading.has(shown), `${label}: terminal error`).toBe(true)
+  }
+  // At a cut, a query that has not ended lists each failure the account
+  // owes among its node's open request failures, by the injected error
+  // object. With a peer, the adapter cannot tell which query issued a load,
+  // so either query's node may list it.
+  const checkRequestErrors = (label: string) => {
+    if (queries.some(({ status }) => status !== `ready`)) return
+    const owed = requestFailures.filter(requestErrorOwed)
+    if (owed.length === 0) return
+    reach.requestErrorChecks++
+    for (const failure of owed) {
+      expect(
+        [live, peer].some((query) =>
+          query?.health.error?.errors.some(
+            ({ cause }) => cause === failure.load.error,
+          ),
+        ),
+        `${label}: request error for "${failure.load.error?.message}" on keys ${[...failure.keys].join()}`,
+      ).toBe(true)
+    }
   }
   // A subscriber keeps each live query from garbage collection while a
   // history waits on held loads.
@@ -2360,10 +2531,11 @@ async function checkOrderedReplay(
       }
       await flushPromises()
       checkRetention(`retained publication after ${command.type}`)
+      checkRequestErrors(`after ${command.type}`)
       // Judge a terminal error at the history cut where it appears, before
       // final recovery can hide an incorrect transition.
       for (const shown of [live, peer]) {
-        if (shown?.status === `error`) checkTerminal(`history`)
+        if (shown?.status === `error`) checkTerminal(`history`, shown)
       }
       // A failed load after initial-query readiness shows as a request error
       // until a later load of its data succeeds.
@@ -2434,9 +2606,14 @@ async function checkOrderedReplay(
       ...(peer ? [[peer, `peer convergence`, peerWindow] as const] : []),
     ] as const) {
       if (shown.status === `error`) {
-        checkTerminal(label)
+        checkTerminal(label, shown)
         reach.terminalErrors++
-      } else checkWindow(label, shown.toArray, expected)
+      } else {
+        checkWindow(label, shown.toArray, expected)
+        // Recovery replayed every source and revalidated the window, and each
+        // success decides the request errors before it, so none stays.
+        expect(shown.health.error, `${label}: stale request error`).toBeNull()
+      }
     }
   } finally {
     holding = false
@@ -3109,6 +3286,7 @@ describe(`Ordered windows across truncate replays`, () => {
         markerTruncates: 0,
         terminalErrors: 0,
         requestErrors: 0,
+        requestErrorChecks: 0,
         replayLoads: 0,
         abortRejections: 0,
         preloadChecks: 0,
@@ -3145,6 +3323,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `partialFailureRetirements`,
         `preloadReplayFailures`,
         `discardedReplayMoves`,
+        `requestErrorChecks`,
       ])
       // Counts are histories, rather than repeated events in one trace.
       const dimensions = (
@@ -3284,9 +3463,12 @@ describe(`Ordered windows across truncate replays`, () => {
         }),
       ),
       fc.array(orderedCommand, { maxLength: 6 }),
+      // The failed demand's retry, which the query starts at once, may stay
+      // held, so later commands act while that demand is still unloaded.
+      fc.boolean(),
     )
     .map(
-      ([scenario, joined, settles, newest, move, rest]): [
+      ([scenario, joined, settles, newest, move, rest, retryHeld]): [
         Array<OrderedCommand>,
         OrderedScenario,
       ] => [
@@ -3301,7 +3483,15 @@ describe(`Ordered windows across truncate replays`, () => {
           })),
           { type: `settle`, ok: false, newest: true, keepHolding: true },
           ...(move
-            ? [move, { type: `settle` as const, ok: false, newest: false }]
+            ? [
+                move,
+                {
+                  type: `settle` as const,
+                  ok: false,
+                  newest: false,
+                  keepHolding: retryHeld,
+                },
+              ]
             : []),
           ...rest,
         ],
@@ -3347,6 +3537,67 @@ describe(`Ordered windows across truncate replays`, () => {
         { ...scenario, markerMode: `on-demand` },
       ],
     )
+  // A demand fails behind a sibling's failed replay, and its retry stays
+  // held. A later command starts another demand of the same source, whose
+  // load then succeeds, so a replay's success, publication, and request
+  // errors are judged while a failed demand is still unloaded. The model's
+  // replay is shared across the query's subscriptions to the source, so it
+  // gives its verdict only when every load of the source settled; it cannot
+  // judge one subscription's request error while another load is held (see
+  // Limits).
+  const heldRetryCase = fc
+    .tuple(
+      failedReplayScenario,
+      fc.constantFrom(`some` as const, `none` as const, `inner` as const),
+      fc.record({
+        type: fc.constant(`move` as const),
+        id: fc.integer({ min: 1, max: 5 }),
+        rank: fc.integer({ min: 1, max: 60 }),
+      }),
+      fc.oneof(
+        fc.record({
+          type: fc.constant(`move` as const),
+          id: fc.integer({ min: 1, max: 5 }),
+          rank: fc.integer({ min: -5, max: 99 }),
+        }),
+        fc.record({
+          type: fc.constant(`mark` as const),
+          id: fc.integer({ min: 1, max: 5 }),
+          on: fc.boolean(),
+        }),
+        fc.record({
+          type: fc.constant(`window` as const),
+          offset: fc.constantFrom(0 as const, 1 as const),
+          limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+        }),
+      ) as fc.Arbitrary<OrderedCommand>,
+      fc.array(orderedCommand, { maxLength: 3 }),
+    )
+    .map(
+      ([scenario, joined, move, change, rest]): [
+        Array<OrderedCommand>,
+        OrderedScenario,
+      ] => [
+        [
+          { type: `hold` },
+          { type: `truncateMarkers` },
+          { type: `settle`, ok: true, keepHolding: true, newest: false },
+          { type: `settle`, ok: false, newest: true, keepHolding: true },
+          move,
+          { type: `settle`, ok: false, newest: false, keepHolding: true },
+          change,
+          { type: `settle`, ok: true, newest: true, keepHolding: true },
+          ...rest,
+        ],
+        {
+          ...scenario,
+          limit: scenario.limit === 1 ? 2 : scenario.limit,
+          joined,
+          includes: true,
+          markerMode: `on-demand`,
+        },
+      ],
+    )
   const failedReplayCase = fc.oneof(
     {
       weight: 3,
@@ -3355,6 +3606,7 @@ describe(`Ordered windows across truncate replays`, () => {
     { weight: 1, arbitrary: includeDemandCase },
     { weight: 2, arbitrary: siblingDemandCase },
     { weight: 2, arbitrary: thrownDemandCase },
+    { weight: 2, arbitrary: heldRetryCase },
   )
   const failedReplayProperty = `replay.ordered-failed-replay`
   const failedReplayCampaigns =
@@ -3526,6 +3778,7 @@ describe(`Ordered windows across truncate replays`, () => {
           `failedSiblingDemandFailures`,
           `thrownReplayDemands`,
           `partialFailureRetirements`,
+          `requestErrorChecks`,
         ] as const,
         { minimum: 5 },
       )
@@ -3556,6 +3809,9 @@ describe(`Ordered windows across truncate replays`, () => {
           }
           if (observed.partialFailureRetirements > 0) {
             reach.reach(`partialFailureRetirements`)
+          }
+          if (observed.requestErrorChecks > 0) {
+            reach.reach(`requestErrorChecks`)
           }
         }),
         campaign === `fixed`

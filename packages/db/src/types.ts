@@ -1312,7 +1312,7 @@ export interface SubscribeChangesOptions<
      * The replays of the graph's other subscriptions to this collection that
      * still load. They share one barrier, so this replay waits for them.
      */
-    readonly siblingReplays?: () => Promise<unknown> | undefined
+    readonly siblingReplays: () => Promise<unknown> | undefined
   }
 }
 
