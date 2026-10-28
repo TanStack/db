@@ -108,6 +108,7 @@ const adapterValues = [
   `fetchNextLiveQueryWindowPage`,
   `getLiveQueryHash`,
   `getLiveQueryKey`,
+  `getLiveQueryStatusFlags`,
   `getPreparedLiveQueryIdentity`,
   `getPreparedLiveQuerySources`,
   `getPublicCollection`,
@@ -122,6 +123,7 @@ const adapterValues = [
   `releaseDeferredOnReclaim`,
   `resolveLiveQueryValue`,
   `resumeDeferredLiveQueryCollections`,
+  `toBoundaryError`,
 ]
 
 const typicalApp = [...new Set([...coreValues, ...adapterValues])]

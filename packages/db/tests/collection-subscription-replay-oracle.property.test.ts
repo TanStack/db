@@ -26,7 +26,9 @@ import type { Scheduler } from 'fast-check'
  * optimistic state, callbacks, and cleanup may still be in flight. The public
  * snapshot must change only when the newest complete replay earns authority.
  * Older, failed, aborted, or released work may settle and release resources,
- * but it must not leak rows or overwrite a newer snapshot. An `unloadSubset`
+ * but it must not leak rows or overwrite a newer snapshot. A newer replay
+ * aborts the older attempts' loads, and an abort ends a load (maintainer
+ * decision): the newest replay does not wait for them. An `unloadSubset`
  * that throws is an adapter bug: the subscription reports it uncaught once,
  * and it is not a replay failure, so the replay continues as if the release
  * had succeeded.
@@ -616,12 +618,15 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       | undefined
 
     // A new attempt supersedes the previous one, and its failure with it.
+    // It aborts the older attempts' loads, and an abort ends a load
+    // (maintainer decision): the replay no longer waits for them.
     const startModelAttempt = (
       state: NonNullable<typeof modelReplayState>,
       attemptIndex: number,
     ): void => {
       state.currentAttemptIndex = attemptIndex
       state.failed = false
+      state.pending.clear()
     }
 
     const writeReplayRows = (
@@ -957,14 +962,15 @@ async function runSequentialReplayScenario(
             nextLoad = undefined
             nextError = undefined
             applyRows(load.rows)
-            if (load.outcome === `throw`) {
-              throw error
-            }
-
+            // A throw is a rejection (maintainer decision): an acquisition
+            // that core releases.
             acquisitionCounts.set(options, {
               acquisitions: 1,
               releases: 0,
             })
+            if (load.outcome === `throw`) {
+              throw error
+            }
             if (load.outcome === `return`) return true
             const deferred = createDeferred<void>()
             pending.push({ load, deferred, error })
@@ -2902,15 +2908,14 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
         if (site === `new request throws`) {
-          // A request that throws inside the open replay fails that replay
-          // as a rejected load does (maintainer decision), so it does not
-          // throw to its caller.
+          // A synchronous throw is a rejection: the request fails its load.
           expect(() =>
             subscription.requestSnapshot({
               where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
               optimizedOnly: false,
             }),
           ).not.toThrow()
+          await flushPromises()
         }
         subscription.releaseSnapshot(where)
         await flushPromises()
@@ -2953,14 +2958,13 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it.each([
-    ...[`current`, `pending`].flatMap((scope) =>
+  // A synchronous throw is a rejection (maintainer decision), so no failure
+  // is held by an attempt whose setup stack has not returned yet.
+  it.each(
+    [`current`, `pending`].flatMap((scope) =>
       [`throw`, `reject`].map((failureMode) => ({ scope, failureMode })),
     ),
-    // An async rejection runs after setup; only a sync failure can be held
-    // by an attempt whose setup stack has not returned yet.
-    { scope: `setup`, failureMode: `throw` },
-  ])(
+  )(
     `drops released failure references: $scope, $failureMode`,
     async ({ scope, failureMode }) => {
       let begin!: () => void
@@ -2987,20 +2991,6 @@ describe(`CollectionSubscription replay oracle`, () => {
                 if (loads === 3) {
                   if (failureMode === `throw`) throw failure
                   return Promise.reject(failure)
-                }
-                if (scope === `setup` && loads === 4) {
-                  expect(retainedFailures()).toEqual([failure])
-                  subscription.requestSnapshot({
-                    where: peerWhere,
-                    optimizedOnly: false,
-                  })
-                  return pendingPeer.promise
-                }
-                if (scope === `setup` && loads === 5) {
-                  begin()
-                  truncate()
-                  commit()
-                  subscription.releaseSnapshot(failedWhere)
                 }
                 return loads === 4 ? pendingPeer.promise : replacement.promise
               },
@@ -3057,7 +3047,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         // This is a retained-state witness, not a row oracle or GC benchmark.
         // Public rows cannot reveal a released owner held by an old error map.
         // Adapt this witness if the replay representation changes again.
-        if (scope !== `setup`) expect(retainedFailures()).toEqual([failure])
+        expect(retainedFailures()).toEqual([failure])
         if (scope === `pending`) await replaySource()
         subscription.releaseSnapshot(failedWhere)
         expect(retainedFailures()).toEqual([])

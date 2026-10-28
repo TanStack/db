@@ -14,6 +14,9 @@ import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { collectSourceRefs } from '../ir.js'
+import { findProblems } from '../../collection/health-tree.js'
+import { isFailedStatus } from '../../live-query-primitives.js'
 import { reducePublicKeys } from './public-key-reduction.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
@@ -37,8 +40,10 @@ import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
+import type { HealthSource } from '../../collection/health-tree.js'
 import type {
   CollectionConfigSingleRowOption,
+  CollectionDependent,
   KeyedStream,
   ResultStream,
   StringCollationConfig,
@@ -122,16 +127,62 @@ export class CollectionConfigBuilder<
 
   // Error state tracking
   private fatalQueryError = false
-  private readonly erroredSourceIds = new Set<string>()
   private lastSubsetError: unknown | undefined
-
-  // A fatal error or any unrecovered source error puts the live query in error.
-  private get isInErrorState(): boolean {
-    return this.fatalQueryError || this.erroredSourceIds.size > 0
-  }
+  // The query's own reload: its new run publishes nothing until its graph
+  // result is complete (law 9), then commits that result as the snapshot
+  // that replaces the kept rows and completes the reload.
+  private reloadSnapshotPending = false
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
+  private dependentEntry: CollectionDependent | undefined
+
+  /**
+   * Reload each source with an error anywhere in its tree, then this query if
+   * its own node shows an error. A nested live query passes the reload down the
+   * same way. A source's reload keeps this query's status until it commits.
+   * A query that is not running starts once its sources reloaded, as any
+   * Collection's reload starts one; `query` is the live-query Collection,
+   * which a query that never started has not given this builder yet.
+   */
+  async reload(
+    query: Collection<any, any, any> | undefined = this.liveQueryCollection,
+  ): Promise<void> {
+    // A crashed query rejects without touching its sources.
+    if (query?.status === `crashed`) return query._sync.reload()
+    const failed = this.collectionSources
+      .map(({ collection }) => collection)
+      .filter(
+        (collection, index, all) =>
+          all.indexOf(collection) === index &&
+          findProblems(collection.health).some((node) => node.error !== null),
+      )
+    // Only a query that was not running starts: a cleanup that ends it during
+    // the reload cancels the reload, as the app ended it.
+    const ended = query?.status === `idle` || query?.status === `cleaned-up`
+    await Promise.all(failed.map((collection) => collection.reload()))
+    // Its preload is what lets a live query start its sources.
+    if (ended) return query.preload()
+    // The query reloads itself after its sources when its own node shows an
+    // error (a failed first load or a request error); a reload of it already
+    // in flight settles with that run.
+    if (query?._lifecycle.problems.error || query?._lifecycle.reloading)
+      await query._sync.reload()
+  }
+
+  /** This live query as its sources' `subscribers` list it. */
+  dependent(): CollectionDependent | undefined {
+    const collection = this.liveQueryCollection
+    if (!collection) return undefined
+    return (this.dependentEntry ??= {
+      kind: `live-query`,
+      collection,
+      get active() {
+        return collection.subscribers.length > 0
+      },
+      end: () => collection.cleanup({ dependents: true }),
+    })
+  }
 
   /**
    * Whether this live-query Collection had a subscriber or a preload in its
@@ -165,6 +216,7 @@ export class CollectionConfigBuilder<
   private includesRuntimeCache: IncludesRuntime | undefined
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
+  private readonly includeSourceIds = new Set<string>()
 
   // Map of opaque source ID to subscription
   readonly subscriptions = createSourceRecord<CollectionSubscription>()
@@ -220,6 +272,7 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
+    collectSourceRefs(this.query, this.includeSourceIds)
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
@@ -345,19 +398,15 @@ export class CollectionConfigBuilder<
       limit: options.limit ?? baseWindow?.limit,
     }
     const request = ++this.windowRequestGeneration
-    // This call supersedes every older one. Until it records its own
-    // settlement, they have nothing newer to wait on, even if it throws
-    // before it does; none of them can wait on itself.
-    this.latestWindowRequest = undefined
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      const syncRunGeneration = this.syncRunGeneration
+      const syncRuns = this.syncRuns()
       const resume = async (): Promise<void> => {
         // Wait for every replay that holds publication, including one a
         // newer truncate starts meanwhile. A replay that a newer truncate or
         // a retired demand discards rejects its completion with an
-        // AbortError, but it did not fail. Cleanup also rejects it, and then
-        // the move rejects with that error.
+        // AbortError, but it did not fail. Cleanup and a reload end the sync
+        // run the move waits in, and the move rejects with that error.
         for (
           let recovery: Promise<void> | undefined = sourceRecovery;
           recovery;
@@ -366,7 +415,7 @@ export class CollectionConfigBuilder<
           try {
             await recovery
           } catch (error) {
-            if (syncRunGeneration !== this.syncRunGeneration) throw error
+            if (syncRuns !== this.syncRuns()) throw error
           }
         }
         // A newer call wins, even if this deferred one resumes after it.
@@ -495,6 +544,18 @@ export class CollectionConfigBuilder<
     return generation
   }
 
+  /** The source aliases of this query, in query order, for its health tree. */
+  healthSources(): ReadonlyArray<HealthSource> {
+    return this.collectionSources.map(({ sourceId, alias, collection }) => ({
+      id: sourceId,
+      alias,
+      collection,
+      ...(this.includeSourceIds.has(sourceId)
+        ? { kind: `include` as const }
+        : {}),
+    }))
+  }
+
   settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
@@ -517,15 +578,6 @@ export class CollectionConfigBuilder<
     )
   }
 
-  /**
-   * A lazy demand load failure ends the query unless a failed replay of its
-   * source's collection holds publication after the query first became
-   * ready: that replay keeps the last publication until a later replay of
-   * the source reacquires the demand. A demand that a pending replay decides
-   * reaches here only once that replay settled. Before the first ready there
-   * is no publication to keep, so the failure is an initial load failure. A
-   * failed demand is settled either way, so it holds no ordered loading.
-   */
   failDemand(
     subscription: CollectionSubscription,
     collection: Collection,
@@ -535,29 +587,33 @@ export class CollectionConfigBuilder<
   ): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
-    demand.settled = true
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    // A failure while a failed replay of this source holds the shared
-    // barrier belongs to that recovery: it does not end the query, and it
-    // holds this subscription's publication too, so retiring the other
-    // replay's failed demand cannot publish without this demand's rows.
-    if (
-      this.liveQueryCollection?.status !== `loading` &&
-      this.collectionSources.some(
-        (source) =>
-          source.collection === collection &&
-          this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+    if (this.liveQueryCollection?._lifecycle.status === `ready`) {
+      // The failure settles the demand: the request errors of its keys show
+      // it, and ordered work must not wait for a load that already ended.
+      // Output held for this demand publishes now, unless a failed replay of
+      // this source holds publication: the failure then holds this
+      // subscription's publication too, so retiring the other replay's
+      // failed demand cannot publish without this demand's rows.
+      demand.settled = true
+      if (
+        this.collectionSources.some(
+          (source) =>
+            source.collection === collection &&
+            this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+        )
       )
+        subscription.failReplacement(normalized)
+      this.maybeRunGraphFn?.()
+      return
+    }
+    this.failQuery(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Subset demand '${planId}' failed: ${normalized.message}`
+        : codedMessage(228, { planId, cause: normalized.message }),
+      normalized,
     )
-      subscription.failReplacement(normalized)
-    else
-      this.transitionToError(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `Subset demand '${planId}' failed: ${normalized.message}`
-          : codedMessage(228, { planId, cause: normalized.message }),
-        normalized,
-      )
   }
 
   recordSubsetError(error: unknown, fatalBeforeReady = false): Error {
@@ -571,7 +627,7 @@ export class CollectionConfigBuilder<
       this.orderedLoadFailed = true
     }
     if (fatalBeforeReady) {
-      this.transitionToError(
+      this.failQuery(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Initial subset load failed: ${normalized.message}`
           : codedMessage(229, { cause: normalized.message }),
@@ -618,7 +674,7 @@ export class CollectionConfigBuilder<
     if (
       !holdPublication &&
       !this.activeWindowOperation &&
-      this.liveQueryCollection?.status !== `loading` &&
+      this.liveQueryCollection?._lifecycle.inFirstLoad !== true &&
       this.pendingOrderedLoads.size === 0
     ) {
       return
@@ -653,21 +709,54 @@ export class CollectionConfigBuilder<
     demand?.participant?.resolve()
   }
 
-  hasPendingSourceRecovery(): boolean {
-    return Object.values(this.subscriptions).some(
-      (subscription) => subscription.hasPendingTruncateReplacement,
-    )
+  /** A root load of an eager source failed. */
+  failRootLoad(sourceId: string, error: Error): void {
+    this.reportFailedRequest(`root:${sourceId}`, [error])
   }
 
-  private pendingSourceRecovery(): Promise<void> | undefined {
-    const pending = Object.values(this.subscriptions).flatMap((subscription) =>
-      subscription.pendingTruncateReplacement
-        ? [subscription.pendingTruncateReplacement]
-        : [],
-    )
-    return pending.length > 0
-      ? Promise.all(pending).then(() => undefined)
-      : undefined
+  /** A later root load of the source succeeded. */
+  settleRootLoad(sourceId: string): void {
+    this.clearFailedRequest(`root:${sourceId}`)
+  }
+
+  /** A source's truncate replay loaded the query's demand again. */
+  settleReplayedRequests(sourceId: string): void {
+    this.settleRootLoad(sourceId)
+    this.clearFailedRequest(`replay:${sourceId}`)
+  }
+
+  /**
+   * A source's truncate replay could not load the query's data again: each
+   * of its failures, in failure order. Before the first ready the earliest
+   * fails the query.
+   */
+  failReplay(sourceId: string, errors: Array<Error>): void {
+    if (this.reportFailedRequest(`replay:${sourceId}`, errors)) return
+    this.failQuery(errors[0]!.message, errors[0])
+  }
+
+  // After the first ready, a failed load is a request error on this query's
+  // node. It clears when the failed request settles later or is released.
+  reportFailedRequest(key: string, errors: Array<Error>): boolean {
+    const lifecycle = this.liveQueryCollection?._lifecycle
+    if (lifecycle?.status !== `ready`) return false
+    lifecycle.reportRequestError(key, errors)
+    return true
+  }
+
+  /** A request settled later, or the query no longer needs its data. */
+  clearFailedRequest(key: string): void {
+    this.liveQueryCollection?._lifecycle.clearRequestError(key)
+  }
+
+  /** This query's sync run and its sources' sync runs. */
+  private syncRuns(): string {
+    return [
+      this.syncRunGeneration,
+      ...this.collectionSources.map(({ collection }) =>
+        collection._sync.getSyncRunGeneration(),
+      ),
+    ].join()
   }
 
   /** Replays of other subscriptions to a source's collection that still load. */
@@ -686,6 +775,23 @@ export class CollectionConfigBuilder<
         : []
     })
     return pending.length > 0 ? Promise.allSettled(pending) : undefined
+  }
+
+  hasPendingSourceRecovery(): boolean {
+    return Object.values(this.subscriptions).some(
+      (subscription) => subscription.hasPendingTruncateReplacement,
+    )
+  }
+
+  private pendingSourceRecovery(): Promise<void> | undefined {
+    const pending = Object.values(this.subscriptions).flatMap((subscription) =>
+      subscription.pendingTruncateReplacement
+        ? [subscription.pendingTruncateReplacement]
+        : [],
+    )
+    return pending.length > 0
+      ? Promise.all(pending).then(() => undefined)
+      : undefined
   }
 
   private hasFailedSourceRecovery(): boolean {
@@ -737,7 +843,7 @@ export class CollectionConfigBuilder<
         this.currentSyncState === syncState
 
       // Don't run if the live query is in an error state
-      if (this.isInErrorState) {
+      if (this.fatalQueryError) {
         return
       }
 
@@ -749,8 +855,13 @@ export class CollectionConfigBuilder<
             try {
               syncState.graph.run()
             } catch (error) {
-              if (isCurrentSyncRun()) {
-                this.transitionToError(
+              // A first load that already failed in this run reported its
+              // error.
+              if (
+                isCurrentSyncRun() &&
+                this.liveQueryCollection?._lifecycle.stoppedThisRun !== true
+              ) {
+                this.crashQuery(
                   devBuild() && process.env.NODE_ENV !== `production`
                     ? `Live query graph failed`
                     : codedMessage(212),
@@ -775,8 +886,9 @@ export class CollectionConfigBuilder<
         if (!isCurrentSyncRun()) return
 
         // On the initial run, we may need to do an empty commit to ensure that
-        // the collection is initialized
-        if (syncState.messagesCount === 0) {
+        // the collection is initialized. A reload's run commits its snapshot
+        // instead.
+        if (syncState.messagesCount === 0 && !this.reloadSnapshotPending) {
           begin()
           commit()
         }
@@ -843,9 +955,9 @@ export class CollectionConfigBuilder<
     const syncRunGeneration = ++this.syncRunGeneration
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
+    this.reloadSnapshotPending = config.collection._lifecycle.reloading
     // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.fatalQueryError = false
-    this.erroredSourceIds.clear()
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -924,10 +1036,19 @@ export class CollectionConfigBuilder<
     this.currentSyncState = undefined
     this.maybeRunGraphFn = undefined
     this.loadMoreFn = undefined
-    this.currentWindow = undefined
-    this.settledWindow = this.initialWindow
+    // The query's own reload retries its data, not the window the app chose:
+    // the new run starts from the settled window, and a pending move ends
+    // with the retired run. Cleanup discards the window, also during the
+    // reload: it tears the run down before it ends the reload.
+    const lifecycle = this.liveQueryCollection?._lifecycle
+    if (lifecycle?.reloading && !lifecycle.hasStartedCleanup())
+      this.currentWindow = this.settledWindow
+    else {
+      this.currentWindow = undefined
+      this.settledWindow = this.initialWindow
+    }
     this.fatalQueryError = false
-    this.erroredSourceIds.clear()
+    this.reloadSnapshotPending = false
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -1069,8 +1190,13 @@ export class CollectionConfigBuilder<
     syncState.flushPendingChanges = () => {
       const hasParentChanges = pendingChanges.size > 0
       const hasChildChanges = bucketFacades?.hasPendingChanges() ?? false
+      // A reload's run holds its result until it is complete, then commits
+      // it as a snapshot, also an empty one.
+      const snapshot = this.reloadSnapshotPending
+      if (snapshot && !this.isResultComplete()) return
+      const writesRoot = hasParentChanges || snapshot
 
-      if (!hasParentChanges && !hasChildChanges) {
+      if (!writesRoot && !hasChildChanges) {
         return
       }
 
@@ -1107,7 +1233,7 @@ export class CollectionConfigBuilder<
         ReturnType<Collection[`_deferPublication`]> | undefined
       try {
         facadePublication = bucketFacades?.flush()
-        rootPublication = hasParentChanges
+        rootPublication = writesRoot
           ? config.collection._deferPublication()
           : undefined
         const changesToApply: Map<unknown, Changes<TResult>> = bucketFacades
@@ -1130,10 +1256,13 @@ export class CollectionConfigBuilder<
         // make them ready first. A facade failure then leaves the root intact,
         // and the root commit is the final state change before publication.
         facadePublication?.prepare()
-        if (hasParentChanges) {
-          begin()
+        if (writesRoot) {
+          begin(snapshot ? { snapshot } : undefined)
           let lookup: ((key: string | number) => boolean) | undefined
           const hasSyncedKey = (key: string | number) => {
+            // A snapshot replaces every row, so no earlier row exists for
+            // the batch it holds.
+            if (snapshot) return false
             lookup ??= config.collection._state.createSyncedKeyLookup()
             return lookup(key)
           }
@@ -1144,6 +1273,7 @@ export class CollectionConfigBuilder<
             markLayoutChange(config.collection)
           }
           commit()
+          this.reloadSnapshotPending = false
         }
       } catch (error) {
         rootPublication?.discard()
@@ -1241,13 +1371,27 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // Handle error state - any source collection in error puts live query in error
-    if (status === `error`) {
-      this.erroredSourceIds.add(sourceId)
-      this.setErrorState(
+    // A crashed source cannot serve reads, so it ends this query at any time.
+    if (status === `crashed`) {
+      this.crashQuery(
         devBuild() && process.env.NODE_ENV !== `production`
-          ? `Source collection '${collectionId}' entered error state`
+          ? `Source collection '${collectionId}' crashed`
           : codedMessage(172, { collectionId }),
+        event.collection._lifecycle.getSyncError(),
+      )
+      return
+    }
+
+    // A source whose first load failed fails this query's first load. Once
+    // the query has shown data, the failure is a sync problem on the source's
+    // node: the query keeps its status and rows.
+    if (status === `error`) {
+      if (this.liveQueryCollection?.status === `ready`) return
+      this.failQuery(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Source collection '${collectionId}' failed its first load`
+          : codedMessage(260, { collectionId }),
+        event.collection._lifecycle.getSyncError(),
       )
       return
     }
@@ -1260,14 +1404,6 @@ export class CollectionConfigBuilder<
     }
 
     if (status === `ready`) {
-      const recovered = this.erroredSourceIds.delete(sourceId)
-      if (
-        recovered &&
-        !this.fatalQueryError &&
-        this.erroredSourceIds.size === 0
-      ) {
-        this.maybeRunGraphFn?.()
-      }
       if (
         Object.values(this.optimizableOrderByCollections).some(
           (info) => info.joinedFilterSourceId === sourceId,
@@ -1289,7 +1425,7 @@ export class CollectionConfigBuilder<
             `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
         : codedMessage(152, { collectionId, id: this.id }),
     )
-    this.transitionToError(error.message, error)
+    this.crashQuery(error.message, error)
     return error
   }
 
@@ -1297,14 +1433,19 @@ export class CollectionConfigBuilder<
    * Update the live query status based on source collection statuses
    */
   private updateLiveQueryStatus(config: SyncMethods<TResult>) {
-    const { markReady } = config
-
     // Don't update status if already in error
-    if (this.isInErrorState) {
-      return
-    }
+    if (this.fatalQueryError || !this.isResultComplete()) return
+    // A reload's run commits its complete result as its snapshot first. The
+    // snapshot completes the reload, so a run that keeps its result private
+    // (after a failed window move or ordered load) does not mark ready.
+    if (this.reloadSnapshotPending)
+      this.currentSyncState?.flushPendingChanges?.()
+    if (!this.reloadSnapshotPending) config.markReady()
+  }
 
-    const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
+  /** Whether the current run's graph result is complete. */
+  private isResultComplete(): boolean {
+    const syncState = this.currentSyncState
     const allReady = this.allRequiredSourcesReady()
     const allDemandsSettled = [...this.activeDemands.values()].every(
       (demand) => demand.settled,
@@ -1312,34 +1453,53 @@ export class CollectionConfigBuilder<
     const isLoading = this.liveQueryCollection?.isLoadingSubset
     // Mark ready when:
     // 1. All subscriptions are set up (subscribedToAllCollections)
-    // 2. All source collections are ready
-    // 3. Every active route demand has settled
-    // 4. The live query collection is not loading subset data
+    // 2. The graph processed all its input: a source can announce its
+    //    readiness while its last batch still waits in this graph's
+    //    scheduled run, and that run marks ready when it ends
+    // 3. All source collections are ready
+    // 4. Every active route demand has settled
+    // 5. The live query collection is not loading subset data
+    // 6. No source reload's replay is still loading the demand again
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (subscribedToAll && allReady && allDemandsSettled && !isLoading) {
-      markReady()
-    }
+    return (
+      syncState?.subscribedToAllCollections === true &&
+      !syncState.graph.pendingWork() &&
+      allReady &&
+      allDemandsSettled &&
+      isLoading !== true &&
+      !this.hasPendingSourceRecovery()
+    )
   }
 
   /**
-   * Transition the live query to error state
+   * The query's first load failed: status `error`. A sync problem or a
+   * request error after the first ready never reaches here.
    */
-  private transitionToError(message: string, error?: unknown) {
-    this.fatalQueryError = true
-    this.setErrorState(message, error)
+  private failQuery(message: string, error?: unknown) {
+    if (!this.enterErrorState(message)) return
+    this.liveQueryCollection?._lifecycle.fail(error ?? new Error(message))
   }
 
-  private setErrorState(message: string, error?: unknown) {
-    // Log error to console for debugging
+  /**
+   * The query can no longer serve reads: a crashed source, a graph failure,
+   * or a contract violation such as a source cleaned up under this query.
+   */
+  private crashQuery(message: string, error?: unknown) {
+    this.enterErrorState(message)
+    this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message))
+  }
+
+  /** Returns false when the query already ended. */
+  private enterErrorState(message: string): boolean {
+    if (this.fatalQueryError) return false
+    this.fatalQueryError = true
     console.error(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `[Live Query Error] ${message}`
         : message,
     )
-
-    // Transition live query collection to error state
-    this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
+    return true
   }
 
   private allRequiredSourcesReady() {
@@ -1365,6 +1525,9 @@ export class CollectionConfigBuilder<
       )
     }
 
+    // A Collection read under several aliases changes this query's tree once
+    // per change, so its relay is registered once.
+    const relayed = new Set<object>()
     const loaders = this.collectionSources.map((source) => {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
@@ -1387,6 +1550,15 @@ export class CollectionConfigBuilder<
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
+      // Relay health tree changes so this query's tree stays current.
+      if (!relayed.has(collection)) {
+        relayed.add(collection)
+        syncState.unsubscribeCallbacks.add(
+          collection.on(`health:change`, () =>
+            this.liveQueryCollection?._emitHealthChange(),
+          ),
+        )
+      }
       let cleanupStartError: Error | undefined
       const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
         cleanupStartError = this.handleSourceCleanupStart(collectionId)
@@ -1405,12 +1577,12 @@ export class CollectionConfigBuilder<
       // The source may have failed before this live query subscribed. Register
       // the listener first, then reconcile that current state so no transition
       // can be missed between observation and subscription.
-      if (collection.status === `error`) {
+      if (isFailedStatus(collection.status)) {
         this.handleSourceStatusChange(config, sourceId, collectionId, {
           type: `status:change`,
           collection,
-          status: `error`,
-          previousStatus: `error`,
+          status: collection.status,
+          previousStatus: collection.status,
         })
       }
 

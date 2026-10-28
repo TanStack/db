@@ -1103,9 +1103,9 @@ describe(`createLiveQueryObserver`, () => {
     expect(observer.getSnapshot().data).toHaveLength(2)
     expect(entriesSpy).toHaveBeenCalledTimes(1)
 
-    source._lifecycle.setStatus(`error`)
+    source._lifecycle.setStatus(`crashed`)
 
-    expect(observer.getSnapshot().status).toBe(`error`)
+    expect(observer.getSnapshot().status).toBe(`crashed`)
     expect(observer.getSnapshot().state?.size).toBe(2)
     // Status-only changes reuse the immutable row capture.
     expect(entriesSpy).toHaveBeenCalledTimes(1)
@@ -1142,10 +1142,10 @@ describe(`createLiveQueryObserver`, () => {
 
     // Status transitions carry no row changes; the observer must publish
     // them through the same canonical path as data changes.
-    source._lifecycle.setStatus(`error`)
+    source._lifecycle.setStatus(`crashed`)
     source._lifecycle.setStatus(`cleaned-up`)
 
-    expect(statuses).toContain(`error`)
+    expect(statuses).toContain(`crashed`)
     expect(statuses).toContain(`cleaned-up`)
     observer.dispose()
   })

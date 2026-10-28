@@ -3,7 +3,6 @@ import {
   SetWindowRequiresOrderByError,
 } from './errors.js'
 import {
-  getLiveQueryStatusFlags,
   isCollection,
   isSingleResultCollection,
 } from './live-query-primitives.js'
@@ -17,7 +16,7 @@ import type {
 } from './live-query-observer.js'
 import type { DbClient } from './client.js'
 import type { Collection } from './collection/index.js'
-import type { CollectionStatus } from './types.js'
+import type { CollectionStatus, HealthNode } from './types.js'
 import type {
   Context,
   InitialQueryBuilder,
@@ -523,21 +522,21 @@ export interface LiveQueryWindowSnapshot<
   pageParams: ReadonlyArray<number>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  /** Last pagination failure, retained through an earlier-started success until recovery begins. */
-  error: unknown
   /** Keyed results for the physical window, or `undefined` when disabled. */
   state: ReadonlyMap<TKey, T> | undefined
   collection: Collection<T, TKey, any> | undefined
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQuerySnapshot<T, TKey>[`persistedStatus`]
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  isLoadingError: boolean
+  isCrashed: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  /** The data is shown, and a sync problem or failed page load is in `health`. */
+  isSyncError: boolean
+  /** The health tree for the collection and its dependencies, or `undefined` when disabled. */
+  health: HealthNode | undefined
 }
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
@@ -588,9 +587,6 @@ interface CachedFrom {
   observerSnapshot: unknown
   committedPageCount: number
   isFetchingNextPage: boolean
-  hasPaginationError: boolean
-  paginationError: unknown
-  failedHasNextPage: boolean
 }
 
 interface SubscriptionRecord {
@@ -615,9 +611,6 @@ class LiveQueryWindowControllerImpl<
 
   private committedPageCount: number
   private isFetchingNextPage = false
-  private hasPaginationError = false
-  private paginationError: unknown
-  private failedHasNextPage = false
   private activeFetchPromise: Promise<void> | null = null
   private windowGeneration = 0
   private pendingWindowGeneration: number | undefined
@@ -671,19 +664,13 @@ class LiveQueryWindowControllerImpl<
   private snapshotFrom(
     observerSnapshot: LiveQuerySnapshot<T, TKey>,
   ): LiveQueryWindowSnapshot<T, TKey> {
-    if (this.hasPaginationError && observerSnapshot.status === `ready`) {
-      this.failedHasNextPage = this.getComputedHasNextPage(observerSnapshot)
-    }
     const cached = this.cachedSnapshot
     if (
       cached &&
       this.cachedFrom &&
       this.cachedFrom.observerSnapshot === observerSnapshot &&
       this.cachedFrom.committedPageCount === this.committedPageCount &&
-      this.cachedFrom.isFetchingNextPage === this.isFetchingNextPage &&
-      this.cachedFrom.hasPaginationError === this.hasPaginationError &&
-      this.cachedFrom.paginationError === this.paginationError &&
-      this.cachedFrom.failedHasNextPage === this.failedHasNextPage
+      this.cachedFrom.isFetchingNextPage === this.isFetchingNextPage
     ) {
       return cached
     }
@@ -694,10 +681,7 @@ class LiveQueryWindowControllerImpl<
         ? (observerSnapshot.data as ReadonlyArray<T>)
         : []
     const totalRequested = this.committedPageCount * this.pageSize
-    const computedHasNextPage = enabled && rows.length > totalRequested
-    const hasNextPage = this.hasPaginationError
-      ? this.failedHasNextPage
-      : computedHasNextPage
+    const hasNextPage = enabled && rows.length > totalRequested
 
     const pageCount = enabled ? this.committedPageCount : 0
     const pages: Array<ReadonlyArray<T>> = []
@@ -707,39 +691,31 @@ class LiveQueryWindowControllerImpl<
       pageParams.push(this.initialPageParam + i)
     }
 
-    const status = this.hasPaginationError ? `error` : observerSnapshot.status
-    const statusFlags = this.hasPaginationError
-      ? getLiveQueryStatusFlags(`error`)
-      : observerSnapshot
     this.cachedSnapshot = {
       data: rows.slice(0, totalRequested),
       pages,
       pageParams,
       hasNextPage,
       isFetchingNextPage: this.isFetchingNextPage,
-      error: this.hasPaginationError ? this.paginationError : undefined,
       get state() {
         return observerSnapshot.state
       },
       collection: observerSnapshot.collection,
-      status,
-      isLoading: statusFlags.isLoading,
-      isReady: statusFlags.isReady,
-      persistedStatus: observerSnapshot.persistedStatus,
-      isPersistedReady: observerSnapshot.isPersistedReady,
-      persistedError: observerSnapshot.persistedError,
-      isIdle: statusFlags.isIdle,
-      isError: statusFlags.isError,
+      status: observerSnapshot.status,
+      isLoading: observerSnapshot.isLoading,
+      isReady: observerSnapshot.isReady,
+      isIdle: observerSnapshot.isIdle,
+      isLoadingError: observerSnapshot.isLoadingError,
+      isCrashed: observerSnapshot.isCrashed,
       isCleanedUp: observerSnapshot.isCleanedUp,
       isEnabled: observerSnapshot.isEnabled,
+      isSyncError: observerSnapshot.isSyncError,
+      health: observerSnapshot.health,
     }
     this.cachedFrom = {
       observerSnapshot,
       committedPageCount: this.committedPageCount,
       isFetchingNextPage: this.isFetchingNextPage,
-      hasPaginationError: this.hasPaginationError,
-      paginationError: this.paginationError,
-      failedHasNextPage: this.failedHasNextPage,
     }
     return this.cachedSnapshot
   }
@@ -757,12 +733,10 @@ class LiveQueryWindowControllerImpl<
         // Store the desired physical window before observer activation can
         // compile or restart the live-query pipeline.
         const windowResult = this.ensureLeaseActive(this.committedPageCount)
-        const leaseGeneration = this.leaseGeneration
         observerUnsub = this.observer.subscribe(() => this.notify())
         this.observerUnsub = observerUnsub
-        if (windowResult !== true) {
-          this.trackAttachmentFailure(windowResult, leaseGeneration)
-        }
+        // A failed load is a request error in the health tree.
+        if (windowResult !== true) void windowResult.catch(() => undefined)
       } catch (error) {
         observerUnsub?.()
         this.observerUnsub = null
@@ -848,7 +822,6 @@ class LiveQueryWindowControllerImpl<
     if (this.disposed) return Promise.resolve()
     if (
       this.committedPageCount === 1 &&
-      !this.hasPaginationError &&
       !this.isFetchingNextPage &&
       !this.activeFetchPromise &&
       this.pendingWindowGeneration === undefined
@@ -862,22 +835,11 @@ class LiveQueryWindowControllerImpl<
   async preload(): Promise<void> {
     if (this.disposed) throw new LiveQueryWindowControllerDisposedError()
 
-    const hadPaginationError = this.hasPaginationError
-    this.hasPaginationError = false
-    this.paginationError = undefined
     this.acquireInFlightLease()
     try {
       const result = this.ensureLeaseActive(this.committedPageCount)
       if (result !== true) await result
       await this.observer.preload()
-      this.failedHasNextPage = false
-      if (hadPaginationError) this.notify()
-    } catch (error) {
-      this.hasPaginationError = true
-      this.paginationError = error
-      this.failedHasNextPage = this.getComputedHasNextPage()
-      this.notify()
-      throw error
     } finally {
       this.releaseInFlightLease()
     }
@@ -902,14 +864,11 @@ class LiveQueryWindowControllerImpl<
     fetchingNextPage: boolean,
   ): Promise<void> {
     const generation = ++this.windowGeneration
-    const previousHasNextPage = this.getSnapshot().hasNextPage
     this.pendingWindowGeneration = undefined
     this.acquireInFlightLease()
 
     this.beginTransition()
     this.isFetchingNextPage = fetchingNextPage
-    this.hasPaginationError = false
-    this.paginationError = undefined
     if (fetchingNextPage) this.notify()
 
     let result: WindowResult
@@ -917,9 +876,6 @@ class LiveQueryWindowControllerImpl<
       result = this.activateLease(requestedPageCount)
     } catch (error) {
       this.isFetchingNextPage = false
-      this.hasPaginationError = true
-      this.paginationError = error
-      this.failedHasNextPage = previousHasNextPage
       this.notify()
       this.endTransition()
       this.releaseInFlightLease()
@@ -948,7 +904,6 @@ class LiveQueryWindowControllerImpl<
           this.pendingWindowGeneration = undefined
           this.committedPageCount = requestedPageCount
           this.isFetchingNextPage = false
-          this.failedHasNextPage = this.getComputedHasNextPage()
           this.notify()
           this.endTransition()
         },
@@ -957,9 +912,6 @@ class LiveQueryWindowControllerImpl<
             this.beginTransition()
             this.pendingWindowGeneration = undefined
             this.isFetchingNextPage = false
-            this.hasPaginationError = true
-            this.paginationError = error
-            this.failedHasNextPage = previousHasNextPage
             this.notify()
             this.endTransition()
           }
@@ -1004,37 +956,6 @@ class LiveQueryWindowControllerImpl<
     this.leaseActive = false
     this.restoreInitialWindowOnRelease = false
     this.coordinator.release(this.lease, restoreWhenEmpty)
-  }
-
-  private trackAttachmentFailure(
-    result: Promise<void>,
-    leaseGeneration: number,
-  ): void {
-    void result.catch((error: unknown) => {
-      if (
-        this.disposed ||
-        !this.leaseActive ||
-        leaseGeneration !== this.leaseGeneration
-      ) {
-        return
-      }
-      this.beginTransition()
-      this.hasPaginationError = true
-      this.paginationError = error
-      this.failedHasNextPage = this.getComputedHasNextPage()
-      this.notify()
-      this.endTransition()
-    })
-  }
-
-  private getComputedHasNextPage(
-    snapshot: LiveQuerySnapshot<T, TKey> = this.observer.getSnapshot(),
-  ): boolean {
-    return (
-      snapshot.isEnabled &&
-      Array.isArray(snapshot.data) &&
-      snapshot.data.length > this.committedPageCount * this.pageSize
-    )
   }
 
   private beginTransition(): void {

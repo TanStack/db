@@ -1000,10 +1000,10 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers.size).toBe(2)
 
     // Tear down the source collection and the live query, e.g. when switching
-    // to a different data set at runtime. Cleaning up a source collection puts
-    // the dependent live query into an error state.
+    // to a different data set at runtime. Nothing subscribes to the live
+    // query, so the source's cleanup is admitted and ends the query.
     await usersCollection.cleanup()
-    expect(activeUsers.status).toBe(`error`)
+    expect(activeUsers.status).toBe(`crashed`)
 
     await activeUsers.cleanup()
     expect(activeUsers.status).toBe(`cleaned-up`)
@@ -1909,7 +1909,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`releases an ordered source when initial live-query loading throws`, async () => {
+    it(`fails the first load when initial ordered live-query loading throws`, async () => {
       const failure = new Error(`initial ordered live-query load failed`)
       const source = createCollection<User>({
         id: `initial-ordered-live-query-error`,
@@ -1935,15 +1935,19 @@ describe(`createLiveQueryCollection`, () => {
           .limit(1),
       )
 
+      // A synchronous throw is a rejection (maintainer decision): the
+      // query's first load fails, and its cleanup releases the source.
       await expect(Promise.resolve().then(() => live.preload())).rejects.toBe(
         failure,
       )
+      expect(live.status).toBe(`error`)
+      await live.cleanup()
       expect(source.subscriberCount).toBe(0)
 
-      await Promise.all([live.cleanup(), source.cleanup()])
+      await source.cleanup()
     })
 
-    it(`releases earlier live-query sources when initial lazy demand throws`, async () => {
+    it(`fails the first load when initial lazy demand throws`, async () => {
       type Issue = { id: number; userId: number }
       const failure = new Error(`initial live-query lazy demand failed`)
       const users = createCollection(
@@ -1980,13 +1984,17 @@ describe(`createLiveQueryCollection`, () => {
           })),
       )
 
+      // A synchronous throw is a rejection: the query's first load fails,
+      // and its cleanup releases every source.
       await expect(Promise.resolve().then(() => live.preload())).rejects.toBe(
         failure,
       )
+      expect(live.status).toBe(`error`)
+      await live.cleanup()
       expect(users.subscriberCount).toBe(0)
       expect(issues.subscriberCount).toBe(0)
 
-      await Promise.all([live.cleanup(), users.cleanup(), issues.cleanup()])
+      await Promise.all([users.cleanup(), issues.cleanup()])
     })
 
     it(`isolates synchronous lazy-demand failure from an established source commit`, async () => {
@@ -2040,7 +2048,12 @@ describe(`createLiveQueryCollection`, () => {
         }
 
         expect(commitError).toBeUndefined()
-        expect(live.status).toBe(`error`)
+        // A synchronous throw is a rejection, delivered after the commit.
+        await flushPromises()
+        // After the first ready, the failed request is a request error on the
+        // live query's node; the query stays ready.
+        expect(live.status).toBe(`ready`)
+        expect(live.health.error).toEqual(expect.anything())
         expect(live.utils.lastSubsetError).toBe(failure)
       } finally {
         await Promise.all([live.cleanup(), users.cleanup(), issues.cleanup()])
@@ -2656,10 +2669,9 @@ describe(`createLiveQueryCollection`, () => {
               return {
                 loadSubset: (options) => {
                   if (!recovering) return true
-                  // Choose by request shape, not callback order. A startup
-                  // throw inside the replay fails it as a rejection does, for
-                  // new demand and a replayed owner alike (maintainer
-                  // decision; ARCHITECTURE.md, replay participants).
+                  // Choose by request shape, not callback order. A throw is a
+                  // rejection (maintainer decision): new and replayed demand
+                  // both keep their owner.
                   const target =
                     demand === `retained`
                       ? options.limit !== undefined

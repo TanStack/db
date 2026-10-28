@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:177](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L177)
+Defined in: [useLiveQuery.ts:168](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L168)
 
 Create a live query using a query function
 
@@ -77,13 +77,13 @@ const { data } = useLiveQuery((q) =>
 
 ```ts
 // Handle loading and error states in template
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
+const { data, isLoading, isLoadingError, status } = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 // In template:
 // <div v-if="isLoading">Loading...</div>
-// <div v-else-if="isError">Error: {{ status }}</div>
+// <div v-else-if="isLoadingError">Error: {{ status }}</div>
 // <ul v-else>
 //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
 // </ul>
@@ -95,7 +95,7 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(queryFn, deps?): ConditionalUseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:183](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L183)
+Defined in: [useLiveQuery.ts:174](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L174)
 
 Create a live query using a query function
 
@@ -163,13 +163,13 @@ const { data } = useLiveQuery((q) =>
 
 ```ts
 // Handle loading and error states in template
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
+const { data, isLoading, isLoadingError, status } = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 // In template:
 // <div v-if="isLoading">Loading...</div>
-// <div v-else-if="isError">Error: {{ status }}</div>
+// <div v-else-if="isLoadingError">Error: {{ status }}</div>
 // <ul v-else>
 //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
 // </ul>
@@ -181,7 +181,7 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:223](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L223)
+Defined in: [useLiveQuery.ts:214](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L214)
 
 Create a live query using configuration object
 
@@ -232,13 +232,13 @@ const { data, isReady } = useLiveQuery({
 
 ```ts
 // Handle all states uniformly
-const { data, isLoading, isReady, isError } = useLiveQuery({
+const { data, isLoading, isReady, isLoadingError } = useLiveQuery({
   query: (q) => q.from({ items: itemCollection })
 })
 
 // In template:
 // <div v-if="isLoading">Loading...</div>
-// <div v-else-if="isError">Something went wrong</div>
+// <div v-else-if="isLoadingError">Something went wrong</div>
 // <div v-else-if="!isReady">Preparing...</div>
 // <div v-else>{{ data.length }} items loaded</div>
 ```
@@ -249,7 +249,7 @@ const { data, isLoading, isReady, isError } = useLiveQuery({
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveQuery.ts:268](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L268)
+Defined in: [useLiveQuery.ts:259](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L259)
 
 Subscribe to an existing query collection (can be reactive)
 
@@ -312,11 +312,11 @@ const handleToggle = (id) => {
 
 ```ts
 // Handle states consistently
-const { data, isLoading, isError } = useLiveQuery(sharedQuery)
+const { data, isLoading, isLoadingError } = useLiveQuery(sharedQuery)
 
 // In template:
 // <div v-if="isLoading">Loading...</div>
-// <div v-else-if="isError">Error loading data</div>
+// <div v-else-if="isLoadingError">Error loading data</div>
 // <div v-else>
 //   <Item v-for="item in data" :key="item.id" v-bind="item" />
 // </div>
@@ -328,7 +328,7 @@ const { data, isLoading, isError } = useLiveQuery(sharedQuery)
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithSingleResultCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveQuery.ts:279](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L279)
+Defined in: [useLiveQuery.ts:270](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L270)
 
 Create a live query using a query function
 
@@ -396,13 +396,13 @@ const { data } = useLiveQuery((q) =>
 
 ```ts
 // Handle loading and error states in template
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
+const { data, isLoading, isLoadingError, status } = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 // In template:
 // <div v-if="isLoading">Loading...</div>
-// <div v-else-if="isError">Error: {{ status }}</div>
+// <div v-else-if="isLoadingError">Error: {{ status }}</div>
 // <ul v-else>
 //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
 // </ul>

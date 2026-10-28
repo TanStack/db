@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
   createCollection,
@@ -8,14 +8,24 @@ import {
   withCollectionSyncConfigCleanup,
 } from '../src'
 import { createDeferred } from '../src/deferred'
-import type { SyncConfig } from '../src/types'
+import { Query } from '../src/query/builder/index.js'
+import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
+import { createOracleReach } from './oracle-reach.js'
+import { flushPromises } from './utils'
+import type { CollectionDependent, SyncConfig } from '../src/types'
 
 /**
  * # When does cleanup become observable?
  *
  * Authority comes from the public `Collection.cleanup()` contract and the
- * cleanup and cleanup-start terms in the contributing glossary. Cleanup has
- * two boundaries. Cleanup start synchronously closes restart admission and
+ * cleanup and cleanup-start terms in the contributing glossary. Public cleanup
+ * first checks admission: it rejects while a live query or Effect reads the
+ * Collection, and `cleanup({ dependents: true })` first cleans up each such
+ * live query, with its own dependents, and disposes each such Effect. A direct
+ * subscription is not refused: it survives cleanup and asks for data again in
+ * the next sync run. `collection.subscribers` lists all three kinds. The
+ * boundary histories below drive internal teardown, which bypasses that check,
+ * as a retiring facade does. Cleanup has two boundaries. Cleanup start synchronously closes restart admission and
  * puts dependent live queries in terminal error while marking dependent Effects
  * disposed. Cleanup settlement publishes `cleaned-up` and settles the public
  * cleanup promise only after adapter cleanup settles. Cleanup start is internal;
@@ -42,6 +52,14 @@ import type { SyncConfig } from '../src/types'
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and every local error as an ordered secondary
  * diagnostic. A lone error keeps its identity.
+ * Cleanup with dependents settles as a whole. It ends every dependent and
+ * always starts the Collection's own cleanup, even when a dependent's `end()`
+ * throws or rejects; its promise settles only after every dependent's end and
+ * the Collection's cleanup settle, by when the Collection is `cleaned-up`, and
+ * it rejects with one of those failures if any failed. The failing-dependents
+ * product below checks this law for every pair of dependents drawn from
+ * well-behaved, throwing, rejecting, and held ends, crossed with synchronous,
+ * held, and rejecting adapter cleanup and both release orders.
  * No replacement sync run is admitted until terminal publication. Concurrent
  * callers share the cleanup promise. Rejection still finalizes the old run and
  * rejects every waiter. A later ordinary preload starts a new sync run.
@@ -219,7 +237,481 @@ describe(`Collection cleanup oracle calibration`, () => {
   })
 })
 
+/**
+ * ## Cleanup with failing dependents
+ *
+ * Law: `cleanup({ dependents: true })` ends each dependent and starts the
+ * Collection's own cleanup in the same call, whatever any dependent's end
+ * does. Its promise settles only once every dependent's end and the
+ * Collection's cleanup have settled; at that moment the Collection is
+ * `cleaned-up`. It resolves when nothing failed and otherwise rejects with one
+ * of the failures. Authority: the `Collection.cleanup()` JSDoc (an adapter
+ * rejection rejects "after the Collection reaches its final cleaned-up
+ * state"), the glossary's cleanup entry, and ARCHITECTURE law 14. The contract
+ * names no precedence among failures, so the model accepts any of them.
+ *
+ * Model: `expectedDependentCleanup` reads only the declared cell. Work is
+ * outstanding while a held dependent or a held adapter cleanup is unreleased;
+ * the promise stays pending exactly that long, and the Collection keeps its
+ * prior status exactly while its adapter cleanup is held.
+ *
+ * History grammar: an ordered pair of dependents, each ending by resolving,
+ * throwing synchronously, rejecting, or holding and then resolving or
+ * rejecting, or a pooled live query whose status listener throws at its end.
+ * A pooled view, like a live-query Collection's emitter, gives each listener
+ * its own call and reports a throw as uncaught, so that view's end succeeds
+ * and the driver checks the throw was reported. Adapter cleanup is
+ * synchronous, held then resolved, or held then rejected. When both sides
+ * hold, either side is released first.
+ *
+ * Production driver: scripted dependents register through the internal
+ * subscription `owner`, the same boundary every live query, Effect, and
+ * pooled view uses. The driver calls the public `cleanup({ dependents: true })`
+ * and releases the gates one at a time.
+ *
+ * Refinement check: the call returns a promise; it has ended both dependents
+ * and invoked adapter cleanup by then; after each release the promise is
+ * pending exactly while work is outstanding and the status matches the
+ * model; the settlement continuation sees `cleaned-up` and every end settled;
+ * the outcome and reason match the model.
+ *
+ * Calibration: ending dependents before starting the Collection's own cleanup
+ * without catching a throw fails every throwing cell; settling with
+ * `Promise.all` fails every cell where a dependent rejects while the adapter
+ * cleanup is held; settling with `Promise.allSettled` over the dependents
+ * alone fails every held-adapter cell.
+ *
+ * Limits: one Collection with two dependents; Effects and nested live-query
+ * chains are covered only by the admission history above.
+ */
+type DependentEnd =
+  | `resolve`
+  | `throw`
+  | `reject`
+  | `held-resolve`
+  | `held-reject`
+  | `pooled-throw`
+type AdapterCleanup = `sync` | `held-resolve` | `held-reject`
+type DependentCleanupCell = {
+  id: string
+  ends: readonly [DependentEnd, DependentEnd]
+  adapter: AdapterCleanup
+  // Which side the driver releases first when both hold.
+  adapterFirst: boolean
+}
+
+const dependentEnds: ReadonlyArray<DependentEnd> = [
+  `resolve`,
+  `throw`,
+  `reject`,
+  `held-resolve`,
+  `held-reject`,
+  `pooled-throw`,
+]
+const adapterCleanups: ReadonlyArray<AdapterCleanup> = [
+  `sync`,
+  `held-resolve`,
+  `held-reject`,
+]
+const holds = (behavior: string) => behavior.startsWith(`held`)
+const dependentCleanupCells: ReadonlyArray<DependentCleanupCell> =
+  dependentEnds.flatMap((first) =>
+    dependentEnds.flatMap((second) =>
+      adapterCleanups.flatMap((adapter) =>
+        (holds(adapter) && (holds(first) || holds(second))
+          ? [false, true]
+          : [false]
+        ).map((adapterFirst) => ({
+          id: `${first}+${second}:${adapter}${adapterFirst ? `:adapter-first` : ``}`,
+          ends: [first, second] as const,
+          adapter,
+          adapterFirst,
+        })),
+      ),
+    ),
+  )
+
+type Gate = `dependent-0` | `dependent-1` | `adapter`
+type DependentCleanupExpectation = {
+  // Gates in release order.
+  releases: Array<Gate>
+  // Whether the promise is still pending with these gates unreleased.
+  pendingWhile: (unreleased: ReadonlySet<Gate>) => boolean
+  statusWhile: (unreleased: ReadonlySet<Gate>) => `ready` | `cleaned-up`
+  outcome: `resolved` | `rejected`
+}
+
+/** Independent model of one cell. */
+function expectedDependentCleanup(
+  cell: DependentCleanupCell,
+): DependentCleanupExpectation {
+  const heldDependents = cell.ends.flatMap((behavior, index) =>
+    holds(behavior) ? [`dependent-${index}` as Gate] : [],
+  )
+  const adapter: Array<Gate> = holds(cell.adapter) ? [`adapter`] : []
+  const fails = (behavior: string) =>
+    behavior !== `resolve` &&
+    behavior !== `sync` &&
+    behavior !== `held-resolve` &&
+    behavior !== `pooled-throw`
+  return {
+    releases: cell.adapterFirst
+      ? [...adapter, ...heldDependents]
+      : [...heldDependents, ...adapter],
+    pendingWhile: (unreleased) => unreleased.size > 0,
+    statusWhile: (unreleased) =>
+      unreleased.has(`adapter`) ? `ready` : `cleaned-up`,
+    outcome: [...cell.ends, cell.adapter].some(fails) ? `rejected` : `resolved`,
+  }
+}
+
+const dependentCleanupReachStates = [
+  `dependent-end-threw`,
+  `dependent-failed-while-adapter-held`,
+  `held-dependent-outlasted-adapter`,
+  `adapter-rejected-after-dependent-failure`,
+] as const
+
+describe(`Collection cleanup with failing dependents oracle`, () => {
+  const reach = createOracleReach(
+    `collection-cleanup.dependents`,
+    dependentCleanupReachStates,
+  )
+  afterAll(() => reach.assertReached())
+
+  it(`declares each cell of the dependents product once`, () => {
+    const ids = dependentCleanupCells.map(({ id }) => id)
+    expect(new Set(ids).size).toBe(ids.length)
+    // 6 x 6 pairs x 3 adapters, plus a second release order for the 20 pairs
+    // with a held dependent under each of the 2 held adapters.
+    expect(ids.length).toBe(6 * 6 * 3 + 20 * 2)
+  })
+
+  it.each(dependentCleanupCells)(
+    `settles after every dependent and the source's own cleanup: $id`,
+    async (cell) => {
+      reach.beginHistory()
+      const expected = expectedDependentCleanup(cell)
+      const gates = new Map<Gate, ReturnType<typeof createDeferred<void>>>()
+      // Teardown's own cleanup must not wait on a gate nobody releases.
+      let tearingDown = false
+      const gate = (name: Gate) => {
+        const deferred = createDeferred<void>()
+        gates.set(name, deferred)
+        if (tearingDown) deferred.resolve()
+        return deferred.promise
+      }
+      const failures = new Map<Gate | `adapter-cause`, Error>()
+      const failure = (name: Gate) => {
+        const error = new Error(`${name} failed exactly`)
+        failures.set(name, error)
+        return error
+      }
+      let adapterCalls = 0
+      let adapterSettled = false
+      // A listener's throw the pooled view reports uncaught.
+      const uncaught: Array<unknown> = []
+      const queueMicrotask = globalThis.queueMicrotask
+      globalThis.queueMicrotask = (callback) =>
+        queueMicrotask(() => {
+          try {
+            callback()
+          } catch (error) {
+            if ([...failures.values()].includes(error as Error))
+              uncaught.push(error)
+            else throw error
+          }
+        })
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            commit()
+            markReady()
+            return {
+              cleanup: () => {
+                adapterCalls++
+                if (cell.adapter === `sync`) {
+                  adapterSettled = true
+                  return undefined
+                }
+                return gate(`adapter`).finally(() => {
+                  adapterSettled = true
+                  if (cell.adapter === `held-reject`) {
+                    failures.set(`adapter-cause`, failure(`adapter`))
+                    throw failures.get(`adapter`)
+                  }
+                })
+              },
+            }
+          },
+        },
+      })
+      const started = [false, false]
+      const settled = [false, false]
+      const teardown: Array<() => void> = []
+      const markFailedWhileHeld = () => {
+        if (holds(cell.adapter) && !adapterSettled) {
+          reach.reach(`dependent-failed-while-adapter-held`)
+        }
+      }
+      const register = (behavior: DependentEnd, index: 0 | 1) => {
+        const name = `dependent-${index}` as Gate
+        if (behavior === `pooled-throw`) {
+          // A pooled view on its own field, so each is its own dependent.
+          const query = new Query()
+            .from({ r: source })
+            .where(({ r }) => eq(index === 0 ? r.rank : r.id, 1))
+          // The builder's public type hides the members the pool reads.
+          const view = createPooledLiveQuery(
+            query as unknown as Parameters<typeof createPooledLiveQuery>[0],
+          ) as unknown as {
+            on: (event: `status:change`, listener: () => void) => () => void
+          }
+          let thrown = false
+          teardown.push(
+            view.on(`status:change`, () => {
+              if (thrown) return
+              thrown = true
+              started[index] = true
+              settled[index] = true
+              reach.reach(`dependent-end-threw`)
+              markFailedWhileHeld()
+              throw failure(name)
+            }),
+          )
+          return
+        }
+        const owner: CollectionDependent = {
+          kind: `live-query`,
+          active: true,
+          end: () => {
+            started[index] = true
+            subscription.unsubscribe()
+            const finish = () => {
+              settled[index] = true
+            }
+            if (behavior === `resolve`) {
+              finish()
+              return Promise.resolve()
+            }
+            if (behavior === `throw`) {
+              finish()
+              reach.reach(`dependent-end-threw`)
+              throw failure(name)
+            }
+            if (behavior === `reject`) {
+              finish()
+              markFailedWhileHeld()
+              return Promise.reject(failure(name))
+            }
+            return gate(name).then(() => {
+              finish()
+              if (behavior === `held-reject`) {
+                markFailedWhileHeld()
+                throw failure(name)
+              }
+            })
+          },
+        }
+        const subscription = source.subscribeChanges(() => {}, { owner })
+      }
+
+      try {
+        await source.preload()
+        register(cell.ends[0], 0)
+        register(cell.ends[1], 1)
+        expect(source.subscribers).toHaveLength(2)
+
+        let call: Promise<void>
+        try {
+          call = source.cleanup({ dependents: true })
+        } catch (error) {
+          throw new Error(`cleanup threw synchronously instead of rejecting`, {
+            cause: error,
+          })
+        }
+        let atSettlement:
+          { status: string; ended: boolean; adapter: boolean } | undefined
+        const outcome = call.then(
+          () => `resolved` as const,
+          (error: unknown) => ({ error }),
+        )
+        void outcome.then(() => {
+          atSettlement = {
+            status: source.status,
+            ended: settled.every(Boolean),
+            adapter: adapterSettled,
+          }
+        })
+        // The call ends both dependents and starts the source's cleanup.
+        expect(started, `dependents ended in the call`).toEqual([true, true])
+        expect(adapterCalls, `adapter cleanup started in the call`).toBe(1)
+
+        const unreleased = new Set(expected.releases)
+        const checkpoint = async (label: string) => {
+          await flushPromises()
+          expect(atSettlement === undefined, `${label}: pending`).toBe(
+            expected.pendingWhile(unreleased),
+          )
+          expect(source.status, `${label}: status`).toBe(
+            expected.statusWhile(unreleased),
+          )
+        }
+        await checkpoint(`after the call`)
+        for (const name of expected.releases) {
+          if (name === `adapter` && unreleased.size > 1) {
+            reach.reach(`held-dependent-outlasted-adapter`)
+          }
+          if (
+            name === `adapter` &&
+            cell.adapter === `held-reject` &&
+            failures.size > 0
+          ) {
+            reach.reach(`adapter-rejected-after-dependent-failure`)
+          }
+          gates.get(name)!.resolve()
+          unreleased.delete(name)
+          await checkpoint(`after releasing ${name}`)
+        }
+
+        const result = await outcome
+        expect(atSettlement, `at settlement`).toEqual({
+          status: `cleaned-up`,
+          ended: true,
+          adapter: true,
+        })
+        expect(result === `resolved` ? `resolved` : `rejected`).toBe(
+          expected.outcome,
+        )
+        if (result !== `resolved`) {
+          const reason = result.error as { cause?: unknown }
+          const dependentFailures = [
+            failures.get(`dependent-0`),
+            failures.get(`dependent-1`),
+          ].filter(Boolean)
+          expect(
+            dependentFailures.includes(reason as Error) ||
+              (failures.has(`adapter-cause`) &&
+                reason.cause === failures.get(`adapter-cause`)),
+            `rejects with one of this cell's failures`,
+          ).toBe(true)
+        }
+        expect(source.status).toBe(`cleaned-up`)
+        await flushPromises()
+        cell.ends.forEach((behavior, index) => {
+          if (behavior === `pooled-throw`)
+            expect(
+              uncaught,
+              `dependent-${index}'s listener throw is reported uncaught`,
+            ).toContain(failures.get(`dependent-${index}` as Gate))
+        })
+      } finally {
+        globalThis.queueMicrotask = queueMicrotask
+        tearingDown = true
+        for (const deferred of gates.values()) deferred.resolve()
+        for (const stop of teardown) stop()
+        await flushPromises()
+        await source.cleanup({ dependents: true }).catch(() => undefined)
+      }
+    },
+  )
+})
+
 describe(`Collection cleanup admission oracle`, () => {
+  it(`refuses cleanup while a live query or Effect reads it, and ends dependents first on request`, async () => {
+    let starts = 0
+    let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          ops = params
+          starts++
+          params.begin()
+          params.write({ type: `insert`, value: { id: starts, rank: starts } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    const inner = createLiveQueryCollection((q) => q.from({ row: source }))
+    const outer = createLiveQueryCollection((q) => q.from({ row: inner }))
+    const effect = createEffect({
+      query: (q) => q.from({ row: source }),
+      onBatch: () => {},
+    })
+    const received: Array<number> = []
+    const direct = source.subscribeChanges((changes) => {
+      for (const change of changes) received.push(change.key)
+    })
+    try {
+      await outer.preload()
+      // Model: three readers of the source, one of each kind; the outer query
+      // reads the inner one, not the source.
+      expect(source.subscribers.map(({ kind }) => kind).sort()).toEqual([
+        `effect`,
+        `live-query`,
+        `subscription`,
+      ])
+      expect(
+        source.subscribers.find(({ kind }) => kind === `live-query`)
+          ?.collection,
+      ).toBe(inner)
+      expect(inner.subscribers.map(({ collection }) => collection)).toEqual([
+        outer,
+      ])
+
+      // A plain cleanup refuses and changes nothing.
+      await expect(source.cleanup()).rejects.toThrow(/dependent/)
+      expect([source.status, inner.status, outer.status]).toEqual([
+        `ready`,
+        `ready`,
+        `ready`,
+      ])
+      expect(effect.disposed).toBe(false)
+
+      // With its dependents, cleanup ends the query chain and the Effect
+      // first. The direct subscription survives into the next sync run.
+      await source.cleanup({ dependents: true })
+      expect([source.status, inner.status, outer.status]).toEqual([
+        `cleaned-up`,
+        `cleaned-up`,
+        `cleaned-up`,
+      ])
+      expect(effect.disposed).toBe(true)
+      expect(source.subscribers.map(({ kind }) => kind)).toEqual([
+        `subscription`,
+      ])
+      received.length = 0
+      source.startSyncImmediate()
+      expect(starts).toBe(2)
+      ops.begin()
+      ops.write({ type: `insert`, value: { id: 9, rank: 9 } })
+      ops.commit()
+      expect(received).toContain(9)
+      // Only direct subscriptions and an idle live query remain. Nothing
+      // reads the idle query, so a plain cleanup is admitted; the idle query
+      // ends at cleanup start, as a query under internal teardown does.
+      const idle = createLiveQueryCollection((q) => q.from({ row: source }))
+      await idle.preload()
+      expect(
+        source.subscribers.find(({ collection }) => collection === idle)
+          ?.active,
+      ).toBe(false)
+      await source.cleanup()
+      expect(source.status).toBe(`cleaned-up`)
+      expect(idle.status).toBe(`crashed`)
+    } finally {
+      direct.unsubscribe()
+      await outer.cleanup({ dependents: true })
+      await effect.dispose()
+      await source.cleanup({ dependents: true })
+    }
+  })
+
   // Logical demand is distinct from a request to start a sync run. Cleanup
   // rejects the latter, including resumption, while a deferred subscription
   // may retain demand without starting even a live-query Collection's run.
@@ -394,7 +886,7 @@ describe(`Collection cleanup admission oracle`, () => {
         getKey: (row) => row.id,
         syncMode,
         sync: {
-          sync: ({ begin, write, commit, markReady, markError }) => {
+          sync: ({ begin, write, commit, markReady, fail }) => {
             starts++
             publish = () => {
               begin()
@@ -403,7 +895,7 @@ describe(`Collection cleanup admission oracle`, () => {
             }
             if (priorStatus === `ready` || starts > 1) markReady()
             if (priorStatus === `error` && starts === 1) {
-              markError(new Error(`initial source error`))
+              fail(new Error(`initial source error`))
             }
             return {
               cleanup: () => cleanupGate.promise,
@@ -744,8 +1236,10 @@ describe(`Collection cleanup admission oracle`, () => {
 
     try {
       await loadEntered.promise
+      // Internal teardown that bypasses cleanup admission, such as a retiring
+      // facade, still crashes the dependent at cleanup start.
       let cleanupSettled = false
-      const cleanup = source.cleanup().then(() => {
+      const cleanup = source._lifecycle.cleanup().then(() => {
         cleanupSettled = true
       })
 
@@ -754,7 +1248,7 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(observeCleanupSettlement(cleanupSettled)).toBe(
         atCleanupStart.cleanup,
       )
-      expect(observeDependent(live.status !== `error`)).toBe(
+      expect(observeDependent(live.status !== `crashed`)).toBe(
         atCleanupStart.dependent,
       )
       expect(await preload).toMatchObject({
@@ -775,7 +1269,7 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
-  it(`puts a live query in terminal error once when one source has two aliases`, async () => {
+  it(`crashes a live query once when internal teardown retires a source it reads under two aliases`, async () => {
     const cleanupGate = createDeferred<void>()
     const source = createCollection<Row, number>({
       getKey: (row) => row.id,
@@ -804,9 +1298,10 @@ describe(`Collection cleanup admission oracle`, () => {
     try {
       await live.preload()
 
-      const cleanup = source.cleanup()
+      // Internal teardown that bypasses admission crashes the query once.
+      const cleanup = source._lifecycle.cleanup()
 
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       expect(reports).toHaveBeenCalledTimes(1)
 
       cleanupGate.resolve()
@@ -856,8 +1351,12 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(effect.disposed).toBe(false)
       expect(source.subscriberCount).toBe(1)
 
+      // The public cleanup refuses while the Effect reads the source.
+      // Internal teardown that bypasses it disposes the Effect at cleanup
+      // start.
+      await expect(source.cleanup()).rejects.toThrow(/dependent/)
       let cleanupSettled = false
-      const cleanup = source.cleanup().then(() => {
+      const cleanup = source._lifecycle.cleanup().then(() => {
         cleanupSettled = true
       })
       const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
@@ -1095,11 +1594,11 @@ describe(`Collection cleanup admission oracle`, () => {
         getKey: (row) => row.id,
         syncMode,
         sync: {
-          sync: ({ markReady, markError }) => {
+          sync: ({ markReady, fail }) => {
             starts++
             if (priorStatus === `ready` || starts > 1) markReady()
             if (priorStatus === `error` && starts === 1) {
-              markError(new Error(`initial source error`))
+              fail(new Error(`initial source error`))
             }
             return {
               cleanup: () => cleanupGate.promise,
@@ -1235,7 +1734,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
         await expect(live.preload()).rejects.toThrow(message)
 
-        expect(live.status).toBe(`error`)
+        expect(live.status).toBe(`crashed`)
         expect({
           cleaning: cleaningSource.subscriberCount,
           healthy: healthySource.subscriberCount,
@@ -1329,7 +1828,7 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
-  it(`does not revive a terminal live query when its source restarts`, async () => {
+  it(`does not revive a cleaned-up live query when its source restarts`, async () => {
     let starts = 0
     const source = createCollection<Row, number>({
       getKey: (row) => row.id,
@@ -1355,16 +1854,20 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(live.get(1)?.rank).toBe(1)
       publications.length = 0
 
-      await source.cleanup()
-      expect(live.status).toBe(`error`)
+      // Cleanup refuses while the live query reads the source; with its
+      // dependents it cleans the live query up first.
+      await expect(source.cleanup()).rejects.toThrow(/dependent/)
+      await source.cleanup({ dependents: true })
+      expect(live.status).toBe(`cleaned-up`)
 
+      // Restarting the source does not revive the cleaned-up live query,
+      // and its surviving subscriber receives nothing from the new run.
       source.startSyncImmediate()
       expect(source.status).toBe(`ready`)
       expect(starts).toBe(2)
-      expect(live.status).toBe(`error`)
-      expect(live.get(1)?.rank).toBe(1)
+      expect(live.status).toBe(`cleaned-up`)
       expect(publications).toEqual([])
-      expect(reports).toHaveBeenCalledTimes(1)
+      expect(reports).not.toHaveBeenCalled()
     } finally {
       subscription.unsubscribe()
       reports.mockRestore()
@@ -1374,7 +1877,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it.each([`eager`, `on-demand`] as const)(
-    `recovers an errored %s source and dependent live query through their own restarts`,
+    `restarts a %s source that failed after ready, and its live query, through their own restarts`,
     async (syncMode) => {
       let sourceSync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       let starts = 0
@@ -1416,13 +1919,23 @@ describe(`Collection cleanup admission oracle`, () => {
         await live.preload()
         expect(live.get(1)?.rank).toBe(1)
 
-        sourceSync.markError(new Error(`source sync failed`))
-        expect(source.status).toBe(`error`)
-        expect(live.status).toBe(`error`)
+        // After the first ready a source's fail() stops its sync: the
+        // status and rows stay, and the live query's health tree reports it.
+        sourceSync.fail(new Error(`source sync failed`))
+        expect(source.status).toBe(`ready`)
+        expect(source.health.error).toMatchObject({
+          message: `source sync failed`,
+        })
+        expect(live.status).toBe(`ready`)
+        expect(live.get(1)?.rank).toBe(1)
+        expect(live.health.sources[0]?.error).toBeTruthy()
 
+        // Only a new sync run clears the error.
         await live.cleanup()
         await source.cleanup()
         await live.preload()
+        expect(source.health.hasErrors).toBe(false)
+        expect(live.health.hasErrors).toBe(false)
 
         expect(starts).toBe(2)
         expect(source.status).toBe(`ready`)

@@ -10,7 +10,7 @@ import {
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
   oraclePropertyOptions,
@@ -2029,6 +2029,18 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         `reachedReportOverFullWindow`,
       ] as const
       const reach = createOracleReach(property, states, { minimum: 3 })
+      const options =
+        campaign === `fixed`
+          ? { seed: 20261013, numRuns: oracleRuns(80) }
+          : oraclePropertyOptions(80, property)
+      // fast-check reports its seed only when the property fails. Choose the
+      // random campaign's seed here, so a test timeout can report it too.
+      const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)
+      onTestFailed(() => {
+        console.error(
+          `${property} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
+        )
+      })
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
           reach.beginHistory()
@@ -2037,9 +2049,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
             if (observation[state]) reach.reach(state)
           }
         }),
-        campaign === `fixed`
-          ? { seed: 20261013, numRuns: oracleRuns(80) }
-          : oraclePropertyOptions(80, property),
+        { ...options, seed },
       )
       reach.assertReached()
     },

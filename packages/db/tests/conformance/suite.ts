@@ -33,7 +33,8 @@
  * Coverage: query/where/select, live insert/update/delete, orderBy, join,
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
- * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
+ * no-data, initial readiness over a lagging on-demand source, Collection
+ * sync errors after readiness, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, opt-in pooling in each input form, error status, and order-only
  * moves.
  *
@@ -53,11 +54,7 @@
  * query follow the same split: rejected, or each read.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  include,
-  pooledLiveQueries,
-  waitForPersistedInitialRender,
-} from '@tanstack/db'
+import { include, pooledLiveQueries } from '@tanstack/db'
 import { createOracleReach } from '../oracle-reach'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
@@ -71,7 +68,7 @@ import {
 } from './result-laws'
 import type { PooledLiveQueries } from '@tanstack/db'
 import type {
-  DeferredSourceHandle,
+  ConformanceStatusSurface,
   LiveQueryDriver,
   LiveQueryHandle,
   Row,
@@ -199,9 +196,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeLaggingSource<T>()),
+    makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+      sources!.track(rawDriver.makeSyncSource<T>(data)),
     makePrecreated: (build, options) =>
       sources!.track(rawDriver.makePrecreated(build, options)),
-    makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
+    makeErrorSource: (kind) => sources!.track(rawDriver.makeErrorSource(kind)),
     mount: (build) => track(rawDriver.mount(build)),
     mountControllable: (build, initial, options) =>
       track(rawDriver.mountControllable(build, initial, options)),
@@ -210,40 +209,6 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     mountConfig: (build, options) =>
       track(rawDriver.mountConfig(build, options)),
     mountDisabled: () => track(rawDriver.mountDisabled()),
-  }
-
-  const installPersistedReadiness = (
-    source: DeferredSourceHandle,
-    settledSnapshot:
-      { status: `ready` } | { status: `error`; error: unknown } = {
-      status: `ready`,
-    },
-  ) => {
-    let snapshot:
-      | { status: `loading` }
-      | { status: `ready` }
-      | { status: `error`; error: unknown } = { status: `loading` }
-    const listeners = new Set<() => void>()
-    Object.defineProperty(
-      source.collection.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 0,
-          waitForInitialRender: waitForPersistedInitialRender,
-          getOrStartNetworkDeadline: () => Date.now(),
-          getSnapshot: () => snapshot,
-          subscribe: (listener: () => void) => {
-            listeners.add(listener)
-            return () => listeners.delete(listener)
-          },
-        },
-      },
-    )
-    return () => {
-      snapshot = settledSnapshot
-      for (const listener of listeners) listener()
-    }
   }
 
   /** Register one unique law. */
@@ -278,91 +243,6 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
-    scenario(
-      `persisted-readiness`,
-      `every opted-in source restores before a joined query reports persisted readiness`,
-      async () => {
-        const left = driver.makeDeferredSource<Row>()
-        const right = driver.makeDeferredSource<Row>()
-        const settleLeft = installPersistedReadiness(left)
-        const settleRight = installPersistedReadiness(right)
-        const h = driver.mount((q) =>
-          q
-            .from({ left: left.collection })
-            .join({ right: right.collection }, ({ left: a, right: b }: any) =>
-              ops.eq(a.id, b.id),
-            ),
-        )
-        await h.flush()
-        expect(h.current()).toMatchObject({
-          status: `loading`,
-          persistedStatus: `loading`,
-          isPersistedReady: false,
-        })
-
-        await h.apply(() => {
-          left.emit([SEED[0]!])
-          right.emit([SEED[0]!])
-        })
-        await h.flush()
-        expect(h.current().data).toHaveLength(1)
-
-        await h.apply(settleLeft)
-        await h.flush()
-        expect(h.current().persistedStatus).toBe(`loading`)
-        await h.apply(settleRight)
-        await h.flush()
-        expect(h.current()).toMatchObject({
-          status: `loading`,
-          persistedStatus: `ready`,
-          isPersistedReady: true,
-        })
-      },
-    )
-
-    scenario(
-      `persisted-readiness-opt-out`,
-      `one unconfigured source keeps the persisted signal unavailable`,
-      async () => {
-        const opted = driver.makeDeferredSource<Row>()
-        const ordinary = driver.makeDeferredSource<Row>()
-        const settle = installPersistedReadiness(opted)
-        const h = driver.mount((q) =>
-          q
-            .from({ opted: opted.collection })
-            .join(
-              { ordinary: ordinary.collection },
-              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
-            ),
-        )
-        await h.apply(settle)
-        await h.flush()
-        expect(h.current()).toMatchObject({
-          persistedStatus: `unavailable`,
-          isPersistedReady: false,
-        })
-      },
-    )
-    scenario(
-      `persisted-error-identity`,
-      `a persisted restore failure keeps its original object identity`,
-      async () => {
-        const source = driver.makeDeferredSource<Row>()
-        const failure = { code: `restore-failed`, detail: { retryable: false } }
-        const failRestore = installPersistedReadiness(source, {
-          status: `error`,
-          error: failure,
-        })
-        const h = driver.mount((q) => q.from({ items: source.collection }))
-        await h.flush()
-        expect(h.current().persistedStatus).toBe(`loading`)
-
-        await h.apply(failRestore)
-        expect(h.current().persistedStatus).toBe(`error`)
-        expect(h.current().persistedError).toBe(failure)
-        expect(h.current().isPersistedReady).toBe(false)
-      },
-    )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -1940,28 +1820,321 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
 
-    scenario(
-      `error-status`,
-      `a failing source surfaces an error (flag or boundary)`,
-      async () => {
-        const source = driver.makeErrorSource()
-        // Source ownership is registered before judging a failed setup.
-        expect(source.startup.returned, `source startup threw`).toBe(false)
-        if (!source.startup.returned)
-          expect(source.startup.error, `intended source startup error`).toBe(
-            source.expectedError,
+    // A failed first load and a crash both stop a fresh mount from showing
+    // data, and they need different handling: a failed first load is
+    // `status: 'error'` (`isLoadingError`), recovered by a new sync run; a
+    // crash is `status: 'crashed'` (`isCrashed`), permanent for the Collection
+    // instance (docs/guides/error-handling.md "Status" and "When a Collection
+    // crashes"; glossary "loading error" and "crash"). Both explain
+    // themselves on the mounted Collection's node with the exact error the
+    // source produced.
+    //
+    // A driver whose `errorSurface` is `throw` reads `data` through an error
+    // boundary, so reading the failed result throws. Its flags stay readable
+    // through `statusSurface` and are judged by the same law: a boundary
+    // that receives the failure does not license a wrong `isCrashed` or
+    // `isLoadingError`.
+    const failureSurface = (h: LiveQueryHandle) => {
+      if (driver.errorSurface !== `throw`) return h.current()
+      expect(() => h.current(), `reading a failed result throws`).toThrow()
+      expect(
+        h.statusSurface,
+        `a throw-surface driver reads its flags without data`,
+      ).toBeDefined()
+      return h.statusSurface!()
+    }
+    const expectFailureFlags = (
+      result: ConformanceStatusSurface,
+      kind: `fail` | `crash`,
+    ) => {
+      expect(result.status).toBe(kind === `fail` ? `error` : `crashed`)
+      expect(result.isLoadingError, `isLoadingError`).toBe(kind === `fail`)
+      expect(result.isCrashed, `isCrashed`).toBe(kind === `crash`)
+      expect(result.isReady).toBe(false)
+      expect(result.isSyncError).toBe(false)
+      expect(result.health?.hasErrors).toBe(true)
+    }
+    for (const kind of [`fail`, `crash`] as const) {
+      scenario(
+        kind === `fail` ? `error-status` : `crashed-status`,
+        kind === `fail`
+          ? `a source whose first load fails surfaces a loading error (flag or boundary)`
+          : `a crashed source surfaces a crash (flag or boundary)`,
+        async () => {
+          const source = driver.makeErrorSource(kind)
+          // Source ownership is registered before judging a failed setup.
+          // Only a crash makes startup throw.
+          expect(source.startup.returned, `source startup returned`).toBe(
+            kind === `fail`,
           )
-        const h = driver.mountCollection(source.collection)
-        await h.flush()
+          if (!source.startup.returned)
+            expect(source.startup.error, `intended source startup error`).toBe(
+              source.expectedError,
+            )
+          const h = driver.mountCollection(source.collection)
+          await h.flush()
 
-        if (driver.errorSurface === `throw`) {
-          // Boundary model: reading the errored result throws (for an error
-          // boundary to catch), rather than exposing a readable flag.
-          expect(() => h.current()).toThrow()
-        } else {
-          expect(h.current().status).toBe(`error`)
-          expect(h.current().isError).toBe(true)
+          const result = failureSurface(h)
+          expectFailureFlags(result, kind)
+          expect(result.health?.failureReason).toBeNull()
+          expect(result.health?.error).toMatchObject({
+            message: source.expectedError.message,
+          })
+          // The binding exposes the exact value the source failed with.
+          expect(result.health?.error?.cause).toBe(source.expectedError)
+          h.unmount()
+        },
+      )
+    }
+
+    // The same law when the failure arrives while the binding waits for the
+    // first load, the window a Suspense resource or a pending preload spans:
+    // the mounted query shows `loading`, then its source fails its first
+    // load or crashes. The source is a loading Collection, failed through
+    // the Collection side of the adapter's `fail()` or crashed the way core
+    // crashes it after an IndexedDB closure or a failed restore. A query
+    // takes its source's worst status before its initial-query readiness
+    // (ARCHITECTURE.md law 16), so mounting the source directly and mounting
+    // a live query over it must both end in that status, and the source's
+    // node carries the exact cause (law 17: a node mirrors its Collection).
+    for (const kind of [`fail`, `crash`] as const) {
+      for (const shape of [`collection`, `query`] as const) {
+        scenario(
+          `${kind === `fail` ? `error` : `crashed`}-status-during-first-load-${shape}`,
+          `a ${kind === `fail` ? `failed first load` : `crash`} while the ${shape} waits for its first load surfaces ${kind === `fail` ? `a loading error` : `a crash`}`,
+          async () => {
+            const source = driver.makeDeferredSource<Row>()
+            const expectedError = new Error(
+              `conformance: ${kind} in first load`,
+            )
+            const h =
+              shape === `collection`
+                ? driver.mountCollection(source.collection)
+                : driver.mount((q) => q.from({ items: source.collection }))
+            await h.flush()
+            const waiting = h.statusSurface?.() ?? h.current()
+            expect(waiting.status, `before the failure`).toBe(`loading`)
+
+            const lifecycle = (
+              source.collection as unknown as {
+                _lifecycle: {
+                  fail: (error: unknown) => void
+                  crash: (error: unknown) => void
+                }
+              }
+            )._lifecycle
+            if (kind === `fail`) lifecycle.fail(expectedError)
+            else lifecycle.crash(expectedError)
+            await h.flush()
+
+            const result = failureSurface(h)
+            expectFailureFlags(result, kind)
+            const sourceNode =
+              shape === `collection` ? result.health : result.health?.sources[0]
+            expect(sourceNode?.error?.cause, `source node cause`).toBe(
+              expectedError,
+            )
+            h.unmount()
+          },
+        )
+      }
+    }
+
+    // ---- sync problems after readiness -------------------------------
+    // After readiness a sync problem never changes status, rows, or the
+    // load flags. It appears only in the health tree, on the source alias's
+    // node, and sets `isSyncError`. `reportError()` sets the node's
+    // `failureReason` and `reportHealthy()` clears it; `fail()` sets its
+    // `error`, which only a new sync run clears, and after it every report
+    // from the sync adapter throws. The tree keeps its object identity until
+    // its content changes (ARCHITECTURE.md laws 16 and 17,
+    // docs/contributing/designs/source-failure-and-health/error-surface).
+    //
+    // The model below is the whole expectation: one optional problem with a
+    // field, its frame of failures (oldest first), and a serial number. The
+    // problem shows its newest failure and lists the frame in `errors`
+    // (maintainer decision): each `reportError()` adds a failure, and
+    // `fail()` is one failure for the sync run. A report is a new serial, so
+    // the tree must be a new object; a call that changes nothing keeps the
+    // serial, so the tree must be the same object. Row writes do not touch
+    // the model. Each step is observed after the driver's `flush` cut.
+    scenario(
+      `sync-errors-after-readiness`,
+      `sync problems after readiness appear only in the health tree`,
+      async () => {
+        type Problem = {
+          field: `failureReason` | `error`
+          causes: Array<Error>
+          serial: number
         }
+        let problem: Problem | null = null
+        let serial = 0
+        const stopped = () => problem?.field === `error`
+
+        const source = driver.makeSyncSource(SEED)
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .select(({ items }: any) => ({ id: items.id, name: items.name })),
+        )
+        await h.flush()
+        let rows = SEED.map(({ id, name }) => ({ id, name }))
+        let previous: { tree: unknown; serial: number | null } | undefined
+
+        const observe = (step: string) => {
+          const result = h.current()
+          const tree = result.health
+          expect(result.status, step).toBe(`ready`)
+          expect(
+            result.isLoadingError,
+            `${step}: isLoadingError is the first load`,
+          ).toBe(false)
+          expect(result.isSyncError, `${step}: isSyncError`).toBe(
+            problem !== null,
+          )
+          expectUnorderedRows(result.data, rows)
+          expect(tree, step).toBeDefined()
+          const node = tree!.sources.find(({ alias }) => alias === `items`)
+          const shown = (
+            info:
+              | { message: string; errors: ReadonlyArray<{ message: string }> }
+              | null
+              | undefined,
+          ) =>
+            info
+              ? {
+                  message: info.message,
+                  errors: info.errors.map(({ message }) => message),
+                }
+              : null
+          const expected = (field: Problem[`field`]) =>
+            problem?.field === field
+              ? {
+                  message: problem.causes.at(-1)!.message,
+                  errors: problem.causes.map(({ message }) => message),
+                }
+              : null
+          expect(
+            {
+              rootError: tree!.error,
+              hasErrors: tree!.hasErrors,
+              node: node && {
+                kind: node.kind,
+                status: node.status,
+                failureReason: shown(node.failureReason),
+                error: shown(node.error),
+              },
+            },
+            step,
+          ).toEqual({
+            rootError: null,
+            hasErrors: problem !== null,
+            node: {
+              kind: `source`,
+              status: `ready`,
+              failureReason: expected(`failureReason`),
+              error: expected(`error`),
+            },
+          })
+          // The binding exposes the exact values the sync adapter reported.
+          const info = node?.failureReason ?? node?.error
+          expect(info?.cause, `${step}: error cause`).toBe(
+            problem?.causes.at(-1),
+          )
+          expect(
+            info?.errors.every(
+              (failure, at) => failure.cause === problem?.causes[at],
+            ) ?? true,
+            `${step}: each listed failure is the reported value`,
+          ).toBe(true)
+          const current = { tree, serial: problem?.serial ?? null }
+          if (previous) {
+            if (previous.serial === current.serial)
+              expect(tree, `${step}: unchanged tree keeps identity`).toBe(
+                previous.tree,
+              )
+            else
+              expect(tree, `${step}: changed tree is a new object`).not.toBe(
+                previous.tree,
+              )
+          }
+          previous = current
+        }
+
+        observe(`ready`)
+        await h.flush()
+        observe(`a flush without changes`)
+
+        source.insert({ id: `4`, name: `Dave`, age: 40, team: `b` })
+        rows = [...rows, { id: `4`, name: `Dave` }]
+        await h.flush()
+        observe(`a row write`)
+
+        // Each step either applies to the model or, after fail(), throws.
+        const steps: Array<[string, () => void]> = [
+          [
+            `a failure reason`,
+            () => {
+              const stalled = new Error(`stream stalled`)
+              source.reportError(stalled)
+              problem = {
+                field: `failureReason`,
+                causes: [stalled],
+                serial: ++serial,
+              }
+            },
+          ],
+          [
+            `a second failure reason joins the list`,
+            () => {
+              const retried = new Error(`retry failed`)
+              source.reportError(retried)
+              problem = {
+                field: `failureReason`,
+                causes: [...problem!.causes, retried],
+                serial: ++serial,
+              }
+            },
+          ],
+          [
+            `reportHealthy clears it`,
+            () => {
+              source.reportHealthy()
+              problem = null
+            },
+          ],
+          [
+            `reportHealthy with nothing to clear changes nothing`,
+            () => source.reportHealthy(),
+          ],
+          [
+            `fail sets the error`,
+            () => {
+              const ended = new Error(`stream ended`)
+              source.fail(ended)
+              problem = { field: `error`, causes: [ended], serial: ++serial }
+            },
+          ],
+          [`reportHealthy after fail throws`, () => source.reportHealthy()],
+          [
+            `reportError after fail throws`,
+            () => source.reportError(new Error(`late`)),
+          ],
+        ]
+        for (const [step, act] of steps) {
+          const throws = stopped()
+          if (throws) expect(act, `${step}: throws`).toThrow()
+          else act()
+          await h.flush()
+          observe(step)
+        }
+
+        source.update({ id: `1`, name: `Johnny Doe`, age: 30, team: `a` })
+        rows = rows.map((row) =>
+          row.id === `1` ? { id: `1`, name: `Johnny Doe` } : row,
+        )
+        await h.flush()
+        observe(`rows still publish after fail`)
         h.unmount()
       },
     )
@@ -2003,7 +2176,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(46)
+      expect(registry.size).toBe(49)
     })
   })
 }

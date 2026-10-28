@@ -220,9 +220,11 @@ for (const shared of [true, false]) {
         expect(
           await page.evaluate(() => window.initialization.fresh()),
         ).toEqual(expected)
+        // A versionchange closes each connection: local storage can no longer
+        // serve reads, so every Collection crashes.
         expect(
           await page.evaluate(() => window.initialization.upgrade()),
-        ).toEqual({ blocked: 0, statuses: ['error', 'error', 'error'] })
+        ).toEqual({ blocked: 0, statuses: ['crashed', 'crashed', 'crashed'] })
       })
     })
   }

@@ -3896,8 +3896,10 @@ describe(`ordered source work oracle`, () => {
               if (recovering && isFullSource) {
                 fullSourceRequests++
                 if (failure && fullSourceRequests <= failure.attempts) {
-                  if (failure.mode === `sync`) throw failure.error
+                  // A synchronous throw is a rejection (maintainer
+                  // decision): an acquisition that core releases.
                   acquisitions.push(options)
+                  if (failure.mode === `sync`) throw failure.error
                   return Promise.reject(failure.error)
                 }
               }
