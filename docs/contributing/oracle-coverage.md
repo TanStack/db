@@ -3403,20 +3403,27 @@ does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
 
-`packages/db/tests/oracle-reach.ts` (`createOracleReach`, ORC-015) checks
-declared reach in an ordinary run and in a run with only
-`TANSTACK_DB_ORACLE_SEED`, which reseeds the whole campaign at its full budget.
-Only a path replay, which runs one recorded history, skips the check. A declared
-state that only random histories reach can still miss by chance at the normal
-budget. In `packages/db/tests/source-health-oracle.test.ts`, the
-`source-health.history`, `source-health.on-demand`, and
+`packages/db/tests/declared-reach-oracle.property.test.ts`
+(`oracle.declared-reach`) owns when `createOracleReach` (ORC-015) checks reach,
+and what fixed examples prove. By default the check runs in an ordinary run and
+in a run with only `TANSTACK_DB_ORACLE_SEED`, which reseeds the whole campaign
+at its full budget. Only a path replay, which runs one recorded history, skips
+it. A property can run fixed examples first in every run, through
+`oraclePropertyOptions(…, { examples })`. The examples come on top of the base
+run budget, so they never displace a random history. With `fixedHistories`,
+the check also fails for each declared state that the examples did not enter.
+The `source-health.history`, `source-health.on-demand`, and
 `source-health.lazy-demand` properties run each reach prefix, and each driver
-option that a declared state needs, as fast-check `examples` before their random
-histories. The examples alone reach every declared state of those three
-properties, so their reach check does not depend on the seed (#2287). Other
-properties have not been measured for this. Owner: none (oracle machinery).
-Needed witness: per property, the declared states that its fixed examples do
-not reach, and how often a normal-budget run misses each one.
+option that a declared state needs, as examples, so their reach does not depend
+on the seed (#2287). The oracle generates ledgers over two to four states, up to
+six histories, minimums up to three, and up to four fixed histories, under the
+three run kinds. It does not cover `runOracleCampaign` in
+`packages/db/tests/oracle-campaign.ts`, which passes its own `replaying` rule:
+a seed-only run of its campaign prefix still skips the check. A declared state
+of another property that only random histories reach can still miss by chance
+at the normal budget. Those properties have not been measured. Needed witness:
+per property, the declared states that no fixed example enters, and how often a
+normal-budget run misses each one.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest

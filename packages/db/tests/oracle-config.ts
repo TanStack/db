@@ -6,6 +6,7 @@ type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
   `lint.part-reach`,
+  `oracle.declared-reach`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
   `react.ssr-ordinary`,
@@ -642,14 +643,32 @@ export function readOracleRunConfig(
   return { multiplier, replaySeed, replayPath, replayProperty }
 }
 
-export function oracleRandomParameters(
+export function oracleRandomParameters<TExample = never>(
   numRuns: number,
   replay: OracleReplayConfig | number | undefined,
   property?: string,
-): { numRuns: number; seed?: number; path?: string } & ReturnType<
-  typeof oracleReplayReporter
-> {
+  examples?: ReadonlyArray<TExample>,
+): {
+  numRuns: number
+  seed?: number
+  path?: string
+  examples?: Array<TExample>
+} & ReturnType<typeof oracleReplayReporter> {
   if (property !== undefined) assertRegisteredOracleProperty(property)
+  // fast-check runs the examples first and counts them in numRuns, so they
+  // come on top of the random runs: the examples never displace one. A path
+  // replay runs one recorded history, which can be an example.
+  if (examples !== undefined) {
+    const parameters = oracleRandomParameters(numRuns, replay, property)
+    return {
+      ...parameters,
+      examples: [...examples],
+      numRuns:
+        parameters.path === undefined
+          ? parameters.numRuns + examples.length
+          : parameters.numRuns,
+    }
+  }
   const { replaySeed, replayPath, replayProperty } =
     typeof replay === `object`
       ? replay
@@ -756,10 +775,19 @@ export function oracleRuns(baseRuns: number): number {
   return baseRuns * multiplier
 }
 
-/** Replays broad randomized properties when a campaign seed is supplied. */
-export function oraclePropertyOptions(
+/**
+ * Replays broad randomized properties when a campaign seed is supplied.
+ * `examples` run first in every run, on top of the base runs.
+ */
+export function oraclePropertyOptions<TExample = never>(
   baseRuns: number,
   property?: string,
-): ReturnType<typeof oracleRandomParameters> {
-  return oracleRandomParameters(oracleRuns(baseRuns), replay, property)
+  { examples }: { examples?: ReadonlyArray<TExample> } = {},
+): ReturnType<typeof oracleRandomParameters<TExample>> {
+  return oracleRandomParameters(
+    oracleRuns(baseRuns),
+    replay,
+    property,
+    examples,
+  )
 }

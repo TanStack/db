@@ -3353,9 +3353,20 @@ describe(`source failure and health oracle`, () => {
       on(`ready`, `A`),
     ]),
   ]
+  // Each prefix also runs as a fixed example, first in every run and on top
+  // of the random histories, with a direct subscriber and the `join` shape,
+  // which queries both sources that the prefixes drive. The reach check fails
+  // for a declared state that these examples do not enter (#2287).
+  const historyExamples = reachPrefixes.map(
+    (prefix): [[Shape, Array<Step>], boolean] => [
+      [prefixShapes.get(prefix) ?? `join`, [...prefix]],
+      true,
+    ],
+  )
   const historyReach = createOracleReach(
     `source-health.history`,
     historyReachStates,
+    { fixedHistories: historyExamples.length },
   )
   let historiesRan = false
   fcTest.prop(
@@ -3372,16 +3383,9 @@ describe(`source failure and health oracle`, () => {
         ]),
       fc.boolean(),
     ],
-    {
-      ...oraclePropertyOptions(60, `source-health.history`),
-      // Each prefix runs once in every run, before the random histories, so
-      // the states only a prefix enters cannot miss by chance (#2287). The
-      // `join` shape queries both sources that the prefixes drive.
-      examples: reachPrefixes.map((prefix): [[Shape, Array<Step>], boolean] => [
-        [prefixShapes.get(prefix) ?? `join`, [...prefix]],
-        true,
-      ]),
-    },
+    oraclePropertyOptions(60, `source-health.history`, {
+      examples: historyExamples,
+    }),
   )(
     `generated histories refine the model`,
     ([shape, steps], directSubscribers) => {
@@ -5186,14 +5190,6 @@ describe(`on-demand demand grammar`, () => {
     `fail`,
     `crash`,
   )
-  const demandReach = createOracleReach(
-    `source-health.on-demand`,
-    demandReachStates,
-  )
-  let demandHistoriesRan = false
-  afterAll(() => {
-    if (demandHistoriesRan) demandReach.assertReached()
-  })
   // A prefix that enters a declared reach state that random steps alone
   // rarely reach at the base run count; random steps follow it.
   const demandReachPrefixes: ReadonlyArray<ReadonlyArray<WindowStep>> = [
@@ -5240,6 +5236,21 @@ describe(`on-demand demand grammar`, () => {
       `restart`,
     ],
   ]
+  // Each prefix also runs as a fixed example, first in every run and on top
+  // of the random histories, with a direct subscriber. The reach check fails
+  // for a declared state that these examples do not enter.
+  const demandExamples = demandReachPrefixes.map(
+    (prefix): [Array<WindowStep>, boolean] => [[...prefix], true],
+  )
+  const demandReach = createOracleReach(
+    `source-health.on-demand`,
+    demandReachStates,
+    { fixedHistories: demandExamples.length },
+  )
+  let demandHistoriesRan = false
+  afterAll(() => {
+    if (demandHistoriesRan) demandReach.assertReached()
+  })
   fcTest.prop(
     [
       fc
@@ -5253,13 +5264,9 @@ describe(`on-demand demand grammar`, () => {
         ]),
       fc.boolean(),
     ],
-    {
-      ...oraclePropertyOptions(60, `source-health.on-demand`),
-      // Each prefix runs once in every run, before the random histories.
-      examples: demandReachPrefixes.map(
-        (prefix): [Array<WindowStep>, boolean] => [[...prefix], true],
-      ),
-    },
+    oraclePropertyOptions(60, `source-health.on-demand`, {
+      examples: demandExamples,
+    }),
   )(
     `generated demand histories refine the model`,
     (steps, directSubscriber) => {
@@ -6960,14 +6967,6 @@ describe(`lazy join demand grammar`, () => {
         ending: { at: `subscription-status`, dependents },
       }),
   )
-  const lazyReach = createOracleReach(
-    `source-health.lazy-demand`,
-    lazyReachStates,
-  )
-  let lazyHistoriesRan = false
-  afterAll(() => {
-    if (lazyHistoriesRan) lazyReach.assertReached()
-  })
   // A reload whose replay fails. A row the provider deletes after it stays.
   const failedReload = {
     steps: [{ kind: `settle-ok` }, { kind: `reload` }, { kind: `settle-fail` }],
@@ -7097,12 +7096,10 @@ describe(`lazy join demand grammar`, () => {
     rest: Array<LazyStep>,
     {
       withEffect = false,
-      windowed = false,
       deferredStart,
       ending,
     }: {
       withEffect?: boolean
-      windowed?: boolean
       deferredStart?: `reload-in-first-load`
       ending?: { at: ReloadNotice; dependents: boolean }
     } = {},
@@ -7112,10 +7109,44 @@ describe(`lazy join demand grammar`, () => {
     false,
     true,
     withEffect,
-    windowed,
+    false,
     deferredStart,
     ending,
   ]
+  // Each prefix also runs as a fixed example, first in every run and on top
+  // of the random histories, and so does each driver option that a declared
+  // state needs. Each example has a direct subscriber and no other option it
+  // does not name. The reach check fails for a declared state that these
+  // examples do not enter.
+  const lazyExamples = [
+    ...lazyReachPrefixes.map((prefix) => lazyExample(prefix, [])),
+    // The provider deletes a row after a reload's run ended.
+    lazyExample(failedReload, [{ kind: `remote-delete`, key: 1 }]),
+    lazyExample(null, [{ kind: `settle-ok` }], { withEffect: true }),
+    lazyExample(null, [{ kind: `settle-ok` }], {
+      deferredStart: `reload-in-first-load`,
+    }),
+    // A cleanup at each notice of a reload. A reload changes loadingSubset
+    // only while the first load is still open.
+    ...reloadNotices.map((at) =>
+      lazyExample(
+        null,
+        at === `loading-subset` ? [] : [{ kind: `settle-ok` }],
+        {
+          ending: { at, dependents: false },
+        },
+      ),
+    ),
+  ]
+  const lazyReach = createOracleReach(
+    `source-health.lazy-demand`,
+    lazyReachStates,
+    { fixedHistories: lazyExamples.length },
+  )
+  let lazyHistoriesRan = false
+  afterAll(() => {
+    if (lazyHistoriesRan) lazyReach.assertReached()
+  })
   fcTest.prop(
     [
       fc
@@ -7142,33 +7173,9 @@ describe(`lazy join demand grammar`, () => {
         { freq: 2, nil: undefined },
       ),
     ],
-    {
-      ...oraclePropertyOptions(100, `source-health.lazy-demand`),
-      // Each prefix runs once in every run, before the random histories,
-      // and so does each driver option that a declared state needs. Each
-      // example has a direct subscriber and no other option it does not name.
-      examples: [
-        ...lazyReachPrefixes.map((prefix) => lazyExample(prefix, [])),
-        // The provider deletes a row after a reload's run ended.
-        lazyExample(failedReload, [{ kind: `remote-delete`, key: 1 }]),
-        lazyExample(null, [{ kind: `settle-ok` }], { withEffect: true }),
-        lazyExample(null, [{ kind: `settle-ok` }], {
-          deferredStart: `reload-in-first-load`,
-        }),
-        // A cleanup at each notice of a reload. The loadingSubset notice
-        // needs a windowed query whose first load is still open.
-        ...reloadNotices.map((at) =>
-          at === `loading-subset`
-            ? lazyExample(null, [], {
-                windowed: true,
-                ending: { at, dependents: false },
-              })
-            : lazyExample(null, [{ kind: `settle-ok` }], {
-                ending: { at, dependents: false },
-              }),
-        ),
-      ],
-    },
+    oraclePropertyOptions(100, `source-health.lazy-demand`, {
+      examples: lazyExamples,
+    }),
   )(
     `generated lazy demand histories refine the model`,
     (
