@@ -371,7 +371,7 @@ export function createCoordinatorHarness(): CoordinatorHarness {
 }
 
 export type FailStopCoordinatorHarness = PersistedCollectionCoordinator & {
-  emit: (payload: unknown, senderId?: string) => void
+  emit: (payload: unknown, senderId?: string, storageId?: string) => void
   publishCalls: Array<ProtocolEnvelope<unknown>>
   remoteEnsureCalls: Array<LoadSubsetOptions>
   remoteReleaseCalls: Array<LoadSubsetOptions>
@@ -417,11 +417,11 @@ export function createFailStopCoordinatorHarness(
         seq: tx.seq,
         latestRowVersion: tx.rowVersion,
       }),
-    emit: (payload, senderId = `remote-fail-stop-peer`) => {
+    emit: (payload, senderId = `remote-fail-stop-peer`, storageId) => {
       subscriber?.({
         v: 1,
         dbName: `test-db`,
-        collectionId,
+        collectionId: storageId ?? collectionId,
         senderId,
         ts: Date.now(),
         payload,

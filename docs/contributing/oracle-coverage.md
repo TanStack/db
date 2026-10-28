@@ -2592,7 +2592,20 @@ consistency between them: while their streams interleave, a lagging tab's
 copy of an older transaction can be stored and announced after a newer one,
 so a tab can briefly show an older server state. Every tab delivers the
 same log in order, so durable state and every tab converge once the streams
-catch up. No lane checks this yet. Ordering the copies would need a generic
+catch up. No lane checks this yet.
+A counterexample bounds that convergence claim
+([#2209](https://github.com/TanStack/db/issues/2209)). Two Browser tabs
+share one SQLite file through the real coordinator, with a controlled
+Electric stream per tab. Tab A's stream applies v1 then v2 at `30_0`. Tab B's
+lagging stream applies v1 at `20_0`, and tab B closes before it reaches v2.
+Tab A then shows v1, and the durable `electric:resume` offset is back at
+`20_0`. Nothing redelivers v2 to tab A while it stays open, because its
+stream is already past it. A tab that opens later resumes from `20_0` and
+repairs the cache. The convergence above therefore holds only while the
+lagging tab keeps running or another tab restarts its stream. The
+multi-tab Electric oracle in `browser-db-sqlite-persistence` pins this
+history with `it.fails` beside a passing control in which the lagging tab
+catches up. Ordering the copies would need a generic
 source position on sync commits; Electric already stores `{ handle, offset }`
 with each commit, PowerSync does not use this wrapper, and persisted Query
 collections have no log position.
@@ -3460,6 +3473,182 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       not establish behavior after schema changes or invalidated resume points,
       or each intermediate publication during a multi-transaction truncate replay.
       The same owner needs those histories before claiming those stronger laws.
+      Reserved commits (#2226). The same driver and model also own the
+      reserved-commit law: a persisted hydration that would start while a
+      reserved sync transaction is open waits until it ends, and the commit is
+      accepted. Authority: `reserveCommitTurn` in `packages/db/src/types.ts`,
+      widened by maintainer decision on #2226 to every persisted hydration.
+      Further maintainer decisions fix its edges. Readers keep the rows from
+      before a hydration while it waits; a transaction opened after a
+      hydration began straddles it. A notice that waited may be retried as
+      gap recovery. A tab asks the leader only to fill a gap it has not
+      already filled, and sends no added upstream request. Each reservation
+      a notice waited for can open one gap, so the oracle checks at most one
+      more pullSince request per wait (maintainer decision on PR #2265). A source that stops for good abandons its
+      reservation.
+      A second registration crosses the routes with the reserving timings,
+      ending, and follow-up dimensions. The routes are subset, complete
+      subset, a follower's routed subset, the source's own baseline,
+      reset, full reload, sequence gap with or without pullSince, sequence
+      gap whose pullSince deltas reload partway through (a targeted delta,
+      then one past the targeted-invalidation limit), and a targeted change
+      that starts no hydration. Gap recovery is a hydration cycle only from
+      the point where it will change rows (maintainer decision on PR #2265):
+      after pullSince answers, or at its reload without pullSince. A
+      reservation opened after that point straddles it; one opened during
+      pullSince makes it wait, and a transaction that did not reserve may
+      commit during pullSince. A peer reset abandons a reserved transaction
+      that began before it (maintainer decision on PR #2265): the commit
+      rejects and the reset does not wait. The reserving timings are
+      before a subset load's admission, during gap recovery's pullSince
+      (with or without a reservation), across the mutex turn, across scope
+      entry, during the read, in the route's first publication, and across
+      startup. A load that waits for a reservation runs after it ends,
+      whether it commits or is abandoned (maintainer decision on PR #2265);
+      on `851e8d9da` the abandoned admission cells failed with a rejected
+      load. The ending is commits,
+      abandoned, cleanup, an aborted demand, or the source awaiting its own
+      baseline. The follow-up is a reset then a pre-reset commit, or a
+      reset, a new reservation, and then the pre-reset commit. A reservation
+      that a reset abandoned cannot reserve again; on `7a6f32fd7` 8
+      re-reserve cells failed because a later hydration waited for the
+      abandoned transaction. An aborted demand still waiting for its turn is
+      no longer active demand. It receives the reset follow-up, or a peer's
+      targeted change for a row no live demand covers; nothing reads or asks
+      the leader for it. On `7a6f32fd7`, 12 of the 24 aborted-demand cells
+      fail: the reset's reload read for it, and the peer change sent a
+      pullSince past the bound. Filtering aborted demand only from reloads
+      still fails the 4 peer-change cells that wait at the mutex turn or
+      scope entry.
+      Observations: receipts, final rows, row metadata, cursor, status,
+      reads during the reservation, upstream requests, pullSince count,
+      rows while waiting, and every read against the fold of the durable
+      events before it. Every cell declares reach (ORC-015).
+      | Evidence | Result |
+      | --- | --- |
+      | Row-algebra cross and reservation cross | 677 cells pass. |
+      | Peer reset against an older reservation, on `2047f4281` | 53 cells fail: the reset waited and the stale commit landed in the new epoch. Abandoning only at the reset's turn fails 6 follow-up cells; abandoning only on arrival fails 40 route cells. |
+      | Gap recovery's cycle start, on `2047f4281` | 12 pullSince cells fail: an unreserved commit during pullSince rejected, and a reservation opened then straddled. Dropping the reservation check after pullSince fails 8. |
+      | Gap recovery that reloads partway through, on `851e8d9da` | 28 cells fail: recovery advanced the stream position and applied a targeted delta before it deferred, so its retry skipped the reload. A gate only at recovery start still fails 15 scope-entry cells; reloads that start their own cycle inside recovery fail 61. |
+      | `5649a07d4` | The open cells fail with `a persisted sync transaction cannot cross a hydration cycle`. Three `after read` reset follow-up cells also fail, because `main` applied a pre-reset commit before the reset set its term fence. Queueing resets with notices fixes this pre-existing defect. |
+      | Hostile mutants | Each mutant fails its cells, and every failure is an assertion. Deferring every notice fails the targeted change. Dropping the follower reply's wait fails the routed subset. Reporting hydration start before the check fails the aborted demand. A reset reload that starts its own cycle fails the first-publication reset. Applying a reset outside the notice queue fails the reset follow-ups. Retrying a waited notice while the reservation is open fails the follow-up and routed cells (repeated pullSince). Checking only at the mutex turn fails every scope-entry cell. Gating subset hydration only fails every reset, reload, and gap cell. Requeueing a waited notice behind later notices fails 12 reset follow-up cells: the pre-reset commit is published before its reset, and a reload is lost. |
+      A routed load also judges law 7 at its settlement: the owner's row is
+      public when the load settles. A reservation that ends between the
+      follower's flush and its wait check is a one-microtask window no
+      timing reaches; a temporary hook that ended the reservation there
+      showed the old wait loop settling early in 4 straddled cells and the
+      current loop keeping the owner's row public. A new reservation that
+      opens between the loop's wait and its flush defers the owner's
+      broadcast again. The loop checks for a reservation after each flush; a
+      temporary hook that opened one there showed the loop on `7a6f32fd7`
+      settling the routed load in 2 cells before the owner's row was public.
+      A third registration reaches it without a hook. The owner's reply is
+      held while its broadcast waits; the source commits 0 to 8 microtasks
+      after the reply and reserves an empty second transaction 0 to 12
+      microtasks later. On `7a6f32fd7` the 12 cells that commit 3 microtasks
+      after the reply settle the routed load before the owner's row is
+      public; all 117 cells pass on the current loop. A held write after the
+      commit does not open the window, because a reservation lasts through
+      its own durable write.
+      A second reservation that opens 7 or more microtasks after the commit
+      holds the broadcast twice, and the notice asks the leader once per
+      wait, as the bound allows. A peer reset for a
+      storage generation this Collection no longer uses abandons nothing.
+      Known limit (maintainer decision on PR #2265): Electric publishes a
+      transaction's txids as stream evidence before persistence accepts its
+      commit, so `awaitTxId` can resolve for a commit that a peer reset or a
+      terminal failure later rejects; the source then fails, and the
+      Collection's health node records it.
+      Known limit (maintainer decision on PR #2265): no fairness rule. A
+      hydration released by a commit waits again for a reservation that
+      opens before its next mutex turn, so a source that reserves back to
+      back can delay it; Electric reserves across batches only during an
+      initial sync or refetch.
+      Not covered: `forceReloadSubset`, which only a sync-absent Collection
+      has, and which therefore never meets a reservation; startup hydration,
+      which source entry follows (an `open across startup` observation);
+      and row visibility for on-demand Collections without demand beyond the
+      source's own rows. Cleaned-up cells judge only cleanup.
+      Real SQLite adapter:
+      `packages/db-sqlite-persistence-core/tests/reserved-commit-sqlite-adapter-oracle.test.ts`
+      crosses three routes (peer full reload, peer reset, and a subset
+      admitted earlier) with two timings (a held write of this Collection,
+      or the shared scheduler holding the scope after its turn) and two
+      endings (commits, abandoned). It runs on `SQLiteCorePersistenceAdapter`.
+      It also judges that a subset load that waited settles successfully.
+      Its peer-reset cells judge that the reset abandons the reservation:
+      the commit rejects and row-1 keeps its durable value (both committing
+      peer-reset cells fail on `2047f4281`).
+      A nesting dimension adds a second reserved transaction inside the
+      first. A peer reset must abandon both, so both reject with the same
+      abort; on `5ac5a8711` the inner one rejected with the cross-cycle
+      error instead. Its 20 cells pass.
+      Every committing single-transaction cell fails on `5649a07d4`. A
+      mutant that rejects the waited load after the reservation fails the 4
+      subset cells; before the load's outcome was judged, it passed. A peer
+      full reload behind this Collection's own held write cannot become
+      durable through the single SQLite writer, so it is excluded here and
+      left to the grammar's fixture leader.
+      Browser host: the multi-tab Electric oracle in
+      `browser-db-sqlite-persistence` crosses two or three tabs, eager or
+      on-demand Collections, which tab finishes first, a storm or staggered
+      arrival, the last tab's open reserved transaction (its refetch, or an
+      ordinary batch after it resumed from the persisted position), how its
+      source stops for good (an error that `onError` does not retry, the SDK
+      giving up, a signal abort, cleanup, or resume invalidation), and how
+      the application recovers it (restart in the page, or reload). It
+      judges every tab's status once every source has delivered or stopped,
+      and again after recovery. Eager cells also compare rows at both
+      checkpoints, except a cleaned-up tab before recovery. It also judges the
+      full-snapshot request after resume invalidation. A Collection in
+      `error` keeps showing durable rows (maintainer decision on PR #2265),
+      so the tab whose source resume invalidation failed must show its
+      peers' refetch; it stays `ready` with an error on its health node. Its 290 storm cells pass. Every ordinary storm
+      cell fails on `5649a07d4`. Removing Electric's abandon on the `onError`,
+      give-up, or signal-abort path fails 12 cells each, and on the resume
+      invalidation path 16 cells. Cleanup's abandon mutant survives here,
+      because the persisted wrapper ends its transactions on cleanup; the
+      Electric descriptor-isolation oracle kills it without persistence.
+      On-demand cells judge receipts and status only.
+      Generated histories in the same file interleave server changes,
+      deploys, partial and complete deliveries, every stop except resume
+      invalidation, restarts, and reloads across two or three eager tabs
+      (fixed seed 952051961 and a random seed, 60 runs each; the shared
+      `TANSTACK_DB_ORACLE_SEED`, `_PATH`, and `_PROPERTY=
+      browser.multi-tab-reserved-history` replay one). The
+      model folds committed batches into the expected durable rows. After
+      every step it judges the durable rows, every Collection status, and
+      the rows of each tab with no open transaction; after every tab catches
+      up it judges them again. A Collection status changes only through its
+      own source (maintainer decision on PR #2265): a peer's commit leaves a
+      `loading` or failed tab as it is. That law failed on `main` (a peer's
+      truncate reload marked such a tab ready); the fixed seed fails without
+      the repair. Removing the reservation gate, or the `onError`, give-up,
+      or signal-abort abandon, fails both campaigns. Each declared premise,
+      including a peer commit after each kind of stop mid-transaction, is
+      reached in every campaign. Known gap #2267 is left out of the
+      generated histories and pinned with `it.fails`: a resumed tab that lags
+      behind a peer can receive an update for a row the peer already
+      deleted, and Electric's resume check puts it in `error`.
+      The histories also post a peer `collection:reset` on the tabs'
+      coordinator channel; no shipped host sends one yet, so this premise is
+      controlled. The reset abandons every open reserved transaction, and
+      Electric's next commit then fails the source until the tab restarts
+      (maintainer decision on PR #2265): a ready tab keeps `ready` with an
+      error on its health node, which the histories judge, and a loading tab
+      goes to `error` (#2168). A reset that waits and
+      accepts the stale commit fails both campaigns.
+      Electric's updates carry only changed columns by default, so an update
+      for a row the tab does not hold applies nothing; the fold follows that
+      rule (a CI random campaign found the history where a lagging tab's
+      update follows a peer's delete).
+      A delivery may also commit only a prefix of what a stream owes, as a
+      server answering at an earlier moment does, so lagging commits are
+      generated. The final checkpoint requires the server head (Law 2).
+      Known gap #2209 is the one history that breaks it: a lagging tab
+      commits an older row and closes for good. Generated histories never
+      close a tab for good, and an `it.fails` replay through the same driver
+      and checks pins that history.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in
@@ -4357,7 +4546,12 @@ public and durable state. A second delivery lands during rotation, before the
 replacement stream starts; it rejects old callback admission into the new
 cache. Initial scoped recovery also forgets imported old txid evidence, and
 retiring an incomplete old stream transaction releases its commit turn so a
-new demand can start. These histories killed the one-phase restart, retained
+new demand can start. A progressive atomic swap that throws in `getKey`
+leaves its reserved transaction open; when the SDK then gives up, Electric
+must abandon it, and a subset load that waited runs. On `7a6f32fd7` the swap
+did not mark its transaction open, so no stop could abandon it and the load
+waited until its checkpoint timed out. The metadata-only commit shares the
+same begin and commit helpers but has no fallible step between them. These histories killed the one-phase restart, retained
 acknowledgement, and open-transaction designs at their named checkpoints. The
 Electric descriptor owner also holds rotation while aborting one old demand:
 that demand rejects promptly and a sibling later applies fresh source rows.

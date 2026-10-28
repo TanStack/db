@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import {
@@ -24,6 +25,7 @@ import {
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
   assertGenerationNoticeHistory,
   atPersistedOracleCheckpoint,
@@ -32,6 +34,7 @@ import {
   createCoordinatorHarness,
   createDeferred,
   createEventGate,
+  createFailStopCoordinatorHarness,
   createFollowerTab,
   createRecordingAdapter,
   describeUnlessAnyOracleReplay,
@@ -2227,7 +2230,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // insert/update, and absent/present dependent successors. The two-read
   // unreserved case
   // reconstructs the report; one and three distinguish a misplaced threshold.
-  // Open transactions crossing hydration are excluded here and rejected below.
+  // Open transactions crossing hydration are excluded here. Unreserved ones are
+  // rejected below; reserved ones are covered by the persisted-read precedence
+  // grammar's open commit timings.
   // This driver supplies adapter scheduling, not live Electric or OPFS delivery.
   it.each(
     ([`insert`, `update`] as const).flatMap((type) =>
@@ -4987,6 +4992,1684 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
     },
   )
+
+  // # Do persisted reads preserve sync history, and do reserved commits survive them?
+  //
+  // Law 1 (persisted-baseline precedence, maintainer decision on #2036):
+  // persisted rows are an older baseline for newer sync-adapter changes, and
+  // an internal read never revokes an accepted sync transaction. Every
+  // history must reach the independent final rows, row metadata, and cursor
+  // below, and a persistence read must observe the durable rows after exactly
+  // the source steps whose durable writes completed before it.
+  //
+  // Law 2 (reserved commits): a persisted hydration that would start while a
+  // reserved sync transaction is open waits until that transaction ends, and
+  // the commit is accepted. Authority: SyncPersistenceCapabilityV1
+  // `reserveCommitTurn` (packages/db/src/types.ts), widened by maintainer
+  // decision on #2226 to every persisted hydration. Maintainer decisions on
+  // #2226 also fix its edges:
+  // - While a hydration waits, readers keep the rows from before it began.
+  //   A hydration that already began when the reservation opened continues;
+  //   the transaction straddles it.
+  // - A notice that waited may be retried as gap recovery, because the
+  //   reserved commit lands first and takes the next stream position. A tab
+  //   asks the leader only to fill a gap it has not already filled, and
+  //   sends no added upstream request. Each reservation a notice waited for
+  //   can open one gap, so the oracle allows one more pullSince request per
+  //   wait (maintainer decision on PR #2265).
+  // - A source that stops for good abandons its reserved transaction; waiting
+  //   hydrations then proceed and the abandoned writes never apply.
+  // - A peer change that starts no hydration is not delayed. A load aborted
+  //   while it waits settles before the commit. Cleanup while a hydration
+  //   waits settles and reads nothing more. A pre-reset commit never publishes
+  //   its own rows. A source that awaits its own baseline hydration inside its
+  //   reservation is rejected at once rather than waiting on itself.
+  //
+  // History grammar. A held earlier durable write ("gate") queues the route,
+  // the hydration that a cell exercises:
+  // - `subset`, `complete subset`: on-demand demand;
+  // - `routed subset`: a follower's demand, which the owner serves by
+  //   committing a row, broadcasting it, then replying;
+  // - `source baseline`: the source's own `hydrateBaseline` request;
+  // - `collection-reset`, `full-reload`, `seq-gap`, `seq-gap pull`,
+  //   `seq-gap deltas`: peer notices (`seq-gap pull` recovers through a
+  //   pullSince full reload; `seq-gap deltas` through pullSince deltas, a
+  //   targeted row change and then a delta too large to apply in place,
+  //   which reloads partway through the recovery);
+  // - `targeted`: a peer change for a key that is not public, which starts
+  //   no hydration.
+  // The commit timing places the first sync transaction against the route:
+  // - `after read`: it begins after the read is published;
+  // - `queued`: it begins and commits while the read waits;
+  // - `open before admission`: it begins and reserves before the route's
+  //   subset load is admitted, so the load waits in the wrapper's admission
+  //   path. Whether the reservation commits or is abandoned, the load runs
+  //   after it ends (maintainer decision on PR #2265);
+  // - `unreserved across pullSince`: it begins without reserving before a
+  //   gap notice and commits while recovery waits for pullSince. Recovery
+  //   is a hydration cycle only from the point where it will change rows, so
+  //   the commit is accepted (maintainer decision on PR #2265);
+  // - `open during pullSince`: it begins and reserves while recovery waits
+  //   for pullSince, before recovery's cycle begins, so recovery waits for
+  //   its commit and asks the leader again;
+  // - `open across mutex turn`: it begins and reserves while the read waits
+  //   behind the gate, before the read's turn;
+  // - `open across scope entry`: it reserves after the read's turn began and
+  //   its hydration scope was entered, as a shared scheduler can hold it;
+  // - `open during the read`: it reserves while the route's first persisted
+  //   read is in progress, so the transaction straddles the hydration (for an
+  //   eager reset, after its truncate published);
+  // - `open in the first publication`: it reserves from the route's first
+  //   public change, through a microtask, as a source reacting to it would;
+  //   for an eager reset that lands between its truncate and its reload;
+  // - `open across startup`: the source begins and reserves inside its sync
+  //   function, before startup has settled.
+  // The ending says how the reserved transaction ends: it `commits`, is
+  // `abandoned` (committed with an aborted signal), meets `cleanup` of the
+  // Collection, or the route's demand is aborted while it waits (`demand
+  // aborted`); with `source awaits own baseline` the source also awaits
+  // `hydrateBaseline` inside its reservation. A follow-up delivers, while
+  // the route waits, a peer reset and then a pre-reset peer commit whose row
+  // the reset superseded. After an aborted demand, the follow-up
+  // `peer change after the abort` delivers a peer's targeted change while the aborted
+  // load still waits for its turn. No live demand covers that row, so it
+  // stays out of the Collection and nothing reads for it. For a follower's
+  // routed subset, `owner replies, then the source reserves again` releases
+  // the owner's held reply while the owner's broadcast waits for the
+  // reservation. The source commits a few microtasks later and reserves an
+  // empty second transaction a few microtasks after that, as a source that
+  // reacts through promise continuations does. The follower can then find no
+  // reservation open while the broadcast still waits, and the second
+  // reservation defers the broadcast again. Law 7 still requires the load to
+  // settle after the owner's row is public. The delays range over 0 to 8 and
+  // 0 to 12 microtasks. A late second reservation holds the broadcast twice,
+  // so it may ask the leader twice.
+  //
+  // Three registrations share this one driver and model: the row-algebra
+  // cross (every operation and truncate replay; committed endings; the
+  // original routes and timings), the reservation cross (every route, timing,
+  // ending, and follow-up, with one insert and no truncate replay), and the
+  // follower window (the second-reservation delays above). The
+  // controlled coordinator does not prove host delivery; the Browser-host
+  // receiving witness is the multi-tab Electric oracle.
+  type PersistedReadRoute =
+    | `subset`
+    | `complete subset`
+    | `routed subset`
+    | `source baseline`
+    | `collection-reset`
+    | `full-reload`
+    | `seq-gap`
+    | `seq-gap pull`
+    | `seq-gap deltas`
+    | `targeted`
+  type PersistedReadTiming =
+    | `after read`
+    | `queued`
+    | `open before admission`
+    | `unreserved across pullSince`
+    | `open during pullSince`
+    | `open across mutex turn`
+    | `open across scope entry`
+    | `open during the read`
+    | `open in the first publication`
+    | `open across startup`
+  type PersistedReadEnding =
+    | `commits`
+    | `abandoned`
+    | `cleanup`
+    | `demand aborted`
+    | `source awaits own baseline`
+  type PersistedReadHistory = {
+    syncMode: `eager` | `on-demand`
+    route: PersistedReadRoute
+    operation: `insert` | `update` | `delete`
+    truncateReplay: `none` | `before` | `after`
+    commitTiming: PersistedReadTiming
+    ending: PersistedReadEnding
+    // For `owner replies, then the source reserves again`: the microtasks
+    // the source takes after the owner replies to commit its reservation,
+    // then to reserve a second transaction.
+    reReserveDelays?: readonly [number, number]
+    followUp:
+      | `none`
+      | `reset then pre-reset commit`
+      | `reset, re-reserve, then pre-reset commit`
+      | `retired-storage reset`
+      | `peer change after the abort`
+      | `owner replies, then the source reserves again`
+  }
+  type PersistedReadReach =
+    | `route performed a persisted read`
+    | `reservation opened while the read was pending`
+    | `reservation opened before the route was admitted`
+    | `unreserved transaction committed while recovery waited for pullSince`
+    | `reservation opened while recovery waited for pullSince`
+    | `reservation opened while a read was in progress`
+    | `reservation opened in the route's first publication`
+    | `reservation opened before startup settled`
+    | `peer change announced while reserved`
+    | `reset and pre-reset commit announced while waiting`
+    | `retired-storage reset announced while reserved`
+    | `peer change announced after the demand aborted`
+    | `source reserved again after the owner replied`
+
+  // The rows of the persisted-reads histories. Each history gets fresh
+  // objects, so no history can observe another's.
+  const createPersistedReadRows = () => {
+    const storedRow = { id: `shared`, title: `persisted`, detail: `old` }
+    const storedOnly = { id: `stored-only`, title: `removed by truncate` }
+    const gateRow = { id: `gate`, title: `earlier sync transaction` }
+    const networkRow = { id: `shared`, title: `network`, detail: `new` }
+    const replacementRow = { id: `replacement`, title: `truncate replay` }
+    const peerRow = { id: `peer`, title: `peer change` }
+    const remoteRow = { id: `remote`, title: `owner` }
+    const supersededRow = { id: `superseded`, title: `before the reset` }
+    return {
+      storedRow,
+      storedOnly,
+      gateRow,
+      networkRow,
+      replacementRow,
+      peerRow,
+      remoteRow,
+      supersededRow,
+    }
+  }
+  type PersistedReadRows = ReturnType<typeof createPersistedReadRows>
+
+  // Independent model. It reads only the history and its input rows,
+  // never an observation from production, so it can be reviewed and
+  // calibrated apart from the driver.
+  const expectedPersistedReadOutcome = (
+    history: PersistedReadHistory,
+    fixtureRows: PersistedReadRows,
+  ) => {
+    const {
+      syncMode,
+      route,
+      operation,
+      truncateReplay,
+      commitTiming,
+      ending,
+      followUp,
+    } = history
+    const {
+      storedRow,
+      storedOnly,
+      gateRow,
+      networkRow,
+      replacementRow,
+      peerRow,
+      remoteRow,
+    } = fixtureRows
+    const waits =
+      commitTiming === `open before admission` ||
+      commitTiming === `open during pullSince` ||
+      commitTiming === `open across mutex turn` ||
+      commitTiming === `open across scope entry`
+    // The transaction straddles a hydration that already began.
+    const straddles =
+      commitTiming === `open during the read` ||
+      commitTiming === `open in the first publication`
+    const reserves =
+      waits || straddles || commitTiming === `open across startup`
+    // Gap recovery is a hydration cycle only from the point where it will
+    // change rows (maintainer decision on PR #2265). With pullSince that is
+    // after the leader answers, before recovery enters its hydration scope,
+    // so a reservation that opens at scope entry straddles the recovery.
+    // Without pullSince it is the reload inside the scope, so such a
+    // reservation comes first and the recovery waits. Every other route
+    // begins its hydration inside the scope.
+    const recoveryStraddles =
+      commitTiming === `open across scope entry` &&
+      (route === `seq-gap pull` || route === `seq-gap deltas`)
+    // A peer reset abandons a reserved transaction that opened before the
+    // reset's hydration began: the route reset when the reservation opened
+    // before its turn, or a follow-up reset delivered while the reservation
+    // is open (maintainer decision on PR #2265). Its commit rejects, its
+    // first step applies nothing, and the reset runs without waiting.
+    const resetAbandons =
+      waits &&
+      (route === `collection-reset` ||
+        followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`)
+    const hydrationWaits = waits && !recoveryStraddles && !resetAbandons
+    const hydrationStraddles = straddles || recoveryStraddles || resetAbandons
+    const noticeWaited = waits && !recoveryStraddles
+    const sourceSteps =
+      truncateReplay === `none`
+        ? [`network`]
+        : truncateReplay === `before`
+          ? [`replacement`, `network`]
+          : [`network`, `replacement`]
+    const demandRoute =
+      route === `subset` ||
+      route === `complete subset` ||
+      route === `routed subset`
+    const noDemandRead =
+      syncMode === `on-demand` && !demandRoute && route !== `source baseline`
+    // Rows the route adds durably. The owner's row for a routed subset lands
+    // after the follower's own read, so reads never see it.
+    const routeRows =
+      route === `targeted` ||
+      route === `seq-gap deltas` ||
+      followUp === `peer change after the abort`
+        ? [peerRow]
+        : route === `routed subset`
+          ? [remoteRow]
+          : []
+    const lateRowIds = new Set(route === `routed subset` ? [remoteRow.id] : [])
+    const readBaselineRows = [
+      storedRow,
+      storedOnly,
+      gateRow,
+      ...routeRows,
+    ].filter((row) => !lateRowIds.has(row.id))
+    // Steps that apply: an abandoned reservation applies none of its writes.
+    const firstStepAbandoned = ending === `abandoned` || resetAbandons
+    const appliedSteps = firstStepAbandoned ? sourceSteps.slice(1) : sourceSteps
+    const abandonedStep = firstStepAbandoned ? sourceSteps[0] : undefined
+
+    // Independent snapshot algebra over the source steps that apply, in
+    // order. A replacement discards every earlier row and leaves only its
+    // own; a network step writes or deletes the shared key. An abandoned step
+    // applies nothing. Complete row values and explicit metadata avoid the
+    // separate partial-update contract. Source steps are input history, never
+    // observations from production.
+    const baselineRows = [storedRow, storedOnly, gateRow, ...routeRows]
+    const foldSteps = (initialRows: Array<Todo>) => {
+      const rows = new Map<string, Todo>(
+        initialRows.map((row) => [row.id, row]),
+      )
+      for (const step of appliedSteps) {
+        if (step === `replacement`) {
+          rows.clear()
+          rows.set(replacementRow.id, replacementRow)
+        } else if (operation === `delete`) rows.delete(`shared`)
+        else rows.set(networkRow.id, networkRow)
+      }
+      return [...rows.values()]
+    }
+    let durableSharedMetadata: unknown = { owner: `persisted` }
+    let expectedCursor = `persisted` as string
+    for (const step of appliedSteps) {
+      durableSharedMetadata =
+        step === `replacement` || operation === `delete`
+          ? undefined
+          : { owner: `network` }
+      expectedCursor = step
+    }
+    const expectedRows = foldSteps(baselineRows)
+    // On-demand without demand exposes the source's own rows, folded from its
+    // earlier row; an aborted demand loads nothing. Every other route exposes
+    // the durable rows. Uncertified on-demand cache rows stay quarantined
+    // after a baseline hydration (electric.ts: "loaded only through fresh
+    // subset snapshots").
+    const exposesSourceRowsOnly =
+      noDemandRead || route === `source baseline` || ending === `demand aborted`
+    const expectedPublicRows = exposesSourceRowsOnly
+      ? foldSteps([gateRow])
+      : expectedRows
+    // The persisted shared metadata is public only where the durable rows are.
+    const sharedMetadata = {
+      public:
+        exposesSourceRowsOnly && appliedSteps.length === 0
+          ? undefined
+          : durableSharedMetadata,
+      durable: durableSharedMetadata,
+    }
+    const replacementMetadata = appliedSteps.includes(`replacement`)
+      ? { owner: `replacement` }
+      : undefined
+    const readsSomething =
+      !noDemandRead &&
+      route !== `targeted` &&
+      route !== `source baseline` &&
+      ending !== `demand aborted`
+    // A routed subset reads its local rows, then rereads to admit the
+    // owner's row; a reset follow-up reloads, and so does the fenced
+    // pre-reset notice. Those reloads read only active demand: an eager
+    // Collection's baseline, or a subset whose demand was not aborted. An
+    // aborted demand loads no rows.
+    const expectedReadCount =
+      (!readsSomething ? 0 : route === `routed subset` ? 2 : 1) +
+      ((followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`) &&
+      (syncMode === `eager` || readsSomething)
+        ? 2
+        : 0)
+    const applyDurableEvent = (rows: Map<string, Todo>, event: string) => {
+      if (event === `replacement`) {
+        rows.clear()
+        rows.set(replacementRow.id, replacementRow)
+      } else if (event === `network`) {
+        if (operation === `delete`) rows.delete(`shared`)
+        else rows.set(networkRow.id, networkRow)
+      } else if (event === `owner commit`) rows.set(remoteRow.id, remoteRow)
+    }
+    // The first step committed before the route's reads inside startup. A
+    // commit made while gap recovery waits for pullSince is accepted, but its
+    // durable write waits behind recovery's apply-mutex turn, so recovery's
+    // reads still come first.
+    const startupStepCommitted =
+      commitTiming === `open across startup` && abandonedStep === undefined
+    const noWaitPullSinceCalls =
+      route === `seq-gap pull` || route === `seq-gap deltas` ? 1 : 0
+    // A route notice waits in the waiting timings; a follower's owner notice
+    // arrives during a straddled reservation and waits there. A tab asks the
+    // leader only to fill a new gap, and each reservation a notice waited
+    // for can open one, so the bound is one request per wait; nothing else
+    // opens a gap. A second reservation can hold the owner's notice again.
+    const waitedNotices =
+      (noticeWaited &&
+        (route === `full-reload` ||
+          route === `seq-gap pull` ||
+          route === `seq-gap deltas`)) ||
+      (straddles && route === `routed subset`)
+        ? followUp === `owner replies, then the source reserves again`
+          ? 2
+          : 1
+        : 0
+    const expectedSourceLoads =
+      route === `subset` ||
+      route === `complete subset` ||
+      route === `routed subset`
+        ? ending === `demand aborted`
+          ? 0
+          : 1
+        : route === `seq-gap` && syncMode === `eager`
+          ? 1
+          : 0
+    const metadataKeys = [`shared`, `stored-only`, `gate`, `replacement`]
+    const expectedMetadata = (side: `public` | `durable`) =>
+      metadataKeys.map((key) =>
+        key === `shared`
+          ? sharedMetadata[side]
+          : key === `replacement`
+            ? replacementMetadata
+            : undefined,
+      )
+    return {
+      waits,
+      straddles,
+      reserves,
+      hydrationWaits,
+      resetAbandons,
+      hydrationStraddles,
+      sourceSteps,
+      demandRoute,
+      readBaselineRows,
+      appliedSteps,
+      expectedRows,
+      exposesSourceRowsOnly,
+      expectedPublicRows,
+      expectedCursor,
+      expectedReadCount,
+      applyDurableEvent,
+      startupStepCommitted,
+      noWaitPullSinceCalls,
+      waitedNotices,
+      expectedSourceLoads,
+      metadataKeys,
+      expectedMetadata,
+    }
+  }
+
+  const runPersistedReadHistory = async (history: PersistedReadHistory) => {
+    const { syncMode, route, operation, commitTiming, ending, followUp } =
+      history
+    const fixtureRows = createPersistedReadRows()
+    const {
+      storedRow,
+      storedOnly,
+      gateRow,
+      networkRow,
+      replacementRow,
+      peerRow,
+      remoteRow,
+      supersededRow,
+    } = fixtureRows
+    const {
+      waits,
+      reserves,
+      hydrationWaits,
+      resetAbandons,
+      hydrationStraddles,
+      sourceSteps,
+      demandRoute,
+      readBaselineRows,
+      appliedSteps,
+      expectedRows,
+      exposesSourceRowsOnly,
+      expectedPublicRows,
+      expectedCursor,
+      expectedReadCount,
+      applyDurableEvent,
+      startupStepCommitted,
+      noWaitPullSinceCalls,
+      waitedNotices,
+      expectedSourceLoads,
+      metadataKeys,
+      expectedMetadata,
+    } = expectedPersistedReadOutcome(history, fixtureRows)
+    const adapter = createRecordingAdapter([
+      { ...storedRow },
+      { ...storedOnly },
+    ])
+    adapter.rowMetadata.set(`shared`, { owner: `persisted` })
+    adapter.collectionMetadata.set(`cursor`, `persisted`)
+    const coordinator = createFailStopCoordinatorHarness(
+      `persisted-read-precedence`,
+    )
+    const persistenceEntered = createEventGate()
+    const releasePersistence = createEventGate()
+    const readApplied = createEventGate()
+    const trace: Array<string> = []
+    // Every adapter call advances this counter. The quiescence checkpoint
+    // reads it; it is driver evidence, not part of the model.
+    let adapterCalls = 0
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.applyCommittedTx = async (...args) => {
+      adapterCalls++
+      if (args[1].mutations.some(({ key }) => key === `gate`)) {
+        persistenceEntered.resolve()
+        await releasePersistence.promise
+      }
+      await applyCommittedTx(...args)
+      // Record durable completion, including a delete or truncate. A rejected
+      // adapter write must never appear as a completed source obligation.
+      if (args[1].truncate) trace.push(`replacement`)
+      else if (args[1].mutations.some(({ key }) => key === `shared`)) {
+        trace.push(`network`)
+      }
+    }
+    // The fixture leader allocates each commit the next durable position,
+    // after every commit already stored, including the peer commits that
+    // notices announce. A Browser leader does the same
+    // (`nextPersistedTxIfLeader`), so two commits never share a position.
+    const leaderPosition = { seq: 0, rowVersion: 0 }
+    const advanceLeaderPosition = (seq: number, rowVersion: number) => {
+      leaderPosition.seq = Math.max(leaderPosition.seq, seq)
+      leaderPosition.rowVersion = Math.max(
+        leaderPosition.rowVersion,
+        rowVersion,
+      )
+    }
+    const nextPeerPosition = () => {
+      advanceLeaderPosition(
+        leaderPosition.seq + 1,
+        leaderPosition.rowVersion + 1,
+      )
+      return { seq: leaderPosition.seq, rowVersion: leaderPosition.rowVersion }
+    }
+    // A peer commit stored durably at the next position, then announced.
+    const peerCommit = async (row: Todo, txId: string) => {
+      const position = nextPeerPosition()
+      await applyCommittedTx(
+        { kind: `eager`, collectionId: `persisted-read-precedence` },
+        {
+          txId,
+          term: 1,
+          seq: position.seq,
+          rowVersion: position.rowVersion,
+          mutations: [{ type: `insert`, key: row.id, value: row }],
+        } as never,
+      )
+      if (row.id === remoteRow.id) trace.push(`owner commit`)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: position.seq,
+        txId,
+        latestRowVersion: position.rowVersion,
+        requiresFullReload: false,
+        changedRows: [{ key: row.id, value: row }],
+        deletedKeys: [],
+      })
+    }
+    // Every route but `seq-gap` has a leader that answers pullSince with a
+    // full reload.
+    let pullSinceCalls = 0
+    // Holds the next pullSince request open for the pullSince timings.
+    let pullSinceHold:
+      | {
+          entered: ReturnType<typeof createEventGate>
+          release: ReturnType<typeof createEventGate>
+        }
+      | undefined =
+      commitTiming === `unreserved across pullSince` ||
+      commitTiming === `open during pullSince`
+        ? { entered: createEventGate(), release: createEventGate() }
+        : undefined
+    const pullHold = pullSinceHold
+    coordinator.pullSince =
+      route === `seq-gap`
+        ? undefined
+        : async () => {
+            pullSinceCalls++
+            const hold = pullSinceHold
+            pullSinceHold = undefined
+            if (hold) {
+              hold.entered.resolve()
+              await hold.release.promise
+            }
+            if (route === `seq-gap deltas`) {
+              // A targeted delta for the row the peer stored at the skipped
+              // position, then a delta past the targeted-invalidation limit.
+              const bulkKeys = Array.from(
+                { length: 129 },
+                (_, index) => `absent-${index}`,
+              )
+              return Promise.resolve({
+                type: `rpc:pullSince:res`,
+                rpcId: `gap-deltas`,
+                ok: true,
+                latestTerm: 1,
+                latestSeq: leaderPosition.seq,
+                latestRowVersion: leaderPosition.rowVersion,
+                requiresFullReload: false,
+                changedKeys: [peerRow.id],
+                deletedKeys: bulkKeys,
+                deltas: [
+                  {
+                    txId: `gap-delta-row`,
+                    latestRowVersion: leaderPosition.rowVersion - 1,
+                    changedRows: [{ key: peerRow.id, value: peerRow }],
+                    deletedKeys: [],
+                  },
+                  {
+                    txId: `gap-delta-bulk`,
+                    latestRowVersion: leaderPosition.rowVersion,
+                    changedRows: [],
+                    deletedKeys: bulkKeys,
+                  },
+                ],
+              } as never)
+            }
+            return Promise.resolve({
+              type: `rpc:pullSince:res`,
+              rpcId: `gap-pull`,
+              ok: true,
+              latestTerm: 1,
+              latestSeq: leaderPosition.seq,
+              latestRowVersion: leaderPosition.rowVersion,
+              requiresFullReload: true,
+            })
+          }
+    // Upstream requests: direct source loads and remote-subset ensures,
+    // which owned demand, a follower's routed demand, and recovery's refetch
+    // go through. A follower's owner commits its row, broadcasts, then
+    // replies, as law 7 assumes.
+    let sourceLoads = 0
+    if (route === `routed subset`) coordinator.isLeader = () => false
+    const requestEnsureRemoteSubset =
+      coordinator.requestEnsureRemoteSubset.bind(coordinator)
+    let ownerCommitted = false
+    const ownerReply = createEventGate()
+    if (followUp !== `owner replies, then the source reserves again`) {
+      ownerReply.resolve()
+    }
+    coordinator.requestEnsureRemoteSubset = async (...args) => {
+      sourceLoads++
+      if (route === `routed subset` && !ownerCommitted) {
+        ownerCommitted = true
+        await peerCommit(remoteRow, `owner-commit`)
+        await ownerReply.promise
+        return
+      }
+      return requestEnsureRemoteSubset(...args)
+    }
+    coordinator.requestApplyCommittedTx = async (id, tx) => {
+      const positioned = {
+        ...tx,
+        seq: Math.max(tx.seq, leaderPosition.seq + 1),
+        rowVersion: Math.max(tx.rowVersion, leaderPosition.rowVersion + 1),
+      }
+      advanceLeaderPosition(positioned.seq, positioned.rowVersion)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: id },
+        positioned,
+      )
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: positioned.term,
+        seq: positioned.seq,
+        latestRowVersion: positioned.rowVersion,
+      }
+    }
+    // Reads. A reserved sync transaction is open between its reservation and
+    // its end. A read that starts in that window, outside a straddled
+    // hydration, belongs to a hydration that did not wait. Every adapter read
+    // method is recorded. When armed, the first read after the route was
+    // admitted is held, so a reservation can open while it is in progress.
+    let reservationOpen = false
+    let routeAdmitted = false
+    let cleanupStarted = false
+    const routeReads: Array<string> = []
+    const readsDuringReservation: Array<string> = []
+    const readsAfterCleanup: Array<string> = []
+    const startupOrder: Array<string> = []
+    let heldRead:
+      | {
+          entered: ReturnType<typeof createEventGate>
+          release: ReturnType<typeof createEventGate>
+        }
+      | undefined
+    const recordRead = async (method: string) => {
+      adapterCalls++
+      if (!routeAdmitted) startupOrder.push(`startup read`)
+      if (routeAdmitted) routeReads.push(method)
+      if (reservationOpen) readsDuringReservation.push(method)
+      if (cleanupStarted) readsAfterCleanup.push(method)
+      const hold = routeAdmitted ? heldRead : undefined
+      if (hold) {
+        heldRead = undefined
+        hold.entered.resolve()
+        await hold.release.promise
+      }
+    }
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    const readRows: Array<Array<Record<string, unknown>>> = []
+    adapter.loadSubset = async (...args) => {
+      await recordRead(`loadSubset`)
+      const rows = await loadSubset(...args)
+      readRows.push(rows.map(({ value }) => ({ ...value })))
+      trace.push(`persisted read`)
+      return rows
+    }
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      await recordRead(`loadResumeSnapshot`)
+      return loadResumeSnapshot(...args)
+    }
+    // The recording adapter defines every optional read method.
+    const loadCollectionMetadata = adapter.loadCollectionMetadata!.bind(adapter)
+    adapter.loadCollectionMetadata = async (...args) => {
+      await recordRead(`loadCollectionMetadata`)
+      return loadCollectionMetadata(...args)
+    }
+    const scanRows = adapter.scanRows!.bind(adapter)
+    adapter.scanRows = async (...args) => {
+      await recordRead(`scanRows`)
+      return scanRows(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const writeSourceStep = (step: (typeof sourceSteps)[number]) => {
+      if (step === `replacement`) {
+        sourceParams.truncate()
+        sourceParams.write({ type: `insert`, value: { ...replacementRow } })
+        sourceParams.metadata!.row.set(`replacement`, { owner: `replacement` })
+      } else if (operation === `delete`) {
+        sourceParams.write({ type: `delete`, key: `shared` })
+      } else {
+        sourceParams.write({ type: operation, value: { ...networkRow } })
+        sourceParams.metadata!.row.set(`shared`, { owner: `network` })
+      }
+      sourceParams.metadata!.collection.set(`cursor`, step)
+    }
+    const reach = createOracleReach<PersistedReadReach>(
+      `persistence.reserved-commit-read-precedence`,
+      [
+        ...(ending === `cleanup` ||
+        ((route === `targeted` || ending === `demand aborted`) &&
+          followUp !== `reset then pre-reset commit` &&
+          followUp !== `reset, re-reserve, then pre-reset commit`)
+          ? []
+          : ([`route performed a persisted read`] as const)),
+        ...(waits &&
+        commitTiming !== `open before admission` &&
+        commitTiming !== `open during pullSince`
+          ? ([`reservation opened while the read was pending`] as const)
+          : []),
+        ...(commitTiming === `open before admission`
+          ? ([`reservation opened before the route was admitted`] as const)
+          : []),
+        ...(commitTiming === `unreserved across pullSince`
+          ? ([
+              `unreserved transaction committed while recovery waited for pullSince`,
+            ] as const)
+          : []),
+        ...(commitTiming === `open during pullSince`
+          ? ([
+              `reservation opened while recovery waited for pullSince`,
+            ] as const)
+          : []),
+        ...(commitTiming === `open during the read`
+          ? ([`reservation opened while a read was in progress`] as const)
+          : []),
+        ...(commitTiming === `open in the first publication`
+          ? ([`reservation opened in the route's first publication`] as const)
+          : []),
+        ...(commitTiming === `open across startup`
+          ? ([`reservation opened before startup settled`] as const)
+          : []),
+        ...(route === `targeted` && waits
+          ? ([`peer change announced while reserved`] as const)
+          : []),
+        ...((followUp === `reset then pre-reset commit` ||
+          followUp === `reset, re-reserve, then pre-reset commit`) &&
+        waits
+          ? ([`reset and pre-reset commit announced while waiting`] as const)
+          : []),
+        ...(followUp === `retired-storage reset`
+          ? ([`retired-storage reset announced while reserved`] as const)
+          : []),
+        ...(followUp === `peer change after the abort`
+          ? ([`peer change announced after the demand aborted`] as const)
+          : []),
+        ...(followUp === `owner replies, then the source reserves again`
+          ? ([`source reserved again after the owner replied`] as const)
+          : []),
+      ],
+    )
+    reach.beginHistory()
+    const beginReservedSourceStep = () => {
+      sourceParams.begin()
+      sourceParams.metadata!.persistence!.reserveCommitTurn()
+      writeSourceStep(sourceSteps[0]!)
+      reservationOpen = true
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `persisted-read-precedence`,
+        getKey: (row) => row.id,
+        syncMode,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            if (commitTiming === `open across startup`) {
+              startupOrder.push(`source entered`)
+              beginReservedSourceStep()
+              reach.reach(`reservation opened before startup settled`)
+            }
+            params.markReady()
+            return {
+              loadSubset: () => {
+                sourceLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const abortDemand = new AbortController()
+    const options =
+      route === `complete subset`
+        ? { signal: abortDemand.signal }
+        : { limit: 100, signal: abortDemand.signal }
+    // Pending operations and the outcome each one owes.
+    const pendingOperations: Array<Promise<unknown>> = []
+    const expectedOutcomes: Array<`fulfilled` | `rejected`> = []
+    const retainOperation = (
+      receipt: unknown,
+      expected: `fulfilled` | `rejected` = `fulfilled`,
+    ) => {
+      const pending = Promise.resolve(receipt)
+      void pending.catch(() => undefined)
+      pendingOperations.push(pending)
+      expectedOutcomes.push(expected)
+    }
+    const commitSourceTransaction = (
+      signal?: AbortSignal,
+      expected: `fulfilled` | `rejected` = signal ? `rejected` : `fulfilled`,
+    ) => {
+      try {
+        retainOperation(sourceParams.commit(signal), expected)
+      } catch (error) {
+        retainOperation(Promise.reject(error), expected)
+      }
+    }
+    const endReservation = () => {
+      reservationOpen = false
+      if (ending === `abandoned`) {
+        const cancelled = new AbortController()
+        cancelled.abort()
+        commitSourceTransaction(cancelled.signal)
+      } else {
+        // A reset that abandoned the reservation rejects its commit.
+        commitSourceTransaction(
+          undefined,
+          resetAbandons ? `rejected` : `fulfilled`,
+        )
+      }
+    }
+    const published = new Set<string>()
+    let hasPrimaryFailure = false
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `precedence collection ready`,
+      )
+      const startupObservation =
+        commitTiming === `open across startup`
+          ? {
+              readsBeforeSource: startupOrder.indexOf(`source entered`) > 0,
+              sourceEnteredLast:
+                startupOrder[startupOrder.length - 1] === `source entered`,
+            }
+          : undefined
+      if (commitTiming === `open across startup`) endReservation()
+      const subscription = collection.subscribeChanges(
+        () => {
+          for (const key of collection.keys()) published.add(String(key))
+        },
+        { includeInitialState: false },
+      )
+      // The scope callback witnesses publication, not just completion of the
+      // adapter's load promise. When armed, it holds one scope after entry
+      // and before its task, as a shared logical scheduler can.
+      let heldScope:
+        | {
+            entered: ReturnType<typeof createEventGate>
+            release: ReturnType<typeof createEventGate>
+          }
+        | undefined
+      // Set inside the scope hook, so TypeScript cannot narrow it here.
+      let readPublished = false as boolean
+      adapter.runInHydrationScope = async (task) => {
+        const hold = heldScope
+        heldScope = undefined
+        if (hold) {
+          hold.entered.resolve()
+          await hold.release.promise
+        }
+        const result = await task(adapter)
+        if (routeAdmitted) {
+          readPublished = true
+          readApplied.resolve()
+        }
+        return result
+      }
+      // Progress checkpoint: wait until three consecutive tasks pass with no
+      // adapter call; the bound turns a livelock into a named failure.
+      const persistenceQuiesced = async (label: string) => {
+        let quietTasks = 0
+        for (let task = 0; task < 200 && quietTasks < 3; task++) {
+          const callsBefore = adapterCalls
+          await flushAsyncWork()
+          quietTasks = adapterCalls === callsBefore ? quietTasks + 1 : 0
+        }
+        if (quietTasks < 3) {
+          throw new Error(
+            `Persisted oracle checkpoint did not quiesce: ${label}`,
+          )
+        }
+      }
+      sourceParams.begin()
+      sourceParams.write({ type: `insert`, value: { ...gateRow } })
+      retainOperation(sourceParams.commit())
+      await atPersistedOracleCheckpoint(
+        persistenceEntered.promise,
+        `predecessor held`,
+      )
+      const rowsAtAdmission = new Map(
+        Array.from(collection.values(), (row) => [
+          row.id,
+          stripVirtualProps(row),
+        ]),
+      )
+      if (commitTiming === `unreserved across pullSince`) {
+        sourceParams.begin()
+        writeSourceStep(sourceSteps[0]!)
+      }
+      if (commitTiming === `open before admission`) {
+        beginReservedSourceStep()
+        reach.reach(`reservation opened before the route was admitted`)
+      }
+      routeAdmitted = true
+      let ownBaselineRejection: string | undefined
+      let ownerVisibleAtSettlement: boolean | undefined
+      if (
+        route === `subset` ||
+        route === `complete subset` ||
+        route === `routed subset`
+      ) {
+        const load = collection._sync.loadSubset(options)
+        retainOperation(
+          load,
+          ending === `demand aborted` ? `rejected` : `fulfilled`,
+        )
+        // Law 7 at the load's settlement: a routed load settles only after
+        // the owner's broadcast rows are public.
+        if (route === `routed subset`) {
+          void Promise.resolve(load).then(
+            () => {
+              ownerVisibleAtSettlement = collection.has(remoteRow.id)
+            },
+            () => undefined,
+          )
+        }
+      } else if (route === `source baseline`) {
+        retainOperation(sourceParams.metadata!.persistence!.hydrateBaseline())
+      } else if (route === `collection-reset`) {
+        coordinator.emit({
+          type: `collection:reset`,
+          schemaVersion: 1,
+          resetEpoch: 1,
+        })
+      } else if (route === `full-reload`) {
+        const position = nextPeerPosition()
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: position.seq,
+          txId: `remote-reload`,
+          latestRowVersion: position.rowVersion,
+          requiresFullReload: true,
+        })
+      } else if (route === `targeted`) {
+        // Waiting timings deliver the change after the reservation opens.
+        if (!waits && commitTiming !== `open in the first publication`) {
+          await peerCommit(peerRow, `peer-change`)
+        }
+      } else {
+        // Sequence gap, with or without pullSince. A peer commit this tab has
+        // not observed arrives past a sequence gap and carries no rows, as a
+        // peer's must-refetch reset commit does in a multi-tab refetch storm.
+        // Recovery rereads durable rows. For `seq-gap deltas` the skipped
+        // position holds a peer row that only pullSince reports.
+        const skipped = nextPeerPosition()
+        if (route === `seq-gap deltas`) {
+          await applyCommittedTx(
+            { kind: `eager`, collectionId: `persisted-read-precedence` },
+            {
+              txId: `gap-row`,
+              term: 1,
+              seq: skipped.seq,
+              rowVersion: skipped.rowVersion,
+              mutations: [{ type: `insert`, key: peerRow.id, value: peerRow }],
+            } as never,
+          )
+        }
+        const position = nextPeerPosition()
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: position.seq,
+          txId: `remote-gap`,
+          latestRowVersion: position.rowVersion,
+          requiresFullReload: false,
+          changedRows: [],
+          deletedKeys: [],
+        })
+      }
+      await flushAsyncWork()
+      expect(readRows).toEqual([])
+      // A peer reset, then a pre-reset peer commit whose row the reset
+      // superseded. The reset removed that commit's row from durable storage.
+      const deliverFollowUp = () => {
+        if (followUp === `none`) return
+        // A reset for a storage generation this Collection no longer uses
+        // does not apply here, so it abandons nothing.
+        if (followUp === `retired-storage reset`) {
+          coordinator.emit(
+            { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+            undefined,
+            `retired-storage`,
+          )
+          return
+        }
+        coordinator.emit({
+          type: `collection:reset`,
+          schemaVersion: 1,
+          resetEpoch: 1,
+        })
+        // The source reserves its turn again on the transaction the reset
+        // abandoned; a dead transaction cannot reserve.
+        if (
+          followUp === `reset, re-reserve, then pre-reset commit` &&
+          reservationOpen
+        ) {
+          sourceParams.metadata!.persistence!.reserveCommitTurn()
+        }
+        const position = nextPeerPosition()
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: position.seq,
+          txId: `pre-reset-commit`,
+          latestRowVersion: position.rowVersion,
+          requiresFullReload: false,
+          changedRows: [{ key: supersededRow.id, value: supersededRow }],
+          deletedKeys: [],
+        })
+      }
+      // With `owner replies, then the source reserves again`, the owner's
+      // reply is released first; the source then ends its reservation and
+      // reserves an empty second transaction after the history's delays.
+      const endStraddledReservation = async () => {
+        if (followUp !== `owner replies, then the source reserves again`) {
+          return endReservation()
+        }
+        const [commitDelay, reserveDelay] = history.reReserveDelays!
+        ownerReply.resolve()
+        for (let i = 0; i < commitDelay; i++) await Promise.resolve()
+        endReservation()
+        for (let i = 0; i < reserveDelay; i++) await Promise.resolve()
+        sourceParams.begin()
+        sourceParams.metadata!.persistence!.reserveCommitTurn()
+        reservationOpen = true
+        reach.reach(`source reserved again after the owner replied`)
+        await persistenceQuiesced(`owner's broadcast waits again`)
+        reservationOpen = false
+        commitSourceTransaction()
+      }
+      let remainingSteps: ReadonlyArray<(typeof sourceSteps)[number]> =
+        commitTiming === `open across startup`
+          ? sourceSteps.slice(1)
+          : sourceSteps
+      let rowsWhileReserved: Map<string, unknown> | undefined
+      let peerWhileReserved: unknown
+      let abortedBeforeEnd: string | undefined
+      const observeWhileReserved = () => {
+        rowsWhileReserved = new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      }
+      if (
+        commitTiming === `after read` ||
+        commitTiming === `open across startup`
+      ) {
+        releasePersistence.resolve()
+        if (route !== `targeted`) {
+          await atPersistedOracleCheckpoint(
+            readApplied.promise,
+            `read published`,
+          )
+        } else await persistenceQuiesced(`targeted change applied`)
+        deliverFollowUp()
+        await persistenceQuiesced(`follow-up applied`)
+      } else if (commitTiming === `unreserved across pullSince`) {
+        releasePersistence.resolve()
+        await atPersistedOracleCheckpoint(
+          pullHold!.entered.promise,
+          `recovery waits for pullSince`,
+        )
+        commitSourceTransaction()
+        reach.reach(
+          `unreserved transaction committed while recovery waited for pullSince`,
+        )
+        pullHold!.release.resolve()
+        await persistenceQuiesced(`recovery finished`)
+        remainingSteps = sourceSteps.slice(1)
+      } else if (commitTiming === `queued`) {
+        // The sync transaction commits while the read waits (below).
+      } else if (commitTiming === `open in the first publication`) {
+        const reserved = createEventGate()
+        let armed = true
+        const firstPublication = collection.subscribeChanges(
+          () => {
+            if (!armed) return
+            armed = false
+            queueMicrotask(() => {
+              beginReservedSourceStep()
+              reach.reach(`reservation opened in the route's first publication`)
+              reserved.resolve()
+            })
+          },
+          { includeInitialState: false },
+        )
+        releasePersistence.resolve()
+        if (route === `targeted`) await peerCommit(peerRow, `peer-change`)
+        await atPersistedOracleCheckpoint(reserved.promise, `route published`)
+        firstPublication.unsubscribe()
+        await persistenceQuiesced(`straddled hydration finished`)
+        observeWhileReserved()
+        await endStraddledReservation()
+        remainingSteps = sourceSteps.slice(1)
+      } else if (commitTiming === `open during the read`) {
+        heldRead = { entered: createEventGate(), release: createEventGate() }
+        const { entered, release } = heldRead
+        releasePersistence.resolve()
+        await atPersistedOracleCheckpoint(
+          entered.promise,
+          `route read in progress`,
+        )
+        beginReservedSourceStep()
+        reach.reach(`reservation opened while a read was in progress`)
+        release.resolve()
+        await persistenceQuiesced(`straddled read finished`)
+        observeWhileReserved()
+        await endStraddledReservation()
+        remainingSteps = sourceSteps.slice(1)
+      } else {
+        if (commitTiming === `open during pullSince`) {
+          releasePersistence.resolve()
+          await atPersistedOracleCheckpoint(
+            pullHold!.entered.promise,
+            `recovery waits for pullSince`,
+          )
+          beginReservedSourceStep()
+          reach.reach(`reservation opened while recovery waited for pullSince`)
+          pullHold!.release.resolve()
+        } else if (commitTiming === `open before admission`) {
+          // The reservation opened before the route was admitted.
+          releasePersistence.resolve()
+          await atPersistedOracleCheckpoint(
+            pendingOperations[0]!,
+            `predecessor applied while the reservation is open`,
+          )
+        } else if (commitTiming === `open across mutex turn`) {
+          // The read was admitted before this reservation.
+          beginReservedSourceStep()
+          if (!readPublished) {
+            reach.reach(`reservation opened while the read was pending`)
+          }
+          releasePersistence.resolve()
+          await atPersistedOracleCheckpoint(
+            pendingOperations[0]!,
+            `predecessor applied while the reservation is open`,
+          )
+        } else {
+          // The read already holds its mutex turn and hydration scope.
+          heldScope = { entered: createEventGate(), release: createEventGate() }
+          const { entered, release } = heldScope
+          releasePersistence.resolve()
+          if (route === `targeted`) {
+            await persistenceQuiesced(`targeted change pending`)
+            heldScope = undefined
+            release.resolve()
+          } else {
+            await atPersistedOracleCheckpoint(
+              entered.promise,
+              `read entered its scope`,
+            )
+          }
+          beginReservedSourceStep()
+          if (!readPublished) {
+            reach.reach(`reservation opened while the read was pending`)
+          }
+          release.resolve()
+        }
+        if (route === `targeted`) {
+          await peerCommit(peerRow, `peer-change`)
+          reach.reach(`peer change announced while reserved`)
+        }
+        const announceFollowUp = () => {
+          deliverFollowUp()
+          reach.reach(
+            followUp === `retired-storage reset`
+              ? `retired-storage reset announced while reserved`
+              : `reset and pre-reset commit announced while waiting`,
+          )
+        }
+        // An aborted demand meets its follow-up after the abort (below).
+        if (followUp !== `none` && ending !== `demand aborted`) {
+          announceFollowUp()
+        }
+        await persistenceQuiesced(`reservation open, route waiting`)
+        observeWhileReserved()
+        peerWhileReserved = stripVirtualProps(collection.get(peerRow.id))
+        if (ending === `cleanup`) {
+          cleanupStarted = true
+          reservationOpen = false
+          await atPersistedOracleCheckpoint(
+            collection.cleanup(),
+            `cleanup settles while the route waits`,
+          )
+        } else {
+          if (ending === `demand aborted`) {
+            abortDemand.abort()
+            abortedBeforeEnd = await atPersistedOracleCheckpoint(
+              pendingOperations[1]!.then(
+                () => `fulfilled`,
+                () => `rejected`,
+              ),
+              `aborted demand settles before the reservation ends`,
+            )
+            // A reset after the abort reloads only demand that is still
+            // active, so the aborted demand loads nothing.
+            if (followUp === `peer change after the abort`) {
+              await peerCommit(peerRow, `peer-change`)
+              reach.reach(`peer change announced after the demand aborted`)
+              await persistenceQuiesced(`peer change after the abort applied`)
+            } else if (followUp !== `none`) {
+              announceFollowUp()
+              await persistenceQuiesced(`follow-up after the abort applied`)
+            }
+          }
+          if (ending === `source awaits own baseline`) {
+            ownBaselineRejection = await atPersistedOracleCheckpoint(
+              sourceParams.metadata!.persistence!.hydrateBaseline().then(
+                () => `fulfilled`,
+                (error: unknown) => (error as Error).message,
+              ),
+              `own baseline settles inside the reservation`,
+            )
+          }
+          endReservation()
+        }
+        remainingSteps = sourceSteps.slice(1)
+      }
+      if (ending !== `cleanup`) {
+        for (const step of remainingSteps) {
+          sourceParams.begin()
+          writeSourceStep(step)
+          commitSourceTransaction()
+        }
+      }
+      releasePersistence.resolve()
+      const outcomes = await atPersistedOracleCheckpoint(
+        Promise.allSettled(pendingOperations),
+        `sync history applied and durable`,
+      )
+      if (ending === `cleanup`) {
+        await flushAsyncWork()
+        subscription.unsubscribe()
+        reach.assertReached()
+        expect({ status: collection.status, readsAfterCleanup }).toEqual({
+          status: `cleaned-up`,
+          readsAfterCleanup: [],
+        })
+        return
+      }
+      // A read that waited runs after the reservation ends.
+      if (reserves && route !== `targeted` && ending !== `demand aborted`) {
+        await atPersistedOracleCheckpoint(
+          readApplied.promise,
+          `route read published`,
+        )
+      }
+      if (followUp !== `none`) await persistenceQuiesced(`follow-up settled`)
+      subscription.unsubscribe()
+
+      // Observations and the values the model owes. The trace records durable
+      // completions (source steps and the owner's commit) beside persisted
+      // reads. Each read must observe the fold of the durable events before
+      // it, which proves the baseline it saw. Without waiting, every read
+      // precedes every source step, so the older baseline runs first; after a
+      // startup reservation commits, its step precedes the reads; while a read
+      // waits for a reserved commit, reads and later steps may interleave.
+      // Rows are compared by key: the adapter's row order is not part of the law.
+      const durableBefore = (index: number) => {
+        const rows = new Map(readBaselineRows.map((row) => [row.id, row]))
+        for (const event of trace.slice(0, index))
+          applyDurableEvent(rows, event)
+        return rows
+      }
+      const sameRows = (
+        left: Map<string, unknown>,
+        right: Map<string, unknown>,
+      ) =>
+        left.size === right.size &&
+        [...left].every(([key, value]) =>
+          isDeepStrictEqual(value, right.get(key)),
+        )
+      const byKey = (rows: Array<Todo>) =>
+        new Map(rows.map((row) => [row.id, row]))
+      const readIndexes = trace.flatMap((event, index) =>
+        event === `persisted read` ? [index] : [],
+      )
+      const stepIndexes = trace.flatMap((event, index) =>
+        event === `network` || event === `replacement` ? [index] : [],
+      )
+      const observedReadOrder = hydrationWaits
+        ? `may interleave`
+        : hydrationStraddles
+          ? readIndexes.length === 0 ||
+            stepIndexes.every((step) => readIndexes[0]! < step)
+            ? `straddled read before every step`
+            : `other`
+          : startupStepCommitted
+            ? readIndexes.every(
+                (read) =>
+                  read > stepIndexes[0]! &&
+                  stepIndexes.slice(1).every((step) => read < step),
+              )
+              ? `after the startup step`
+              : `other`
+            : readIndexes.every((read) =>
+                  stepIndexes.every((step) => read < step),
+                )
+              ? `before every step`
+              : `other`
+      const observed = {
+        outcomes: outcomes.map(({ status }) => status),
+        readsDuringReservation: hydrationStraddles
+          ? []
+          : readsDuringReservation,
+        stepOrder: trace.filter(
+          (event) => event === `network` || event === `replacement`,
+        ),
+        ownerCommits: trace.filter((event) => event === `owner commit`).length,
+        readCount: readIndexes.length,
+        readsObserveDurable: readIndexes.map((index, read) =>
+          sameRows(byKey(readRows[read] as Array<Todo>), durableBefore(index)),
+        ),
+        readOrder: observedReadOrder,
+        finalDurable: durableBefore(trace.length),
+        pullSinceWithinBound:
+          pullSinceCalls >= noWaitPullSinceCalls &&
+          pullSinceCalls <= noWaitPullSinceCalls + waitedNotices,
+        sourceLoads,
+        status: collection.status,
+        publicRows: new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        ),
+        durableRows: adapter.rows,
+        publicMetadata: metadataKeys.map((key) =>
+          sourceParams.metadata!.row.get(key),
+        ),
+        durableMetadata: metadataKeys.map((key) =>
+          adapter.rowMetadata.get(key),
+        ),
+        publicCursor: sourceParams.metadata!.collection.get(`cursor`),
+        durableCursor: adapter.collectionMetadata.get(`cursor`),
+        ...(hydrationWaits && route !== `targeted`
+          ? { rowsWhileReserved }
+          : {}),
+        ...(hydrationStraddles ? { rowsWhileReserved } : {}),
+        ...(route === `targeted` && waits ? { peerWhileReserved } : {}),
+        ...(followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`
+          ? { publishedSuperseded: published.has(supersededRow.id) }
+          : {}),
+        ...(route === `routed subset` ? { ownerVisibleAtSettlement } : {}),
+        ...(ending === `demand aborted` ? { abortedBeforeEnd } : {}),
+        ...(ending === `source awaits own baseline`
+          ? { ownBaselineRejection }
+          : {}),
+        ...(startupObservation ? { startupObservation } : {}),
+      }
+      const expected = {
+        outcomes: expectedOutcomes,
+        readsDuringReservation: [],
+        stepOrder: appliedSteps,
+        ownerCommits: route === `routed subset` ? 1 : 0,
+        readCount: expectedReadCount,
+        readsObserveDurable: Array.from(
+          { length: expectedReadCount },
+          () => true,
+        ),
+        readOrder: hydrationWaits
+          ? `may interleave`
+          : hydrationStraddles
+            ? `straddled read before every step`
+            : startupStepCommitted
+              ? `after the startup step`
+              : `before every step`,
+        // The fold over durable events must agree with the closed form.
+        finalDurable: byKey(expectedRows),
+        pullSinceWithinBound: true,
+        sourceLoads: expectedSourceLoads,
+        status: `ready`,
+        publicRows: byKey(expectedPublicRows),
+        durableRows: byKey(expectedRows),
+        publicMetadata: expectedMetadata(`public`),
+        durableMetadata: expectedMetadata(`durable`),
+        publicCursor: expectedCursor,
+        durableCursor: expectedCursor,
+        // While a hydration waits, readers keep the rows from before it; a
+        // straddled read has published the pre-source durable rows.
+        ...(hydrationWaits && route !== `targeted`
+          ? { rowsWhileReserved: rowsAtAdmission }
+          : {}),
+        ...(hydrationStraddles
+          ? {
+              rowsWhileReserved: byKey(
+                exposesSourceRowsOnly ? [gateRow] : readBaselineRows,
+              ),
+            }
+          : {}),
+        ...(route === `targeted` && waits
+          ? { peerWhileReserved: peerRow }
+          : {}),
+        ...(followUp === `reset then pre-reset commit` ||
+        followUp === `reset, re-reserve, then pre-reset commit`
+          ? { publishedSuperseded: false }
+          : {}),
+        ...(route === `routed subset`
+          ? { ownerVisibleAtSettlement: true }
+          : {}),
+        ...(ending === `demand aborted`
+          ? { abortedBeforeEnd: `rejected` }
+          : {}),
+        ...(ending === `source awaits own baseline`
+          ? {
+              ownBaselineRejection: `hydrateBaseline cannot run while this source's reserved sync transaction is open`,
+            }
+          : {}),
+        ...(startupObservation
+          ? {
+              startupObservation: {
+                readsBeforeSource: true,
+                sourceEnteredLast: true,
+              },
+            }
+          : {}),
+      }
+      expect(observed).toEqual(expected)
+      // Reach is judged after the comparison, so an unexpected read fails on
+      // the read count rather than as an undeclared reach state.
+      if (routeReads.length > 0) reach.reach(`route performed a persisted read`)
+      reach.assertReached()
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releasePersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          ...(demandRoute
+            ? [() => collection._sync.unloadSubset(options)]
+            : []),
+          () => Promise.allSettled(pendingOperations),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  }
+
+  // Row-algebra cross: the original routes and timings, every operation and
+  // truncate replay, with a reservation that commits.
+  it.each(
+    (
+      [
+        { syncMode: `on-demand`, route: `subset` },
+        { syncMode: `on-demand`, route: `complete subset` },
+        { syncMode: `on-demand`, route: `collection-reset` },
+        { syncMode: `on-demand`, route: `full-reload` },
+        { syncMode: `on-demand`, route: `seq-gap` },
+        { syncMode: `on-demand`, route: `seq-gap pull` },
+        { syncMode: `on-demand`, route: `seq-gap deltas` },
+        { syncMode: `eager`, route: `collection-reset` },
+        { syncMode: `eager`, route: `full-reload` },
+        { syncMode: `eager`, route: `seq-gap` },
+        { syncMode: `eager`, route: `seq-gap pull` },
+        { syncMode: `eager`, route: `seq-gap deltas` },
+      ] as const
+    ).flatMap(({ syncMode, route }) =>
+      ([`insert`, `update`, `delete`] as const).flatMap((operation) =>
+        ([`none`, `before`, `after`] as const).flatMap((truncateReplay) =>
+          (
+            [
+              `after read`,
+              `queued`,
+              `open across mutex turn`,
+              `open across scope entry`,
+            ] as const
+          ).map((commitTiming): PersistedReadHistory => ({
+            syncMode,
+            route,
+            operation,
+            truncateReplay,
+            commitTiming,
+            ending: `commits`,
+            followUp: `none`,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `preserves sync history over persisted reads ($syncMode, $route, $operation, truncate=$truncateReplay, timing=$commitTiming)`,
+    runPersistedReadHistory,
+  )
+
+  // Reservation cross: every route, reserving timing, ending, and follow-up,
+  // with one insert and no truncate replay. `after read` is each route's
+  // control. An ending or follow-up appears only where it can happen: cleanup,
+  // aborted demand, and the source's own baseline need a waiting route; the
+  // follow-up's reset fence is judged on eager Collections, whose reset
+  // reloads every durable row.
+  const reservationRoutes = [
+    { syncMode: `on-demand`, route: `subset` },
+    { syncMode: `on-demand`, route: `complete subset` },
+    { syncMode: `on-demand`, route: `routed subset` },
+    { syncMode: `on-demand`, route: `source baseline` },
+    { syncMode: `on-demand`, route: `collection-reset` },
+    { syncMode: `on-demand`, route: `full-reload` },
+    { syncMode: `on-demand`, route: `seq-gap` },
+    { syncMode: `on-demand`, route: `seq-gap pull` },
+    { syncMode: `on-demand`, route: `seq-gap deltas` },
+    { syncMode: `eager`, route: `collection-reset` },
+    { syncMode: `eager`, route: `full-reload` },
+    { syncMode: `eager`, route: `seq-gap` },
+    { syncMode: `eager`, route: `seq-gap pull` },
+    { syncMode: `eager`, route: `seq-gap deltas` },
+    { syncMode: `eager`, route: `targeted` },
+  ] as const
+  const reservationHistories = reservationRoutes.flatMap(
+    ({ syncMode, route }) =>
+      (
+        [
+          `after read`,
+          `open before admission`,
+          `unreserved across pullSince`,
+          `open during pullSince`,
+          `open across mutex turn`,
+          `open across scope entry`,
+          `open during the read`,
+          `open in the first publication`,
+          `open across startup`,
+        ] as const
+      ).flatMap((commitTiming) => {
+        // Only a gap recovery that asks the leader waits for pullSince.
+        if (
+          (commitTiming === `unreserved across pullSince` ||
+            commitTiming === `open during pullSince`) &&
+          route !== `seq-gap pull` &&
+          route !== `seq-gap deltas`
+        ) {
+          return []
+        }
+        // Only a subset load is admitted through the wrapper's admission.
+        if (
+          commitTiming === `open before admission` &&
+          route !== `subset` &&
+          route !== `complete subset`
+        ) {
+          return []
+        }
+        if (commitTiming === `open during the read` && route === `targeted`)
+          return []
+        // Only a route whose hydration publishes rows reaches a publication.
+        if (
+          commitTiming === `open in the first publication` &&
+          syncMode === `on-demand` &&
+          route !== `subset` &&
+          route !== `complete subset` &&
+          route !== `routed subset`
+        ) {
+          return []
+        }
+        const waits =
+          commitTiming === `open before admission` ||
+          commitTiming === `open during pullSince` ||
+          commitTiming === `open across mutex turn` ||
+          commitTiming === `open across scope entry`
+        const endings: Array<PersistedReadEnding> =
+          commitTiming === `after read` ||
+          commitTiming === `unreserved across pullSince`
+            ? [`commits`]
+            : waits
+              ? [
+                  `commits`,
+                  `abandoned`,
+                  `cleanup`,
+                  ...(route === `subset` || route === `complete subset`
+                    ? ([`demand aborted`] as const)
+                    : []),
+                  ...(route === `source baseline`
+                    ? ([`source awaits own baseline`] as const)
+                    : []),
+                ]
+              : [`commits`, `abandoned`]
+        return endings.flatMap((ending) =>
+          (
+            [
+              `none`,
+              ...((syncMode === `eager` &&
+                (commitTiming === `after read` || waits) &&
+                (ending === `commits` || ending === `abandoned`)) ||
+              ending === `demand aborted`
+                ? ([
+                    `reset then pre-reset commit`,
+                    `reset, re-reserve, then pre-reset commit`,
+                  ] as const)
+                : []),
+              ...(ending === `demand aborted`
+                ? ([`peer change after the abort`] as const)
+                : []),
+              ...(syncMode === `eager` &&
+              waits &&
+              (ending === `commits` || ending === `abandoned`)
+                ? ([`retired-storage reset`] as const)
+                : []),
+            ] as const
+          ).map((followUp): PersistedReadHistory => ({
+            syncMode,
+            route,
+            operation: `insert`,
+            truncateReplay: `none`,
+            commitTiming,
+            ending,
+            followUp,
+          })),
+        )
+      }),
+  )
+  // The follower window: a second reservation after the owner replied.
+  const reReserveHistories = Array.from({ length: 9 }, (_, commitDelay) =>
+    Array.from({ length: 13 }, (_, reserveDelay): PersistedReadHistory => ({
+      syncMode: `on-demand`,
+      route: `routed subset`,
+      operation: `insert`,
+      truncateReplay: `none`,
+      commitTiming: `open during the read`,
+      ending: `commits`,
+      followUp: `owner replies, then the source reserves again`,
+      reReserveDelays: [commitDelay, reserveDelay],
+    })),
+  ).flat()
+  it.each(reReserveHistories)(
+    `keeps a follower's load behind a second reservation (delays=$reReserveDelays)`,
+    runPersistedReadHistory,
+  )
+  it.each(reservationHistories)(
+    `keeps reserved commits and their neighbours lawful ($syncMode, $route, timing=$commitTiming, ending=$ending, follow-up=$followUp)`,
+    runPersistedReadHistory,
+  )
+
+  // The model predicts every observation from the history and its input
+  // rows; the driver runs the real Collection and compares; the history
+  // lists are the grammar the registrations below draw from.
+  declareOracle({
+    check: [runPersistedReadHistory],
+    model: [expectedPersistedReadOutcome],
+    grammar: [reservationHistories, reReserveHistories],
+  })
 })
 
 /**
