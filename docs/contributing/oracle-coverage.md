@@ -3024,7 +3024,11 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Its peer-reset cells judge that the reset abandons the reservation:
       the commit rejects and row-1 keeps its durable value (both committing
       peer-reset cells fail on `2047f4281`).
-      Its 10 cells pass. Every committing cell fails on `5649a07d4`. A
+      A nesting dimension adds a second reserved transaction inside the
+      first. A peer reset must abandon both, so both reject with the same
+      abort; on `5ac5a8711` the inner one rejected with the cross-cycle
+      error instead. Its 20 cells pass.
+      Every committing single-transaction cell fails on `5649a07d4`. A
       mutant that rejects the waited load after the reservation fails the 4
       subset cells; before the load's outcome was judged, it passed. A peer
       full reload behind this Collection's own held write cannot become

@@ -19,8 +19,11 @@
  * Grammar: the hydration route (a peer full-reload notice, a peer reset, or a
  * subset load admitted before the reservation) crossed with the timing (the
  * route waits behind this Collection's held write, or the shared scheduler
- * holds its scope behind another Collection's write after its turn began) and
- * the ending (the reserved transaction commits, or is abandoned).
+ * holds its scope behind another Collection's write after its turn began),
+ * the nesting (one reserved transaction, or a second one nested inside it),
+ * and the ending (the reserved transactions commit, or are abandoned). A
+ * peer reset abandons every reserved transaction that began before it, so a
+ * nested one rejects with the same abort as its outer one.
  *
  * Model: row-1's durable value before the reservation follows from the
  * history alone: the initial row, a peer edit, or the held write's value. A
@@ -263,6 +266,13 @@ const openPeerTabHarness = async ({
     if (value) params.write({ type: 'update', value: { id: 'row-1', value } })
     params.metadata?.persistence?.reserveCommitTurn()
   }
+  // A second reserved transaction nested inside the open one.
+  const reserveNested = () => {
+    const params = requireSource()
+    params.begin()
+    params.write({ type: 'insert', value: { id: 'row-2', value: 'nested' } })
+    params.metadata?.persistence?.reserveCommitTurn()
+  }
   const commit = () => requireSource().commit()
   // Committing with an aborted signal abandons the transaction.
   const abandon = () => {
@@ -272,6 +282,7 @@ const openPeerTabHarness = async ({
   }
   await start()
   return {
+    reserveNested,
     abandon,
     adapter,
     coordinator,
@@ -288,6 +299,7 @@ const openPeerTabHarness = async ({
 type AdapterHistory = {
   route: 'peer full reload' | 'peer reset' | 'subset admitted earlier'
   timing: 'mutex turn' | 'scheduler hold'
+  nesting: 'single' | 'nested'
   ending: 'commits' | 'abandoned'
 }
 
@@ -300,11 +312,14 @@ const adapterHistories: Array<AdapterHistory> = (
     // leader; the persisted-reads grammar's fixture leader covers it.
     route === 'peer full reload' && timing === 'mutex turn'
       ? []
-      : (['commits', 'abandoned'] as const).map((ending) => ({
-          route,
-          timing,
-          ending,
-        })),
+      : (['single', 'nested'] as const).flatMap((nesting) =>
+          (['commits', 'abandoned'] as const).map((ending) => ({
+            route,
+            timing,
+            nesting,
+            ending,
+          })),
+        ),
   ),
 )
 
@@ -327,8 +342,8 @@ describe('reserved commits across real-adapter hydrations', () => {
   })
 
   it.each(adapterHistories)(
-    'keeps a reserved commit lawful across a real-adapter hydration ($route, $timing, $ending)',
-    async ({ route, timing, ending }) => {
+    'keeps a reserved commit lawful across a real-adapter hydration ($route, $timing, $nesting, $ending)',
+    async ({ route, timing, nesting, ending }) => {
       const harness = await openPeerTabHarness({
         sharedScheduling: timing === 'scheduler hold',
         onDemand: route === 'subset admitted earlier',
@@ -376,6 +391,7 @@ describe('reserved commits across real-adapter hydrations', () => {
         // One task lets the route take its mutex turn before the reservation.
         await new Promise((resolve) => setTimeout(resolve, 0))
         harness.reserve('refetched')
+        if (nesting === 'nested') harness.reserveNested()
         const entered = harness.nextScopeEntry()
         write.release()
         await blocker
@@ -407,18 +423,26 @@ describe('reserved commits across real-adapter hydrations', () => {
         admitRoute()
         await reached(began, 'route turn began')
         harness.reserve('refetched')
+        if (nesting === 'nested') harness.reserveNested()
         const entered = harness.nextScopeEntry()
         otherWrite.release()
         await blocker
         await reached(entered, 'hydration entered its scope')
       }
       reach.reach('hydration entered its scope while reserved')
-      const outcome = await Promise.resolve(
-        ending === 'commits' ? harness.commit() : harness.abandon(),
-      ).then(
-        () => 'fulfilled',
-        () => 'rejected',
-      )
+      // Commits the innermost transaction first; a rejection keeps its name,
+      // so an abort and a cross-cycle failure stay distinct.
+      const settle = async () => {
+        try {
+          await (ending === 'commits' ? harness.commit() : harness.abandon())
+          return 'fulfilled'
+        } catch (error) {
+          return `rejected (${(error as Error).name})`
+        }
+      }
+      const outcomes: Array<string> = []
+      if (nesting === 'nested') outcomes.push(await settle())
+      outcomes.push(await settle())
       const loadOutcome = await load
       reach.assertReached()
       // A peer reset abandons the reservation, which began before it.
@@ -431,11 +455,16 @@ describe('reserved commits across real-adapter hydrations', () => {
       )
       // A subset load that waited runs after the reservation and succeeds.
       expect({
-        outcome,
+        outcomes,
+        nestedRow: harness.collection.get('row-2')?.value,
         status: harness.collection.status,
         loadOutcome,
       }).toEqual({
-        outcome: commitAccepted ? 'fulfilled' : 'rejected',
+        outcomes: Array.from({ length: nesting === 'nested' ? 2 : 1 }, () =>
+          commitAccepted ? 'fulfilled' : 'rejected (AbortError)',
+        ),
+        nestedRow:
+          nesting === 'nested' && commitAccepted ? 'nested' : undefined,
         status: 'ready',
         loadOutcome:
           route === 'subset admitted earlier' ? 'fulfilled' : undefined,

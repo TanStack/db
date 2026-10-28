@@ -1301,6 +1301,8 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   queuedBecauseHydrating: boolean
   // Set by `reserveCommitTurn`: every hydration waits for this commit.
   reservesCommitTurn?: boolean
+  // Settles once the reservation ends; every wait shares it.
+  reservationEnded?: Promise<void>
   hasDependentSuccessor: boolean
   publicationAdmissionWaiters?: Set<{
     resolve: () => void
@@ -1567,6 +1569,7 @@ class PersistedCollectionRuntime<
   private hydrationSequence = 0
   private waitForReservedCommit: WaitForReservedCommit | undefined
   private abandonReservedCommit: (() => void) | undefined
+  private reservedCommitFlush: Promise<void> | undefined
   // An unscheduled startup read may finish after a coordinator reset publishes.
   private resetSequence = 0
   private readonly pendingRemoteSubsetEnsures = new Map<
@@ -1955,7 +1958,11 @@ class PersistedCollectionRuntime<
   // apply in arrival order once the reserved transaction commits.
   private flushAfterReservedCommit(): void {
     const lifecycleGeneration = this.lifecycleGeneration
-    void Promise.resolve(this.waitForReservedCommit?.())
+    const ended = this.waitForReservedCommit?.()
+    // One deferred flush per reservation drains every notice behind it.
+    if (ended && ended === this.reservedCommitFlush) return
+    this.reservedCommitFlush = ended
+    void Promise.resolve(ended)
       .then(() => {
         if (lifecycleGeneration !== this.lifecycleGeneration) return
         return this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
@@ -4919,7 +4926,13 @@ class PersistedCollectionRuntime<
     this.throwIfReservedCommitOpen()
     // Every reload in this recovery continues its hydration cycle.
     const reloadInCycle = (adapter: HydrationPersistenceAdapter) =>
-      this.reloadActiveSubsetsUnsafe(adapter, false, false, false, true)
+      this.reloadActiveSubsetsUnsafe(
+        adapter,
+        /* skipUnchangedReplace */ false,
+        /* restoreResetBaseline */ false,
+        /* replayDemand */ false,
+        /* continuesHydrationCycle */ true,
+      )
     if (this.persistence.coordinator.pullSince && this.latestRowVersion >= 0) {
       let pullResponse: PullSinceResponse | undefined
       try {
@@ -5128,10 +5141,10 @@ class PersistedCollectionRuntime<
     // follower requests its demand again.
     await this.reloadActiveSubsetsUnsafe(
       adapter,
-      false,
-      this.syncMode === `eager`,
-      true,
-      true,
+      /* skipUnchangedReplace */ false,
+      /* restoreResetBaseline */ this.syncMode === `eager`,
+      /* replayDemand */ true,
+      /* continuesHydrationCycle */ true,
     )
   }
 
@@ -5150,8 +5163,8 @@ class PersistedCollectionRuntime<
           this.reloadActiveSubsetsUnsafe(
             scopedAdapter,
             skipUnchangedReplace,
-            false,
-            false,
+            /* restoreResetBaseline */ false,
+            /* replayDemand */ false,
             continuesHydrationCycle,
           ),
         adapter,
@@ -6026,23 +6039,26 @@ function createWrappedSyncConfig<
           if (!transaction) return undefined
           // Admission waiters settle when the transaction commits, aborts, or
           // cleanup discards it. Every outcome closes the reservation.
-          return new Promise<void>((resolve) => {
-            ;(transaction.publicationAdmissionWaiters ??= new Set()).add({
-              resolve,
-              reject: () => resolve(),
-            })
-          })
+          return (transaction.reservationEnded ??= new Promise<void>(
+            (resolve) => {
+              ;(transaction.publicationAdmissionWaiters ??= new Set()).add({
+                resolve,
+                reject: () => resolve(),
+              })
+            },
+          ))
         },
-        // A peer reset abandons a reservation built before it: later writes
+        // A peer reset abandons every reservation built before it: later writes
         // are dropped, the commit rejects, and its waiters run.
         () => {
-          const transaction = findReservedTransaction()
-          if (!transaction) return
-          transaction.reservesCommitTurn = false
-          transaction.terminalFailure ??= {
-            error: new SyncTransactionAbortedError(),
+          for (const transaction of transactionStack) {
+            if (!transaction.reservesCommitTurn) continue
+            transaction.reservesCommitTurn = false
+            transaction.terminalFailure ??= {
+              error: new SyncTransactionAbortedError(),
+            }
+            settlePublicationAdmissionWaiters(transaction)
           }
-          settlePublicationAdmissionWaiters(transaction)
         },
       )
 
