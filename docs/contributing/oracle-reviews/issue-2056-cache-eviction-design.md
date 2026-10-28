@@ -323,3 +323,34 @@ demand beside an active warm tab and a peer notification delivered to an
 expired receiver. The Electric descriptor owner checks restart, and the
 installed-SDK owner checks subset-only network work. The remaining limits
 above are recorded in the coverage map rather than inferred from green tests.
+
+## Follow-up: persisted demand coverage
+
+PR #2263 implements item 1 of #2102 in a narrower form than the issue
+proposed. The issue asked for certified predicate and window evidence that
+overlapping subsets could combine. The PR instead records persisted demand
+coverage: evidence, in one persisted cache generation, that a load of one
+exact demand reached applied settlement with its rows durably committed. Its
+law is in `2026-10-20-on-demand-network-first-law.md`, and its primary owner is
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`.
+
+Coverage does not change this design's authority rules:
+
+- It is not a key-set certificate. An uncertified generation stays
+  uncertified. Coverage only lets a later load of the same demand settle from
+  rows that the same generation already holds.
+- Coverage belongs to its generation. Scoped recovery and claim-expiry
+  rotation give the next load an empty generation with no coverage, and a
+  record that memory still holds from the retired generation does not count.
+- An ordinary persisted truncate deletes every coverage record in its own
+  transaction, and a schema reset deletes collection metadata with the rows.
+- A row deleted after the covered load settled ends coverage for that demand.
+  An ordered window whose rows change asks for a tie-boundary key that no load
+  covered.
+- Overlapping demands never combine. A demand covers only its own exact key,
+  as #1797 requires for request deduplication.
+
+Shape-identity churn across new runs, described above, can alternate the
+current generation. Coverage written under one shape's generation is not
+reused under the other's.
+

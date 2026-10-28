@@ -17,22 +17,50 @@ import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
-  readOracleRunConfig,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import { createMockStream } from './electric-stream-mock'
 import {
   applyRetryModel,
   createRetryModel,
   expectedRetryObservation,
   retryStepIsLegal,
 } from './electric-retry-decision-model'
-import type { Collection, SyncMetadataApi } from '@tanstack/db'
-import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
+import {
+  change,
+  createDeferred,
+  createMetadata,
+  createOracleCollection,
+  createPersistedAdapter,
+  everyContiguousPartition,
+  expectGaveUpAfterReadiness,
+  expectPreloadOutcome,
+  expectWholePublications,
+  mockStream,
+  mockSubscribe,
+  mustRefetch,
+  observableResume,
+  observePreload,
+  observePublications,
+  resetElectricOracleMocks,
+  resumeState,
+  rowsFromCollection,
+  rowsFromMap,
+  runTrace,
+  shapeId,
+  subsetEnd,
+  upToDate,
+} from './electric-adapter-support'
 import type {
-  PersistedTx,
-  PersistenceAdapter,
-} from '../../db-sqlite-persistence-core/src'
+  ObservedPreload,
+  OracleRow,
+  TraceResult,
+} from './electric-adapter-support'
+import type { Collection } from '@tanstack/db'
+import type { ChangeMessage, Message } from '@electric-sql/client'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 import type {
   RetryDecision,
@@ -43,46 +71,12 @@ import type {
   RetryWait,
 } from './electric-retry-decision-model'
 
-// Replays one generated law directly with
-// TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY=<property>
-// TANSTACK_DB_ELECTRIC_HISTORY_SEED=<reported seed>
-// TANSTACK_DB_ELECTRIC_HISTORY_PATH=<reported path>
+// Replays one generated law directly with the shared oracle variables:
+// TANSTACK_DB_ORACLE_PROPERTY=<property>
+// TANSTACK_DB_ORACLE_SEED=<reported seed>
+// TANSTACK_DB_ORACLE_PATH=<reported path>
 // pnpm exec vitest run tests/electric-oracle.property.test.ts -t '<law name> \(replay\)'
-const historyReplayProperty = process.env.TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY
-const historyReplaySeed = process.env.TANSTACK_DB_ELECTRIC_HISTORY_SEED
-const historyReplayPath = process.env.TANSTACK_DB_ELECTRIC_HISTORY_PATH
 const registeredHistoryProperties = new Set<string>()
-const historyPropertyIds = new Set([
-  `electric.initial-tagged-move-outs`,
-  `electric.process-grammar`,
-  `electric.design-convergence`,
-  `electric.synthetic-batch-partition`,
-  `electric.valid-batch-partition`,
-  `electric.invalid-resume-partition`,
-  `electric.subset-request-row-validity`,
-  `electric.resume-metadata-merge`,
-  `electric.metadata-merge-complete-state`,
-  `electric.retry-decision`,
-])
-
-if (
-  historyReplayProperty === undefined &&
-  (historyReplaySeed !== undefined || historyReplayPath !== undefined)
-) {
-  throw new Error(`Electric history replay requires a property`)
-}
-if (
-  historyReplayProperty !== undefined &&
-  (historyReplaySeed === undefined || historyReplayPath === undefined)
-) {
-  throw new Error(`Electric history replay requires both seed and path`)
-}
-if (
-  historyReplayProperty !== undefined &&
-  !historyPropertyIds.has(historyReplayProperty)
-) {
-  throw new Error(`unknown Electric history property: ${historyReplayProperty}`)
-}
 
 function electricHistoryProperty<T>(
   property: string,
@@ -98,117 +92,28 @@ function electricHistoryProperty<T>(
     throw new Error(`duplicate Electric history property: ${property}`)
   }
   registeredHistoryProperties.add(property)
-  const numRuns = oracleRuns(baseRuns)
-  if (historyReplayProperty === undefined) {
-    fcTest.prop([arbitrary], { numRuns, seed: fixedSeed, examples })(
-      `${name} (fixed)`,
-      check,
-      timeout,
-    )
-    fcTest.prop([arbitrary], { numRuns, examples })(
-      `${name} (random)`,
-      check,
-      timeout,
-    )
-    return
-  }
-  if (historyReplayProperty !== property) return
-  const seed = Number(historyReplaySeed)
-  if (!Number.isSafeInteger(seed)) {
-    throw new Error(`Electric history replay seed must be an integer`)
-  }
-  if (!/^\d+(?::\d+)*$/.test(historyReplayPath!)) {
-    throw new Error(
-      `Electric history replay path must contain colon-separated nonnegative integers`,
-    )
-  }
-  fcTest.prop([arbitrary], { numRuns, seed, path: historyReplayPath })(
-    `${name} (replay)`,
-    check,
-    timeout,
-  )
-}
-
-/**
- * # Does the Electric adapter preserve one coherent replica lifecycle?
- *
- * Electric delivers change messages, reset controls, offsets, handles, and
- * snapshot availability through an SDK stream. The adapter must publish atomic
- * callback cuts, wait for acceptance before Collection readiness and for
- * application before subset success, persist valid resume evidence for a valid source prefix, reject unseen partial updates,
- * and keep stale callbacks and metadata scoped to the sync run that created
- * them.
- *
- * Independent Maps model rows, selected-tag membership, source commits, resume
- * evidence, and persisted state. A controlled ShapeStream boundary supplies
- * authored message partitions and settlement order. The production Collection,
- * Query-backed persistence wrapper, metadata APIs, and cleanup run unchanged.
- * Checks cover public and durable rows, exact batches, readiness, errors,
- * metadata, waiters, stream ownership, and restart at named checkpoints.
- *
- * The suite retains fixed protocol histories, exhaustive contiguous
- * partitions, fixed campaigns, random campaigns, and explicit seed/path replay
- * for durability policies. Sensitivity checks reject missing prefix evidence.
- * Installed-SDK HTTP delivery, PostgreSQL semantics, and live-service execution
- * remain separate evidence.
- */
-type OracleRow = Row & {
-  id: number
-  name: string
-  stable: string
-}
-
-const mockSubscribe = vi.fn()
-const shapeId = `{"params":{"table":"test_table"},"url":"http://test-url"}`
-const mockStream = {
-  subscribe: mockSubscribe,
-  requestSnapshot: vi.fn().mockResolvedValue(undefined),
-  fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
-  forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-  isUpToDate: false,
-  shapeHandle: undefined as string | undefined,
-  lastOffset: `-1` as string,
-}
-
-function createDeferred<T>(): {
-  promise: Promise<T>
-  resolve: (value: T | PromiseLike<T>) => void
-  reject: (reason?: unknown) => void
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, resolve, reject }
+  // A path replay of this property runs only the random campaign, from its
+  // path. The fixed campaign stands aside during every path replay.
+  oracleReplayTest(fcTest).prop([arbitrary], {
+    numRuns: oracleRuns(baseRuns),
+    seed: fixedSeed,
+    examples,
+  })(`${name} (fixed)`, check, timeout)
+  oracleReplayTest(fcTest, property).prop([arbitrary], {
+    ...oraclePropertyOptions(baseRuns, property),
+    examples,
+  })(`${name} (random)`, check, timeout)
 }
 
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => mockStream),
+    // Full SDK release clears this stream's callback, including when another
+    // Collection has a separate stream using these shared request mocks.
+    ShapeStream: vi.fn(() => createMockStream(mockStream)),
   }
 })
-
-function everyContiguousPartition<T>(values: Array<T>): Array<Array<Array<T>>> {
-  if (values.length === 0) return [[]]
-  const partitions: Array<Array<Array<T>>> = []
-  const boundaryCount = values.length - 1
-  for (let mask = 0; mask < 1 << boundaryCount; mask++) {
-    const batches: Array<Array<T>> = [[values[0]!]]
-    for (let index = 1; index < values.length; index++) {
-      if ((mask & (1 << (index - 1))) !== 0) {
-        batches.push([values[index]!])
-      } else {
-        batches.at(-1)!.push(values[index]!)
-      }
-    }
-    partitions.push(batches)
-  }
-  return partitions
-}
 
 function isSdkResetFramedPartition(
   batches: Array<Array<Message<OracleRow>>>,
@@ -226,133 +131,6 @@ function isSdkResetFramedPartition(
           `must-refetch`,
       ),
   )
-}
-
-function createMetadata(seed: ReadonlyMap<string, unknown>): {
-  api: SyncMetadataApi<string | number>
-  state: Map<string, unknown>
-} {
-  const state = new Map(seed)
-  return {
-    state,
-    api: {
-      persistence: null,
-      row: {
-        get: () => undefined,
-        set: () => {},
-        delete: () => {},
-      },
-      collection: {
-        get: (key) => state.get(key),
-        set: (key, value) => {
-          state.set(key, value)
-        },
-        delete: (key) => {
-          state.delete(key)
-        },
-        list: (prefix) =>
-          Array.from(state, ([key, value]) => ({ key, value })).filter(
-            ({ key }) => !prefix || key.startsWith(prefix),
-          ),
-      },
-    },
-  }
-}
-
-function resumeState(): ReadonlyMap<string, unknown> {
-  // This fixture represents an untagged source. Legacy/unknown membership is
-  // exercised separately by the cold-recovery history generator.
-  return new Map([
-    [
-      `electric:resume`,
-      {
-        kind: `resume`,
-        requiresTagState: false,
-        offset: `10_0`,
-        handle: `shape-1`,
-        shapeId,
-        updatedAt: 1,
-      },
-    ],
-  ])
-}
-
-function createPersistedAdapter(
-  collectionMetadata: Map<string, unknown>,
-  rows: Map<string | number, OracleRow>,
-  loadGate: Promise<void> = Promise.resolve(),
-): PersistenceAdapter {
-  let latestTerm = 0
-  let latestSeq = 0
-  let latestRowVersion = 0
-  let resetEpoch = 0
-  return {
-    loadSubset: () =>
-      loadGate.then(() =>
-        Array.from(rows, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-      ),
-    loadResumeSnapshot: async (_collectionId, ctx) => {
-      if (ctx?.includeRows !== false) await loadGate
-      return {
-        rows:
-          ctx?.includeRows === false
-            ? []
-            : Array.from(rows, ([key, value]) => ({
-                key,
-                value: structuredClone(value),
-              })),
-        keySet: { status: `consistent` },
-        collectionMetadata: Array.from(collectionMetadata, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-        latestTerm,
-        latestSeq,
-        latestRowVersion,
-        resetEpoch,
-      }
-    },
-    loadCollectionMetadata: () =>
-      Promise.resolve(
-        Array.from(collectionMetadata, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-      ),
-    applyCommittedTx: (_target, tx: PersistedTx) => {
-      for (const mutation of tx.collectionMetadataMutations ?? []) {
-        if (mutation.type === `delete`) {
-          collectionMetadata.delete(mutation.key)
-        } else {
-          collectionMetadata.set(mutation.key, structuredClone(mutation.value))
-        }
-      }
-      if (tx.truncate) {
-        rows.clear()
-        resetEpoch++
-      }
-      for (const mutation of tx.mutations) {
-        if (mutation.type === `delete`) {
-          rows.delete(mutation.key)
-        } else if (mutation.type === `update`) {
-          rows.set(mutation.key, {
-            ...rows.get(mutation.key),
-            ...structuredClone(mutation.value),
-          } as OracleRow)
-        } else {
-          rows.set(mutation.key, structuredClone(mutation.value) as OracleRow)
-        }
-      }
-      latestTerm = tx.term
-      latestSeq = tx.seq
-      latestRowVersion = tx.rowVersion
-      return Promise.resolve()
-    },
-    ensureIndex: () => Promise.resolve(),
-  }
 }
 
 type SourceLedgerEvent = {
@@ -383,58 +161,29 @@ function foldSourceLedgerThrough(
   throw new Error(`resume offset ${resumeOffset} is absent from source ledger`)
 }
 
+const durablePrefixProperty = `electric.durable-prefix`
+const publicationBeforePersistenceProperty = `electric.publication-before-persistence`
+const adapterFailurePolicyProperty = `electric.adapter-failure-policy`
+
 function durablePrefixPropertyOptions(mode: `fixed` | `random`): {
   numRuns: number
   seed?: number
   path?: string
 } {
-  const numRuns = oracleRuns(10)
-  if (mode === `fixed`) return { numRuns, seed: 20260921 }
-  const seedValue = process.env.TANSTACK_DB_ELECTRIC_DURABILITY_SEED
-  const path = process.env.TANSTACK_DB_ELECTRIC_DURABILITY_PATH
-  if (path !== undefined && seedValue === undefined) {
-    throw new Error(
-      `TANSTACK_DB_ELECTRIC_DURABILITY_PATH requires TANSTACK_DB_ELECTRIC_DURABILITY_SEED`,
-    )
-  }
-  if (seedValue === undefined) return { numRuns }
-  const seed = Number(seedValue)
-  if (!Number.isSafeInteger(seed)) {
-    throw new Error(`TANSTACK_DB_ELECTRIC_DURABILITY_SEED must be an integer`)
-  }
-  return {
-    numRuns,
-    seed,
-    ...(path === undefined ? {} : { path }),
-  }
+  if (mode === `fixed`) return { numRuns: oracleRuns(10), seed: 20260921 }
+  return oraclePropertyOptions(10, durablePrefixProperty)
 }
 
-function persistencePolicyPropertyOptions(mode: `fixed` | `random`): {
+function persistencePolicyPropertyOptions(
+  mode: `fixed` | `random`,
+  property: string,
+): {
   numRuns: number
   seed?: number
   path?: string
 } {
-  const numRuns = oracleRuns(8)
-  if (mode === `fixed`) return { numRuns, seed: 20260923 }
-  const seedValue = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED
-  const path = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH
-  if (path !== undefined && seedValue === undefined) {
-    throw new Error(
-      `TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH requires TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED`,
-    )
-  }
-  if (seedValue === undefined) return { numRuns }
-  const seed = Number(seedValue)
-  if (!Number.isSafeInteger(seed)) {
-    throw new Error(
-      `TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED must be an integer`,
-    )
-  }
-  return {
-    numRuns,
-    seed,
-    ...(path === undefined ? {} : { path }),
-  }
+  if (mode === `fixed`) return { numRuns: oracleRuns(8), seed: 20260923 }
+  return oraclePropertyOptions(8, property)
 }
 
 async function runRejectedDurablePrefixWitness(
@@ -547,7 +296,7 @@ async function runRejectedDurablePrefixWitness(
     subscriber!([secondMessage, upToDate])
     if (acceptedPrefix) {
       await atCheckpoint(rejectedAttempt.promise, `second durability rejection`)
-      await vi.waitFor(() => expect(collection.status).toBe(`error`))
+      await vi.waitFor(() => expect(collection.status).toBe(`crashed`))
       // A later source callback may arrive after the failed durability turn.
       // It cannot become part of the accepted prefix or start another write.
       subscriber!([change(`insert`, 3, `retired`), upToDate])
@@ -576,63 +325,10 @@ async function runRejectedDurablePrefixWitness(
     // A rejected durability boundary is terminal: it cannot retry, admit the
     // later source commit, or publish a resume claim for an undurable prefix.
     // Clearing the accepted prefix on a later rejection is also a wrong rule.
-    expect(statusAtTerminalCut).toBe(`error`)
+    expect(statusAtTerminalCut).toBe(`crashed`)
     expect(durableOffset).toBe(acceptedPrefix ? `21_0` : undefined)
     expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(acceptedRows))
   }, [() => collection.cleanup()])
-}
-
-function createOracleCollection(
-  id: string,
-  syncMode: ElectricSyncMode,
-  metadata: SyncMetadataApi<string | number>,
-  shapeResumeOptions: {
-    offset?: Offset
-    handle?: string
-    signal?: AbortSignal
-    onError?: () => Promise<Record<string, never> | undefined>
-  } = {},
-  wrapParams: <TParams>(params: TParams) => TParams = (params) => params,
-) {
-  let subscriber!: (messages: Array<Message<OracleRow>>) => void
-  let sdkError!: (error: unknown) => void
-  const unsubscribe = vi.fn()
-  mockSubscribe.mockImplementationOnce((callback, onSubscriberError) => {
-    subscriber = callback
-    sdkError = onSubscriberError
-    return unsubscribe
-  })
-  const options = electricCollectionOptions<OracleRow>({
-    id,
-    shapeOptions: {
-      url: `http://test-url`,
-      params: { table: `test_table` },
-      ...shapeResumeOptions,
-    },
-    syncMode,
-    getKey: (row) => row.id,
-    startSync: true,
-  })
-  const originalSync = options.sync
-  return {
-    collection: createCollection({
-      ...options,
-      sync: {
-        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync(wrapParams({ ...params, metadata })),
-      },
-    }),
-    subscriber,
-    sdkError,
-    unsubscribe,
-  }
-}
-
-type TraceResult = {
-  rows: Array<[string | number, string, string]>
-  snapshots: Array<Array<[string | number, string, string]>>
-  status: string
-  resume: unknown
 }
 
 type PersistedTraceResult = TraceResult & {
@@ -644,29 +340,6 @@ type PersistedTraceResult = TraceResult & {
 type ReferenceState = {
   committed: Map<number, OracleRow>
   pending: Map<number, OracleRow>
-}
-
-function rowsFromCollection(
-  collection: Collection<OracleRow, string | number>,
-): Array<[string | number, string, string]> {
-  return Array.from(
-    collection,
-    ([key, row]): [string | number, string, string] => [
-      key,
-      row.name,
-      row.stable,
-    ],
-  ).sort(([left], [right]) => String(left).localeCompare(String(right)))
-}
-
-function rowsFromMap(
-  rows: ReadonlyMap<string | number, OracleRow>,
-): Array<[string | number, string, string]> {
-  return Array.from(rows, ([key, row]): [string | number, string, string] => [
-    key,
-    row.name,
-    row.stable,
-  ]).sort(([left], [right]) => String(left).localeCompare(String(right)))
 }
 
 /**
@@ -711,48 +384,20 @@ const queuedPresenceArbitraries: [
   }),
   fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
 ]
-const requestedQueuedPresenceProperty =
-  process.env.TANSTACK_DB_ELECTRIC_ORACLE_PROPERTY
 const persistenceInterleavingProperty = `electric.persistence-interleaving`
-const requestedPersistenceInterleavingProperty =
-  readOracleRunConfig().replayProperty
 
-if (
-  requestedQueuedPresenceProperty !== undefined &&
-  requestedQueuedPresenceProperty !== queuedPresenceProperty
-) {
-  throw new Error(
-    `unknown Electric oracle replay property: ${requestedQueuedPresenceProperty}`,
-  )
-}
-
-function queuedPresencePropertyOptions(mode: `fixed` | `random` | `replay`): {
+function queuedPresencePropertyOptions(mode: `fixed` | `random`): {
   numRuns: number
   seed?: number
   path?: string
 } {
   if (mode === `fixed`) {
-    return { numRuns: queuedPresenceRuns, seed: queuedPresenceFixedSeed }
+    return {
+      numRuns: oracleRuns(queuedPresenceRuns),
+      seed: queuedPresenceFixedSeed,
+    }
   }
-  if (mode === `random`) return { numRuns: queuedPresenceRuns }
-
-  const seedValue = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED
-  const path = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH
-  if (seedValue === undefined || path === undefined || path.trim() === ``) {
-    throw new Error(
-      `Electric queued-presence replay requires both seed and path`,
-    )
-  }
-  const seed = Number(seedValue)
-  if (!Number.isSafeInteger(seed)) {
-    throw new Error(`Electric queued-presence replay seed must be an integer`)
-  }
-  if (!/^\d+(?::\d+)*$/.test(path)) {
-    throw new Error(
-      `Electric queued-presence replay path must contain colon-separated nonnegative integers`,
-    )
-  }
-  return { numRuns: queuedPresenceRuns, seed, path }
+  return oraclePropertyOptions(queuedPresenceRuns, queuedPresenceProperty)
 }
 
 function reconstructQueuedPresenceCampaign(
@@ -1435,87 +1080,6 @@ function recomputedSnapshots(
   })
 }
 
-function observableResume(value: unknown): unknown {
-  if (value === null || typeof value !== `object`) return value
-  const state = value as Record<string, unknown>
-  return {
-    kind: state.kind,
-    offset: state.offset,
-    handle: state.handle,
-    shapeId: state.shapeId,
-  }
-}
-
-type Publication = { cut: string; rows: TraceResult[`rows`] }
-
-function observePublications(
-  collection: Collection<OracleRow, string | number>,
-) {
-  const entries: Array<Publication> = []
-  const record = (cut: string) => {
-    entries.push({ cut, rows: structuredClone(rowsFromCollection(collection)) })
-  }
-  const subscription = collection.subscribeChanges(() => record(`event`), {
-    includeInitialState: false,
-  })
-  return { entries, record, stop: () => subscription.unsubscribe() }
-}
-
-function expectWholePublications(
-  entries: Array<Publication>,
-  allowed: Array<TraceResult[`rows`]>,
-) {
-  let position = 0
-  for (const entry of entries) {
-    while (
-      position < allowed.length &&
-      !isDeepStrictEqual(entry.rows, allowed[position])
-    )
-      position++
-    expect(position, JSON.stringify({ entry, allowed, entries })).toBeLessThan(
-      allowed.length,
-    )
-  }
-}
-
-async function runTrace(
-  id: string,
-  syncMode: ElectricSyncMode,
-  prefix: Array<Array<Message<OracleRow>>>,
-  batches: Array<Array<Message<OracleRow>>>,
-  seed: ReadonlyMap<string, unknown> = new Map(),
-  hooks: {
-    beforeDelivery?: () => void
-    cleanup?: (cleanup: () => Promise<void>) => Promise<void>
-  } = {},
-): Promise<TraceResult> {
-  const metadata = createMetadata(seed)
-  const { collection, subscriber } = createOracleCollection(
-    id,
-    syncMode,
-    metadata.api,
-  )
-  const deliver = (batch: Array<Message<OracleRow>>) => {
-    hooks.beforeDelivery?.()
-    subscriber(batch)
-  }
-  const cleanup = () => collection.cleanup()
-  return withElectricCleanup(() => {
-    for (const batch of prefix) deliver(batch)
-    const snapshots: Array<Array<[string | number, string, string]>> = []
-    for (const batch of batches) {
-      deliver(batch)
-      snapshots.push(rowsFromCollection(collection))
-    }
-    return {
-      rows: rowsFromCollection(collection),
-      snapshots,
-      status: collection.status,
-      resume: observableResume(metadata.state.get(`electric:resume`)),
-    }
-  }, [() => (hooks.cleanup ? hooks.cleanup(cleanup) : cleanup())])
-}
-
 async function runPersistedTrace(
   id: string,
   syncMode: ElectricSyncMode,
@@ -1734,34 +1298,6 @@ async function runQueryTrace(
   }
 }
 
-function change(
-  operation: `insert` | `update` | `delete`,
-  id: number,
-  name: string,
-): ChangeMessage<OracleRow> {
-  const value =
-    operation === `insert`
-      ? { id, name, stable: `stable-${id}` }
-      : operation === `update`
-        ? { id, name }
-        : { id }
-  return {
-    key: String(id),
-    value: value as OracleRow,
-    headers: { operation },
-  }
-}
-
-const upToDate: Message<OracleRow> = {
-  headers: { control: `up-to-date` },
-}
-const subsetEnd: Message<OracleRow> = {
-  headers: { control: `subset-end` },
-}
-const mustRefetch: Message<OracleRow> = {
-  headers: { control: `must-refetch` },
-}
-
 async function checkInitialMoveOut(
   syncMode: ElectricSyncMode,
   removals: number,
@@ -1783,10 +1319,7 @@ async function checkInitialMoveOut(
     ),
     upToDate,
   ]
-  // The contract is a tagged relation: removing its only tag removes the row.
-  // Completing that snapshot must not affect later, unrelated live updates.
-  const initialRows: TraceResult[`rows`] =
-    removals === 0 ? [[id, `snapshot`, `stable-${id}`]] : []
+  const expected = expectedInitialMoveOutSnapshots(removals, id, updated)
   for (const partition of everyContiguousPartition(initial)) {
     const result = await runTrace(
       `initial-move-out-${syncMode}`,
@@ -1797,16 +1330,38 @@ async function checkInitialMoveOut(
         [change(`update`, id + 1, updated), upToDate],
       ],
     )
-    expect(result.snapshots).toEqual([
-      [...initialRows, [id + 1, `live`, `stable-${id + 1}`]].sort(
-        ([left], [right]) => String(left).localeCompare(String(right)),
-      ),
-      [...initialRows, [id + 1, updated, `stable-${id + 1}`]].sort(
-        ([left], [right]) => String(left).localeCompare(String(right)),
-      ),
-    ])
+    expect(result.snapshots).toEqual(expected)
     expect(result.status).toBe(`ready`)
   }
+}
+
+// The contract is a tagged relation: removing its only tag removes the row.
+// Completing that snapshot must not affect later, unrelated live updates. The
+// model predicts the public rows after the initial snapshot and after each
+// live update, for any number of move-outs of that snapshot.
+function expectedInitialMoveOutSnapshots(
+  removals: number,
+  id: number,
+  updated: string,
+): Array<TraceResult[`snapshots`][number]> {
+  const initialRows: TraceResult[`rows`] =
+    removals === 0 ? [[id, `snapshot`, `stable-${id}`]] : []
+  const liveRows: TraceResult[`rows`] = [
+    ...initialRows,
+    [id + 1, `live`, `stable-${id + 1}`],
+  ]
+  const updatedRows: TraceResult[`rows`] = [
+    ...initialRows,
+    [id + 1, updated, `stable-${id + 1}`],
+  ]
+  return [
+    liveRows.sort(([left], [right]) =>
+      String(left).localeCompare(String(right)),
+    ),
+    updatedRows.sort(([left], [right]) =>
+      String(left).localeCompare(String(right)),
+    ),
+  ]
 }
 
 type PartitionScenario = {
@@ -1858,61 +1413,15 @@ type ProcessRuntime = {
   resumeAvailable: boolean
   requiresCompleteResume: boolean
   resettingSnapshot: boolean
+  // Electric reaches Collection readiness at its first up-to-date. Only a
+  // delivered snapshot or batch carries one, so the model records it there.
+  reachedReadiness: boolean
   terminalError: boolean
+  // A give-up after readiness is the Collection's `error`, not status `error`.
+  terminalAfterReadiness: boolean
   active: boolean
   retired: boolean
   preloads: Array<ObservedPreload>
-}
-
-type PreloadOutcome =
-  { status: `fulfilled` } | { status: `rejected`; reason: unknown }
-
-function observePreload(promise: Promise<void>) {
-  const observed: {
-    expectedRejection?: `cleanup` | `invalid-resume`
-    settled: boolean
-    outcome: Promise<PreloadOutcome>
-  } = {
-    settled: false,
-    // Both handlers are installed at creation, before a driver command can
-    // invalidate or retire the collection. Keep the original rejection object.
-    outcome: promise.then(
-      () => {
-        observed.settled = true
-        return { status: `fulfilled` }
-      },
-      (reason: unknown) => {
-        observed.settled = true
-        return { status: `rejected`, reason }
-      },
-    ),
-  }
-  return observed
-}
-
-type ObservedPreload = ReturnType<typeof observePreload>
-
-function expectPreloadOutcome(
-  observed: ObservedPreload,
-  outcome: PreloadOutcome,
-) {
-  if (observed.expectedRejection === undefined) {
-    if (outcome.status === `rejected`) throw outcome.reason
-    return
-  }
-  expect(outcome.status).toBe(`rejected`)
-  if (outcome.status === `rejected`) {
-    expect(outcome.reason).toMatchObject(
-      observed.expectedRejection === `cleanup`
-        ? {
-            name: `AbortError`,
-            message: `Collection preload was abandoned during cleanup`,
-          }
-        : {
-            message: `Electric resume state referenced an unseen row; a full snapshot is required`,
-          },
-    )
-  }
 }
 
 async function runPublicationBeforePersistenceWitness(
@@ -2148,9 +1657,9 @@ async function runPersistenceFailureCrashOnlyWitness(
         publicationsBeforeRetiredWork,
       ),
     }).toEqual({
-      statusAtAdmissionCut: `error`,
+      statusAtAdmissionCut: `crashed`,
       publicErrorNameAtAdmissionCut: `PersistedCollectionDurabilityError`,
-      status: `error`,
+      status: `crashed`,
       publicErrorName: `PersistedCollectionDurabilityError`,
       hasNamedPersistenceSemantics: true,
       preservesCause: true,
@@ -2415,7 +1924,9 @@ async function runProcessGrammar(
       resumeAvailable: false,
       requiresCompleteResume: false,
       resettingSnapshot: false,
+      reachedReadiness: false,
       terminalError: false,
+      terminalAfterReadiness: false,
       active: false,
       retired: false,
       preloads: [],
@@ -2437,7 +1948,9 @@ async function runProcessGrammar(
     runtime.subscriber = subscriber
     runtime.requiresCompleteResume = runtime.resumeAvailable
     runtime.resettingSnapshot = false
+    runtime.reachedReadiness = false
     runtime.terminalError = false
+    runtime.terminalAfterReadiness = false
     runtime.active = true
     runtime.retired = false
   }
@@ -2449,7 +1962,11 @@ async function runProcessGrammar(
         : []
       expect(rowsFromCollection(runtime.collection)).toEqual(expected)
       if (runtime.terminalError) {
-        expect(runtime.collection.status).toBe(`error`)
+        if (runtime.terminalAfterReadiness) {
+          expectGaveUpAfterReadiness(runtime.collection)
+        } else {
+          expect(runtime.collection.status).toBe(`error`)
+        }
       }
       if (!runtime.active && runtime.retired) {
         expect(runtime.collection.status).toBe(`cleaned-up`)
@@ -2524,7 +2041,9 @@ async function runProcessGrammar(
       runtime.resumeAvailable = false
       runtime.requiresCompleteResume = false
       runtime.resettingSnapshot = false
+      runtime.reachedReadiness = false
       runtime.terminalError = false
+      runtime.terminalAfterReadiness = false
       return `cleaned up`
     }
     if (command.kind === `retired-callback`) {
@@ -2566,6 +2085,7 @@ async function runProcessGrammar(
       applyReferenceBatch(runtime.reference, messages)
       runtime.resettingSnapshot = false
       runtime.resumeAvailable = true
+      runtime.reachedReadiness = true
       return `delivered: snapshot`
     }
 
@@ -2595,6 +2115,7 @@ async function runProcessGrammar(
     runtime.subscriber(messages)
     if (invalidResume) {
       runtime.terminalError = true
+      runtime.terminalAfterReadiness = runtime.reachedReadiness
       runtime.resumeAvailable = false
       runtime.retiredSubscriber = runtime.subscriber
       return `delivered: invalid resume`
@@ -2602,6 +2123,7 @@ async function runProcessGrammar(
     applyReferenceBatch(runtime.reference, messages)
     runtime.resettingSnapshot = false
     runtime.resumeAvailable = true
+    runtime.reachedReadiness = true
     if (txidOutcome) {
       await expect(txidOutcome).resolves.toBe(true)
       runtime.seenTxids.add(command.txid)
@@ -2862,28 +2384,81 @@ async function runSchedulerPermutation(
   } finally {
     await collection.cleanup()
     vi.mocked(ShapeStream).mockReset()
-    vi.mocked(ShapeStream).mockImplementation(() => mockStream as never)
+    vi.mocked(ShapeStream).mockImplementation(
+      () => createMockStream(mockStream) as never,
+    )
   }
 }
 
-const describeUnlessQueuedPresenceReplay =
-  requestedQueuedPresenceProperty ||
-  requestedPersistenceInterleavingProperty === persistenceInterleavingProperty
-    ? describe.skip
-    : describe
+const assertPublicationEpochHistory = async (
+  tokens: Array<DesignToken>,
+  partitionSeed: number,
+) => {
+  const messages = buildDifferentialHistory(tokens)
+  const partitions = everyContiguousPartition(messages).filter(
+    isSdkResetFramedPartition,
+  )
+  const partition = partitions[partitionSeed % partitions.length]!
+  const referenceSnapshots = recomputedSnapshots([], partition)
 
-function resetElectricOracleMocks(): void {
-  vi.clearAllMocks()
-  // clearAllMocks retains one-shot implementations from a failed earlier
-  // history. Each history must own its transport responses independently.
-  mockSubscribe.mockReset()
-  mockStream.requestSnapshot.mockReset().mockResolvedValue(undefined)
-  mockStream.isUpToDate = false
-  mockStream.shapeHandle = `shape-current`
-  mockStream.lastOffset = `20_0`
+  for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
+    const direct = await runTrace(
+      `direct-differential-${syncMode}`,
+      syncMode,
+      [],
+      partition,
+    )
+    const persisted = await runPersistedTrace(
+      `persisted-differential-${syncMode}`,
+      syncMode,
+      partition,
+    )
+    const query = await runQueryTrace(
+      `query-differential-${syncMode}`,
+      partition,
+    )
+
+    expect(direct.snapshots).toEqual(referenceSnapshots)
+    expect(persisted.snapshots).toEqual(referenceSnapshots)
+    expect(query.snapshots).toEqual(referenceSnapshots)
+    expect(persisted.rows).toEqual(direct.rows)
+    expect(query.rows).toEqual(direct.rows)
+    expect(persisted.status).toBe(direct.status)
+    expect(query.status).toBe(`ready`)
+    expect(persisted.resume).toEqual(direct.resume)
+    expect(persisted.durableRows).toEqual(direct.rows)
+    expect(persisted.durableResume).toEqual(direct.resume)
+    expect(persisted.persistenceCommits).toBeGreaterThan(0)
+  }
 }
 
-describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
+// Each registration below says which path replays stand it aside. A path
+// replay runs only the selected property, and the sibling suites register it.
+/**
+ * # Does the Electric adapter preserve one coherent replica lifecycle?
+ *
+ * Electric delivers change messages, reset controls, offsets, handles, and
+ * snapshot availability through an SDK stream. The adapter must publish atomic
+ * callback cuts, wait for acceptance before Collection readiness and for
+ * application before subset success, persist valid resume evidence for a valid source prefix, reject unseen partial updates,
+ * and keep stale callbacks and metadata scoped to the sync run that created
+ * them.
+ *
+ * Independent Maps model rows, selected-tag membership, source commits, resume
+ * evidence, and persisted state. A controlled ShapeStream boundary supplies
+ * authored message partitions and settlement order. The production Collection,
+ * Query-backed persistence wrapper, metadata APIs, and cleanup run unchanged.
+ * Checks cover public and durable rows, exact batches, readiness, errors,
+ * metadata, waiters, stream ownership, and restart at named checkpoints.
+ *
+ * The suite retains fixed protocol histories, exhaustive contiguous
+ * partitions, fixed campaigns, random campaigns, and explicit seed/path replay
+ * for durability policies. Sensitivity checks reject missing prefix evidence.
+ * Installed-SDK HTTP delivery, PostgreSQL semantics, and live-service execution
+ * remain separate evidence.
+ */
+
+describe(`Electric adapter laws`, () => {
   let processGrammarRun = 0
   let persistencePolicyRun = 0
 
@@ -2891,45 +2466,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     resetElectricOracleMocks()
   })
 
-  it.each([false, true])(
-    `cleans direct traces after delivery failure and preserves the primary error (cleanup failure: %s)`,
-    async (failCleanup) => {
-      const primary = new Error(`delivery sentinel`)
-      const secondary = new Error(`cleanup sentinel`)
-      const cleanup = vi.fn(async (release: () => Promise<void>) => {
-        await release()
-        if (failCleanup) throw secondary
-      })
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      try {
-        await expect(
-          runTrace(`cleanup-${failCleanup}`, `eager`, [[]], [], new Map(), {
-            beforeDelivery: () => {
-              throw primary
-            },
-            cleanup,
-          }),
-        ).rejects.toBe(primary)
-        expect(cleanup).toHaveBeenCalledTimes(1)
-        const unsubscribe = mockSubscribe.mock.results.at(-1)!.value
-        expect(unsubscribe).toHaveBeenCalledTimes(1)
-        const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)![0] as {
-          signal?: AbortSignal
-        }
-        expect(streamOptions.signal?.aborted).toBe(true)
-        if (failCleanup)
-          expect(warning).toHaveBeenCalledWith(
-            `Electric oracle cleanup failed after a primary error`,
-            secondary,
-          )
-        else expect(warning).not.toHaveBeenCalled()
-      } finally {
-        warning.mockRestore()
-      }
-    },
-  )
-
-  it.each(
+  oracleReplayTest(it).each(
     ([`eager`, `on-demand`, `progressive`] as const).flatMap((syncMode) =>
       [0, 1, 2].map((removals) => ({ syncMode, removals })),
     ),
@@ -2968,42 +2505,45 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  it(`delivers retired callbacks without advancing a failed lifecycle`, async () => {
-    const result = await runProcessGrammar(`process-grammar-terminal-error`, [
-      {
-        kind: `batch`,
-        slot: `a`,
-        operation: `update`,
-        id: 1,
-        name: `unseen`,
-        txid: 55,
-      },
-      { kind: `snapshot`, slot: `a`, id: 1, name: `stale callback` },
-      {
-        kind: `retired-callback`,
-        slot: `a`,
-        id: 1,
-        name: `actually delivered`,
-      },
-    ])
-    expect(
-      result.reached
-        .filter(({ command }) => command.kind === `retired-callback`)
-        .map(({ result: reached }) => reached),
-    ).toEqual([
-      `delivered: retired callback`,
-      `delivered: retired callback`,
-      `delivered: retired callback`,
-    ])
-    expect(
-      result.reached.find(
-        ({ command }) =>
-          command.kind === `snapshot` && command.name === `stale callback`,
-      )?.result,
-    ).toBe(`skipped: terminal error`)
-  })
+  oracleReplayTest(it)(
+    `delivers retired callbacks without advancing a failed lifecycle`,
+    async () => {
+      const result = await runProcessGrammar(`process-grammar-terminal-error`, [
+        {
+          kind: `batch`,
+          slot: `a`,
+          operation: `update`,
+          id: 1,
+          name: `unseen`,
+          txid: 55,
+        },
+        { kind: `snapshot`, slot: `a`, id: 1, name: `stale callback` },
+        {
+          kind: `retired-callback`,
+          slot: `a`,
+          id: 1,
+          name: `actually delivered`,
+        },
+      ])
+      expect(
+        result.reached
+          .filter(({ command }) => command.kind === `retired-callback`)
+          .map(({ result: reached }) => reached),
+      ).toEqual([
+        `delivered: retired callback`,
+        `delivered: retired callback`,
+        `delivered: retired callback`,
+      ])
+      expect(
+        result.reached.find(
+          ({ command }) =>
+            command.kind === `snapshot` && command.name === `stale callback`,
+        )?.result,
+      ).toBe(`skipped: terminal error`)
+    },
+  )
 
-  it.each([`invalid-resume`, `cleanup`] as const)(
+  oracleReplayTest(it).each([`invalid-resume`, `cleanup`] as const)(
     `records an initial preload's %s rejection before continuing the grammar`,
     async (failure) => {
       const result = await runProcessGrammar(`preload-${failure}`, [
@@ -3049,301 +2589,102 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  it(`preserves unexpected preload failures instead of treating observation as success`, async () => {
-    const failure = new Error(`test-owned preload failure`)
-    const observed = observePreload(Promise.reject(failure))
-    const outcome = await observed.outcome
-    expect(outcome).toEqual({ status: `rejected`, reason: failure })
-    if (outcome.status === `rejected`) expect(outcome.reason).toBe(failure)
-    expect(() => expectPreloadOutcome(observed, outcome)).toThrow(failure)
-    const success = observePreload(Promise.resolve())
-    expectPreloadOutcome(success, await success.outcome)
-  })
-
-  it.each([`reset`, `delete`, `move-out`] as const)(
-    `keeps $0 removal authoritative across an optimistic write and a new acquisition`,
-    async (removal) => {
-      const trace = createOracleCollection(
-        `parked-presence`,
-        `on-demand`,
-        createMetadata(new Map()).api,
+  oracleReplayTest(it)(
+    `publishes an Electric source commit before its adapter persistence settles`,
+    async () => {
+      await runPublicationBeforePersistenceWitness(
+        `publication-before-persistence-fixed`,
+        { id: 41, name: `visible first`, stable: `stable-41` },
+        741,
       )
-      const persistence = createDeferred<void>()
-      let acquired: Promise<unknown> | undefined
-      let transaction: ReturnType<typeof createTransaction> | undefined
-      try {
-        const inserted = change(`insert`, 1, `complete`)
-        trace.subscriber([
-          { ...inserted, headers: { ...inserted.headers, tags: [`left`] } },
-          upToDate,
-        ])
-        transaction = createTransaction({
-          mutationFn: () => persistence.promise,
-        })
-        transaction.mutate(() =>
-          trace.collection.insert({
-            id: 99,
-            name: `optimistic`,
-            stable: `stable-99`,
-          }),
-        )
-        const removed: Message<OracleRow> =
-          removal === `reset`
-            ? mustRefetch
-            : removal === `delete`
-              ? change(`delete`, 1, `complete`)
-              : {
-                  headers: {
-                    event: `move-out`,
-                    patterns: [{ pos: 0, value: `left` }],
-                  },
-                }
-        trace.subscriber([removed, subsetEnd])
-        // Truncation drains immediately; ordinary removals remain parked.
-        expect(trace.collection.has(1)).toBe(removal !== `reset`)
-        acquired = Promise.resolve(
-          trace.collection._sync.loadSubset({
-            where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(2)]),
-          }),
-        )
-        void acquired.catch(() => {})
-        trace.subscriber([change(`update`, 1, `partial`), upToDate])
-        persistence.resolve()
-        await transaction.isPersisted.promise
-        await acquired
-        expect(trace.collection.has(1)).toBe(false)
-      } finally {
-        persistence.resolve()
-        await transaction?.isPersisted.promise
-        await trace.collection.cleanup()
-        await acquired
-      }
     },
   )
 
-  it(`publishes an Electric source commit before its adapter persistence settles`, async () => {
-    await runPublicationBeforePersistenceWitness(
-      `publication-before-persistence-fixed`,
-      { id: 41, name: `visible first`, stable: `stable-41` },
-      741,
-    )
-  })
-
-  it(`publishes later Electric callbacks while an earlier durability turn is held`, async () => {
-    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const firstPersistenceEntered = createDeferred<void>()
-    const releaseFirstPersistence = createDeferred<void>()
-    const persistedMetadata = new Map<string, unknown>()
-    const persistedRows = new Map<string | number, OracleRow>()
-    const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
-    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
-    let heldFirstRow = false
-    let durabilityCalls = 0
-    adapter.applyCommittedTx = async (...args) => {
-      durabilityCalls++
-      if (
-        !heldFirstRow &&
-        args[1].mutations.some((mutation) => mutation.key === 1)
-      ) {
-        heldFirstRow = true
-        firstPersistenceEntered.resolve()
-        await releaseFirstPersistence.promise
-      }
-      await applyCommittedTx(...args)
-    }
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `queued-persisted-presence`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
+  oracleReplayTest(it)(
+    `reconstructs the queued-presence grammar and rejects ablated, out-of-range, and foreign campaigns`,
+    () => {
+      const campaigns = fc.sample(fc.tuple(...queuedPresenceArbitraries), {
+        seed: queuedPresenceFixedSeed,
+        numRuns: 20,
+      })
+      for (const [histories, names] of campaigns) {
+        expect(reconstructQueuedPresenceCampaign({ histories, names })).toEqual(
+          {
+            histories,
+            names,
           },
-          syncMode: `progressive`,
-          getKey: (row) => row.id,
-          startSync: true,
+        )
+      }
+
+      const witness = {
+        histories: [...queuedPresenceHistories],
+        names: [``, `x`.repeat(12)] as [string, string],
+      }
+      expect(reconstructQueuedPresenceCampaign(witness)).toEqual(witness)
+      expect(() =>
+        reconstructQueuedPresenceCampaign({ names: witness.names }),
+      ).toThrow()
+      expect(() =>
+        reconstructQueuedPresenceCampaign({ histories: witness.histories }),
+      ).toThrow()
+      expect(() =>
+        reconstructQueuedPresenceCampaign({
+          ...witness,
+          histories: witness.histories.slice(1),
         }),
-        persistence: { adapter },
-      }),
-    )
-    const publications = observePublications(collection)
+      ).toThrow()
+      expect(() =>
+        reconstructQueuedPresenceCampaign({
+          ...witness,
+          histories: [
+            `insert-update`,
+            `insert-update`,
+            `delete-update`,
+            `truncate-update`,
+          ],
+        }),
+      ).toThrow()
+      expect(() =>
+        reconstructQueuedPresenceCampaign({
+          ...witness,
+          histories: [
+            `insert-update`,
+            `update-update`,
+            `delete-update`,
+            `replace-update`,
+          ],
+        }),
+      ).toThrow()
+      expect(() =>
+        reconstructQueuedPresenceCampaign({
+          ...witness,
+          names: [`x`.repeat(13), ``],
+        }),
+      ).toThrow()
+    },
+  )
 
-    await withElectricCleanup(async () => {
-      await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
-        interval: 1,
-        timeout: 250,
-      })
-      mockStream.lastOffset = `90_0`
-      subscriber!([upToDate])
-      await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
-        interval: 1,
-        timeout: 250,
-      })
-
-      const first = change(`insert`, 1, `holds persistence`)
-      first.value = { id: 1, name: `holds persistence`, stable: `stable-1` }
-      mockStream.lastOffset = `91_0`
-      subscriber!([first, upToDate])
-      await atCheckpoint(
-        firstPersistenceEntered.promise,
-        `first Electric persistence entered`,
-      )
-      const durabilityCallsAtHold = durabilityCalls
-
-      const queued = change(`insert`, 2, `queued insert`)
-      queued.value = { id: 2, name: `queued insert`, stable: `stable-2` }
-      mockStream.lastOffset = `92_0`
-      subscriber!([queued, upToDate])
-
-      const laterUpdate = change(`update`, 2, `later update`)
-      laterUpdate.value = { id: 2, name: `later update`, stable: `stable-2` }
-      mockStream.lastOffset = `93_0`
-      subscriber!([laterUpdate, upToDate])
-
-      const expected = rowsFromMap(
-        new Map([
-          [1, first.value],
-          [2, laterUpdate.value],
-        ]),
-      )
-      expect({
-        publicRows: rowsFromCollection(collection),
-        durableRows: rowsFromMap(persistedRows),
-        noLaterDurabilityStarted: durabilityCalls === durabilityCallsAtHold,
-        published: publications.entries.some(
-          ({ cut, rows }) =>
-            cut === `event` && isDeepStrictEqual(rows, expected),
+  oracleReplayTest(it)(
+    `rejects named wrong answer: later callback publishes before durability`,
+    () => {
+      expect(() =>
+        expectQueuedPresenceAtDurabilityHold(
+          [
+            [1, `holds persistence`, `stable-1`],
+            [2, `later`, `stable-2`],
+          ],
+          `insert-update`,
+          { id: 1, name: `holds persistence`, stable: `stable-1` },
         ),
-      }).toEqual({
-        publicRows: rowsFromMap(new Map([[1, first.value]])),
-        durableRows: [],
-        noLaterDurabilityStarted: true,
-        published: false,
-      })
+      ).toThrow()
+    },
+  )
 
-      releaseFirstPersistence.resolve()
-      await vi.waitFor(
-        () =>
-          expect(rowsFromMap(persistedRows)).toEqual(
-            rowsFromMap(
-              new Map([
-                [1, first.value],
-                [2, laterUpdate.value],
-              ]),
-            ),
-          ),
-        { interval: 1, timeout: 250 },
-      )
-      expect(rowsFromCollection(collection)).toEqual(
-        rowsFromMap(
-          new Map([
-            [1, first.value],
-            [2, laterUpdate.value],
-          ]),
-        ),
-      )
-      expect(collection.status).toBe(`ready`)
-    }, [
-      () => releaseFirstPersistence.resolve(),
-      () => publications.stop(),
-      () => collection.cleanup(),
-    ])
-  })
-
-  it(`reconstructs the queued-presence grammar and rejects ablated, out-of-range, and foreign campaigns`, () => {
-    const campaigns = fc.sample(fc.tuple(...queuedPresenceArbitraries), {
-      seed: queuedPresenceFixedSeed,
-      numRuns: 20,
-    })
-    for (const [histories, names] of campaigns) {
-      expect(reconstructQueuedPresenceCampaign({ histories, names })).toEqual({
-        histories,
-        names,
-      })
-    }
-
-    const witness = {
-      histories: [...queuedPresenceHistories],
-      names: [``, `x`.repeat(12)] as [string, string],
-    }
-    expect(reconstructQueuedPresenceCampaign(witness)).toEqual(witness)
-    expect(() =>
-      reconstructQueuedPresenceCampaign({ names: witness.names }),
-    ).toThrow()
-    expect(() =>
-      reconstructQueuedPresenceCampaign({ histories: witness.histories }),
-    ).toThrow()
-    expect(() =>
-      reconstructQueuedPresenceCampaign({
-        ...witness,
-        histories: witness.histories.slice(1),
-      }),
-    ).toThrow()
-    expect(() =>
-      reconstructQueuedPresenceCampaign({
-        ...witness,
-        histories: [
-          `insert-update`,
-          `insert-update`,
-          `delete-update`,
-          `truncate-update`,
-        ],
-      }),
-    ).toThrow()
-    expect(() =>
-      reconstructQueuedPresenceCampaign({
-        ...witness,
-        histories: [
-          `insert-update`,
-          `update-update`,
-          `delete-update`,
-          `replace-update`,
-        ],
-      }),
-    ).toThrow()
-    expect(() =>
-      reconstructQueuedPresenceCampaign({
-        ...witness,
-        names: [`x`.repeat(13), ``],
-      }),
-    ).toThrow()
-  })
-
-  it(`rejects named wrong answer: later callback publishes before durability`, () => {
-    expect(() =>
-      expectQueuedPresenceAtDurabilityHold(
-        [
-          [1, `holds persistence`, `stable-1`],
-          [2, `later`, `stable-2`],
-        ],
-        `insert-update`,
-        { id: 1, name: `holds persistence`, stable: `stable-1` },
-      ),
-    ).toThrow()
-  })
-
-  fcTest.prop(
+  oracleReplayTest(fcTest).prop(
     queuedPresenceArbitraries,
     queuedPresencePropertyOptions(`fixed`),
   )(
     `generated queued Electric histories preserve staged presence and reset fences (fixed)`,
-    runQueuedPresenceCampaign,
-  )
-
-  fcTest.prop(
-    queuedPresenceArbitraries,
-    queuedPresencePropertyOptions(`random`),
-  )(
-    `generated queued Electric histories preserve staged presence and reset fences (random)`,
     runQueuedPresenceCampaign,
   )
 
@@ -3359,29 +2700,37 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       800 + id,
     )
   }
-  fcTest.prop(
+  oracleReplayTest(fcTest).prop(
     publicationPolicyArbitraries,
-    persistencePolicyPropertyOptions(`fixed`),
+    persistencePolicyPropertyOptions(
+      `fixed`,
+      publicationBeforePersistenceProperty,
+    ),
   )(
     `generated Electric commits publish before adapter persistence settles (fixed)`,
     checkPublicationPolicy,
   )
-  // Replay the random lane with the legacy seed/path variables and -t 'random'.
-  fcTest.prop(
+  oracleReplayTest(fcTest, publicationBeforePersistenceProperty).prop(
     publicationPolicyArbitraries,
-    persistencePolicyPropertyOptions(`random`),
+    persistencePolicyPropertyOptions(
+      `random`,
+      publicationBeforePersistenceProperty,
+    ),
   )(
     `generated Electric commits publish before adapter persistence settles (random)`,
     checkPublicationPolicy,
   )
 
-  it(`turns adapter rejection into a named terminal Electric persistence error`, async () => {
-    await runPersistenceFailureCrashOnlyWitness(
-      `terminal-persistence-error-fixed`,
-      { id: 51, name: `published before failure`, stable: `stable-51` },
-      { id: 52, name: `must not be admitted`, stable: `stable-52` },
-    )
-  })
+  oracleReplayTest(it)(
+    `turns adapter rejection into a named terminal Electric persistence error`,
+    async () => {
+      await runPersistenceFailureCrashOnlyWitness(
+        `terminal-persistence-error-fixed`,
+        { id: 51, name: `published before failure`, stable: `stable-51` },
+        { id: 52, name: `must not be admitted`, stable: `stable-52` },
+      )
+    },
+  )
 
   const failurePolicyArbitraries: [
     fc.Arbitrary<number>,
@@ -3398,16 +2747,16 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       { id: id + 100, name: names[1], stable: `stable-${id + 100}` },
     )
   }
-  fcTest.prop(
+  oracleReplayTest(fcTest).prop(
     failurePolicyArbitraries,
-    persistencePolicyPropertyOptions(`fixed`),
+    persistencePolicyPropertyOptions(`fixed`, adapterFailurePolicyProperty),
   )(
     `generated adapter failures reject publicly and admit no later Electric work (fixed)`,
     checkFailurePolicy,
   )
-  fcTest.prop(
+  oracleReplayTest(fcTest, adapterFailurePolicyProperty).prop(
     failurePolicyArbitraries,
-    persistencePolicyPropertyOptions(`random`),
+    persistencePolicyPropertyOptions(`random`, adapterFailurePolicyProperty),
   )(
     `generated adapter failures reject publicly and admit no later Electric work (random)`,
     checkFailurePolicy,
@@ -3450,147 +2799,163 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  it(`distinguishes plausible unseen-update and reset-visibility semantics`, async () => {
-    const completeUnseenUpdate: ChangeMessage<OracleRow> = {
-      key: `1`,
-      value: { id: 1, name: `complete`, stable: `stable-1` },
-      headers: { operation: `update` },
-    }
-    const updateHistory = [[completeUnseenUpdate, upToDate]]
-    expect(recomputeCommittedRows(updateHistory, `ignore`)).toEqual([])
-    expect(recomputeCommittedRows(updateHistory, `promote-complete`)).toEqual([
-      [1, `complete`, `stable-1`],
-    ])
-    const updateActual = await runTrace(
-      `design-unseen-update`,
-      `eager`,
-      [],
-      updateHistory,
-    )
-    expect(updateActual.rows).toEqual(
-      recomputeCommittedRows(updateHistory, `ignore`),
-    )
-
-    const resetHistory = [
-      [change(`insert`, 1, `committed`), upToDate],
-      [mustRefetch],
-    ]
-    const atomicReset = recomputedSnapshots([], resetHistory)
-    const immediateReset: typeof atomicReset = [atomicReset[0]!, []]
-    expect(atomicReset).not.toEqual(immediateReset)
-    const resetActual = await runTrace(
-      `design-reset-visibility`,
-      `eager`,
-      [],
-      resetHistory,
-    )
-    expect(resetActual.snapshots).toEqual(atomicReset)
-  })
-
-  it(`keeps SDK reset callbacks separate from every neighboring message kind`, () => {
-    const neighbors: Array<Message<OracleRow>> = [
-      change(`insert`, 1, `row`),
-      change(`update`, 1, `row`),
-      change(`delete`, 1, `row`),
-      { headers: { event: `move-out`, patterns: [{ pos: 0, value: `left` }] } },
-      upToDate,
-      subsetEnd,
-      mustRefetch,
-    ]
-    expect(isSdkResetFramedPartition([[mustRefetch]])).toBe(true)
-    for (const neighbor of neighbors) {
-      for (const messages of [
-        [neighbor, mustRefetch],
-        [mustRefetch, neighbor],
-      ]) {
-        expect(
-          isSdkResetFramedPartition([messages]),
-          JSON.stringify(messages),
-        ).toBe(false)
-        expect(
-          isSdkResetFramedPartition(messages.map((message) => [message])),
-        ).toBe(true)
+  oracleReplayTest(it)(
+    `distinguishes plausible unseen-update and reset-visibility semantics`,
+    async () => {
+      const completeUnseenUpdate: ChangeMessage<OracleRow> = {
+        key: `1`,
+        value: { id: 1, name: `complete`, stable: `stable-1` },
+        headers: { operation: `update` },
       }
-    }
-  })
-
-  it(`distinguishes callback-atomic and subset publication semantics`, async () => {
-    const callbackHistory = [
-      [
-        change(`insert`, 1, `before-control`),
-        upToDate,
-        change(`update`, 1, `after-control`),
-      ],
-    ]
-    const callbackAtomic = recomputeCommittedRows(callbackHistory)
-    const freezeAtControl: typeof callbackAtomic = [
-      [1, `before-control`, `stable-1`],
-    ]
-    expect(callbackAtomic).toEqual([[1, `after-control`, `stable-1`]])
-    expect(callbackAtomic).not.toEqual(freezeAtControl)
-    expect(isSdkResetFramedPartition([[upToDate, mustRefetch]])).toBe(false)
-    expect(
-      isSdkResetFramedPartition([[mustRefetch, subsetEnd, mustRefetch]]),
-    ).toBe(false)
-
-    const readyPrefix = [[upToDate]]
-    const subsetHistory = [
-      [change(`insert`, 1, `subset-publication`)],
-      [subsetEnd],
-    ]
-    const subsetPublishes = recomputedSnapshots(readyPrefix, subsetHistory)
-    const upToDateOnly: typeof subsetPublishes = [[], []]
-    expect(subsetPublishes).not.toEqual(upToDateOnly)
-
-    for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
-      const callbackActual = await runTrace(
-        `design-callback-atomic-${syncMode}`,
-        syncMode,
+      const updateHistory = [[completeUnseenUpdate, upToDate]]
+      expect(recomputeCommittedRows(updateHistory, `ignore`)).toEqual([])
+      expect(recomputeCommittedRows(updateHistory, `promote-complete`)).toEqual(
+        [[1, `complete`, `stable-1`]],
+      )
+      const updateActual = await runTrace(
+        `design-unseen-update`,
+        `eager`,
         [],
-        callbackHistory,
+        updateHistory,
       )
-      expect(callbackActual.rows).toEqual(callbackAtomic)
-
-      const subsetActual = await runTrace(
-        `design-subset-publication-${syncMode}`,
-        syncMode,
-        readyPrefix,
-        subsetHistory,
+      expect(updateActual.rows).toEqual(
+        recomputeCommittedRows(updateHistory, `ignore`),
       )
-      expect(subsetActual.snapshots).toEqual(subsetPublishes)
-    }
-  })
 
-  it(`settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`, async () => {
-    const events: Array<SchedulerEvent> = [
-      `startup-promise`,
-      `hydration`,
-      `snapshot-available`,
-      `release-persistence-apply`,
-      `cleanup`,
-    ]
-    let permutationIndex = 0
-    const outcomes = new Set<`resolved` | `aborted`>()
-    let sawAcknowledgementBeforeDurability = false
-    for (const order of permutations(events)) {
-      const currentIndex = permutationIndex++
-      try {
-        const result = await runSchedulerPermutation(
-          `scheduler-permutation-${currentIndex}`,
-          order,
-        )
-        outcomes.add(result.outcome)
-        sawAcknowledgementBeforeDurability ||= result.acknowledgedBeforeDurable
-      } catch (error) {
-        throw new Error(
-          `scheduler permutation ${currentIndex} failed: ${order.join(` → `)}`,
-          { cause: error },
-        )
+      const resetHistory = [
+        [change(`insert`, 1, `committed`), upToDate],
+        [mustRefetch],
+      ]
+      const atomicReset = recomputedSnapshots([], resetHistory)
+      const immediateReset: typeof atomicReset = [atomicReset[0]!, []]
+      expect(atomicReset).not.toEqual(immediateReset)
+      const resetActual = await runTrace(
+        `design-reset-visibility`,
+        `eager`,
+        [],
+        resetHistory,
+      )
+      expect(resetActual.snapshots).toEqual(atomicReset)
+    },
+  )
+
+  oracleReplayTest(it)(
+    `keeps SDK reset callbacks separate from every neighboring message kind`,
+    () => {
+      const neighbors: Array<Message<OracleRow>> = [
+        change(`insert`, 1, `row`),
+        change(`update`, 1, `row`),
+        change(`delete`, 1, `row`),
+        {
+          headers: { event: `move-out`, patterns: [{ pos: 0, value: `left` }] },
+        },
+        upToDate,
+        subsetEnd,
+        mustRefetch,
+      ]
+      expect(isSdkResetFramedPartition([[mustRefetch]])).toBe(true)
+      for (const neighbor of neighbors) {
+        for (const messages of [
+          [neighbor, mustRefetch],
+          [mustRefetch, neighbor],
+        ]) {
+          expect(
+            isSdkResetFramedPartition([messages]),
+            JSON.stringify(messages),
+          ).toBe(false)
+          expect(
+            isSdkResetFramedPartition(messages.map((message) => [message])),
+          ).toBe(true)
+        }
       }
-    }
-    expect(outcomes).toEqual(new Set([`resolved`, `aborted`]))
-    expect(sawAcknowledgementBeforeDurability).toBe(true)
-  }, 30_000)
+    },
+  )
+
+  oracleReplayTest(it)(
+    `distinguishes callback-atomic and subset publication semantics`,
+    async () => {
+      const callbackHistory = [
+        [
+          change(`insert`, 1, `before-control`),
+          upToDate,
+          change(`update`, 1, `after-control`),
+        ],
+      ]
+      const callbackAtomic = recomputeCommittedRows(callbackHistory)
+      const freezeAtControl: typeof callbackAtomic = [
+        [1, `before-control`, `stable-1`],
+      ]
+      expect(callbackAtomic).toEqual([[1, `after-control`, `stable-1`]])
+      expect(callbackAtomic).not.toEqual(freezeAtControl)
+      expect(isSdkResetFramedPartition([[upToDate, mustRefetch]])).toBe(false)
+      expect(
+        isSdkResetFramedPartition([[mustRefetch, subsetEnd, mustRefetch]]),
+      ).toBe(false)
+
+      const readyPrefix = [[upToDate]]
+      const subsetHistory = [
+        [change(`insert`, 1, `subset-publication`)],
+        [subsetEnd],
+      ]
+      const subsetPublishes = recomputedSnapshots(readyPrefix, subsetHistory)
+      const upToDateOnly: typeof subsetPublishes = [[], []]
+      expect(subsetPublishes).not.toEqual(upToDateOnly)
+
+      for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
+        const callbackActual = await runTrace(
+          `design-callback-atomic-${syncMode}`,
+          syncMode,
+          [],
+          callbackHistory,
+        )
+        expect(callbackActual.rows).toEqual(callbackAtomic)
+
+        const subsetActual = await runTrace(
+          `design-subset-publication-${syncMode}`,
+          syncMode,
+          readyPrefix,
+          subsetHistory,
+        )
+        expect(subsetActual.snapshots).toEqual(subsetPublishes)
+      }
+    },
+  )
+
+  oracleReplayTest(it)(
+    `settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`,
+    async () => {
+      const events: Array<SchedulerEvent> = [
+        `startup-promise`,
+        `hydration`,
+        `snapshot-available`,
+        `release-persistence-apply`,
+        `cleanup`,
+      ]
+      let permutationIndex = 0
+      const outcomes = new Set<`resolved` | `aborted`>()
+      let sawAcknowledgementBeforeDurability = false
+      for (const order of permutations(events)) {
+        const currentIndex = permutationIndex++
+        try {
+          const result = await runSchedulerPermutation(
+            `scheduler-permutation-${currentIndex}`,
+            order,
+          )
+          outcomes.add(result.outcome)
+          sawAcknowledgementBeforeDurability ||=
+            result.acknowledgedBeforeDurable
+        } catch (error) {
+          throw new Error(
+            `scheduler permutation ${currentIndex} failed: ${order.join(` → `)}`,
+            { cause: error },
+          )
+        }
+      }
+      expect(outcomes).toEqual(new Set([`resolved`, `aborted`]))
+      expect(sawAcknowledgementBeforeDurability).toBe(true)
+    },
+    30_000,
+  )
 
   electricHistoryProperty(
     `electric.synthetic-batch-partition`,
@@ -3798,154 +3163,11 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  it(`keeps pending row presence across callbacks until one persisted subset commit`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const persistedRows = new Map<string | number, OracleRow>()
-    const persistedMetadata = new Map<string, unknown>()
-    const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
-    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
-    const durabilityEntered = createDeferred<void>()
-    const releaseDurability = createDeferred<void>()
-    const durabilitySettled = createDeferred<void>()
-    let persistedTx: PersistedTx | undefined
-    adapter.applyCommittedTx = async (...args) => {
-      persistedTx = structuredClone(args[1])
-      durabilityEntered.resolve()
-      await releaseDurability.promise
-      await applyCommittedTx(...args)
-      durabilitySettled.resolve()
-    }
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `persisted-cross-callback-presence`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `eager`,
-          getKey: (row) => row.id,
-          startSync: true,
-        }),
-        persistence: { adapter },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await withElectricCleanup(async () => {
-      await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
-
-      subscriber([change(`insert`, 1, ``)])
-      subscriber([change(`update`, 1, `updated across callbacks`)])
-      subscriber([subsetEnd])
-      await atCheckpoint(
-        durabilityEntered.promise,
-        `cross-callback durability entered`,
-      )
-
-      expect({
-        publicRows: rowsFromCollection(collection),
-        durableRows: rowsFromMap(persistedRows),
-        persistedMutations: persistedTx?.mutations.map((mutation) => ({
-          type: mutation.type,
-          key: mutation.key,
-          value: mutation.type === `delete` ? undefined : mutation.value,
-        })),
-      }).toEqual({
-        publicRows: [[1, `updated across callbacks`, `stable-1`]],
-        durableRows: [],
-        persistedMutations: [
-          {
-            type: `update`,
-            key: 1,
-            value: {
-              id: 1,
-              name: ``,
-              stable: `stable-1`,
-            },
-          },
-          {
-            type: `update`,
-            key: 1,
-            value: {
-              id: 1,
-              name: `updated across callbacks`,
-            },
-          },
-        ],
-      })
-
-      releaseDurability.resolve()
-      await atCheckpoint(
-        durabilitySettled.promise,
-        `cross-callback durability settled`,
-      )
-      expect(rowsFromMap(persistedRows)).toEqual([
-        [1, `updated across callbacks`, `stable-1`],
-      ])
-    }, [
-      async () => {
-        releaseDurability.resolve()
-        await collection.cleanup()
-      },
-    ])
-  })
-
   const publicationEpochTokensArbitrary = fc.array(designTokenArb, {
     minLength: 1,
     maxLength: 7,
   })
   const publicationEpochPartitionArbitrary = fc.nat()
-  const assertPublicationEpochHistory = async (
-    tokens: Array<DesignToken>,
-    partitionSeed: number,
-  ) => {
-    const messages = buildDifferentialHistory(tokens)
-    const partitions = everyContiguousPartition(messages).filter(
-      isSdkResetFramedPartition,
-    )
-    const partition = partitions[partitionSeed % partitions.length]!
-    const referenceSnapshots = recomputedSnapshots([], partition)
-
-    for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
-      const direct = await runTrace(
-        `direct-differential-${syncMode}`,
-        syncMode,
-        [],
-        partition,
-      )
-      const persisted = await runPersistedTrace(
-        `persisted-differential-${syncMode}`,
-        syncMode,
-        partition,
-      )
-      const query = await runQueryTrace(
-        `query-differential-${syncMode}`,
-        partition,
-      )
-
-      expect(direct.snapshots).toEqual(referenceSnapshots)
-      expect(persisted.snapshots).toEqual(referenceSnapshots)
-      expect(query.snapshots).toEqual(referenceSnapshots)
-      expect(persisted.rows).toEqual(direct.rows)
-      expect(query.rows).toEqual(direct.rows)
-      expect(persisted.status).toBe(direct.status)
-      expect(query.status).toBe(`ready`)
-      expect(persisted.resume).toEqual(direct.resume)
-      expect(persisted.durableRows).toEqual(direct.rows)
-      expect(persisted.durableResume).toEqual(direct.resume)
-      expect(persisted.persistenceCommits).toBeGreaterThan(0)
-    }
-  }
   const publicationEpochExamples: Array<[Array<DesignToken>, number]> = [
     [
       [
@@ -3969,13 +3191,13 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ],
   ]
 
-  it.each(publicationEpochExamples)(
+  oracleReplayTest(it).each(publicationEpochExamples)(
     `reconstructs the authored publication-epoch history`,
     assertPublicationEpochHistory,
     30_000,
   )
 
-  fcTest.prop(
+  oracleReplayTest(fcTest).prop(
     [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
     {
       seed: 42714,
@@ -3987,7 +3209,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     30_000,
   )
 
-  fcTest.prop(
+  oracleReplayTest(fcTest, `electric.publication-epoch-convergence`).prop(
     [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
     oraclePropertyOptions(20, `electric.publication-epoch-convergence`),
   )(
@@ -3996,176 +3218,140 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     30_000,
   )
 
-  it(`retains a wrong intermediate publication even when the final read repairs it`, async () => {
-    const trace = createOracleCollection(
-      `publication-recorder-control`,
-      `eager`,
-      createMetadata(new Map()).api,
-    )
-    trace.subscriber([change(`insert`, 1, `old`), upToDate])
-    const observed = observePublications(trace.collection)
-    try {
-      observed.record(`before`)
-      trace.subscriber([change(`update`, 1, `wrong`), upToDate])
-      trace.subscriber([change(`update`, 1, `correct`), upToDate])
-      observed.record(`final`)
-      expect(rowsFromCollection(trace.collection)).toEqual([
-        [1, `correct`, `stable-1`],
-      ])
-      expect(observed.entries[0]!.rows).toEqual([[1, `old`, `stable-1`]])
-      expect(
-        observed.entries.some(
-          ({ cut, rows }) => cut === `event` && rows[0]?.[1] === `wrong`,
-        ),
-      ).toBe(true)
-      expect(() =>
-        expectWholePublications(observed.entries, [
-          [[1, `old`, `stable-1`]],
-          [[1, `correct`, `stable-1`]],
-        ]),
-      ).toThrow()
-      expectWholePublications(observed.entries, [
+  oracleReplayTest(it)(
+    `checks an authored HTTP transcript and separate complete Query snapshots`,
+    async () => {
+      const { ShapeStream: RealShapeStream } = await vi.importActual<{
+        ShapeStream: typeof ShapeStream
+      }>(`@electric-sql/client`)
+      const ready: Message<OracleRow> = {
+        headers: { control: `up-to-date`, global_last_seen_lsn: `2` },
+      }
+      const authored: Array<Array<Message<OracleRow>>> = [
+        [
+          change(`insert`, 1, `old`),
+          { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+        ],
+        [mustRefetch],
+        [
+          change(`insert`, 2, `replacement`),
+          subsetEnd,
+          change(`insert`, 3, `after-control`),
+          ready,
+        ],
+      ]
+      // These complete snapshots are authored directly, not computed by either
+      // reference reducer or from any adapter result. A post-control row belongs
+      // to the same delivered callback's atomic publication.
+      const complete: TraceResult[`snapshots`] = [
         [[1, `old`, `stable-1`]],
-        [[1, `wrong`, `stable-1`]],
-        [[1, `correct`, `stable-1`]],
-      ])
-    } finally {
-      observed.stop()
-      await trace.collection.cleanup()
-    }
-  })
-
-  it(`checks an authored HTTP transcript and separate complete Query snapshots`, async () => {
-    const { ShapeStream: RealShapeStream } = await vi.importActual<{
-      ShapeStream: typeof ShapeStream
-    }>(`@electric-sql/client`)
-    const ready: Message<OracleRow> = {
-      headers: { control: `up-to-date`, global_last_seen_lsn: `2` },
-    }
-    const authored: Array<Array<Message<OracleRow>>> = [
-      [
-        change(`insert`, 1, `old`),
-        { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
-      ],
-      [mustRefetch],
-      [
-        change(`insert`, 2, `replacement`),
-        subsetEnd,
-        change(`insert`, 3, `after-control`),
-        ready,
-      ],
-    ]
-    // These complete snapshots are authored directly, not computed by either
-    // reference reducer or from any adapter result. A post-control row belongs
-    // to the same delivered callback's atomic publication.
-    const complete: TraceResult[`snapshots`] = [
-      [[1, `old`, `stable-1`]],
-      [[1, `old`, `stable-1`]],
-      [
-        [2, `replacement`, `stable-2`],
-        [3, `after-control`, `stable-3`],
-      ],
-    ]
-    const controller = new AbortController()
-    const headers = {
-      'electric-handle': `authored-old`,
-      'electric-offset': `1_0`,
-      // Without this completion header the SDK can prefetch the next chunk;
-      // a positional mock-response queue would not describe the live request.
-      'electric-up-to-date': `true`,
-      'electric-schema': JSON.stringify({
-        id: { type: `int4` },
-        name: { type: `text` },
-        stable: { type: `text` },
-      }),
-    }
-    const wire = (messages: Array<Message<OracleRow>>) =>
-      JSON.stringify(
-        messages.map((message) =>
-          `value` in message
-            ? {
-                ...message,
-                value: { ...message.value, id: String(message.value.id) },
-              }
-            : message,
-        ),
-      )
-    const responses = [
-      new Response(wire(authored[0]!), { headers }),
-      new Response(wire(authored[1]!), {
-        status: 409,
-        headers: { 'electric-handle': `authored-new` },
-      }),
-      new Response(wire(authored[2]!), {
-        headers: {
-          ...headers,
-          'electric-handle': `authored-new`,
-          'electric-offset': `2_0`,
-          'electric-cursor': `1`,
-        },
-      }),
-    ]
-    const received: Array<Array<Message<OracleRow>>> = []
-    const stream = new RealShapeStream<OracleRow>({
-      url: `http://test-url/v1/authored-publication-transcript`,
-      params: { table: `rows` },
-      signal: controller.signal,
-      fetchClient: () => {
-        const response = responses.shift()
-        if (response) return Promise.resolve(response)
-        return new Promise<Response>((_resolve, reject) => {
-          if (controller.signal.aborted) reject(controller.signal.reason)
-          else
-            controller.signal.addEventListener(
-              `abort`,
-              () => reject(controller.signal.reason),
-              { once: true },
-            )
-        })
-      },
-    })
-    const unsubscribe = stream.subscribe((messages) => {
-      received.push(structuredClone(messages))
-    })
-    try {
-      await vi.waitFor(() =>
-        expect(
-          received,
-          JSON.stringify({ received, remainingResponses: responses.length }),
-        ).toHaveLength(3),
-      )
-      expect(received).toEqual(authored)
-      expect(isSdkResetFramedPartition(received)).toBe(true)
-      // This validates this installed SDK's controlled-HTTP antecedent only.
-      // It is not proof that all servers or SSE streams emit this transcript.
-      for (const mode of [`eager`, `on-demand`, `progressive`] as const) {
-        const direct = await runTrace(
-          `authored-direct-${mode}`,
-          mode,
-          [],
-          structuredClone(received),
+        [[1, `old`, `stable-1`]],
+        [
+          [2, `replacement`, `stable-2`],
+          [3, `after-control`, `stable-3`],
+        ],
+      ]
+      const controller = new AbortController()
+      const headers = {
+        'electric-handle': `authored-old`,
+        'electric-offset': `1_0`,
+        // Without this completion header the SDK can prefetch the next chunk;
+        // a positional mock-response queue would not describe the live request.
+        'electric-up-to-date': `true`,
+        'electric-schema': JSON.stringify({
+          id: { type: `int4` },
+          name: { type: `text` },
+          stable: { type: `text` },
+        }),
+      }
+      const wire = (messages: Array<Message<OracleRow>>) =>
+        JSON.stringify(
+          messages.map((message) =>
+            `value` in message
+              ? {
+                  ...message,
+                  value: { ...message.value, id: String(message.value.id) },
+                }
+              : message,
+          ),
         )
-        const persisted = await runPersistedTrace(
-          `authored-persisted-${mode}`,
-          mode,
+      const responses = [
+        new Response(wire(authored[0]!), { headers }),
+        new Response(wire(authored[1]!), {
+          status: 409,
+          headers: { 'electric-handle': `authored-new` },
+        }),
+        new Response(wire(authored[2]!), {
+          headers: {
+            ...headers,
+            'electric-handle': `authored-new`,
+            'electric-offset': `2_0`,
+            'electric-cursor': `1`,
+          },
+        }),
+      ]
+      const received: Array<Array<Message<OracleRow>>> = []
+      const stream = new RealShapeStream<OracleRow>({
+        url: `http://test-url/v1/authored-publication-transcript`,
+        params: { table: `rows` },
+        signal: controller.signal,
+        fetchClient: () => {
+          const response = responses.shift()
+          if (response) return Promise.resolve(response)
+          return new Promise<Response>((_resolve, reject) => {
+            if (controller.signal.aborted) reject(controller.signal.reason)
+            else
+              controller.signal.addEventListener(
+                `abort`,
+                () => reject(controller.signal.reason),
+                { once: true },
+              )
+          })
+        },
+      })
+      const unsubscribe = stream.subscribe((messages) => {
+        received.push(structuredClone(messages))
+      })
+      try {
+        await vi.waitFor(() =>
+          expect(
+            received,
+            JSON.stringify({ received, remainingResponses: responses.length }),
+          ).toHaveLength(3),
+        )
+        expect(received).toEqual(authored)
+        expect(isSdkResetFramedPartition(received)).toBe(true)
+        // This validates this installed SDK's controlled-HTTP antecedent only.
+        // It is not proof that all servers or SSE streams emit this transcript.
+        for (const mode of [`eager`, `on-demand`, `progressive`] as const) {
+          const direct = await runTrace(
+            `authored-direct-${mode}`,
+            mode,
+            [],
+            structuredClone(received),
+          )
+          const persisted = await runPersistedTrace(
+            `authored-persisted-${mode}`,
+            mode,
+            structuredClone(received),
+            complete,
+          )
+          expect(direct.snapshots).toEqual(complete)
+          expect(persisted.snapshots).toEqual(complete)
+          expect(persisted.durableRows).toEqual(complete[2])
+        }
+        const query = await runQueryTrace(
+          `authored-query`,
           structuredClone(received),
           complete,
         )
-        expect(direct.snapshots).toEqual(complete)
-        expect(persisted.snapshots).toEqual(complete)
-        expect(persisted.durableRows).toEqual(complete[2])
+        expect(query.snapshots).toEqual(complete)
+      } finally {
+        unsubscribe()
+        controller.abort()
       }
-      const query = await runQueryTrace(
-        `authored-query`,
-        structuredClone(received),
-        complete,
-      )
-      expect(query.snapshots).toEqual(complete)
-    } finally {
-      unsubscribe()
-      controller.abort()
-    }
-  })
+    },
+  )
 
   electricHistoryProperty(
     `electric.invalid-resume-partition`,
@@ -4212,7 +3398,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             ])
             for (const batch of partition) trace.subscriber(batch)
 
-            expect(trace.collection.status).toBe(`error`)
+            expectGaveUpAfterReadiness(trace.collection)
             expect(trace.collection.get(id)).toEqual(
               expect.objectContaining({ stable: `stable-${id}` }),
             )
@@ -4225,680 +3411,6 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }
     },
   )
-
-  for (const syncMode of [`eager`, `progressive`] as const) {
-    it(`rejects unseen resumed updates and recovers on the next ${syncMode} lifecycle`, async () => {
-      const metadata = createMetadata(resumeState())
-      const old = createOracleCollection(
-        `invalid-${syncMode}-resume`,
-        syncMode,
-        metadata.api,
-      )
-
-      old.subscriber([change(`update`, 1, `partial`)])
-      expect(old.collection.status).toBe(`error`)
-      expect(old.collection.has(1)).toBe(false)
-      expect(old.unsubscribe).toHaveBeenCalledOnce()
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `reset` }),
-      )
-
-      old.subscriber([change(`insert`, 1, `old generation`), upToDate])
-      expect(old.collection.has(1)).toBe(false)
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `reset` }),
-      )
-      await old.collection.cleanup()
-
-      const fresh = createOracleCollection(
-        `fresh-${syncMode}-snapshot`,
-        syncMode,
-        metadata.api,
-      )
-      fresh.subscriber([change(`insert`, 1, `complete snapshot`), upToDate])
-
-      expect(fresh.collection.status).toBe(`ready`)
-      expect(fresh.collection.get(1)?.name).toBe(`complete snapshot`)
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `resume`, offset: `20_0` }),
-      )
-      await fresh.collection.cleanup()
-    })
-
-    it(`treats delete then update as an invalid ${syncMode} resume`, async () => {
-      const metadata = createMetadata(resumeState())
-      const trace = createOracleCollection(
-        `delete-update-${syncMode}-resume`,
-        syncMode,
-        metadata.api,
-      )
-
-      trace.subscriber([
-        change(`insert`, 1, `seen`),
-        change(`delete`, 1, `seen`),
-        change(`update`, 1, `partial`),
-      ])
-
-      expect(trace.collection.status).toBe(`error`)
-      expect(trace.collection.has(1)).toBe(false)
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `reset` }),
-      )
-      await trace.collection.cleanup()
-    })
-
-    it(`rejects delete then update across every ${syncMode} resume partition`, async () => {
-      const messages = [
-        change(`delete`, 1, `complete`),
-        change(`update`, 1, `partial`),
-        upToDate,
-      ]
-
-      for (const [partitionId, partition] of everyContiguousPartition(
-        messages,
-      ).entries()) {
-        const metadata = createMetadata(resumeState())
-        const trace = createOracleCollection(
-          `invalid-partition-${syncMode}-${partitionId}`,
-          syncMode,
-          metadata.api,
-        )
-        trace.subscriber([change(`insert`, 1, `complete`), upToDate])
-        for (const batch of partition) trace.subscriber(batch)
-
-        expect(trace.collection.status).toBe(`error`)
-        expect(trace.collection.get(1)).toEqual(
-          expect.objectContaining({ stable: `stable-1` }),
-        )
-        expect(metadata.state.get(`electric:resume`)).toEqual(
-          expect.objectContaining({ kind: `reset` }),
-        )
-        await trace.collection.cleanup()
-      }
-    })
-  }
-
-  it(`keeps stream cleanup and stale callbacks scoped to their lifecycle`, async () => {
-    const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
-    const unsubscribes = [vi.fn(), vi.fn()]
-    mockSubscribe.mockImplementation((callback) => {
-      const index = subscribers.length
-      subscribers.push(callback)
-      return unsubscribes[index]!
-    })
-    const options = electricCollectionOptions<OracleRow>({
-      id: `reused-sync-config`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const createLifecycle = (id: string) => {
-      const metadata = createMetadata(resumeState())
-      const lifecycleSync = options.sync
-      return createCollection({
-        ...options,
-        id,
-        sync: {
-          ...lifecycleSync,
-          sync: (params: Parameters<typeof lifecycleSync.sync>[0]) =>
-            lifecycleSync.sync({ ...params, metadata: metadata.api }),
-        },
-      })
-    }
-
-    const oldCollection = createLifecycle(`old-sync-lifecycle`)
-    const currentCollection = createLifecycle(`current-sync-lifecycle`)
-
-    subscribers[0]!([change(`insert`, 1, `first row`), upToDate])
-    subscribers[1]!([change(`insert`, 2, `second row`), upToDate])
-    expect(oldCollection.get(1)?.name).toBe(`first row`)
-    expect(currentCollection.get(2)?.name).toBe(`second row`)
-    subscribers[0]!([change(`update`, 1, `first row updated`), upToDate])
-    const currentMatch = currentCollection.utils.awaitMatch(
-      (message) => `value` in message && message.value.id === 3,
-      100,
-    )
-    const currentTxid = currentCollection.utils.awaitTxId(42, 100)
-    const currentSnapshotTxid = currentCollection.utils.awaitTxId(50, 100)
-    let currentMatchResolved = false
-    let currentTxidResolved = false
-    let currentSnapshotTxidResolved = false
-    void currentMatch.then(() => {
-      currentMatchResolved = true
-    })
-    void currentTxid.then(() => {
-      currentTxidResolved = true
-    })
-    void currentSnapshotTxid.then(() => {
-      currentSnapshotTxidResolved = true
-    })
-    subscribers[0]!([
-      change(`insert`, 3, `wrong lifecycle`),
-      {
-        headers: {
-          control: `snapshot-end`,
-          xmin: `100`,
-          xmax: `150`,
-          xip_list: [],
-        },
-      },
-      { headers: { control: `up-to-date`, txids: [42] } },
-    ])
-    await Promise.resolve()
-    expect(currentMatchResolved).toBe(false)
-    expect(currentTxidResolved).toBe(false)
-    expect(currentSnapshotTxidResolved).toBe(false)
-
-    await oldCollection.cleanup()
-
-    expect(unsubscribes[0]).toHaveBeenCalledOnce()
-    expect(unsubscribes[1]).not.toHaveBeenCalled()
-
-    subscribers[0]!([change(`update`, 1, `stale`)])
-    expect(unsubscribes[1]).not.toHaveBeenCalled()
-    subscribers[1]!([
-      change(`insert`, 3, `still live`),
-      {
-        headers: {
-          control: `snapshot-end`,
-          xmin: `100`,
-          xmax: `150`,
-          xip_list: [],
-        },
-      },
-      { headers: { control: `up-to-date`, txids: [42] } },
-    ])
-    await expect(currentMatch).resolves.toBe(true)
-    await expect(currentTxid).resolves.toBe(true)
-    await expect(currentSnapshotTxid).resolves.toBe(true)
-    expect(currentCollection.get(3)?.name).toBe(`still live`)
-    await currentCollection.cleanup()
-    expect(unsubscribes[1]).toHaveBeenCalledOnce()
-  })
-
-  it(`binds sync metadata import and export to the receiving collection`, async () => {
-    const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
-    mockSubscribe.mockImplementation((callback) => {
-      subscribers.push(callback)
-      return vi.fn()
-    })
-    const options = electricCollectionOptions<OracleRow>({
-      id: `shared-metadata-config`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const first = createCollection({ ...options, id: `metadata-first` })
-    const second = createCollection({ ...options, id: `metadata-second` })
-
-    subscribers[0]!([{ headers: { control: `up-to-date`, txids: [11] } }])
-    subscribers[1]!([{ headers: { control: `up-to-date`, txids: [22] } }])
-
-    expect(first.config.sync.exportSyncMeta?.()).toMatchObject({
-      version: 1,
-      seenTxids: [11],
-    })
-    expect(second.config.sync.exportSyncMeta?.()).toMatchObject({
-      version: 1,
-      seenTxids: [22],
-    })
-
-    const importedResume = {
-      kind: `resume` as const,
-      requiresTagState: false,
-      offset: `7_0` as const,
-      handle: `shape-7`,
-      shapeId,
-      updatedAt: 7,
-    }
-    first.config.sync.importSyncMeta?.({
-      version: 1,
-      resume: importedResume,
-      seenTxids: [99],
-    })
-
-    await expect(first.utils.awaitTxId(99, 50)).resolves.toBe(true)
-    await expect(second.utils.awaitTxId(99, 10)).rejects.toThrow()
-    expect(first.config.sync.exportSyncMeta?.()).toEqual({
-      version: 1,
-      resume: importedResume,
-      seenTxids: [99],
-    })
-    expect(second.config.sync.exportSyncMeta?.()).toMatchObject({
-      version: 1,
-      seenTxids: [22],
-    })
-    expect(second.config.sync.exportSyncMeta?.()).not.toMatchObject({
-      resume: importedResume,
-    })
-
-    const third = createCollection({ ...options, id: `metadata-third` })
-    await expect(third.utils.awaitTxId(99, 10)).rejects.toThrow()
-    expect(third.config.sync.exportSyncMeta?.()).not.toMatchObject({
-      resume: importedResume,
-    })
-
-    await first.cleanup()
-    await second.cleanup()
-    await third.cleanup()
-  })
-
-  it(`consumes raw sync metadata when the next collection is materialized`, async () => {
-    mockSubscribe.mockImplementation(() => vi.fn())
-    const options = electricCollectionOptions<OracleRow>({
-      id: `seeded-metadata-config`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const importedResume = {
-      kind: `resume` as const,
-      requiresTagState: false,
-      offset: `8_0` as const,
-      handle: `shape-8`,
-      shapeId,
-      updatedAt: 8,
-    }
-    options.sync.importSyncMeta?.({
-      version: 1,
-      resume: importedResume,
-      seenTxids: [55],
-    })
-
-    const seeded = createCollection({ ...options, id: `metadata-seeded` })
-    await expect(seeded.utils.awaitTxId(55, 50)).resolves.toBe(true)
-    expect(seeded.config.sync.exportSyncMeta?.()).toMatchObject({
-      resume: importedResume,
-      seenTxids: [55],
-    })
-
-    const unseeded = createCollection({ ...options, id: `metadata-unseeded` })
-    await expect(unseeded.utils.awaitTxId(55, 10)).rejects.toThrow()
-    expect(unseeded.config.sync.exportSyncMeta?.()).toEqual({
-      version: 1,
-      seenTxids: [],
-    })
-
-    await seeded.cleanup()
-    await unseeded.cleanup()
-  })
-
-  it(`binds imported evidence and pending matches before lazy sync starts`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementation((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const options = electricCollectionOptions<OracleRow>({
-      id: `lazy-bound-evidence`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      getKey: (row) => row.id,
-      startSync: false,
-    })
-    const collection = createCollection(options)
-    const importedResume = {
-      kind: `resume` as const,
-      requiresTagState: false,
-      offset: `9_0` as const,
-      handle: `shape-9`,
-      shapeId,
-      updatedAt: 9,
-    }
-    collection.config.sync.importSyncMeta?.({
-      version: 1,
-      resume: importedResume,
-      seenTxids: [33],
-    })
-
-    await expect(collection.utils.awaitTxId(33, 20)).resolves.toBe(true)
-    const pendingMatch = collection.utils.awaitMatch(
-      (message) => `value` in message && message.value.id === 5,
-      100,
-    )
-    const pendingTxid = collection.utils.awaitTxId(34, 100)
-    const preload = collection.preload()
-    expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
-      offset: `9_0`,
-      handle: `shape-9`,
-    })
-    const evidenceChange = change(`insert`, 5, `matched after start`)
-    subscriber([
-      {
-        ...evidenceChange,
-        headers: { operation: `insert`, txids: [34] },
-      },
-      upToDate,
-    ])
-
-    await expect(pendingMatch).resolves.toBe(true)
-    await expect(pendingTxid).resolves.toBe(true)
-    await preload
-    expect(collection.get(5)?.name).toBe(`matched after start`)
-    await collection.cleanup()
-  })
-
-  it(`keeps descriptor utilities captured before collection startup live`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementation((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const options = electricCollectionOptions<OracleRow>({
-      id: `captured-descriptor-utilities`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      getKey: (row) => row.id,
-      startSync: false,
-    })
-    const { awaitMatch, awaitTxId } = options.utils
-    const collection = createCollection(options)
-    const pendingMatch = awaitMatch(
-      (message) => `value` in message && message.value.id === 77,
-      100,
-    )
-    const pendingTxid = awaitTxId(77, 100)
-
-    const preload = collection.preload()
-    const evidenceChange = change(`insert`, 77, `captured utilities`)
-    subscriber([
-      {
-        ...evidenceChange,
-        headers: { operation: `insert`, txids: [77] },
-      },
-      upToDate,
-    ])
-
-    await expect(pendingMatch).resolves.toBe(true)
-    await expect(pendingTxid).resolves.toBe(true)
-    await preload
-    await collection.cleanup()
-  })
-
-  it(`retires a pending pre-start match when a lazy collection is cleaned up`, async () => {
-    mockSubscribe.mockImplementation(() => vi.fn())
-    const collection = createCollection(
-      electricCollectionOptions<OracleRow>({
-        id: `lazy-pre-start-cleanup`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        getKey: (row) => row.id,
-        startSync: false,
-      }),
-    )
-    const pendingMatch = collection.utils.awaitMatch(() => false, 100)
-
-    await collection.cleanup()
-
-    await expect(pendingMatch).rejects.toThrow(/aborted/i)
-    expect(mockSubscribe).not.toHaveBeenCalled()
-  })
-
-  it(`retires pre-start waiters when persisted metadata startup is interrupted`, async () => {
-    const metadataStarted = createDeferred<void>()
-    const metadataGate = createDeferred<void>()
-    const adapter = createPersistedAdapter(new Map(), new Map())
-    const loadResumeSnapshot = adapter.loadResumeSnapshot
-    adapter.loadResumeSnapshot = async (...args) => {
-      metadataStarted.resolve()
-      await metadataGate.promise
-      return loadResumeSnapshot(args[0], args[1])
-    }
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `persisted-startup-waiter-cleanup`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          getKey: (row) => row.id,
-          startSync: false,
-        }),
-        persistence: { adapter },
-      }),
-    )
-    const pendingMatch = collection.utils.awaitMatch(() => false, 100)
-    const pendingTxid = collection.utils.awaitTxId(702, 100)
-    const preload = expect(collection.preload()).rejects.toMatchObject({
-      name: `AbortError`,
-    })
-    await metadataStarted.promise
-    const matchOutcome = expect(pendingMatch).rejects.toThrow(/aborted/i)
-    const txidOutcome = expect(pendingTxid).rejects.toThrow(/aborted/i)
-
-    await collection.cleanup()
-
-    await matchOutcome
-    await txidOutcome
-    expect(mockSubscribe).not.toHaveBeenCalled()
-    metadataGate.resolve()
-    await preload
-  })
-
-  it(`retires pre-start waiters through automatic collection GC`, async () => {
-    const metadataGate = createDeferred<void>()
-    const adapter = createPersistedAdapter(new Map(), new Map())
-    const loadResumeSnapshot = adapter.loadResumeSnapshot
-    adapter.loadResumeSnapshot = vi.fn(async (...args) => {
-      await metadataGate.promise
-      return loadResumeSnapshot(args[0], args[1])
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `persisted-gc-waiter-cleanup`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          getKey: (row) => row.id,
-          startSync: false,
-          gcTime: 10,
-        }),
-        persistence: { adapter },
-      }),
-    )
-    const pendingMatch = collection.utils.awaitMatch(() => false, 5000)
-    const pendingTxid = collection.utils.awaitTxId(703, 5000)
-    // A pending preload owns retention; exercise unowned sync for automatic GC.
-    collection.startSyncImmediate()
-    await vi.waitFor(
-      () => expect(adapter.loadResumeSnapshot).toHaveBeenCalledOnce(),
-      { interval: 1, timeout: 250 },
-    )
-    const subscription = collection.subscribeChanges(() => {})
-    const matchOutcome = pendingMatch.catch((error: unknown) => error)
-    const txidOutcome = pendingTxid.catch((error: unknown) => error)
-
-    subscription.unsubscribe()
-    await vi.waitFor(() => expect(collection.status).toBe(`cleaned-up`), {
-      interval: 10,
-      timeout: 1500,
-    })
-    const pendingSentinel = Symbol(`pending`)
-    const matchResult = await Promise.race([
-      matchOutcome,
-      new Promise((resolve) => setTimeout(() => resolve(pendingSentinel), 50)),
-    ])
-    const txidResult = await Promise.race([
-      txidOutcome,
-      new Promise((resolve) => setTimeout(() => resolve(pendingSentinel), 50)),
-    ])
-
-    expect(matchResult).toEqual(
-      expect.objectContaining({
-        message: expect.stringMatching(/aborted/i),
-      }),
-    )
-    expect(txidResult).toEqual(
-      expect.objectContaining({
-        message: expect.stringMatching(/aborted/i),
-      }),
-    )
-    expect(mockSubscribe).not.toHaveBeenCalled()
-    metadataGate.resolve()
-  })
-
-  it(`retires every pending waiter when its collection lifecycle is cleaned up`, async () => {
-    mockSubscribe.mockImplementation(() => vi.fn())
-    const lazy = createCollection(
-      electricCollectionOptions<OracleRow>({
-        id: `lazy-waiter-cleanup`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        getKey: (row) => row.id,
-        startSync: false,
-      }),
-    )
-    const lazyTxid = lazy.utils.awaitTxId(700, 100)
-    await lazy.cleanup()
-    await expect(lazyTxid).rejects.toThrow(/aborted/i)
-
-    const active = createOracleCollection(
-      `active-waiter-cleanup`,
-      `eager`,
-      createMetadata(new Map()).api,
-    )
-    const activeMatch = active.collection.utils.awaitMatch(() => false, 100)
-    const activeTxid = active.collection.utils.awaitTxId(701, 100)
-    await active.collection.cleanup()
-
-    await expect(activeMatch).rejects.toThrow(/aborted/i)
-    await expect(activeTxid).rejects.toThrow(/aborted/i)
-  })
-
-  it(`settles waiters according to whether evidence or cleanup wins`, async () => {
-    for (const cleanupWins of [true, false]) {
-      const trace = createOracleCollection(
-        `waiter-race-${cleanupWins}`,
-        `eager`,
-        createMetadata(new Map()).api,
-      )
-      const pendingMatch = trace.collection.utils.awaitMatch(
-        (message) => `value` in message && message.value.id === 91,
-        100,
-      )
-      const pendingTxid = trace.collection.utils.awaitTxId(91, 100)
-      const evidenceChange = change(`insert`, 91, `race winner`)
-      const evidence: Array<Message<OracleRow>> = [
-        {
-          ...evidenceChange,
-          headers: { operation: `insert`, txids: [91] },
-        },
-        upToDate,
-      ]
-
-      if (cleanupWins) {
-        await trace.collection.cleanup()
-        trace.subscriber(evidence)
-        await expect(pendingMatch).rejects.toThrow(/aborted/i)
-        await expect(pendingTxid).rejects.toThrow(/aborted/i)
-        expect(trace.collection.get(91)).toBeUndefined()
-      } else {
-        trace.subscriber(evidence)
-        await trace.collection.cleanup()
-        await expect(pendingMatch).resolves.toBe(true)
-        await expect(pendingTxid).resolves.toBe(true)
-      }
-    }
-  })
-
-  it(`keeps committed match evidence across newer writer batches`, async () => {
-    const metadata = createMetadata(new Map())
-    const trace = createOracleCollection(
-      `await-match-batch-generation`,
-      `eager`,
-      metadata.api,
-    )
-
-    trace.subscriber([change(`insert`, 1, `old batch`), upToDate])
-    trace.subscriber([change(`insert`, 2, `current batch`), upToDate])
-
-    await expect(
-      trace.collection.utils.awaitMatch(
-        (message) => `value` in message && message.value.name === `old batch`,
-        20,
-      ),
-    ).resolves.toBe(true)
-    await trace.collection.cleanup()
-  })
-
-  it(`keeps committed match evidence across callbacks with no new data`, async () => {
-    const trace = createOracleCollection(
-      `await-match-neutral-callback`,
-      `eager`,
-      createMetadata(new Map()).api,
-    )
-
-    trace.subscriber([change(`insert`, 1, `committed`), upToDate])
-    trace.subscriber([
-      {
-        headers: {
-          control: `snapshot-end`,
-          xmin: `100`,
-          xmax: `150`,
-          xip_list: [],
-        },
-      },
-    ])
-    trace.subscriber([])
-
-    await expect(
-      trace.collection.utils.awaitMatch(
-        (message) => `value` in message && message.value.id === 1,
-        20,
-      ),
-    ).resolves.toBe(true)
-    await trace.collection.cleanup()
-  })
-
-  it(`clears committed match evidence when the stream must refetch`, async () => {
-    const trace = createOracleCollection(
-      `await-match-reset-generation`,
-      `eager`,
-      createMetadata(new Map()).api,
-    )
-
-    trace.subscriber([change(`insert`, 1, `old generation`), upToDate])
-    trace.subscriber([mustRefetch, upToDate])
-
-    await expect(
-      trace.collection.utils.awaitMatch(
-        (message) =>
-          `value` in message && message.value.name === `old generation`,
-        20,
-      ),
-    ).rejects.toThrow(/Timeout waiting for custom match function/)
-    await trace.collection.cleanup()
-  })
 
   const reentryHistory = fc.record({
     txid: fc.integer({ min: 1, max: 10000 }),
@@ -5001,291 +3513,20 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
   }
 
-  fcTest.prop([reentryHistory], { seed: 42713, numRuns: oracleRuns(10) })(
+  oracleReplayTest(fcTest).prop([reentryHistory], {
+    seed: 42713,
+    numRuns: oracleRuns(10),
+  })(
     `replacement sync runs reject evidence from callback reentry histories (fixed)`,
     runReentryHistory,
   )
-  fcTest.prop(
+  oracleReplayTest(fcTest, `electric.match-reentry`).prop(
     [reentryHistory],
     oraclePropertyOptions(10, `electric.match-reentry`),
   )(
     `replacement sync runs reject evidence from callback reentry histories (random)`,
     runReentryHistory,
   )
-
-  it(`does not let a committed message satisfy awaitMatch after restart`, async () => {
-    const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
-    mockSubscribe.mockImplementation((callback) => {
-      subscribers.push(callback)
-      return vi.fn()
-    })
-    const collection = createCollection(
-      electricCollectionOptions<OracleRow>({
-        id: `await-match-lifecycle-generation`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        getKey: (row) => row.id,
-        startSync: true,
-      }),
-    )
-
-    subscribers[0]!([change(`insert`, 1, `old lifecycle`), upToDate])
-    await collection.cleanup()
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(subscribers).toHaveLength(2))
-
-    await expect(
-      collection.utils.awaitMatch(
-        (message) =>
-          `value` in message && message.value.name === `old lifecycle`,
-        20,
-      ),
-    ).rejects.toThrow(/Timeout waiting for custom match function/)
-    await collection.cleanup()
-  })
-
-  for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
-    it(`does not apply an unseen ${syncMode} update after must-refetch`, async () => {
-      const metadata = createMetadata(new Map())
-      const trace = createOracleCollection(
-        `must-refetch-unseen-${syncMode}`,
-        syncMode,
-        metadata.api,
-      )
-      trace.subscriber([change(`insert`, 1, `complete`), upToDate])
-
-      trace.subscriber([mustRefetch, change(`update`, 1, `partial`), upToDate])
-
-      expect(trace.collection.status).toBe(`ready`)
-      expect(trace.collection.has(1)).toBe(false)
-      await trace.collection.cleanup()
-    })
-
-    it(`keeps the ${syncMode} reset marker until the replacement snapshot is complete`, async () => {
-      const metadata = createMetadata(resumeState())
-      const trace = createOracleCollection(
-        `durable-reset-${syncMode}`,
-        syncMode,
-        metadata.api,
-      )
-
-      trace.subscriber([mustRefetch])
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `reset` }),
-      )
-
-      trace.subscriber([change(`insert`, 1, `partial snapshot`), subsetEnd])
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `reset` }),
-      )
-
-      trace.subscriber([
-        change(`update`, 2, `unseen`),
-        change(`update`, 1, `complete snapshot`),
-        upToDate,
-      ])
-      expect(trace.collection.status).toBe(`ready`)
-      expect(trace.collection.get(1)).toEqual(
-        expect.objectContaining({
-          id: 1,
-          name: `complete snapshot`,
-          stable: `stable-1`,
-        }),
-      )
-      expect(trace.collection.has(2)).toBe(false)
-      expect(metadata.state.get(`electric:resume`)).toEqual(
-        expect.objectContaining({ kind: `resume`, offset: `20_0` }),
-      )
-      await trace.collection.cleanup()
-    })
-  }
-
-  it(`does not let an older applied receipt finish a newer reset`, async () => {
-    const metadata = createMetadata(resumeState())
-    const trace = createOracleCollection(
-      `overlapping-reset-generations`,
-      `eager`,
-      metadata.api,
-    )
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-
-    trace.subscriber([
-      mustRefetch,
-      change(`insert`, 1, `first replacement`),
-      subsetEnd,
-    ])
-    transaction.mutate(() =>
-      trace.collection.insert({
-        id: 99,
-        name: `optimistic`,
-        stable: `stable-99`,
-      }),
-    )
-    trace.subscriber([upToDate])
-    trace.subscriber([mustRefetch])
-    await Promise.resolve()
-
-    trace.subscriber([change(`update`, 2, `unseen`), upToDate])
-
-    expect(trace.collection.status).not.toBe(`error`)
-    expect(trace.collection.has(2)).toBe(false)
-
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await trace.collection.cleanup()
-  })
-
-  // Readiness counts accepted rows; they publish when the mutation settles.
-  it(`publishes readiness once a held receipt is accepted`, async () => {
-    const metadata = createMetadata(new Map())
-    const trace = createOracleCollection(
-      `deferred-applied-receipt`,
-      `eager`,
-      metadata.api,
-    )
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    transaction.mutate(() =>
-      trace.collection.insert({
-        id: 99,
-        name: `optimistic`,
-        stable: `stable-99`,
-      }),
-    )
-
-    trace.subscriber([change(`insert`, 1, `synced`), upToDate])
-    await Promise.resolve()
-
-    expect(trace.collection.status).toBe(`ready`)
-    expect(trace.collection.has(1)).toBe(false)
-
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await trace.collection.stateWhenReady()
-
-    expect(trace.collection.status).toBe(`ready`)
-    expect(trace.collection.get(1)).toEqual(
-      expect.objectContaining({ stable: `stable-1` }),
-    )
-    await trace.collection.cleanup()
-  })
-
-  /**
-   * Full-mode recovery can accept its complete source snapshot while an
-   * optimistic transaction still withholds application. Collection readiness
-   * is allowed at acceptance; LoadSubsetFn success must await the applied
-   * receipt. The independent obligation is simply pending until the held
-   * transaction releases, then exact source-row visibility at settlement.
-   *
-   * Demand before and after readiness distinguishes an initial-ready gate
-   * from the stronger applied-settlement law, including receipts created
-   * before the acquisition's own commit cursor. The transaction promise
-   * controls application; yielding a turn only drains already queued work.
-   */
-  it.each([`before-ready`, `after-ready`] as const)(
-    `full recovery subset waits for application when acquired %s`,
-    async (acquireAt) => {
-      const trace = createOracleCollection(
-        `full-recovery-applied-${acquireAt}`,
-        `on-demand`,
-        createMetadata(
-          new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-        ).api,
-      )
-      const persistence = createDeferred<void>()
-      const transaction = createTransaction({
-        mutationFn: () => persistence.promise,
-      })
-      transaction.mutate(() =>
-        trace.collection.insert({
-          id: 99,
-          name: `optimistic`,
-          stable: `stable-99`,
-        }),
-      )
-      let outcome: `pending` | `fulfilled` | `rejected` = `pending`
-      const acquire = () =>
-        Promise.resolve(trace.collection._sync.loadSubset({ limit: 1 })).then(
-          () => {
-            outcome = `fulfilled`
-          },
-          (error: unknown) => {
-            outcome = `rejected`
-            throw error
-          },
-        )
-      let loading: Promise<void> | undefined
-      await withElectricCleanup(async () => {
-        if (acquireAt === `before-ready`) loading = acquire()
-        trace.subscriber([change(`insert`, 1, `replacement`), upToDate])
-        expect(trace.collection.status).toBe(`ready`)
-        if (acquireAt === `after-ready`) loading = acquire()
-        void loading!.catch(() => undefined)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-        expect(trace.collection.has(1), `application is still held`).toBe(false)
-        expect(outcome, `ready does not establish subset application`).toBe(
-          `pending`,
-        )
-        persistence.resolve()
-        await transaction.isPersisted.promise
-        await atCheckpoint(loading!, `full recovery applied settlement`)
-        expect(outcome).toBe(`fulfilled`)
-        expect(trace.collection.get(1)).toMatchObject({
-          id: 1,
-          name: `replacement`,
-          stable: `stable-1`,
-        })
-      }, [() => persistence.resolve(), () => trace.collection.cleanup()])
-    },
-  )
-
-  // A full stream keeps its capability across a same-run must-refetch. Its
-  // previous applied snapshot cannot establish newly requested replacement
-  // coverage. This continuation rejects a permanently fulfilled startup gate.
-  it(`full recovery demand waits again after a same-run reset`, async () => {
-    const trace = createOracleCollection(
-      `full-recovery-reset`,
-      `on-demand`,
-      createMetadata(
-        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-      ).api,
-    )
-    await withElectricCleanup(async () => {
-      trace.subscriber([change(`insert`, 1, `first`), upToDate])
-      await trace.collection._sync.loadSubset({ limit: 1 })
-      trace.subscriber([mustRefetch])
-      let outcome = `pending`
-      const loading = Promise.resolve(
-        trace.collection._sync.loadSubset({ limit: 2 }),
-      ).then(
-        () => {
-          outcome = `fulfilled`
-        },
-        (error: unknown) => {
-          outcome = `rejected`
-          throw error
-        },
-      )
-      void loading.catch(() => undefined)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(outcome, `prior readiness is not replacement coverage`).toBe(
-        `pending`,
-      )
-      trace.subscriber([change(`insert`, 2, `second`), upToDate])
-      await atCheckpoint(loading, `same-run replacement applied`)
-      expect(outcome).toBe(`fulfilled`)
-      expect(rowsFromCollection(trace.collection)).toEqual([
-        [2, `second`, `stable-2`],
-      ])
-    }, [() => trace.collection.cleanup()])
-  })
 
   /**
    * ## Does a source that still tries ever look failed?
@@ -5449,13 +3690,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     const heldAcceptance = createDeferred<void>()
     const holdAcceptance = <TParams>(params: TParams): TParams => {
       const syncParams = params as unknown as {
-        commit: () => true | Promise<void>
+        commit: (signal?: AbortSignal) => true | Promise<void>
       }
       const commit = syncParams.commit
       return {
         ...params,
-        commit: () => {
-          const receipt = commit()
+        // A wrapper passes the source's signal through, so an abandoned
+        // transaction stays abandoned.
+        commit: (signal?: AbortSignal) => {
+          const receipt = commit(signal)
           if (!armAcceptance) return receipt
           return withAcceptedReceipt(
             receipt === true ? Promise.resolve() : receipt,
@@ -5892,667 +4135,26 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
   )
 
-  /**
-   * A scoped source snapshot owes applied settlement at subset-end, even
-   * when must-refetch opened a truncate replay. The independent model knows
-   * one inserted source row and no other rows; it predicts that a successful
-   * demand observes that row. This driver acquires through the real persisted
-   * wrapper before reset, delivers a subset-end without up-to-date, and checks
-   * public visibility at demand settlement. Full-mode replay's distinct
-   * up-to-date obligation is checked by neighboring laws.
-   */
-  it(`applies a scoped reset subset before its demand succeeds`, async () => {
-    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
-    mockSubscribe.mockImplementation((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const adapter = createPersistedAdapter(
-      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-      new Map(),
-    )
-    // This fixture abstracts physical cache IDs because the law here concerns
-    // source settlement. The SQLite generation oracle owns physical isolation.
-    let generation = 0
-    const claim = (id: string) => ({
-      storageCollectionId: `${id}:generation-${generation}`,
-      claimId: `claim-${generation}`,
-    })
-    adapter.claimCacheGeneration = async (id) => claim(id)
-    adapter.rotateCacheGeneration = async (id) => {
-      generation++
-      return claim(id)
-    }
-    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
-    adapter.releaseCacheGenerationClaim = async () => {}
-    const options = electricCollectionOptions<OracleRow>({
-      id: `scoped-reset-applied-settlement`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      syncMode: `on-demand`,
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({ ...options, persistence: { adapter } }),
-    )
-    const snapshot = createDeferred<void>()
-    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
-
-    await withElectricCleanup(async () => {
-      collection.startSyncImmediate()
-      await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
-      const demand = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
-      void demand.catch(() => undefined)
-      await vi.waitFor(() =>
-        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
-      )
-      subscriber!([mustRefetch])
-      subscriber!([change(`insert`, 1, `scoped replacement`), subsetEnd])
-      snapshot.resolve()
-      await atCheckpoint(demand, `scoped reset applied settlement`)
-      expect(collection.get(1)).toMatchObject({
-        id: 1,
-        name: `scoped replacement`,
-        stable: `stable-1`,
-      })
-    }, [() => snapshot.resolve(), () => collection.cleanup()])
-  })
-
-  // Initial failure rejects all current waiters with the original error.
-  // Cleanup quietly settles adapter loads and invalidates later callbacks.
-  // A provider error alone does not make its future callbacks obsolete;
-  // retry semantics are checked by the neighboring recovery laws.
-  it.each([`failure`, `cleanup`] as const)(
-    `full recovery retires concurrent demand on %s`,
-    async (terminal) => {
-      const loggedError = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
-      const trace = createOracleCollection(
-        `full-recovery-${terminal}`,
-        `on-demand`,
-        createMetadata(
-          new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-        ).api,
-      )
-      const sentinel = new Error(`initial full sync failed`)
-      const outcomes = [1, 2].map((limit) =>
-        Promise.resolve(trace.collection._sync.loadSubset({ limit })).then(
-          () => ({ kind: `fulfilled` as const }),
-          (error: unknown) => ({ kind: `rejected` as const, error }),
-        ),
-      )
-      await withElectricCleanup(async () => {
-        if (terminal === `failure`) {
-          const options = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-            | {
-                onError?: (error: unknown) => void
-              }
-            | undefined
-          expect(options?.onError).toBeTypeOf(`function`)
-          options?.onError?.(sentinel)
-        } else await trace.collection.cleanup()
-        const results = await atCheckpoint(
-          Promise.all(outcomes),
-          `terminal full recovery settlement`,
-        )
-        if (terminal === `failure`) {
-          expect(results).toEqual([
-            { kind: `rejected`, error: sentinel },
-            { kind: `rejected`, error: sentinel },
-          ])
-          expect(trace.collection.status).toBe(`error`)
-        } else {
-          expect(results).toEqual([
-            { kind: `fulfilled` },
-            { kind: `fulfilled` },
-          ])
-          expect(trace.collection.status).toBe(`cleaned-up`)
-          trace.subscriber([change(`insert`, 1, `abandoned`), upToDate])
-          expect(trace.collection.has(1)).toBe(false)
-        }
-      }, [() => trace.collection.cleanup(), () => loggedError.mockRestore()])
+  oracleReplayTest(it)(
+    `does not advance durable Electric resume metadata past a rejected row commit`,
+    async () => {
+      await runRejectedDurablePrefixWitness(`durable-prefix-fixed`, [
+        `first`,
+        `second`,
+      ])
     },
   )
 
-  // Each demand owns its cancellation even while full-log source evidence is
-  // shared. Aborting one demand ends that load before up-to-date; its sibling
-  // and a replacement of the canceled demand still wait for the source
-  // snapshot and succeed after the row applies.
-  it(`cancels one full recovery demand without settling its sibling`, async () => {
-    const trace = createOracleCollection(
-      `full-recovery-one-abort`,
-      `on-demand`,
-      createMetadata(
-        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-      ).api,
-    )
-    const controller = new AbortController()
-    const canceled = Promise.resolve(
-      trace.collection._sync.loadSubset({
-        limit: 1,
-        signal: controller.signal,
-      }),
-    )
-    void canceled.catch(() => undefined)
-    let siblingOutcome = `pending`
-    const sibling = Promise.resolve(
-      trace.collection._sync.loadSubset({ limit: 2 }),
-    ).then(
-      () => {
-        siblingOutcome = `fulfilled`
-      },
-      () => {
-        siblingOutcome = `rejected`
-      },
-    )
-
-    await withElectricCleanup(async () => {
-      controller.abort()
-      await expect(
-        atCheckpoint(canceled, `canceled full recovery demand`),
-      ).rejects.toMatchObject({ name: `AbortError` })
-      expect(siblingOutcome).toBe(`pending`)
-
-      // Cancellation cannot mark this predicate complete or poison a later
-      // acquisition of the same demand key.
-      const replacement = Promise.resolve(
-        trace.collection._sync.loadSubset({ limit: 1 }),
+  oracleReplayTest(it)(
+    `retains an accepted Electric source prefix when the next row commit rejects`,
+    async () => {
+      await runRejectedDurablePrefixWitness(
+        `durable-prefix-after-success`,
+        [`accepted`, `rejected`],
+        true,
       )
-      let replacementOutcome = `pending`
-      const observedReplacement = replacement.then(
-        () => {
-          replacementOutcome = `fulfilled`
-        },
-        () => {
-          replacementOutcome = `rejected`
-        },
-      )
-      await Promise.resolve()
-      expect(replacementOutcome).toBe(`pending`)
-
-      trace.subscriber([change(`insert`, 1, `source row`), upToDate])
-      await atCheckpoint(
-        Promise.all([sibling, observedReplacement]),
-        `remaining full recovery demands`,
-      )
-      expect(siblingOutcome).toBe(`fulfilled`)
-      expect(replacementOutcome).toBe(`fulfilled`)
-      expect(trace.collection.get(1)).toMatchObject({ name: `source row` })
-    }, [() => trace.collection.cleanup()])
-  })
-
-  // An external ShapeStream abort is a provider failure, not Collection
-  // cleanup. It cannot fulfill an in-flight demand or certify its key as
-  // loaded when no source snapshot arrived. A second identical demand must
-  // therefore remain a failing acquisition rather than deduplicated success.
-  it(`does not certify a full recovery demand after external stream abort`, async () => {
-    const external = new AbortController()
-    const trace = createOracleCollection(
-      `full-recovery-external-abort`,
-      `on-demand`,
-      createMetadata(
-        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-      ).api,
-      { signal: external.signal },
-    )
-    const first = Promise.resolve(
-      trace.collection._sync.loadSubset({ limit: 1 }),
-    )
-    void first.catch(() => undefined)
-
-    await withElectricCleanup(async () => {
-      external.abort()
-      await expect(
-        atCheckpoint(first, `externally aborted full recovery demand`),
-      ).rejects.toMatchObject({ name: `StreamAbortedError` })
-      const second = trace.collection._sync.loadSubset({ limit: 1 })
-      expect(second).not.toBe(true)
-      await expect(Promise.resolve(second)).rejects.toMatchObject({
-        name: `AbortError`,
-      })
-      expect(trace.collection.size).toBe(0)
-    }, [() => trace.collection.cleanup()])
-  })
-
-  // A subset transport may return after the shared stream retires. Its
-  // messages cannot apply to that lifecycle, so transport settlement alone
-  // cannot certify the demand or its deduplication key.
-  it(`does not certify a subset snapshot after external stream abort`, async () => {
-    const external = new AbortController()
-    const trace = createOracleCollection(
-      `subset-external-abort`,
-      `on-demand`,
-      createMetadata(new Map()).api,
-      { signal: external.signal },
-    )
-    const snapshot = createDeferred<void>()
-    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
-    const first = Promise.resolve(
-      trace.collection._sync.loadSubset({ limit: 1 }),
-    )
-    void first.catch(() => undefined)
-
-    await withElectricCleanup(async () => {
-      await vi.waitFor(() =>
-        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
-      )
-      external.abort()
-      snapshot.resolve()
-      await expect(
-        atCheckpoint(first, `externally aborted subset snapshot`),
-      ).rejects.toMatchObject({ name: `AbortError` })
-      const second = trace.collection._sync.loadSubset({ limit: 1 })
-      expect(second).not.toBe(true)
-      await expect(Promise.resolve(second)).rejects.toMatchObject({
-        name: `AbortError`,
-      })
-      expect(trace.collection.size).toBe(0)
-    }, [() => snapshot.resolve(), () => trace.collection.cleanup()])
-  })
-
-  // Even a completed transport cannot certify a demand while its accepted
-  // source commit is waiting for application. Retiring the stream during that
-  // wait leaves no visible source row, so the demand must fail when the held
-  // applied receipt finally settles.
-  it(`does not certify an externally aborted subset during applied settlement`, async () => {
-    const external = new AbortController()
-    const trace = createOracleCollection(
-      `subset-held-external-abort`,
-      `on-demand`,
-      createMetadata(new Map()).api,
-      { signal: external.signal },
-    )
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    transaction.mutate(() =>
-      trace.collection.insert({
-        id: 99,
-        name: `optimistic`,
-        stable: `stable-99`,
-      }),
-    )
-    const snapshot = createDeferred<void>()
-    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
-    const first = Promise.resolve(
-      trace.collection._sync.loadSubset({ limit: 1 }),
-    )
-    void first.catch(() => undefined)
-
-    await withElectricCleanup(async () => {
-      await vi.waitFor(() =>
-        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
-      )
-      trace.subscriber([change(`insert`, 1, `source row`), subsetEnd])
-      snapshot.resolve()
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(trace.collection.has(1), `applied receipt is held`).toBe(false)
-      external.abort()
-      persistence.resolve()
-      await transaction.isPersisted.promise
-      await expect(
-        atCheckpoint(first, `externally aborted held subset`),
-      ).rejects.toMatchObject({ name: `AbortError` })
-      const second = trace.collection._sync.loadSubset({ limit: 1 })
-      expect(second).not.toBe(true)
-      await expect(Promise.resolve(second)).rejects.toMatchObject({
-        name: `AbortError`,
-      })
-      expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
-    }, [
-      () => snapshot.resolve(),
-      () => persistence.resolve(),
-      () => trace.collection.cleanup(),
-    ])
-  })
-
-  // Application can outlive the SDK request. A caller that releases its
-  // demand during that interval must reject promptly, while the source
-  // receipt remains held and a later acquisition can still wait for it.
-  it(`cancels a subset demand while its source receipt is held`, async () => {
-    const trace = createOracleCollection(
-      `subset-held-demand-abort`,
-      `on-demand`,
-      createMetadata(new Map()).api,
-    )
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    transaction.mutate(() =>
-      trace.collection.insert({
-        id: 99,
-        name: `optimistic`,
-        stable: `stable-99`,
-      }),
-    )
-    const snapshot = createDeferred<void>()
-    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
-    const controller = new AbortController()
-    const first = Promise.resolve(
-      trace.collection._sync.loadSubset({
-        limit: 1,
-        signal: controller.signal,
-      }),
-    )
-    let firstOutcome: `pending` | `fulfilled` | `rejected` = `pending`
-    let firstError: unknown
-    const observedFirst = first.then(
-      () => {
-        firstOutcome = `fulfilled`
-      },
-      (error: unknown) => {
-        firstOutcome = `rejected`
-        firstError = error
-      },
-    )
-
-    await withElectricCleanup(async () => {
-      await vi.waitFor(() =>
-        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
-      )
-      trace.subscriber([change(`insert`, 1, `source row`), subsetEnd])
-      snapshot.resolve()
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(trace.collection.has(1)).toBe(false)
-      controller.abort()
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(firstOutcome).toBe(`rejected`)
-      expect(firstError).toMatchObject({ name: `AbortError` })
-      persistence.resolve()
-      await transaction.isPersisted.promise
-      await observedFirst
-      expect(trace.collection.has(1)).toBe(true)
-    }, [
-      () => snapshot.resolve(),
-      () => persistence.resolve(),
-      () => trace.collection.cleanup(),
-    ])
-  })
-
-  // A demand canceled before its subset transport settles has no successful
-  // acquisition, whether that transport later resolves or rejects. The source
-  // may still apply a late SDK response, but this caller observes AbortError and
-  // an identical later demand remains eligible for a new acquisition.
-  it.each([`resolve`, `reject`] as const)(
-    `rejects a canceled subset demand when its transport later %ss`,
-    async (transportOutcome) => {
-      const trace = createOracleCollection(
-        `subset-demand-abort-${transportOutcome}`,
-        `on-demand`,
-        createMetadata(new Map()).api,
-      )
-      const controller = new AbortController()
-      const snapshot = createDeferred<void>()
-      mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
-      const first = Promise.resolve(
-        trace.collection._sync.loadSubset({
-          limit: 1,
-          signal: controller.signal,
-        }),
-      )
-      void first.catch(() => undefined)
-
-      await withElectricCleanup(async () => {
-        await vi.waitFor(() =>
-          expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
-        )
-        controller.abort()
-        if (transportOutcome === `resolve`) snapshot.resolve()
-        else snapshot.reject(new Error(`late provider failure`))
-        await expect(
-          atCheckpoint(first, `canceled subset ${transportOutcome}`),
-        ).rejects.toMatchObject({ name: `AbortError` })
-        const second = trace.collection._sync.loadSubset({ limit: 1 })
-        expect(second).not.toBe(true)
-        await expect(
-          atCheckpoint(
-            Promise.resolve(second).then(() => undefined),
-            `fresh subset after ${transportOutcome} and caller abort`,
-          ),
-        ).resolves.toBeUndefined()
-        expect(mockStream.requestSnapshot).toHaveBeenCalledTimes(2)
-      }, [() => snapshot.resolve(), () => trace.collection.cleanup()])
     },
   )
-
-  // Snapshot responses share one SDK cursor, but a queued demand owns its
-  // cancellation independently of the request ahead of it. At the next task
-  // boundary after abort, this caller must have rejected without invoking a
-  // second SDK request; the first demand remains pending until its response.
-  it(`cancels a queued subset demand while an earlier snapshot is held`, async () => {
-    const trace = createOracleCollection(
-      `queued-subset-abort`,
-      `on-demand`,
-      createMetadata(new Map()).api,
-    )
-    const held = createDeferred<void>()
-    mockStream.requestSnapshot.mockReturnValueOnce(held.promise)
-    const first = Promise.resolve(
-      trace.collection._sync.loadSubset({ limit: 1 }),
-    )
-    const controller = new AbortController()
-    let secondOutcome: `pending` | `fulfilled` | `rejected` = `pending`
-    let secondError: unknown
-    const second = Promise.resolve(
-      trace.collection._sync.loadSubset({
-        limit: 2,
-        signal: controller.signal,
-      }),
-    ).then(
-      () => {
-        secondOutcome = `fulfilled`
-      },
-      (error: unknown) => {
-        secondOutcome = `rejected`
-        secondError = error
-      },
-    )
-
-    await withElectricCleanup(async () => {
-      await vi.waitFor(() =>
-        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
-      )
-      controller.abort()
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(secondOutcome).toBe(`rejected`)
-      expect(secondError).toMatchObject({ name: `AbortError` })
-      expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
-      held.resolve()
-      await atCheckpoint(Promise.all([first, second]), `queued abort drain`)
-    }, [() => held.resolve(), () => trace.collection.cleanup()])
-  })
-
-  it(`drops a held receipt's rows when cleanup abandons it`, async () => {
-    const metadata = createMetadata(new Map())
-    const trace = createOracleCollection(
-      `rejected-applied-receipt`,
-      `eager`,
-      metadata.api,
-    )
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    transaction.mutate(() =>
-      trace.collection.insert({
-        id: 99,
-        name: `optimistic`,
-        stable: `stable-99`,
-      }),
-    )
-    trace.subscriber([change(`insert`, 1, `synced`), upToDate])
-    await Promise.resolve()
-    expect(trace.collection.status).toBe(`ready`)
-
-    await trace.collection.cleanup()
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await Promise.resolve()
-
-    expect(trace.collection.status).toBe(`cleaned-up`)
-    expect(trace.collection._lifecycle.getSyncError()).toBeUndefined()
-    expect(trace.collection.has(1)).toBe(false)
-  })
-
-  it(`accepts partial resumed updates for rows restored by persistence`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const collectionMetadata = new Map(resumeState())
-    const persistedRows = new Map<string | number, OracleRow>([
-      [
-        1,
-        {
-          id: 1,
-          name: `persisted`,
-          stable: `stable-1`,
-        },
-      ],
-    ])
-    const electricOptions = electricCollectionOptions<OracleRow>({
-      id: `persisted-resume-oracle`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      syncMode: `progressive`,
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricOptions,
-        persistence: {
-          adapter: createPersistedAdapter(collectionMetadata, persistedRows),
-        },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await collection._sync.loadSubset({ limit: 10 })
-    expect(collection.get(1)).toEqual(
-      expect.objectContaining({ name: `persisted`, stable: `stable-1` }),
-    )
-    expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
-      offset: `10_0`,
-      handle: `shape-1`,
-    })
-
-    subscriber([change(`update`, 1, `resumed update`), upToDate])
-    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-
-    expect(collection.get(1)).toEqual(
-      expect.objectContaining({
-        name: `resumed update`,
-        stable: `stable-1`,
-      }),
-    )
-    await vi.waitFor(() => {
-      expect(persistedRows.get(1)).toEqual(
-        expect.objectContaining({
-          name: `resumed update`,
-          stable: `stable-1`,
-        }),
-      )
-    })
-    await collection.cleanup()
-  })
-
-  it(`buffers resumed updates that arrive while persisted rows are hydrating`, async () => {
-    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const hydration = createDeferred<void>()
-    const collectionMetadata = new Map(resumeState())
-    const persistedRows = new Map<string | number, OracleRow>([
-      [
-        1,
-        {
-          id: 1,
-          name: `persisted`,
-          stable: `stable-1`,
-        },
-      ],
-    ])
-    const electricOptions = electricCollectionOptions<OracleRow>({
-      id: `concurrent-persisted-resume-oracle`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      syncMode: `progressive`,
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricOptions,
-        persistence: {
-          adapter: createPersistedAdapter(
-            collectionMetadata,
-            persistedRows,
-            hydration.promise,
-          ),
-        },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
-    expect(collection.status).not.toBe(`error`)
-    subscriber!([change(`update`, 1, `concurrent update`), upToDate])
-
-    expect(collection.status).not.toBe(`error`)
-    hydration.resolve()
-    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-    expect(collection.get(1)).toEqual(
-      expect.objectContaining({
-        name: `concurrent update`,
-        stable: `stable-1`,
-      }),
-    )
-    await collection.cleanup()
-  })
-
-  it(`does not advance durable Electric resume metadata past a rejected row commit`, async () => {
-    await runRejectedDurablePrefixWitness(`durable-prefix-fixed`, [
-      `first`,
-      `second`,
-    ])
-  })
-
-  it(`retains an accepted Electric source prefix when the next row commit rejects`, async () => {
-    await runRejectedDurablePrefixWitness(
-      `durable-prefix-after-success`,
-      [`accepted`, `rejected`],
-      true,
-    )
-  })
 
   const durablePrefixArbitrary = fc.tuple(
     fc.string({ maxLength: 12 }),
@@ -6564,17 +4166,23 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       names,
     )
   }
-  fcTest.prop([durablePrefixArbitrary], durablePrefixPropertyOptions(`fixed`))(
+  oracleReplayTest(fcTest).prop(
+    [durablePrefixArbitrary],
+    durablePrefixPropertyOptions(`fixed`),
+  )(
     `a rejected initial Electric row commit creates no durable source prefix (fixed)`,
     checkDurablePrefix,
   )
-  // Replay the random lane with the legacy seed/path variables and -t 'random'.
-  fcTest.prop([durablePrefixArbitrary], durablePrefixPropertyOptions(`random`))(
+  // A shared seed reseeds this random lane; a path replay selects it by property.
+  oracleReplayTest(fcTest, durablePrefixProperty).prop(
+    [durablePrefixArbitrary],
+    durablePrefixPropertyOptions(`random`),
+  )(
     `a rejected initial Electric row commit creates no durable source prefix (random)`,
     checkDurablePrefix,
   )
 
-  fcTest.prop(
+  oracleReplayTest(fcTest).prop(
     [
       fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {
         minLength: 2,
@@ -6606,228 +4214,6 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       /absent from source ledger/,
     )
   })
-
-  it(`rehydrates persisted rows and resume metadata after cleanup and restart`, async () => {
-    const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
-    mockSubscribe.mockImplementation((callback) => {
-      subscribers.push(callback)
-      return vi.fn()
-    })
-    const collectionMetadata = new Map(resumeState())
-    const persistedRows = new Map<string | number, OracleRow>([
-      [1, { id: 1, name: `persisted`, stable: `stable-1` }],
-    ])
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `persisted-restart-oracle`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `progressive`,
-          getKey: (row) => row.id,
-          startSync: true,
-        }),
-        persistence: {
-          adapter: createPersistedAdapter(collectionMetadata, persistedRows),
-        },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(collection.get(1)?.name).toBe(`persisted`))
-    await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-    subscribers[0]!([upToDate])
-    await collection.stateWhenReady()
-
-    await collection.cleanup()
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(subscribers).toHaveLength(2))
-    await vi.waitFor(() => expect(collection.get(1)?.name).toBe(`persisted`))
-    expect(collectionMetadata.get(`electric:resume`)).toEqual(
-      expect.objectContaining({ kind: `resume` }),
-    )
-    await collection.cleanup()
-  })
-
-  it(`does not let hydration from a cleaned-up lifecycle poison restart`, async () => {
-    const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
-    mockSubscribe.mockImplementation((callback) => {
-      subscribers.push(callback)
-      return vi.fn()
-    })
-    const firstHydration = createDeferred<void>()
-    const collectionMetadata = new Map(resumeState())
-    const persistedRows = new Map<string | number, OracleRow>([
-      [1, { id: 1, name: `current`, stable: `stable-1` }],
-    ])
-    const adapter = createPersistedAdapter(collectionMetadata, persistedRows)
-    const loadResumeSnapshot = adapter.loadResumeSnapshot
-    let hydrationCall = 0
-    adapter.loadResumeSnapshot = vi.fn(async (collectionId, ctx) => {
-      const snapshot = await loadResumeSnapshot(collectionId, ctx)
-      if (ctx?.includeRows === false) return snapshot
-      hydrationCall++
-      if (hydrationCall === 1) {
-        await firstHydration.promise
-        return {
-          ...snapshot,
-          rows: [
-            {
-              key: 1,
-              value: { id: 1, name: `stale`, stable: `stable-1` },
-            },
-          ],
-        }
-      }
-      return snapshot
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `persisted-stale-hydration-oracle`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `progressive`,
-          getKey: (row) => row.id,
-          startSync: true,
-        }),
-        persistence: { adapter },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(hydrationCall).toBe(1))
-    await collection.cleanup()
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(subscribers).toHaveLength(2))
-
-    firstHydration.resolve()
-    await vi.waitFor(() => expect(hydrationCall).toBe(2))
-    await vi.waitFor(() => expect(collection.get(1)?.name).toBe(`current`))
-    subscribers[1]!([upToDate])
-    await collection.stateWhenReady()
-    await collection.cleanup()
-  })
-
-  it(`does not hydrate persisted on-demand rows before subset demand`, async () => {
-    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const collectionMetadata = new Map<string, unknown>()
-    const persistedRows = new Map<string | number, OracleRow>([
-      [1, { id: 1, name: `persisted`, stable: `stable-1` }],
-    ])
-    const adapter = createPersistedAdapter(collectionMetadata, persistedRows)
-    const loadSubset = vi.fn(adapter.loadSubset)
-    adapter.loadSubset = loadSubset
-    const electricOptions = electricCollectionOptions<OracleRow>({
-      id: `persisted-on-demand-oracle`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      syncMode: `on-demand`,
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricOptions,
-        persistence: { adapter },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
-    subscriber!([upToDate])
-    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-
-    expect(loadSubset).not.toHaveBeenCalled()
-    expect(collection.has(1)).toBe(false)
-    await collection.cleanup()
-  })
-
-  it.each(
-    [`reset`, `delete`, `move-out`].flatMap((removal) =>
-      [`none`, `before-commit`, `after-commit`].map((acquire) => ({
-        removal,
-        acquire,
-      })),
-    ),
-  )(
-    `keeps removed rows unknown across $removal and subset acquisition $acquire`,
-    async ({ removal, acquire }) => {
-      const trace = createOracleCollection(
-        `presence-${removal}-${acquire}`,
-        `on-demand`,
-        createMetadata(new Map()).api,
-      )
-      const snapshot = createDeferred<void>()
-      mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
-      let acquired: Promise<unknown> | undefined
-      const request = () => {
-        acquired = Promise.resolve(
-          trace.collection._sync.loadSubset({
-            where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(2)]),
-          }),
-        )
-        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
-      }
-      try {
-        const inserted = change(`insert`, 1, `complete`)
-        trace.subscriber([
-          { ...inserted, headers: { ...inserted.headers, tags: [`left`] } },
-          upToDate,
-        ])
-        expect(trace.collection.get(1)?.stable).toBe(`stable-1`)
-        const removed: Message<OracleRow> =
-          removal === `reset`
-            ? mustRefetch
-            : removal === `delete`
-              ? change(`delete`, 1, `complete`)
-              : ({
-                  headers: {
-                    event: `move-out`,
-                    patterns: [{ pos: 0, value: `left` }],
-                  },
-                } as Message<OracleRow>)
-        trace.subscriber([removed])
-        if (acquire === `before-commit`) request()
-        trace.subscriber([subsetEnd])
-        expect(trace.collection.has(1)).toBe(false)
-        if (acquire === `after-commit`) request()
-        snapshot.resolve()
-        await acquired
-        trace.subscriber([change(`update`, 1, `partial`), upToDate])
-        expect(trace.collection.has(1)).toBe(false)
-      } finally {
-        snapshot.resolve()
-        await trace.collection.cleanup()
-        await acquired
-      }
-    },
-  )
 
   electricHistoryProperty(
     `electric.subset-request-row-validity`,
@@ -6919,211 +4305,6 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       ],
     ],
   )
-
-  it(`applies on-demand catch-up updates to hydrated persisted rows`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const collectionMetadata = new Map(resumeState())
-    const persistedRows = new Map<string | number, OracleRow>([
-      [1, { id: 1, name: `persisted`, stable: `stable-1` }],
-    ])
-    const collection = createCollection(
-      persistedCollectionOptions<
-        OracleRow,
-        string | number,
-        never,
-        ElectricCollectionUtils<OracleRow>
-      >({
-        ...electricCollectionOptions<OracleRow>({
-          id: `on-demand-persisted-catch-up`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `on-demand`,
-          getKey: (row) => row.id,
-          startSync: true,
-        }),
-        persistence: {
-          adapter: createPersistedAdapter(collectionMetadata, persistedRows),
-        },
-      }),
-    )
-
-    collection.startSyncImmediate()
-    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
-    await collection._sync.loadSubset({})
-    subscriber([change(`update`, 1, `caught up`), upToDate])
-    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-
-    expect(collection.get(1)).toEqual(
-      expect.objectContaining({ name: `caught up`, stable: `stable-1` }),
-    )
-    expect(collectionMetadata.get(`electric:resume`)).toEqual(
-      expect.objectContaining({ kind: `resume`, offset: `20_0` }),
-    )
-    await collection.cleanup()
-  })
-
-  it.each([
-    {
-      name: `malformed`,
-      seed: new Map<string, unknown>([
-        [
-          `electric:resume`,
-          {
-            kind: `resume`,
-            requiresTagState: false,
-            offset: 10,
-            handle: `shape-1`,
-            shapeId,
-            updatedAt: 1,
-          },
-        ],
-      ]),
-    },
-    {
-      name: `reset`,
-      seed: new Map<string, unknown>([
-        [`electric:resume`, { kind: `reset`, updatedAt: 1 }],
-      ]),
-    },
-    {
-      name: `incompatible`,
-      seed: new Map<string, unknown>([
-        [
-          `electric:resume`,
-          {
-            kind: `resume`,
-            requiresTagState: false,
-            offset: `10_0`,
-            handle: `shape-1`,
-            shapeId: `different-shape`,
-            updatedAt: 1,
-          },
-        ],
-      ]),
-    },
-  ])(`starts a full snapshot for $name resume metadata`, async ({ seed }) => {
-    const metadata = createMetadata(seed)
-    const trace = createOracleCollection(
-      `non-resumable-metadata`,
-      `eager`,
-      metadata.api,
-    )
-
-    expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
-      offset: undefined,
-      handle: undefined,
-    })
-    trace.subscriber([change(`insert`, 1, `full snapshot`), upToDate])
-
-    expect(trace.collection.status).toBe(`ready`)
-    expect(trace.collection.get(1)).toEqual(
-      expect.objectContaining({ stable: `stable-1` }),
-    )
-    expect(metadata.state.get(`electric:resume`)).toEqual(
-      expect.objectContaining({ kind: `resume`, offset: `20_0` }),
-    )
-    await trace.collection.cleanup()
-  })
-
-  it(`does not mix an explicit resume option with persisted metadata`, async () => {
-    const metadata = createMetadata(resumeState())
-    const trace = createOracleCollection(
-      `explicit-resume`,
-      `on-demand`,
-      metadata.api,
-      { handle: `explicit-handle` },
-    )
-
-    expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
-      offset: `now`,
-      handle: `explicit-handle`,
-    })
-    trace.subscriber([upToDate])
-    expect(trace.collection.status).toBe(`ready`)
-    await trace.collection.cleanup()
-  })
-
-  // An explicit source cursor owns this run's resume decision. A malformed
-  // durable record is still invalid for a later implicit run, but it cannot
-  // authorize this run to write a reset before any source evidence arrives.
-  // The metadata Map observes that side effect at startup, before up-to-date
-  // can legitimately stage a fresh resume record.
-  it.each([
-    { name: `offset`, options: { offset: `10_0` as Offset } },
-    { name: `handle`, options: { handle: `explicit-handle` } },
-  ])(
-    `leaves malformed durable resume untouched with explicit $name`,
-    async ({ options }) => {
-      const malformed = { kind: `resume`, offset: 10, handle: `stale` }
-      const metadata = createMetadata(new Map([[`electric:resume`, malformed]]))
-      const trace = createOracleCollection(
-        `explicit-malformed-${options}`,
-        `on-demand`,
-        metadata.api,
-        options,
-      )
-      try {
-        expect(metadata.state.get(`electric:resume`)).toBe(malformed)
-      } finally {
-        await trace.collection.cleanup()
-      }
-    },
-  )
-
-  it(`lets an equal-timestamp reset dominate a stale hydrated resume`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const options = electricCollectionOptions<OracleRow>({
-      id: `equal-timestamp-reset`,
-      shapeOptions: {
-        url: `http://test-url`,
-        params: { table: `test_table` },
-      },
-      getKey: (row) => row.id,
-      startSync: true,
-    })
-    options.sync.importSyncMeta?.({
-      version: 1,
-      resume: {
-        kind: `resume`,
-        requiresTagState: false,
-        offset: `10_0`,
-        handle: `stale-handle`,
-        shapeId,
-        updatedAt: 1,
-      },
-      seenTxids: [],
-    })
-    const originalSync = options.sync
-    const metadata = createMetadata(
-      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-    )
-    const collection = createCollection({
-      ...options,
-      sync: {
-        ...originalSync,
-        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync({ ...params, metadata: metadata.api }),
-      },
-    })
-
-    expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
-      offset: undefined,
-      handle: undefined,
-    })
-    subscriber([change(`insert`, 1, `full snapshot`), upToDate])
-    expect(collection.status).toBe(`ready`)
-    await collection.cleanup()
-  })
 
   electricHistoryProperty(
     `electric.resume-metadata-merge`,
@@ -7362,287 +4543,154 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ],
   )
 
-  it(`retains the selected tag requirement when timestamps establish an order`, () => {
-    const merge = electricCollectionOptions<OracleRow>({
-      shapeOptions: { url: `http://test-url`, params: { table: `test_table` } },
-      getKey: (row) => row.id,
-    }).sync.mergeSyncMeta!
-    for (const olderTag of [undefined, false, true]) {
-      for (const newerTag of [undefined, false, true]) {
-        const state = (updatedAt: number, tag: boolean | undefined) => ({
-          version: 1,
-          seenTxids: [updatedAt],
-          resume: {
-            kind: `resume`,
-            offset: `10_0`,
-            handle: `shape-1`,
-            shapeId,
-            updatedAt,
-            ...(tag === undefined ? {} : { requiresTagState: tag }),
-          },
-        })
-        const older = state(1, olderTag)
-        const newer = state(2, newerTag)
-        const expected = { ...newer, seenTxids: [1, 2] }
-        expect(merge(older, newer)).toEqual(expected)
-        expect(merge(newer, older)).toEqual(expected)
-      }
-    }
-  })
-
-  it(`rejects an unseen partial update from an explicit eager resume`, async () => {
-    const metadata = createMetadata(resumeState())
-    const trace = createOracleCollection(
-      `explicit-eager-resume`,
-      `eager`,
-      metadata.api,
-      { offset: `10_0` as Offset, handle: `explicit-handle` },
-    )
-
-    trace.subscriber([change(`update`, 1, `partial`), upToDate])
-
-    expect(trace.collection.status).toBe(`error`)
-    expect(trace.collection.has(1)).toBe(false)
-    expect(metadata.state.get(`electric:resume`)).toEqual(
-      expect.objectContaining({ kind: `reset` }),
-    )
-    await trace.collection.cleanup()
-  })
-
-  it(`accepts complete replica updates from an explicit eager resume`, async () => {
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return vi.fn()
-    })
-    const collection = createCollection(
-      electricCollectionOptions<OracleRow>({
-        id: `explicit-full-replica-resume`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table`, replica: `full` },
-          offset: `10_0` as Offset,
-          handle: `explicit-handle`,
-        },
-        syncMode: `eager`,
-        getKey: (row) => row.id,
-        startSync: true,
-      }),
-    )
-
-    subscriber([
-      {
-        key: `1`,
-        value: { id: 1, name: `complete update`, stable: `stable-1` },
-        headers: { operation: `update` },
-      },
-      upToDate,
-    ])
-
-    expect(collection.status).toBe(`ready`)
-    expect(collection.get(1)).toEqual(
-      expect.objectContaining({
-        name: `complete update`,
-        stable: `stable-1`,
-      }),
-    )
-    await collection.cleanup()
-  })
-
-  it.each([10, 100])(
-    `subset acquisition avoids scanning the applied baseline with %s rows`,
-    async (size) => {
-      const trace = createOracleCollection(
-        `acquisition-work`,
-        `on-demand`,
-        createMetadata(new Map()).api,
-      )
-      try {
-        trace.subscriber([
-          ...Array.from({ length: size }, (_, id) =>
-            change(`insert`, id, `row`),
-          ),
-          upToDate,
-        ])
-        await trace.collection._sync.loadSubset({})
-        const keys = vi.spyOn(trace.collection._state.syncedData, `keys`)
-        try {
-          for (let i = 0; i < 3; i++)
-            await trace.collection._sync.loadSubset({})
-          expect(keys).not.toHaveBeenCalled()
-          for (let i = 0; i < 3; i++)
-            await trace.collection._sync.loadSubset({
-              where: new IR.Func(`eq`, [
-                new IR.PropRef([`id`]),
-                new IR.Value(size + i),
-              ]),
-            })
-          expect(keys).not.toHaveBeenCalled()
-          expect(mockStream.requestSnapshot).toHaveBeenCalledTimes(4)
-        } finally {
-          keys.mockRestore()
-        }
-      } finally {
-        await trace.collection.cleanup()
+  oracleReplayTest(it)(
+    `reconstructs persistence-interleaving campaigns and rejects ablated, out-of-range, and foreign histories`,
+    () => {
+      const campaigns = fc.sample(persistenceInterleavingCampaignArbitrary, {
+        seed: 18_530_601,
+        numRuns: 20,
+      })
+      for (const campaign of campaigns) {
+        expect(reconstructPersistenceInterleavingCampaign(campaign)).toEqual(
+          campaign,
+        )
+        expect(() =>
+          reconstructPersistenceInterleavingCampaign({
+            names: campaign.names,
+          }),
+        ).toThrow()
+        expect(() =>
+          reconstructPersistenceInterleavingCampaign({
+            histories: campaign.histories,
+          }),
+        ).toThrow()
+        expect(() =>
+          reconstructPersistenceInterleavingCampaign({
+            ...campaign,
+            histories: [`open-transaction-hydration`, `foreign`],
+          }),
+        ).toThrow()
+        expect(() =>
+          reconstructPersistenceInterleavingCampaign({
+            ...campaign,
+            names: [``, campaign.names[1]],
+          }),
+        ).toThrow()
       }
     },
   )
 
-  it(`ignores an unseen on-demand update without blocking readiness`, async () => {
-    const metadata = createMetadata(resumeState())
-    const trace = createOracleCollection(
-      `on-demand-unseen-update`,
-      `on-demand`,
-      metadata.api,
-    )
-
-    trace.subscriber([change(`update`, 1, `partial`), upToDate])
-
-    expect(trace.collection.status).toBe(`ready`)
-    expect(trace.collection.has(1)).toBe(false)
-    expect(metadata.state.get(`electric:resume`)).toEqual(
-      expect.objectContaining({ kind: `resume`, offset: `20_0` }),
-    )
-    await trace.collection.cleanup()
-  })
-
-  it(`records match and txid evidence for an ignored on-demand update`, async () => {
-    const trace = createOracleCollection(
-      `on-demand-ignored-update-evidence`,
-      `on-demand`,
-      createMetadata(resumeState()).api,
-    )
-    trace.subscriber([upToDate])
-
-    const pendingMatch = trace.collection.utils.awaitMatch(
-      (message) => `value` in message && message.value.id === 808,
-      100,
-    )
-    const pendingTxid = trace.collection.utils.awaitTxId(808, 100)
-    const update = change(`update`, 808, `ignored`)
-    update.headers.txids = [808]
-
-    trace.subscriber([update, upToDate])
-
-    await Promise.all([
-      expect(pendingMatch).resolves.toBe(true),
-      expect(pendingTxid).resolves.toBe(true),
-    ])
-    expect(trace.collection.has(808)).toBe(false)
-    await trace.collection.cleanup()
-  })
-
-  it(`reconstructs persistence-interleaving campaigns and rejects ablated, out-of-range, and foreign histories`, () => {
-    const campaigns = fc.sample(persistenceInterleavingCampaignArbitrary, {
-      seed: 18_530_601,
-      numRuns: 20,
-    })
-    for (const campaign of campaigns) {
-      expect(reconstructPersistenceInterleavingCampaign(campaign)).toEqual(
-        campaign,
-      )
+  oracleReplayTest(it)(
+    `rejects named wrong answers for persistence interleavings`,
+    () => {
+      const names: [string, string] = [`before`, `after`]
       expect(() =>
-        reconstructPersistenceInterleavingCampaign({
-          names: campaign.names,
-        }),
+        expectPersistenceInterleavingObservation(
+          {
+            kind: `open-transaction-hydration`,
+            hydrationStartedBeforeCommit: true,
+            hydrationOutcomeBeforeRelease: `AbortError`,
+            cachedRowBeforeRelease: true,
+            hydrationOutcome: `fulfilled`,
+            publicRowsAtHydrationSettlement: [],
+            deliveryErrors: [`InvalidPersistedCollectionConfigError`],
+            publicRows: [],
+            durableRows: [],
+            status: `ready`,
+            publicError: undefined,
+          },
+          names,
+        ),
       ).toThrow()
       expect(() =>
-        reconstructPersistenceInterleavingCampaign({
-          histories: campaign.histories,
-        }),
+        expectPersistenceInterleavingObservation(
+          {
+            kind: `subset-supersedes-absence`,
+            publicRows: [],
+            durableRows: [],
+            status: `ready`,
+            publicError: undefined,
+          },
+          names,
+        ),
       ).toThrow()
-      expect(() =>
-        reconstructPersistenceInterleavingCampaign({
-          ...campaign,
-          histories: [`open-transaction-hydration`, `foreign`],
-        }),
-      ).toThrow()
-      expect(() =>
-        reconstructPersistenceInterleavingCampaign({
-          ...campaign,
-          names: [``, campaign.names[1]],
-        }),
-      ).toThrow()
-    }
-  })
+    },
+  )
 
-  it(`rejects named wrong answers for persistence interleavings`, () => {
-    const names: [string, string] = [`before`, `after`]
-    expect(() =>
-      expectPersistenceInterleavingObservation(
-        {
-          kind: `open-transaction-hydration`,
-          hydrationStartedBeforeCommit: true,
-          hydrationOutcomeBeforeRelease: `AbortError`,
-          cachedRowBeforeRelease: true,
-          hydrationOutcome: `fulfilled`,
-          publicRowsAtHydrationSettlement: [],
-          deliveryErrors: [`InvalidPersistedCollectionConfigError`],
-          publicRows: [],
-          durableRows: [],
-          status: `ready`,
-          publicError: undefined,
-        },
-        names,
-      ),
-    ).toThrow()
-    expect(() =>
-      expectPersistenceInterleavingObservation(
-        {
-          kind: `subset-supersedes-absence`,
-          publicRows: [],
-          durableRows: [],
-          status: `ready`,
-          publicError: undefined,
-        },
-        names,
-      ),
-    ).toThrow()
-  })
-
-  fcTest.prop([persistenceInterleavingCampaignArbitrary], {
+  oracleReplayTest(fcTest).prop([persistenceInterleavingCampaignArbitrary], {
     seed: 18_530_601,
     numRuns: oracleRuns(4),
   })(
     `preserves persisted Electric interleavings (fixed)`,
     runPersistenceInterleavingCampaign,
   )
-
-  fcTest.prop(
-    [persistenceInterleavingCampaignArbitrary],
-    oraclePropertyOptions(4, persistenceInterleavingProperty),
-  )(
-    `preserves persisted Electric interleavings (random)`,
-    runPersistenceInterleavingCampaign,
-  )
 })
 
-if (
-  requestedPersistenceInterleavingProperty === persistenceInterleavingProperty
-) {
-  describe(`persisted Electric interleaving replay`, () => {
+// Each campaign's random lane has its own suite. An ordinary run runs it
+// beside the adapter laws. A path replay of its property runs only it.
+oracleReplayTest(describe, persistenceInterleavingProperty)(
+  `persisted Electric interleaving campaign`,
+  () => {
     beforeEach(resetElectricOracleMocks)
 
     fcTest.prop(
       [persistenceInterleavingCampaignArbitrary],
       oraclePropertyOptions(4, persistenceInterleavingProperty),
     )(
-      `preserves persisted Electric interleavings (replay)`,
+      `preserves persisted Electric interleavings (random)`,
       runPersistenceInterleavingCampaign,
     )
-  })
-}
+  },
+)
 
-if (requestedQueuedPresenceProperty === queuedPresenceProperty) {
-  describe(`Electric queued-presence replay`, () => {
+oracleReplayTest(describe, queuedPresenceProperty)(
+  `Electric queued-presence campaign`,
+  () => {
     beforeEach(resetElectricOracleMocks)
 
     fcTest.prop(
       queuedPresenceArbitraries,
-      queuedPresencePropertyOptions(`replay`),
+      queuedPresencePropertyOptions(`random`),
     )(
-      `generated queued Electric histories preserve staged presence and reset fences (replay)`,
+      `generated queued Electric histories preserve staged presence and reset fences (random)`,
       runQueuedPresenceCampaign,
     )
-  })
-}
+  },
+)
+
+// The checks run a history through production and compare each observation
+// with the model (or the authored snapshots they are given). The models are
+// independent folds of the same histories. The grammar generates the queued
+// presence and persistence interleaving campaigns.
+declareOracle({
+  check: [
+    runProcessGrammar,
+    runQueuedPresenceCampaign,
+    expectQueuedPresenceAtDurabilityHold,
+    checkInitialMoveOut,
+    runRejectedDurablePrefixWitness,
+    runPublicationBeforePersistenceWitness,
+    runPersistenceFailureCrashOnlyWitness,
+    assertPublicationEpochHistory,
+    runSchedulerPermutation,
+    runPersistenceInterleavingCampaign,
+    expectPersistenceInterleavingObservation,
+  ],
+  model: [
+    expectedSnapshots,
+    recomputeCommittedRows,
+    recomputedSnapshots,
+    expectedQueuedPresenceRows,
+    foldSourceLedgerThrough,
+    isSdkResetFramedPartition,
+    applyReferenceBatch,
+    createRetryModel,
+    applyRetryModel,
+    expectedRetryObservation,
+    expectedInitialMoveOutSnapshots,
+  ],
+  grammar: [
+    queuedPresenceArbitraries,
+    persistenceInterleavingCampaignArbitrary,
+  ],
+})

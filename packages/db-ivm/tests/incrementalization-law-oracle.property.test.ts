@@ -16,6 +16,12 @@ import { StreamBuilder } from '../src/d2.js'
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
 import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
   assertBinaryIncrementalization,
   assertUnaryIncrementalization,
   jsonLawValuePolicy,
@@ -178,47 +184,23 @@ type GroupedOutput = [
 ]
 
 const FIXED_SEED = 1741
-type GeneratedCampaign = {
-  name: `fixed` | `random` | `replay`
-  seed: number | undefined
-  path: string | undefined
-}
+const LAW_PROPERTY = `ivm.incrementalization-law`
+const RUNS = oracleRuns(100)
 
-const replaySeedText = process.env.TANSTACK_DB_IVM_ORACLE_SEED
-const replaySeed =
-  replaySeedText === undefined ? undefined : Number(replaySeedText)
-const RUNS = Number(process.env.TANSTACK_DB_IVM_ORACLE_RUNS ?? 100)
-const REPLAY_PATH = process.env.TANSTACK_DB_IVM_ORACLE_PATH
-if (
-  replaySeedText !== undefined &&
-  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-) {
-  throw new Error(`TANSTACK_DB_IVM_ORACLE_SEED must be an integer`)
-}
-if (!Number.isSafeInteger(RUNS) || RUNS <= 0) {
-  throw new Error(`TANSTACK_DB_IVM_ORACLE_RUNS must be a positive integer`)
-}
-if (REPLAY_PATH !== undefined && replaySeed === undefined) {
-  throw new Error(
-    `TANSTACK_DB_IVM_ORACLE_PATH requires TANSTACK_DB_IVM_ORACLE_SEED`,
-  )
-}
-
-const generatedCampaigns: Array<GeneratedCampaign> =
-  replaySeed === undefined
-    ? [
-        { name: `fixed`, seed: FIXED_SEED, path: undefined },
-        { name: `random`, seed: undefined, path: undefined },
-      ]
-    : [{ name: `replay`, seed: replaySeed, path: REPLAY_PATH }]
-
-function campaignParameters(campaign: (typeof generatedCampaigns)[number]) {
-  return {
-    numRuns: RUNS,
-    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
-    ...(campaign.path === undefined ? {} : { path: campaign.path }),
-  }
-}
+// The fixed campaign stands aside during a path replay. The random campaign is
+// a fresh seed, or the recorded seed and path of this property when replayed.
+const generatedCampaigns = [
+  {
+    name: `fixed`,
+    test: oracleReplayTest(it),
+    parameters: { numRuns: RUNS, seed: FIXED_SEED },
+  },
+  {
+    name: `random`,
+    test: oracleReplayTest(it, LAW_PROPERTY),
+    parameters: oraclePropertyOptions(100, LAW_PROPERTY),
+  },
+]
 
 /**
  * Reach of one generated campaign. The checker delivers every logical batch
@@ -285,8 +267,8 @@ const uniqueRowSplitDomain = {
  * index, which these laws drop before comparing. Publication timing and
  * SQL meaning are separate contracts.
  *
- * Normal runs pair a stable campaign with a new random seed. Replay variables
- * instead select only the recorded seed and shrink path.
+ * Normal runs pair a stable campaign with a new random seed. A replay of this
+ * property selects only its recorded seed and shrink path.
  */
 
 const weightedWorld = weightedStateArbitrary(
@@ -559,6 +541,10 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
     return worlds
   })
 
+// The grammar of legal ordered histories. Its calibration test checks that the
+// generated steps reach row promotions, which the ordered laws need.
+declareOracle({ grammar: [orderedHistory] })
+
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)
     .sort(([[leftKey, leftRank]], [[rightKey, rightRank]]) =>
@@ -584,267 +570,270 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
 }
 
 describe(`DBSP incrementalization laws`, () => {
-  it.each(generatedCampaigns)(
-    `checks consolidate, reduce, and groupBy against full recomputation ($name campaign)`,
-    async (campaign) => {
-      const reach = new CampaignReach()
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
-          async (worlds) => {
-            // Yield between complete histories so stress runs can report progress.
-            // Graph delivery and every observation within a history stay synchronous.
-            await setImmediate()
-            const batches = transitions(worlds)
-            reach.unary({
-              name: `consolidate`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              build: (input) => input.pipe(consolidate()),
-              evaluate: keyedIdentity,
-            })
-            reach.unary({
-              name: `reduce`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              build: (input) =>
-                input.pipe(
-                  reduce((values) => {
-                    if (values.length === 0) return []
-                    return [
-                      [
-                        values.reduce(
-                          (sum, [value, weight]) => sum + value * weight,
-                          0,
-                        ),
-                        1,
-                      ],
-                    ]
-                  }),
-                ),
-              evaluate: summed,
-            })
-            reach.unary({
-              name: `groupBy reduction`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: groupedPolicy,
-              build: (input) =>
-                input.pipe(
-                  groupBy(([key]) => ({ bucket: key % 2 }), {
-                    total: groupByOperators.sum(([, value]) => value),
-                    minimum: groupByOperators.min(([, value]) => value),
-                    maximum: groupByOperators.max(([, value]) => value),
-                    mean: groupByOperators.avg(([, value]) => value),
-                  }),
-                ),
-              evaluate: groupedAggregates,
-            })
-            reach.unary({
-              name: `groupBy mean alone`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: groupedMeanPolicy,
-              build: (input) =>
-                input.pipe(
-                  groupBy(([key]) => ({ bucket: key % 2 }), {
-                    mean: groupByOperators.avg(([, value]) => value),
-                  }),
-                ),
-              evaluate: groupedMean,
-            })
-            reach.unary({
-              name: `groupBy string extrema`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: groupedTextPolicy,
-              build: (input) =>
-                input.pipe(
-                  groupBy(([key]) => ({ bucket: key % 2 }), {
-                    lowFirst: groupByOperators.min(
-                      ([, value]) => textPair(value)[0],
-                    ),
-                    highFirst: groupByOperators.max(
-                      ([, value]) => textPair(value)[0],
-                    ),
-                    lowSecond: groupByOperators.min(
-                      ([, value]) => textPair(value)[1],
-                    ),
-                    highSecond: groupByOperators.max(
-                      ([, value]) => textPair(value)[1],
-                    ),
-                  }),
-                ),
-              evaluate: groupedTextExtrema,
-            })
-          },
-        ),
-        campaignParameters(campaign),
-      )
-      reach.expectBothDeliveries()
-    },
-  )
+  for (const campaign of generatedCampaigns)
+    campaign.test(
+      `checks consolidate, reduce, and groupBy against full recomputation (${campaign.name} campaign)`,
+      async () => {
+        const reach = new CampaignReach()
+        await fc.assert(
+          fc.asyncProperty(
+            fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
+            async (worlds) => {
+              // Yield between complete histories so stress runs can report progress.
+              // Graph delivery and every observation within a history stay synchronous.
+              await setImmediate()
+              const batches = transitions(worlds)
+              reach.unary({
+                name: `consolidate`,
+                initial: worlds[0]!,
+                batches,
+                inputPolicy: keyedPolicy,
+                outputPolicy: keyedPolicy,
+                build: (input) => input.pipe(consolidate()),
+                evaluate: keyedIdentity,
+              })
+              reach.unary({
+                name: `reduce`,
+                initial: worlds[0]!,
+                batches,
+                inputPolicy: keyedPolicy,
+                outputPolicy: keyedPolicy,
+                build: (input) =>
+                  input.pipe(
+                    reduce((values) => {
+                      if (values.length === 0) return []
+                      return [
+                        [
+                          values.reduce(
+                            (sum, [value, weight]) => sum + value * weight,
+                            0,
+                          ),
+                          1,
+                        ],
+                      ]
+                    }),
+                  ),
+                evaluate: summed,
+              })
+              reach.unary({
+                name: `groupBy reduction`,
+                initial: worlds[0]!,
+                batches,
+                inputPolicy: keyedPolicy,
+                outputPolicy: groupedPolicy,
+                build: (input) =>
+                  input.pipe(
+                    groupBy(([key]) => ({ bucket: key % 2 }), {
+                      total: groupByOperators.sum(([, value]) => value),
+                      minimum: groupByOperators.min(([, value]) => value),
+                      maximum: groupByOperators.max(([, value]) => value),
+                      mean: groupByOperators.avg(([, value]) => value),
+                    }),
+                  ),
+                evaluate: groupedAggregates,
+              })
+              reach.unary({
+                name: `groupBy mean alone`,
+                initial: worlds[0]!,
+                batches,
+                inputPolicy: keyedPolicy,
+                outputPolicy: groupedMeanPolicy,
+                build: (input) =>
+                  input.pipe(
+                    groupBy(([key]) => ({ bucket: key % 2 }), {
+                      mean: groupByOperators.avg(([, value]) => value),
+                    }),
+                  ),
+                evaluate: groupedMean,
+              })
+              reach.unary({
+                name: `groupBy string extrema`,
+                initial: worlds[0]!,
+                batches,
+                inputPolicy: keyedPolicy,
+                outputPolicy: groupedTextPolicy,
+                build: (input) =>
+                  input.pipe(
+                    groupBy(([key]) => ({ bucket: key % 2 }), {
+                      lowFirst: groupByOperators.min(
+                        ([, value]) => textPair(value)[0],
+                      ),
+                      highFirst: groupByOperators.max(
+                        ([, value]) => textPair(value)[0],
+                      ),
+                      lowSecond: groupByOperators.min(
+                        ([, value]) => textPair(value)[1],
+                      ),
+                      highSecond: groupByOperators.max(
+                        ([, value]) => textPair(value)[1],
+                      ),
+                    }),
+                  ),
+                evaluate: groupedTextExtrema,
+              })
+            },
+          ),
+          campaign.parameters,
+        )
+        reach.expectBothDeliveries()
+      },
+    )
 
-  it.each(generatedCampaigns)(
-    `checks simultaneous binary join deltas and split delivery ($name campaign)`,
-    async (campaign) => {
-      const reach = new CampaignReach()
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(fc.tuple(weightedWorld, weightedWorld), {
-            minLength: 2,
-            maxLength: 7,
+  for (const campaign of generatedCampaigns)
+    campaign.test(
+      `checks simultaneous binary join deltas and split delivery (${campaign.name} campaign)`,
+      async () => {
+        const reach = new CampaignReach()
+        await fc.assert(
+          fc.asyncProperty(
+            fc.array(fc.tuple(weightedWorld, weightedWorld), {
+              minLength: 2,
+              maxLength: 7,
+            }),
+            async (generated) => {
+              await setImmediate()
+              const worlds = generated.map(([left, right]) => ({ left, right }))
+              const batches = worlds.slice(1).map((next, index) => ({
+                left: weightedDifference(
+                  worlds[index]!.left,
+                  next.left,
+                  keyedPolicy,
+                  CANCELLATION_ROW,
+                ),
+                right: weightedDifference(
+                  worlds[index]!.right,
+                  next.right,
+                  keyedPolicy,
+                  CANCELLATION_ROW,
+                ),
+              }))
+              reach.binary({
+                name: `inner join`,
+                initialLeft: worlds[0]!.left,
+                initialRight: worlds[0]!.right,
+                batches,
+                leftPolicy: keyedPolicy,
+                rightPolicy: keyedPolicy,
+                outputPolicy: joinPolicy,
+                build: (left, right) => left.pipe(innerJoined(right)),
+                evaluate: joined,
+              })
+              reach.binary({
+                name: `full outer join`,
+                initialLeft: worlds[0]!.left,
+                initialRight: worlds[0]!.right,
+                batches,
+                leftPolicy: keyedPolicy,
+                rightPolicy: keyedPolicy,
+                outputPolicy: outerJoinPolicy,
+                build: (left, right) => left.pipe(join(right, `full`)),
+                evaluate: fullJoined,
+              })
+              reach.binary({
+                name: `left outer join`,
+                initialLeft: worlds[0]!.left,
+                initialRight: worlds[0]!.right,
+                batches,
+                leftPolicy: keyedPolicy,
+                rightPolicy: keyedPolicy,
+                outputPolicy: outerJoinPolicy,
+                build: (left, right) => left.pipe(join(right, `left`)),
+                evaluate: leftJoined,
+              })
+              reach.binary({
+                name: `right outer join`,
+                initialLeft: worlds[0]!.left,
+                initialRight: worlds[0]!.right,
+                batches,
+                leftPolicy: keyedPolicy,
+                rightPolicy: keyedPolicy,
+                outputPolicy: outerJoinPolicy,
+                build: (left, right) => left.pipe(join(right, `right`)),
+                evaluate: rightJoined,
+              })
+              reach.binary({
+                name: `join then grouped reduction`,
+                initialLeft: worlds[0]!.left,
+                initialRight: worlds[0]!.right,
+                batches,
+                leftPolicy: keyedPolicy,
+                rightPolicy: keyedPolicy,
+                outputPolicy: keyedPolicy,
+                build: (left, right) =>
+                  left.pipe(
+                    innerJoined(right),
+                    map(([key, [leftValue, rightValue]]) => [
+                      key,
+                      leftValue * rightValue,
+                    ]),
+                    reduce((values) => {
+                      if (values.length === 0) return []
+                      return [
+                        [
+                          values.reduce(
+                            (sum, [value, weight]) => sum + value * weight,
+                            0,
+                          ),
+                          1,
+                        ],
+                      ]
+                    }),
+                  ),
+                evaluate: joinedSums,
+              })
+            },
+          ),
+          campaign.parameters,
+        )
+        reach.expectBothDeliveries()
+      },
+    )
+
+  for (const campaign of generatedCampaigns)
+    campaign.test(
+      `checks global ordering and window membership (${campaign.name} campaign)`,
+      async () => {
+        const reach = new CampaignReach()
+        await fc.assert(
+          fc.asyncProperty(orderedHistory, async (worlds) => {
+            await setImmediate()
+            reach.unary({
+              name: `ordered window`,
+              initial: worlds[0]!,
+              batches: transitions(worlds),
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              splitDomain: uniqueRowSplitDomain,
+              build: (input) =>
+                input.pipe(
+                  orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+                  withoutIndex(),
+                ),
+              evaluate: firstThree,
+            })
+            reach.unary({
+              name: `grouped orderBy`,
+              initial: worlds[0]!,
+              batches: transitions(worlds),
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              splitDomain: uniqueRowSplitDomain,
+              build: (input) =>
+                input.pipe(
+                  groupedOrderByWithFractionalIndex((rank) => rank, {
+                    groupKeyFn: (key) => key % 2,
+                    limit: 2,
+                  }),
+                  map(([key, [rank]]) => [key, rank] as Keyed),
+                ),
+              evaluate: firstTwoPerParity,
+            })
           }),
-          async (generated) => {
-            await setImmediate()
-            const worlds = generated.map(([left, right]) => ({ left, right }))
-            const batches = worlds.slice(1).map((next, index) => ({
-              left: weightedDifference(
-                worlds[index]!.left,
-                next.left,
-                keyedPolicy,
-                CANCELLATION_ROW,
-              ),
-              right: weightedDifference(
-                worlds[index]!.right,
-                next.right,
-                keyedPolicy,
-                CANCELLATION_ROW,
-              ),
-            }))
-            reach.binary({
-              name: `inner join`,
-              initialLeft: worlds[0]!.left,
-              initialRight: worlds[0]!.right,
-              batches,
-              leftPolicy: keyedPolicy,
-              rightPolicy: keyedPolicy,
-              outputPolicy: joinPolicy,
-              build: (left, right) => left.pipe(innerJoined(right)),
-              evaluate: joined,
-            })
-            reach.binary({
-              name: `full outer join`,
-              initialLeft: worlds[0]!.left,
-              initialRight: worlds[0]!.right,
-              batches,
-              leftPolicy: keyedPolicy,
-              rightPolicy: keyedPolicy,
-              outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(join(right, `full`)),
-              evaluate: fullJoined,
-            })
-            reach.binary({
-              name: `left outer join`,
-              initialLeft: worlds[0]!.left,
-              initialRight: worlds[0]!.right,
-              batches,
-              leftPolicy: keyedPolicy,
-              rightPolicy: keyedPolicy,
-              outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(join(right, `left`)),
-              evaluate: leftJoined,
-            })
-            reach.binary({
-              name: `right outer join`,
-              initialLeft: worlds[0]!.left,
-              initialRight: worlds[0]!.right,
-              batches,
-              leftPolicy: keyedPolicy,
-              rightPolicy: keyedPolicy,
-              outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(join(right, `right`)),
-              evaluate: rightJoined,
-            })
-            reach.binary({
-              name: `join then grouped reduction`,
-              initialLeft: worlds[0]!.left,
-              initialRight: worlds[0]!.right,
-              batches,
-              leftPolicy: keyedPolicy,
-              rightPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              build: (left, right) =>
-                left.pipe(
-                  innerJoined(right),
-                  map(([key, [leftValue, rightValue]]) => [
-                    key,
-                    leftValue * rightValue,
-                  ]),
-                  reduce((values) => {
-                    if (values.length === 0) return []
-                    return [
-                      [
-                        values.reduce(
-                          (sum, [value, weight]) => sum + value * weight,
-                          0,
-                        ),
-                        1,
-                      ],
-                    ]
-                  }),
-                ),
-              evaluate: joinedSums,
-            })
-          },
-        ),
-        campaignParameters(campaign),
-      )
-      reach.expectBothDeliveries()
-    },
-  )
-
-  it.each(generatedCampaigns)(
-    `checks global ordering and window membership ($name campaign)`,
-    async (campaign) => {
-      const reach = new CampaignReach()
-      await fc.assert(
-        fc.asyncProperty(orderedHistory, async (worlds) => {
-          await setImmediate()
-          reach.unary({
-            name: `ordered window`,
-            initial: worlds[0]!,
-            batches: transitions(worlds),
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            splitDomain: uniqueRowSplitDomain,
-            build: (input) =>
-              input.pipe(
-                orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
-                withoutIndex(),
-              ),
-            evaluate: firstThree,
-          })
-          reach.unary({
-            name: `grouped orderBy`,
-            initial: worlds[0]!,
-            batches: transitions(worlds),
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            splitDomain: uniqueRowSplitDomain,
-            build: (input) =>
-              input.pipe(
-                groupedOrderByWithFractionalIndex((rank) => rank, {
-                  groupKeyFn: (key) => key % 2,
-                  limit: 2,
-                }),
-                map(([key, [rank]]) => [key, rank] as Keyed),
-              ),
-            evaluate: firstTwoPerParity,
-          })
-        }),
-        campaignParameters(campaign),
-      )
-      reach.expectBothDeliveries()
-    },
-  )
+          campaign.parameters,
+        )
+        reach.expectBothDeliveries()
+      },
+    )
 
   // Reconstruction: the fixed ordered campaign reaches promotion. Sampling
   // its arbitrary with its seed and run count yields exactly the histories it

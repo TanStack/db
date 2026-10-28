@@ -9,6 +9,7 @@ import { TransactionScope } from './transactions.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
+import { LiveQueryObserverClient } from './live-query-observer-client.js'
 import { createDeferred } from './deferred.js'
 import {
   getLiveQueryHash,
@@ -17,9 +18,12 @@ import {
   resumeDeferredLiveQueryCollections,
 } from './live-query-options.js'
 import { codedMessage, devBuild } from './error-message.js'
+import { truncatesSourceKey } from './collection/state.js'
+import type { LiveQueryObserverClientHost } from './live-query-observer-client.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
+import type { Deferred } from './deferred.js'
 import type {
   CollectionConfig,
   InferSchemaInput,
@@ -33,7 +37,11 @@ import type {
   DeferredLiveQueryCollections,
   LiveQueryOptions,
 } from './live-query-options.js'
-import type { PendingMetadataWrite } from './collection/state.js'
+import type {
+  CollectionStateManager,
+  PendingMetadataWrite,
+  StagedSyncTransaction,
+} from './collection/state.js'
 
 const collectionConfigFactory: unique symbol = Symbol.for(
   `@tanstack/db.collectionConfig.factory`,
@@ -138,6 +146,8 @@ export type DehydratedCollectionChunk<
 export type DehydratedLiveQuery = {
   queryHash: string
   dehydratedAt: number
+  /** Earlier ordinary markup may precede a shared Suspense result. */
+  initialSnapshot?: DehydratedLiveQueryResult
   snapshot?: DehydratedLiveQueryResult
   promise?: Promise<DehydratedLiveQueryResult>
 }
@@ -147,6 +157,8 @@ export type DehydratedLiveQueryResult<
   TKey extends string | number = string | number,
 > = {
   rows: Array<DehydratedCollectionRow<T, TKey>>
+  /** An initial SSR view may precede query readiness. Omitted means ready. */
+  status?: `loading` | `error`
 }
 
 export type DehydratedDbState = {
@@ -161,6 +173,8 @@ export type DbClientLiveQuery = {
   readonly dehydratedAt: number
   readonly status: DbClientLiveQueryState
   readonly promise: Promise<void>
+  /** Initial hydration view retained while a local preload completes. */
+  readonly initialSnapshot?: DehydratedLiveQueryResult
   readonly snapshot?: DehydratedLiveQueryResult
   readonly error?: unknown
 }
@@ -183,6 +197,7 @@ export type DehydrateDbClientOptions = {
 type CollectionRecord = {
   collection: AnyCollection
   shouldDehydrate: boolean
+  hydrated: boolean
 }
 
 type LiveQueryRecord = {
@@ -194,6 +209,7 @@ type LiveQueryRecord = {
   resultPromise: Promise<DehydratedLiveQueryResult>
   succeed: (snapshot: DehydratedLiveQueryResult) => void
   fail: (error: unknown) => void
+  initialSnapshot?: DehydratedLiveQueryResult
   snapshot?: DehydratedLiveQueryResult
   error?: unknown
 }
@@ -334,10 +350,73 @@ export function isCollectionOptions(
   return hasCollectionOptionsBrand(value)
 }
 
+/**
+ * A late hydration seed cannot supersede committed adapter work. Row data
+ * and row metadata are separate objects, so each has its own lookup. A
+ * wrapping sync's committed transactions that it has not handed to this
+ * Collection yet count as committed adapter work.
+ */
+function createAdapterAuthorityLookups<TKey extends string | number>(
+  state: CollectionStateManager<any, TKey, any, any>,
+): {
+  rows: (key: TKey) => boolean
+  metadata: (key: TKey) => boolean
+} {
+  const rowKeys = new Set<TKey>()
+  const metadataKeys = new Set<TKey>()
+  // The latest source truncate, with the held seeds a schema reset kept.
+  let truncate: StagedSyncTransaction<TKey> | undefined =
+    state.hasAppliedAdapterTruncate
+      ? {
+          truncate: true,
+          operations: [],
+          rowMetadataWrites: new Map(),
+          preserveHydrationSeedKeys: state.adapterTruncateKeptKeys,
+          sourceTruncate: true,
+        }
+      : undefined
+  for (const transaction of [
+    ...state.pendingSyncedTransactions.filter((pending) => pending.committed),
+    ...state.getStagedSyncTransactions(),
+  ]) {
+    if (
+      transaction.truncate &&
+      (!transaction.preserveHydrationSeedKeys || transaction.sourceTruncate)
+    )
+      truncate = transaction
+    for (const operation of transaction.operations)
+      if (!transaction.preserveHydrationSeedKeys?.has(operation.key as TKey))
+        rowKeys.add(operation.key as TKey)
+    for (const key of transaction.rowMetadataWrites.keys())
+      if (!transaction.preserveHydrationSeedKeys?.has(key))
+        metadataKeys.add(key)
+  }
+  return {
+    rows: (key) =>
+      (truncate !== undefined && truncatesSourceKey(truncate, key)) ||
+      rowKeys.has(key) ||
+      state.appliedAdapterKeys?.get(key) === true ||
+      (state.syncedData.has(key) && !state.hydrationSeedKeys.has(key)),
+    // A key whose row an applied adapter write deleted is in the map too.
+    metadata: (key) =>
+      (truncate !== undefined && truncatesSourceKey(truncate, key)) ||
+      metadataKeys.has(key) ||
+      state.appliedAdapterKeys?.has(key) === true,
+  }
+}
+
 export class DbClient {
   private collectionsById = new Map<string, CollectionRecord>()
   private pendingHydration = new Map<string, Array<DehydratedCollectionChunk>>()
   private liveQueries = new Map<string, LiveQueryRecord>()
+  // A committed reader cannot consume a later boundary's server snapshot.
+  // Retain transported records for server getters until this client cleans up.
+  private hydratedLiveQueries = new Map<string, LiveQueryRecord>()
+  private ssrQueryWaiters = new Map<
+    string,
+    Deferred<void> | { cause: unknown }
+  >()
+  private ssrStreamFailure: { cause: unknown } | undefined
   private preloadedLiveQueries = new Map<
     string,
     {
@@ -398,7 +477,7 @@ export class DbClient {
 
     let resumeFailure: { error: unknown } | undefined
     try {
-      resumeDeferredLiveQueryCollections(deferredCollections)
+      resumeDeferredLiveQueryCollections(deferredCollections, true)
     } catch (error) {
       resumeFailure = { error }
     }
@@ -422,7 +501,7 @@ export class DbClient {
     const preloaded = this.preloadedLiveQueries.get(queryHash)
     if (!preloaded) return
     preloaded.observer.dispose()
-    void preloaded.collection.cleanup().catch(() => {})
+    void preloaded.collection.cleanup({ dependents: true }).catch(() => {})
     this.preloadedLiveQueries.delete(queryHash)
   }
 
@@ -437,8 +516,13 @@ export class DbClient {
     const queryHash = getLiveQueryHash(prepared, options.queryKey)
     const sources = getPreparedLiveQuerySources(prepared)
     const existing = this.liveQueries.get(queryHash)
-    if (existing && existing.status !== `error`) {
-      this._assertLiveQuerySources(queryHash, sources)
+    this._assertLiveQuerySources(queryHash, sources)
+    if (
+      existing &&
+      (existing.status === `pending` ||
+        (existing.status === `success` &&
+          existing.snapshot?.status === undefined))
+    ) {
       return { result: existing.promise }
     }
 
@@ -564,6 +648,7 @@ export class DbClient {
     this.collectionsById.set(collection.id, {
       collection,
       shouldDehydrate: !deferSyncStart,
+      hydrated: this.pendingHydration.has(collection.id),
     })
 
     if (materializeOptions?.initialData?.length) {
@@ -640,9 +725,10 @@ export class DbClient {
 
     const liveQueries = Array.from(this.liveQueries.values()).flatMap(
       (query): Array<DehydratedLiveQuery> => {
+        const decision = options.shouldDehydrateLiveQuery?.(query)
         const shouldDehydrate =
-          options.shouldDehydrateLiveQuery?.(query) ??
-          query.status === `success`
+          decision ??
+          (query.status === `success` || query.snapshot !== undefined)
         if (!shouldDehydrate || query.status === `error`) {
           return []
         }
@@ -651,9 +737,15 @@ export class DbClient {
           {
             queryHash: query.queryHash,
             dehydratedAt: query.dehydratedAt,
-            ...(query.snapshot
-              ? { snapshot: query.snapshot }
-              : { promise: query.resultPromise }),
+            ...(query.initialSnapshot &&
+            query.initialSnapshot !== query.snapshot
+              ? { initialSnapshot: query.initialSnapshot }
+              : {}),
+            ...(query.snapshot ? { snapshot: query.snapshot } : {}),
+            ...(query.status === `pending` &&
+            (!query.snapshot || this.ssrStreamingEnabled || decision === true)
+              ? { promise: query.resultPromise }
+              : {}),
           },
         ]
       },
@@ -669,6 +761,7 @@ export class DbClient {
     for (const chunk of state.collections) {
       const record = this.collectionsById.get(chunk.collectionId)
       if (record) {
+        record.hydrated = true
         this.applyRows(record.collection, chunk, `hydration`)
         continue
       }
@@ -692,9 +785,80 @@ export class DbClient {
     return () => this.listeners.delete(listener)
   }
 
+  /** @internal Supply transport behavior without coupling ordinary observers to SSR. */
+  _bindLiveQueryObserver<T extends object, TKey extends string | number>(
+    collection: Collection<T, TKey, any> | null,
+    queryHash: string | undefined,
+    suspendUntilReady: boolean,
+    host: LiveQueryObserverClientHost<T, TKey>,
+  ): LiveQueryObserverClient<T, TKey> {
+    return new LiveQueryObserverClient(
+      this,
+      collection,
+      queryHash,
+      suspendUntilReady,
+      host,
+    )
+  }
+
+  /** @internal Normalized source transport carries rows, not readiness. */
+  _hasSsrCollectionSnapshot(collection: AnyCollection): boolean {
+    const sources = getBuilderFromConfig(
+      collection.config,
+    )?.getSourceCollections()
+    if (sources)
+      return sources.every((source) => this._hasSsrCollectionSnapshot(source))
+    const record = this.collectionsById.get(collection.id)
+    return (
+      record?.collection === collection &&
+      (record.shouldDehydrate || record.hydrated)
+    )
+  }
+
   /** @internal */
   _setSsrStreamingEnabled(enabled: boolean): void {
+    if (enabled && !this.ssrStreamingEnabled) {
+      this.ssrStreamFailure = undefined
+      this.ssrQueryWaiters.clear()
+    } else if (!enabled && this.ssrStreamingEnabled && !this.ssrStreamFailure)
+      this.failSsrQueryWaiters(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `The DB stream ended before the server-rendered query snapshot arrived.`
+            : codedMessage(253),
+        ),
+      )
     this.ssrStreamingEnabled = enabled
+  }
+
+  /** @internal Wait for transport without claiming or starting a local source. */
+  _waitForSsrLiveQuery(
+    queryHash: string,
+    forHydration = false,
+  ): Promise<void> | undefined {
+    let waiter = this.ssrQueryWaiters.get(queryHash)
+    if (waiter && `cause` in waiter) throw waiter.cause
+    if (!forHydration || this.hydratedLiveQueries.has(queryHash)) return
+    if (this.ssrStreamFailure) {
+      this.ssrQueryWaiters.set(queryHash, this.ssrStreamFailure)
+      throw this.ssrStreamFailure.cause
+    }
+    if (!this.ssrStreamingEnabled) return
+    if (!waiter) {
+      waiter = createDeferred<void>()
+      waiter.promise.catch(() => {})
+      this.ssrQueryWaiters.set(queryHash, waiter)
+    }
+    return waiter.promise
+  }
+
+  private failSsrQueryWaiters(cause: unknown): void {
+    // The wrapper distinguishes a terminal undefined cause from an open stream.
+    this.ssrStreamFailure ??= { cause }
+    for (const [queryHash, waiter] of this.ssrQueryWaiters) {
+      this.ssrQueryWaiters.set(queryHash, this.ssrStreamFailure)
+      if (`promise` in waiter) waiter.reject(this.ssrStreamFailure.cause)
+    }
   }
 
   /** @internal */
@@ -713,8 +877,14 @@ export class DbClient {
   }
 
   /** @internal */
-  _getLiveQuery(queryHash: string): DbClientLiveQuery | undefined {
-    return this.liveQueries.get(queryHash)
+  _getLiveQuery(
+    queryHash: string,
+    forServerSnapshot = false,
+  ): DbClientLiveQuery | undefined {
+    return (
+      (forServerSnapshot && this.hydratedLiveQueries.get(queryHash)) ||
+      this.liveQueries.get(queryHash)
+    )
   }
 
   /** @internal Reject a local stream whose hash already names different sources. */
@@ -747,16 +917,55 @@ export class DbClient {
     }
   }
 
+  /** @internal Capture the first server view without starting acquisition. */
+  _captureServerQuery(
+    queryHash: string,
+    snapshot: DehydratedLiveQueryResult,
+    sources?: ReadonlyArray<AnyCollection>,
+  ): void {
+    const existing = this.liveQueries.get(queryHash)
+    if (existing) {
+      if (sources) this._assertLiveQuerySources(queryHash, sources)
+      if (
+        existing.snapshot &&
+        (snapshot.status === undefined || existing.initialSnapshot)
+      )
+        return
+      if (snapshot.status !== undefined) existing.initialSnapshot ??= snapshot
+      existing.snapshot ??= snapshot
+      // A queued promise cannot carry an ordinary reader's later initial view.
+      // Advance transport without replacing that promise or its source claim.
+      existing.dehydratedAt = this.nextLiveQueryTimestamp()
+      this.emit({ type: `liveQueryUpdated`, query: existing })
+      return
+    }
+    const record = this.createLiveQueryRecord(
+      queryHash,
+      this.nextLiveQueryTimestamp(),
+    )
+    record.sources = sources
+    if (snapshot.status !== undefined) record.initialSnapshot = snapshot
+    this.liveQueries.set(queryHash, record)
+    this.emit({ type: `liveQueryAdded`, query: record })
+    record.succeed(snapshot)
+  }
+
   /** @internal */
   _registerLiveQuery(
     queryHash: string,
     promise: Promise<DehydratedLiveQueryResult>,
     sources?: ReadonlyArray<AnyCollection>,
   ): Promise<void> {
+    // Observe even a rejected incoming promise when a source conflict discards it.
+    void Promise.resolve(promise).catch(() => {})
+    if (sources) this._assertLiveQuerySources(queryHash, sources)
     const existing = this.liveQueries.get(queryHash)
-    if (existing && existing.status !== `error`) {
-      void Promise.resolve(promise).catch(() => {})
-      if (sources) this._assertLiveQuerySources(queryHash, sources)
+    if (
+      existing &&
+      (existing.status === `pending` ||
+        (existing.status === `success` &&
+          existing.snapshot?.status === undefined))
+    ) {
       return existing.promise
     }
 
@@ -765,6 +974,7 @@ export class DbClient {
       this.nextLiveQueryTimestamp(),
     )
     record.sources = sources
+    record.initialSnapshot = existing?.initialSnapshot
 
     this.liveQueries.set(queryHash, record)
     this.emit({ type: `liveQueryAdded`, query: record })
@@ -787,6 +997,7 @@ export class DbClient {
 
   /** @internal */
   _failPendingLiveQueries(error: unknown): void {
+    this.failSsrQueryWaiters(error)
     for (const record of this.liveQueries.values()) {
       if (record.status === `pending`) record.fail(error)
     }
@@ -815,13 +1026,13 @@ export class DbClient {
         )),
         ...(await Promise.allSettled(
           Array.from(liveQueryCollections, (collection) =>
-            collection.cleanup(),
+            collection.cleanup({ dependents: true }),
           ),
         )),
         ...(await Promise.allSettled(
           materializedCollections
             .filter((collection) => !liveQueryCollections.has(collection))
-            .map((collection) => collection.cleanup()),
+            .map((collection) => collection.cleanup({ dependents: true })),
         )),
       ]
       const failure = cleanupResults.find(
@@ -830,14 +1041,15 @@ export class DbClient {
       )
       if (failure) throw failure.reason
     } finally {
+      this._setSsrStreamingEnabled(false)
       this.transactionScope.clear()
       this.collectionsById.clear()
       this.pendingHydration.clear()
       this.liveQueries.clear()
+      this.hydratedLiveQueries.clear()
       this.preloadedLiveQueries.clear()
       this.liveQueryResources.clear()
       this.listeners.clear()
-      this.ssrStreamingEnabled = false
       this.ssrServerCleanupEnabled = false
       this.lastLiveQueryTimestamp = 0
     }
@@ -845,7 +1057,13 @@ export class DbClient {
 
   private hydrateLiveQuery(dehydratedQuery: DehydratedLiveQuery): void {
     const existing = this.liveQueries.get(dehydratedQuery.queryHash)
-    if (existing && existing.dehydratedAt >= dehydratedQuery.dehydratedAt) {
+    // Browser preload time cannot order server transport versions. Apply the
+    // active-record guard only when that active record came from transport.
+    if (
+      existing &&
+      existing === this.hydratedLiveQueries.get(dehydratedQuery.queryHash) &&
+      existing.dehydratedAt >= dehydratedQuery.dehydratedAt
+    ) {
       return
     }
 
@@ -862,9 +1080,16 @@ export class DbClient {
     if (existing?.status === `pending`) {
       void record.resultPromise.then(existing.succeed, existing.fail)
     }
+    record.initialSnapshot =
+      dehydratedQuery.initialSnapshot ?? dehydratedQuery.snapshot
+    this.hydratedLiveQueries.set(record.queryHash, record)
+    const waiter = this.ssrQueryWaiters.get(record.queryHash)
+    if (waiter && `promise` in waiter) waiter.resolve()
+    this.ssrQueryWaiters.delete(record.queryHash)
+    if (dehydratedQuery.promise) record.snapshot = dehydratedQuery.snapshot
     this.emit({ type: `liveQueryAdded`, query: record })
 
-    if (dehydratedQuery.snapshot) {
+    if (dehydratedQuery.snapshot && !dehydratedQuery.promise) {
       record.succeed(dehydratedQuery.snapshot)
     } else if (dehydratedQuery.promise) {
       Promise.resolve(dehydratedQuery.promise).then(record.succeed, record.fail)
@@ -957,23 +1182,23 @@ export class DbClient {
     },
     seedKind?: `initialData` | `hydration`,
   ): void {
-    const hasAuthoritativeAdapterWork =
-      collection._state.createAdapterAuthorityLookup()
-    const hasProjectedSyncedKey = collection._state.createSyncedKeyLookup()
-    const rows = chunk.rows.flatMap((row) => {
+    // A hydration seed supplies only the row data and row metadata that no
+    // committed adapter write has written; each object is judged alone.
+    const hydrating = seedKind === `hydration`
+    const authority = createAdapterAuthorityLookups(collection._state)
+    const seeds = chunk.rows.map((row) => {
       const value = collection.validateData(row.value, `insert`)
-      const key = collection.config.getKey(value)
-      const isAdapterAuthoritative =
-        seedKind === `hydration` && hasAuthoritativeAdapterWork(key)
-
-      return isAdapterAuthoritative ? [] : [{ ...row, key, value }]
+      return { ...row, key: collection.config.getKey(value), value }
     })
+    const rows = seeds.filter((row) => !hydrating || !authority.rows(row.key))
     const rowMetadataWrites = new Map<string | number, PendingMetadataWrite>()
 
-    for (const row of rows) {
-      if (row.metadata !== undefined) {
+    for (const row of seeds) {
+      if (hydrating && authority.metadata(row.key)) continue
+      // The latest seed wins whole, so one without metadata clears it.
+      if (row.metadata !== undefined)
         rowMetadataWrites.set(row.key, { type: `set`, value: row.metadata })
-      }
+      else if (hydrating) rowMetadataWrites.set(row.key, { type: `delete` })
     }
 
     if (seedKind) {
@@ -985,29 +1210,32 @@ export class DbClient {
       }
     }
 
-    if (rows.length > 0) {
-      collection._state.acceptSeedTransaction({
+    if (rows.length > 0 || rowMetadataWrites.size > 0) {
+      const applied = createDeferred<void>()
+      // Nothing awaits a seed's receipt; cleanup may still reject it.
+      void applied.promise.catch(() => undefined)
+      collection._state.acceptSyncTransaction({
         committed: true,
         applicationStarted: false,
         layoutChanged: false,
+        // A seed replaces any earlier seed of its row whole.
         operations: rows.map((row) => ({
-          type: hasProjectedSyncedKey(row.key)
-            ? (`update` as const)
-            : (`insert` as const),
+          type: `insert` as const,
           key: row.key,
           value: row.value,
         })),
         rowMetadataWrites,
-        // Hydrated metadata follows every row it describes.
-        explicitRowMetadataWrites: new Map(
-          [...rowMetadataWrites].map(([key, write]) => [
-            key,
-            { position: rows.length, write },
-          ]),
-        ),
+        // An accepted transaction's metadata writes are never rebuilt.
+        explicitRowMetadataWrites: new Map(),
         collectionMetadataWrites: new Map(),
-        applied: createDeferred<void>(),
-        preserveHydrationSeedKeys: seedKind !== undefined,
+        applied,
+        // A seed chunk keeps its keys' seed status.
+        preserveHydrationSeedKeys: seedKind
+          ? new Set([
+              ...rows.map((row) => row.key),
+              ...rowMetadataWrites.keys(),
+            ])
+          : undefined,
       })
     }
 

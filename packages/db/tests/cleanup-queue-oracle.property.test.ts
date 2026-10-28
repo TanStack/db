@@ -2,6 +2,7 @@ import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import { resetCleanupQueue } from './utils'
 
 /**
@@ -102,6 +103,29 @@ function stepModel(model: Model, id: number, action: Action): Model {
 // Callbacks in this model do not schedule or cancel other callbacks. Reentrant
 // callbacks need a separate contract. They must not inherit current Map-loop
 // behavior by accident.
+// The check: deliveries and reported task errors match the model at this cut.
+// Deliveries compare as a set, by id, so their publication order is not judged.
+function expectQueueState(
+  actual: ReadonlyArray<Delivery>,
+  model: Model,
+  errorCalls: ReadonlyArray<ReadonlyArray<unknown>>,
+): void {
+  const canonical = (rows: ReadonlyArray<Delivery>) =>
+    [...rows].sort((a, b) => a.id - b.id)
+  expect(canonical(actual)).toEqual(canonical(model.deliveries))
+  expect(
+    errorCalls
+      .map(([label, error]) => {
+        expect(label).toBe(`Error in CleanupQueue task:`)
+        expect(error).toBeInstanceOf(Error)
+        return (error as Error).message
+      })
+      .sort(),
+  ).toEqual([...model.errors].sort())
+}
+
+declareOracle({ check: [expectQueueState], model: [stepModel] })
+
 async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   vi.useFakeTimers()
   vi.setSystemTime(0)
@@ -119,20 +143,7 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
     deliveries: [],
     errors: [],
   }
-  const canonical = (rows: Array<Delivery>) =>
-    [...rows].sort((a, b) => a.id - b.id)
-  const check = () => {
-    expect(canonical(actual)).toEqual(canonical(model.deliveries))
-    expect(
-      errors.mock.calls
-        .map(([label, error]) => {
-          expect(label).toBe(`Error in CleanupQueue task:`)
-          expect(error).toBeInstanceOf(Error)
-          return (error as Error).message
-        })
-        .sort(),
-    ).toEqual([...model.errors].sort())
-  }
+  const check = () => expectQueueState(actual, model, errors.mock.calls)
   const advance = async (elapsed: number) => {
     await Promise.resolve() // Admit the whole synchronous registration batch.
     expect(vi.getTimerCount()).toBeLessThanOrEqual(1)

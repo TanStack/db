@@ -57,7 +57,9 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   your branch changes. It does not replace `pnpm lint`. If you work with a
   coding agent, the repository's hooks return oracle lint reports to it as it
   edits. Codex and Gemini CLI run project hooks only after you
-  trust them in `/hooks`; review them again when they change.
+  trust them in `/hooks`; review them again when they change. In a linked Git
+  worktree, Codex reads project hooks from the main checkout, not from the
+  worktree, so the hooks run there only after the main checkout has them.
 
 - Implement your changes and tests in the relevant package or example.
 - For a production change that adds, removes, or changes observable behavior,

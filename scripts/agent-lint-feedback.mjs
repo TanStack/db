@@ -10,7 +10,8 @@
  * adapter per harness reads its hook input and writes its response format.
  *
  *   --format=claude|codex|gemini|copilot   the harness that runs the hook
- *   --event=edit   after an edit: lint the edited files
+ *   --event=edit   after an edit: lint the edited files' oracle files, and the
+ *                  oracle files that reach them through test-module imports
  *   --event=stop   at the end of a turn: lint every file the branch changed
  *   --format=text  print the reports and exit 1: `pnpm lint:changed` lints
  *                  the changed files, `pnpm lint:oracles` (`--all`) every
@@ -31,17 +32,29 @@
  * shell command reaches the model at the end of the turn, when the stop hook
  * lints every changed file. When a harness's hook input names no file that
  * this script can find, the edit hook lints every changed file as well.
+ *
+ * A hook lints the checkout that the agent works in, which the hook input's
+ * `cwd` names. A harness can run this script from the checkout where the
+ * session started while the agent works in a worktree under `.worktrees/`.
+ * When `cwd` is in another checkout that has its own copy of this script, that
+ * copy runs instead, so a branch is linted by its own rule, as CI lints it.
+ * Without `cwd`, the checkout is the one that holds this script.
  */
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
 import oraclePlugin from './eslint-plugin-oracle/index.js'
-
-const root = fileURLToPath(new URL(`../`, import.meta.url))
+import { resolveImportedTestModule } from './eslint-plugin-oracle/rules/no-unit-test.js'
+import {
+  describeLoweredRunBudget,
+  isOracleFile,
+  loweredRunBudgetsBetween,
+  mergeBase,
+} from './check-oracle-run-counts.mjs'
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -60,6 +73,30 @@ if (![`edit`, `stop`].includes(options.event)) {
   throw new Error(`--event must be edit or stop`)
 }
 const isHook = options.format !== `text`
+const inputText = isHook ? readFileSync(0, `utf8`) : ``
+const input = inputText.trim() === `` ? {} : JSON.parse(inputText)
+const scriptRoot = realpathSync(fileURLToPath(new URL(`../`, import.meta.url)))
+
+/** The top level of the git checkout that holds `cwd`, or undefined. */
+function checkoutOf(cwd) {
+  try {
+    return realpathSync(
+      execFileSync(`git`, [`rev-parse`, `--show-toplevel`], {
+        cwd,
+        encoding: `utf8`,
+        stdio: [`ignore`, `pipe`, `ignore`],
+      }).trim(),
+    )
+  } catch {
+    return undefined
+  }
+}
+
+const root =
+  (typeof input.cwd === `string` ? checkoutOf(input.cwd) : undefined) ??
+  scriptRoot
+const ownScript = join(root, `scripts`, `agent-lint-feedback.mjs`)
+const delegate = root !== scriptRoot && existsSync(ownScript)
 
 function git(...args) {
   return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
@@ -73,33 +110,80 @@ function repositoryFiles(...outputs) {
 }
 
 /**
- * Every tracked oracle file. Git leaves out builds and untracked checkouts,
- * such as other branches' worktrees under `.worktrees/`.
+ * Every oracle file in the working tree, tracked or new. A new file that an
+ * agent has not added yet is linted like any other. Git leaves out ignored
+ * files: builds, and `.worktrees/`, where other checkouts and scratch copies
+ * live. A plain directory there has no `.git` entry, so without the ignore rule
+ * git would list each of its files as new work on this branch.
  */
-function trackedOracleFiles() {
-  return repositoryFiles(git(`ls-files`, `*oracle*.ts`, `*oracle*.tsx`))
+function oracleFilesInTree() {
+  return repositoryFiles(
+    git(`ls-files`, `--cached`, `--others`, `--exclude-standard`),
+  ).filter((file) => isOracleFile(file))
+}
+
+// A relative import or re-export. Reading too much is harmless: a specifier
+// that names no test module resolves to nothing.
+const relativeSpecifier =
+  /\b(?:from|import|require)\s*\(?\s*['"](\.{1,2}\/[^'"\n]*)['"]/g
+const dependencies = new Map()
+
+/** The test modules that a file imports or re-exports, as the rule resolves them. */
+function testModuleDependencies(file) {
+  if (!dependencies.has(file)) {
+    const found = existsSync(file)
+      ? [...readFileSync(file, `utf8`).matchAll(relativeSpecifier)]
+          .map(([, specifier]) => resolveImportedTestModule(file, specifier))
+          .filter((dependency) => dependency !== undefined)
+      : []
+    dependencies.set(file, found)
+  }
+  return dependencies.get(file)
+}
+
+/** Whether an oracle file is edited, or reaches an edited file through test modules. */
+function reachesEdited(oracle, edited) {
+  const seen = new Set([oracle])
+  const pending = [oracle]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (edited.has(current)) return true
+    for (const dependency of testModuleDependencies(current)) {
+      if (!seen.has(dependency)) {
+        seen.add(dependency)
+        pending.push(dependency)
+      }
+    }
+  }
+  return false
+}
+
+const pluginSources = join(root, `scripts`, `eslint-plugin-oracle`) + sep
+
+/**
+ * The oracle files that a lint of `files` must cover. The rule reads relative
+ * imports of test modules, so an oracle file is covered when it is named, or
+ * when it reaches a named file through test modules. Production files select
+ * nothing, because the rule does not follow them. A change to the rule's own
+ * sources changes every oracle result, so it selects every oracle file.
+ */
+function affectedOracleFiles(files) {
+  const edited = new Set(files)
+  const oracles = new Set(
+    [...oracleFilesInTree(), ...files].filter((file) => isOracleFile(file)),
+  )
+  if ([...edited].some((file) => file.startsWith(pluginSources)))
+    return [...oracles]
+  return [...oracles].filter((oracle) => reachesEdited(oracle, edited))
 }
 
 /**
  * Every file that the branch adds or changes, including uncommitted work.
- * Without a main branch to compare against, the branch's own commits cannot
- * be found, so this fails instead of linting only the uncommitted work.
+ * `mergeBase` fails without a main branch, instead of linting only the
+ * uncommitted work.
  */
 function changedFiles() {
-  const base = [`origin/main`, `main`]
-    .map((branch) => {
-      try {
-        return git(`merge-base`, `HEAD`, branch)
-      } catch {
-        return undefined
-      }
-    })
-    .find((commit) => commit !== undefined)
-  if (base === undefined) {
-    throw new Error(
-      `Cannot find origin/main or main to compare this branch against. Run \`git fetch origin main\`.`,
-    )
-  }
+  const base = mergeBase(root)
   return repositoryFiles(
     git(`diff`, `--name-only`, `--diff-filter=ACMR`, base),
     git(`ls-files`, `--others`, `--exclude-standard`),
@@ -143,21 +227,23 @@ function editedFiles(input) {
   )
 }
 
-function readHookInput() {
-  if (!isHook) return {}
-  const text = readFileSync(0, `utf8`)
-  return text.trim() === `` ? {} : JSON.parse(text)
-}
-
 function createLinter() {
   return new ESLint({
     cwd: root,
     overrideConfigFile: true,
     overrideConfig: [
       { ignores: [`**/dist/**`] },
-      { files: [`**/*.ts`, `**/*.tsx`], languageOptions: { parser: tsParser } },
+      {
+        files: [`**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.mjs`, `**/*.jsx`],
+        languageOptions: { parser: tsParser },
+      },
       { linterOptions: { noInlineConfig: true } },
-      oraclePlugin.configs.recommended,
+      // `lint` passes only oracle files, chosen by `isOracleFile`, so the rules
+      // apply to every file that it passes.
+      {
+        ...oraclePlugin.configs.recommended,
+        files: [`**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.mjs`, `**/*.jsx`],
+      },
     ],
   })
 }
@@ -167,7 +253,7 @@ async function lint(eslint, files) {
   const lintable = []
   for (const file of new Set(files)) {
     if (!existsSync(file) || relative(root, file).startsWith(`..`)) continue
-    if (!/oracle.*\.tsx?$/.test(basename(file))) continue
+    if (!isOracleFile(file)) continue
     if (await eslint.isPathIgnored(file)) continue
     lintable.push(file)
   }
@@ -215,7 +301,7 @@ function respond(report, input, scope) {
   }
   const header =
     scope === `edited`
-      ? `Oracle lint reports in the file you edited:`
+      ? `Oracle lint reports for the file you edited, and the oracle files that depend on it:`
       : `Oracle lint reports in this branch's changed files. Fix them before finishing:`
   const reason = `${header}\n${report}\nSee "How oracle work is scored" in AGENTS.md.`
   if (report === `` || (event === `stop` && input.stop_hook_active === true)) {
@@ -250,18 +336,54 @@ function respond(report, input, scope) {
   process.stdout.write(`${JSON.stringify(output)}\n`)
 }
 
-/** The files to lint: named on the command line, edited, or changed. */
+/**
+ * The oracle files to lint: every oracle file, or those that the named, edited,
+ * or changed files affect.
+ */
 function selectFiles(input) {
-  if (options.all) return { scope: `all`, files: trackedOracleFiles() }
+  if (options.all) return { scope: `all`, files: oracleFilesInTree() }
   if (positionals.length > 0) {
-    return { scope: `named`, files: positionals.map((file) => resolve(file)) }
+    return {
+      scope: `named`,
+      files: affectedOracleFiles(positionals.map((file) => resolve(file))),
+    }
   }
   const edited = options.event === `edit` && isHook ? editedFiles(input) : []
   return edited.length > 0
-    ? { scope: `edited`, files: edited }
-    : { scope: `changed`, files: changedFiles() }
+    ? { scope: `edited`, files: affectedOracleFiles(edited) }
+    : { scope: `changed`, files: affectedOracleFiles(changedFiles()) }
 }
 
-const input = readHookInput()
-const { scope, files } = selectFiles(input)
-respond(reportText(await lint(createLinter(), files)), input, scope)
+/**
+ * Lowered and removed run budgets, for a report over the branch's changed
+ * files. Either can be deliberate, so it is a report for review, not a lint
+ * error.
+ */
+function runBudgetReport(scope) {
+  if (scope !== `changed`) return ``
+  return loweredRunBudgetsBetween(root, mergeBase(root))
+    .map(
+      (budget) =>
+        `${budget.file}: ${describeLoweredRunBudget(budget)}. Restore it, or explain why in the pull request.`,
+    )
+    .join(`\n`)
+}
+
+if (delegate) {
+  // The session's checkout runs its own copy, which writes the response.
+  const result = spawnSync(
+    process.execPath,
+    [ownScript, ...process.argv.slice(2)],
+    { cwd: root, input: inputText, stdio: [`pipe`, `inherit`, `inherit`] },
+  )
+  process.exitCode = result.status ?? 1
+} else {
+  const { scope, files } = selectFiles(input)
+  const report = [
+    reportText(await lint(createLinter(), files)),
+    runBudgetReport(scope),
+  ]
+    .filter(Boolean)
+    .join(`\n`)
+  respond(report, input, scope)
+}

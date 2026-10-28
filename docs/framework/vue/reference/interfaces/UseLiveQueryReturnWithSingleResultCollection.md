@@ -5,6 +5,12 @@ title: UseLiveQueryReturnWithSingleResultCollection
 
 Defined in: [useLiveQuery.ts:108](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L108)
 
+Status, persistence, and error refs every `useLiveQuery` result has.
+
+## Extends
+
+- [`UseLiveQueryFlags`](UseLiveQueryFlags.md)
+
 ## Type Parameters
 
 ### T
@@ -41,23 +47,47 @@ Defined in: [useLiveQuery.ts:114](https://github.com/TanStack/db/blob/main/packa
 
 ***
 
+### health
+
+```ts
+health: ComputedRef<HealthNode | undefined>;
+```
+
+Defined in: [useLiveQuery.ts:69](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L69)
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`health`](UseLiveQueryFlags.md#health)
+
+***
+
 ### isCleanedUp
 
 ```ts
 isCleanedUp: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:124](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L124)
+Defined in: [useLiveQuery.ts:66](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L66)
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isCleanedUp`](UseLiveQueryFlags.md#iscleanedup)
 
 ***
 
-### isError
+### isCrashed
 
 ```ts
-isError: ComputedRef<boolean>;
+isCrashed: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:123](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L123)
+Defined in: [useLiveQuery.ts:65](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L65)
+
+Local storage or an invariant broke. Only a cascade cleanup and a fresh start recover.
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isCrashed`](UseLiveQueryFlags.md#iscrashed)
 
 ***
 
@@ -67,7 +97,11 @@ Defined in: [useLiveQuery.ts:123](https://github.com/TanStack/db/blob/main/packa
 isIdle: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:122](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L122)
+Defined in: [useLiveQuery.ts:61](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L61)
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isIdle`](UseLiveQueryFlags.md#isidle)
 
 ***
 
@@ -77,17 +111,27 @@ Defined in: [useLiveQuery.ts:122](https://github.com/TanStack/db/blob/main/packa
 isLoading: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:117](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L117)
+Defined in: [useLiveQuery.ts:59](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L59)
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isLoading`](UseLiveQueryFlags.md#isloading)
 
 ***
 
-### isPersistedReady
+### isLoadingError
 
 ```ts
-isPersistedReady: ComputedRef<boolean>;
+isLoadingError: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:120](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L120)
+Defined in: [useLiveQuery.ts:63](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L63)
+
+The first load failed: there is nothing to show.
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isLoadingError`](UseLiveQueryFlags.md#isloadingerror)
 
 ***
 
@@ -97,27 +141,27 @@ Defined in: [useLiveQuery.ts:120](https://github.com/TanStack/db/blob/main/packa
 isReady: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:118](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L118)
+Defined in: [useLiveQuery.ts:60](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L60)
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isReady`](UseLiveQueryFlags.md#isready)
 
 ***
 
-### persistedError
+### isSyncError
 
 ```ts
-persistedError: ComputedRef<unknown>;
+isSyncError: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:121](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L121)
+Defined in: [useLiveQuery.ts:68](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L68)
 
-***
+The data is shown, and a sync problem or failed request is in `health`.
 
-### persistedStatus
+#### Inherited from
 
-```ts
-persistedStatus: ComputedRef<LiveQueryPersistedStatus>;
-```
-
-Defined in: [useLiveQuery.ts:119](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L119)
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`isSyncError`](UseLiveQueryFlags.md#issyncerror)
 
 ***
 
@@ -137,4 +181,8 @@ Defined in: [useLiveQuery.ts:113](https://github.com/TanStack/db/blob/main/packa
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveQuery.ts:116](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L116)
+Defined in: [useLiveQuery.ts:58](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L58)
+
+#### Inherited from
+
+[`UseLiveQueryFlags`](UseLiveQueryFlags.md).[`status`](UseLiveQueryFlags.md#status)

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
@@ -33,7 +33,7 @@ import {
 
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), `..`)
 const repositoryDirectory = resolve(packageDirectory, `../..`)
-const fixture = `tests/oracle-replay.fixture.test.ts`
+const fixture = `tests/replay-guard-calibration.fixture.test.ts`
 
 function runReplay(
   args: Array<string> = [fixture],
@@ -207,6 +207,13 @@ describe(`guarded oracle replay`, () => {
     40_000,
   )
 
+  it(`witnesses a synchronous target through the synchronous witness`, () => {
+    const result = runReplay([fixture], `sync`)
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).toContain(`"witnessMode":"sync"`)
+    expect(result.output).toContain(`"executions":1`)
+  }, 60_000)
+
   it.each([
     {
       name: `wrong file`,
@@ -269,7 +276,6 @@ describe(`guarded oracle replay`, () => {
   }, 40_000)
 
   it.each([
-    [`coverage-registry.claim-churn`, `no-named-owner`],
     [`includes.scenario-statistics`, `statistics-only`],
     [`absent.property`, `unknown oracle property`],
   ])(
@@ -364,28 +370,19 @@ describe(`oracle replay reporting`, () => {
 })
 
 describe(`named oracle replay manifest`, () => {
-  it(`accounts for every registry name without deleting unavailable names`, () => {
+  it(`accounts for every registry name`, () => {
     expect(
       new Set(oracleReplayManifest.map(({ property }) => property)),
     ).toEqual(registeredOracleProperties)
-    expect(
-      oracleReplayManifest.filter(({ property }) =>
-        /^(coverage-registry|predicate-subtraction|load-subset-full-flow)\./.test(
-          property,
-        ),
-      ),
-    ).toHaveLength(14)
-    expect(
-      oracleReplayManifest.filter(({ property }) =>
-        property.startsWith(`load-subset-refinement.`),
-      ),
-    ).toHaveLength(11)
   })
 
   it(`maps literal owners and all computed publication cells to source files`, () => {
     for (const entry of oracleReplayManifest) {
       if (entry.file === undefined) continue
-      const source = readFileSync(join(repositoryDirectory, entry.file), `utf8`)
+      const source = readFileSync(
+        join(repositoryDirectory, entry.source ?? entry.file),
+        `utf8`,
+      )
       if (
         entry.property.startsWith(`includes-publication.`) &&
         entry.property.split(`.`).length === 4
@@ -433,6 +430,10 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(
           family?.[1] ?? `includes.matrix.flat-materialization`,
         )
+      } else if (/^(utils|comparison)\.\d+$/.test(entry.property)) {
+        // These oracles number their properties in file order.
+        const [family] = entry.property.split(`.`)
+        expect(source).toContain(`\`${family}.\${id}\``)
       } else if (entry.property.startsWith(`pagination.matrix.`)) {
         const [, , familyCell] = entry.property.split(`.`)
         const [family, cell] = familyCell!.split(`-`)
@@ -441,9 +442,95 @@ describe(`named oracle replay manifest`, () => {
         expect(Number(cell)).toBeLessThan(8)
         expect(source).toContain(`\`pagination.matrix.${family}-\${index}\``)
       } else {
-        expect(source).toContain(`\`${entry.property}\``)
+        // A module may spell the name in any string quotes.
+        expect(
+          [`\``, `'`, `"`].some((quote) =>
+            source.includes(`${quote}${entry.property}${quote}`),
+          ),
+          `${entry.source ?? entry.file} names ${entry.property}`,
+        ).toBe(true)
       }
     }
+  })
+
+  it(`replays every owner from a directory where its command finds the owner`, () => {
+    // A replay command runs from its entry's cwd. From the wrong directory,
+    // the runner's file filter matches no test file, and the replay reports
+    // only that its target never executed. So, for every owner, each file
+    // that the command names must exist from that directory, its last file
+    // must be the owner itself, and a test-runner config must apply there:
+    // the one that `--config` names, or a default config in the directory.
+    const defaultConfigs = [`vitest`, `vite`].flatMap((name) =>
+      [`ts`, `mts`, `js`, `mjs`].map(
+        (extension) => `${name}.config.${extension}`,
+      ),
+    )
+    const failures: Array<string> = []
+    for (const entry of oracleReplayManifest) {
+      if (entry.command === undefined || entry.file === undefined) continue
+      const cwd = resolve(repositoryDirectory, entry.cwd ?? `.`)
+      const owner = resolve(repositoryDirectory, entry.file)
+      const words = entry.command.split(` `)
+      const configAt = words.indexOf(`--config`)
+      const config = configAt === -1 ? undefined : words[configAt + 1]
+      const files = words.filter(
+        (word, index) =>
+          index !== configAt + 1 &&
+          /\.(m?[jt]sx?)$/.test(word) &&
+          !word.startsWith(`-`),
+      )
+      const problems = [
+        ...files
+          .filter((file) => !existsSync(resolve(cwd, file)))
+          .map((file) => `${file} is missing`),
+        ...(resolve(cwd, files.at(-1) ?? ``) === owner
+          ? []
+          : [`the target ${files.at(-1)} is not the owner`]),
+        ...((
+          config === undefined
+            ? defaultConfigs.some((name) => existsSync(join(cwd, name)))
+            : existsSync(resolve(cwd, config))
+        )
+          ? []
+          : [`no test-runner config applies`]),
+      ]
+      if (problems.length > 0) {
+        failures.push(
+          `${entry.property} (cwd ${entry.cwd}): ${problems.join(`, `)}`,
+        )
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it(`names an owner for every registered property`, () => {
+    // A registered name that no file owns would pass replay validation and
+    // run nothing. Every new registered property must name its owner.
+    expect(
+      oracleReplayManifest
+        .filter(({ status }) => status === `no-named-owner`)
+        .map(({ property }) => property),
+    ).toEqual([])
+  })
+
+  it(`replays a property without a shrink path from its seed alone`, () => {
+    // The LIKE oracle draws its cases from its own seeded generator, so the
+    // guarded runner, which witnesses a seed and a path, cannot witness it.
+    expect(
+      oracleReplayManifest
+        .filter(({ status }) => status === `seed-replay`)
+        .map(({ property, command, environment }) => ({
+          property,
+          command,
+          environment,
+        })),
+    ).toEqual([
+      {
+        property: `evaluators.like`,
+        command: `pnpm exec vitest run tests/query/compiler/evaluators-oracle.test.ts`,
+        environment: [`TANSTACK_DB_ORACLE_SEED`],
+      },
+    ])
   })
 
   it(`gives every index and pagination matrix property a direct test selector`, () => {

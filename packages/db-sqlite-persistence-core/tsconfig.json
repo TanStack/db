@@ -17,6 +17,6 @@
       "@tanstack/store": ["../store/src"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts"],
+  "include": ["src", "tests", "vite.config.ts", "vitest.mutants.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

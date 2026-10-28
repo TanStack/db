@@ -14,6 +14,7 @@ import {
   createDeduplicationTestSuite,
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
+  createLiveUpdatesUnitTestSuite,
   createMutationsTestSuite,
   createPaginationTestSuite,
   createPredicatesTestSuite,
@@ -272,5 +273,6 @@ describe(`Query Collection E2E Tests`, () => {
   createDeduplicationTestSuite(getConfig)
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
+  createLiveUpdatesUnitTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
 })

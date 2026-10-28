@@ -1,4 +1,5 @@
 import { expect } from 'vitest'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { MessageTracker } from '../test-utils.js'
 import type { MultiSet } from '../../src/multiset.js'
 
@@ -74,3 +75,5 @@ export class TopKMessageTracker<
     super.addMessage(message)
   }
 }
+
+declareOracle({ check: [TopKRelation] })

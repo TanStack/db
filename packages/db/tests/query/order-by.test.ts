@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { groupKeys } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
@@ -893,7 +894,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           query: (qb) =>
             qb
               .from({ vehicleDocuments: vehicleDocumentCollection })
-              .groupBy((q) => q.vehicleDocuments.vin)
+              .groupBy(groupKeys((q) => q.vehicleDocuments.vin))
               .orderBy((q) => q.vehicleDocuments.vin, `asc`)
               .select((q) => ({
                 vin: q.vehicleDocuments.vin,
@@ -952,7 +953,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           query: (qb) =>
             qb
               .from({ vehicleDocuments: vehicleDocumentCollection })
-              .groupBy((q) => q.vehicleDocuments.vin)
+              .groupBy(groupKeys((q) => q.vehicleDocuments.vin))
               .orderBy((q) => max(q.vehicleDocuments.updatedAt), `desc`)
               .select((q) => ({
                 vin: q.vehicleDocuments.vin,

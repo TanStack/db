@@ -24,7 +24,14 @@ function capture(
   const activeBuckets = graph.newInput<[string, true]>()
   const adapter = new BucketFacadeAdapter(
     `retention-probe`,
-    [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+    [
+      {
+        edgeId: `children`,
+        rows,
+        activeBuckets,
+        hasOrderBy: false,
+      },
+    ],
     () => {},
   )
   graph.finalize()

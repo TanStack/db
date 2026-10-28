@@ -7,7 +7,7 @@ title: DehydratedLiveQuery
 type DehydratedLiveQuery = object;
 ```
 
-Defined in: [packages/db/src/client.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L138)
+Defined in: [packages/db/src/client.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L141)
 
 ## Properties
 
@@ -17,7 +17,19 @@ Defined in: [packages/db/src/client.ts:138](https://github.com/TanStack/db/blob/
 dehydratedAt: number;
 ```
 
-Defined in: [packages/db/src/client.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L140)
+Defined in: [packages/db/src/client.ts:143](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L143)
+
+***
+
+### initialSnapshot?
+
+```ts
+optional initialSnapshot: DehydratedLiveQueryResult;
+```
+
+Defined in: [packages/db/src/client.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L145)
+
+Earlier ordinary markup may precede a shared Suspense result.
 
 ***
 
@@ -27,7 +39,7 @@ Defined in: [packages/db/src/client.ts:140](https://github.com/TanStack/db/blob/
 optional promise: Promise<DehydratedLiveQueryResult>;
 ```
 
-Defined in: [packages/db/src/client.ts:142](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L142)
+Defined in: [packages/db/src/client.ts:147](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L147)
 
 ***
 
@@ -37,7 +49,7 @@ Defined in: [packages/db/src/client.ts:142](https://github.com/TanStack/db/blob/
 queryHash: string;
 ```
 
-Defined in: [packages/db/src/client.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L139)
+Defined in: [packages/db/src/client.ts:142](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L142)
 
 ***
 
@@ -47,4 +59,4 @@ Defined in: [packages/db/src/client.ts:139](https://github.com/TanStack/db/blob/
 optional snapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L141)
+Defined in: [packages/db/src/client.ts:146](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L146)

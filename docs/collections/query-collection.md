@@ -388,8 +388,8 @@ In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and 
 In both modes, a direct cache patch leaves Query's error, invalidation, and
 freshness state intact. A direct write is not a successful fetch: an eager
 query that failed still reports that error, and a stale eager query may fetch
-on remount. Use `utils.clearError()` to retry after an error, or
-`utils.refetch()` when you need fresh server results.
+on remount. Use `utils.refetch({ throwOnError: true })` to retry after an
+error, or `utils.refetch()` when you need fresh server results.
 
 This works automatically when `select` returns the wrapper's array property itself, as in these simple wrappers:
 
@@ -637,8 +637,8 @@ starts first. It includes calls through the handler parameter, captured or
 external Collection references, manual transaction mutation functions, and
 `createOptimisticAction` mutation functions. Code can await the mutation's
 `isPersisted.promise` when it needs the complete transaction and its queued
-Collection application. Utilities that refetch, including `clearError()`,
-inherit the same phase boundary.
+Collection application. Utilities that refetch inherit the same phase
+boundary.
 
 The handler's `collection` parameter and every matching
 `transaction.mutations[n].collection` alias preserve the external Collection
@@ -682,8 +682,14 @@ The collection provides these utility methods via `collection.utils`:
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
   - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
-- `clearError()`: Refetch with errors enabled; retain the recorded error until a successful result applies to the Collection
-  - Uses the same phase-dependent boundary as `refetch()`. During a mutation handler, the promise can resolve at the fetch boundary before the result applies and clears the error.
+
+Failures appear in the health tree. Before the first successful result, a
+failed fetch fails the first load (`status: 'error'`). After the Collection is
+ready, a failed fetch or result application for any Query it observes sets the
+node's `failureReason`, because TanStack Query fetches again, and the next
+successful application clears it. Read it from `collection.health` or a live
+query's `health` tree. To retry a failed first load, call
+`collection.reload()`.
 
 ## Direct Writes
 
