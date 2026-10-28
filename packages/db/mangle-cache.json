@@ -371,7 +371,6 @@
   "repairNeedsReplacement": "gK",
   "coversSource": "gL",
   "standing": "gM",
-  "windowIsInsideOwnPrefix": "gN",
   "debt": "gO",
   "releaseOwned": "gP",
   "moveWork": "ae",
@@ -437,5 +436,8 @@
   "views": "hc",
   "show": "hd",
   "getWritableSyncTransaction": "ar",
-  "mergesOverRow": "b_"
+  "mergesOverRow": "b_",
+  "awaitsSiblingReplays": "gN",
+  "grownPrefixRows": "gZ",
+  "ownPrefixEnd": "he"
 }

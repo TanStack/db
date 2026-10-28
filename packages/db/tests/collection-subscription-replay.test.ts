@@ -1557,6 +1557,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
     const subscription = collection.subscribeChanges(() => {}, {
       truncateReplayPublication: {
+        siblingReplays: () => undefined,
         start: () => {},
         succeed: () => {
           if (rejectReplacement) throw listenerFailure
@@ -1908,6 +1909,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
       truncateReplayPublication: {
+        siblingReplays: () => undefined,
         start: () => {},
         succeed: () => {},
       },
@@ -1973,6 +1975,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
       truncateReplayPublication: {
+        siblingReplays: () => undefined,
         start: () => {},
         succeed: () => {},
       },
@@ -2161,6 +2164,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
         truncateReplayPublication: {
+          siblingReplays: () => undefined,
           start: () => replayStarts++,
           succeed: () => replaySuccesses++,
         },
@@ -2284,6 +2288,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
       truncateReplayPublication: {
+        siblingReplays: () => undefined,
         start: () => {},
         succeed: () => replaySuccesses++,
       },
@@ -2465,7 +2470,11 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
-      truncateReplayPublication: { start: () => {}, succeed: succeeded },
+      truncateReplayPublication: {
+        start: () => {},
+        succeed: succeeded,
+        siblingReplays: () => undefined,
+      },
     })
     try {
       subscription.requestSnapshot({ where: firstWhere })
