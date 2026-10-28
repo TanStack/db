@@ -2119,7 +2119,10 @@ class PersistedCollectionRuntime<
         await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
         // With no reservation left, a head still queued is held by other work,
         // such as a claim recovery, which flushes it.
-        if (this.queuedTxCommitted[0] === head && !this.waitForReservedCommit?.())
+        if (
+          this.queuedTxCommitted[0] === head &&
+          !this.waitForReservedCommit?.()
+        )
           break
       }
       // A broadcast that failed to apply made the runtime terminal; its rows
