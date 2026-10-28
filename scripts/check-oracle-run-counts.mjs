@@ -355,7 +355,7 @@ function dependencies(file, reader, revision) {
       if (
         (statement.type === `ImportDeclaration` ||
           statement.type === `ExportAllDeclaration` ||
-          (statement.type === `ExportNamedDeclaration` && statement.source)) &&
+          statement.type === `ExportNamedDeclaration`) &&
         statement.source
       ) {
         const target = resolveModule(

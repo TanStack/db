@@ -7,9 +7,14 @@ import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { NonRetriableError } from '../src/types'
-import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
+import {
+  FakeStorageAdapter,
+  createTestOfflineEnvironment,
+  gate,
+  turn,
+} from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
-import { gate, storedTransaction, turn } from './leadership-replay-support'
+import { storedTransaction } from './leadership-replay-support'
 import type { OfflineTransaction, OnlineDetector } from '../src/types'
 import type { TestItem } from './harness'
 

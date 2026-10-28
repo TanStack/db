@@ -12,13 +12,17 @@ import { OutboxManager } from '../src/outbox/OutboxManager'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
-import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
+import {
+  FakeStorageAdapter,
+  createTestOfflineEnvironment,
+  gate,
+  turn,
+} from './harness'
 import {
   atOracleCheckpoint,
   captureUnhandledRejections,
   cleanupOfflineOracle,
 } from './oracle-lifecycle'
-import { gate, turn } from './transaction-settlement-support'
 import type { TestItem } from './harness'
 import type { OfflineTransaction, TransactionSignaler } from '../src/types'
 

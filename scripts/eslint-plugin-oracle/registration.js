@@ -195,7 +195,5 @@ function isFunctionBinding(identifier, sourceCode) {
     const init = definition.node.init
     return init !== null && !plainValueTypes.has(init.type)
   }
-  return definition !== undefined && definition.type !== `ImportBinding`
-    ? true
-    : definition?.type === `ImportBinding`
+  return definition !== undefined
 }

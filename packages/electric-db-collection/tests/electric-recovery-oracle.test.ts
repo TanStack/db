@@ -12,6 +12,7 @@ import {
   persistedCollectionOptions,
 } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
+import { nodeSqliteDriver } from './electric-persistence-fixture'
 import {
   attachRecoveryCleanupDiagnostics,
   change,
@@ -26,7 +27,6 @@ import {
   withFixtureCleanup,
 } from './electric-recovery-support'
 import type { Message } from '@electric-sql/client'
-import type { SQLiteDriver } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Item,
@@ -66,51 +66,6 @@ function persistedResumeKind(value: unknown): unknown {
   return value && typeof value === `object`
     ? (value as Record<string, unknown>).kind
     : undefined
-}
-
-function toSqliteBinding(value: unknown): string | number | bigint | null {
-  if (value === null || value === undefined) return null
-  if (typeof value === `boolean`) return value ? 1 : 0
-  if (
-    typeof value === `string` ||
-    typeof value === `number` ||
-    typeof value === `bigint`
-  ) {
-    return value
-  }
-  return String(value)
-}
-
-function nodeSqliteDriver(database: DatabaseSync): SQLiteDriver {
-  const driver: SQLiteDriver = {
-    exec: (sql) => {
-      database.exec(sql)
-      return Promise.resolve()
-    },
-    query: (sql, params = []) =>
-      Promise.resolve(
-        database
-          .prepare(sql)
-          .all(...params.map(toSqliteBinding))
-          .map((row) => ({ ...row })) as Array<never>,
-      ),
-    run: (sql, params = []) => {
-      database.prepare(sql).run(...params.map(toSqliteBinding))
-      return Promise.resolve()
-    },
-    transaction: async (transaction) => {
-      database.exec(`BEGIN IMMEDIATE`)
-      try {
-        const result = await transaction(driver)
-        database.exec(`COMMIT`)
-        return result
-      } catch (error) {
-        database.exec(`ROLLBACK`)
-        throw error
-      }
-    },
-  }
-  return driver
 }
 
 const subscribers: Array<Subscriber> = []

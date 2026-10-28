@@ -363,7 +363,6 @@ function isPrivateReplayVariable(name) {
   return replayVariableName.test(name) && !sharedReplayVariables.has(name)
 }
 
-/** A number literal, or a constant bound to one. */
 /** The number literal that `node` is, or that a constant `node` names. */
 function constantNumber(node, sourceCode) {
   if (isNumberLiteral(node)) return node

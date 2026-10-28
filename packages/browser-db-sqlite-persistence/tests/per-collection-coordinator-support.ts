@@ -13,6 +13,7 @@ import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
+import { storageId } from './browser-coordinator-support'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import type {
   PersistedStorageTarget,
@@ -406,12 +407,6 @@ export type PullFixtureResult = {
 
 export type RecordedSubsetOptions =
   LoadSubsetOptions | TransportedLoadSubsetOptions
-
-export function storageId(target: PersistedStorageTarget): string {
-  return target.kind === `managed`
-    ? target.storageCollectionId
-    : target.collectionId
-}
 
 export type RecordingAdapter = PersistenceAdapter & {
   id: string

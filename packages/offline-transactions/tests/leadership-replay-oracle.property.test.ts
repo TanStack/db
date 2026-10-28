@@ -6,8 +6,13 @@ import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { oracleReplayTest } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import { gate, storedTransaction, turn } from './leadership-replay-support'
+import {
+  FakeStorageAdapter,
+  createTestOfflineEnvironment,
+  gate,
+  turn,
+} from './harness'
+import { storedTransaction } from './leadership-replay-support'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'

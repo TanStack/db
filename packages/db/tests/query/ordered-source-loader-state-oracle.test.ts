@@ -15,7 +15,7 @@ import { declareOracle } from '../oracle-declaration.js'
 import {
   createDeferred,
   createOrderByInfo,
-} from './ordered-source-loader-state-support.js'
+} from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type {

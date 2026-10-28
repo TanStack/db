@@ -14,8 +14,8 @@ import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   createDeferred,
   createOrderByInfo,
-  fakeSubscription,
-} from './ordered-source-loader-state-support.js'
+} from './ordered-source-loader-support.js'
+import { fakeSubscription } from './ordered-source-loader-state-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
 import type { LoadSubsetOptions } from '../../src/types.js'

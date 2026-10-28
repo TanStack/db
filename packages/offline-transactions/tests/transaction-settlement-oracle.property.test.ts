@@ -8,8 +8,12 @@ import {
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import { gate, turn } from './transaction-settlement-support'
+import {
+  FakeStorageAdapter,
+  createTestOfflineEnvironment,
+  gate,
+  turn,
+} from './harness'
 import {
   atOracleCheckpoint,
   captureUnhandledRejections,

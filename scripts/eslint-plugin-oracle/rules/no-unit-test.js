@@ -469,7 +469,8 @@ class OracleModule {
           continue
         }
         for (const part of parts) {
-          const variable = this.#variableAt(part)
+          const variable =
+            part?.type === `Identifier` ? this.resolvedAt.get(part) : undefined
           if (variable !== undefined) declared.add(variable)
         }
       }
@@ -497,13 +498,6 @@ class OracleModule {
     })
   }
 
-  #variableAt(identifier) {
-    if (identifier?.type !== `Identifier`) return undefined
-    return this.references.find(
-      (reference) => reference.identifier === identifier,
-    )?.resolved
-  }
-
   #recordExports(statement) {
     if (statement.type === `ExportDefaultDeclaration`) {
       this.#recordDefaultExport(statement.declaration)
@@ -525,13 +519,6 @@ class OracleModule {
       )) {
         if (variable.scope === moduleScope)
           this.exported.set(variable.name, { variable })
-      }
-      for (const declarator of statement.declaration.declarations ?? []) {
-        for (const variable of this.scopeManager.getDeclaredVariables(
-          declarator,
-        )) {
-          this.exported.set(variable.name, { variable })
-        }
       }
       return
     }
@@ -1088,14 +1075,10 @@ class OracleModule {
     )
   }
 
-  /** Whether code runs a generated property that it contains. */
-  containsProperty(node) {
-    return containsOffset(this.properties, node)
-  }
-
   /** Whether code uses a declared part, directly or through a binding. */
   nodeReaches(node, local = true) {
-    if (this.containsProperty(node)) return true
+    // Code that runs a generated property that it contains.
+    if (containsOffset(this.properties, node)) return true
     // A type-level test reaches a type model by naming it in a type.
     if (containsOffset(this.typeModelUses, node)) return true
     const [start, end] = node.range

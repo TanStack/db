@@ -48,13 +48,13 @@ import {
   routingGrammarPlan,
   routingHistoryFromAxes,
   semanticValue,
-  storageId,
   subsetSemantics,
   waitFor,
   waitForWithoutDelivery,
   withFailurePreservingCleanup,
   withNativeBrowserTransport,
 } from './per-collection-coordinator-support'
+import { storageId } from './browser-coordinator-support'
 import type { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import type {
   PersistedTx,
