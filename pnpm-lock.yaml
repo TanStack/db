@@ -6,7 +6,7 @@ settings:
 
 overrides:
   chokidar@^4.0.0: 4.0.1
-  trailbase>uuid: 13.0.0
+  trailbase>uuid: 13.0.2
   metro: 0.82.5
   metro-babel-transformer: 0.82.5
   metro-cache: 0.82.5
@@ -12479,8 +12479,8 @@ packages:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
 
-  uuid@13.0.0:
-    resolution: {integrity: sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==}
+  uuid@13.0.2:
+    resolution: {integrity: sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw==}
     hasBin: true
 
   uuid@7.0.3:
@@ -25126,7 +25126,7 @@ snapshots:
       '@ungap/raw-json': 0.4.4
       geojson: 0.5.0
       jwt-decode: 4.0.0
-      uuid: 13.0.0
+      uuid: 13.0.2
 
   tree-kill@1.2.2: {}
 
@@ -25401,7 +25401,7 @@ snapshots:
 
   utils-merge@1.0.1: {}
 
-  uuid@13.0.0: {}
+  uuid@13.0.2: {}
 
   uuid@7.0.3: {}
 
