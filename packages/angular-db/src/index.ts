@@ -10,6 +10,7 @@ import {
   BaseQueryBuilder,
   configPool,
   createLiveQueryObserver,
+  getLiveQueryStatusFlags,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
@@ -20,11 +21,12 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryHookConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
+  LiveQueryStatusFlags,
   NonSingleResult,
   PooledLiveQueries,
   QueryBuilder,
@@ -40,7 +42,17 @@ export * from '@tanstack/db'
  * The result of calling `injectLiveQuery`.
  * Contains reactive signals for the query state and data.
  */
-export interface InjectLiveQueryResult<TContext extends Context> {
+/** The status and flag signals every `injectLiveQuery` result has. */
+export type InjectLiveQueryFlags = {
+  /** A signal containing the current status of the collection */
+  status: Signal<CollectionStatus | `disabled`>
+} & {
+  [K in keyof LiveQueryStatusFlags]: Signal<LiveQueryStatusFlags[K]>
+}
+
+export interface InjectLiveQueryResult<
+  TContext extends Context,
+> extends InjectLiveQueryFlags {
   /** A signal containing the complete state map of results keyed by their ID */
   state: Signal<Map<string | number, GetResult<TContext>>>
   /** A signal containing the results as an array, or single result for findOne queries */
@@ -51,21 +63,6 @@ export interface InjectLiveQueryResult<TContext extends Context> {
     string | number,
     {}
   > | null>
-  /** A signal containing the current status of the collection */
-  status: Signal<CollectionStatus | `disabled`>
-  /** A signal indicating whether the collection is currently loading */
-  isLoading: Signal<boolean>
-  /** A signal indicating whether the collection is ready */
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  /** A signal indicating whether the collection is idle */
-  isIdle: Signal<boolean>
-  /** A signal indicating whether the collection has an error */
-  isError: Signal<boolean>
-  /** A signal indicating whether the collection has been cleaned up */
-  isCleanedUp: Signal<boolean>
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -84,38 +81,20 @@ export interface InjectLiveQueryResultWithCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
   TUtils extends Record<string, any> = {},
-> {
+> extends InjectLiveQueryFlags {
   state: Signal<Map<TKey, TResult>>
   data: Signal<Array<TResult>>
   collection: Signal<Collection<TResult, TKey, TUtils> | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
 }
 
 export interface InjectLiveQueryResultWithSingleResultCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
   TUtils extends Record<string, any> = {},
-> {
+> extends InjectLiveQueryFlags {
   state: Signal<Map<TKey, TResult>>
   data: Signal<TResult | undefined>
   collection: Signal<(Collection<TResult, TKey, TUtils> & SingleResult) | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
 }
 
 export function injectLiveQuery<
@@ -230,8 +209,11 @@ export function injectLiveQuery(opts: any) {
     const value = statusValue()
     return value === `idle` && !collection() ? `disabled` : value
   })
-  const persistedStatus = signal<LiveQueryPersistedStatus>(`unavailable`)
-  const persistedError = signal<unknown>(undefined)
+  const health = signal<HealthNode | undefined>(undefined)
+  // Every status flag comes from the shared rule; a disabled query is ready.
+  const flags = computed(() =>
+    getLiveQueryStatusFlags(status() as CollectionStatus, health()),
+  )
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -255,8 +237,7 @@ export function injectLiveQuery(opts: any) {
     internalData.set(newData)
     const snapshot = observer.getSnapshot()
     statusValue.set(snapshot.status)
-    persistedStatus.set(snapshot.persistedStatus)
-    persistedError.set(snapshot.persistedError)
+    health.set(snapshot.health)
   }
 
   let unsub: (() => void) | null = null
@@ -271,8 +252,7 @@ export function injectLiveQuery(opts: any) {
     // Handle null collection (disabled query)
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
-      persistedStatus.set(`unavailable`)
-      persistedError.set(undefined)
+      health.set(undefined)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -315,13 +295,13 @@ export function injectLiveQuery(opts: any) {
       getPublicCollection(collection()),
     ) as Signal<any>,
     status,
-    isLoading: computed(() => status() === `loading`),
-    isReady: computed(() => status() === `ready` || status() === `disabled`),
-    persistedStatus,
-    isPersistedReady: computed(() => persistedStatus() === `ready`),
-    persistedError,
-    isIdle: computed(() => status() === `idle`),
-    isError: computed(() => status() === `error`),
-    isCleanedUp: computed(() => status() === `cleaned-up`),
+    isLoading: computed(() => flags().isLoading),
+    isReady: computed(() => flags().isReady || status() === `disabled`),
+    isIdle: computed(() => flags().isIdle),
+    isLoadingError: computed(() => flags().isLoadingError),
+    isCrashed: computed(() => flags().isCrashed),
+    isCleanedUp: computed(() => flags().isCleanedUp),
+    isSyncError: computed(() => flags().isSyncError),
+    health,
   }
 }

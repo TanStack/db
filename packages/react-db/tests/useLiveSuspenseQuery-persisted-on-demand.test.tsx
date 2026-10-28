@@ -45,9 +45,9 @@ import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/pe
  * Observation: at each checkpoint of session 2, whether the fallback still
  * renders (`loading`) or the rendered ids are shown (`ready`).
  *
- * Limits: one filter, one React render path, no StrictMode. The
- * network-first gate is the Suspense gate, so this host checks the gate the
- * wrapper feeds as well as the wrapper's settlement.
+ * Limits: one filter, one React render path, no StrictMode. Suspense releases at query
+ * readiness, so this host checks the readiness that the wrapper's settlement
+ * feeds.
  */
 
 function GroupA({

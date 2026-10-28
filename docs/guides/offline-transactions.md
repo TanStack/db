@@ -348,7 +348,7 @@ void transaction.when('settled').catch((error) => console.error(error))
 
 For the leader, `waitForInit()` waits for the initial outbox read and optimistic restoration attempt. It does not make `todos` ready. The separate `preload()` call starts Collection loading without blocking offline actions. A screen that needs initial rows can await `todos.preload()` and handle a rejection.
 
-The final `refetch()` asks the server for current rows after a successful write. By default, it can resolve when that read fails. The offline transaction can then settle successfully because the POST succeeded. That read error does not itself request an outbox retry. Check `todos.utils.isError` and `todos.utils.lastError` to report or retry the read.
+The final `refetch()` asks the server for current rows after a successful write. By default, it can resolve when that read fails. The offline transaction can then settle successfully because the POST succeeded. That read error does not itself request an outbox retry. Check `todos.health` (or the `health` tree of a live query over it) to report or retry the read.
 
 The [React Native offline transactions example](https://github.com/TanStack/db/tree/main/examples/react-native/offline-transactions) shows the full app structure. Its API client does not yet send an idempotency key, so use the request pattern above when you adapt it. The [shopping list example](https://github.com/TanStack/db/tree/main/examples/react-native/shopping-list) also shows Electric sync.
 

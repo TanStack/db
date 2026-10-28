@@ -14,8 +14,6 @@ import {
   eq,
   getStableValueHash,
   gt,
-  permitsPersistedInitialRender,
-  waitForPersistedInitialRender,
 } from '@tanstack/db'
 import { Component, StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -91,21 +89,6 @@ describe(`useLiveSuspenseQuery`, () => {
       getKey: (row) => row.id,
       sync: { sync: () => ({}) },
     })
-    Object.defineProperty(
-      source.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 60_000,
-          onDemand: false,
-          waitForInitialRender: waitForPersistedInitialRender,
-          permitsInitialRender: permitsPersistedInitialRender,
-          getOrStartNetworkDeadline: () => Date.now() + 60_000,
-          getSnapshot: () => ({ status: `ready` }),
-          subscribe: () => () => {},
-        },
-      },
-    )
     const query = createLiveQueryCollection((q) => q.from({ person: source }))
     const failure = new Error(`query failed independently of its source`)
     const preload = vi.spyOn(query, `preload`).mockRejectedValue(failure)
@@ -159,21 +142,6 @@ describe(`useLiveSuspenseQuery`, () => {
           },
         },
       })
-      Object.defineProperty(
-        source.config,
-        Symbol.for(`@tanstack/db.persistedReadiness`),
-        {
-          value: {
-            networkTimeoutMs: 60_000,
-            onDemand: false,
-            waitForInitialRender: waitForPersistedInitialRender,
-            permitsInitialRender: permitsPersistedInitialRender,
-            getOrStartNetworkDeadline: () => Date.now() + 60_000,
-            getSnapshot: () => ({ status: `ready` }),
-            subscribe: () => () => {},
-          },
-        },
-      )
       const query = createLiveQueryCollection((q) =>
         q.from({ person: source }).where(({ person }) => gt(person.age, 20)),
       )
@@ -314,21 +282,6 @@ describe(`useLiveSuspenseQuery`, () => {
       getKey: (row) => row.id,
       sync: { sync: () => ({}) },
     })
-    Object.defineProperty(
-      source.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 60_000,
-          onDemand: false,
-          waitForInitialRender: waitForPersistedInitialRender,
-          permitsInitialRender: permitsPersistedInitialRender,
-          getOrStartNetworkDeadline: () => Date.now() + 60_000,
-          getSnapshot: () => ({ status: `ready` }),
-          subscribe: () => () => {},
-        },
-      },
-    )
     const query = createLiveQueryCollection((q) => q.from({ person: source }))
     const failure = new Error(`first query run failed`)
     const pendingRetry = new Promise<void>(() => {})
@@ -372,228 +325,6 @@ describe(`useLiveSuspenseQuery`, () => {
       preload.mockRestore()
       await query.cleanup()
       await source.cleanup()
-    }
-  })
-
-  it.each([
-    {
-      name: `immediate persisted fallback`,
-      networkTimeoutMs: 0,
-      outcome: `pending`,
-    },
-    {
-      name: `persisted fallback after the deadline`,
-      networkTimeoutMs: 30,
-      outcome: `timeout`,
-    },
-    { name: `network readiness`, networkTimeoutMs: 60_000, outcome: `ready` },
-    {
-      name: `early network failure`,
-      networkTimeoutMs: 60_000,
-      outcome: `error`,
-    },
-  ] as const)(
-    `gates the first render: $name`,
-    async ({ networkTimeoutMs, outcome }) => {
-      let sync:
-        | {
-            begin: () => void
-            write: (row: Person) => void
-            commit: () => void
-            markReady: () => void
-            markError: (error: unknown) => void
-          }
-        | undefined
-      const source = createCollection<Person>({
-        id: `suspense-persisted-${outcome}`,
-        getKey: (row) => row.id,
-        sync: {
-          sync: ({ begin, write, commit, markReady, markError }) => {
-            sync = {
-              begin,
-              write: (row) => write({ type: `insert`, value: row }),
-              commit: () => {
-                commit()
-              },
-              markReady,
-              markError,
-            }
-            return {}
-          },
-        },
-      })
-      let persistedStatus: `loading` | `ready` = `loading`
-      let networkDeadlineAt: number | undefined
-      const listeners = new Set<() => void>()
-      Object.defineProperty(
-        source.config,
-        Symbol.for(`@tanstack/db.persistedReadiness`),
-        {
-          value: {
-            networkTimeoutMs,
-            onDemand: false,
-            waitForInitialRender: waitForPersistedInitialRender,
-            permitsInitialRender: permitsPersistedInitialRender,
-            getOrStartNetworkDeadline: () =>
-              (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
-            getSnapshot: () => ({ status: persistedStatus }),
-            subscribe: (listener: () => void) => {
-              listeners.add(listener)
-              return () => listeners.delete(listener)
-            },
-          },
-        },
-      )
-      let cleanupQuery: (() => Promise<void>) | undefined
-
-      function LocalPerson() {
-        const result = useLiveSuspenseQuery((q) => q.from({ person: source }))
-        cleanupQuery = () => result.collection.cleanup()
-        const { data } = result
-        return <div>{data[0]?.name}</div>
-      }
-      const statusView = renderHook(() => useLiveQuery(source))
-      const view = renderComponent(
-        <Suspense fallback={<div>Waiting for network</div>}>
-          <LocalPerson />
-        </Suspense>,
-      )
-      try {
-        expect(view.getByText(`Waiting for network`)).toBeTruthy()
-        await waitFor(() => expect(sync).toBeDefined())
-        await act(() => {
-          sync!.begin()
-          sync!.write(initialPersons[0]!)
-          sync!.commit()
-          persistedStatus = `ready`
-          for (const listener of listeners) listener()
-        })
-        await waitFor(() =>
-          expect(statusView.result.current.persistedStatus).toBe(`ready`),
-        )
-        if (outcome === `pending` || outcome === `timeout`) {
-          await waitFor(() => expect(view.getByText(`John Doe`)).toBeTruthy())
-          expect(source.status).toBe(`loading`)
-        } else {
-          expect(view.getByText(`Waiting for network`)).toBeTruthy()
-          await act(() => {
-            if (outcome === `ready`) sync!.markReady()
-            else sync!.markError(new Error(`network failed`))
-          })
-          await waitFor(() => expect(view.getByText(`John Doe`)).toBeTruthy())
-          expect(source.status).toBe(outcome)
-        }
-      } finally {
-        view.unmount()
-        statusView.unmount()
-        await cleanupQuery?.()
-        await source.cleanup()
-      }
-    },
-  )
-
-  // Receiving witness for the joined network-first gate in
-  // `db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`:
-  // an eager source permits local rendering after its restore and deadline;
-  // an on-demand source permits it only when the query's demand on it has
-  // settled. The eager source never becomes ready, as offline.
-  it(`releases a joined first render when the on-demand demand settles`, async () => {
-    type Parent = { id: string; name: string }
-    type Child = { id: string; parentId: string; label: string }
-    const readiness = (onDemand: boolean) => ({
-      networkTimeoutMs: 0,
-      onDemand,
-      waitForInitialRender: waitForPersistedInitialRender,
-      permitsInitialRender: permitsPersistedInitialRender,
-      getOrStartNetworkDeadline: () => Date.now(),
-      getSnapshot: () => ({ status: `ready` }),
-      subscribe: () => () => {},
-    })
-    const parents = createCollection<Parent>({
-      id: `suspense-joined-parents`,
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ begin, write, commit }) => {
-          // Restored rows; the network never marks this source ready.
-          begin()
-          write({ type: `insert`, value: { id: `p1`, name: `Parent` } })
-          commit()
-          return {}
-        },
-      },
-    })
-    let settleChildLoad!: () => void
-    const children = createCollection<Child>({
-      id: `suspense-joined-children`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          markReady()
-          return {
-            loadSubset: () =>
-              new Promise<void>((resolve) => {
-                settleChildLoad = () => {
-                  begin()
-                  write({
-                    type: `insert`,
-                    value: { id: `c1`, parentId: `p1`, label: `Child` },
-                  })
-                  commit()
-                  resolve()
-                }
-              }),
-          }
-        },
-      },
-    })
-    for (const [collection, onDemand] of [
-      [parents, false],
-      [children, true],
-    ] as const) {
-      Object.defineProperty(
-        collection.config,
-        Symbol.for(`@tanstack/db.persistedReadiness`),
-        { value: readiness(onDemand) },
-      )
-    }
-    let cleanupQuery: (() => Promise<void>) | undefined
-
-    function Joined() {
-      const result = useLiveSuspenseQuery((q) =>
-        q
-          .from({ parent: parents })
-          .join({ child: children }, ({ parent, child }) =>
-            eq(child.parentId, parent.id),
-          )
-          .select(({ parent, child }) => ({
-            id: parent.id,
-            name: parent.name,
-            label: child.label,
-          })),
-      )
-      cleanupQuery = () => result.collection.cleanup()
-      const row = result.data[0]
-      return <div>{row ? `${row.name}/${row.label}` : `no rows`}</div>
-    }
-    const view = renderComponent(
-      <Suspense fallback={<div>Waiting for demand</div>}>
-        <Joined />
-      </Suspense>,
-    )
-    try {
-      await waitFor(() => expect(settleChildLoad).toBeDefined())
-      // The eager deadline has passed, but the on-demand demand is pending.
-      await act(() => new Promise((resolve) => setTimeout(resolve, 20)))
-      expect(view.getByText(`Waiting for demand`)).toBeTruthy()
-      await act(() => settleChildLoad())
-      await waitFor(() => expect(view.getByText(`Parent/Child`)).toBeTruthy())
-      expect(parents.status).toBe(`loading`)
-    } finally {
-      view.unmount()
-      await cleanupQuery?.()
-      await children.cleanup()
-      await parents.cleanup()
     }
   })
 
@@ -1524,4 +1255,215 @@ describe(`useLiveSuspenseQuery`, () => {
     // Data should still be available
     expect(result.current.data).toHaveLength(3)
   })
+
+  // What reaches the error boundary when a sync adapter fails its first load?
+  //
+  // Authority: maintainer decision for this branch, recorded in
+  // docs/guides/error-handling.md ("Using Suspense and Error Boundaries") and
+  // the hook's JSDoc. The hook throws an Error. When the first load's cause is
+  // an Error, the boundary receives that exact object. When it is not, such as
+  // an HTTP response body, the boundary receives an Error whose message is the
+  // problem's message (`health.error.message`) and whose `cause` is the exact
+  // value the adapter reported. The failure can happen while sync starts or
+  // after the hook has already suspended.
+  it.each([
+    { kind: `an Error`, timing: `inside sync`, deferred: false, isError: true },
+    { kind: `an Error`, timing: `after mount`, deferred: true, isError: true },
+    {
+      kind: `not an Error`,
+      timing: `inside sync`,
+      deferred: false,
+      isError: false,
+    },
+    {
+      kind: `not an Error`,
+      timing: `after mount`,
+      deferred: true,
+      isError: false,
+    },
+  ])(
+    `sends a first-load cause that is $kind to the boundary as an Error ($timing)`,
+    async ({ deferred, isError }) => {
+      const cause: unknown = isError
+        ? new Error(`first load failed`)
+        : { status: 500 }
+      let fail: ((error: unknown) => void) | undefined
+      const source = createCollection<Person>({
+        id: `suspense-first-load-cause-${isError}-${deferred}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            if (deferred) fail = params.fail
+            else params.fail(cause)
+          },
+        },
+      })
+      const caught: Array<unknown> = []
+      class RecordingBoundary extends Component<
+        { children: ReactNode },
+        { failed: boolean }
+      > {
+        state = { failed: false }
+        static getDerivedStateFromError() {
+          return { failed: true }
+        }
+        componentDidCatch(error: unknown) {
+          caught.push(error)
+        }
+        render() {
+          return this.state.failed ? (
+            <div>Boundary caught</div>
+          ) : (
+            this.props.children
+          )
+        }
+      }
+      function View() {
+        useLiveSuspenseQuery((q) => q.from({ person: source }))
+        return <div>Query ready</div>
+      }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const view = renderComponent(
+        <RecordingBoundary>
+          <Suspense fallback={<div>Loading query</div>}>
+            <View />
+          </Suspense>
+        </RecordingBoundary>,
+      )
+      try {
+        if (deferred) {
+          await waitFor(() => expect(fail).toBeDefined())
+          act(() => fail!(cause))
+        }
+        await waitFor(() =>
+          expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+        )
+        expect(source.status).toBe(`error`)
+        expect(source.health.error?.cause).toBe(cause)
+        const thrown = caught[0]
+        if (isError) {
+          expect(thrown, `an Error cause is thrown as is`).toBe(cause)
+        } else {
+          expect(thrown, `a non-Error cause is wrapped`).toBeInstanceOf(Error)
+          expect((thrown as Error).message).toBe(source.health.error?.message)
+          expect((thrown as Error).cause).toBe(cause)
+        }
+      } finally {
+        view.unmount()
+        consoleError.mockRestore()
+        await source.cleanup()
+      }
+    },
+  )
+
+  // A crash reaches the boundary under the same rule, at any time: the
+  // Collection can no longer serve reads, so the hook throws after the
+  // first ready too (glossary "crash"). A sync function that throws crashes
+  // the Collection while it starts. A crash after readiness is the one core
+  // raises for a broken local store; the witness raises it the same way.
+  it.each([
+    { kind: `an Error`, timing: `inside sync`, ready: false, isError: true },
+    {
+      kind: `an Error`,
+      timing: `after readiness`,
+      ready: true,
+      isError: true,
+    },
+    {
+      kind: `not an Error`,
+      timing: `inside sync`,
+      ready: false,
+      isError: false,
+    },
+    {
+      kind: `not an Error`,
+      timing: `after readiness`,
+      ready: true,
+      isError: false,
+    },
+  ])(
+    `sends a crash cause that is $kind to the boundary as an Error ($timing)`,
+    async ({ ready, isError }) => {
+      const cause: unknown = isError
+        ? new Error(`local store broke`)
+        : { code: `SQLITE_CORRUPT` }
+      const source = createCollection<Person>({
+        id: `suspense-crash-cause-${isError}-${ready}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            if (!ready) throw cause
+            params.markReady()
+          },
+        },
+      })
+      const caught: Array<unknown> = []
+      class RecordingBoundary extends Component<
+        { children: ReactNode },
+        { failed: boolean }
+      > {
+        state = { failed: false }
+        static getDerivedStateFromError() {
+          return { failed: true }
+        }
+        componentDidCatch(error: unknown) {
+          caught.push(error)
+        }
+        render() {
+          return this.state.failed ? (
+            <div>Boundary caught</div>
+          ) : (
+            this.props.children
+          )
+        }
+      }
+      function View() {
+        useLiveSuspenseQuery((q) => q.from({ person: source }))
+        return <div>Query ready</div>
+      }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const view = renderComponent(
+        <RecordingBoundary>
+          <Suspense fallback={<div>Loading query</div>}>
+            <View />
+          </Suspense>
+        </RecordingBoundary>,
+      )
+      try {
+        if (ready) {
+          await waitFor(() =>
+            expect(view.getByText(`Query ready`)).toBeTruthy(),
+          )
+          act(() =>
+            (
+              source as unknown as {
+                _lifecycle: { crash: (error: unknown) => void }
+              }
+            )._lifecycle.crash(cause),
+          )
+        }
+        await waitFor(() =>
+          expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+        )
+        expect(source.status).toBe(`crashed`)
+        expect(source.health.error?.cause).toBe(cause)
+        const thrown = caught[0]
+        if (isError) {
+          expect(thrown, `an Error cause is thrown as is`).toBe(cause)
+        } else {
+          expect(thrown, `a non-Error cause is wrapped`).toBeInstanceOf(Error)
+          expect((thrown as Error).message).toBe(source.health.error?.message)
+          expect((thrown as Error).cause).toBe(cause)
+        }
+      } finally {
+        view.unmount()
+        consoleError.mockRestore()
+        await source.cleanup().catch(() => undefined)
+      }
+    },
+  )
 })

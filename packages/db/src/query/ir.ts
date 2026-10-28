@@ -341,15 +341,21 @@ export function isExpressionLike(value: unknown): boolean {
 }
 
 /** Returns each lexical Collection or descriptor source in a query tree once. */
-export function collectSourceRefs(query: QueryIR): Array<CollectionSourceRef> {
+export function collectSourceRefs(
+  query: QueryIR,
+  /** Receives the IDs of sources first reached through an include. */
+  includeSourceIds?: Set<string>,
+): Array<CollectionSourceRef> {
   const sources: Array<CollectionSourceRef> = []
   const seen = new Set<string>()
+  let includeDepth = 0
 
   const visitSource = (source: QueryIR[`from`]): void => {
     if (source.type === `collectionRef` || source.type === `descriptorRef`) {
       if (!seen.has(source.sourceId)) {
         seen.add(source.sourceId)
         sources.push(source)
+        if (includeDepth > 0) includeSourceIds?.add(source.sourceId)
       }
     } else if (source.type === `queryRef`) {
       visitQuery(source.query)
@@ -362,7 +368,9 @@ export function collectSourceRefs(query: QueryIR): Array<CollectionSourceRef> {
 
   const visitSelectValue = (value: any): void => {
     if (value instanceof IncludesSubquery) {
+      includeDepth++
       visitQuery(value.query)
+      includeDepth--
     } else if (value instanceof ConditionalSelect) {
       value.branches.forEach((branch) => visitSelectValue(branch.value))
       if (value.defaultValue !== undefined) {

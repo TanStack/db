@@ -1,7 +1,6 @@
 import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
-  PERSISTED_READINESS,
   SYNC_PERSISTENCE_PROTOCOL,
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
@@ -9,10 +8,9 @@ import {
   compileSingleRowExpression,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
-  permitsPersistedInitialRender,
+  reportUncaught,
   safeRandomUUID,
   toBooleanPredicate,
-  waitForPersistedInitialRender,
   whenSyncAccepted,
   withAcceptedReceipt,
   withCollectionConfigFactory,
@@ -53,8 +51,6 @@ import type {
   LoadSubsetFn,
   LoadSubsetOptions,
   PendingMutation,
-  PersistedReadinessSnapshot,
-  PersistedReadinessSource,
   SyncAppliedReceipt,
   SyncConfig,
   SyncConfigRes,
@@ -800,9 +796,18 @@ export interface PersistedCollectionUtils extends UtilsRecord {
   forceReloadSubset?: (options: LoadSubsetOptions) => Promise<void> | void
 }
 
-class PersistedReadinessTracker implements PersistedReadinessSource {
+/** The local-restore boundary of one persisted Collection's sync run. */
+type PersistedReadinessSnapshot =
+  | { status: `loading`; error?: never }
+  | { status: `ready`; error?: never }
+  | { status: `error`; error: unknown }
+
+/**
+ * Tracks the local restore for network-first initial rendering. The
+ * wrapper's sync function reads it to open the Collection from restored rows.
+ */
+class PersistedReadinessTracker {
   private snapshot: PersistedReadinessSnapshot = { status: `loading` }
-  private networkDeadlineAt: number | undefined
   private readonly listeners = new Set<() => void>()
 
   constructor(
@@ -810,14 +815,7 @@ class PersistedReadinessTracker implements PersistedReadinessSource {
     readonly onDemand: boolean,
   ) {}
 
-  waitForInitialRender = waitForPersistedInitialRender
-  permitsInitialRender = permitsPersistedInitialRender
-
   getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
-
-  getOrStartNetworkDeadline = (): number => {
-    return (this.networkDeadlineAt ??= Date.now() + this.networkTimeoutMs)
-  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -825,15 +823,9 @@ class PersistedReadinessTracker implements PersistedReadinessSource {
   }
 
   set(snapshot: PersistedReadinessSnapshot): void {
-    const deadlineRestarted =
-      snapshot.status === `loading` && this.networkDeadlineAt !== undefined
-    if (deadlineRestarted) {
-      this.networkDeadlineAt = Date.now() + this.networkTimeoutMs
-    }
     if (
       this.snapshot.status === snapshot.status &&
-      this.snapshot.error === snapshot.error &&
-      !deadlineRestarted
+      this.snapshot.error === snapshot.error
     ) {
       return
     }
@@ -972,6 +964,10 @@ const TARGETED_INVALIDATION_KEY_LIMIT = 128
 const DEFAULT_DB_NAME = `tanstack-db`
 const REMOTE_ENSURE_RETRY_DELAY_MS = 50
 
+// A remote subset request failure that no sync run can carry.
+const warnRemoteFailure = (error: unknown): void =>
+  console.warn(`Persisted remote subset request failed:`, error)
+
 type SyncControlFns<T extends object, TKey extends string | number> = {
   begin: (() => void) | null
   write:
@@ -985,7 +981,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
   truncate: ((options?: { markReady?: boolean }) => void) | null
   metadata: SyncMetadataApi<TKey> | null
-  markError: ((error: unknown) => void) | null
+  fail: ((error: unknown) => void) | null
 }
 
 /**
@@ -1327,6 +1323,10 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   // Set just before the transaction is handed to the Collection; from then
   // on core holds its keys itself.
   handedToCollection?: boolean
+  // The source's own begin and truncate options, forwarded to core as given:
+  // only the source declares a transaction that replaces every synced row.
+  beginOptions?: { snapshot?: boolean }
+  truncateOptions?: { markReady?: boolean }
 }
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
@@ -1608,7 +1608,7 @@ class PersistedCollectionRuntime<
     commit: null,
     truncate: null,
     metadata: null,
-    markError: null,
+    fail: null,
   }
   private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
@@ -1623,6 +1623,8 @@ class PersistedCollectionRuntime<
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
+  // The failures reported for remote requests, until one succeeds.
+  private remoteErrors: Array<unknown> = []
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
   private terminalFailure:
@@ -1922,19 +1924,72 @@ class PersistedCollectionRuntime<
     this.restartSourceAfterScopedRecovery = undefined
   }
 
-  reportSyncError(error: unknown): unknown {
-    const markError = this.syncControls.markError
+  /**
+   * Reports one failure to the sync run that made the failed request; a
+   * reload's retired run reaches no run. The wrapped sync adapter's own
+   * fail() keeps core's meaning: a failed first load before Collection
+   * readiness, a stopped sync with the rows kept after it. A failure raised
+   * by local persistence means the Collection can no longer serve reads or
+   * admit writes, so it crashes. A remote request of the wrapper's own (a
+   * coordinator acquisition or release) is a network failure while the
+   * source keeps syncing: a ready Collection's failure reason. Before the
+   * first ready it reaches no run: core forbids the report, the first load
+   * does not wait on it, and a load that did wait received its rejection.
+   */
+  reportSyncError(
+    error: unknown,
+    origin: `persistence` | `sync adapter` | `remote` = `persistence`,
+    lifecycleGeneration = this.lifecycleGeneration,
+  ): unknown {
+    const fail = this.syncControls.fail
+    const ready = this.collection?.status === `ready`
+    if (lifecycleGeneration !== this.lifecycleGeneration) return error
     if (this.syncErrorReported) return this.reportedSyncError
-    if (!markError) return error
+    if (!fail) return error
+    if (origin === `remote` && !ready) {
+      warnRemoteFailure(error)
+      return error
+    }
 
-    this.syncErrorReported = true
-    this.reportedSyncError = error
+    // After readiness the sync adapter's fail() keeps the rows and the run
+    // continues, so only a failure that ends the run latches.
+    if (origin === `persistence` || (origin === `sync adapter` && !ready)) {
+      this.syncErrorReported = true
+      this.reportedSyncError = error
+    }
     try {
-      markError(error)
+      if (origin === `remote`) {
+        this.remoteErrors.push(error)
+        this.collection?._lifecycle.reportError(error)
+      } else if (origin === `sync adapter`) fail(error)
+      else this.collection?._lifecycle.crash(error)
     } catch {
-      // Reporting must not replace the original asynchronous failure.
+      // Reporting must not replace the original asynchronous failure. A
+      // sync adapter that already stopped takes no further report.
     }
     return error
+  }
+
+  /**
+   * Acquires a remote subset. A success shows the remote works again, so
+   * every failure reported for the run's remote requests ends.
+   */
+  private ensureRemoteSubset(
+    options: LoadSubsetOptions,
+    storageId = this.storageCollectionId,
+  ): Promise<void> {
+    const lifecycleGeneration = this.lifecycleGeneration
+    return this.persistence.coordinator
+      .requestEnsureRemoteSubset(storageId, options)
+      .then(() => {
+        if (lifecycleGeneration !== this.lifecycleGeneration) return
+        try {
+          for (const error of this.remoteErrors.splice(0))
+            this.collection?._lifecycle.reportHealthy(error)
+        } catch {
+          // A sync adapter that already stopped takes no further report.
+        }
+      })
   }
 
   registerRemoteSubsetOwner(owner: RemoteSubsetOwner): void {
@@ -2008,7 +2063,7 @@ class PersistedCollectionRuntime<
       commit: null,
       truncate: null,
       metadata: null,
-      markError: null,
+      fail: null,
     }
   }
 
@@ -2586,12 +2641,11 @@ class PersistedCollectionRuntime<
         if (options.signal?.aborted) continue
         const rotatedOptions = this.rotatedAcquisitions.get(options)
         if (rotatedOptions) {
-          const ensure = this.persistence.coordinator.requestEnsureRemoteSubset(
-            this.storageCollectionId,
-            rotatedOptions,
-          )
+          const ensure = this.ensureRemoteSubset(rotatedOptions)
           this.rotatedEnsures.set(options, ensure)
-          void ensure.catch((error) => this.reportSyncError(error))
+          void ensure.catch((error) =>
+            this.reportSyncError(error, `remote`, lifecycleGeneration),
+          )
         } else {
           this.refreshScopedSubsets()
           break
@@ -2833,10 +2887,7 @@ class PersistedCollectionRuntime<
           !options.signal?.aborted
         ) {
           await (this.rotatedEnsures.get(options) ??
-            this.persistence.coordinator.requestEnsureRemoteSubset(
-              this.storageCollectionId,
-              rotatedOptions,
-            ))
+            this.ensureRemoteSubset(rotatedOptions))
           await this.applyLeaderCommitsBeforeReply(options)
         }
         return
@@ -2873,8 +2924,7 @@ class PersistedCollectionRuntime<
 
     if (this.canRouteRemoteDemandThroughCoordinator()) {
       try {
-        await this.persistence.coordinator.requestEnsureRemoteSubset(
-          this.storageCollectionId,
+        await this.ensureRemoteSubset(
           this.rotatedAcquisitions.get(options) ?? options,
         )
       } catch (error) {
@@ -3111,26 +3161,22 @@ class PersistedCollectionRuntime<
     )
     if (!stillActive) this.hydratedDemands.delete(demandKey)
     if (this.mode === `sync-present`) {
+      const lifecycleGeneration = this.lifecycleGeneration
       void this.persistence.coordinator
         .requestReleaseRemoteSubset(this.storageCollectionId, remoteOptions)
         .catch((error) => {
-          this.reportSyncError(error)
+          this.reportSyncError(error, `remote`, lifecycleGeneration)
         })
     }
-    if (upstreamUnloadSubset) {
-      try {
-        const result = (
-          upstreamUnloadSubset as unknown as (
-            options: LoadSubsetOptions,
-          ) => unknown
-        )(options)
-        void Promise.resolve(result).catch((error) => {
-          this.reportSyncError(error)
-        })
-      } catch (error) {
-        this.reportSyncError(error)
-      }
-    }
+    // The adapter's own unloadSubset, called as core calls it: a throw
+    // reaches core, which reports the contract breach uncaught. A returned
+    // rejection is the same breach.
+    void Promise.resolve(
+      (
+        upstreamUnloadSubset as
+          ((options: LoadSubsetOptions) => unknown) | undefined
+      )?.(options),
+    ).catch(reportUncaught)
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
@@ -3311,9 +3357,10 @@ class PersistedCollectionRuntime<
                 this.storageCollectionId,
                 this.rotatedAcquisitions.get(options) ?? options,
               )
-              .catch((error) => {
-                this.reportSyncError(error)
-              }),
+              // The retired run's release reaches no run, and a remote
+              // failure must not fail the cleanup: a reload crashes a
+              // Collection whose retired run's cleanup rejects.
+              .catch(warnRemoteFailure),
           )
         })
       }
@@ -3341,10 +3388,9 @@ class PersistedCollectionRuntime<
     this.rotatedAcquisitions.clear()
     for (const [options, storageId] of this.scopedRefreshes) {
       remoteReleases.push(
-        this.persistence.coordinator.requestReleaseRemoteSubset(
-          storageId,
-          options,
-        ),
+        this.persistence.coordinator
+          .requestReleaseRemoteSubset(storageId, options)
+          .catch(warnRemoteFailure),
       )
     }
     this.scopedRefreshes.clear()
@@ -4703,8 +4749,7 @@ class PersistedCollectionRuntime<
         continue
       }
       try {
-        await this.persistence.coordinator.requestEnsureRemoteSubset(
-          this.storageCollectionId,
+        await this.ensureRemoteSubset(
           this.rotatedAcquisitions.get(options) ?? options,
         )
         this.pendingRemoteSubsetEnsures.delete(subsetKey)
@@ -5068,28 +5113,19 @@ class PersistedCollectionRuntime<
           ) {
             return
           }
-          return this.persistence.coordinator.requestEnsureRemoteSubset(
-            storageId,
-            refreshOptions,
-          )
+          return this.ensureRemoteSubset(refreshOptions, storageId)
         })
         .catch((error: unknown) => {
-          if (
-            lifecycleGeneration === this.lifecycleGeneration &&
-            !options.signal?.aborted
-          ) {
-            this.reportSyncError(error)
-          }
+          if (!options.signal?.aborted)
+            this.reportSyncError(error, `remote`, lifecycleGeneration)
         })
         .finally(() => {
           if (!this.scopedRefreshes.delete(refreshOptions)) return
           void this.persistence.coordinator
             .requestReleaseRemoteSubset(storageId, refreshOptions)
-            .catch((error: unknown) => {
-              if (lifecycleGeneration === this.lifecycleGeneration) {
-                this.reportSyncError(error)
-              }
-            })
+            .catch((error: unknown) =>
+              this.reportSyncError(error, `remote`, lifecycleGeneration),
+            )
         })
     }
   }
@@ -5876,6 +5912,7 @@ function createWrappedSyncConfig<
         getMap(openTransaction).set(key, write)
       }
       let fullStartPromise: Promise<void> | null = null
+      let stopNetworkFirstGate = () => {}
       let sourceResultPromise: Promise<SyncConfigRes> | null = null
       let resolveSourceResultAssigned!: () => void
       const sourceResultAssigned = new Promise<void>((resolve) => {
@@ -5926,21 +5963,49 @@ function createWrappedSyncConfig<
         })
       }
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
-      const reportUpstreamError = (error: unknown) => {
-        if (persistedReadiness?.getSnapshot().status !== `loading`) {
-          runtime.reportSyncError(error)
-          return
-        }
-        // An early network error must not stop the live-query graph before
-        // the persisted baseline has published its rows.
-        void (fullStartPromise ?? runtime.ensureStarted()).then(
-          () => {
-            if (!isCleanedUp() && !getTerminalFailure()) {
-              runtime.reportSyncError(error)
-            }
-          },
-          () => undefined,
+      // Network-first initial rendering: once the deadline passes, or the
+      // remote fails, a completed restore that installed rows opens the
+      // Collection. An empty restore keeps it loading, so an empty list never
+      // stands for data the network has not answered yet. An on-demand
+      // Collection restores per demand instead: each covered load settles
+      // from SQLite after its own wait (`settleCoveredDemand`), and query
+      // readiness follows its loads.
+      const openFromDisk = () => {
+        if (
+          !persistedReadiness ||
+          persistedReadiness.onDemand ||
+          isCleanedUp() ||
+          getTerminalFailure()
         )
+          return
+        if (persistedReadiness.getSnapshot().status !== `ready`) return
+        if (params.collection.status !== `loading`) return
+        if (params.collection.size === 0) return
+        markCoreReady()
+      }
+      // The wrapper marks core ready outside the sync function. The status
+      // reads `ready` before ready callbacks and ready-event subscribers run,
+      // so one that throws surfaces as uncaught and the Collection stays
+      // ready, as core reports other subscriber errors. A throw from
+      // markReady itself is a contract violation and reaches the caller.
+      const markCoreReady = () => {
+        const readyFailures = params.collection._lifecycle.deferReadyFailures()
+        try {
+          params.markReady()
+        } finally {
+          const failure = readyFailures()
+          if (failure)
+            queueMicrotask(() => {
+              throw failure.error
+            })
+        }
+      }
+      // A remote that fails before the restore finishes waits for it: the
+      // restored rows open the Collection and the failure shows as its
+      // error; without rows, the first load fails.
+      const failUpstream = (error: unknown) => {
+        openFromDisk()
+        runtime.reportSyncError(error, `sync adapter`)
       }
       const createHandledRejection = (error: unknown): Promise<never> => {
         const rejected = Promise.reject(error)
@@ -5966,8 +6031,9 @@ function createWrappedSyncConfig<
           }
           transaction.deferredHydrationMetadataDeleteKeys.clear()
 
-          params.begin()
-          if (transaction.truncate) params.truncate()
+          params.begin(transaction.beginOptions)
+          if (transaction.truncateOptions)
+            params.truncate(transaction.truncateOptions)
           for (const operation of transaction.operations) {
             if (operation.type === `delete`) {
               params.write({ type: `delete`, key: operation.key })
@@ -6012,7 +6078,7 @@ function createWrappedSyncConfig<
           commit: params.commit,
           truncate: params.truncate,
           metadata: params.metadata ?? null,
-          markError: params.markError,
+          fail: params.fail,
         },
       )
 
@@ -6072,28 +6138,57 @@ function createWrappedSyncConfig<
       }
 
       let sourceSession = 0
+      // Upstream reports and failures wait for persisted startup, as
+      // markReady does. Readiness, reports, and failures reach core in the
+      // order the adapter made them, after startup and after the sync
+      // function returned its result.
+      let adapterCalls = Promise.resolve()
+      const afterStartup = (call: () => void | Promise<void>) => {
+        if (startupState.cleanedUp || getTerminalFailure()) return
+        adapterCalls = adapterCalls
+          .then(() => fullStartPromise ?? runtime.ensureStarted())
+          .then(
+            async () => {
+              if (isCleanedUp() || getTerminalFailure()) return
+              try {
+                await call()
+              } catch (error) {
+                // The call broke the Collection's state machine. It is too
+                // late to throw at the adapter, so it crashes the Collection,
+                // as a throwing sync function does.
+                params.collection._lifecycle.crash(error)
+              }
+            },
+            // A failed startup reports its own failure.
+            () => undefined,
+          )
+      }
+      const reportUpstreamError = (error: unknown) =>
+        afterStartup(() => failUpstream(error))
       const wrappedParams = {
         ...params,
-        markError: reportUpstreamError,
-        markReady: () => {
-          if (startupState.cleanedUp || getTerminalFailure()) return
-          void (fullStartPromise ?? runtime.ensureStarted())
-            .then(async () => {
-              if (isCleanedUp() || getTerminalFailure()) return
-              await sourceResultAssigned
-              try {
-                await sourceResultPromise
-              } catch (error) {
-                reportUpstreamError(error)
-                return
-              }
-              if (isCleanedUp() || getTerminalFailure()) return
-              params.markReady()
-            })
-            .catch(() => undefined)
-        },
-        begin: () => {
+        fail: reportUpstreamError,
+        reportError: (error: unknown) =>
+          afterStartup(() => params.reportError(error)),
+        reportHealthy: (error?: unknown) =>
+          afterStartup(() => params.reportHealthy(error)),
+        markReady: () =>
+          afterStartup(async () => {
+            await sourceResultAssigned
+            try {
+              await sourceResultPromise
+            } catch (error) {
+              failUpstream(error)
+              return
+            }
+            if (isCleanedUp() || getTerminalFailure()) return
+            markCoreReady()
+          }),
+        begin: (options?: { snapshot?: boolean }) => {
           if (startupState.cleanedUp) return undefined
+          // A snapshot replaces every synced row, durable ones included, as a
+          // truncate at its start does.
+          if (options?.snapshot) runtime.noteSourceTruncate()
           const terminalFailure = getTerminalFailure()
           const internal = runtime.isApplyingInternally()
           const transaction: OpenSyncTransaction<T, TKey> = {
@@ -6102,7 +6197,8 @@ function createWrappedSyncConfig<
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
             deferredHydrationMetadataDeleteKeys: new Set(),
-            truncate: false,
+            truncate: options?.snapshot === true,
+            beginOptions: options,
             internal,
             lifecycleGeneration: runtime.getLifecycleGeneration(),
             operationKeys: new Set(),
@@ -6293,7 +6389,7 @@ function createWrappedSyncConfig<
               },
             }
           : undefined,
-        truncate: () => {
+        truncate: (options?: { markReady?: boolean }) => {
           if (startupState.cleanedUp) return
           runtime.noteSourceTruncate()
           const openTransaction = getOpenTransaction()
@@ -6320,6 +6416,7 @@ function createWrappedSyncConfig<
             })
           }
           openTransaction.truncate = true
+          openTransaction.truncateOptions = options ?? {}
         },
         commit: (signal?: AbortSignal) => {
           if (startupState.cleanedUp) return true
@@ -6455,17 +6552,23 @@ function createWrappedSyncConfig<
           markReady: () => {
             if (active()) wrappedParams.markReady()
           },
-          markError: (error?: unknown) => {
-            if (active()) wrappedParams.markError(error)
+          fail: (error: unknown) => {
+            if (active()) wrappedParams.fail(error)
           },
-          begin: () => {
-            if (active()) wrappedParams.begin()
+          reportError: (error: unknown) => {
+            if (active()) wrappedParams.reportError(error)
+          },
+          reportHealthy: (error?: unknown) => {
+            if (active()) wrappedParams.reportHealthy(error)
+          },
+          begin: (options?: { snapshot?: boolean }) => {
+            if (active()) wrappedParams.begin(options)
           },
           write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
             if (active()) wrappedParams.write(message)
           },
-          truncate: () => {
-            if (active()) wrappedParams.truncate()
+          truncate: (options?: { markReady?: boolean }) => {
+            if (active()) wrappedParams.truncate(options)
           },
           invalidateLoadedSubsets: () => {
             if (active()) wrappedParams.invalidateLoadedSubsets()
@@ -6569,6 +6672,7 @@ function createWrappedSyncConfig<
       let customRestartSequence = 0
       const enterSourceSession = (): void => {
         const session = ++sourceSession
+        const lifecycleGeneration = runtime.getLifecycleGeneration()
         let settleSourceSyncEntry!: () => void
         activeSourceSyncEntry = new Promise<void>((resolve) => {
           settleSourceSyncEntry = resolve
@@ -6601,8 +6705,16 @@ function createWrappedSyncConfig<
                   ownerSource.unloadSubset?.(
                     options as unknown as LoadSubsetOptions,
                   ),
+                // The coordinator reports a failed remote request of this
+                // owner. The source keeps syncing; the request's own caller
+                // received the rejection.
                 onError: (error: unknown) => {
-                  if (session === sourceSession) reportUpstreamError(error)
+                  if (session === sourceSession)
+                    runtime.reportSyncError(
+                      error,
+                      `remote`,
+                      lifecycleGeneration,
+                    )
                 },
               }),
             )
@@ -6645,6 +6757,20 @@ function createWrappedSyncConfig<
         })
       }
       fullStartPromise = runtime.ensureStarted()
+      if (persistedReadiness) {
+        let deadlinePassed = false
+        const deadline = setTimeout(() => {
+          deadlinePassed = true
+          openFromDisk()
+        }, persistedReadiness.networkTimeoutMs)
+        const stopReadiness = persistedReadiness.subscribe(() => {
+          if (deadlinePassed) openFromDisk()
+        })
+        stopNetworkFirstGate = () => {
+          clearTimeout(deadline)
+          stopReadiness()
+        }
+      }
       // Startup can fail before the source reaches markReady or loadSubset,
       // which are the two eventual consumers of this outer adopting promise.
       // The runtime-owned inner promise still installs and reports the exact
@@ -6686,6 +6812,7 @@ function createWrappedSyncConfig<
           for (const acquisition of acquisitions.values()) {
             acquisition.cancelAdmissionWait?.()
           }
+          stopNetworkFirstGate()
           acquisitions.clear()
           pendingPublicationTransactions.length = 0
           for (const transaction of transactionStack) {
@@ -6885,7 +7012,7 @@ function createLoopbackSyncConfig<
           commit: params.commit,
           truncate: params.truncate,
           metadata: params.metadata ?? null,
-          markError: params.markError,
+          fail: params.fail,
         },
       )
 
@@ -7061,9 +7188,6 @@ export function persistedCollectionOptions<
         persistedReadinessTracker,
       ),
       persistence,
-      ...(persistedReadinessTracker
-        ? { [PERSISTED_READINESS]: persistedReadinessTracker }
-        : {}),
     }
 
     return withCollectionConfigFactory(
@@ -7182,9 +7306,6 @@ export function persistedCollectionOptions<
     ...localOnlyOptions,
     id: collectionId,
     persistence,
-    ...(persistedReadinessTracker
-      ? { [PERSISTED_READINESS]: persistedReadinessTracker }
-      : {}),
     sync: createLoopbackSyncConfig(runtime),
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,

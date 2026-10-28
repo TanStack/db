@@ -1,4 +1,4 @@
-// Hostile mutants for persisted demand coverage and its initial-render gate.
+// Hostile mutants for persisted demand coverage.
 //
 // Each mutant replaces one exact piece of production code with a plausible
 // wrong design. The harness applies it in memory through
@@ -311,234 +311,6 @@ const MUTANTS = [
     rationale: 'source truncate does not delete demand coverage records',
   },
   {
-    id: 'D01',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: 'return builder ? builder.initialDemandsSettled() : !owner.isLoadingSubset',
-    replace: 'return builder ? true : !owner.isLoadingSubset',
-    rationale:
-      'permitsPersistedInitialRender: on-demand source permits before demands settle',
-  },
-  {
-    id: 'D02',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: 'networkFailed || Date.now() >= readiness.getOrStartNetworkDeadline()',
-    replace: 'networkFailed',
-    rationale:
-      'permitsPersistedInitialRender: eager source ignores its network deadline',
-  },
-  {
-    id: 'D03',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '  return sources.every(({ demandOwner: owner, readiness }) => {',
-    replace: '  return sources.some(({ demandOwner: owner, readiness }) => {',
-    rationale:
-      'permitsPersistedInitialRender: some() instead of every() across sources',
-  },
-  {
-    id: 'D04',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '? builder.subscribeInitialDemandsSettled(listener)',
-    replace: '? demandOwner.on(`loadingSubset:change`, listener)',
-    rationale:
-      'subscribeDemandSettlement: listens to loadingSubset only, not demand settlement',
-  },
-  {
-    id: 'D05',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '    unsubscribers.push(subscribeDemandSettlement(sources, check))',
-    replace: '',
-    rationale:
-      'waitForPersistedInitialRender: never rechecks when demands settle',
-  },
-  {
-    id: 'D06',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: 'if (networkReady) {',
-    replace: 'if (networkReady && false) {',
-    rationale:
-      'waitForPersistedInitialRender: network readiness no longer renders immediately',
-  },
-  {
-    id: 'D07',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '        sources,\n        networkFailed,\n      )\n      const sourceFailed',
-    replace:
-      '        sources,\n        false,\n      )\n      const sourceFailed',
-    rationale:
-      'waitForPersistedInitialRender: failed network not passed to permit check',
-  },
-  {
-    id: 'D08',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '} else if (localRenderAllowed && persisted.status === `ready`) {',
-    replace: '} else if (localRenderAllowed) {',
-    rationale:
-      'waitForPersistedInitialRender: renders before persisted restore is ready',
-  },
-  {
-    id: 'D09',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '        networkFailed &&\n        !sourceFailed &&',
-    replace: '        networkFailed &&',
-    rationale:
-      'waitForPersistedInitialRender: failed source does not block network-error rejection',
-  },
-  {
-    id: 'D10',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: '} else if (remainingNetworkMs > 0 && !networkFailed) {',
-    replace: '} else if (false) {',
-    rationale:
-      'waitForPersistedInitialRender: no deadline timer for eager sources',
-  },
-  {
-    id: 'D11',
-    file: 'packages/db/src/persisted-readiness.ts',
-    find: 'const networkDeadlineAt = Math.max(',
-    replace: 'const networkDeadlineAt = Math.min(',
-    rationale: 'deadline aggregation Math.min instead of Math.max over sources',
-  },
-  {
-    id: 'B01',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '      this.notifyIfDemandsSettled()\n      demand.participant?.resolve()',
-    replace: '      demand.participant?.resolve()',
-    rationale: 'settleDemand: does not notify settled-demand listeners',
-  },
-  {
-    id: 'B02',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '    if (!this.notifyIfDemandsSettled()) return\n    if (!this.isInErrorState',
-    replace: '    this.notifyIfDemandsSettled()\n    if (!this.isInErrorState',
-    rationale:
-      'updateLiveQueryStatus: marks ready ignoring the demands-settled gate',
-  },
-  {
-    id: 'B03',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '    if (!this.initialDemandsSettled()) return false',
-    replace: '    if (!this.initialDemandsSettled() && false) return false',
-    rationale:
-      'notifyIfDemandsSettled: notifies listeners before demands settle',
-  },
-  {
-    id: 'B04',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '[...this.activeDemands.values()].every((demand) => demand.settled)',
-    replace:
-      '[...this.activeDemands.values()].some((demand) => demand.settled)',
-    rationale: 'initialDemandsSettled: some() instead of every() over demands',
-  },
-  {
-    id: 'B05',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '!this.liveQueryCollection?.isLoadingSubset',
-    replace: 'true',
-    rationale: 'initialDemandsSettled: ignores live collection subset loading',
-  },
-  {
-    id: 'B06',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: 'this.currentSyncState?.subscribedToAllCollections === true &&',
-    replace: 'true &&',
-    rationale: 'initialDemandsSettled: ignores subscription setup',
-  },
-  {
-    id: 'B07',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: 'if (!this.isInErrorState && this.allRequiredSourcesReady()) markReady()',
-    replace: 'if (this.allRequiredSourcesReady()) markReady()',
-    rationale: 'updateLiveQueryStatus: an errored query becomes ready',
-  },
-  {
-    id: 'B08',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '    for (const listener of this.demandsSettledListeners) listener()',
-    replace: '    void this.demandsSettledListeners',
-    rationale: 'notifyIfDemandsSettled: listeners never called',
-  },
-  {
-    id: 'B09',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: '    return () => this.demandsSettledListeners.delete(listener)',
-    replace: '    return () => {}',
-    rationale:
-      'subscribeInitialDemandsSettled: unsubscribe is a no-op (leak; expected EQUIVALENT observably)',
-    equivalent: 'a no-op unsubscribe only leaks a listener',
-  },
-  {
-    id: 'B10',
-    file: 'packages/db/src/query/live/collection-config-builder.ts',
-    find: 'if (!demand || demand.generation !== generation || demand.settled) return',
-    replace: 'if (!demand || demand.generation !== generation) return',
-    rationale:
-      'settleDemand: re-settling an already settled demand is re-processed (expected EQUIVALENT)',
-    equivalent: 're-settling a settled demand is a no-op',
-  },
-  {
-    id: 'O01',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: '      !sources ||\n      this.readPersistedReadiness().status !== `ready`',
-    replace: '      !sources',
-    rationale:
-      'isInitialRenderReady: ignores whether the persisted restore is ready',
-  },
-  {
-    id: 'O02',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: '      !INITIAL_RENDER_PRELOADS.has(collection) ||\n',
-    replace: '',
-    rationale:
-      'isInitialRenderReady: renders without a preload having been started',
-  },
-  {
-    id: 'O03',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: '    if (collection.status === `error` && !sourceFailed) return false\n',
-    replace: '',
-    rationale: 'isInitialRenderReady: errored live collection not blocked',
-  },
-  {
-    id: 'O04',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: 'collection.status === `error` || clientQuery?.status === `error`',
-    replace: 'collection.status === `error`',
-    rationale: 'isInitialRenderReady: errored client query stream ignored',
-  },
-  {
-    id: 'O05',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: '    if (this.collection) INITIAL_RENDER_PRELOADS.add(this.collection)',
-    replace: '    void INITIAL_RENDER_PRELOADS',
-    rationale:
-      'preloadForInitialRender: preload not registered (readiness never reached)',
-  },
-  {
-    id: 'O06',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: 'const demandOwner = source.onDemand ? (owner ?? collection) : undefined',
-    replace: 'const demandOwner = source.onDemand ? collection : undefined',
-    rationale:
-      'collectPersistedReadinessSources: demand owner is the source, not the reading query',
-  },
-  {
-    id: 'O07',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: 'const demandOwner = source.onDemand ? (owner ?? collection) : undefined',
-    replace:
-      'const demandOwner = undefined as Collection<any, any, any> | undefined',
-    rationale:
-      'collectPersistedReadinessSources: on-demand source does not gate rendering',
-  },
-  {
-    id: 'O08',
-    file: 'packages/db/src/live-query-observer.ts',
-    find: '        .every((source) => visit(source, collection))',
-    replace: '        .some((source) => visit(source, collection))',
-    rationale:
-      'collectPersistedReadinessSources: some() across a builder sources',
-  },
-  {
     id: 'P36',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
     find: '    } catch {\n      if (this.hasExpiredCacheClaim()) {\n        this.scheduleCacheClaimRecovery(this.lifecycleGeneration)\n      }\n      return undefined\n    }',
@@ -552,6 +324,14 @@ const MUTANTS = [
     find: '  options.limit === undefined\n    ? undefined\n    : JSON.stringify',
     replace: '  JSON.stringify',
     rationale: 'every demand records its row keys, not only a window',
+  },
+  {
+    id: 'P39',
+    file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
+    find: '          !persistedReadiness ||\n          persistedReadiness.onDemand ||\n',
+    replace: '          !persistedReadiness ||\n',
+    rationale:
+      'an on-demand Collection opens from disk after the deadline, like an eager one',
   },
 ]
 

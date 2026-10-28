@@ -237,7 +237,7 @@ describe(`useLiveInfiniteQuery`, () => {
     ).toThrow(/orderBy/)
   })
 
-  it(`resolves the fetch promise and exposes pagination failures in state`, async () => {
+  it(`resolves the fetch promise and keeps status after a pagination failure`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `infinite-query-pagination-failure`,
@@ -270,9 +270,9 @@ describe(`useLiveInfiniteQuery`, () => {
     })
 
     await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-      expect(result.current.error).toBe(failure)
+      // A failed page request after readiness does not change the status.
       expect(result.current.isFetchingNextPage).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
     })
     expect(result.current.pages).toHaveLength(1)
     expect(result.current.hasNextPage).toBe(true)

@@ -27,12 +27,13 @@ import type {
   DbClient,
   DeferredLiveQueryCollections,
   GetResult,
+  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryHookConfig,
   LiveQueryKey,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
+  LiveQueryStatusFlags,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -55,22 +56,19 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isLoading - True while initial query data is loading
  * @property isReady - True when query has received first data and is ready
  * @property isIdle - True when query hasn't started yet
- * @property isError - True when query encountered an error
+ * @property isLoadingError - True when the first load failed
+ * @property isCrashed - True when local storage or an invariant broke
+ * @property isSyncError - True when data is shown and `health` has a problem
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
+export interface UseLiveQueryReturn<
+  T extends object,
+  TData = Array<T>,
+> extends LiveQueryStatusFlags {
   state: Map<string | number, T>
   data: TData
   collection: Collection<T, string | number, {}>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -91,19 +89,11 @@ export interface UseLiveQueryReturnWithCollection<
   TKey extends string | number,
   TUtils extends Record<string, any>,
   TData = Array<T>,
-> {
+> extends LiveQueryStatusFlags {
   state: Map<TKey, T>
   data: TData
   collection: Collection<T, TKey, TUtils>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
 }
 
 type MaybeGetter<T> = T | (() => T)
@@ -173,8 +163,8 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * const query = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  * )
- * const { data, isLoading, isError } = $derived(query)
- * // Now data, isLoading, and isError maintain reactivity
+ * const { data, isLoading, isLoadingError } = $derived(query)
+ * // Now data, isLoading, and isLoadingError maintain reactivity
  *
  * @example
  * // Join pattern
@@ -199,7 +189,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * // In template:
  * // {#if todosQuery.isLoading}
  * //   <div>Loading...</div>
- * // {:else if todosQuery.isError}
+ * // {:else if todosQuery.isLoadingError}
  * //   <div>Error: {todosQuery.status}</div>
  * // {:else}
  * //   <ul>
@@ -255,7 +245,7 @@ export function useLiveQuery<TContext extends Context>(
  * // In template:
  * // {#if itemsQuery.isLoading}
  * //   <div>Loading...</div>
- * // {:else if itemsQuery.isError}
+ * // {:else if itemsQuery.isLoadingError}
  * //   <div>Something went wrong</div>
  * // {:else if !itemsQuery.isReady}
  * //   <div>Preparing...</div>
@@ -304,7 +294,7 @@ export function useLiveQuery<TContext extends Context>(
  * // In template:
  * // {#if queryResult.isLoading}
  * //   <div>Loading...</div>
- * // {:else if queryResult.isError}
+ * // {:else if queryResult.isLoadingError}
  * //   <div>Error loading data</div>
  * // {:else}
  * //   {#each queryResult.data as item (item.id)}
@@ -508,8 +498,8 @@ export function useLiveQuery(
 
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
-  let persistedStatus = $state(initialSnapshot.persistedStatus)
-  let persistedError = $state.raw<unknown>(initialSnapshot.persistedError)
+  let health = $state.raw<HealthNode | undefined>(initialSnapshot.health)
+  let isSyncError = $state(initialSnapshot.isSyncError)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,
@@ -517,8 +507,8 @@ export function useLiveQuery(
   ) => {
     const snapshot = observer.getSnapshot()
     status = snapshot.status as CollectionStatus
-    persistedStatus = snapshot.persistedStatus
-    persistedError = snapshot.persistedError
+    health = snapshot.health
+    isSyncError = snapshot.isSyncError
     untrack(() => {
       if (changes && changes.length > 0) {
         for (const change of changes) {
@@ -611,29 +601,29 @@ export function useLiveQuery(
       readResolved()
       return status === `ready` || status === `disabled`
     },
-    get persistedStatus() {
-      readResolved()
-      return persistedStatus
-    },
-    get isPersistedReady() {
-      readResolved()
-      return persistedStatus === `ready`
-    },
-    get persistedError() {
-      readResolved()
-      return persistedError
-    },
     get isIdle() {
       readResolved()
       return status === `idle`
     },
-    get isError() {
+    get isLoadingError() {
       readResolved()
       return status === `error`
+    },
+    get isCrashed() {
+      readResolved()
+      return status === `crashed`
     },
     get isCleanedUp() {
       readResolved()
       return status === `cleaned-up`
+    },
+    get isSyncError() {
+      readResolved()
+      return isSyncError
+    },
+    get health() {
+      readResolved()
+      return health
     },
   }
 }

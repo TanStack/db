@@ -5,7 +5,6 @@ import {
   IR,
   createCollection,
   createLiveQueryCollection,
-  createLiveQueryObserver,
   eq,
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
@@ -1613,47 +1612,31 @@ async function runHeldPastTheWait(
 // Part 3: joined sources
 //
 // An eager source P restored from SQLite and an on-demand source C. Offline,
-// the network-first wait may release only when the query's demand on C has
-// settled from SQLite, so the same joined query must have covered it in
-// session 1. Collection readiness stays false: P's Collection never becomes
-// ready offline.
+// P's Collection opens from its restored rows once its wait passes. The
+// joined query is ready only when its demand on C has settled from SQLite,
+// so the same joined query must have covered that demand in session 1.
 //
-// The shared judgment reads C's loads from session 2's record: the wait
-// releases exactly when every one of them has settled, and then shows P's
+// The shared judgment reads C's loads from session 2's record: the query is
+// ready exactly when every one of them has settled, and it then shows P's
 // rows joined with C's restored rows. The wrong design "an on-demand opt-in
-// permits fallback on its own" releases without coverage; each
+// permits fallback on its own" makes the query ready without coverage; each
 // never-requested history feeds that wrong observation to the judgment as a
 // calibration.
 //
-// The rows are read when the wait releases, because that is the snapshot a
-// Suspense render shows. Session 2 also reads the joined query through an
-// outer live query (`nested`), which must already show the joined row at
-// release.
+// Session 2 also reads the joined query through an outer live query
+// (`nested`), which must show the joined row when it is ready.
 //
 // A query can reach C through more than one live query. In `two-readers` the
 // outer query reads the joined query and also joins C itself on another key,
-// so it has two demands on C. Persisted readiness requires every demand the
-// query reaches on C to have settled (`docs/contributing/glossary.md`,
-// "persisted readiness"). The history `covered by the inner query only`
-// covers just the joined query's demand, so the wait must not release. It
+// so it has two demands on C. The query is ready only when every demand it
+// reaches on C has settled. The history `covered by the inner query only`
+// covers just the joined query's demand, so the query must stay loading. It
 // rejects the wrong design "the first live query reached on C stands for
 // all of them".
 //
-// A source failure is not coverage. When C reports an error while its
-// never-covered demand is pending, the wait must not release a local render:
-// that would show rows that no load proved complete. This rejects the wrong
-// design "a source failure permits fallback for every source". The demand
-// still waits for its upstream load, so the wait neither releases nor
-// rejects (the law record's limit "Uncovered demand while offline").
-//
-// A source failure does not block a covered demand either. In the failure
-// histories C waits 1000 ms, and P or C reports an error at once. Before the
-// wait passes nothing releases. After it, the covered demand has settled from
-// SQLite, so every condition of the gate holds and the wait releases the
-// joined row, even though the live query reports the source error. This
-// rejects the wrong design "a source error blocks every on-demand demand",
-// which leaves the wait pending with nothing left to change it. The observer's
-// synchronous gate, `isInitialRenderReady`, must agree with the wait.
+// Source failures are not histories here. How a source error reaches a
+// query's status is the source-health law, and its oracle owns that law
+// (`packages/db/tests/source-health-oracle.test.ts`).
 // ===========================================================================
 
 type ChildHistory =
@@ -1661,10 +1644,7 @@ type ChildHistory =
   | `covered by the inner query only`
   | `never requested`
 type JoinedShape = `flat` | `nested` | `two-readers`
-type JoinedFailure = `none` | `on-demand source fails` | `eager source fails`
 // What the joined query reads: P's rows joined with C's rows on `parentId`.
-// The judgment treats a released network-first wait as `ready`, a rejected
-// one as `error`, and a pending one as `loading`.
 const JOINED: QuerySpec = {
   join: { parents: `parents`, children: `children`, on: `parentId` },
   select: (parent, child) => ({
@@ -1678,7 +1658,6 @@ type Parent = { id: string; value: string }
 type Child = { id: string; parentId: string; value: string }
 
 function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
-  const source = { markError: (_error: unknown) => {} }
   // The source's own log, for the shared judgment.
   const events: Array<SourceEvent> = []
   const collection = createCollection(
@@ -1688,8 +1667,7 @@ function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
       initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
       persistence: { adapter },
       sync: {
-        sync: ({ begin, write, commit, markReady, markError }) => {
-          source.markError = markError
+        sync: ({ begin, write, commit, markReady }) => {
           if (online) {
             begin()
             write({ type: `insert`, value: { id: `p1`, value: `parent` } })
@@ -1706,16 +1684,14 @@ function eagerParents(adapter: SQLiteCorePersistenceAdapter, online: boolean) {
       },
     }),
   )
-  return { collection, source, events }
+  return { collection, events }
 }
 
 function onDemandChildren(
   adapter: SQLiteCorePersistenceAdapter,
   online: boolean,
-  waitMs = 0,
 ) {
   const calls: Array<LoadSubsetOptions> = []
-  const source = { markError: (_error: unknown) => {} }
   // The source's own log, for the shared judgment, and when it received
   // each load.
   const events: Array<SourceEvent> = []
@@ -1725,11 +1701,10 @@ function onDemandChildren(
       id: `demand-coverage-children`,
       getKey: (row) => row.id,
       syncMode: `on-demand`,
-      initialRender: { strategy: `network-first`, networkTimeoutMs: waitMs },
+      initialRender: { strategy: `network-first`, networkTimeoutMs: 0 },
       persistence: { adapter },
       sync: {
-        sync: ({ begin, write, commit, markError }) => {
-          source.markError = markError
+        sync: ({ begin, write, commit }) => {
           return {
             loadSubset: (options: LoadSubsetOptions) => {
               calls.push(options)
@@ -1762,7 +1737,7 @@ function onDemandChildren(
       },
     }),
   )
-  return { collection, calls, source, events, arrivedAt }
+  return { collection, calls, events, arrivedAt }
 }
 
 function shapedQuery(
@@ -1818,7 +1793,6 @@ function joined(
 async function runJoined(
   history: ChildHistory,
   shape: JoinedShape,
-  failure: JoinedFailure = `none`,
 ): Promise<Array<CoverageRecord>> {
   const driver = createDriver(new DatabaseSync(`:memory:`))
   const session1: Array<SourceEvent> = []
@@ -1861,54 +1835,36 @@ async function runJoined(
 
   useFakeClock()
   const adapter = new SQLiteCorePersistenceAdapter({ driver })
-  const eager = eagerParents(adapter, false)
-  const parents = eager.collection
-  const waitMs = failure === `none` ? 0 : 1000
-  const children = onDemandChildren(adapter, false, waitMs)
+  const parents = eagerParents(adapter, false).collection
+  const children = onDemandChildren(adapter, false)
   const { inner, query } = shapedQuery(shape, parents, children.collection)
 
-  const observer = createLiveQueryObserver(query)
-  const unsubscribe = observer.subscribe(() => {})
+  const subscription = query.subscribeChanges(() => {})
   // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
   const visibleRows = () =>
-    (observer.getSnapshot().data as Array<object>).map((row) =>
+    (query.toArray as Array<object>).map((row) =>
       Object.fromEntries(
         Object.entries(row).filter(([key]) => !key.startsWith(`$`)),
       ),
     )
-  const initialRender: {
-    released: boolean
-    rejected: boolean
-    rows?: unknown
-  } = { released: false, rejected: false }
-  void observer.preloadForInitialRender().then(
-    () => {
-      initialRender.released = true
-      initialRender.rows = visibleRows()
-    },
-    () => (initialRender.rejected = true),
-  )
-  const observe = (): CoverageRecord => {
-    // The observer's synchronous gate must agree with the wait.
-    expect(observer.isInitialRenderReady()).toBe(initialRender.released)
-    return {
-      events: [...session1, ...children.events],
-      queries: {
-        joined: {
-          spec: JOINED,
-          sent: [...children.calls],
-          observed: initialRender.released
+  const observe = (): CoverageRecord => ({
+    events: [...session1, ...children.events],
+    queries: {
+      joined: {
+        spec: JOINED,
+        sent: [...children.calls],
+        observed:
+          query.status === `ready`
             ? {
                 status: `ready`,
-                rows: initialRender.rows as QueryObservation[`rows`],
+                rows: visibleRows() as QueryObservation[`rows`],
               }
-            : { status: initialRender.rejected ? `error` : `loading` },
-        },
+            : { status: query.status === `error` ? `error` : `loading` },
       },
-      upstream: `never answers`,
-      waitPassed: waitPassedAt(children, waitMs),
-    }
-  }
+    },
+    upstream: `never answers`,
+    waitPassed: waitPassedAt(children, 0),
+  })
   return withCleanup(async () => {
     for (let i = 0; i < 200 && children.calls.length === 0; i++) {
       await vi.advanceTimersByTimeAsync(0)
@@ -1916,25 +1872,16 @@ async function runJoined(
     // Positive witness: session 2 reached the on-demand side's demand.
     expect(children.calls.length).toBeGreaterThan(0)
     await drain()
-    if (failure !== `none`) {
-      const failing =
-        failure === `on-demand source fails` ? children.source : eager.source
-      failing.markError(new Error(`offline stream failed`))
-      await drain()
-    }
     await vi.advanceTimersByTimeAsync(1)
     await drain()
-    const beforeWait = observe()
-    await vi.advanceTimersByTimeAsync(waitMs)
-    await drain()
+    const afterWait = observe()
     // A late checkpoint: nothing else is scheduled to change the outcome.
     await vi.advanceTimersByTimeAsync(10_000)
     await drain()
-    return [beforeWait, observe()]
+    return [afterWait, observe()]
   }, [
     () => vi.useRealTimers(),
-    unsubscribe,
-    () => observer.dispose(),
+    () => subscription.unsubscribe(),
     () => query.cleanup(),
     () => inner.cleanup(),
     () => children.collection.cleanup(),
@@ -2509,23 +2456,17 @@ describe(`persisted demand coverage oracle`, () => {
     ...([`flat`, `nested`, `two-readers`] as const).flatMap(
       (shape: JoinedShape) =>
         ([`covered by the same joined query`, `never requested`] as const).map(
-          (history: ChildHistory) => [history, shape, `none`] as const,
+          (history: ChildHistory) => [history, shape] as const,
         ),
     ),
     // The inner-only history differs from full coverage only when the query
     // reaches C through two live queries.
-    [`covered by the inner query only`, `two-readers`, `none`] as const,
-    ...([`on-demand source fails`, `eager source fails`] as const).flatMap(
-      (failure) =>
-        ([`covered by the same joined query`, `never requested`] as const).map(
-          (history) => [history, `flat`, failure] as const,
-        ),
-    ),
+    [`covered by the inner query only`, `two-readers`] as const,
   ])(
-    `releases the joined network-first wait only when the on-demand demand settles: %s, %s, %s`,
-    async (history, shape, failure) => {
+    `makes a joined query ready only when its on-demand demands settle: %s, %s`,
+    async (history, shape) => {
       quietConsole()
-      const records = await runJoined(history, shape, failure)
+      const records = await runJoined(history, shape)
       judge(records)
       // Checker calibration: an opt-in that permits fallback alone would
       // release a never-requested demand. The judgment must reject it.

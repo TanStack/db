@@ -44,11 +44,8 @@ import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/pe
  * Observation: at each checkpoint of session 2, the primitive's `isReady` and
  * `data`.
  *
- * Limits: Svelte does not consume the network-first initial-render gate.
- * `preloadForInitialRender` and `isInitialRenderReady` are called only by
- * `react-db` and `solid-db`, so this witness checks the wrapper's settlement
- * through query readiness and rows, not a Svelte render gate. It uses one
- * filter, one primitive instance per session, and no component lifecycle.
+ * Limits: this witness checks the wrapper's settlement through query
+ * readiness and rows. It uses one filter, one primitive instance per session, and no component lifecycle.
  */
 
 function queryGroupA(

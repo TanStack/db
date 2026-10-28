@@ -15,8 +15,9 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * load settles from SQLite once its wait has passed or its upstream load has
  * failed. A load with `refetch: true` is never covered. Any other load waits
  * for its upstream load, and fails with it. A query is ready when every load
- * it sent has settled; a network-first initial render over an eager and an
- * on-demand source releases on the same condition for the on-demand loads.
+ * it sent has settled; a query over an eager and an on-demand source is ready
+ * on the same condition for the on-demand loads, once the eager source has
+ * opened from its restored rows.
  *
  * This module is the one judgment that the fixed oracle, the generated
  * campaign, and every receiving driver share (ORC-014, ORC-016). A driver

@@ -3,7 +3,7 @@ id: InvalidPoolOptionError
 title: InvalidPoolOptionError
 ---
 
-Defined in: [packages/db/src/errors.ts:1218](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1218)
+Defined in: [packages/db/src/errors.ts:1248](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1248)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:1218](https://github.com/TanStack/db/blob
 new InvalidPoolOptionError(): InvalidPoolOptionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1219](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1219)
+Defined in: [packages/db/src/errors.ts:1249](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1249)
 
 #### Returns
 

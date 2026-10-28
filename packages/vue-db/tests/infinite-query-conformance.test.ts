@@ -132,7 +132,7 @@ function makeHandle(
         pageParams: result.pageParams.value,
         hasNextPage: result.hasNextPage.value,
         isFetchingNextPage: result.isFetchingNextPage.value,
-        error: result.error.value,
+        isLoadingError: result.isLoadingError.value,
         status: result.status.value,
         collection: result.collection.value,
       }

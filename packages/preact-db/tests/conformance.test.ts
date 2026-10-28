@@ -36,6 +36,8 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeSyncSource } from '../../db/tests/conformance/sync-source'
+import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { renderHook, settle } from './render-probe'
 import type { MountedHook } from './render-probe'
@@ -119,28 +121,12 @@ function makePrecreated(
   return { collection }
 }
 
-function makeErrorSource() {
-  const expectedError = new Error(`conformance: sync failure`)
-  let startup: { returned: true } | { returned: false; error: unknown } = {
-    returned: true,
-  }
-  const collection = createCollection<{ id: string }>({
-    id: `conformance-preact-err-${sourceSeq++}`,
-    getKey: (r) => r.id,
-    startSync: false,
-    sync: {
-      sync: () => {
-        throw expectedError
-      },
-    },
-  })
-  // Starting sync throws → engine catches and sets status to `error`.
-  try {
-    collection.startSyncImmediate()
-  } catch (error) {
-    startup = { returned: false, error }
-  }
-  return { collection, expectedError, startup }
+function makeErrorSource(kind: `fail` | `crash`) {
+  return makeSharedErrorSource(
+    createCollection,
+    `conformance-preact-err-${sourceSeq++}`,
+    kind,
+  )
 }
 
 function makeHandle(hook: MountedHook<any>): LiveQueryHandle {
@@ -153,13 +139,13 @@ function makeHandle(hook: MountedHook<any>): LiveQueryHandle {
         state: r?.state,
         status: r?.status,
         isReady: r?.isReady,
-        persistedStatus: r?.persistedStatus,
-        isPersistedReady: r?.isPersistedReady,
-        persistedError: r?.persistedError,
-        isError: r?.isError,
+        isLoadingError: r?.isLoadingError,
+        isCrashed: r?.isCrashed,
+        isSyncError: r?.isSyncError,
         // Read the hook's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).
         isEnabled: r?.isEnabled,
+        health: r?.health,
       })
     },
     flush: settle,
@@ -273,6 +259,12 @@ const preactDriver: LiveQueryDriver = {
     makeLaggingSource<T>(
       createCollection,
       `conformance-preact-lagging-${sourceSeq++}`,
+    ),
+  makeSyncSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeSyncSource<T>(
+      createCollection,
+      `conformance-preact-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,

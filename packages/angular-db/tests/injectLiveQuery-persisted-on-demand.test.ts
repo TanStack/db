@@ -49,11 +49,8 @@ import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/pe
  * Observation: at each checkpoint of session 2, the signals `isReady` and
  * `data`.
  *
- * Limits: Angular does not consume the network-first initial-render gate.
- * `preloadForInitialRender` and `isInitialRenderReady` are called only by
- * `react-db` and `solid-db`, so this witness checks the wrapper's settlement
- * through query readiness and rows, not an Angular render gate. It uses one
- * filter, one injection per session, and no template rendering.
+ * Limits: this witness checks the wrapper's settlement through query
+ * readiness and rows. It uses one filter, one injection per session, and no template rendering.
  */
 
 function groupA(

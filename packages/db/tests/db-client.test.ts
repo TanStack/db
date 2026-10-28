@@ -894,7 +894,7 @@ describe(`DbClient`, () => {
 
     await client.preloadLiveQuery(options)
     const source = client.collection(descriptor)
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
     await client.preloadLiveQuery(options)
 
     await expect(

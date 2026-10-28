@@ -9,7 +9,7 @@ title: useLiveSuspenseQuery
 function useLiveSuspenseQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:152](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L152)
+Defined in: [useLiveSuspenseQuery.ts:156](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L156)
 
 Create a live query with React Suspense support
 
@@ -52,6 +52,12 @@ collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[
 data: InferResultType<TContext>;
 ```
 
+#### health
+
+```ts
+health: HealthNode | undefined;
+```
+
 #### state
 
 ```ts
@@ -64,7 +70,10 @@ Promise when data is loading (caught by Suspense boundary)
 
 ### Throws
 
-Error when collection fails (caught by Error boundary)
+Error when the first load fails or the Collection crashes (caught by
+an Error boundary): the cause itself when it is an Error, otherwise an Error
+with the problem's message (`health.error.message`) whose `cause` is the
+value the sync adapter reported
 
 ### Examples
 
@@ -162,7 +171,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:162](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L162)
+Defined in: [useLiveSuspenseQuery.ts:167](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L167)
 
 Create a live query with React Suspense support
 
@@ -197,6 +206,12 @@ collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[
 data: InferResultType<TContext>;
 ```
 
+#### health
+
+```ts
+health: HealthNode | undefined;
+```
+
 #### state
 
 ```ts
@@ -209,7 +224,10 @@ Promise when data is loading (caught by Suspense boundary)
 
 ### Throws
 
-Error when collection fails (caught by Error boundary)
+Error when the first load fails or the Collection crashes (caught by
+an Error boundary): the cause itself when it is an Error, otherwise an Error
+with the problem's message (`health.error.message`) whose `cause` is the
+value the sync adapter reported
 
 ### Examples
 
@@ -307,7 +325,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:171](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L171)
+Defined in: [useLiveSuspenseQuery.ts:177](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L177)
 
 Create a live query with React Suspense support
 
@@ -348,6 +366,12 @@ collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[
 data: InferResultType<TContext>;
 ```
 
+#### health
+
+```ts
+health: HealthNode | undefined;
+```
+
 #### state
 
 ```ts
@@ -360,7 +384,10 @@ Promise when data is loading (caught by Suspense boundary)
 
 ### Throws
 
-Error when collection fails (caught by Error boundary)
+Error when the first load fails or the Collection crashes (caught by
+an Error boundary): the cause itself when it is an Error, otherwise an Error
+with the problem's message (`health.error.message`) whose `cause` is the
+value the sync adapter reported
 
 ### Examples
 
@@ -458,7 +485,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:181](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L181)
+Defined in: [useLiveSuspenseQuery.ts:188](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L188)
 
 Create a live query with React Suspense support
 
@@ -500,6 +527,12 @@ collection: Collection<TResult, TKey, TUtils>;
 data: TResult[];
 ```
 
+#### health
+
+```ts
+health: HealthNode | undefined;
+```
+
 #### state
 
 ```ts
@@ -512,7 +545,10 @@ Promise when data is loading (caught by Suspense boundary)
 
 ### Throws
 
-Error when collection fails (caught by Error boundary)
+Error when the first load fails or the Collection crashes (caught by
+an Error boundary): the cause itself when it is an Error, otherwise an Error
+with the problem's message (`health.error.message`) whose `cause` is the
+value the sync adapter reported
 
 ### Examples
 
@@ -610,7 +646,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:194](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L194)
+Defined in: [useLiveSuspenseQuery.ts:202](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L202)
 
 Create a live query with React Suspense support
 
@@ -652,6 +688,12 @@ collection: Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>
 data: TResult | undefined;
 ```
 
+#### health
+
+```ts
+health: HealthNode | undefined;
+```
+
 #### state
 
 ```ts
@@ -664,7 +706,10 @@ Promise when data is loading (caught by Suspense boundary)
 
 ### Throws
 
-Error when collection fails (caught by Error boundary)
+Error when the first load fails or the Collection crashes (caught by
+an Error boundary): the cause itself when it is an Error, otherwise an Error
+with the problem's message (`health.error.message`) whose `cause` is the
+value the sync adapter reported
 
 ### Examples
 

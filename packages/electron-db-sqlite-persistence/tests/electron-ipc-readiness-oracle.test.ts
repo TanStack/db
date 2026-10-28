@@ -406,8 +406,9 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
  * The first renderer owns the Collection and runs the source; the second is a
  * follower and routes its demand to the owner. Law 7 owes the follower: its
  * load, and its query's first ready, settle only once the owner's rows are
- * visible in the follower, and they reject, with the follower source in
- * error, if applying the owner's commit fails here.
+ * visible in the follower, and they reject if applying the owner's commit
+ * fails here. That failure is a local persistence failure, so the follower
+ * source crashes.
  *
  * The model knows only whether the owner's commit applies in the follower.
  * The grammar crosses that outcome with the consumer: a live query over the
@@ -429,7 +430,7 @@ function expectedCoordinatedRenderer(history: CoordinatedRendererHistory) {
     settledWhileApplyHeld: false,
     outcome: applied ? `fulfilled` : `rejected`,
     rows: applied ? [`remote`] : undefined,
-    source: applied ? `ready` : `error`,
+    source: applied ? `ready` : `crashed`,
   }
 }
 

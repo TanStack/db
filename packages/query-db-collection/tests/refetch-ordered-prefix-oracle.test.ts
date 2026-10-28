@@ -10,7 +10,7 @@ import {
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
@@ -1989,15 +1989,25 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     async (campaign) => {
       let reached = 0
       let reachedDuringHold = 0
+      const options =
+        campaign === `fixed`
+          ? { seed: 20261013, numRuns: oracleRuns(80) }
+          : oraclePropertyOptions(80, property)
+      // fast-check reports its seed only when the property fails. Choose the
+      // random campaign's seed here, so a test timeout can report it too.
+      const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)
+      onTestFailed(() => {
+        console.error(
+          `${property} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
+        )
+      })
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
           const observation = await withDeadline(checkCase(testCase))
           if (observation.reachedLaggingRefetchAfterContinuation) reached++
           if (observation.reachedLaggingRefetchDuringHold) reachedDuringHold++
         }),
-        campaign === `fixed`
-          ? { seed: 20261013, numRuns: oracleRuns(80) }
-          : oraclePropertyOptions(80, property),
+        { ...options, seed },
       )
       // Positive reach witness: generated histories serve continuation pages
       // before a refetch, which is the premise of the gap.

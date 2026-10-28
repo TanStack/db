@@ -44,11 +44,8 @@ import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/pe
  * Observation: at each checkpoint of session 2, the composable's `isReady` and
  * `data`.
  *
- * Limits: Vue does not consume the network-first initial-render gate.
- * `preloadForInitialRender` and `isInitialRenderReady` are called only by
- * `react-db` and `solid-db`, so this witness checks the wrapper's settlement
- * through query readiness and rows, not a Vue render gate. It uses one filter,
- * one composable instance per session, and no component lifecycle.
+ * Limits: this witness checks the wrapper's settlement through query
+ * readiness and rows. It uses one filter, one composable instance per session, and no component lifecycle.
  */
 
 function groupA(
@@ -90,7 +87,7 @@ describe(`Vue useLiveQuery over a persisted on-demand Collection offline`, () =>
         const query = groupA(first.collection)
         await vi.waitFor(() => expect(query.isReady.value).toBe(true))
         await new Promise((resolve) => setTimeout(resolve, 50))
-        await first.collection.cleanup()
+        await first.collection.cleanup({ dependents: true })
       }
       const session1: Session1Record = { events: session1Events }
 
@@ -117,7 +114,7 @@ describe(`Vue useLiveQuery over a persisted on-demand Collection offline`, () =>
         expect(coverageViolations(records.beforeDeadline)).toEqual([])
         expect(coverageViolations(records.afterDeadline)).toEqual([])
       } finally {
-        await second.collection.cleanup()
+        await second.collection.cleanup({ dependents: true })
       }
     },
   )

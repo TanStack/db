@@ -200,6 +200,16 @@ eager Collection readiness. The implementation must add that query-level
 signal: initial readiness with each eager source's persisted restore in place
 of its Collection readiness.
 
+Update, 2026-10-27: the source-health change (#2168) removed the observer's
+network-first gate and `PersistedReadinessSource`. A network-first eager
+Collection now becomes `ready` from its restored rows after the deadline or a
+remote failure, so the substitution above happens in Collection status
+itself. Query readiness is the signal, and this law adds nothing to core: an
+on-demand source permits initial readiness, and the query is ready when its
+demands on it have settled. How a source error reaches the query's status is
+the source-health law (`packages/db/tests/source-health-oracle.test.ts`); the
+two failure paragraphs above are superseded by it.
+
 ### The wait
 
 The wait reuses the network-first option and its default. #1955 set that
