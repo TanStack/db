@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { captureMicrotaskErrors, mockSyncCollectionOptions } from '../utils.js'
 
@@ -214,17 +215,13 @@ describe(`loadSubset failure matrix`, () => {
 
       try {
         if (consumer === `effect`) {
+          // A synchronous throw is a rejection (maintainer decision), so
+          // both deliveries end the Effect once the failure settles.
           const sourceErrors: Array<Error> = []
-          if (delivery === `throw`) {
-            expect(() =>
-              startEffect(path, primary, child, sourceErrors),
-            ).toThrow(error)
-          } else {
-            const effect = startEffect(path, primary, child, sourceErrors)
-            await flushFailures()
-            expect(effect.disposed).toBe(true)
-            await effect.dispose()
-          }
+          const effect = startEffect(path, primary, child, sourceErrors)
+          await flushFailures()
+          expect(effect.disposed).toBe(true)
+          await effect.dispose()
           expect(sourceErrors).toEqual([error])
         } else {
           const live = startLive(path, primary, child)
@@ -357,7 +354,16 @@ describe(`loadSubset failure matrix`, () => {
             expect(() => triggerFailure()).not.toThrow()
             await flushFailures()
 
-            expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
+            // After the first ready, a failed lazy request is a request error
+            // on the live query's node; the query keeps its status and rows.
+            expect(live.status).toBe(`ready`)
+            if (path === `lazy`) {
+              expect(live.health).toMatchObject({
+                hasErrors: true,
+                failureReason: null,
+                error: expect.anything(),
+              })
+            }
             if (failureValue === `error`) {
               expect(live.utils.lastSubsetError).toBe(error)
             } else {
@@ -553,7 +559,10 @@ describe(`loadSubset failure matrix`, () => {
     },
   )
 
-  it(`preserves a synchronous ordered error after reentrant cleanup`, async () => {
+  // A synchronous throw is a rejection, and the cleanup that ran inside the
+  // load ended the window move first: an abort ends the load (maintainer
+  // decisions), so the move rejects as aborted.
+  it(`rejects a window move as aborted when its load throws after a reentrant cleanup`, async () => {
     const error = new Error(`ordered load failed after cleanup`)
     let cleanupLive: () => Promise<void> = () => Promise.resolve()
     const source = createCollection<Row>({
@@ -586,7 +595,9 @@ describe(`loadSubset failure matrix`, () => {
 
     try {
       await live.preload()
-      expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(error)
+      await expect(
+        Promise.resolve(live.utils.setWindow({ offset: 0, limit: 1 })),
+      ).rejects.toBeInstanceOf(LoadSubsetOperationAbortedError)
     } finally {
       await Promise.all([live.cleanup(), source.cleanup()])
     }

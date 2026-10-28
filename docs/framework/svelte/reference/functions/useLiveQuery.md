@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferResultType<TContext>>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:213](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L213)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:221](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L221)
 
 Create a live query using a query function
 
@@ -90,8 +90,8 @@ const todosQuery = useLiveQuery(
 const query = useLiveQuery((q) =>
   q.from({ todos: todosCollection })
 )
-const { data, isLoading, isError } = $derived(query)
-// Now data, isLoading, and isError maintain reactivity
+const { data, isLoading, isLoadingError } = $derived(query)
+// Now data, isLoading, and isLoadingError maintain reactivity
 ```
 
 ```ts
@@ -118,7 +118,7 @@ const todosQuery = useLiveQuery((q) =>
 // In template:
 // {#if todosQuery.isLoading}
 //   <div>Loading...</div>
-// {:else if todosQuery.isError}
+// {:else if todosQuery.isLoadingError}
 //   <div>Error: {todosQuery.status}</div>
 // {:else}
 //   <ul>
@@ -135,7 +135,7 @@ const todosQuery = useLiveQuery((q) =>
 function useLiveQuery<TContext>(queryFn, deps?): ConditionalUseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferConditionalResultType<TContext>>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:219](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L219)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:227](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L227)
 
 Create a live query using a query function
 
@@ -216,8 +216,8 @@ const todosQuery = useLiveQuery(
 const query = useLiveQuery((q) =>
   q.from({ todos: todosCollection })
 )
-const { data, isLoading, isError } = $derived(query)
-// Now data, isLoading, and isError maintain reactivity
+const { data, isLoading, isLoadingError } = $derived(query)
+// Now data, isLoading, and isLoadingError maintain reactivity
 ```
 
 ```ts
@@ -244,7 +244,7 @@ const todosQuery = useLiveQuery((q) =>
 // In template:
 // {#if todosQuery.isLoading}
 //   <div>Loading...</div>
-// {:else if todosQuery.isError}
+// {:else if todosQuery.isLoadingError}
 //   <div>Error: {todosQuery.status}</div>
 // {:else}
 //   <ul>
@@ -261,7 +261,7 @@ const todosQuery = useLiveQuery((q) =>
 function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferResultType<TContext>>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:267](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L267)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:275](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L275)
 
 Create a live query using configuration object
 
@@ -319,7 +319,7 @@ const itemsQuery = useLiveQuery({
 // In template:
 // {#if itemsQuery.isLoading}
 //   <div>Loading...</div>
-// {:else if itemsQuery.isError}
+// {:else if itemsQuery.isLoadingError}
 //   <div>Something went wrong</div>
 // {:else if !itemsQuery.isReady}
 //   <div>Preparing...</div>
@@ -334,7 +334,7 @@ const itemsQuery = useLiveQuery({
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult[]>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:316](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L316)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:324](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L324)
 
 Subscribe to an existing query collection (can be reactive)
 
@@ -402,7 +402,7 @@ const queryResult = useLiveQuery(sharedQuery)
 // In template:
 // {#if queryResult.isLoading}
 //   <div>Loading...</div>
-// {:else if queryResult.isError}
+// {:else if queryResult.isLoadingError}
 //   <div>Error loading data</div>
 // {:else}
 //   {#each queryResult.data as item (item.id)}
@@ -417,7 +417,7 @@ const queryResult = useLiveQuery(sharedQuery)
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult | undefined>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:327](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L327)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:335](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L335)
 
 Create a live query using a query function
 
@@ -498,8 +498,8 @@ const todosQuery = useLiveQuery(
 const query = useLiveQuery((q) =>
   q.from({ todos: todosCollection })
 )
-const { data, isLoading, isError } = $derived(query)
-// Now data, isLoading, and isError maintain reactivity
+const { data, isLoading, isLoadingError } = $derived(query)
+// Now data, isLoading, and isLoadingError maintain reactivity
 ```
 
 ```ts
@@ -526,7 +526,7 @@ const todosQuery = useLiveQuery((q) =>
 // In template:
 // {#if todosQuery.isLoading}
 //   <div>Loading...</div>
-// {:else if todosQuery.isError}
+// {:else if todosQuery.isLoadingError}
 //   <div>Error: {todosQuery.status}</div>
 // {:else}
 //   <ul>

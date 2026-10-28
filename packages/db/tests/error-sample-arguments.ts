@@ -27,6 +27,9 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   // Collection state errors
   CollectionStateError: [['State error']],
   CollectionInErrorStateError: [['operation', 'collection-1']],
+  CollectionHasSubscribersError: [['collection-1', 2]],
+  CollectionReloadCrashedError: [['collection-1']],
+  CollectionReloadDuringSyncEntryError: [['collection-1']],
   InvalidCollectionStatusTransitionError: [
     ['pending', 'ready', 'collection-1'],
   ],

@@ -464,10 +464,11 @@ function projectPublication(
     publication.retainedKeys = new Set(publication.visible.keys())
     publication.source.clear()
     publication.replacement = undefined
-  } else if (command.type === `release`) {
+  } else if (command.type === `release` || command.type === `abort`) {
     // Release changes demand, not source retention. Releasing alone never
     // changes the subscriber's rows; a source write, a successful
-    // replacement, or a later request does.
+    // replacement, or a later request does. An abort ends the owner's load
+    // (maintainer decision): the replacement no longer waits for it.
     finishReplacement(publication, lifecycle)
   } else if (command.type === `settle` && effect.attemptId !== undefined) {
     const attempt = lifecycle.attempts[effect.attemptId]!
@@ -609,9 +610,12 @@ async function runPublicationHistory(
     batches: [],
     sentKeys: new Set(),
   }
-  const where = {
+  // The publication arbitrary draws only `a` and `b`; `c` belongs to the
+  // demand-change grammar and completes the record.
+  const where: Record<DemandName, Func> = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+    c: new Func(`eq`, [new PropRef([`id`]), new Value(`c`)]),
   }
   const demandForWhere = new Map<unknown, DemandName>([
     [where.a, `a`],

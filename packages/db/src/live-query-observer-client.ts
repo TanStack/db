@@ -1,6 +1,7 @@
 import { codedMessage, devBuild } from './error-message.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-source.js'
+import { isFailedStatus } from './live-query-primitives.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type {
@@ -23,7 +24,6 @@ export interface LiveQueryObserverClientHost<
   entries: () => Array<[TKey, T]>
   isAttached: () => boolean
   isDisposed: () => boolean
-  persistedReady: () => boolean
   dirty: () => void
   publish: (
     changes: Array<ChangeMessage<T, TKey>>,
@@ -124,12 +124,12 @@ export class LiveQueryObserverClient<
       // Local rows cannot substitute for the missing server-rendered view.
       if (query?.status === `pending` && !snapshot) {
         if (this.usesSettledHydration)
-          void this.host.observer.preloadForInitialRender().catch(() => {})
+          void this.host.observer.preload().catch(() => {})
         throw query.promise
       }
     }
     if (preloadRequested) {
-      void this.host.observer.preloadForInitialRender().catch(() => {})
+      void this.host.observer.preload().catch(() => {})
     }
     const snapshot = this.host.read(true)
     const collection = this.collection
@@ -166,9 +166,10 @@ export class LiveQueryObserverClient<
         ...(snapshot.isReady
           ? {}
           : {
-              status: snapshot.isError
-                ? (`error` as const)
-                : (`loading` as const),
+              status:
+                snapshot.isLoadingError || snapshot.isCrashed
+                  ? (`error` as const)
+                  : (`loading` as const),
             }),
       },
       sources,
@@ -225,9 +226,9 @@ export class LiveQueryObserverClient<
       !this.host.isAttached() ||
       !collection ||
       !this.seed ||
-      (collection.status !== `error` &&
-        ((collection.status !== `ready` && !this.host.persistedReady()) ||
-          collection.isLoadingSubset))
+      // A failure ends the sync run whose result the seed stood in for.
+      (!isFailedStatus(collection.status) &&
+        (collection.status !== `ready` || collection.isLoadingSubset))
     )
       return
     const previous = this.seed.entries
@@ -271,7 +272,7 @@ export class LiveQueryObserverClient<
       this.host.observer,
       async () => {
         this.host.observer.dispose()
-        await this.collection?.cleanup()
+        await this.collection?.cleanup({ dependents: true })
       },
     )
   }

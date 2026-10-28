@@ -335,9 +335,9 @@ it('retires every managed store without publishing database deletion', async () 
         }
       }
       expect([source.status, sameStore.status, sibling.status]).toEqual([
-        'error',
-        'error',
-        'error',
+        'crashed',
+        'crashed',
+        'crashed',
       ])
       assertRows(
         source.values(),
@@ -424,7 +424,7 @@ it('retains every public snapshot and sends no deletion before native deletion s
           collection === sibling ? [other] : [item],
           'deletion retains errored snapshot',
         )
-        expect(collection.status).toBe('error')
+        expect(collection.status).toBe('crashed')
       }
       const fresh = await createIndexedDB({
         name: h.db.name,
@@ -636,7 +636,7 @@ for (const count of [2, 3]) {
               )
             }
             for (const [index, collection] of collections.entries()) {
-              expect(collection.status).toBe('error')
+              expect(collection.status).toBe('crashed')
               expect(() =>
                 collection.insert({ id: 'closed-' + index, name: 'rejected' }),
               ).toThrow()
@@ -837,7 +837,7 @@ it('ignores an old native deletion receipt after database recreation', async () 
     })
     const deletion = deleteDatabase(h.db.name)
     await nativeComplete.promise
-    expect(old.status).toBe('error')
+    expect(old.status).toBe('crashed')
     const recreated = await createIndexedDB({
       name: h.db.name,
       version: 1,
@@ -878,13 +878,20 @@ it('reports connection closure immediately and supports fresh Collections', asyn
       stores: ['items'],
     })
     h.descriptors.push(upgraded)
-    expect(old.status).toBe('error')
-    expect(live.status).toBe('error')
+    // Closure crashes the source, and a crashed source ends every live query
+    // above it, even one that was already ready. Both trees explain why.
+    expect(old.status).toBe('crashed')
+    expect(live.status).toBe('crashed')
+    expect(live.health.sources[0]).toMatchObject({
+      status: 'crashed',
+      error: expect.anything(),
+    })
     const fresh = await h.open('items', { db: upgraded })
     await fresh.insert({ id: 1, name: 'new' }).isPersisted.promise
     await Channel.deliver()
-    expect(old.status).toBe('error')
-    expect(live.status).toBe('error')
+    expect(old.status).toBe('crashed')
+    expect(live.status).toBe('crashed')
+    expect(live.health.hasErrors).toBe(true)
     expect(fresh.status).toBe('ready')
     assertRows(
       fresh.values(),
@@ -995,7 +1002,7 @@ it('preserves a recreated peer while a newer deletion is blocked', async () => {
     })
     const firstDeletion = deleteDatabase(h.db.name)
     await nativeComplete.promise
-    expect(old.status).toBe('error')
+    expect(old.status).toBe('crashed')
     const freshDb = await h.connect()
     const peerDb = await h.connect()
     const fresh = await h.open('items', { db: freshDb })

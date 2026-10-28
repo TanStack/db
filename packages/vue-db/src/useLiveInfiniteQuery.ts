@@ -11,12 +11,12 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryPersistedStatus,
   LiveQueryWindowBinding,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
 } from '@tanstack/db'
+import type { UseLiveQueryFlags } from './useLiveQuery'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 type InfiniteQueryOptions = {
@@ -34,52 +34,32 @@ export type UseLiveInfiniteQueryConfig<
 
 export interface UseLiveInfiniteQueryReturn<
   TContext extends Context & NonSingleResult,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<string | number, GetResult<TContext>>>
   data: ComputedRef<InferResultType<TContext>>
   collection: ComputedRef<
     Collection<GetResult<TContext>, string | number, UtilsRecord>
   >
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<InferResultType<TContext>[number]>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  error: ComputedRef<unknown>
 }
 
 export interface UseLiveInfiniteQueryReturnWithCollection<
   TResult extends object,
   TKey extends string | number,
   TUtils extends UtilsRecord,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<TKey, TResult>>
   data: ComputedRef<Array<TResult>>
   collection: ComputedRef<Collection<TResult, TKey, TUtils>>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
   pages: ComputedRef<Array<Array<TResult>>>
   pageParams: ComputedRef<Array<number>>
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  error: ComputedRef<unknown>
 }
 
 /**
@@ -168,12 +148,11 @@ export function useLiveInfiniteQuery<
     status: computed(() => snapshot.value.status as CollectionStatus),
     isLoading: computed(() => snapshot.value.isLoading),
     isReady: computed(() => snapshot.value.isReady),
-    persistedStatus: computed(() => snapshot.value.persistedStatus),
-    isPersistedReady: computed(() => snapshot.value.isPersistedReady),
-    persistedError: computed(() => snapshot.value.persistedError),
     isIdle: computed(() => snapshot.value.isIdle),
-    isError: computed(() => snapshot.value.isError),
+    isLoadingError: computed(() => snapshot.value.isLoadingError),
+    isCrashed: computed(() => snapshot.value.isCrashed),
     isCleanedUp: computed(() => snapshot.value.isCleanedUp),
+    isSyncError: computed(() => snapshot.value.isSyncError),
     pages: computed(
       () =>
         snapshot.value.pages as Array<Array<InferResultType<TContext>[number]>>,
@@ -182,6 +161,6 @@ export function useLiveInfiniteQuery<
     fetchNextPage: () => fetchNextLiveQueryWindowPage(controller.value),
     hasNextPage: computed(() => snapshot.value.hasNextPage),
     isFetchingNextPage: computed(() => snapshot.value.isFetchingNextPage),
-    error: computed(() => snapshot.value.error),
+    health: computed(() => snapshot.value.health),
   }
 }

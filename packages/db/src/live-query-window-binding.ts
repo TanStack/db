@@ -1,6 +1,7 @@
 import { codedMessage, devBuild } from './error-message.js'
 import { UnhashableQueryIRError } from './errors.js'
 import { getLiveQueryHash } from './live-query-options.js'
+import { isFailedStatus } from './live-query-primitives.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
   assertLiveQueryWindowManyResult,
@@ -180,13 +181,13 @@ export function bindLiveQueryWindow(
       uncommitted?.ownsCollection &&
       !compareUpdate(uncommitted, update, dependencies).recompile &&
       uncommitted.collection.status !== `cleaned-up` &&
-      uncommitted.collection.status !== `error` &&
+      !isFailedStatus(uncommitted.collection.status) &&
       liveQueryWindowMatches(uncommitted.collection, requiredLimit)
     ) {
       // Nothing has taken effect since the earlier update built this
       // collection, and its window is exactly the retained pages, so its first
-      // rows are correct. A collection in terminal error, such as after its
-      // source restarted, cannot serve the query again.
+      // rows are correct. A collection in terminal error or crashed, such as
+      // after its source restarted, cannot serve the query again.
       collection = uncommitted.collection
       queryHash = uncommitted.queryHash
       ownsCollection = true

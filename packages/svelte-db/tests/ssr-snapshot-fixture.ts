@@ -104,9 +104,9 @@ export async function renderSsrRuntimeErrorHistory(
     getKey: (row: { id: string; name: string; sourcePayload: string }) =>
       row.id,
     sync: {
-      sync: ({ markReady, markError }) => {
+      sync: ({ markReady, fail }) => {
         if (history.serverOutcome === `error`)
-          markError(
+          fail(
             history.definedError
               ? new Error(`provider unavailable`)
               : undefined,

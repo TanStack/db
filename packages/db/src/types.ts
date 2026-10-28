@@ -448,8 +448,14 @@ export interface SyncConfig<
 > {
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
-    /** Begin a new sync transaction. */
-    begin: () => void
+    /**
+     * Begin a new sync transaction. Its writes apply on the rows the
+     * Collection holds, also during a reload. `snapshot: true` declares that
+     * the transaction carries every row: its commit replaces every synced
+     * row, as `truncate({ markReady: false })` at its start does. A reload's
+     * new run replaces the kept rows only with a snapshot or `truncate()`.
+     */
+    begin: (options?: { snapshot?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
      * Commit the active sync transaction in FIFO order. Core accepts it at
@@ -462,13 +468,38 @@ export interface SyncConfig<
      * named `AbortError`. Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
-    /** Signal that a usable initial or recovered snapshot is available. */
+    /**
+     * Signal that the sync run's initial data is available. During a reload
+     * it completes the reload and keeps the rows unless a snapshot replaced
+     * them. A second call in the run, or one after `fail()`, does nothing.
+     */
     markReady: () => void
     /**
-     * Signal that initial sync failed before producing a usable snapshot.
-     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     * Report a problem after the first ready while the sync adapter keeps
+     * trying. It shows as the node's `failureReason` and adds a failure to its
+     * `errors`; the status and rows do not change. One error value is one
+     * failure: reporting a value already listed changes nothing, and that
+     * failure keeps its place and its `at`. Throws before the first ready and
+     * after `fail()`.
      */
-    markError: (error?: unknown) => void
+    reportError: (error: unknown) => void
+    /**
+     * The sync adapter stopped. Before the first ready the status becomes
+     * `error` and `preload()` rejects with `error`. After it, the rows stay, the
+     * status stays `ready`, and the node's `error` holds the cause until a
+     * reload. A second `fail()` in the same sync run does nothing.
+     * While the sync adapter retries, call nothing or `reportError()`.
+     */
+    fail: (error: unknown) => void
+    /**
+     * Sync works again. With no `error`, clears the `failureReason`. With an
+     * `error`, removes only the failure whose cause is that value, for
+     * example one of several requests that recovered; the `failureReason`
+     * then shows the newest failure left, and clears once none is left. With
+     * nothing to clear or remove it does nothing, so it can follow every
+     * commit. Throws before the first ready and after `fail()`.
+     */
+    reportHealthy: (error?: unknown) => void
     /**
      * Replace the synced rows. By default the replacement also marks the
      * Collection ready. Set markReady:false to publish without changing status,
@@ -755,8 +786,9 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // Any active status can transition to → error or cleaned-up
- * // error → ready after a successful sync recovery
+ * // loading → error when the sync adapter calls fail() before the first ready
+ * // any active status → crashed when local storage or an invariant breaks
+ * // After the first ready, sync problems appear in `health`, not in `status`.
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -765,12 +797,76 @@ export type CollectionStatus =
   | `loading`
   /** Collection has been explicitly marked ready via markReady() */
   | `ready`
-  /** An error occurred during sync initialization */
+  /** The first load of the sync run failed: there is nothing to show. */
   | `error`
+  /**
+   * Local storage or an internal invariant broke. The Collection cannot serve
+   * reads or accept writes, and `reload()` rejects. Only cleanup leaves it; a
+   * later start is a fresh start.
+   */
+  | `crashed`
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
 export type SyncMode = `eager` | `on-demand`
+
+/**
+ * Detail about a Collection problem. Every field except `cause` is plain data,
+ * so the value can be logged or sent as JSON; `cause` keeps the original value
+ * and is omitted from JSON.
+ */
+export interface CollectionErrorInfo {
+  readonly name: string
+  readonly message: string
+  readonly code?: string
+  /** Epoch milliseconds when the problem was reported. */
+  readonly at: number
+  readonly cause: unknown
+}
+
+/**
+ * A problem on a health node. Its own fields are its newest failure's, and
+ * `errors` lists every failure of its frame that is still open, oldest
+ * first; the last entry is the newest. A source's `failureReason` lists each
+ * `reportError()` of the sync run since the problem began, once per error
+ * value; `reportHealthy(error)` removes that value's failure, and
+ * `reportHealthy()` ends it. An `error` from `fail()`, a failed first load, or a crash is one
+ * failure. A query's request error lists every request failure still open
+ * on its node, once per error value, and a failed replay adds each load it
+ * failed for.
+ */
+export interface HealthProblem extends CollectionErrorInfo {
+  readonly errors: ReadonlyArray<CollectionErrorInfo>
+}
+
+/**
+ * One node of a health tree. A Collection's tree is one node; a live query's
+ * has one node for itself and one for each source alias in query order. The
+ * shape is fixed by the query, and nodes without a problem are present too.
+ *
+ * A node shows at most one problem. `failureReason`: something went wrong and
+ * the sync adapter is still trying, so the problem clears by itself.
+ * `error`: the first load failed, the sync adapter stopped, the Collection
+ * crashed, or, on a live query's own node, a request for more data failed.
+ */
+export interface HealthNode {
+  /** The query alias, or `root` for the Collection the tree was read from. */
+  readonly alias: string
+  readonly collectionId: string
+  /** `include` is an include's source; its rows feed per-row child Collections. */
+  readonly kind: `source` | `live-query` | `include`
+  readonly status: CollectionStatus
+  /** This node or any node below it has a `failureReason` or an `error`. */
+  readonly hasErrors: boolean
+  readonly failureReason: HealthProblem | null
+  readonly error: HealthProblem | null
+  /**
+   * A reload's new sync run is in flight: the rows, status, and problem shown
+   * are the previous run's until it commits or fails.
+   */
+  readonly reloading: boolean
+  readonly sources: ReadonlyArray<HealthNode>
+}
 
 export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
@@ -1133,6 +1229,27 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 
 /**
+ * Something that reads a Collection, as listed by `collection.subscribers`:
+ * a live query, an Effect, or a direct subscription.
+ */
+export interface CollectionDependent {
+  readonly kind: `live-query` | `effect` | `subscription`
+  /** A live query's Collection; a pooled live query has none. */
+  readonly collection?: Collection<any, any, any, any, any>
+  /**
+   * Whether something still reads through this dependent: an Effect or a
+   * subscription always does; a live query does while it has a subscriber.
+   * `cleanup()` refuses only while an active live query or Effect remains.
+   */
+  readonly active: boolean
+  /**
+   * End this dependent: clean up the live query with its own dependents,
+   * dispose the Effect, or end the subscription.
+   */
+  end: () => Promise<void>
+}
+
+/**
  * Options for subscribing to collection changes
  */
 export interface SubscribeChangesOptions<
@@ -1168,6 +1285,12 @@ export interface SubscribeChangesOptions<
    */
   deferAcquisition?: boolean
   /**
+   * The live query or Effect this subscription reads for, so
+   * `collection.subscribers` can name it.
+   * @internal
+   */
+  owner?: CollectionDependent
+  /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
    * @internal
@@ -1193,8 +1316,11 @@ export interface SubscribeChangesOptions<
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
   /** Lets a live-query graph retain its last publication during replay. @internal */
   truncateReplayPublication?: {
-    readonly start: () => void
+    /** `retired`: a reload retired the sync run, and no truncate came. */
+    readonly start: (retired: boolean) => void
     readonly succeed: () => void
+    /** The replay could not load every active demand again: its failures, in failure order. */
+    readonly fail?: (errors: Array<Error>) => void
   }
 }
 
