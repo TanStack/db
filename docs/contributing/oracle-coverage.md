@@ -3778,6 +3778,204 @@ an answer, and a Collection that synced to zero rows before (it waits like an
 empty restore) are outside it. Hooks read Collection status only, so the
 framework conformance suite's status scenarios cover the binding side.
 
+The persisted demand coverage oracle in
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts`
+owns the on-demand law: an opted-in wrapper may settle a demand's
+load from SQLite only when that exact demand has persisted demand coverage,
+after the configured wait or an upstream failure. Its bounded enumeration
+crosses twelve session-1 histories (not requested, failed, overlapping
+filter, same filter with another window, same filter with another order,
+rejected durable row write, settled empty, settled, settled then truncated,
+three in which a reset lands after the load's rows but before it settles (a
+source truncate, a completed scoped recovery that rotates the cache
+generation, and a scoped recovery still pending), and one in which the source
+deletes a row of D after D settles), two waits, and six
+session-2 upstream schedules (pending, early and late failure, early and late
+answer, late empty answer), over the real wrapper and
+`SQLiteCorePersistenceAdapter` on `node:sqlite`. Session 1 creates coverage
+only through real loads, and a positive witness checks whether it sent the
+session-2 demand key. A pure trace model predicts status, `preload()` state,
+and exact rows at five checkpoints. A fixed lifecycle history checks that each
+load measures its own wait and settles on its own restored rows, that
+release aborts the upstream load, and that coverage survives release. A joined history checks that a
+query over an eager and an on-demand source is ready only when the on-demand
+demand is covered, read directly and through an outer live query, with the
+joined row visible when ready. A third shape reaches the on-demand source
+through two live queries; covering only the inner query's demand must keep
+the query loading.
+Two fixed same-session histories check that a load of D after a cache
+rotation, and a `refetch: true` load of D, both wait for the network. Model-level calibration shows that eighteen wrong designs (fifteen
+single-demand, two lifecycle, one joined) each differ from the law at a named
+case. Before the implementation, every
+production case failed at setup because `initialRender` rejected
+`syncMode: 'on-demand'`; without the opt-in, that code matched every
+uncovered cell and diverged at the first checkpoint where the law applies for
+every covered cell except an early network answer. With the implementation,
+every case passes; the [implementation review](oracle-reviews/2026-10-21-persisted-demand-coverage-review.md) records RED, GREEN, and each mutant's outcome. Production mutants that ignore coverage, ignore or halve
+the wait, error a covered demand on upstream failure, write coverage before
+the load settles, measure the wait from the sync run, keep coverage across a
+truncate, let an on-demand opt-in permit fallback alone, or read the root
+query's demands instead of the owning inner query's each fail named cases.
+A review then found three more defects, and the in-flight histories and the
+two-reader shape reproduced each one on unchanged production: an obsolete load
+recorded coverage after a truncate or rotation (22 cells), a coverage record
+during pending recovery failed the session-1 load (12 cells), and the first
+live query reached on a source stood for every reader (one cell). After the
+repair, mutants that restore each defect, or that check only for a truncate,
+fail those cases. A third review round added the row-deletion history, the
+source-failure history, and the rotation and refetch histories; on the parent
+production code they failed 14 cases by assertion, and the Query DB witness
+failed its retention history. Mutants that drop the row count, require more
+rows than recorded, ignore the cache generation, let a refetch settle on
+coverage, or let a network failure bypass on-demand settlement each fail
+those cases; a gate that ignores the
+eager deadline fails the persisted-readiness oracle instead. The Electric
+progressive witness in
+`packages/electric-db-collection/tests/electric-progressive-offline-readiness-witness.test.ts`
+receives the law as a production driver for the shared model: it records
+Electric's own log at its `loadSubset` boundary, and session 2 reads either
+the subset session 1 loaded or one no query read. A subset-only session 1
+settles the loaded subset offline and leaves the other waiting; after a
+completed progressive full sync, the never-loaded subset is ready too,
+because Electric settles every later load at once from its complete rows
+(model rule `full sync completes`). A mutant that drops the complete resume's
+full-snapshot resolution fails only that never-loaded history. The Query DB witness
+in `packages/query-db-collection/tests/persisted-on-demand-offline-witness.test.ts`
+receives it with a fresh QueryClient per session: a covered on-demand query
+stays loading until the wait and then shows its restored rows, a rejected
+`queryFn` settles it at once, and a never-loaded query keeps loading; a mutant
+that ignores coverage fails both covered histories. A fourth history lets
+Query DB retention delete the released rows after a 20 ms `gcTime`; session 2
+must then keep loading. React and Solid Suspense once received a joined
+initial-render gate through capability fixtures. The source-health change
+(#2168) removed that gate: Suspense now releases at query readiness, and the
+React and Solid receiving witnesses below run the shared contract. A later round closed most open limits with enforced cases. The driver checks
+that the wrapper forwards a load only after its persisted subset restore is
+visible, so no upstream event can precede it. Session 2 reads answer on a
+later macrotask, so a load that fails at once reaches the coverage read, and
+removing the wrapper's early rejection handler raises unhandled rejections.
+Part 2b adds a schema reset over an empty covered demand, an optimistic write
+that rolls back on a demand settled from SQLite, and two cache-claim expiry
+histories: one before the coverage record and one before the coverage check.
+Part 4 covers ordered windows: a row deleted, moved out, or moved in after the
+window settled keeps it loading, a swap keeps it covered, and with an index a
+page move settles offline only when session 1 loaded that page with a cursor.
+The Electric witness adds on-demand must-refetch and checks that Electric
+writes nothing from a snapshot that answers after release. React
+(`useLiveSuspenseQuery-persisted-on-demand.test.tsx`) and Solid
+(`useLiveQuery-persisted-on-demand.test.tsx`) Suspense render a covered demand
+from a real persisted on-demand Collection on `node:sqlite`. Vue
+(`useLiveQuery-persisted-on-demand.test.ts`), Svelte
+(`useLiveQuery-persisted-on-demand.svelte.test.ts`), and Angular
+(`injectLiveQuery-persisted-on-demand.test.ts`) witnesses observe `isReady`,
+`isLoading`, and rows. All five run the shared receiving contract described below. Mutants that drop
+the early rejection handler, keep collection metadata across a schema reset,
+key coverage without cursor and offset, ignore coverage, or let a coverage
+read under an expired claim fail the load each fail these cases.
+A fifth round added Part 2c and five more histories. Part 2c checks that a
+failed coverage read, after the load or during the check, keeps the load's
+own outcome; that a synchronous answer's coverage counts its rows, so a
+later deletion ends it; and that a release during the coverage check stops
+the source Collection loading. Part 3 then added a source failure before a
+covered demand's wait ends; after the source-health change (#2168) replaced
+the initial-render gate with Collection status, those histories belong to
+`packages/db/tests/source-health-oracle.test.ts`. Part 4 adds a row replaced below the window boundary and a row gained
+by an under-full window, which keep the tie-boundary key. Each failed on the
+parent production code. A window check that accepts a superset of the
+recorded keys, and a builder that drops its error-state check without
+notifying settlement, each fail named cases.
+A sixth round (the 2026-10-28 review) closed three more holes, each RED on
+the parent production code. The campaign adds a `snapshot` command (a
+snapshot transaction ends coverage, as a truncate does) and a source that
+stops and resolves an aborted load (a load that core aborted records
+nothing); Part 2b adds a load after scoped recovery reloaded the demand (no
+load settles or records during the rest of that sync run). The shared model
+now judges demand identity from the request data itself instead of core's
+demand key. The storage sweep also checks that a failed coverage write
+crashes the Collection.
+
+Remaining limits: coverage relies on the source committing a load's rows
+before it settles that load (law 7); an unordered demand that loses one row
+and gains another keeps its row count and stays covered, so a row that
+retention removed can be missing from a covered restore (maintainer
+decision, 2026-10-26; a fixed history pins the rule); and multi-tab
+coordinators, outside the law by maintainer decision (2026-10-26). Part 4
+now covers a tie at the window boundary, modelled as a limited demand plus
+an unordered tie-boundary demand, and page moves with and without an index.
+
+The generated campaign in
+`packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`
+shares the fixed oracle's driver (`tests/helpers/demand-coverage-driver.ts`).
+Its model replays the source's own log of row writes, deletes, truncates,
+and settled loads, so it does not predict when the wrapper reacquires a
+demand. A fixed and a random campaign of 40 histories each interleave two
+unordered demands with load starts, answers, failures, releases, live
+writes and deletes, truncates, snapshot transactions, and a source that
+rejects, ignores, or stops and resolves an aborted load; declared reach
+covers an obsolete load that settles, an aborted load that settles, a demand
+settled only by an aborted load, coverage ended by a snapshot, coverage
+recorded twice, a row moved between demands, and a covered demand short of
+rows. Part 2 fails each
+adapter call of a covered history once, before or after its effect, in
+either session: safety holds for every call, a failed coverage read keeps
+the load ready, and a failed coverage check waits. Part 3 releases the
+demand after each step of a load: the source Collection stops loading, and
+every load left behind was aborted. Mutants that ignore the row count, let
+an obsolete load record coverage, keep coverage across a truncate, let a
+failed coverage read fail the load, or keep a released load's wait each fail
+it. The campaign also reads the window `group = 'a' orderBy rank limit 2`
+over generated ranks with ties: a query is ready offline exactly when every
+load it sent in session 2 is covered, which judges the tie-boundary load
+without predicting when core sends it. Mutants that ignore window keys,
+compare them in order, or record keys for every demand each fail it. Its
+limits: real timers in session 1, one process, `node:sqlite`, and no cursor
+or offset loads.
+A scripted mutation sweep (63 mutants, recorded in the review record) then
+added five fixed histories: an empty covered demand after a rotation, a
+truncate during an empty load's coverage read, a synchronous answer whose
+durable write lands late, claim recovery after an expired claim during the
+check, and a coverage read that outlasts the wait. A sixth history holds the
+load's cache-claim renewal past the wait and kills the last survivor, a wait
+measured from after that renewal. No survivor of the sweep remains open in
+this owner.
+
+Every receiving witness is a production driver for the same judgment
+(ORC-014). The shared contract,
+`packages/db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract.ts`,
+holds six histories as data (session-1 steps and session-2 premises only):
+covered, never loaded, covered then a source delete, a covered window, a
+window with a row replaced below the boundary, and a covered demand whose
+upstream fails at once. Each host records the source log, the session-2 loads,
+and two checkpoint observations, and the shared model in
+`tests/persisted-demand-coverage-model-oracle.ts` judges them; no witness
+states an expected result. The histories module imports nothing, so the
+Playwright spec can load it.
+
+The hosts run all six through their own entry point: Node (better-sqlite3
+through `createNodeSQLitePersistence`), Chromium OPFS (wa-sqlite in two page
+loads, in `playwright.opfs.config.ts`, which the browser E2E job runs),
+Electron (a renderer over IPC to a `node:sqlite` main process, two app
+launches, in the desktop E2E job), Cloudflare Durable Objects (`wrangler dev`
+restarted over one persist directory, in the cloud-mobile job), React Native
+(an op-sqlite-shaped driver, in the cloud-mobile job), Expo (an expo-sqlite
+shim), and Tauri and Capacitor (their unit-suite SQLite stand-ins). The React,
+Solid, Vue, Svelte, and Angular witnesses run the covered, never-loaded, and
+failure histories through their own hook or primitive. With the contract's
+session-2 source forced to a 60 s wait and an upstream that never answers,
+every host and framework reports violations on its covered histories. The
+OPFS witness also pins the guide's statement that a multi-tab coordinator
+waits for the network; that run is recorded, not judged, because it pins the
+guide rather than the law.
+
+Limits: no CI job runs the Expo, Capacitor, or Tauri e2e suites, and no host
+runs on its native runtime here. The Capacitor device e2e needs an iOS
+simulator or Android emulator, and `adb` is not installed here; its Node e2e
+fails at file load (`SqliteError: cannot start a transaction within a
+transaction` at `tests/helpers/capacitor-sqlite-test-db.ts:22`). The Tauri
+native e2e needs `cargo`. React Suspense reveals a covered failure about 300 ms
+late (its fallback throttle), so the contract's before-wait checkpoint sits at
+450 ms.
+
 ## Sync metadata session
 
 [Issue #2220](https://github.com/TanStack/db/issues/2220) reports that a

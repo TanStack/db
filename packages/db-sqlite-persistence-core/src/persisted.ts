@@ -812,7 +812,10 @@ class PersistedReadinessTracker {
   private snapshot: PersistedReadinessSnapshot = { status: `loading` }
   private readonly listeners = new Set<() => void>()
 
-  constructor(readonly networkTimeoutMs: number) {}
+  constructor(
+    readonly networkTimeoutMs: number,
+    readonly onDemand: boolean,
+  ) {}
 
   getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
 
@@ -840,6 +843,20 @@ export type PersistedInitialRenderOptions = {
 }
 
 const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
+// Persisted demand coverage: a load of this exact demand key reached applied
+// settlement with its rows durably committed in this cache generation.
+const DEMAND_COVERAGE_PREFIX = `persisted:coverage:`
+const demandCoverageKey = (options: LoadSubsetOptions): string =>
+  `${DEMAND_COVERAGE_PREFIX}${getLoadSubsetDemandKey(options)}`
+// A window covers exactly the rows it held (maintainer decision,
+// 2026-10-26), so its coverage also records their keys, in any order.
+const windowKeys = (
+  options: LoadSubsetOptions,
+  rows: ReadonlyArray<{ key: string | number }>,
+): string | undefined =>
+  options.limit === undefined
+    ? undefined
+    : JSON.stringify(rows.map(({ key }) => key).sort())
 const CACHE_CLAIM_RENEW_WINDOW_MS = 60_000
 const MAX_TIMER_TIMEOUT_MS = 2_147_483_647
 
@@ -2218,6 +2235,17 @@ class PersistedCollectionRuntime<
       : undefined
   }
 
+  // A reset or a new lifecycle makes an in-flight load obsolete (law 6 in
+  // `ARCHITECTURE.md`), so its settlement cannot record coverage.
+  captureResetEpoch(): () => boolean {
+    const { lifecycleGeneration, resetSequence, sourceTruncateGeneration } =
+      this
+    return () =>
+      lifecycleGeneration === this.lifecycleGeneration &&
+      resetSequence === this.resetSequence &&
+      sourceTruncateGeneration === this.sourceTruncateGeneration
+  }
+
   getLifecycleGeneration(): number {
     return this.lifecycleGeneration
   }
@@ -2947,6 +2975,7 @@ class PersistedCollectionRuntime<
     onHydrationStarted?: () => void,
     isDemandRetained?: () => boolean,
   ): Promise<void> {
+    const startedAt = Date.now()
     this.throwIfTerminal()
     await this.ensureCacheClaimActive()
     // The caller can retire demand while claim renewal or rotation is awaited.
@@ -3099,12 +3128,132 @@ class PersistedCollectionRuntime<
     }
 
     if (upstreamLoadSubset) {
-      try {
-        await upstreamLoadSubset(options)
-      } catch (error) {
-        this.noteUpstreamLoadFailure(options, error)
-        throw error
+      const upstream = (async () => {
+        try {
+          await upstreamLoadSubset(options)
+        } catch (error) {
+          this.noteUpstreamLoadFailure(options, error)
+          throw error
+        }
+      })()
+      await this.settleCoveredDemand(options, upstream, startedAt)
+    }
+  }
+
+  // The persisted subset restore of this demand is visible. A covered demand
+  // of an opted-in on-demand Collection settles once the wait since the load
+  // started has passed or its upstream load has failed. The upstream load
+  // keeps running; its rows are ordinary source writes, and a later failure
+  // is reported but leaves the demand settled.
+  //
+  // A refetch starts a new acquisition that waits for its own rows
+  // (`ARCHITECTURE.md`, "Demand grouping and ownership"), so coverage never
+  // settles it.
+  private async settleCoveredDemand(
+    options: LoadSubsetOptions,
+    upstream: Promise<void>,
+    startedAt: number,
+  ): Promise<void> {
+    // The coverage read below can outlast a fast upstream failure.
+    void upstream.catch(() => undefined)
+    if (
+      !this.persistedReadiness?.onDemand ||
+      options.refetch === true ||
+      !(await this.isDemandCovered(options))
+    ) {
+      return upstream
+    }
+    // A released load owns no wait, even if its source ignores the abort.
+    if (options.signal?.aborted) return
+    const deadlineAt = startedAt + this.persistedReadiness.networkTimeoutMs
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, Math.max(0, deadlineAt - Date.now()))
+      const settle = () => {
+        clearTimeout(timer)
+        resolve()
       }
+      options.signal?.addEventListener(`abort`, settle, { once: true })
+      void upstream.catch(() => undefined).then(settle)
+    })
+  }
+
+  // Coverage belongs to one persisted cache generation. A rotation changes
+  // the storage ID, so a record that memory still holds from the previous
+  // generation does not count.
+  private currentCoverageRecord(
+    options: LoadSubsetOptions,
+  ): { rows: number; keys?: string } | undefined {
+    const record = this.syncControls.metadata?.collection.get(
+      demandCoverageKey(options),
+    ) as { generation?: unknown; rows?: unknown; keys?: string } | undefined
+    return record?.generation === this.storageCollectionId &&
+      typeof record.rows === `number`
+      ? { rows: record.rows, keys: record.keys }
+      : undefined
+  }
+
+  // The rows that this demand reads from SQLite in the current generation.
+  // The read waits behind every source transaction already committed, so it
+  // sees their rows durably. Coverage is bookkeeping: a failed read proves
+  // nothing and returns undefined, and the load keeps its own outcome. A
+  // read under an expired cache claim also starts claim recovery. Scoped
+  // recovery leaves the rest of its sync run uncertified, and its persisted
+  // subset restore publishes no rows, so no read proves coverage then.
+  private async readDemandRows(
+    options: LoadSubsetOptions,
+  ): Promise<Array<{ key: string | number }> | undefined> {
+    if (this.scopedRecovery) return undefined
+    try {
+      return await this.applyMutex.run(() =>
+        this.persistence.adapter.loadSubset(this.storageTargetFor(), options, {
+          requiredIndexSignatures: this.getRequiredIndexSignatures(),
+          cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
+        }),
+      )
+    } catch {
+      if (this.hasExpiredCacheClaim()) {
+        this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
+      }
+      return undefined
+    }
+  }
+
+  // A row deleted after the covered load settled, by the source or by
+  // retention, leaves fewer rows than coverage recorded, so it no longer
+  // proves the demand complete (maintainer decision, 2026-10-26). A window
+  // must also hold the same rows.
+  private async isDemandCovered(options: LoadSubsetOptions): Promise<boolean> {
+    const record = this.currentCoverageRecord(options)
+    if (record === undefined) return false
+    const rows = await this.readDemandRows(options)
+    return (
+      rows !== undefined &&
+      rows.length >= record.rows &&
+      windowKeys(options, rows) === record.keys
+    )
+  }
+
+  // The coverage record for a load that just settled, or undefined when the
+  // current record already says the same.
+  async nextCoverageRecord(options: LoadSubsetOptions): Promise<
+    | {
+        settledAt: number
+        generation: string
+        rows: number
+        keys?: string
+      }
+    | undefined
+  > {
+    const rows = await this.readDemandRows(options)
+    if (rows === undefined) return undefined
+    const keys = windowKeys(options, rows)
+    const current = this.currentCoverageRecord(options)
+    if (current?.rows === rows.length && current.keys === keys) return undefined
+    return {
+      settledAt: Date.now(),
+      generation: this.storageCollectionId,
+      rows: rows.length,
+      keys,
     }
   }
 
@@ -3137,14 +3286,18 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    return result.then(
-      () => {
-        this.queueRemoteSubsetEnsure(options)
-      },
-      (error: unknown) => {
-        this.noteUpstreamLoadFailure(options, error)
-        throw error
-      },
+    return this.settleCoveredDemand(
+      options,
+      result.then(
+        () => {
+          this.queueRemoteSubsetEnsure(options)
+        },
+        (error: unknown) => {
+          this.noteUpstreamLoadFailure(options, error)
+          throw error
+        },
+      ),
+      Date.now(),
     )
   }
 
@@ -6343,9 +6496,18 @@ function createWrappedSyncConfig<
       // Network-first initial rendering: once the deadline passes, or the
       // remote fails, a completed restore that installed rows opens the
       // Collection. An empty restore keeps it loading, so an empty list never
-      // stands for data the network has not answered yet.
+      // stands for data the network has not answered yet. An on-demand
+      // Collection restores per demand instead: each covered load settles
+      // from SQLite after its own wait (`settleCoveredDemand`), and query
+      // readiness follows its loads.
       const openFromDisk = () => {
-        if (!persistedReadiness || isCleanedUp() || getTerminalFailure()) return
+        if (
+          !persistedReadiness ||
+          persistedReadiness.onDemand ||
+          isCleanedUp() ||
+          getTerminalFailure()
+        )
+          return
         if (persistedReadiness.getSnapshot().status !== `ready`) return
         if (params.collection.status !== `loading`) return
         if (params.collection.size === 0) return
@@ -6598,6 +6760,15 @@ function createWrappedSyncConfig<
       }
       const reportUpstreamError = (error: unknown) =>
         afterStartup(() => failUpstream(error))
+      // Persisted demand coverage ends with the rows it described, at a
+      // truncate and at a snapshot transaction, which replaces every row.
+      const endDemandCoverage = (transaction: OpenSyncTransaction<T, TKey>) => {
+        for (const { key } of wrappedParams.metadata?.collection.list(
+          DEMAND_COVERAGE_PREFIX,
+        ) ?? []) {
+          transaction.collectionMetadataWrites.set(key, { type: `delete` })
+        }
+      }
       const wrappedParams = {
         ...params,
         fail: reportUpstreamError,
@@ -6643,6 +6814,7 @@ function createWrappedSyncConfig<
             queuedBecauseHydrating: false,
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
+          if (options?.snapshot) endDemandCoverage(transaction)
           transactionStack.push(transaction)
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
@@ -6861,6 +7033,7 @@ function createWrappedSyncConfig<
           // Callers (for example electric resume/reset handling) may stage
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
+          endDemandCoverage(openTransaction)
           openTransaction.truncate = true
           openTransaction.truncateOptions = options ?? {}
         },
@@ -7096,6 +7269,30 @@ function createWrappedSyncConfig<
         }
       }
 
+      // The load's rows committed first; this metadata-only source
+      // transaction persists after them, so coverage never outlives a failed
+      // row write.
+      // Only a current load records coverage. A reset makes the record
+      // obsolete before its commit could be aborted, so a current record
+      // fails only with a durable failure that already fails the runtime.
+      // A load that core aborted decides nothing, even if its source
+      // resolves it.
+      const recordCoverage = async (
+        demand: LoadSubsetOptions,
+        isCurrent: () => boolean,
+      ): Promise<void> => {
+        const current = () => isCurrent() && !demand.signal?.aborted
+        if (!current()) return
+        const record = await runtime.nextCoverageRecord(demand)
+        if (!record || !current()) return
+        wrappedParams.begin()
+        wrappedParams.metadata?.collection.set(
+          demandCoverageKey(demand),
+          record,
+        )
+        await wrappedParams.commit()
+      }
+
       let sourceResult: SyncConfigRes = {}
       let sourceResultSettled = false
       let activeSourceSyncEntry: Promise<void> | undefined
@@ -7302,7 +7499,16 @@ function createWrappedSyncConfig<
             try {
               // Returning a promise transfers its lease even if it rejects.
               // Only a synchronous throw leaves no upstream lease to release.
-              return currentSource.loadSubset(loadOptions)
+              const loaded = currentSource.loadSubset(loadOptions)
+              if (!persistedReadiness?.onDemand) return loaded
+              const isCurrent = runtime.captureResetEpoch()
+              // A synchronous answer stays synchronous. Its coverage record
+              // follows its rows in commit order without holding the load.
+              if (loaded === true) {
+                void recordCoverage(options, isCurrent).catch(() => undefined)
+                return true
+              }
+              return loaded.then(() => recordCoverage(options, isCurrent))
             } catch (error) {
               acquisition.forwarded = false
               acquisition.source = undefined
@@ -7546,14 +7752,12 @@ export function persistedCollectionOptions<
   }
 
   const networkTimeoutMs = getNetworkTimeoutMs(options.initialRender)
-  if (networkTimeoutMs !== undefined && options.syncMode === `on-demand`) {
-    throw new InvalidPersistedCollectionConfigError(
-      `network-first initial rendering requires eager persistence syncMode`,
-    )
-  }
   const persistedReadinessTracker =
     networkTimeoutMs !== undefined
-      ? new PersistedReadinessTracker(networkTimeoutMs)
+      ? new PersistedReadinessTracker(
+          networkTimeoutMs,
+          options.syncMode === `on-demand`,
+        )
       : undefined
 
   let claimed = false

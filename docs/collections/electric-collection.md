@@ -406,6 +406,14 @@ isolated but needs a separate cross-version cleanup policy while older tabs
 may still use it. Scoped recovery
 does not certify the new generation for offline reuse.
 
+With `initialRender: { strategy: 'network-first' }`, an on-demand or
+progressive Collection can render a demand offline from SQLite after that exact
+demand settled online in an earlier session. Each demand keeps its own
+coverage in the current persisted cache generation. Scoped recovery, cache-claim
+expiry, and a must-refetch end it, so after any of them a demand waits for the
+network again. A demand that loads during the rest of a scoped-recovery sync
+run records no coverage. See [On-demand Collections offline](../guides/sqlite-persistence.md#on-demand-collections-offline).
+
 During scoped recovery, coordinator notifications about SQLite changes do not
 hydrate, truncate, or replace public source rows. The Electric change stream
 and demanded source snapshots own those rows until the sync run ends. A change

@@ -388,6 +388,11 @@ const ownerGroups: ReadonlyArray<
     `managed-claim-read retired-storage`,
   ],
   [
+    `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
+    `persisted-demand-coverage`,
+    `history`,
+  ],
+  [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
     `trailbase`,
     `page-event`,
