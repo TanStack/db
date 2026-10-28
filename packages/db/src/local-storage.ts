@@ -1229,13 +1229,13 @@ function createLocalStorageSync<T extends object>(
         processStorageChanges,
       )
       try {
-        if (initialData.size > 0) {
-          begin()
-          initialData.forEach((storedItem) => {
-            write({ type: `insert`, value: storedItem.data })
-          })
-          commit()
-        }
+        // Storage holds the run's full state: a snapshot replaces the rows a
+        // reload keeps, and removes the rows another tab deleted.
+        begin({ snapshot: true })
+        initialData.forEach((storedItem) => {
+          write({ type: `insert`, value: storedItem.data })
+        })
+        commit()
         // Mark collection as ready after initial load, then listen for
         // browser events from other tabs.
         markReady()

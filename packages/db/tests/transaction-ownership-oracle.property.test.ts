@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   captureCreatedTransactions,
   mockSyncCollectionOptionsNoInitialState,
@@ -740,6 +741,8 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
 }
 
 const history = fc.array(step, { minLength: 1, maxLength: 24 })
+
+declareOracle({ check: [runHistory], model: [OwnershipModel] })
 
 describe(`settled transactions leave every Collection that tracked them`, () => {
   it(`generated histories with a fixed seed`, async () => {

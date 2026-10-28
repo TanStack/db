@@ -1,10 +1,12 @@
 import { tanstackConfig } from '@tanstack/eslint-config'
+import oraclePlugin from './scripts/eslint-plugin-oracle/index.js'
 
 export default [
   ...tanstackConfig,
   {
     ignores: [
       `**/dist/**`,
+      `packages/convex-db-collection/e2e/backend/convex/_generated/**`,
       `**/.output/**`,
       `**/.nitro/**`,
       `**/traildepot/**`,
@@ -45,4 +47,5 @@ export default [
       'import/no-cycle': `error`,
     },
   },
+  oraclePlugin.configs.recommended,
 ]

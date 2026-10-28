@@ -46,9 +46,10 @@ export type VirtualOrigin = 'local' | 'remote'
  * - Available in queries (WHERE, ORDER BY, SELECT)
  * - Included when spreading rows (`...user`)
  *
- * Whole-row live-query outputs retain source metadata. Ordinary projections
- * receive metadata from the live-query Collection. An explicitly selected
- * virtual field name cannot replace source metadata at root publication.
+ * Structured whole-row selections and spreads retain source metadata.
+ * A functional selection retains it only when returning a source row directly.
+ * New functional objects and other projections receive the output Collection's
+ * metadata. Selected virtual names cannot change that attribution.
  *
  * @template TKey - The type of the row's key (string or number)
  *

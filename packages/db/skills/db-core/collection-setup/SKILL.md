@@ -172,6 +172,7 @@ Use `z.union([z.string(), z.date()])` for transformed fields — this ensures `T
 Always use a schema with Electric — without one, the collection types as `Record<string, unknown>`.
 
 ```ts
+import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { z } from 'zod'
 

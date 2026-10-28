@@ -66,8 +66,9 @@ const addTodoMutation = useMutation({
 
 ```typescript
 const todoCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
     queryKey: ['todos'],
+    queryClient,
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
     schema: todoSchema,
@@ -898,6 +899,13 @@ triggers Save, `tx.commit()` fires the `mutationFn` to persist all accumulated
 mutations in a single batch. If the user cancels instead, `tx.rollback()`
 discards the optimistic changes and reverts the UI.
 
+A pending manual transaction does not retain its Collections against garbage
+collection. Keep a subscription while you need the draft's optimistic rows,
+until commit or rollback. Once GC clears those rows, restarting sync does not
+guarantee that the draft's previous optimistic view is restored. After commit,
+the persisting transaction retains every Collection it touches until its handler
+settles. Explicit `cleanup()` still clears rows even while a handler persists.
+
 ### Multi-Step Workflows
 
 Manual transactions excel at complex workflows:
@@ -986,7 +994,7 @@ You can mix local and server collections in the same transaction:
 
 ```ts
 const localSettings = createCollection(
-  localStorageCollectionOptions({
+  localStorageCollectionOptions<{ id: string; mode: string }>({
     id: "user-settings",
     storageKey: "app-settings",
     getKey: (item) => item.id,
@@ -994,8 +1002,9 @@ const localSettings = createCollection(
 )
 
 const userProfile = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; name: string }>({
     queryKey: ["profile"],
+    queryClient,
     queryFn: async () => api.profile.get(),
     getKey: (item) => item.id,
     onUpdate: async ({ transaction, collection }) => {
@@ -1010,7 +1019,7 @@ const tx = createTransaction({
     // Handle server collection mutations explicitly in mutationFn
     await Promise.all(
       transaction.mutations
-        .filter((m) => m.collection === userProfile)
+        .filter((m) => Object.is(m.collection, userProfile))
         .map((m) => api.profile.update(m.modified))
     )
 

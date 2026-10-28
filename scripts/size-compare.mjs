@@ -21,6 +21,15 @@
  * in parallel, and a package whose sources did not change since its last
  * build is not rebuilt. With `--files`, production mode lists each source
  * module's minified bytes in the bundle, before compression.
+ *
+ * A package bundle keeps every export, so nothing is tree-shaken. Production
+ * mode therefore also measures scenarios: apps in `scripts/size-scenarios/`.
+ * `app` is the typical app: a query collection, a live query, and the React
+ * adapter. Each other scenario adds one feature to it (a join, a groupBy,
+ * includes, an optimistic action, LocalStorage, an Effect), so its delta is
+ * that feature's cost. Each is tree-shaken as an app ships it, with React and
+ * TanStack Query left external because an app ships them anyway. With `--files`, the changed modules of each
+ * scenario are listed too. `--no-scenarios` skips them.
  */
 import { execFile, execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -32,7 +41,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { availableParallelism, tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { build as esbuild } from 'esbuild'
@@ -47,6 +56,7 @@ const flag = (name) => args.includes(`--${name}`)
 
 const DEFAULT_PACKAGES = [
   `db`,
+  `convex-db-collection`,
   `react-db`,
   `query-db-collection`,
   `electric-db-collection`,
@@ -58,10 +68,16 @@ const DEFAULT_PACKAGES = [
 // Built first, in order: the other packages resolve their types while their
 // declarations build.
 const PREREQUISITES = [`db-ivm`, `db`]
+// Packages that the scenarios import; production mode always builds them.
+const SCENARIO_PACKAGES = [`react-db`, `query-db-collection`]
+// An app ships these itself, so a scenario leaves them out.
+const APP_DEPENDENCIES = [`react`, `react-dom`, `@tanstack/query-core`]
 
 const root = execSync(`git rev-parse --show-toplevel`, {
   encoding: `utf8`,
 }).trim()
+const runScenarios = !flag(`dev`) && !flag(`no-scenarios`)
+const scenarioPackages = runScenarios ? SCENARIO_PACKAGES : []
 const baseRef = option(`base`, `origin/main`)
 const packages = option(`packages`, DEFAULT_PACKAGES.join(`,`)).split(`,`)
 const git = (command) =>
@@ -131,7 +147,9 @@ async function build(dir, label, force) {
     prerequisiteResults[pkg] = await buildPackage(dir, pkg, force)
   // Packages build independently, so run them in parallel.
   const limit = Math.max(1, Math.floor(availableParallelism() / 2))
-  const queue = packages.filter((pkg) => !PREREQUISITES.includes(pkg))
+  const queue = [...new Set([...packages, ...scenarioPackages])].filter(
+    (pkg) => !PREREQUISITES.includes(pkg),
+  )
   const results = {}
   await Promise.all(
     Array.from({ length: limit }, async () => {
@@ -199,6 +217,8 @@ function exportedEntries(pkgDir) {
 // is the compressed bundle; each file's entry is its minified bytes in it.
 async function measureProduction(dir, pkg) {
   const pkgDir = join(dir, `packages`, pkg)
+  // New or removed packages have no shipped bytes on the absent side.
+  if (!existsSync(pkgDir)) return new Map()
   const entries = exportedEntries(pkgDir).filter(existsSync)
   if (entries.length === 0) return new Map()
   const result = await esbuild({
@@ -227,6 +247,58 @@ async function measureProduction(dir, pkg) {
   const output = Object.values(result.metafile.outputs)[0]
   for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
     const name = relative(join(`dist`, `esm`), input)
+    files.set(name, { gzip: bytesInOutput, brotli: bytesInOutput, raw: true })
+  }
+  return files
+}
+
+// A scenario as an app ships it: tree-shaken, with its dependencies, built
+// against one tree's packages.
+const scenarioDir = join(root, `scripts`, `size-scenarios`)
+// The typical app first; each other scenario adds one feature to it.
+const scenarios = existsSync(scenarioDir)
+  ? walk(scenarioDir, (name) => name.endsWith(`.js`)).sort((a, b) =>
+      basename(a) === `app.js`
+        ? -1
+        : basename(b) === `app.js`
+          ? 1
+          : a.localeCompare(b),
+    )
+  : []
+async function measureScenario(dir, scenario) {
+  const result = await esbuild({
+    entryPoints: [scenario],
+    absWorkingDir: join(dir, `packages`, `db`),
+    bundle: true,
+    minify: true,
+    format: `esm`,
+    platform: `browser`,
+    tsconfigRaw: `{}`,
+    external: APP_DEPENDENCIES,
+    alias: Object.fromEntries(
+      [`db`, `db-ivm`, ...SCENARIO_PACKAGES].map((pkg) => [
+        `@tanstack/${pkg}`,
+        join(dir, `packages`, pkg, `dist`, `esm`, `index.js`),
+      ]),
+    ),
+    write: false,
+    metafile: true,
+    logLevel: `error`,
+    define: { 'process.env.NODE_ENV': `"production"` },
+  })
+  const bundle = Buffer.from(result.outputFiles[0].contents)
+  const files = new Map([[`(bundle)`, sizes(bundle)]])
+  const output = Object.values(result.metafile.outputs)[0]
+  // Name each input the same way in both trees: scenario files by their
+  // scenario path, workspace modules by their package path, and dependencies
+  // by their path inside node_modules.
+  for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
+    const path = resolve(join(dir, `packages`, `db`), input)
+    const name = path.startsWith(scenarioDir)
+      ? `scenario/${relative(scenarioDir, path)}`
+      : path.includes(`/node_modules/`)
+        ? path.slice(path.lastIndexOf(`/node_modules/`) + 14)
+        : relative(dir, path)
     files.set(name, { gzip: bytesInOutput, brotli: bytesInOutput, raw: true })
   }
   return files
@@ -301,3 +373,58 @@ console.log(
     signed(sum.headBrotli - sum.baseBrotli),
   ].join(`\t`),
 )
+
+if (runScenarios) {
+  console.log(
+    `\nscenarios: apps in scripts/size-scenarios, tree-shaken, with ${APP_DEPENDENCIES.join(`, `)} external\n`,
+  )
+  console.log(
+    [
+      `scenario`,
+      `base gzip`,
+      `head gzip`,
+      `Δ gzip`,
+      `Δ brotli`,
+      `feature cost (head gzip over app)`,
+    ].join(`\t`),
+  )
+  let appGzip
+  for (const scenario of scenarios) {
+    // A scenario written for a new API cannot build against an older base:
+    // it imports a name the base does not export. Any other failure is real.
+    const base = await measureScenario(baseDir, scenario).catch((error) => {
+      if (!String(error?.message).includes(`No matching export`)) throw error
+      return undefined
+    })
+    const head = await measureScenario(root, scenario)
+    const baseGzip = base?.get(`(bundle)`).gzip
+    const headGzip = head.get(`(bundle)`).gzip
+    appGzip ??= headGzip
+    console.log(
+      [
+        relative(scenarioDir, scenario).replace(/\.js$/, ``),
+        baseGzip ?? `n/a`,
+        headGzip,
+        baseGzip === undefined
+          ? `n/a`
+          : signed(headGzip - baseGzip) +
+            percent(headGzip - baseGzip, baseGzip),
+        base
+          ? signed(head.get(`(bundle)`).brotli - base.get(`(bundle)`).brotli)
+          : `n/a`,
+        signed(headGzip - appGzip),
+      ].join(`\t`),
+    )
+    if (!flag(`files`) || !base) continue
+    const changed = [...new Set([...base.keys(), ...head.keys()])]
+      .filter((file) => file !== `(bundle)`)
+      .map((file) => [
+        file,
+        (head.get(file)?.gzip ?? 0) - (base.get(file)?.gzip ?? 0),
+      ])
+      .filter(([, delta]) => delta !== 0)
+      .sort((a, b) => b[1] - a[1])
+    for (const [file, delta] of changed)
+      console.log(`  ${file}\t\t\t${signed(delta)}`)
+  }
+}

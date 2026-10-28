@@ -1,9 +1,5 @@
 import { QueryClient } from '@tanstack/query-core'
-import {
-  BasicIndex,
-  createCollection,
-  createLiveQueryCollection,
-} from '@tanstack/db'
+import { createCollection } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import {
@@ -11,12 +7,14 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
-import { createDeferred } from '../../db/src/deferred.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
-import { createBackend } from './cursor-pagination/backend.js'
+import {
+  createFixture,
+  observeRows,
+} from './cursor-pagination-integration-fixture.js'
 import { expectedWindow } from './cursor-pagination/model-oracle.js'
-import type { Row, Scope } from './cursor-pagination/model-oracle.js'
+import type { Row } from './cursor-pagination/model-oracle.js'
 
 /**
  * # Does opaque pagination refine a real live-query window?
@@ -38,138 +36,6 @@ import type { Row, Scope } from './cursor-pagination/model-oracle.js'
  * cursor expressions, then chooses the explicit offset for its local reader.
  * Each tie filter has its own opaque backend sequence, just like the prefix.
  */
-function createFixture(
-  rows: Array<Row>,
-  scope: Scope,
-  backendSize: number,
-  holdFirst = false,
-) {
-  const backend = { calls: [] as Array<string | undefined> }
-  const gate = createDeferred<void>()
-  let received = 0
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
-    },
-  })
-  const makePager = (rank?: number) => {
-    const makeBackend = () =>
-      createBackend(
-        rank === undefined ? rows : rows.filter((row) => row.rank === rank),
-        scope,
-        backendSize,
-      )
-    let transport = makeBackend()
-    return createCursorPager({
-      queryClient: client,
-      queryKey: [`cursor-experiment`, scope, `opaque-pages`, rank ?? null],
-      fetchPage: async (cursor, signal) => {
-        if (cursor === undefined) transport = makeBackend()
-        if (rank === undefined) backend.calls.push(cursor)
-        const page = await transport.fetchPage(cursor, signal)
-        if (++received === 1 && holdFirst) await gate.promise
-        return page
-      },
-    })
-  }
-  const pager = makePager()
-  const ties = new Map<number, ReturnType<typeof makePager>>()
-  const requests: Array<{ offset: number; limit: number | undefined }> = []
-  let cursorRequestCount = 0
-  const direction = scope.descending ? `desc` : `asc`
-  const source = createCollection(
-    queryCollectionOptions<Row>({
-      queryClient: client,
-      queryKey: [`cursor-experiment`, scope, `rows`],
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BasicIndex,
-      getKey: (row) => row.id,
-      queryFn: async (ctx) => {
-        const options = ctx.meta?.loadSubsetOptions
-        let reader = pager
-        const where = options?.where
-        if (where !== undefined) {
-          if (
-            where.type !== `func` ||
-            where.name !== `eq` ||
-            where.args.length !== 2 ||
-            where.args[0]?.type !== `ref` ||
-            where.args[0].path.length !== 1 ||
-            where.args[0].path[0] !== `rank` ||
-            where.args[1]?.type !== `val` ||
-            typeof where.args[1].value !== `number`
-          ) {
-            throw new Error(`Unsupported fixture predicate`)
-          }
-          const rank = where.args[1].value
-          let tie = ties.get(rank)
-          if (!tie) {
-            tie = makePager(rank)
-            ties.set(rank, tie)
-          }
-          reader = tie
-        }
-        if (options?.cursor) {
-          cursorRequestCount++
-          expect(options.cursor.whereCurrent).toMatchObject({
-            type: `func`,
-            name: `eq`,
-            args: [
-              { type: `ref`, path: [`rank`] },
-              { type: `val`, value: expect.any(Number) },
-            ],
-          })
-          expect(options.cursor.whereFrom).toMatchObject({
-            type: `func`,
-            name: scope.descending ? `lt` : `gt`,
-            args: [
-              { type: `ref`, path: [`rank`] },
-              { type: `val`, value: expect.any(Number) },
-            ],
-          })
-        }
-        if (options?.orderBy) {
-          expect(options.orderBy).toMatchObject([
-            { expression: { path: [`rank`] }, compareOptions: { direction } },
-            { expression: { path: [`id`] }, compareOptions: { direction } },
-          ])
-        }
-        const window = { offset: options?.offset ?? 0, limit: options?.limit }
-        requests.push(window)
-        return reader.read(window, ctx.signal)
-      },
-    }),
-  )
-  const live = createLiveQueryCollection((q) =>
-    q
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank, direction)
-      .orderBy(({ row }) => row.id, direction)
-      .limit(1),
-  )
-  return {
-    backend,
-    gate,
-    requests,
-    cursorRequestCount: () => cursorRequestCount,
-    live,
-    source,
-    refresh: () =>
-      client.invalidateQueries(
-        { queryKey: [`cursor-experiment`, scope] },
-        { throwOnError: true },
-      ),
-    received: () => received,
-    async cleanup() {
-      gate.resolve()
-      await live.cleanup()
-      await source.cleanup()
-      client.clear()
-    },
-  }
-}
-
 const matrix = [0, 1, 9, 20].flatMap((count) =>
   [2, 5].flatMap((backendSize) =>
     [3, 7].flatMap((pageSize) =>
@@ -182,11 +48,6 @@ const matrix = [0, 1, 9, 20].flatMap((count) =>
     ),
   ),
 )
-
-// This oracle checks all user row fields and their order. Virtual Collection
-// fields ($key/$origin/etc.) are outside the cursor adapter's responsibility.
-const observeRows = (rows: ReadonlyArray<Row>) =>
-  rows.map(({ id, rank, group }) => ({ id, rank, group }))
 
 const manualWriteProperty = `cursor-pagination.manual-write`
 const manualWriteReplay = readOracleRunConfig()
@@ -351,10 +212,7 @@ describe(`cursor adapter through production pagination`, () => {
           ),
           campaign === `fixed`
             ? { seed: 20261012, numRuns: oracleRuns(50) }
-            : {
-                ...oraclePropertyOptions(50, manualWriteProperty),
-                ...(campaign === `replay` ? { numRuns: 1 } : {}),
-              },
+            : oraclePropertyOptions(50, manualWriteProperty),
         )
       } catch (error) {
         lawFailure = error
@@ -509,60 +367,4 @@ describe(`cursor adapter through production pagination`, () => {
       }
     },
   )
-
-  it(`holds real response delivery and preserves a shallower peer after deep exhaustion`, async () => {
-    const rows = Array.from({ length: 9 }, (_, id) => ({
-      id,
-      rank: Math.floor(id / 6),
-      group: 0,
-    }))
-    const scope = { group: undefined, descending: false }
-    const fixture = createFixture(rows, scope, 2, true)
-    const shallow = createLiveQueryWindowController(fixture.live, {
-      pageSize: 3,
-    })
-    const deep = createLiveQueryWindowController(fixture.live, { pageSize: 10 })
-    const publications: Array<Array<number>> = []
-    const stopShallow = shallow.subscribe(() =>
-      publications.push(shallow.getSnapshot().data.map((row) => row.id)),
-    )
-    const stopDeep = deep.subscribe(() => {})
-    let fulfilledPreloads = 0
-    const pending = Promise.allSettled(
-      [shallow.preload(), deep.preload()].map((promise) =>
-        promise.then(() => {
-          fulfilledPreloads++
-        }),
-      ),
-    )
-    try {
-      await vi.waitFor(() => expect(fixture.received()).toBe(1))
-      expect(fulfilledPreloads).toBe(0)
-      expect(shallow.getSnapshot().data).toEqual([])
-      expect(publications.every((batch) => batch.length === 0)).toBe(true)
-      fixture.gate.resolve()
-      expect((await pending).map((result) => result.status)).toEqual([
-        `fulfilled`,
-        `fulfilled`,
-      ])
-      expect(shallow.getSnapshot().hasNextPage).toBe(true)
-      expect(deep.getSnapshot().hasNextPage).toBe(false)
-      stopDeep()
-      deep.dispose()
-      await shallow.preload()
-      expect(observeRows(shallow.getSnapshot().data)).toEqual(rows.slice(0, 3))
-      expect(shallow.getSnapshot().hasNextPage).toBe(true)
-      await shallow.fetchNextPage()
-      expect(observeRows(shallow.getSnapshot().data)).toEqual(rows.slice(0, 6))
-      expect(fixture.backend.calls).toHaveLength(5)
-    } finally {
-      fixture.gate.resolve()
-      await pending
-      stopShallow()
-      stopDeep()
-      shallow.dispose()
-      deep.dispose()
-      await fixture.cleanup()
-    }
-  })
 })

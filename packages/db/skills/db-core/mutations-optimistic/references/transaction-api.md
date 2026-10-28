@@ -16,7 +16,7 @@ const tx = createTransaction<T>({
 ## Transaction Object
 
 ```ts
-interface Transaction<T> {
+interface Transaction<T extends object> {
   id: string
   state: 'pending' | 'persisting' | 'completed' | 'failed'
   mutations: Array<PendingMutation<T>>

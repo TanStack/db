@@ -14,35 +14,48 @@
  * differ in the value and lifecycle facts visible there. The suite tracks all
  * handles, sources, and pending fetches so cleanup is itself part of the tested
  * history instead of test-runner housekeeping.
+ *
+ * This module keeps the scenarios that compare production with the source rows
+ * or with a model. Scenarios whose only comparison is a value written down by
+ * hand are in infinite-suite-cases.ts. The shared machinery is in
+ * infinite-suite-harness.ts.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { createOracleReach } from '../oracle-reach'
+import { declareOracle } from '../oracle-declaration.js'
+import {
+  captureError,
+  createScenarioState,
+  rows,
+  runScenario,
+  scenarioLifetime,
+  trackScenarioPromise,
+  waitFor,
+  waitForAsync,
+  wrapDriver,
+} from './infinite-suite-harness'
 import { expectPageRows } from './page-laws-oracle'
-import { ScenarioLifetime } from './scenario-lifetime'
-import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
+import type {
+  InfiniteQueryContext,
+  InfiniteRow,
+} from './infinite-suite-harness'
 import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
 } from './infinite-contract'
 
-interface InfiniteRow {
-  id: string
-  label: string
-  rank: number
-}
-
 /**
  * A fulfilled page fetch advances the committed prefix. A failed request leaves
- * that prefix alone and keeps its error visible until explicit recovery.
- * Source length, not the controller's failed-window cache, decides whether the
- * committed prefix has a continuation, including after later source writes.
+ * that prefix and the `ready` status alone; its rejection reaches the caller,
+ * and a failed source load behind it is a request error in the health tree.
+ * Source length decides whether the committed prefix has a continuation,
+ * including after later source writes.
  */
 function expectedOverlappingWindow(
   source: ReadonlyArray<InfiniteRow>,
   pageSize: number,
   pageSucceeded: boolean,
-  preloadFailed: boolean,
-  failure: Error,
 ) {
   const pageCount = pageSucceeded ? 2 : 1
   const visible = source.slice(0, pageCount * pageSize)
@@ -56,8 +69,6 @@ function expectedOverlappingWindow(
     pageParams: Array.from({ length: pageCount }, (_, page) => page),
     hasNextPage: source.length > pageCount * pageSize,
     isFetchingNextPage: !pageSucceeded,
-    error: preloadFailed ? failure : undefined,
-    status: preloadFailed ? `error` : `ready`,
   }
 }
 
@@ -127,106 +138,72 @@ function expectFirstOnDemandValue(
   }
 }
 
-function rows(count: number, prefix = ``): Array<InfiniteRow> {
-  return Array.from({ length: count }, (_, index) => ({
-    id: `${prefix}${index + 1}`,
-    label: `${prefix || `row`}-${index + 1}`,
-    rank: count - index,
-  }))
-}
-
-async function captureError(fn: () => InfiniteQueryHandle): Promise<unknown> {
+/** A rejected input throws at mount, reconfiguration, flush, or read. */
+async function captureRejection(
+  run: () => Promise<unknown> | unknown,
+): Promise<unknown> {
   try {
-    const handle = fn()
-    await handle.flush()
-    handle.unmount()
+    await run()
     return undefined
   } catch (error) {
     return error
   }
 }
 
-async function waitFor(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    if (check()) return
-    await Promise.resolve()
+/**
+ * After a rejection, every read throws or holds no rows. Two reads catch a
+ * memo that throws once and then serves its previous value. No current driver
+ * can fail this check (see `contract.ts`); it guards a driver whose binding
+ * stays mounted after a rejection.
+ */
+function expectNoPagesAfterRejection(handle: InfiniteQueryHandle): void {
+  for (let read = 0; read < 2; read++) {
+    let data: unknown
+    try {
+      data = handle.current().data
+    } catch {
+      continue
+    }
+    expect(data).toEqual([])
   }
-  throw new Error(`Condition did not become true`)
 }
 
-async function waitForAsync(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    if (check()) return
-    await new Promise((resolve) => setTimeout(resolve, 5))
-  }
-  throw new Error(`Condition did not become true`)
-}
+/**
+ * The two laws that this suite's scenarios compare with. The publication law
+ * checks every ready value against the source prefix for its page count. The
+ * overlapping-window model predicts the committed prefix, its continuation, and
+ * the retained error after overlapping window outcomes.
+ */
+declareOracle({
+  check: [expectReadyObservationsMatchSource],
+  model: [expectedOverlappingWindow],
+})
 
-export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
+export function runInfiniteQuerySuite(
+  rawDriver: InfiniteQueryDriver,
+  registerUnitScenarios: (context: InfiniteQueryContext) => void,
+): void {
   const registry = scenarioRegistry(rawDriver.knownGaps)
-  let lifetime: ScenarioLifetime | null = null
-  let sources: ScenarioSources | null = null
-
-  const track = <H extends InfiniteQueryHandle>(handle: H): H => {
-    const unmount = handle.unmount.bind(handle)
-    if (lifetime) handle.unmount = lifetime.defer(unmount)
-    return handle
-  }
-  const trackPromise = (promise: Promise<void>): Promise<void> => {
-    void promise.catch(() => undefined)
-    lifetime!.defer(() => promise)
-    return promise
-  }
-  const driver: InfiniteQueryDriver = {
-    ...rawDriver,
-    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
-    makeOnDemandSource: (data, delay) =>
-      sources!.track(rawDriver.makeOnDemandSource(data, delay)),
-    makeLaggingOnDemandSource: (data) =>
-      sources!.track(rawDriver.makeLaggingOnDemandSource(data)),
-    makePrecreated: (build) => sources!.track(rawDriver.makePrecreated(build)),
-    mount: (build, config) => track(rawDriver.mount(build, config)),
-    mountControllable: (build, initial, config) =>
-      track(rawDriver.mountControllable(build, initial, config)),
-    mountCollection: (collection, config) =>
-      track(rawDriver.mountCollection(collection, config)),
-    mountCollectionControllable: (collection, config) =>
-      track(rawDriver.mountCollectionControllable(collection, config)),
-    mountConfigControllable: (build, config) =>
-      track(rawDriver.mountConfigControllable(build, config)),
-    mountInputControllable: (collection, build, config) =>
-      track(rawDriver.mountInputControllable(collection, build, config)),
-  }
-
+  const state = createScenarioState()
+  const driver = wrapDriver(rawDriver, state)
+  const lifetime = scenarioLifetime(state)
+  const trackPromise = (promise: Promise<void>): Promise<void> =>
+    trackScenarioPromise(state, promise)
   const scenario = (
     key: string,
     name: string,
     fn: () => Promise<void> | void,
+    // A generated grammar runs many histories, each through the driver's cut.
+    timeoutMs?: number,
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
-    const run = async () => {
-      const resources = new ScenarioLifetime()
-      const ownedSources = new ScenarioSources()
-      lifetime = resources
-      sources = ownedSources
-      try {
-        await resources.run(async () => {
-          try {
-            await fn()
-          } finally {
-            ownedSources.defer(resources)
-          }
-        })
-      } finally {
-        lifetime = null
-        sources = null
-      }
-    }
-    it(label, run)
+    it(label, () => runScenario(state, fn), timeoutMs)
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
+    registerUnitScenarios({ driver, registry, state })
+
     scenario(
       `first-paint-ready`,
       `publishes the ready first page on the first paint for a synchronous source`,
@@ -617,54 +594,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
-      `fetch-settlement`,
-      `fulfills the driver operation only after the window request fulfills`,
-      async () => {
-        const source = driver.makeSource(rows(8))
-        const handle = driver.mount(
-          (q) =>
-            q
-              .from({ items: source.collection })
-              .orderBy(({ items }: any) => items.rank, `desc`),
-          { pageSize: 3 },
-        )
-        await handle.flush()
-
-        const utils = handle.current().collection.utils as {
-          setWindow: (window: {
-            offset: number
-            limit: number
-          }) => true | Promise<void>
-        }
-        const originalSetWindow = utils.setWindow.bind(utils)
-        let resolveWindow: (() => void) | undefined
-        lifetime!.defer(() => resolveWindow?.())
-        utils.setWindow = (window) => {
-          originalSetWindow(window)
-          return new Promise<void>((resolve) => {
-            resolveWindow = resolve
-          })
-        }
-
-        try {
-          let fetchFulfilled = false
-          const fetch = trackPromise(handle.fetchNextPage()).then(() => {
-            fetchFulfilled = true
-          })
-          void fetch.catch(() => undefined)
-          await waitFor(() => resolveWindow !== undefined)
-          await Promise.resolve()
-          expect(fetchFulfilled).toBe(false)
-          resolveWindow?.()
-          await fetch
-          expect(fetchFulfilled).toBe(true)
-        } finally {
-          utils.setWindow = originalSetWindow
-        }
-      },
-    )
-
-    scenario(
       `on-demand-paging`,
       `uses peek-ahead windows while paging an on-demand source`,
       async () => {
@@ -864,7 +793,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `window-failure`,
-      `surfaces a failed window request in state without rejecting`,
+      `keeps pages and status after a failed window request`,
       async () => {
         const source = driver.makeSource(rows(8))
         const handle = driver.mount(
@@ -893,8 +822,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           await expect(handle.fetchNextPage()).resolves.toBeUndefined()
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([3])
-          expect(handle.current().status).toBe(`error`)
-          expect(handle.current().error).toBe(failure)
+          expect(handle.current().status).toBe(`ready`)
+          expect(handle.current().isLoadingError).toBe(false)
 
           utils.setWindow = originalSetWindow
           await handle.fetchNextPage()
@@ -902,7 +831,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           expect(handle.current().pages.map((page) => page.length)).toEqual([
             3, 3,
           ])
-          expect(handle.current().error).toBeUndefined()
           expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
         } finally {
           utils.setWindow = originalSetWindow
@@ -912,13 +840,13 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `overlapping-window-outcomes`,
-      `retains a window failure while continuation follows committed pages and live source changes`,
+      `keeps continuation on committed pages and live source changes after a window failure`,
       async () => {
         // Contract: after overlapping window requests settle, the latest
-        // committed page count determines continuation. A prior failure remains
-        // visible until explicit recovery. The bounded grammar crosses an
-        // exhausted versus remaining source with both settlement orders, then
-        // changes source extent while the earlier error remains visible.
+        // committed page count determines continuation, and a failed request
+        // changes neither the pages nor the status. The bounded grammar
+        // crosses an exhausted versus remaining source with both settlement
+        // orders, then changes source extent after the failure.
         // This drives the exported DB controller in each package realm. Hooks
         // expose no preload operation, so their scheduling is outside this cell.
         const pageSize = 2
@@ -970,13 +898,11 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             let secondReleased = false
             let preload: Promise<unknown> | undefined
             let fetch: Promise<unknown> | undefined
-            const check = (pageSucceeded: boolean, preloadFailed: boolean) => {
+            const check = (pageSucceeded: boolean) => {
               const expected = expectedOverlappingWindow(
                 currentRows,
                 pageSize,
                 pageSucceeded,
-                preloadFailed,
-                failure,
               )
               const actual = controller.getSnapshot()
               expect(actual.data.map((row) => row.id)).toEqual(expected.ids)
@@ -988,8 +914,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               expect(actual.isFetchingNextPage).toBe(
                 expected.isFetchingNextPage,
               )
-              expect(actual.error).toBe(expected.error)
-              expect(actual.status).toBe(expected.status)
+              expect(actual.status).toBe(`ready`)
               checked++
             }
 
@@ -1009,20 +934,20 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
                 firstReleased = true
                 rejectFirst(failure)
                 expect(await preload).toBe(failure)
-                check(false, true)
+                check(false)
                 secondReleased = true
                 resolveSecond()
                 expect(await fetch).toBeUndefined()
-                check(true, true)
+                check(true)
               } else {
                 secondReleased = true
                 resolveSecond()
                 expect(await fetch).toBeUndefined()
-                check(true, false)
+                check(true)
                 firstReleased = true
                 rejectFirst(failure)
                 expect(await preload).toBe(failure)
-                check(true, true)
+                check(true)
               }
               const fifthRow =
                 rowCount === 4
@@ -1040,7 +965,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
                 await waitForAsync(
                   () => collection.toArray.length === currentRows.length,
                 )
-                check(true, true)
+                check(true)
               } finally {
                 unsubscribe()
               }
@@ -1055,9 +980,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               await waitForAsync(
                 () => collection.toArray.length === currentRows.length,
               )
-              check(true, true)
+              check(true)
               await controller.preload()
-              check(true, false)
+              check(true)
             } finally {
               if (!firstReleased) rejectFirst(failure)
               if (!secondReleased) resolveSecond()
@@ -1435,108 +1360,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
-      `callback-error`,
-      `surfaces an error thrown while constructing the query`,
-      async () => {
-        const failure = new Error(`query construction failed`)
-        const error = await captureError(() =>
-          driver.mount(
-            ((..._args: Array<any>) => {
-              throw failure
-            }) as any,
-            { pageSize: 3 },
-          ),
-        )
-        expect(error).toBe(failure)
-      },
-    )
-
-    scenario(
-      `disabled-callback`,
-      `rejects a nullable query callback through the shared input policy`,
-      async () => {
-        const error = await captureError(() =>
-          driver.mount((() => null) as any, { pageSize: 3 }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(
-          `Disabled null or undefined queries are not supported`,
-        )
-      },
-    )
-
-    scenario(
-      `findone-runtime`,
-      `rejects a single-result query at runtime`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const error = await captureError(() =>
-          driver.mount(
-            ((q: any) =>
-              q
-                .from({ items: source.collection })
-                .orderBy(({ items }: any) => items.rank, `desc`)
-                .findOne()) as any,
-            { pageSize: 3 },
-          ),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(`Remove .findOne()`)
-        // A rejected query must not have started: its source stays unread.
-        expect(source.collection.subscriberCount).toBe(0)
-      },
-    )
-
-    scenario(
-      `unordered-collection`,
-      `rejects a pre-created collection without orderBy`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const unordered = driver.makePrecreated((q) =>
-          q.from({ items: source.collection }),
-        ).collection
-        const error = await captureError(() =>
-          driver.mountCollection(unordered, { pageSize: 3 }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toMatch(/orderBy|ORDER BY/)
-      },
-    )
-
-    scenario(
-      `unordered-query`,
-      `rejects a query callback without orderBy`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const error = await captureError(() =>
-          driver.mount((q) => q.from({ items: source.collection }), {
-            pageSize: 3,
-          }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toMatch(/orderBy|ORDER BY/)
-      },
-    )
-
-    scenario(
-      `findone-collection`,
-      `rejects a pre-created single-result collection`,
-      async () => {
-        const source = driver.makeSource(rows(4))
-        const single = driver.makePrecreated(((q: any) =>
-          q
-            .from({ items: source.collection })
-            .orderBy(({ items }: any) => items.rank, `desc`)
-            .findOne()) as any).collection
-        const error = await captureError(() =>
-          driver.mountCollection(single, { pageSize: 3 }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(`Remove .findOne()`)
-      },
-    )
-
-    scenario(
       `collection-window-normalization`,
       `normalizes a pre-created collection to the first peek-ahead window`,
       async () => {
@@ -1603,20 +1426,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
-      `invalid-input`,
-      `rejects a first argument that is neither a query nor a collection`,
-      async () => {
-        const error = await captureError(() =>
-          driver.mount(null as unknown as Parameters<typeof driver.mount>[0], {
-            pageSize: 3,
-          }),
-        )
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain(`First argument`)
-      },
-    )
-
-    scenario(
       `shared-window-release`,
       `releases shared window leases and restores the initial window`,
       async () => {
@@ -1655,8 +1464,320 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       },
     )
 
-    it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(39)
-    })
+    // ---- query identity (1.0 law; see contract.ts) ----------------------
+    //
+    // Each history branches only on the driver's public identity policy, and
+    // both branches check pages: a comparing binding rejects, and a reactive
+    // binding pages the current input.
+
+    // `fn.where` runs a JavaScript predicate, so its IR has no stable hash.
+    const functionalRanks = (source: { collection: any }) => (q: any) =>
+      q
+        .from({ items: source.collection })
+        .fn.where(({ items }: any) => items.rank > 4)
+        .orderBy(({ items }: any) => items.rank, `desc`)
+
+    scenario(
+      `unhashable-query`,
+      `pages a query without a stable IR identity, needing queryKey only where the binding compares identity`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        if (driver.comparesQueryIdentity) {
+          // An empty key is absent, as it is for a DbClient preload.
+          for (const config of [
+            { pageSize: 3 },
+            { pageSize: 3, queryKey: [] },
+          ]) {
+            const error = await captureError(() =>
+              driver.mount(functionalRanks(source), config),
+            )
+            expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          }
+        }
+        const handle = driver.mount(
+          functionalRanks(source),
+          driver.comparesQueryIdentity
+            ? { pageSize: 3, queryKey: [`ranks-above`, 4] }
+            : { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 4), 3)
+        expect(handle.current().hasNextPage).toBe(false)
+      },
+    )
+
+    scenario(
+      `source-id-reuse`,
+      `rejects or pages a different source under a Collection ID the binding read`,
+      async () => {
+        // Claim memory grammar, as in the live suite without a disabled step:
+        // a history mounts on A(x) or C(y), then takes two steps over A(x),
+        // B(x) (another object under A's ID), and C(y). The pairwise model
+        // judges each step from the history alone. A comparing binding rejects
+        // a step when an earlier step read another object under its ID, which
+        // ends the history; a reactive binding pages the selected source.
+        type Pick = `A` | `B` | `C`
+        const first = driver.makeSource(rows(4))
+        const sourceOf: Record<Pick, { collection: any }> = {
+          A: first,
+          B: driver.makeSource(rows(3, `r`), first.collection.id),
+          C: driver.makeSource(rows(2, `o`)),
+        }
+        const pagesOf: Record<Pick, Array<InfiniteRow>> = {
+          A: rows(4).slice(0, 3),
+          B: rows(3, `r`),
+          C: rows(2, `o`),
+        }
+        const collides = (history: ReadonlyArray<Pick>, next: Pick) =>
+          history.some(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+        type ReachState =
+          | `swap after an intervening query`
+          | `revisit after an intervening query`
+        // A state names what lies between the step that made a claim and the
+        // step that tests it.
+        const reachedState = (
+          history: ReadonlyArray<Pick>,
+          next: Pick,
+        ): ReachState | undefined => {
+          const lastIndex = (match: (pick: Pick) => boolean) => {
+            for (let index = history.length - 1; index >= 0; index--) {
+              if (match(history[index]!)) return index
+            }
+            return -1
+          }
+          const conflict = lastIndex(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+          if (conflict >= 0) {
+            return history.length - conflict > 1
+              ? `swap after an intervening query`
+              : undefined
+          }
+          const revisit = lastIndex((prior) => prior === next)
+          return revisit >= 0 && history.length - revisit > 1
+            ? `revisit after an intervening query`
+            : undefined
+        }
+        // Declared reach: the states where a claim must outlive the query
+        // that made it.
+        const reach = createOracleReach<ReachState>(
+          `infinite source-id claim memory`,
+          [
+            `swap after an intervening query`,
+            `revisit after an intervening query`,
+          ],
+        )
+        const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`]
+        for (const start of [`A`, `C`] as const) {
+          for (const second of picks) {
+            for (const third of picks) {
+              reach.beginHistory()
+              const history: Array<Pick> = [start]
+              const handle = driver.mountControllable(
+                (q, pick: Pick) =>
+                  q
+                    .from({ items: sourceOf[pick].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                start as Pick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[start], 3)
+              for (const next of [second, third]) {
+                const reached = reachedState(history, next)
+                if (reached) reach.reach(reached)
+                if (driver.comparesQueryIdentity && collides(history, next)) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                const observed = handle.observations().length
+                handle.setParamSync(next)
+                if (collides(history, next)) {
+                  // A reactive binding read the swap as a new source. At the
+                  // first paint, after the framework's microtask flush and
+                  // before any later task, it shows only the new source's
+                  // rows or none; so does every value it publishes after.
+                  await Promise.resolve()
+                  await Promise.resolve()
+                  const allowed = new Set(pagesOf[next].map((row) => row.id))
+                  const firstPaint = handle
+                    .current()
+                    .data.map((row: { id: string }) => row.id)
+                  expect(
+                    firstPaint.filter((id: string) => !allowed.has(id)),
+                    `first paint ${JSON.stringify(firstPaint)}`,
+                  ).toEqual([])
+                  await handle.flush()
+                  for (const observation of handle
+                    .observations()
+                    .slice(observed)) {
+                    expect(
+                      observation.ids.filter((id) => !allowed.has(id)),
+                      `published ${JSON.stringify(observation.ids)}`,
+                    ).toEqual([])
+                  }
+                } else {
+                  await handle.flush()
+                }
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[next], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        reach.assertReached()
+
+        if (!driver.comparesQueryIdentity) return
+        // Keyed dimension (comparing bindings only), as in the live suite:
+        // AK reads A(x) and BK reads B(x) under their own keys. A keyed step
+        // records no claim and checks none, so a claim made before it still
+        // binds a later derived step.
+        type KeyedPick = Pick | `AK` | `BK`
+        const base = (pick: KeyedPick): Pick =>
+          pick === `AK` ? `A` : pick === `BK` ? `B` : pick
+        const isKeyed = (pick: KeyedPick) => pick !== base(pick)
+        const conflicts = (prior: KeyedPick, next: KeyedPick) =>
+          !isKeyed(prior) &&
+          !isKeyed(next) &&
+          base(prior) !== base(next) &&
+          sourceOf[base(prior)].collection.id ===
+            sourceOf[base(next)].collection.id
+        type KeyedReachState =
+          `claim crosses a keyed step` | `keyed step after a claim`
+        const keyedReach = createOracleReach<KeyedReachState>(
+          `infinite source-id claim memory with keys`,
+          [`claim crosses a keyed step`, `keyed step after a claim`],
+        )
+        const mountKeyed = driver.mountKeyedControllable
+        // Every comparing driver supplies the keyed form.
+        expect(mountKeyed).toBeDefined()
+        const keyedPicks: ReadonlyArray<KeyedPick> = [`A`, `B`, `C`, `AK`, `BK`]
+        for (const start of [`A`, `C`, `AK`] as const) {
+          for (const second of keyedPicks) {
+            for (const third of keyedPicks) {
+              keyedReach.beginHistory()
+              const history: Array<KeyedPick> = [start]
+              const handle = mountKeyed!(
+                (q, pick: KeyedPick) =>
+                  q
+                    .from({ items: sourceOf[base(pick)].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                (pick) => (isKeyed(pick) ? [`keyed`, pick] : undefined),
+                start as KeyedPick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[base(start)], 3)
+              for (const next of [second, third]) {
+                let claimIndex = -1
+                for (let index = history.length - 1; index >= 0; index--) {
+                  if (conflicts(history[index]!, next)) {
+                    claimIndex = index
+                    break
+                  }
+                }
+                if (
+                  claimIndex >= 0 &&
+                  history.slice(claimIndex + 1).some(isKeyed)
+                ) {
+                  keyedReach.reach(`claim crosses a keyed step`)
+                }
+                if (
+                  isKeyed(next) &&
+                  history.some(
+                    (prior) =>
+                      !isKeyed(prior) &&
+                      base(prior) !== base(next) &&
+                      sourceOf[base(prior)].collection.id ===
+                        sourceOf[base(next)].collection.id,
+                  )
+                ) {
+                  keyedReach.reach(`keyed step after a claim`)
+                }
+                if (claimIndex >= 0) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                handle.setParamSync(next)
+                await handle.flush()
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[base(next)], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        keyedReach.assertReached()
+      },
+      // 18 histories of three steps each, and 75 keyed histories for a
+      // comparing binding.
+      60_000,
+    )
+
+    scenario(
+      `unhashable-recompile`,
+      `recompiling to a query without a stable IR identity follows the binding's identity policy`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        // `null` selects the structured query; a number, the functional one
+        // that keeps ranks at or below it.
+        const handle = driver.mountControllable(
+          (q, atMost: number | null) => {
+            const query = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return atMost === null
+              ? query
+              : query.fn.where(({ items }: any) => items.rank <= atMost)
+          },
+          null as number | null,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        if (driver.comparesQueryIdentity) {
+          const error = await captureRejection(async () => {
+            handle.setParamSync(4)
+            await handle.flush()
+            return handle.current()
+          })
+          expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          expectNoPagesAfterRejection(handle)
+          return
+        }
+        // A changed captured value recompiles, though no identity names it.
+        handle.setParamSync(4)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(4, 7), 3)
+        handle.setParamSync(2)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(6, 8), 3)
+      },
+    )
   })
 }

@@ -3,7 +3,7 @@ id: JoinCollectionNotFoundError
 title: JoinCollectionNotFoundError
 ---
 
-Defined in: [packages/db/src/errors.ts:832](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L832)
+Defined in: [packages/db/src/errors.ts:901](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L901)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:832](https://github.com/TanStack/db/blob/
 new JoinCollectionNotFoundError(collectionId): JoinCollectionNotFoundError;
 ```
 
-Defined in: [packages/db/src/errors.ts:833](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L833)
+Defined in: [packages/db/src/errors.ts:902](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L902)
 
 #### Parameters
 

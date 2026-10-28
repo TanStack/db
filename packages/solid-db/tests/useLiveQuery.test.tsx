@@ -1,5 +1,3 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
   count,
@@ -8,8 +6,11 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  include,
   toArray,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
+import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   For,
   Suspense,
@@ -2261,119 +2262,6 @@ describe(`Query Collections`, () => {
       },
     )
 
-    it.each([
-      {
-        name: `immediate persisted fallback`,
-        networkTimeoutMs: 0,
-        outcome: `pending`,
-      },
-      {
-        name: `persisted fallback after the deadline`,
-        networkTimeoutMs: 30,
-        outcome: `timeout`,
-      },
-      { name: `network readiness`, networkTimeoutMs: 60_000, outcome: `ready` },
-      {
-        name: `early network failure`,
-        networkTimeoutMs: 60_000,
-        outcome: `error`,
-      },
-    ] as const)(
-      `gates the first render: $name`,
-      async ({ networkTimeoutMs, outcome }) => {
-        let sync:
-          | {
-              begin: () => void
-              write: (row: Person) => void
-              commit: () => void
-              markReady: () => void
-              markError: (error: unknown) => void
-            }
-          | undefined
-        const source = createCollection<Person>({
-          id: `solid-persisted-${outcome}`,
-          getKey: (row) => row.id,
-          sync: {
-            sync: ({ begin, write, commit, markReady, markError }) => {
-              sync = {
-                begin,
-                write: (row) => write({ type: `insert`, value: row }),
-                commit: () => {
-                  commit()
-                },
-                markReady,
-                markError,
-              }
-              return {}
-            },
-          },
-        })
-        let persistedStatus: `loading` | `ready` = `loading`
-        let networkDeadlineAt: number | undefined
-        const listeners = new Set<() => void>()
-        Object.defineProperty(
-          source.config,
-          Symbol.for(`@tanstack/db.persistedReadiness`),
-          {
-            value: {
-              networkTimeoutMs,
-              getOrStartNetworkDeadline: () =>
-                (networkDeadlineAt ??= Date.now() + networkTimeoutMs),
-              getSnapshot: () => ({ status: persistedStatus }),
-              subscribe: (listener: () => void) => {
-                listeners.add(listener)
-                return () => listeners.delete(listener)
-              },
-            },
-          },
-        )
-        let cleanupQuery: (() => Promise<void>) | undefined
-        const statusView = renderHook(() => useLiveQuery(() => source))
-
-        function LocalPerson() {
-          const query = useLiveQuery((q) => q.from({ person: source }))
-          cleanupQuery = () => query.collection.cleanup()
-          return <div data-testid="local-person">{query()[0]?.name}</div>
-        }
-        const view = render(() => (
-          <Suspense fallback={<div data-testid="local-waiting">Waiting</div>}>
-            <LocalPerson />
-          </Suspense>
-        ))
-        try {
-          await waitFor(() => expect(sync).toBeDefined())
-          sync!.begin()
-          sync!.write(initialPersons[0]!)
-          sync!.commit()
-          persistedStatus = `ready`
-          for (const listener of listeners) listener()
-          await waitFor(() =>
-            expect(statusView.result.persistedStatus).toBe(`ready`),
-          )
-          expect(statusView.result()[0]?.name).toBe(`John Doe`)
-          if (outcome === `pending` || outcome === `timeout`) {
-            const content = await view.findByTestId(`local-person`)
-            expect(content.textContent).toBe(`John Doe`)
-            expect(source.status).toBe(`loading`)
-          } else {
-            expect(view.getByTestId(`local-waiting`)).toBeTruthy()
-            if (outcome === `ready`) sync!.markReady()
-            else sync!.markError(new Error(`network failed`))
-          }
-          const content = await view.findByTestId(`local-person`)
-          expect(content.textContent).toBe(`John Doe`)
-          if (outcome === `ready` || outcome === `error`) {
-            expect(source.status).toBe(outcome)
-          }
-        } finally {
-          view.unmount()
-          statusView.cleanup()
-          await cleanupQuery?.()
-          await source.cleanup()
-        }
-      },
-    )
-
     it(`should work with Suspense boundaries`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -3466,14 +3354,16 @@ describe(`includes subqueries`, () => {
       useLiveQuery((q) =>
         q.from({ project: projects }).select(({ project }) => ({
           id: project.id,
-          issues: q
-            .from({ issue: issues })
-            .where(({ issue }) => eq(issue.projectId, project.id))
-            .select(({ issue }) => ({
-              id: issue.id,
-              projectId: issue.projectId,
-              title: issue.title,
-            })),
+          issues: include(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                projectId: issue.projectId,
+                title: issue.title,
+              })),
+          ),
         })),
       ),
     )

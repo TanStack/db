@@ -7,7 +7,7 @@ title: getLiveQueryHash
 function getLiveQueryHash(preparedValue, queryKey?): string;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L205)
+Defined in: [packages/db/src/live-query-options.ts:291](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L291)
 
 ## Parameters
 

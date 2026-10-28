@@ -4,10 +4,10 @@ title: CollectionStatus
 ---
 
 ```ts
-type CollectionStatus = "idle" | "loading" | "ready" | "error" | "cleaned-up";
+type CollectionStatus = "idle" | "loading" | "ready" | "error" | "crashed" | "cleaned-up";
 ```
 
-Defined in: [packages/db/src/types.ts:736](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L736)
+Defined in: [packages/db/src/types.ts:769](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L769)
 
 Collection status values for lifecycle management
 
@@ -25,6 +25,7 @@ if (collection.status === "loading") {
 ```ts
 // Status transitions
 // idle → loading → ready (when markReady() is called)
-// Any active status can transition to → error or cleaned-up
-// error → ready after a successful sync recovery
+// loading → error when the sync adapter calls fail() before the first ready
+// any active status → crashed when local storage or an invariant breaks
+// After the first ready, sync problems appear in `health`, not in `status`.
 ```

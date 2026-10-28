@@ -22,7 +22,10 @@ The first candidate is `1.0.0-rc.1`. `@tanstack/query-db-collection` and
 `@tanstack/offline-transactions` were both accidentally released as 1.0 before
 the RC. Keep them on 1.x and update to their latest 1.x releases. These
 releases use the app's `@tanstack/db` as a peer dependency, so the RC and stable
-packages share one DB instance.
+packages share one DB instance. The accompanying Offline Transactions minor
+release requires `@tanstack/db@^1.0.0-rc.0`; upgrade DB at the same time. Its
+outbox restoration uses `Transaction.completeWithoutCommit()`, which DB 0.15
+does not provide. Query Collection continues to support DB 0.15 and the RC.
 
 ## Replace `$synced` with `$hasPendingWrites`
 
@@ -48,10 +51,18 @@ If you create virtual rows yourself, include `$hasPendingWrites`:
 
 The fields `$hasPendingWrites`, `$origin`, `$key`, and `$collectionId` are
 reserved on published Collection rows. A selected field with one of those names
-cannot author conflicting metadata at a live-query row root. Whole-row outputs,
-including a selected joined row, retain that source row's metadata. Ordinary
-projections without selected virtual fields receive the live-query Collection's
-metadata. Rename application data fields that collide with these names before
+cannot author conflicting metadata at a live-query row root. Structured
+`.select()` calls that return or spread a source row retain its metadata,
+including a joined source. With several source spreads, the last supplies the
+metadata. Other projections receive the live-query Collection's metadata,
+regardless of selected virtual field names.
+
+A functional `.fn.select()` preserves source metadata only when it returns a
+source row directly, such as `({ user }) => user`. A new object, including
+`({ user }) => ({ ...user })`, receives the live-query Collection's metadata.
+Identical field values do not establish which source authored that object.
+These rules also apply to Collection-valued include rows. Inline `toArray()`
+and `materialize()` results keep their selected shape. Rename application data fields that collide with these names before
 selecting them as row roots.
 
 ## Wait for transaction settlement
@@ -59,6 +70,7 @@ selecting them as row roots.
 Replace `transaction.isPersisted.promise` with `transaction.when('settled')`:
 
 ```ts
+const todoId = "todo-1"
 const transaction = todoCollection.update(todoId, (draft) => {
   draft.completed = true
 })
@@ -77,7 +89,9 @@ for the full boundary.
 
 The pre-1.0 Collection adapters no longer use values returned by
 `onInsert`, `onUpdate`, or `onDelete` to coordinate synchronization. Their
-handlers now return `Promise<void>`. Await the work that must finish before
+handlers now return `Promise<void>`. Query and Electric ignore legacy return
+values at runtime. A discarded value does not turn a successful server write
+into a failed transaction, and it does not coordinate synchronization. Await the work that must finish before
 the transaction settles:
 
 ```ts
@@ -133,8 +147,8 @@ fetch. If the handler neither refreshes nor writes confirmed data, its
 optimistic changes revert to the previous synced rows when the transaction
 settles, even if the server accepted the mutation.
 
-Handlers now return `Promise<void>`. Remove `{ refetch: false }`; it is no
-longer supported. A handler that already explicitly refetches or writes its
+Handlers now return `Promise<void>`. Remove `{ refetch: false }`; the types
+reject it, and runtime code ignores it. A handler that already explicitly refetches or writes its
 server response needs only to remove that return value. See
 [Controlling Refetch Behavior](../collections/query-collection.md#controlling-refetch-behavior).
 
@@ -239,6 +253,7 @@ expressions.
 useLiveQuery(
   (q) => q.from({ todos: todoCollection })
     .where(({ todos }) => eq(todos.status, status)),
+  // @ts-expect-error Dependency arrays are removed in the RC.
   [status],
 )
 
@@ -259,6 +274,11 @@ useLiveQuery({
     .fn.where(({ todos }) => todos.status === status),
 })
 ```
+
+For config-object queries, `getKey` and runtime `schema` options bind when the
+query identity changes. Allocating an inline callback or schema object during a
+render does not rebuild the Collection. Change the query or a nonempty
+`queryKey` when you need to apply different options.
 
 An unhashable query without a nonempty `queryKey` now throws
 `UnhashableQueryIRError`; `queryKey: []` counts as absent. Put the key in the
@@ -291,10 +311,15 @@ Solid `useLiveQuery` no longer exposes the deprecated `.data` alias. Call the
 returned accessor wherever you read the result:
 
 ```tsx
+import { For } from "solid-js"
+import { useLiveQuery } from "@tanstack/solid-db"
+
 const todosQuery = useLiveQuery((q) => q.from({ todos: todoCollection }))
 
 // Before: <For each={todosQuery.data}>...</For>
-<For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+const TodoList = () => (
+  <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+)
 ```
 
 Status fields remain reactive properties, such as `todosQuery.isLoading`. See the

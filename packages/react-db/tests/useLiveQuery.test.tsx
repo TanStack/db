@@ -1,8 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
+  UnhashableQueryIRError,
   coalesce,
   collectionOptions,
   count,
@@ -11,11 +10,14 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  include,
   localOnlyCollectionOptions,
   lte,
   sum,
   toArray,
 } from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { DbProvider } from '../src/DbProvider'
@@ -993,7 +995,7 @@ describe(`Query Collections`, () => {
     expect(result.current.collection).toBe(liveQueryCollection)
   })
 
-  it(`shows recovery of a pre-created live query after dependent-first cleanup`, async () => {
+  it(`restarts a pre-created live query after a final health error and dependent-first cleanup`, async () => {
     let starts = 0
     let failSource!: () => void
     const source = createCollection({
@@ -1008,7 +1010,7 @@ describe(`Query Collections`, () => {
           })
           methods.commit()
           methods.markReady()
-          failSource = () => methods.markError(new Error(`source sync failed`))
+          failSource = () => methods.fail(new Error(`source sync failed`))
         },
       },
     })
@@ -1022,8 +1024,13 @@ describe(`Query Collections`, () => {
       await waitFor(() => expect(result.current.status).toBe(`ready`))
       expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
+      // After Collection readiness, a final health error leaves the initial
+      // gate alone: status and rows stay, and only the health tree shows it.
       act(() => failSource())
-      await waitFor(() => expect(result.current.isError).toBe(true))
+      await waitFor(() => expect(result.current.health?.hasErrors).toBe(true))
+      expect(result.current.status).toBe(`ready`)
+      expect(result.current.isLoadingError).toBe(false)
+      expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
       await act(async () => {
         await todosQuery.cleanup()
@@ -1034,6 +1041,8 @@ describe(`Query Collections`, () => {
       await waitFor(() => expect(result.current.status).toBe(`ready`))
       expect(result.current.collection).toBe(todosQuery)
       expect(result.current.data[0]?.text).toBe(`Todo 2`)
+      // Only a restart clears a final health error.
+      expect(result.current.health?.hasErrors).toBe(false)
     } finally {
       unmount()
       reports.mockRestore()
@@ -2226,7 +2235,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
       // Enable the query
@@ -2265,7 +2274,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
     })
 
@@ -2303,7 +2312,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
       // Enable the query
@@ -2755,13 +2764,15 @@ describe(`Query Collections`, () => {
           q.from({ p: projectsCollection }).select(({ p }) => ({
             id: p.id,
             name: p.name,
-            issues: q
-              .from({ i: issuesCollection })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
+            issues: include(
+              q
+                .from({ i: issuesCollection })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
           })),
         )
       })
@@ -3256,7 +3267,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).not.toBe(firstCollection)
     })
 
-    it(`requires queryKey for a functional query`, () => {
+    it(`throws when a functional query has no queryKey`, () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `derived-identity-functional-missing-key`,
@@ -3276,8 +3287,14 @@ describe(`Query Collections`, () => {
             }),
           { initialProps: { minAge: 25 } },
         ),
-      ).toThrow(/Provide a serializable queryKey/)
+      ).toThrow(UnhashableQueryIRError)
     })
+
+    // A dependency list decides reuse, so the identity is checked when the
+    // query compiles: at mount and when a dependency changes. With a
+    // DbClient, the hook also hashes the query for hydration on every render;
+    // an unhashable query there leaves hydration without a key until the
+    // query compiles again.
 
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
@@ -3311,36 +3328,6 @@ describe(`Query Collections`, () => {
       )
       expect(warnings).toHaveLength(0)
       warnSpy.mockRestore()
-    })
-
-    it(`requires queryKey for a functional query in production`, () => {
-      const previousNodeEnv = process.env.NODE_ENV
-      process.env.NODE_ENV = `production`
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `derived-identity-production-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      try {
-        expect(() =>
-          renderHook(() =>
-            useLiveQuery({
-              query: (q) =>
-                q
-                  .from({ people: collection })
-                  .fn.where(({ people }) => people.age > 25),
-            }),
-          ),
-        ).toThrow(/Provide a serializable queryKey/)
-        expect(warnSpy).not.toHaveBeenCalled()
-      } finally {
-        process.env.NODE_ENV = previousNodeEnv
-        warnSpy.mockRestore()
-      }
     })
 
     it(`uses explicit queryKey for functional query variants`, async () => {

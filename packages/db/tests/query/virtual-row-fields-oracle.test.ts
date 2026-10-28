@@ -35,24 +35,33 @@
  * preload, pending-write, and settled cuts; a FROM-source selection, two
  * opposite spread orders, and an unmatched RIGHT join distinguish a
  * main-source, first-spread, or last-join shortcut. The
- * Collection-valued child is compared with its source Collection, while its
- * inline sibling must retain the selected `$key` value. The root-shape
+ * projection grammar compares source metadata for direct source returns and
+ * structured spreads, and output Collection metadata for new objects, including
+ * functional spreads (maintainer decision). Virtual-name collisions cannot
+ * alter attribution. Supplemental facade and inline witnesses live in
+ * `virtual-row-fields.test.ts`. The root-shape
  * matrix rejects the wrong rule that only expression projections receive
  * virtual row fields. Prior hostile controls made projected-value
  * enrichment and a missing whole-row classification fail at these
  * observations. `checkWithCleanup` retains the primary mismatch as the cause
  * when Collection cleanup also fails and attempts every cleanup.
  */
-import { describe, expect, test, vi } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
+import { afterAll, describe, expect, test, vi } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
+import { declareOracle } from '../oracle-declaration.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import {
+  checkWithCleanup,
+  virtualFieldNames,
+} from './virtual-row-fields-support.js'
 
 type Profile = { label: string }
 
@@ -72,443 +81,196 @@ type VirtualFieldSubject =
   | `nested-value`
   | `opaque-value`
 
-const virtualFieldNames = [
-  `$key`,
-  `$hasPendingWrites`,
-  `$origin`,
-  `$collectionId`,
-] as const
-
 // Only row roots and unprojected whole-row children carry virtual row fields.
 function expectsVirtualFields(subject: VirtualFieldSubject): boolean {
   return subject === `row-root` || subject === `whole-row-child`
 }
 
-function assertPublishedRootFields(row: unknown, name: string): void {
-  for (const field of virtualFieldNames) {
-    if (!(field in Object(row))) {
-      throw new Error(`${name} root must expose ${field}`)
-    }
-  }
-  expect(hasVirtualProps(row), `${name} root classification`).toBe(true)
-}
-
-async function checkWithCleanup(
-  check: () => Promise<void>,
-  cleanups: ReadonlyArray<() => Promise<void>>,
-): Promise<void> {
-  let primaryFailure: unknown
-  let checkFailed = false
-  try {
-    await check()
-  } catch (error) {
-    primaryFailure = error
-    checkFailed = true
-  }
-
-  const cleanupFailures: Array<unknown> = []
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-  }
-
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(
-      cleanupFailures,
-      `Virtual row oracle check and cleanup failed`,
-      {
-        cause: primaryFailure,
-      },
+// Each observed value publishes the virtual row fields exactly when the model
+// classifies its subject as a row, so a missing or leaked field fails at the
+// observation that shows it.
+function expectPublishedFieldClassification(
+  observations: Array<{
+    name: string
+    subject: VirtualFieldSubject
+    value: unknown
+  }>,
+): void {
+  for (const observation of observations) {
+    const expectsFields = expectsVirtualFields(observation.subject)
+    expect(hasVirtualProps(observation.value), observation.name).toBe(
+      expectsFields,
     )
+    for (const field of virtualFieldNames) {
+      expect(
+        field in Object(observation.value),
+        `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
+      ).toBe(expectsFields)
+    }
   }
-  if (checkFailed) throw primaryFailure
 }
 
-describe(`virtual row field runtime boundary`, () => {
-  test(`keeps source metadata authoritative on Collection-valued include rows`, async () => {
+declareOracle({
+  check: [expectPublishedFieldClassification, checkRootMetadata],
+  model: [expectsVirtualFields, sourceOwnsMetadata],
+})
+
+// The independent attribution law uses authoring shape, never selected values.
+function sourceOwnsMetadata(shape: string): boolean {
+  return shape === `structured-spread` || shape === `functional-direct`
+}
+
+function checkRootMetadata(
+  actual: Record<(typeof virtualFieldNames)[number], unknown>,
+  expected: Record<(typeof virtualFieldNames)[number], unknown>,
+): void {
+  for (const field of virtualFieldNames)
+    expect(actual[field], field).toBe(expected[field])
+}
+
+const metadataReach = createOracleReach(`root metadata`, [
+  `joined-pending-source`,
+  `single-pending-source`,
+  `colliding-projection`,
+  `functional-direct`,
+])
+afterAll(() => metadataReach.assertReached())
+
+/**
+ * Projection shape controls attribution, not the spelling of selected fields.
+ * An authored new object has its own live-query metadata; a direct source or
+ * structured spread retains source metadata. A functional spread is a new
+ * object (maintainer decision). The finite grammar crosses all four reserved
+ * collisions and their union with joined and single sources. The clean sibling
+ * supplies only the compiler-generated key; Collection IDs and pending status
+ * come from the independent shape rule. A held source update distinguishes
+ * source metadata from output metadata before and after settlement.
+ */
+test.each(
+  [false, true].flatMap((joined) =>
+    [`none`, ...virtualFieldNames, `all`].flatMap((collision) =>
+      [
+        `structured-projection`,
+        `structured-spread`,
+        `functional-projection`,
+        `functional-spread`,
+        `functional-direct`,
+      ]
+        .filter(
+          (shape) => shape !== `functional-direct` || collision === `none`,
+        )
+        .map((shape) => ({ joined, collision, shape })),
+    ),
+  ),
+)(
+  `attributes root metadata by projection shape: %j`,
+  async ({ joined, collision, shape }) => {
+    metadataReach.beginHistory()
     const parents = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
-        id: `included-virtual-parents`,
+        id: `metadata-parent`,
         getKey: (row) => row.id,
-        initialData: [{ id: `parent-1` }],
+        initialData: [{ id: `parent` }],
       }),
     )
-    const children = createCollection(
-      mockSyncCollectionOptions<{ id: string; parentId: string }>({
-        id: `included-virtual-children`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `child-1`, parentId: `parent-1` }],
-      }),
-    )
-    const live = createLiveQueryCollection((q) =>
-      q.from({ parent: parents }).select(({ parent }) => ({
-        id: parent.id,
-        children: q
-          .from({ child: children })
-          .where(({ child }) => eq(child.parentId, parent.id))
-          .select(({ child }) => ({
-            id: child.id,
-            $key: `selected-key`,
-            $collectionId: `selected-collection`,
-            $hasPendingWrites: true,
-            $origin: `local`,
-          })),
-        inlineChildren: toArray(
-          q
-            .from({ child: children })
-            .where(({ child }) => eq(child.parentId, parent.id))
-            .select(({ child }) => ({
-              id: child.id,
-              $key: `inline-selected-key`,
-            })),
-        ),
-      })),
-    )
-    // A child facade is a public Collection, unlike an inline toArray value.
-    // Its row cannot publish selected literals as system metadata.
-    await checkWithCleanup(async () => {
-      await live.preload()
-      const child = live.toArray[0]!.children.toArray[0]!
-      const source = children.get(`child-1`)!
-      for (const name of virtualFieldNames) {
-        expect(child[name], name).toBe(source[name])
-      }
-      expect(live.toArray[0]!.inlineChildren).toEqual([
-        { id: `child-1`, $key: `inline-selected-key` },
-      ])
-    }, [
-      () => live.cleanup(),
-      () => children.cleanup(),
-      () => parents.cleanup(),
-    ])
-  })
-
-  test(`keeps a selected joined row's source metadata across match and pending update`, async () => {
-    const lists = createCollection(
-      mockSyncCollectionOptions<{ id: string }>({
-        id: `joined-virtual-lists`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `list-1` }],
-      }),
-    )
-    const items = createCollection(
+    const rows = createCollection(
       mockSyncCollectionOptions<{
         id: string
-        listId: string
+        parentId: string
         label: string
       }>({
-        id: `joined-virtual-items`,
+        id: `metadata-child`,
         getKey: (row) => row.id,
-        initialData: [{ id: `item-1`, listId: `list-1`, label: `before` }],
+        initialData: [{ id: `child`, parentId: `parent`, label: `before` }],
       }),
     )
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
-        .select(({ item }) => ({ ...item })),
-    )
-    const fromLive = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
-        .select(({ list }) => ({ ...list })),
-    )
-    const extended = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
-        .select(({ item }) => ({
-          ...item,
-          copyOfLabel: item.label,
-          $key: `selected-key`,
-        })),
-    )
-    const lastItem = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
-        .select(({ list, item }) => ({ ...list, ...item })),
-    )
-    const lastList = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
-        .select(({ list, item }) => ({ ...item, ...list })),
-    )
-    const functional = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
-        .fn.select(({ item }) => ({ ...item })),
-    )
-
-    // A whole-row selection names the joined item as its metadata source.
-    // The independent expected row is the item's public Collection row at
-    // each checkpoint; list metadata has a different key and Collection ID.
+    const overrides: Record<string, unknown> = {}
+    for (const field of virtualFieldNames) {
+      if (collision === field || collision === `all`)
+        overrides[field] = field === `$hasPendingWrites` ? false : `spoof`
+    }
+    const live = createLiveQueryCollection((q) => {
+      const base = joined
+        ? q
+            .from({ parent: parents })
+            .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
+              eq(parent.id, chosen.parentId),
+            )
+        : q.from({ chosen: rows })
+      if (shape === `functional-direct`)
+        return base.fn.select(({ chosen }) => chosen)
+      if (shape === `functional-spread`)
+        return base.fn.select(({ chosen }) => ({ ...chosen, ...overrides }))
+      if (shape === `functional-projection`)
+        return base.fn.select(({ chosen }) => ({
+          id: chosen.id,
+          label: chosen.label,
+          ...overrides,
+        }))
+      if (shape === `structured-spread`)
+        return base.select(({ chosen }) => ({ ...chosen, ...overrides }))
+      return base.select(({ chosen }) => ({
+        id: chosen.id,
+        label: chosen.label,
+        ...overrides,
+      }))
+    })
+    const clean = createLiveQueryCollection((q) => {
+      const base = joined
+        ? q
+            .from({ parent: parents })
+            .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
+              eq(parent.id, chosen.parentId),
+            )
+        : q.from({ chosen: rows })
+      return base.select(({ chosen }) => ({
+        id: chosen.id,
+        label: chosen.label,
+      }))
+    })
+    const sourceOwned = sourceOwnsMetadata(shape)
+    const check = () => {
+      const sourceRow = rows.get(`child`)!
+      const actual = live.toArray[0]!
+      expect(actual.label).toBe(sourceRow.label)
+      const expected = sourceOwned
+        ? sourceRow
+        : {
+            $key: clean.toArray[0]!.$key,
+            $collectionId: live.id,
+            $hasPendingWrites: false,
+            $origin: `remote`,
+          }
+      checkRootMetadata(actual, expected)
+    }
     await checkWithCleanup(async () => {
-      await Promise.all([
-        live.preload(),
-        fromLive.preload(),
-        extended.preload(),
-        lastItem.preload(),
-        lastList.preload(),
-        functional.preload(),
-      ])
-      const expectItemMetadata = () => {
-        const actual = live.toArray[0]!
-        const item = items.get(`item-1`)!
-        expect(actual.label).toBe(item.label)
-        for (const name of virtualFieldNames) {
-          expect(actual[name], name).toBe(item[name])
-          expect(extended.toArray[0]![name], `extended ${name}`).toBe(
-            item[name],
-          )
-          expect(lastItem.toArray[0]![name], `last item ${name}`).toBe(
-            item[name],
-          )
-          expect(functional.toArray[0]![name], `functional ${name}`).toBe(
-            item[name],
-          )
-        }
-      }
-
-      expectItemMetadata()
-      for (const name of virtualFieldNames) {
-        expect(fromLive.toArray[0]![name], name).toBe(
-          lists.get(`list-1`)![name],
-        )
-        expect(lastList.toArray[0]![name], `last list ${name}`).toBe(
-          lists.get(`list-1`)![name],
-        )
-      }
-      const update = items.update(`item-1`, (draft) => {
-        draft.label = `pending`
+      await Promise.all([live.preload(), clean.preload()])
+      check()
+      const mutation = rows.update(`child`, (row) => {
+        row.label = `pending`
       })
       await vi.waitFor(() => expect(live.toArray[0]?.label).toBe(`pending`))
-      expect(items.get(`item-1`)?.$hasPendingWrites).toBe(true)
-      expectItemMetadata()
-      items.utils.resolveSync()
-      await update.when(`settled`)
-      expectItemMetadata()
-    }, [
-      () => fromLive.cleanup(),
-      () => extended.cleanup(),
-      () => lastItem.cleanup(),
-      () => lastList.cleanup(),
-      () => functional.cleanup(),
-      () => live.cleanup(),
-      () => items.cleanup(),
-      () => lists.cleanup(),
-    ])
-  })
-
-  test(`keeps the selected right-join row's metadata when the FROM row is absent`, async () => {
-    const lists = createCollection(
-      mockSyncCollectionOptions<{ id: string }>({
-        id: `right-virtual-lists`,
-        getKey: (row) => row.id,
-        initialData: [],
-      }),
-    )
-    const items = createCollection(
-      mockSyncCollectionOptions<{ id: string; listId: string }>({
-        id: `right-virtual-items`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `item-1`, listId: `missing` }],
-      }),
-    )
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ list: lists })
-        .rightJoin({ item: items }, ({ list, item }) =>
-          eq(list.id, item.listId),
-        )
-        .select(({ item }) => item),
-    )
-
-    await checkWithCleanup(async () => {
-      await live.preload()
-      expect(live.toArray).toHaveLength(1)
-      for (const name of virtualFieldNames) {
-        expect(live.toArray[0]![name], name).toBe(items.get(`item-1`)![name])
-      }
-    }, [() => live.cleanup(), () => items.cleanup(), () => lists.cleanup()])
-  })
-
-  test(`keeps source write metadata authoritative over selected field names`, async () => {
-    const rows = createCollection(
-      mockSyncCollectionOptions<{ id: string; label: string }>({
-        id: `virtual-row-fields-colliding-projection-source`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `row-1`, label: `before` }],
-      }),
-    )
-    const live = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        label: row.label,
-        $hasPendingWrites: false,
-        $origin: `remote`,
-        $key: `selected-key`,
-        $collectionId: `selected-collection`,
-      })),
-    )
-    const functional = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).fn.select(({ row }) => ({
-        id: row.id,
-        label: row.label,
-        $hasPendingWrites: false,
-        $origin: `remote`,
-        $key: `selected-key`,
-        $collectionId: `selected-collection`,
-      })),
-    )
-
-    // The model is the source Collection's public row during a held optimistic
-    // update. Selection changes user fields, but cannot author system metadata.
-    await checkWithCleanup(async () => {
-      await Promise.all([live.preload(), functional.preload()])
-      const update = rows.update(`row-1`, (draft) => {
-        draft.label = `pending`
-      })
-      await vi.waitFor(() => {
-        expect(rows.get(`row-1`)?.$hasPendingWrites).toBe(true)
-        expect(live.toArray[0]?.label).toBe(`pending`)
-      })
-
-      expect(live.toArray[0]).toMatchObject({
-        $hasPendingWrites: true,
-        $origin: `local`,
-        $key: `row-1`,
-        $collectionId: rows.id,
-      })
-      expect(functional.toArray[0]).toMatchObject({
-        $hasPendingWrites: true,
-        $origin: `local`,
-        $key: `row-1`,
-        $collectionId: rows.id,
-      })
-
-      rows.utils.resolveSync()
-      await update.when(`settled`)
-    }, [() => functional.cleanup(), () => live.cleanup(), () => rows.cleanup()])
-  })
-
-  test(`publishes every virtual field on implicit, expression, and functional root shapes`, async () => {
-    const rows = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `virtual-row-fields-root-shapes-source`,
-        getKey: (row) => row.id,
-        initialData: [
-          {
-            id: `row-1`,
-            profile: { label: `nested` },
-            createdAt: new Date(`2026-09-20T12:34:56.000Z`),
-            tags: [`one`],
-          },
-        ],
-      }),
-    )
-    const implicit = createLiveQueryCollection((q) => q.from({ row: rows }))
-    const expression = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        label: row.profile.label,
-      })),
-    )
-    const functional = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).fn.select(({ row }) => ({
-        id: row.id,
-        label: row.profile.label,
-      })),
-    )
-
-    await checkWithCleanup(async () => {
-      await Promise.all([
-        implicit.preload(),
-        expression.preload(),
-        functional.preload(),
-      ])
-
-      const observed = [
-        { name: `implicit`, row: implicit.toArray[0] },
-        { name: `expression`, row: expression.toArray[0] },
-        { name: `functional`, row: functional.toArray[0] },
-      ]
-      for (const { name, row } of observed) {
-        expect(row, `${name} root must publish`).toBeDefined()
-        assertPublishedRootFields(row, name)
-        expect(row!.$hasPendingWrites, `${name} has no pending write`).toBe(
-          false,
-        )
-        expect(`$synced` in row!, `${name} omits the removed alias`).toBe(false)
-      }
-
-      expect(implicit.toArray[0]?.id).toBe(`row-1`)
-      expect(implicit.toArray[0]?.$collectionId).toBe(rows.id)
-      expect(expression.toArray[0]).toMatchObject({
-        id: `row-1`,
-        label: `nested`,
-      })
-      expect(expression.toArray[0]?.$collectionId).toBe(expression.id)
-      expect(functional.toArray[0]).toMatchObject({
-        id: `row-1`,
-        label: `nested`,
-      })
-      expect(functional.toArray[0]?.$collectionId).toBe(functional.id)
-
-      // Wrong rule: functional projection outputs are treated as ordinary
-      // values and never receive root fields. The direct field check above
-      // rejects this observation at the same post-preload checkpoint.
-      const wrongFunctionalRoot = Object.fromEntries(
-        Object.entries(functional.toArray[0]!).filter(
-          ([field]) => field !== `$collectionId`,
-        ),
+      expect(rows.get(`child`)!.$hasPendingWrites).toBe(true)
+      metadataReach.reach(
+        joined ? `joined-pending-source` : `single-pending-source`,
       )
-      expect(() =>
-        assertPublishedRootFields(wrongFunctionalRoot, `functional`),
-      ).toThrow(`functional root must expose $collectionId`)
+      if (collision !== `none`) metadataReach.reach(`colliding-projection`)
+      if (shape === `functional-direct`)
+        metadataReach.reach(`functional-direct`)
+      check()
+      rows.utils.resolveSync()
+      await mutation.when(`settled`)
+      check()
     }, [
-      () => functional.cleanup(),
-      () => expression.cleanup(),
-      () => implicit.cleanup(),
+      () => live.cleanup(),
+      () => clean.cleanup(),
       () => rows.cleanup(),
+      () => parents.cleanup(),
     ])
-  })
+  },
+)
 
-  test(`keeps the primary mismatch and attempts every cleanup`, async () => {
-    const mismatch = new Error(`published row mismatch`)
-    const firstCleanupError = new Error(`first cleanup failed`)
-    const lastCleanupError = new Error(`last cleanup failed`)
-    const attempted: Array<string> = []
-
-    await expect(
-      checkWithCleanup(async () => {
-        throw mismatch
-      }, [
-        async () => {
-          attempted.push(`first`)
-          throw firstCleanupError
-        },
-        async () => {
-          attempted.push(`middle`)
-        },
-        async () => {
-          attempted.push(`last`)
-          throw lastCleanupError
-        },
-      ]),
-    ).rejects.toMatchObject({
-      cause: mismatch,
-      errors: [firstCleanupError, lastCleanupError],
-    })
-    expect(attempted).toEqual([`first`, `middle`, `last`])
-  })
-
+describe(`virtual row field runtime boundary`, () => {
   test(`matches the row and value classification after publication`, async () => {
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
@@ -665,19 +427,7 @@ describe(`virtual row field runtime boundary`, () => {
         },
       ]
 
-      for (const observation of observations) {
-        const expectsFields = expectsVirtualFields(observation.subject)
-        expect(hasVirtualProps(observation.value), observation.name).toBe(
-          expectsFields,
-        )
-        for (const field of virtualFieldNames) {
-          expect(
-            field in Object(observation.value),
-            `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
-          ).toBe(expectsFields)
-        }
-      }
-
+      expectPublishedFieldClassification(observations)
       expect(result.$key).toBe(`row-1`)
       expect(result.$hasPendingWrites).toBe(false)
       expect(result.wholeRows[0]!.$hasPendingWrites).toBe(false)

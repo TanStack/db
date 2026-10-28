@@ -864,7 +864,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 }
 
 /**
- * Type for the awaitTxId utility function
+ * Type for the awaitTxId utility function. It resolves when the txid
+ * appears in the Electric stream (the server's confirmation), before this
+ * tab's persistence accepts the transaction. If that commit later rejects,
+ * the source fails instead, and the Collection's health node records it
+ * (maintainer decision on PR #2265).
  */
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
@@ -1259,9 +1263,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   )
   const options = {
     ...restConfig,
-    onInsert: rejectReturnedHandlerValue(config.onInsert, `onInsert`),
-    onUpdate: rejectReturnedHandlerValue(config.onUpdate, `onUpdate`),
-    onDelete: rejectReturnedHandlerValue(config.onDelete, `onDelete`),
+    onInsert: config.onInsert,
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete,
     syncMode: finalSyncMode,
     sync: syncTemplate,
     utils: utilityTemplate,
@@ -1278,21 +1282,6 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       ) => typeof options
     )(config),
   )
-}
-
-function rejectReturnedHandlerValue<TParams>(
-  handler: ((params: TParams) => Promise<void>) | undefined,
-  name: string,
-): ((params: TParams) => Promise<void>) | undefined {
-  if (!handler) return undefined
-  return async (params) => {
-    const result: unknown = await handler(params)
-    if (result !== undefined) {
-      throw new Error(
-        `Electric ${name} returned a value. Await collection.utils.awaitTxId() or awaitMatch() inside the handler instead.`,
-      )
-    }
-  }
 }
 
 /**
@@ -1648,12 +1637,23 @@ function createElectricSync<T extends Row<unknown>>(
       begin,
       write,
       commit: commitSyncTransaction,
-      markReady,
-      markError,
+      fail,
       truncate,
       collection,
       metadata,
     } = params
+    // Readiness of this sync run. A reload runs `sync` again while the
+    // Collection still shows the previous run's status, so status cannot say
+    // whether this run has reached its first ready.
+    let ready = false
+    const markReady = () => {
+      ready = true
+      params.markReady()
+    }
+    // The stream can give up (fail()) from several places; the first one
+    // stops this sync run. Core ignores a later fail() in the same run, so
+    // the first error stays, and a later markReady(), such as a late
+    // snapshot acceptance, does nothing.
     let commitSequence = 0
     const pendingAppliedReceipts = new Map<number, Promise<void>>()
     const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
@@ -1775,14 +1775,17 @@ function createElectricSync<T extends Row<unknown>>(
       syncMode !== `on-demand` &&
       (canUsePersistedResume ||
         (hasExplicitResumeOffset && !receivesCompleteRows))
-    // A fresh snapshot replaces its hydrated cache; omitting the old offset
-    // alone would merge rows that no longer exist on the server.
+    // A fresh snapshot replaces the rows the Collection holds: its hydrated
+    // cache, or a reload's kept rows. Omitting the old offset alone would
+    // merge rows that no longer exist on the server. A resumed stream sends
+    // no snapshot, so its changes apply on the rows the Collection holds.
     let freshSnapshotPending =
       (syncMode === `eager` ||
         (requiresFreshSourceEvidence && !scopedRecovery)) &&
       !canUsePersistedResume &&
       !hasExplicitResumeOffset &&
-      hydrateBaseline !== undefined
+      (hydrateBaseline !== undefined ||
+        !collection._state.acceptedSyncedEntries().next().done)
 
     // Wrap markReady to wait for test hook in progressive mode
     let progressiveReadyGate: Promise<void> | null = null
@@ -1816,6 +1819,17 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
+    let transactionStarted = false
+    // Commit with an aborted signal: the wrapper discards the transaction and
+    // its reserved commit turn ends.
+    const abandonOpenTransaction = () => {
+      if (!transactionStarted) return
+      transactionStarted = false
+      const cancellation = new AbortController()
+      cancellation.abort()
+      const abandoned = commit(cancellation.signal)
+      if (abandoned !== true) void abandoned.catch(() => undefined)
+    }
     // A final initial failure decides its waiting loads. A cleanup that a
     // status listener runs inside that failure must not relabel it.
     let initialSyncFailedFinally = false
@@ -1830,13 +1844,13 @@ function createElectricSync<T extends Row<unknown>>(
     const failInitialSync = (cause: unknown) => {
       if (firstSnapshotCommitted) return
       initialSyncFailedFinally = true
-      markError(cause)
+      fail(cause)
     }
     const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
-      if (sessionCleanedUp || collection.status !== `loading`) return
+      if (sessionCleanedUp || ready) return
       if (failure !== undefined) {
         initialSyncFailedFinally = true
-        markError(failure)
+        fail(failure)
       } else if (isActiveLifecycle()) {
         wrappedMarkReady(isBuffering, streamErrorVersion)
       } else markReady()
@@ -1844,9 +1858,12 @@ function createElectricSync<T extends Row<unknown>>(
     // An external abort stops the source for good. Before the first ready,
     // that is the final initial failure; cleanup aborts internally instead.
     const forwardExternalAbort = () => {
-      const fails = isActiveLifecycle() && collection.status === `loading`
+      const fails = isActiveLifecycle() && !ready
       abortController.abort()
       if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      // A source that stops must end its reserved transaction. The initial
+      // failure decides first: abandoning commits.
+      abandonOpenTransaction()
     }
 
     if (shapeOptions.signal) {
@@ -1889,9 +1906,12 @@ function createElectricSync<T extends Row<unknown>>(
         // retry follows. A retry that succeeds is a success: waiting loads
         // settle on the snapshot it establishes.
         // Waiting loads and readiness waits reject with the same cause.
-        const fail = (cause: unknown) => {
+        const failWaits = (cause: unknown) => {
           rejectFullSnapshot(cause)
-          if (collection.status === `loading`) failInitialSync(cause)
+          if (!ready) failInitialSync(cause)
+          // No retry follows, so the open transaction can never commit. A
+          // source that stops must end its reserved transaction.
+          abandonOpenTransaction()
         }
 
         if (shapeOptions.onError) {
@@ -1899,14 +1919,14 @@ function createElectricSync<T extends Row<unknown>>(
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
-            fail(error)
+            failWaits(error)
             throw error
           }
-          if (!retry || typeof retry !== `object`) fail(errorParams)
+          if (!retry || typeof retry !== `object`) failWaits(errorParams)
           return retry
         } else {
-          const initialSyncFailed = collection.status === `loading`
-          fail(errorParams)
+          const initialSyncFailed = !ready
+          failWaits(errorParams)
           console.error(
             `An error occurred while syncing collection: ${collection.id}, \n` +
               (initialSyncFailed
@@ -1920,7 +1940,6 @@ function createElectricSync<T extends Row<unknown>>(
         return
       },
     })
-    let transactionStarted = false
     const newTxids = new Set<Txid>()
     const newSnapshots: Array<PostgresSnapshot> = []
     // Track if we've completed initial sync in progressive mode. A persisted
@@ -1969,8 +1988,10 @@ function createElectricSync<T extends Row<unknown>>(
       usesBaseline = false
     }
 
+    // The commit consumes the transaction even if it throws.
     const commitSourceTransaction = (): SyncAppliedReceipt => {
       const committedPresenceRevision = pendingPresenceRevision
+      transactionStarted = false
       const applied = commit()
       if (metadata?.persistence) {
         const retireAppliedPresence = () => {
@@ -1986,8 +2007,10 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     // Subset hydration must not split a stream transaction it overlaps.
+    // Every reserved transaction is marked open, so a stop can abandon it.
     const beginSourceTransaction = () => {
       begin()
+      transactionStarted = true
       metadata?.persistence?.reserveCommitTurn()
     }
 
@@ -1995,7 +2018,11 @@ function createElectricSync<T extends Row<unknown>>(
     // When multiple subset queries return the same row, the server sends `insert`
     // for each response. We convert subsequent inserts to updates to avoid
     // duplicate key errors when the row's data has changed between requests.
-    const syncedKeys = new Set<string | number>()
+    // A reload keeps the retired run's rows, and an insert of a kept key
+    // edits it the same way.
+    const syncedKeys = new Set<string | number>(
+      Array.from(collection._state.acceptedSyncedEntries(), ([key]) => key),
+    )
     let resumeInvalid = false
 
     const stageResumeMetadata = () => {
@@ -2083,6 +2110,24 @@ function createElectricSync<T extends Row<unknown>>(
           })
         : undefined
 
+    // Track synced keys and handle overlapping subset queries. When multiple
+    // subset queries return the same row, the server sends `insert` for each
+    // response, and a subset snapshot row is an `insert` too. An insert of a
+    // key already synced, such as a reload's kept row, becomes an update, to
+    // avoid duplicate key errors when the row's data has changed.
+    const writeSynced = (message: {
+      type: `insert` | `update` | `delete`
+      value: T
+      metadata: Record<string, unknown>
+    }) => {
+      const rowId = collection.getKeyFromItem(message.value)
+      const isDuplicateInsert =
+        message.type === `insert` && syncedKeys.has(rowId)
+      if (message.type === `delete`) syncedKeys.delete(rowId)
+      else syncedKeys.add(rowId)
+      write(isDuplicateInsert ? { ...message, type: `update` } : message)
+    }
+
     /**
      * Process a change message: handle tags and write the mutation
      */
@@ -2103,27 +2148,14 @@ function createElectricSync<T extends Row<unknown>>(
       const rowId = collection.getKeyFromItem(changeMessage.value)
       const operation = changeMessage.headers.operation
 
-      // Track synced keys and handle overlapping subset queries.
-      // When multiple subset queries return the same row, the server sends
-      // `insert` for each response. We convert subsequent inserts to updates
-      // to avoid duplicate key errors when the row's data has changed.
-      const isDelete = operation === `delete`
-      const isDuplicateInsert = operation === `insert` && syncedKeys.has(rowId)
-
-      if (isDelete) {
-        syncedKeys.delete(rowId)
-      } else {
-        syncedKeys.add(rowId)
-      }
-
-      if (isDelete) {
+      if (operation === `delete`) {
         clearTagsForRow(rowId)
       } else if (hasTags) {
         processTagsForChangeMessage(tags, removedTags, rowId, activeConditions)
       }
 
-      write({
-        type: isDuplicateInsert ? `update` : operation,
+      writeSynced({
+        type: operation,
         value: changeMessage.value,
         // Include the primary key and relation info in the metadata
         metadata: {
@@ -2142,7 +2174,7 @@ function createElectricSync<T extends Row<unknown>>(
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
       waitForEstablishedSnapshot: () => fullSnapshotReady,
       begin,
-      write,
+      write: writeSynced,
       commit,
       getCommitCursor: () => commitSequence,
       waitForCommitsAfter,
@@ -2193,24 +2225,18 @@ function createElectricSync<T extends Row<unknown>>(
           : undefined)
     let areResumeKeysReady = !resumeKeysPromise
     const pendingResumeBatches: Array<Array<Message<T>>> = []
-    let unsubscribeStream: () => void = () => {}
 
     const invalidateResume = () => {
       resumeInvalid = true
-      if (transactionStarted) {
-        const cancellation = new AbortController()
-        cancellation.abort()
-        commit(cancellation.signal)
-        transactionStarted = false
-      }
+      abandonOpenTransaction()
       syncedKeys.clear()
       newTxids.clear()
       newSnapshots.length = 0
       commitResetResumeMetadataImmediately()
       streamErrorVersion++
-      unsubscribeStream()
+      stream.unsubscribeAll()
       abortController.abort()
-      markError(
+      fail(
         new Error(
           `Electric resume state referenced an unseen row; a full snapshot is required`,
         ),
@@ -2225,7 +2251,6 @@ function createElectricSync<T extends Row<unknown>>(
       if (freshSnapshotPending) {
         freshSnapshotPending = false
         beginSourceTransaction()
-        transactionStarted = true
         truncate()
         recordPendingTruncate()
         syncedKeys.clear()
@@ -2330,7 +2355,6 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal processing: write changes immediately
             if (!transactionStarted) {
               beginSourceTransaction()
-              transactionStarted = true
             }
 
             processChangeMessage(message)
@@ -2389,7 +2413,6 @@ function createElectricSync<T extends Row<unknown>>(
           // Start a transaction and truncate the collection
           if (!transactionStarted) {
             beginSourceTransaction()
-            transactionStarted = true
           }
 
           truncate()
@@ -2472,8 +2495,7 @@ function createElectricSync<T extends Row<unknown>>(
                 bufferedMsg.headers.patterns,
                 begin,
                 write,
-                // The swap already opened a transaction, even though the
-                // normal-stream transactionStarted flag is still false.
+                // The swap already opened a transaction.
                 true,
                 (rowId) => {
                   recordPendingPresence(rowId, false)
@@ -2506,7 +2528,6 @@ function createElectricSync<T extends Row<unknown>>(
               stageResumeMetadata()
             }
             applied = commitSourceTransaction()
-            transactionStarted = false
           } else if (commitPoint === `up-to-date` && metadata) {
             beginSourceTransaction()
             stageResumeMetadata()
@@ -2516,8 +2537,7 @@ function createElectricSync<T extends Row<unknown>>(
         const readyErrorVersion = streamErrorVersion
         // Readiness counts accepted rows.
         const accepted = whenSyncAccepted(applied)
-        const firstSnapshot =
-          commitPoint === `up-to-date` && collection.status === `loading`
+        const firstSnapshot = commitPoint === `up-to-date` && !ready
         if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
         if (accepted === true) {
           wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
@@ -2542,9 +2562,9 @@ function createElectricSync<T extends Row<unknown>>(
                 return
               }
               streamErrorVersion++
-              unsubscribeStream()
+              stream.unsubscribeAll()
               abortController.abort()
-              if (collection.status !== `error`) markError(error)
+              fail(error)
             },
           )
         }
@@ -2589,7 +2609,7 @@ function createElectricSync<T extends Row<unknown>>(
       }
     }
 
-    unsubscribeStream = stream.subscribe(
+    stream.subscribe(
       (messages: Array<Message<T>>) => {
         if (!areResumeKeysReady) {
           pendingResumeBatches.push([...messages])
@@ -2599,15 +2619,15 @@ function createElectricSync<T extends Row<unknown>>(
       },
       (error) => {
         // The SDK gave up: it rejected the retry decision or exhausted its
-        // retry loop. No provider batch will settle the gate, and before the
-        // first ready this is the source's final initial failure.
+        // retry loop. No provider batch will settle the gate.
         rejectFullSnapshot(error)
-        if (
-          isActiveLifecycle() &&
-          !abortController.signal.aborted &&
-          collection.status === `loading`
-        )
-          failInitialSync(error)
+        if (isActiveLifecycle() && !abortController.signal.aborted) {
+          if (!ready) failInitialSync(error)
+          else fail(error)
+        }
+        // A source that stops must end its reserved transaction. The initial
+        // failure decides first: abandoning commits.
+        abandonOpenTransaction()
       },
     )
 
@@ -2629,9 +2649,9 @@ function createElectricSync<T extends Row<unknown>>(
           rejectFullSnapshot(error)
           commitResetResumeMetadataImmediately()
           streamErrorVersion++
-          unsubscribeStream()
+          stream.unsubscribeAll()
           abortController.abort()
-          markError(error)
+          fail(error)
         },
       )
     }
@@ -2645,17 +2665,9 @@ function createElectricSync<T extends Row<unknown>>(
         if (!abortController.signal.aborted && !initialSyncFailedFinally)
           cleanupAbortedStream = true
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
-        // Unsubscribe from the stream
-        unsubscribeStream()
-        // Abort the abort controller to stop the stream
+        stream.unsubscribeAll()
         abortController.abort()
-        if (transactionStarted) {
-          transactionStarted = false
-          const cancellation = new AbortController()
-          cancellation.abort()
-          const abandoned = commit(cancellation.signal)
-          if (abandoned !== true) void abandoned.catch(() => undefined)
-        }
+        abandonOpenTransaction()
         pendingResumeBatches.length = 0
         // Reset deduplication tracking so collection can load fresh data if restarted
         loadSubsetDedupe?.reset()

@@ -7,7 +7,7 @@ title: withCollectionSyncConfigCleanup
 function withCollectionSyncConfigCleanup<TSync>(sync, cleanup): TSync;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L98)
+Defined in: [packages/db/src/collection/index.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L104)
 
 **`Internal`**
 

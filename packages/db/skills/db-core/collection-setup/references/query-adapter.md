@@ -61,7 +61,7 @@ Handlers return `Promise<void>` and must explicitly refresh or write confirmed
 server data before settlement. Without that confirmation, optimistic changes
 revert to the previous synced rows. `{ refetch: false }` is no longer supported.
 
-```typescript
+```typescript nocheck
 onInsert: async ({ transaction, collection }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
   await collection.utils.refetch()
@@ -245,7 +245,7 @@ same exact key.
 Exact-key and prefix invalidation refetch active eager and on-demand queries,
 then rematerialize their results. Overlapping subsets keep rows that another
 active subset still owns. A failed refetch retains current rows and records the
-error in `collection.utils.lastError`. Cleaned-up or otherwise inactive queries
+error as the source node's `failureReason` in `collection.health`. Cleaned-up or otherwise inactive queries
 do not rematerialize.
 
 ## Predicate Push-Down (syncMode: "on-demand")
@@ -298,7 +298,7 @@ import {
 const queryClient = new QueryClient()
 
 const productsCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; name: string }>({
     id: 'products',
     queryKey: ['products'],
     queryClient,

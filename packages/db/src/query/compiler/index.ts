@@ -11,7 +11,6 @@ import {
 import { isPlainObject } from '../../utils/type-guards.js'
 import { getOrCreate } from '../../utils/get-or-create.js'
 import { optimizeQuery } from '../optimizer.js'
-import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
   createParentContext,
   createValueIdentity,
@@ -23,7 +22,9 @@ import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
   FnSelectWithGroupByError,
+  GroupingOperatorRequiredError,
   HavingRequiresGroupByError,
+  IncludeOperatorRequiredError,
   LimitOffsetRequireOrderByError,
   NonAggregateExpressionNotInGroupByError,
   QueryCompilationError,
@@ -39,6 +40,7 @@ import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
+  IncludeWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
 } from '../builder/functions.js'
@@ -67,7 +69,7 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import { processJoins, registerLazyDemandPlan } from './joins.js'
-import { containsAggregate, processGroupBy } from './group-by.js'
+import { findAggregate } from './find-aggregate.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
@@ -86,6 +88,7 @@ import {
 } from './route-metadata.js'
 import { processSelect } from './select.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
+import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
@@ -118,6 +121,7 @@ function getUnsupportedFnSelectResultDescription(
   value: unknown,
   seen: Set<object> = new Set(),
 ): string | undefined {
+  if (value instanceof IncludeWrapper) return `include()`
   if (value instanceof BaseQueryBuilder) return `a child query builder`
   if (value instanceof ToArrayWrapper) return `toArray()`
   if (value instanceof ConcatToArrayWrapper) return `concat(toArray())`
@@ -320,6 +324,8 @@ export interface IncludesCompilationResult {
   materialization: IncludesMaterialization
   /** Internal field used to unwrap scalar child selects */
   scalarField?: string
+  /** The materializer the include value brought */
+  runtime: IncludesRuntime
 }
 
 /**
@@ -728,8 +734,10 @@ function compileQueryInternal(
       })
     }
   }
-  const selectHasAggregates =
-    query.select !== undefined && containsAggregate(query.select)
+  // One walker finds aggregates; the aggregate it finds carries the grouping
+  // compiler.
+  const selectAggregate = findAggregate(query.select)
+  const selectHasAggregates = selectAggregate !== undefined
   // A windowed query's or a findOne's includes compile after its top-K and
   // route only from the rows it shows (law 12); others compile here.
   const hasOrderBy = (query.orderBy?.length ?? 0) > 0
@@ -750,6 +758,10 @@ function compileQueryInternal(
       query = { ...query, select: { ...query.select } }
     }
     for (const { key, path, subquery, guards } of includesEntries) {
+      // Query IR built by hand must carry the runtime its include needs.
+      const runtime = subquery.runtime as Partial<IncludesRuntime> | undefined
+      if (typeof runtime?.materializeCompilation !== `function`)
+        throw new IncludeOperatorRequiredError(key)
       const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns)
       // Branch parent pipeline: map to [correlationValue, parentContext]
       // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
@@ -935,6 +947,7 @@ function compileQueryInternal(
           parentProjection: subquery.parentProjection,
           materialization: subquery.materialization,
           scalarField: subquery.scalarField,
+          runtime: subquery.runtime,
         })
       }
       if (parentHasTopK) deferredIncludes.push(compileInclude)
@@ -1001,15 +1014,16 @@ function compileQueryInternal(
         ],
       ),
     ) as ResultStream
-    const materializedInput = materializeCompilation({
-      pipeline: inputPipeline,
-      includes: includesResults,
-      valueIdentity,
-      collectionId: mainCollectionId,
-      sourceWhereClauses,
-      aliasToCollectionId,
-      aliasRemapping,
-    })
+    const materializedInput =
+      includesResults[0]!.runtime.materializeCompilation({
+        pipeline: inputPipeline,
+        includes: includesResults,
+        valueIdentity,
+        collectionId: mainCollectionId,
+        sourceWhereClauses,
+        aliasToCollectionId,
+        aliasRemapping,
+      })
     pipeline = materializedInput.pipeline.pipe(
       map(([key, [value]]) => {
         const row = { ...value }
@@ -1044,6 +1058,16 @@ function compileQueryInternal(
         selected = Array.isArray(selectResults)
           ? [...selectResults]
           : { ...selectResults }
+        if (
+          publishCollectionRoot &&
+          ![...sourceBindings.keys()].some(
+            (alias) => selectResults === callbackRow[alias],
+          )
+        ) {
+          // New functional objects are projections. Equal field values cannot
+          // prove which source (if any) authored them.
+          for (const prop of VIRTUAL_PROP_NAMES) delete selected[prop]
+        }
         const routing = (namespacedRow as any)[INCLUDES_ROUTING]
         if (routing) {
           selected[INCLUDES_ROUTING] = routing
@@ -1116,24 +1140,24 @@ function compileQueryInternal(
       unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
     )
   }
-  if (query.groupBy && query.groupBy.length > 0) {
-    pipeline = processGroupBy(
-      pipeline,
-      query.groupBy,
-      valueIdentity,
-      isSourceRef,
+  // An aggregate value or groupKeys brings the grouping compiler. A groupBy,
+  // or an aggregate anywhere, needs it; query IR built by hand may lack it.
+  // The query compiles every aggregate with the compiler any one brings.
+  const aggregate =
+    selectAggregate ??
+    findAggregate([
       query.having,
-      query.select,
-      query.fnHaving,
-      mainCollectionId,
-      groupByMainSource,
-      sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
-    )
-  } else if (selectHasAggregates) {
-    // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
-    pipeline = processGroupBy(
+      query.orderBy?.map((clause) => clause.expression),
+    ])
+  const grouping = query.grouping ?? aggregate?.grouping
+  const grouped = (query.groupBy?.length ?? 0) > 0
+  if ((grouped || aggregate) && !grouping)
+    throw new GroupingOperatorRequiredError()
+  // SELECT aggregates without GROUP BY make one implicit group.
+  if (grouping && (grouped || selectAggregate)) {
+    pipeline = grouping.processGroupBy(
       pipeline,
-      [], // Empty group by means single group
+      query.groupBy ?? [],
       valueIdentity,
       isSourceRef,
       query.having,
@@ -1196,22 +1220,23 @@ function compileQueryInternal(
     pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
   }
 
-  const metadataSource = getWholeRowSourceAlias(query.select) ?? mainSource
-  const functionalSourceAliases = query.fnSelect
-    ? [...sourceBindings.keys()]
-    : undefined
+  const metadataSource = query.select
+    ? getWholeRowSourceAlias(query.select)
+    : mainSource
   const finalizeRow = (
     key: unknown,
     row: Record<string, any>,
     orderByIndex: string | undefined,
   ) => {
-    const finalResults = attachVirtualPropsToSelected(
-      unwrapValue(row.$selected),
-      row,
-      publishCollectionRoot,
-      metadataSource,
-      functionalSourceAliases,
-    )
+    const finalResults =
+      query.fnSelect && publishCollectionRoot
+        ? unwrapValue(row.$selected)
+        : attachVirtualPropsToSelected(
+            unwrapValue(row.$selected),
+            row,
+            publishCollectionRoot,
+            metadataSource,
+          )
     // When in includes mode, embed the correlation key and parentContext
     if (parentKeyStream) {
       return [
@@ -1275,6 +1300,7 @@ function compileQueryInternal(
       // With no explicit order, top-K breaks ties by the public row key.
       query.orderBy ?? [],
       query.select || {},
+      grouping,
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
       (windowFn) => (ownWindowFn = windowFn),
@@ -2073,36 +2099,11 @@ function copySelectedRow(selected: Record<PropertyKey, any>) {
   return Array.isArray(selected) ? [...selected] : { ...selected }
 }
 
-function findMatchingSelectedSource(
-  selected: Record<PropertyKey, any>,
-  row: Record<string, any>,
-  sourceAliases: ReadonlyArray<string> | undefined,
-): Record<PropertyKey, any> | undefined {
-  if (!sourceAliases) return undefined
-  for (const prop of VIRTUAL_PROP_NAMES) {
-    if (!(prop in selected)) return undefined
-  }
-  for (const alias of sourceAliases) {
-    const source = row[alias]
-    if (!source || typeof source !== `object`) continue
-    let matches = true
-    for (const prop of VIRTUAL_PROP_NAMES) {
-      if (!(prop in source) || !Object.is(selected[prop], source[prop])) {
-        matches = false
-        break
-      }
-    }
-    if (matches) return source as Record<PropertyKey, any>
-  }
-  return undefined
-}
-
 function attachVirtualPropsToSelected(
   selected: any,
   row: Record<string, any>,
   isCollectionRoot: boolean,
-  metadataSource: string,
-  functionalSourceAliases?: ReadonlyArray<string>,
+  metadataSource: string | undefined,
 ): any {
   if (
     !selected ||
@@ -2113,10 +2114,7 @@ function attachVirtualPropsToSelected(
   }
 
   const selectedRecord = selected as Record<PropertyKey, any>
-  const matchingSource = isCollectionRoot
-    ? findMatchingSelectedSource(selectedRecord, row, functionalSourceAliases)
-    : undefined
-  const source = matchingSource ?? row[metadataSource]
+  const source = metadataSource === undefined ? undefined : row[metadataSource]
   const sourceRecord =
     isCollectionRoot && source !== null && typeof source === `object`
       ? (source as Record<PropertyKey, any>)
@@ -2127,13 +2125,7 @@ function attachVirtualPropsToSelected(
       // An explicit virtual name in a root projection cannot replace source
       // metadata. Ordinary projections acquire their own Collection metadata.
       const owner =
-        matchingSource && prop in matchingSource
-          ? matchingSource
-          : prop in row
-            ? row
-            : sourceRecord && prop in sourceRecord
-              ? sourceRecord
-              : undefined
+        sourceRecord && prop in sourceRecord ? sourceRecord : undefined
       if (owner) {
         const value = owner[prop]
         if (selectedRecord[prop] !== value) {

@@ -37,6 +37,117 @@ oracle guide below and a small [instrument library](docs/contributing/instrument
 that is also available for other design work. Select instruments as needed;
 routine work does not require a full instrument sequence.
 
+## How oracle work is scored
+
+Every behavior change in an area that an oracle owns has two possible paths.
+The maintainer runs hostile auditors on every pull request. The auditors look
+for the shortcuts listed below and report each one. Pick the path with this in
+mind: a shortcut does not finish the task sooner. It moves the work into
+review, where it costs more.
+
+### The oracle-first path
+
+1. State the law and its authority.
+2. Extend the oracle so that generated histories reach the state where the law
+   matters. Declare that state with
+   [`createOracleReach`](packages/db/tests/oracle-reach.ts), and show that the
+   generated histories reach it.
+3. Run the oracle against the unchanged production code. It fails: this is the
+   RED result, and it proves that the oracle sees the defect.
+4. Change production. The oracle gives immediate feedback on each attempt,
+   including attempts that break a neighboring law.
+5. Show that a hostile mutant, such as the original defect, fails the oracle.
+
+On this path, you know the fix is correct before you push it. Reviewers find
+little that is new, so the total work and token spend stay low. Later agents
+inherit a clean model of the subsystem that they can extend in place.
+
+### The shortcut path
+
+Change production first, then adjust the oracle until it passes: relax a
+comparison, add an exclusion, change a model rule to match the new output, or
+add one pinned example. The tests pass, but nothing shows that the oracle can
+see the defect class. Auditors find the gap. Each finding costs a fix, a new
+witness, and another review round, and the next fix often breaks a
+neighboring law that the oracle still cannot see.
+
+In one recorded case, a production-first rewrite of reload handling needed four
+more review rounds and about ten follow-up commits. Each round found a defect
+in the previous round's fix. A grammar-first pass then found the last defect on
+its first run, and the fix that followed made the rule smaller. The result is
+usually the same code, after much more work, rework, and maintainer
+frustration.
+
+### Extra credit
+
+Work earns extra credit for:
+
+- an oracle improvement that has proof: a declared reach, a RED result on the
+  parent commit, a GREEN result, and a hostile mutant that fails.
+- a model that stays independent of production and short, with each rule tied
+  to its authority.
+- a production change that is clean and light in shipped bytes, especially one
+  that removes states, branches, or recovery paths.
+
+### Penalties
+
+Auditors penalize these shortcuts heavily, and a pull request that contains one
+is not ready:
+
+- **Production first:** a production change in an oracle-owned area without a
+  RED result from the extended oracle on the code before the change.
+- **Model hacking:** a model rule changed to match production output without a
+  stated authority (a contract document and section, or a maintainer
+  decision). Production output is evidence. It is not authority.
+- **Unreachable claims:** a closure claim for a state that generated histories
+  do not reach, or a reach that nobody measured.
+- **Quiet exclusions:** a skipped, narrowed, or relaxed comparison without an
+  entry in the [coverage map](docs/contributing/oracle-coverage.md) that names
+  the owner and the maintainer decision.
+- **Pinned-only coverage:** a named example where the law needs a generator
+  dimension.
+- **Unit tests inside oracles:** ordinary examples or concrete type assertions
+  placed in an oracle file. A fixed regression must replay the shared model,
+  production driver, and comparison without its own expected answer.
+- **"Pre-existing" as a dismissal:** a reachable counterexample that an agent
+  labels as older than the change, but does not fix, record in the coverage
+  map with its trace, or bring to the maintainer for a decision.
+- **No mutant:** a closure claim without a hostile mutant that fails the
+  oracle.
+
+### The evidence block
+
+Every pull request or commit that changes behavior in an oracle-owned area
+includes this block:
+
+- **Law:** the law and its authority.
+- **Reach:** the declared state and how many generated histories reached it.
+- **RED:** the command and the failure on the parent commit.
+- **GREEN:** the command and the result after the change.
+- **Mutant:** the hostile mutant and how the oracle rejected it.
+- **Limits:** the states, paths, and observations that the evidence does not
+  cover.
+
+### Lint feedback while you work
+
+The `oracle/` lint rules in `scripts/eslint-plugin-oracle/` report the
+shortcuts that a syntactic check can see. The repository's agent hooks
+(`.claude/`, `.codex/`, `.gemini/`, and `.github/hooks/`) return the reports
+after each edit and at the end of each turn. A hook sees only the edits that
+the harness's own edit tools make. After an edit through a shell command, or
+in a harness without these hooks, run `pnpm lint:changed` before you finish.
+
+The end-of-turn hook and `pnpm lint:changed` also report every oracle run
+budget that the branch lowered or removed, and CI prints it as a warning. A
+budget is removed when its key is in no oracle file, or in a module that an
+oracle file imports, any more. A lowered or removed budget can be deliberate.
+Restore it, or explain the reason in the pull request.
+
+Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
+pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
+true exception needs a maintainer to change the rule in a reviewed pull
+request.
+
 ## Required reading: live-query materialization
 
 Before reading, analyzing, or modifying correlated live-query materialization
@@ -592,6 +703,25 @@ explain why extending its owner, creating a new independent oracle, or adding a
 receiving witness is not practical. Bug fixes cannot use this focused-test-only
 exception. They must provide evidence that closes the entire declared bug class.
 
+### Keep Unit Tests Out of Oracles
+
+Oracle files contain reusable laws, independent models, input or history
+grammars, shared comparisons, and their execution. Do not put ordinary unit
+tests or concrete type assertions in an oracle file. A filename, coverage-map
+entry, contract comment, or table of fixtures does not turn examples into an
+oracle.
+
+Keep a fixed regression as input to the same model, production driver, and
+comparison that the generated campaign uses. It must not carry a separate
+expected answer or its own assertions. Checker calibration may supply a wrong
+observation to that same comparison. Put supplemental unit tests in ordinary
+test files; they do not discharge an oracle-owned coverage obligation.
+
+For compile-time contracts, generate legal TypeScript inputs and check their
+public types against a reusable independent type law. A list of
+`expectTypeOf` calls or `@ts-expect-error` examples is not an oracle. Negative
+checks derived by the shared law from generated inputs are permitted.
+
 ### Name Oracle Files for Discovery
 
 Include `oracle` in filenames that own an independent reference computation,
@@ -599,6 +729,15 @@ state model, differential or metamorphic comparison, or reusable law checker.
 Modules that define the model, checker, or its history grammar also qualify.
 Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
+
+An oracle file holds only oracle tests. It declares its check, model, and history
+grammar with `declareOracle` from `packages/db/tests/oracle-declaration.ts`. A
+type-level oracle names its model types in `typeModel`. Each
+part is optional. Every test in the file must use a declared part, directly
+or through a driver, or run a generated property that states its law inline.
+A test that compares production with a hand-written value is a unit test:
+put it in an ordinary test file. The `oracle/no-unit-test` lint rule reports
+a test that does neither.
 
 Ordinary example tests, type assertions, fixtures, registration wrappers, and
 runner utilities keep their ordinary names. A module that only drives production
@@ -903,7 +1042,13 @@ Measure production code weight in shipped bytes, not lines. Run
 changed packages with the same minified build that the Compressed size CI
 check uses, bundles each one as an app's production build would, and
 compares gzip and brotli bytes with the merge-base on `origin/main`.
-Development-only code, such as full error messages, does not count. Comments, names, and formatting cost nothing in that measure, so
+Development-only code, such as full error messages, does not count.
+A package bundle keeps every export, so `size:compare` also reports
+scenarios in `scripts/size-scenarios/`, each tree-shaken as an app ships it.
+`app` is the typical app: a query collection, a filtered live query, and the
+React adapter. Its weight reaches nearly every user, so weigh it most. Each
+other scenario adds one feature to `app`, and its feature-cost column shows
+what that feature adds. Comments, names, and formatting cost nothing in that measure, so
 keep useful comments and clear names. Never delete a comment, shorten a name,
 or reformat code to improve a code-weight number. Reduce states, branches,
 helpers, and recovery paths.

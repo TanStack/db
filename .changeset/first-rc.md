@@ -11,7 +11,7 @@
 '@tanstack/electron-db-sqlite-persistence': major
 '@tanstack/expo-db-sqlite-persistence': major
 '@tanstack/node-db-sqlite-persistence': major
-'@tanstack/offline-transactions': patch
+'@tanstack/offline-transactions': minor
 '@tanstack/powersync-db-collection': major
 '@tanstack/preact-db': major
 '@tanstack/query-db-collection': minor
@@ -27,9 +27,12 @@
 ---
 
 Release the first 1.0 candidate. Remove deprecated pre-1.0 APIs and give
-source metadata precedence over colliding selected fields in live queries.
-Move the two packages already on stable 1.x to a compatible peer dependency on
-`@tanstack/db`, so they can share the app's DB instance during the RC.
+published row metadata precedence over colliding selected fields. Structured
+source spreads and direct source-row returns keep source attribution; new
+functional objects and other projections receive output Collection metadata.
+Keep the two packages accidentally released as stable 1.x on their stable
+release lines. Query Collection supports DB 0.15 and the RC. Offline Transactions
+requires `@tanstack/db@^1.0.0-rc.0` for restoration settlement; upgrade DB with it.
 
 Remove Query Collection’s automatic refetch after mutation handlers. Handlers
 return `Promise<void>` and must await `collection.utils.refetch()` or write

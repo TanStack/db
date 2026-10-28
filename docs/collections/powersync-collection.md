@@ -456,7 +456,7 @@ await documents.insert(
 
 // Update with metadata
 await documents.update(
-  docId,
+  String(docId),
   { metadata: { reason: "typo-fix", editor: "user-456" } },
   (doc) => {
     doc.name = "Report Q4 (Updated)"

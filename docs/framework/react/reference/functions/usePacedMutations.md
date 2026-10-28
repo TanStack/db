@@ -76,7 +76,7 @@ function AutoSaveForm({ formId }: { formId: string }) {
 
     // Optional: await persistence or handle errors
     try {
-      await tx.when('settled')
+      await tx.isPersisted.promise
       console.log('Saved!')
     } catch (error) {
       console.error('Save failed:', error)

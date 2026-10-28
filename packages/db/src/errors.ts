@@ -149,6 +149,36 @@ export class CollectionInErrorStateError extends CollectionStateError {
   }
 }
 
+export class CollectionHasSubscribersError extends CollectionStateError {
+  constructor(collectionId: string, dependents: number) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot clean up collection "${collectionId}" while ${dependents} live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them.`
+        : codedMessage(254, { collectionId, dependents }),
+    )
+  }
+}
+
+export class CollectionReloadCrashedError extends CollectionStateError {
+  constructor(collectionId: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot reload collection "${collectionId}" because it crashed. A crash is not recovered in place; clean it up with { dependents: true } and start it again.`
+        : codedMessage(255, { collectionId }),
+    )
+  }
+}
+
+export class CollectionReloadDuringSyncEntryError extends CollectionStateError {
+  constructor(collectionId: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot reload collection "${collectionId}" from inside its sync function or a loadSubset call. Reload after it returns.`
+        : codedMessage(256, { collectionId }),
+    )
+  }
+}
+
 export class InvalidCollectionStatusTransitionError extends CollectionStateError {
   constructor(from: string, to: string, collectionId: string) {
     super(
@@ -207,11 +237,16 @@ export class CollectionOperationError extends TanStackDBError {
   }
 }
 
+// Development messages show a bigint key or field instead of failing to
+// serialize it.
+const showBigint = (_key: string, value: unknown) =>
+  typeof value === `bigint` ? `${value}n` : value
+
 export class UndefinedKeyError extends CollectionOperationError {
   constructor(item: any) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `An object was created without a defined key: ${JSON.stringify(item)}`
+        ? `An object was created without a defined key: ${JSON.stringify(item, showBigint)}`
         : codedMessage(14, { item }),
     )
   }
@@ -221,7 +256,7 @@ export class InvalidKeyError extends CollectionOperationError {
   constructor(key: unknown, item: unknown) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key)}. Item: ${JSON.stringify(item)}`
+        ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key, showBigint)}. Item: ${JSON.stringify(item, showBigint)}`
         : codedMessage(15, { key, type: key === null ? `null` : typeof key }),
     )
   }
@@ -610,6 +645,16 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export class IncludeOperatorRequiredError extends QueryBuilderError {
+  constructor(field: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A subquery in select() needs include(), toArray(), or materialize(). Wrap the ${field} field: ${field}: include(q.from({ i: issues }).where(...)). Import include from @tanstack/db. Query IR built by hand passes includesRuntime to each IR.IncludesSubquery.`
+        : codedMessage(248, { field }),
+    )
+  }
+}
+
 export type SourceClauseContext =
   `from clause` | `unionAll clause` | `join clause`
 
@@ -712,6 +757,16 @@ export class FnSelectWithGroupByError extends QueryCompilationError {
             `which is not possible with fn.select() since it is an opaque function. ` +
             `Use .select() instead of .fn.select() when combining with groupBy().`
         : codedMessage(51),
+    )
+  }
+}
+
+export class GroupingOperatorRequiredError extends QueryCompilationError {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `groupBy() without an aggregate needs groupKeys(), such as .groupBy(groupKeys(({ todo }) => todo.status)). Import groupKeys from @tanstack/db. A query with an aggregate such as count() needs nothing extra. Query IR built by hand passes groupingCompiler to each IR.Aggregate.`
+        : codedMessage(247),
     )
   }
 }
@@ -1152,5 +1207,37 @@ export class UnhashableQueryIRError extends Error {
         : codedMessage(87, { path, reason }),
     )
     this.name = `UnhashableQueryIRError`
+  }
+}
+
+/**
+ * Error thrown when a mounted framework binding that compares query identity
+ * reads a different source Collection under a Collection ID it has already
+ * read, in an earlier query or the same one. The identity names each source by
+ * its ID, so the binding could otherwise keep a live query that reads the old
+ * source.
+ */
+export class SourceCollectionIdReuseError extends TanStackDBError {
+  constructor(
+    public readonly bindingName: string,
+    public readonly collectionId: string,
+  ) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[${bindingName}] Collection ID "${collectionId}" named a different source Collection than one this live query already read. While the hook is mounted, each Collection ID must keep naming one source Collection. Unmount the hook and clean up its previous source and client scope before reusing the ID.`
+        : codedMessage(245, { bindingName, collectionId }),
+    )
+    this.name = `SourceCollectionIdReuseError`
+  }
+}
+
+export class InvalidPoolOptionError extends TanStackDBError {
+  constructor() {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A live query's pool option takes pooledLiveQueries from @tanstack/db, or nothing. Pooling is opt-in: pass pool: pooledLiveQueries to share one partition among equality-filtered queries.`
+        : codedMessage(251),
+    )
+    this.name = `InvalidPoolOptionError`
   }
 }

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -18,14 +19,14 @@ import {
   versionOnRcExit,
 } from './version-packages.mjs'
 
-test('the two existing 1.x packages publish compatible DB peers and stable releases', () => {
+test('stable packages keep their release line and require a compatible DB API', () => {
   const firstRc = readFileSync(
     new URL('../.changeset/first-rc.md', import.meta.url),
     'utf8',
   )
-  for (const [directory, bump] of [
-    ['query-db-collection', 'minor'],
-    ['offline-transactions', 'patch'],
+  for (const [directory, bump, peer] of [
+    ['query-db-collection', 'minor', '^0.15.0 || ^1.0.0-rc.0'],
+    ['offline-transactions', 'minor', '^1.0.0-rc.0'],
   ]) {
     const manifest = JSON.parse(
       readFileSync(
@@ -34,11 +35,32 @@ test('the two existing 1.x packages publish compatible DB peers and stable relea
       ),
     )
     assert.equal(manifest.dependencies?.['@tanstack/db'], undefined)
-    assert.equal(
-      manifest.peerDependencies['@tanstack/db'],
-      '^0.15.0 || ^1.0.0-rc.0',
-    )
+    assert.equal(manifest.peerDependencies['@tanstack/db'], peer)
     assert.match(firstRc, new RegExp(`'${manifest.name}': ${bump}`))
+  }
+})
+
+test('the first RC changeset covers the current public package inventory', () => {
+  const packages = new URL('../packages/', import.meta.url)
+  const entries = [
+    ...readFileSync(
+      new URL('../.changeset/first-rc.md', import.meta.url),
+      'utf8',
+    ).matchAll(/^'([^']+)': (major|minor|patch)$/gm),
+  ]
+  const publicPackages = readdirSync(packages).flatMap((directory) => {
+    const path = new URL(`${directory}/package.json`, packages)
+    if (!existsSync(path)) return []
+    const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    return manifest.private ? [] : [manifest]
+  })
+  assert.deepEqual(
+    entries.map((entry) => entry[1]).sort(),
+    publicPackages.map((manifest) => manifest.name).sort(),
+  )
+  for (const manifest of publicPackages) {
+    const bump = entries.find((entry) => entry[1] === manifest.name)[2]
+    assert.equal(bump, manifest.version.startsWith('0.') ? 'major' : 'minor')
   }
 })
 

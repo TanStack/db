@@ -73,10 +73,11 @@ function FilteredTodos({ minPriority }: { minPriority: number }) {
 }
 ```
 
-For derived-identity queries in one mounted hook and `DbClient` scope, a source
-Collection ID must keep referring to the same Collection object. If a render
-supplies a different source object with a previously used ID, the hook throws
-instead of returning rows from the old source. To reuse an ID within that hook,
+For queries without `queryKey` in one mounted hook and `DbClient` scope, a
+source Collection ID must keep referring to the same Collection object. If a
+render supplies a different source object with a previously used ID, the hook
+throws `SourceCollectionIdReuseError` instead of returning rows from the old
+source. To reuse an ID within that hook,
 unmount it, clean up its source and client scope, then mount the replacement.
 Separate hooks and independent client scopes can use the same ID.
 
@@ -112,16 +113,12 @@ An explicit `queryKey` is the caller's identity contract. If its source object
 changes, change the key too, even when the source ID stays the same. Use a
 primitive scope token in the key; Collection objects cannot be hashed there.
 
-Configs with `getKey` or `schema` work without a `queryKey` in client renders.
-The hook identifies those opaque options by object reference, so keep a stable
-function or schema reference across renders to avoid rebuilding the query. For
-SSR streaming, provide a serializable `queryKey` that is the same on the server
-and client; object references cannot have a shared identity across runtimes.
-
-An unhashable query without `queryKey` throws. Include captured values from
-opaque logic in the key so changes to those values recreate the query. If
-deriving identity becomes expensive across renders, the hook warns once and
-suggests adding a `queryKey` as a performance escape hatch.
+An unhashable query without `queryKey` throws `UnhashableQueryIRError`, so
+represent the values that opaque logic captures in the key. An empty
+`queryKey` counts as none, as it does for a `DbClient` preload. A dependency
+array does not replace `queryKey` for such a query. If deriving identity becomes
+expensive across renders, the hook warns once and suggests adding a `queryKey`
+as a performance escape hatch.
 
 #### What Happens When Identity Changes
 
@@ -182,7 +179,7 @@ const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
 )
 ```
 
-`fetchNextPage()` returns a promise that resolves after the page request settles. Failures are exposed through the returned `error` value and do not reject the promise.
+`fetchNextPage()` returns a promise that resolves after the page request settles. A failed page load does not reject the promise or change `status`; it appears as a request error in the returned `health` tree.
 
 This hook widens an ordered live query; it is not TanStack Query's
 `useInfiniteQuery`. `getNextPageParam` was previously ignored and is now rejected.

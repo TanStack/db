@@ -7,7 +7,7 @@ title: MergeContextWithJoinType
 type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = Omit<TContext, "schema" | "refsSchema" | "hasJoins" | "joinTypes"> & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:978](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L978)
+Defined in: [packages/db/src/query/builder/types.ts:1021](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1021)
 
 MergeContextWithJoinType - Creates a new context after a join operation
 

@@ -21,6 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # The run-budget report compares changed files with the merge-base.
+          fetch-depth: 0
           persist-credentials: false
       - name: Setup Tools
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
@@ -28,6 +30,14 @@ jobs:
         run: pnpm run lint:check
       - name: Check release versioning
         run: pnpm run test:release
+      - name: Typecheck doc and skill examples
+        run: pnpm run test:doc-snippets
+      - name: Check oracle lint without inline directives
+        run: pnpm run lint:oracles
+      - name: Report lowered oracle run budgets
+        run: node scripts/check-oracle-run-counts.mjs --format=github
+      - name: Test oracle lint rules
+        run: pnpm run test:lint-rules
   minified-db:
     name: Minified DB public API
     runs-on: ubuntu-latest
@@ -41,9 +51,11 @@ jobs:
       - name: Check private-member mangle cache
         run: pnpm run check:mangle
       - name: Build DB packages
-        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db --filter @tanstack/react-db build
       - name: Check minified public API
         run: pnpm run test:minified-db
+      - name: Check client-only query bundles
+        run: pnpm run test:ssr-bundle
       - name: Check production error text
         run: pnpm run test:production-errors
       - name: Check DB tests against built dist

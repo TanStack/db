@@ -7,7 +7,7 @@ title: MergeContextForJoinCallback
 type MergeContextForJoinCallback<TContext, TNewSchema> = Omit<TContext, "schema" | "refsSchema" | "hasJoins" | "joinTypes"> & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1323](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1323)
+Defined in: [packages/db/src/query/builder/types.ts:1366](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1366)
 
 MergeContextForJoinCallback - Special context for join condition callbacks
 

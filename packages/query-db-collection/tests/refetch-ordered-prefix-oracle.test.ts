@@ -1,7 +1,5 @@
-import { QueryClient } from '@tanstack/query-core'
 import {
   BTreeIndex,
-  IR,
   createCollection,
   createLiveQueryCollection,
   eq,
@@ -9,15 +7,19 @@ import {
   isUndefined,
   not,
 } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import {
   oraclePropertyOptions,
+  oracleReplayRequested,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
 import { queryCollectionOptions } from '../src/query'
+import { sameOrderedIds, settle } from './refetch-ordered-prefix-support'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 
 /**
@@ -474,12 +476,6 @@ type Run = {
 }
 
 let collectionSequence = 0
-
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 20; turn++) {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  }
-}
 
 async function startRun(testCase: Case): Promise<Run> {
   const { scenario } = testCase
@@ -1010,16 +1006,6 @@ async function withDeadline<T>(work: Promise<T>): Promise<T> {
   }
 }
 
-function sameOrderedIds(
-  actual: ReadonlyArray<number>,
-  expected: ReadonlyArray<number>,
-): boolean {
-  return (
-    actual.length === expected.length &&
-    expected.every((id, index) => actual[index] === id)
-  )
-}
-
 const property = `query-db.refetch-ordered-prefix`
 const replay = readOracleRunConfig()
 const campaigns =
@@ -1029,14 +1015,13 @@ const campaigns =
       ? ([`replay`] as const)
       : ([] as const)
 
-describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () => {
-  it(`the comparison rejects a window with the right size but a stale row`, () => {
-    expect(sameOrderedIds([5, 4], [5, 4])).toBe(true)
-    expect(sameOrderedIds([4, 1], [5, 4])).toBe(false)
-    expect(sameOrderedIds([4, 5], [5, 4])).toBe(false)
-    expect(sameOrderedIds([5], [5, 4])).toBe(false)
-  })
+declareOracle({
+  check: [checkCase],
+  model: [expectedWindow, expectedCoverage],
+  grammar: [caseArbitrary, heldCaseArbitrary],
+})
 
+describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () => {
   // The issue's trace (rank desc, limit 2). Removing rank 10's marker makes
   // the loader serve a continuation after rank 4. The backend then gains
   // rank 5 (marked) and rank 6 (unmarked). The refetched first page ends at
@@ -1515,89 +1500,6 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     expect(failures).toEqual([])
   })
 
-  // A row that arrives ahead moves a one-page window's end earlier, so the
-  // refetch must report. The report gate judges a page's end by order, not
-  // by how the provider returned it:
-  // - Rows without `rank` sort last, so the first page ends on one. An empty
-  //   page and a page whose last row has no order value stay distinct.
-  // - A provider may return a page's rows in any order. Its last array row
-  //   is then not the page's end.
-  // These drive the sync boundary directly: the generated campaigns give
-  // every row a rank, and their provider returns rows in order.
-  it.each([
-    {
-      name: `from a row without an order value`,
-      initial: [{ id: 0, rank: 3 }, { id: 1 }, { id: 2 }],
-      arrival: { id: 3, rank: 2 },
-      reversed: false,
-    },
-    {
-      name: `when the provider returns the page in reverse order`,
-      initial: [
-        { id: 0, rank: 10 },
-        { id: 1, rank: 4 },
-        { id: 2, rank: 1 },
-      ],
-      arrival: { id: 3, rank: 6 },
-      reversed: true,
-    },
-  ])(
-    `a refetch reports a page whose end moves earlier $name`,
-    async ({ initial, arrival, reversed }) => {
-      type Row = { id: number; rank?: number }
-      const backend: Array<Row> = [...initial]
-      const queryClient = new QueryClient({
-        defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-      })
-      const items = createCollection(
-        queryCollectionOptions<Row>({
-          id: `refetch-ordered-prefix-unranked-${collectionSequence++}`,
-          queryClient,
-          queryKey: [`unranked`],
-          syncMode: `on-demand`,
-          getKey: (row) => row.id,
-          queryFn: (ctx) => {
-            const options = ctx.meta?.loadSubsetOptions as LoadSubsetOptions
-            const offset = options.offset ?? 0
-            const page = [...backend]
-              .sort(
-                (a, b) =>
-                  (b.rank ?? -Infinity) - (a.rank ?? -Infinity) || a.id - b.id,
-              )
-              .slice(offset, offset + options.limit!)
-            return reversed ? page.reverse() : page
-          },
-        }),
-      )
-      let reports = 0
-      items.on(`loadedSubsets:invalidated`, () => {
-        reports++
-      })
-      const orderBy: Array<IR.OrderByClause> = [
-        {
-          expression: new IR.PropRef([`rank`]),
-          compareOptions: {
-            direction: `desc`,
-            nulls: `last`,
-            stringSort: `lexical`,
-          },
-        },
-      ]
-      try {
-        items.startSyncImmediate()
-        await items._sync.loadSubset({ orderBy, limit: 2 })
-        expect(items.toArray.map((row) => row.id).sort()).toEqual([0, 1])
-        backend.push(arrival)
-        await items.utils.refetch()
-        await settle()
-        expect(reports).toBe(1)
-      } finally {
-        await items.cleanup()
-        queryClient.clear()
-      }
-    },
-  )
-
   it(`a refetch settles when the provider honors neither cursor nor offset`, async () => {
     const run = await startRun({
       scenario: {
@@ -1965,7 +1867,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
 
   // The premise-directed campaign for the skip under a hold. Its reach
   // witness requires refetches that report while a hold is running.
-  it.runIf(replay.replayPath === undefined)(
+  it.skipIf(oracleReplayRequested())(
     `generated refetch histories under a hold (fixed campaign)`,
     async () => {
       let reachedReport = 0
@@ -1986,18 +1888,25 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     async (campaign) => {
       let reached = 0
       let reachedDuringHold = 0
+      const options =
+        campaign === `fixed`
+          ? { seed: 20261013, numRuns: oracleRuns(80) }
+          : oraclePropertyOptions(80, property)
+      // fast-check reports its seed only when the property fails. Choose the
+      // random campaign's seed here, so a test timeout can report it too.
+      const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)
+      onTestFailed(() => {
+        console.error(
+          `${property} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
+        )
+      })
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
           const observation = await withDeadline(checkCase(testCase))
           if (observation.reachedLaggingRefetchAfterContinuation) reached++
           if (observation.reachedLaggingRefetchDuringHold) reachedDuringHold++
         }),
-        campaign === `fixed`
-          ? { seed: 20261013, numRuns: oracleRuns(80) }
-          : {
-              ...oraclePropertyOptions(80, property),
-              ...(campaign === `replay` ? { numRuns: 1 } : {}),
-            },
+        { ...options, seed },
       )
       // Positive reach witness: generated histories serve continuation pages
       // before a refetch, which is the premise of the gap.

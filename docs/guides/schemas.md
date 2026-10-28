@@ -895,8 +895,8 @@ A complete todo application demonstrating validation, transformations, and defau
 
 ```typescript
 import { z } from 'zod'
-import { createCollection } from '@tanstack/react-db'
-import { not } from '@tanstack/db'
+import { createCollection, useLiveQuery } from '@tanstack/react-db'
+import { not, SchemaValidationError } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 // Schema with validation, transformations, and defaults
@@ -993,7 +993,7 @@ function TodoApp() {
       .orderBy(({ todo }) => todo.created_at, 'desc')
   )
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [errors, setErrors] = useState({} as Record<string, string>)
 
   const addTodo = (text: string, priority: 'low' | 'medium' | 'high') => {
     try {
@@ -1009,7 +1009,7 @@ function TodoApp() {
       if (error instanceof SchemaValidationError) {
         const newErrors: Record<string, string> = {}
         error.issues.forEach(issue => {
-          const field = issue.path?.[0] || 'form'
+          const field = String(issue.path?.[0] ?? 'form')
           newErrors[field] = issue.message
         })
         setErrors(newErrors)

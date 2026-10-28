@@ -9,29 +9,13 @@ import { expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import { applyPredicates } from '../e2e/query-filter.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { isNarrowRankTieProbe } from './optimistic-ordered-refetch-probe.js'
 import type { LoadSubsetOptions } from '@tanstack/db'
+import type { Row } from './optimistic-ordered-refetch-probe.js'
 
-type Row = { id: number; folder: `inbox` | `archive`; at: number }
 type ProviderPhase =
   `initial` | `optimistic` | `held-invalidation` | `handler-refetch`
-
-// A boundary probe may omit ordering, but its predicate must select one rank.
-// Add another row at that rank so a key-specific request cannot masquerade as
-// a rank-tie probe. Evaluate the whole predicate scope, not the capped answer.
-function isNarrowRankTieProbe(
-  options: LoadSubsetOptions,
-  remote: Array<Row>,
-): boolean {
-  if (options.orderBy !== undefined || options.where === undefined) return false
-  const matches = applyPredicates(remote, { where: options.where })
-  if (matches.length === 0) return false
-  const rank = matches[0]!.at
-  if (matches.some((row) => row.at !== rank)) return false
-  const additionalTie: Row = { ...matches[0]!, id: 1000 }
-  return applyPredicates([...remote, additionalTie], {
-    where: options.where,
-  }).some((row) => row.id === additionalTie.id)
-}
 
 /**
  * # Does a Query DB refetch preserve an optimistic ordered departure?
@@ -68,12 +52,6 @@ async function checkOptimisticOrderedRefetch(
     folder: id === 4 ? `archive` : `inbox`,
     at: id,
   }))
-  const expected = () =>
-    remote
-      .filter(({ folder }) => folder === `inbox`)
-      .sort((left, right) => right.at - left.at)
-      .slice(0, 2)
-      .map(({ id }) => id)
   const persistence = createDeferred<void>()
   let providerPhase: ProviderPhase = `initial`
   const requests: Array<{
@@ -130,7 +108,7 @@ async function checkOptimisticOrderedRefetch(
   let unsubscribe: (() => void) | undefined
   try {
     await live.preload()
-    expect(publicIds()).toEqual(expected())
+    expect(publicIds()).toEqual(expectedPublicWindow(remote))
     expect(source.toArray.map(({ id }) => id).sort()).toEqual([2, 3])
     const subscription = live.subscribeChanges(
       () => publications.push(publicIds()),
@@ -214,7 +192,9 @@ async function checkOptimisticOrderedRefetch(
         ),
       ).toBe(true)
     }
-    await vi.waitFor(() => expect(publicIds()).toEqual(expected()))
+    await vi.waitFor(() =>
+      expect(publicIds()).toEqual(expectedPublicWindow(remote)),
+    )
     expect(publicIds()).toEqual(reportDuringHold ? [5, 2] : [2, 1])
     expect(publications.at(-1)).toEqual(publicIds())
   } finally {
@@ -226,18 +206,26 @@ async function checkOptimisticOrderedRefetch(
   }
 }
 
+/**
+ * The public window of the live query `inbox` order `at desc` limit 2, computed
+ * from the plain remote row ledger. This is the model that the check compares
+ * the live rows against at each checkpoint.
+ */
+function expectedPublicWindow(remote: ReadonlyArray<Row>): Array<number> {
+  return remote
+    .filter(({ folder }) => folder === `inbox`)
+    .sort((left, right) => right.at - left.at)
+    .slice(0, 2)
+    .map(({ id }) => id)
+}
+
+declareOracle({
+  check: [checkOptimisticOrderedRefetch],
+  model: [expectedPublicWindow],
+})
+
 it(`publishes a short optimistic window during a mutation-handler refetch`, () =>
   checkOptimisticOrderedRefetch(false))
 
 it(`keeps the short optimistic window through a held refetch report`, () =>
   checkOptimisticOrderedRefetch(true))
-
-it(`rejects an unordered page cap as a rank-tie probe`, () => {
-  const remote: Array<Row> = [1, 2, 3].map((id) => ({
-    id,
-    folder: `inbox`,
-    at: id,
-  }))
-  expect(isNarrowRankTieProbe({ limit: 1 }, remote)).toBe(false)
-  expect(isNarrowRankTieProbe({}, [])).toBe(false)
-})

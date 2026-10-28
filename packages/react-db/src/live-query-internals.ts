@@ -1,11 +1,19 @@
-import type { DbClient, LiveQueryObserver } from '@tanstack/db'
+import type {
+  DbClient,
+  DeferredLiveQueryCollections,
+  LiveQueryObserver,
+  UnhashableQueryIRError,
+} from '@tanstack/db'
 
 const liveQueryResultInfo = Symbol(`liveQueryResultInfo`)
 
 export type LiveQueryResultInfo = {
   client: DbClient | undefined
-  queryHash: string
+  queryHash: string | undefined
+  identityError: UnhashableQueryIRError | undefined
   observer: LiveQueryObserver<object, string | number>
+  /** Sync starts this render deferred, released if the render throws. */
+  deferredCollections: DeferredLiveQueryCollections
 }
 
 type ResultWithInfo = {

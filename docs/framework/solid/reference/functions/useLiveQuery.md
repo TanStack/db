@@ -6,10 +6,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:113](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L113)
+Defined in: [useLiveQuery.ts:123](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L123)
 
 Create a live query using a query function
 
@@ -29,8 +29,6 @@ Query function that defines what data to fetch
 
 ### Returns
 
-`Accessor`\<`InferResultType`\<`TContext`\>\> & `object`
-
 Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
@@ -78,7 +76,7 @@ return (
     <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError}>
+    <Match when={todosQuery.isLoadingError}>
       <div>Error: {todosQuery.status}</div>
     </Match>
     <Match when={todosQuery.isReady}>
@@ -108,10 +106,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:130](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L130)
+Defined in: [useLiveQuery.ts:137](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L137)
 
 Create a live query using a query function
 
@@ -131,8 +129,6 @@ Query function that defines what data to fetch
 
 ### Returns
 
-`Accessor`\<`InferConditionalResultType`\<`TContext`\>\> & `object`
-
 Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
@@ -180,7 +176,7 @@ return (
     <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError}>
+    <Match when={todosQuery.isLoadingError}>
       <div>Error: {todosQuery.status}</div>
     </Match>
     <Match when={todosQuery.isReady}>
@@ -210,10 +206,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
+function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:189](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L189)
+Defined in: [useLiveQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L193)
 
 Create a live query using configuration object
 
@@ -227,13 +223,11 @@ Create a live query using configuration object
 
 #### config
 
-`Accessor`\<`LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>\>
+`Accessor`\<`LiveQueryHookConfig`\<`TContext`\>\>
 
 Configuration object with query and options
 
 ### Returns
-
-`Accessor`\<`InferResultType`\<`TContext`\>\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -268,7 +262,7 @@ return (
     <Match when={itemsQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={itemsQuery.isError}>
+    <Match when={itemsQuery.isLoadingError}>
       <div>Something went wrong</div>
     </Match>
     <Match when={!itemsQuery.isReady}>
@@ -281,10 +275,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:241](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L241)
+Defined in: [useLiveQuery.ts:242](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L242)
 
 Subscribe to an existing live query collection
 
@@ -311,8 +305,6 @@ Subscribe to an existing live query collection
 Pre-created live query collection to subscribe to
 
 ### Returns
-
-`Accessor`\<`TResult`[]\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -345,7 +337,7 @@ return (
    <Match when={sharedQuery.isLoading}>
      <div>Loading...</div>
    </Match>
-   <Match when={sharedQuery.isError}>
+   <Match when={sharedQuery.isLoadingError}>
      <div>Error loading data</div>
    </Match>
  </Switch>
@@ -355,10 +347,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object & LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveQuery.ts:264](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L264)
+Defined in: [useLiveQuery.ts:262](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L262)
 
 Create a live query using a query function
 
@@ -383,8 +375,6 @@ Create a live query using a query function
 `Accessor`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`\>
 
 ### Returns
-
-`Accessor`\<`TResult` \| `undefined`\> & `object`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -433,7 +423,7 @@ return (
     <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError}>
+    <Match when={todosQuery.isLoadingError}>
       <div>Error: {todosQuery.status}</div>
     </Match>
     <Match when={todosQuery.isReady}>

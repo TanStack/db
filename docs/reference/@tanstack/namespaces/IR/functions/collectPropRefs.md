@@ -7,7 +7,7 @@ title: collectPropRefs
 function collectPropRefs(expression): PropRef<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:271](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L271)
+Defined in: [packages/db/src/query/ir.ts:278](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L278)
 
 Collect refs from an IR expression, including aggregate arguments.
 

@@ -441,6 +441,7 @@ import {
   collectionOptions,
   useLiveQuery,
 } from "@tanstack/react-db"
+import { eq } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { QueryClient } from "@tanstack/query-core"
 
@@ -450,7 +451,7 @@ const dbClient = new DbClient({ queryClient })
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
 const todoCollection = collectionOptions("todos", (client) =>
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; list_id: string; text: string; status: string }>({
     id: "todos",
     queryKey: ["todos"],
     queryClient: client.requireDependency<QueryClient>("queryClient"),
@@ -468,7 +469,7 @@ const todoCollection = collectionOptions("todos", (client) =>
   })
 )
 const listCollection = collectionOptions("todo-lists", (client) =>
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; name: string; active: boolean }>({
     id: "todo-lists",
     queryKey: ["todo-lists"],
     queryClient: client.requireDependency<QueryClient>("queryClient"),
@@ -508,7 +509,7 @@ const Todos = () => {
         })),
   })
 
-  // ...
+  return <ul>{todos.map((todo) => <li key={todo.id}>{todo.text}</li>)}</ul>
 }
 
 const App = () => (

@@ -1,3 +1,4 @@
+import { declareOracle } from '../oracle-declaration.js'
 /**
  * Independent cross-tab publication model.
  *
@@ -253,3 +254,13 @@ export function assertReplay(record: ReplayRecord) {
       record,
     )
 }
+
+declareOracle({
+  check: [
+    assertSnapshot,
+    assertStatuses,
+    assertPublicationHistory,
+    assertReplay,
+  ],
+  model: [CrossTabModel],
+})

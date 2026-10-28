@@ -10,7 +10,7 @@ function prepareLiveQueryValue(
    deferredCollections?): unknown;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L92)
+Defined in: [packages/db/src/live-query-options.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L179)
 
 ## Parameters
 

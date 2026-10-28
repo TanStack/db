@@ -171,7 +171,7 @@ function AllTodos() {
 You can also pass an existing collection to `useLiveQuery`. This is useful for sharing queries across components:
 
 ```tsx
-import { createLiveQueryCollection } from '@tanstack/db'
+import { createLiveQueryCollection, eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/solid-db'
 
 // Create collection outside component

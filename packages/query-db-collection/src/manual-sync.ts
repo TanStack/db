@@ -227,7 +227,8 @@ function applyWriteOperations<
   )
 
   // While an optimistic transaction persists, this sync transaction waits
-  // and applies when that transaction settles.
+  // and applies when that transaction settles. A direct write is not a
+  // snapshot, so during a reload it applies to the kept rows.
   ctx.begin()
 
   for (const op of normalized) {

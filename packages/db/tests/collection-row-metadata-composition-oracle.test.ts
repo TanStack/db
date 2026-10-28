@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { SyncConfig } from '../src/types.js'
 
 /**
@@ -28,9 +29,30 @@ import type { SyncConfig } from '../src/types.js'
  * lanes: immediate, held, rebuilt, and nested. The nested lane applies a
  * nested transaction or a hydration seed before the open transaction. When a
  * rebuild changes an insert into an equal re-insert, or the reverse, the rule
- * follows the write that applies. The model judges the reclassified sequence. It does not judge collection metadata, metadata-only
- * publication batches, or other keys. The collection-metadata publication
- * oracle owns those.
+ * follows the write that applies. The model judges the reclassified sequence.
+ * It does not judge metadata-only publication batches or other keys. The
+ * collection-metadata publication oracle owns publication batches; the sync
+ * metadata session oracle owns reads across transactions, seeds, and the
+ * consumer view.
+ *
+ * ## What does the source read before a held transaction applies?
+ *
+ * An accepted sync transaction always applies, in commit order (glossary,
+ * "accepted sync transaction"). A sync-side metadata read therefore returns
+ * the value that the source's accepted writes and its open transaction
+ * determine. Whether a persisting optimistic transaction still holds those
+ * writes does not change the read. The persisted wrapper states the same rule
+ * for its staged writes: the open transaction's write, then the newest staged
+ * one, then the stored value, with a truncate hiding older row metadata.
+ * `collection.base` is a different observation: it is the applied view and
+ * excludes queued writes.
+ *
+ * The held-window lane checks this rule for `metadata.row.get`,
+ * `metadata.collection.get`, and `metadata.collection.list`. The history's
+ * explicit `set` and `unset` writes also write one collection key. A later
+ * accepted transaction writes another key. A read sees both before and after
+ * the hold ends. The lane does not judge a read between writes of one open
+ * transaction, nested transactions, or wrapper-deferred transactions.
  */
 
 type Row = { id: number; v: number }
@@ -179,11 +201,22 @@ const rebuiltHistories = starts.flatMap((start) => {
  *
  * A nested transaction can also call `metadata.row.set` after its row write.
  *
+ * A transaction begun inside T1 is independent and commits first, so it
+ * applies first: sync transactions apply in commit order (maintainer
+ * decision of 2026-10-23, recorded in
+ * `docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md`).
  * T1 applies after the nested write, so the Collection reclassifies each of
  * T1's inserts against the rows that the nested write leaves. An insert of a
  * present key is an equal re-insert, and an insert of an absent key is an
  * insert. Every row write in this lane writes one value, so a reclassified
- * insert is never a duplicate.
+ * insert is never a duplicate. The `held` variant holds both transactions
+ * behind a persisting optimistic update until T1 commits; a hold delays
+ * application but cannot change commit order, so it expects the same value.
+ *
+ * A seed is older than every source write (decisions D4 and D5 of
+ * 2026-10-22). It sits beneath T1, and T1's first insert names the whole
+ * row, so it is an insert that replaces the seeded row, not an equal
+ * re-insert of it.
  *
  * A history is legal when T1's writes are legal both where T1 writes them and
  * where they apply. An insert is legal in either place. An update or a delete
@@ -261,7 +294,11 @@ const reclassify = (
     present = true
     return { kind, metadata: write.metadata }
   })
-/** The model's expected value: T1's writes fold over the nested write's. */
+/**
+ * The model's expected value: T1's writes fold over the nested write's. A
+ * nested insert leaves the row present for T1's inserts; a seed does not,
+ * because T1's first insert replaces it.
+ */
 function expectedNestedMetadata(history: NestedHistory): unknown {
   const metadata = history.nestedSet
     ? nestedSetMetadata
@@ -270,7 +307,7 @@ function expectedNestedMetadata(history: NestedHistory): unknown {
       : nestedMetadata
   return foldMetadata(
     metadata,
-    reclassify(history.nested !== `delete`, history.sequence),
+    reclassify(history.nested === `insert`, history.sequence),
   )
 }
 const describeNested = ({
@@ -298,6 +335,44 @@ const describeWrite = (write: Write) =>
  *   open, so the Collection rebuilds this transaction's automatic metadata
  *   writes before it commits.
  */
+// The model predicts a lane's row metadata. A write before the history (the
+// earlier write) applies first when it names the same key, and the history
+// then folds over that result.
+function expectedLaneMetadata(
+  start: Start,
+  sequence: ReadonlyArray<Write>,
+  earlier: EarlierWrite | undefined,
+): unknown {
+  return earlier?.key === 1
+    ? foldMetadata(expectedMetadata(start, [asWrite(earlier)]), sequence)
+    : expectedMetadata(start, sequence)
+}
+
+// The observed metadata must equal the model's value, compared as JSON. A
+// mismatch is recorded with its history label instead of failing at once.
+function compareObservedMetadata(
+  mismatches: Array<string>,
+  label: string,
+  actual: unknown,
+  expected: unknown,
+): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected))
+    mismatches.push(
+      `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+    )
+}
+
+declareOracle({
+  check: [compareObservedMetadata],
+  model: [
+    expectedMetadata,
+    foldMetadata,
+    expectedLaneMetadata,
+    expectedNestedMetadata,
+  ],
+  grammar: [histories, rebuiltHistories, nestedHistories],
+})
+
 async function observeMetadata(
   lane: Lane,
   start: Start,
@@ -406,16 +481,185 @@ async function observeMetadata(
 }
 
 /**
+ * The held-window model folds collection metadata separately. An explicit
+ * `set` names the cursor's value and an `unset` deletes it. Row writes and
+ * truncates leave it alone, because collection metadata is not row state.
+ * T2 always writes the `later` key, so a correct `list()` contains it.
+ */
+const cursorKey = `cursor`
+const laterKey = `later`
+const laterMetadata = { m: `later` }
+type HeldOpen = `empty` | `truncated`
+type HeldReads = {
+  row: unknown
+  cursor: unknown
+  list: Array<{ key: string; value: unknown }>
+}
+
+function expectedCursor(start: Start, sequence: ReadonlyArray<Write>) {
+  let current: unknown =
+    start === `present-with-metadata` ? startMetadata : undefined
+  sequence.forEach((write, step) => {
+    if (write.kind === `set`) current = writeMetadata(step)
+    else if (write.kind === `unset`) current = undefined
+  })
+  return current
+}
+
+function expectedHeldReads(
+  start: Start,
+  sequence: ReadonlyArray<Write>,
+  open: HeldOpen | `applied`,
+): HeldReads {
+  const cursor = expectedCursor(start, sequence)
+  return {
+    // An open truncate hides every older row metadata value.
+    row: open === `truncated` ? undefined : expectedMetadata(start, sequence),
+    cursor,
+    list: [
+      ...(cursor === undefined ? [] : [{ key: cursorKey, value: cursor }]),
+      { key: laterKey, value: laterMetadata },
+    ],
+  }
+}
+
+const readHeld = (sync: SyncActions): HeldReads => ({
+  row: sync.metadata!.row.get(1),
+  cursor: sync.metadata!.collection.get(cursorKey),
+  // List order is not part of the contract.
+  list: [...sync.metadata!.collection.list()].sort((a, b) =>
+    a.key.localeCompare(b.key),
+  ),
+})
+
+/**
+ * The held-window driver holds the history's transaction T1 behind a
+ * persisting optimistic update. It then commits T2, which updates key 2 and
+ * sets `later`. T1 is held unless it truncates, and T2 is always held. The
+ * driver reads at three checkpoints:
+ *
+ * - `committed`: after T2's commit returns, with no open transaction.
+ * - `open`: inside an open T3 that is empty or truncates.
+ * - `applied`: after T3 is canceled and the hold ends.
+ *
+ * T3 is canceled with an aborted signal, so the applied checkpoint expects
+ * T1 and T2 only.
+ */
+async function observeHeldReads(
+  start: Start,
+  sequence: ReadonlyArray<Write>,
+  open: HeldOpen,
+  id: string,
+): Promise<Record<`committed` | `open` | `applied`, HeldReads>> {
+  let sync!: SyncActions
+  let release!: () => void
+  const collection = createCollection<Row, number>({
+    id,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 2, v: 0 } })
+        if (start !== `absent`) {
+          actions.write({
+            type: `insert`,
+            value: { id: 1, v: 0 },
+            ...(start === `present-with-metadata`
+              ? { metadata: startMetadata }
+              : {}),
+          })
+        }
+        if (start === `present-with-metadata`)
+          actions.metadata!.collection.set(cursorKey, startMetadata)
+        actions.commit()
+        actions.markReady()
+      },
+    },
+    onUpdate: () => new Promise<void>((resolve) => (release = resolve)),
+  })
+  try {
+    await collection.stateWhenReady()
+    const blocker = collection.update(2, (draft) => {
+      draft.v = 9
+    })
+    let held: number | undefined = start === `absent` ? undefined : 0
+    sync.begin()
+    sequence.forEach((write, step) => {
+      const metadata = writeMetadata(step)
+      if (write.kind === `insert` || write.kind === `update`) held = step + 1
+      else if (write.kind === `delete` || write.kind === `truncate`)
+        held = undefined
+      if (write.kind === `set`) {
+        sync.metadata!.row.set(1, metadata)
+        sync.metadata!.collection.set(cursorKey, metadata)
+      } else if (write.kind === `unset`) {
+        sync.metadata!.row.delete(1)
+        sync.metadata!.collection.delete(cursorKey)
+      } else if (write.kind === `truncate`) sync.truncate()
+      else if (write.kind === `delete`)
+        sync.write({
+          type: `delete`,
+          key: 1,
+          ...(write.metadata ? { metadata } : {}),
+        })
+      else if (write.kind === `reinsert`)
+        sync.write({
+          type: `insert`,
+          value: { id: 1, v: held! },
+          ...(write.metadata ? { metadata } : {}),
+        })
+      else
+        sync.write({
+          type: write.kind,
+          value: { id: 1, v: step + 1 },
+          ...(write.metadata ? { metadata } : {}),
+        })
+    })
+    const firstReceipt = sync.commit()
+    if (sequence.some((write) => write.kind === `truncate`))
+      expect(firstReceipt).toBe(true)
+    else expect(firstReceipt).not.toBe(true)
+    sync.begin()
+    sync.write({ type: `update`, value: { id: 2, v: 100 } })
+    sync.metadata!.collection.set(laterKey, laterMetadata)
+    const laterReceipt = sync.commit()
+    expect(laterReceipt).not.toBe(true)
+    const committed = readHeld(sync)
+
+    sync.begin()
+    if (open === `truncated`) sync.truncate()
+    const openReads = readHeld(sync)
+    const abort = new AbortController()
+    abort.abort()
+    await expect(sync.commit(abort.signal)).rejects.toThrow()
+
+    release()
+    await blocker.when('settled')
+    await firstReceipt
+    await laterReceipt
+    return { committed, open: openReads, applied: readHeld(sync) }
+  } finally {
+    await collection.cleanup()
+  }
+}
+
+/**
  * The nested driver writes T1 through a real Collection's sync API, then
  * applies the nested write and commits both. A seed goes through
  * `DbClient.hydrate`, so that history uses a Collection that a `DbClient`
- * owns. The driver reads `metadata.row.get` after T1 applies.
+ * owns. When `held`, a persisting optimistic update of key 2 holds both
+ * transactions until T1 has committed. The driver reads `metadata.row.get`
+ * after T1 applies.
  */
 async function observeNested(
   { start, nested, nestedSet, sequence }: NestedHistory,
   id: string,
+  held = false,
 ): Promise<unknown> {
   let sync!: SyncActions
+  let release!: () => void
   const row = { id: 1, v: 0 }
   const config = {
     id,
@@ -424,6 +668,7 @@ async function observeNested(
       sync: (actions: SyncActions) => {
         sync = actions
         actions.begin()
+        actions.write({ type: `insert`, value: { id: 2, v: 0 } })
         if (start !== `absent`)
           actions.write({
             type: `insert`,
@@ -436,6 +681,7 @@ async function observeNested(
         actions.markReady()
       },
     },
+    onUpdate: () => new Promise<void>((resolve) => (release = resolve)),
   }
   const client = new DbClient()
   const collection =
@@ -444,6 +690,11 @@ async function observeNested(
       : createCollection<Row, number>({ ...config, startSync: true })
   try {
     await collection.stateWhenReady()
+    const blocker = held
+      ? collection.update(2, (draft) => {
+          draft.v = 9
+        })
+      : undefined
     sync.begin()
     sequence.forEach((write, step) => {
       const metadata = writeMetadata(step)
@@ -481,6 +732,10 @@ async function observeNested(
       nestedReceipt = sync.commit()
     }
     const receipt = sync.commit()
+    if (blocker) {
+      release()
+      await blocker.when('settled')
+    }
     await nestedReceipt
     await receipt
     return sync.metadata!.row.get(1)
@@ -588,11 +843,20 @@ describe(`row metadata composition oracle`, () => {
     expect(
       expectedNestedMetadata({
         start: `absent`,
-        nested: `seed`,
+        nested: `insert`,
         nestedSet: false,
         sequence: [{ kind: `set` }, { kind: `insert`, metadata: false }],
       }),
     ).toEqual(writeMetadata(0))
+    // T1's insert replaces the seeded row, so it clears T1's earlier set.
+    expect(
+      expectedNestedMetadata({
+        start: `absent`,
+        nested: `seed`,
+        nestedSet: false,
+        sequence: [{ kind: `set` }, { kind: `insert`, metadata: false }],
+      }),
+    ).toBeUndefined()
     // T1 applies after the nested set, so T1's later write wins.
     expect(
       expectedNestedMetadata({
@@ -604,10 +868,10 @@ describe(`row metadata composition oracle`, () => {
     ).toEqual(writeMetadata(0))
   })
 
-  it(
-    `matches last-write-wins metadata after a nested write`,
+  it.each([`immediate`, `held`] as const)(
+    `matches last-write-wins metadata after a nested write (%s)`,
     { timeout: 120_000 },
-    async () => {
+    async (path) => {
       const mismatches: Array<string> = []
       for (const [index, history] of nestedHistories.entries()) {
         const label = describeNested(history)
@@ -615,17 +879,76 @@ describe(`row metadata composition oracle`, () => {
         try {
           actual = await observeNested(
             history,
-            `row-metadata-composition-nested-${index}`,
+            `row-metadata-composition-nested-${path}-${index}`,
+            path === `held`,
           )
         } catch (error) {
           mismatches.push(`${label} threw ${String(error)}`)
           continue
         }
-        const expected = expectedNestedMetadata(history)
-        if (JSON.stringify(actual) !== JSON.stringify(expected))
-          mismatches.push(
-            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+        compareObservedMetadata(
+          mismatches,
+          label,
+          actual,
+          expectedNestedMetadata(history),
+        )
+      }
+      expect(mismatches).toEqual([])
+    },
+  )
+
+  it(`rejects named wrong answers in the held-window model`, () => {
+    // Truncate keeps collection metadata, and an earlier set survives T2.
+    expect(
+      expectedHeldReads(
+        `present-with-metadata`,
+        [{ kind: `set` }, { kind: `truncate` }],
+        `empty`,
+      ),
+    ).toEqual({
+      row: undefined,
+      cursor: writeMetadata(0),
+      list: [
+        { key: cursorKey, value: writeMetadata(0) },
+        { key: laterKey, value: laterMetadata },
+      ],
+    })
+    // An open truncate hides row metadata, not the cursor.
+    expect(
+      expectedHeldReads(`absent`, [{ kind: `set` }], `truncated`),
+    ).toMatchObject({ row: undefined, cursor: writeMetadata(0) })
+  })
+
+  it.each([`empty`, `truncated`] as const)(
+    `reads accepted metadata during a hold, then in an open transaction that is %s`,
+    { timeout: 120_000 },
+    async (open) => {
+      const mismatches: Array<string> = []
+      for (const [index, { start, sequence }] of histories.entries()) {
+        const label = `${start}: ${sequence.map(describeWrite).join(`, `)}`
+        let actual: Awaited<ReturnType<typeof observeHeldReads>>
+        try {
+          actual = await observeHeldReads(
+            start,
+            sequence,
+            open,
+            `row-metadata-composition-held-window-${open}-${index}`,
           )
+        } catch (error) {
+          mismatches.push(`${label} threw ${String(error)}`)
+          continue
+        }
+        for (const checkpoint of [`committed`, `open`, `applied`] as const) {
+          const expected = expectedHeldReads(
+            start,
+            sequence,
+            checkpoint === `open` ? open : `applied`,
+          )
+          if (JSON.stringify(actual[checkpoint]) !== JSON.stringify(expected))
+            mismatches.push(
+              `${label} at ${checkpoint} read ${JSON.stringify(actual[checkpoint])}, expected ${JSON.stringify(expected)}`,
+            )
+        }
       }
       expect(mismatches).toEqual([])
     },
@@ -655,17 +978,12 @@ describe(`row metadata composition oracle`, () => {
           mismatches.push(`${label} threw ${String(error)}`)
           continue
         }
-        const expected =
-          earlier?.key === 1
-            ? foldMetadata(
-                expectedMetadata(start, [asWrite(earlier)]),
-                sequence,
-              )
-            : expectedMetadata(start, sequence)
-        if (JSON.stringify(actual) !== JSON.stringify(expected))
-          mismatches.push(
-            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
-          )
+        compareObservedMetadata(
+          mismatches,
+          label,
+          actual,
+          expectedLaneMetadata(start, sequence, earlier),
+        )
       }
       expect(mismatches).toEqual([])
     },

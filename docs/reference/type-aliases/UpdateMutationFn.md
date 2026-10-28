@@ -4,10 +4,10 @@ title: UpdateMutationFn
 ---
 
 ```ts
-type UpdateMutationFn<T, TKey, TUtils> = (params) => Promise<void>;
+type UpdateMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:708](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L708)
+Defined in: [packages/db/src/types.ts:735](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L735)
 
 ## Type Parameters
 
@@ -23,6 +23,12 @@ Defined in: [packages/db/src/types.ts:708](https://github.com/TanStack/db/blob/m
 
 `TUtils` *extends* [`UtilsRecord`](UtilsRecord.md) = [`UtilsRecord`](UtilsRecord.md)
 
+### TReturn
+
+`TReturn` = `any`
+
+DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+
 ## Parameters
 
 ### params
@@ -31,4 +37,4 @@ Defined in: [packages/db/src/types.ts:708](https://github.com/TanStack/db/blob/m
 
 ## Returns
 
-`Promise`\<`void`\>
+`Promise`\<`TReturn`\>

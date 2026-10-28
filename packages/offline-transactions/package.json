@@ -23,7 +23,7 @@
     "dev": "vite build --watch",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit --project tsconfig.test.json",
     "lint": "eslint src"
   },
   "type": "module",
@@ -61,7 +61,7 @@
   ],
   "peerDependencies": {
     "@react-native-community/netinfo": ">=11.0.0",
-    "@tanstack/db": "^0.15.0 || ^1.0.0-rc.0",
+    "@tanstack/db": "^1.0.0-rc.0",
     "react-native": ">=0.70.0"
   },
   "peerDependenciesMeta": {

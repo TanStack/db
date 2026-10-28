@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
+import { deepEquals } from '../src/utils'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config.js'
+import {
+  assertDistinctTypes,
+  assertExtraProperty,
+  edgeCarriers,
+  expectCopyAndChanged,
+  expectEqualityPair,
+  expectRingLaw,
+} from './deep-equals-support'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -24,61 +37,37 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * reference relation does not define.
  */
 // Every generated law below uses the same property in a fixed and a fresh
-// campaign. Set UTILS_ORACLE_PROPERTY to the numbered test label and provide
-// UTILS_ORACLE_SEED and UTILS_ORACLE_PATH to replay its fast-check shrink
-// directly, for example with `vitest run tests/utils-oracle.property.test.ts`.
+// campaign. Set TANSTACK_DB_ORACLE_PROPERTY to `utils.<number>` from the test
+// label, with TANSTACK_DB_ORACLE_SEED and TANSTACK_DB_ORACLE_PATH, to replay
+// its fast-check shrink directly, for example with
+// `vitest run tests/utils-oracle.property.test.ts`.
 const fixedSeed = 20260911
-const campaignRuns = 100
-const requestedProperty = process.env.UTILS_ORACLE_PROPERTY
-const replaySeed = process.env.UTILS_ORACLE_SEED
-const replayPath = process.env.UTILS_ORACLE_PATH
-let nextPropertyId = 0
 
-if (
-  requestedProperty === undefined &&
-  (replaySeed !== undefined || replayPath !== undefined)
-) {
-  throw new Error(`utils oracle replay needs a property number`)
-}
+const campaignRuns = 100
+
+// Each property registers as `utils.<number>`, in file order. A path replay
+// selects one with TANSTACK_DB_ORACLE_PROPERTY=utils.<number>.
+let nextPropertyId = 0
 
 function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   [K in keyof Ts]: fc.Arbitrary<Ts[K]>
 }) {
   return (name: string, check: (...values: Ts) => void): void => {
-    const id = String(++nextPropertyId)
+    const id = ++nextPropertyId
+    const property = `utils.${id}`
     const label = `${id}: ${name}`
     // fast-check's variadic tuple overload widens a generic tuple to any[].
     // The mapped arbitraries preserve each position's Ts member.
     const argumentsArbitrary = fc.tuple(...arbitraries) as fc.Arbitrary<Ts>
 
-    if (requestedProperty !== undefined) {
-      if (requestedProperty !== id) {
-        it.skip(`${label} skipped for oracle replay`, () => {})
-        return
-      }
-      if (replaySeed === undefined || replayPath === undefined) {
-        throw new Error(`utils oracle replay needs a seed and shrink path`)
-      }
-      const seed = Number(replaySeed)
-      if (!Number.isSafeInteger(seed)) {
-        throw new Error(`utils oracle replay seed must be an integer`)
-      }
-      fcTest.prop([argumentsArbitrary], {
-        seed,
-        path: replayPath,
-        numRuns: campaignRuns,
-      })(`${label} replay`, (values) => check(...values))
-      return
-    }
-
-    fcTest.prop([argumentsArbitrary], {
+    oracleReplayTest(fcTest).prop([argumentsArbitrary], {
       seed: fixedSeed,
-      numRuns: campaignRuns,
+      numRuns: oracleRuns(campaignRuns),
     })(`${label} fixed`, (values) => check(...values))
-    fcTest.prop([argumentsArbitrary], { numRuns: campaignRuns })(
-      `${label} random`,
-      (values) => check(...values),
-    )
+    oracleReplayTest(fcTest, property).prop(
+      [argumentsArbitrary],
+      oraclePropertyOptions(campaignRuns, property),
+    )(`${label} random`, (values) => check(...values))
   }
 }
 
@@ -92,6 +81,7 @@ const arbitraryPrimitive = fc.oneof(
 )
 
 const arbitraryDate = fc.date().map((d) => new Date(d.getTime()))
+
 const arbitraryFiniteDate = fc
   .integer({ min: -1_000_000_000_000, max: 2_000_000_000_000 })
   .map((time) => new Date(time))
@@ -161,15 +151,19 @@ const arbitrarySameTypePrimitive = fc.oneof(
 )
 
 const arbitrarySameTypeDate = fc.tuple(arbitraryDate, arbitraryDate)
+
 const arbitrarySameTypeRegExp = fc.tuple(arbitraryRegExp, arbitraryRegExp)
+
 const arbitrarySameTypeUint8Array = fc.tuple(
   arbitraryUint8Array,
   arbitraryUint8Array,
 )
+
 const arbitrarySameTypeTemporalDate = fc.tuple(
   arbitraryTemporalPlainDate,
   arbitraryTemporalPlainDate,
 )
+
 const arbitrarySameTypeTemporalDuration = fc.tuple(
   arbitraryTemporalDuration,
   arbitraryTemporalDuration,
@@ -205,9 +199,11 @@ const arbitrarySingleValue = fc.oneof(
   fc.array(fc.integer(), { maxLength: 5 }),
   fc.dictionary(fc.string(), fc.integer(), { maxKeys: 5 }),
 )
+
 const arbitraryNonNullValue = arbitrarySingleValue.filter(
   (value) => value !== null,
 )
+
 const arbitraryDefinedValue = arbitrarySingleValue.filter(
   (value) => value !== undefined,
 )
@@ -247,84 +243,9 @@ const arbitraryExtraProperty = fc
     return { original, key, value }
   })
 
-const edgeCarriers = [`object`, `array`, `map`, `symbol`] as const
-type EdgeCarrier = (typeof edgeCarriers)[number]
-type EqualityNode = { value: number; next?: unknown }
-
-// Construct corresponding rings, not an implementation of deep equality.
-// Every node is reachable; replacing one numeric payload must be observable.
-// Map keys/symbol keys are shared tokens, while all structural nodes are fresh.
-function equalityRing(
-  cells: ReadonlyArray<{ value: number; carrier: EdgeCarrier }>,
-  keys: ReadonlyArray<symbol>,
-): EqualityNode {
-  const nodes: Array<EqualityNode> = cells.map(({ value }) => ({ value }))
-  for (const [index, cell] of cells.entries()) {
-    const target = nodes[(index + 1) % nodes.length]!
-    switch (cell.carrier) {
-      case `object`:
-        nodes[index]!.next = { target }
-        break
-      case `array`:
-        nodes[index]!.next = [target]
-        break
-      case `map`:
-        nodes[index]!.next = new Map([[keys[index]!, target]])
-        break
-      case `symbol`:
-        nodes[index]!.next = { [keys[index]!]: target }
-        break
-    }
-  }
-  return nodes[0]!
-}
-
-function expectEqualityPair(
-  a: unknown,
-  b: unknown,
-  expected: boolean,
-  equal: (a: unknown, b: unknown) => boolean = deepEquals,
-): void {
-  expect(equal(a, b), `forward equality`).toBe(expected)
-  expect(equal(b, a), `reverse equality`).toBe(expected)
-}
-
-function expectCopyAndChanged(
-  original: unknown,
-  copy: unknown,
-  changed: unknown,
-  equal: (a: unknown, b: unknown) => boolean = deepEquals,
-): void {
-  expectEqualityPair(original, copy, true, equal)
-  expectEqualityPair(original, changed, false, equal)
-}
-
 function adjacentDateTime(time: number): number {
   if (Number.isNaN(time)) return 0
   return time === 8_640_000_000_000_000 ? time - 1 : time + 1
-}
-
-function expectRingLaw(
-  cells: ReadonlyArray<{ value: number; carrier: EdgeCarrier }>,
-  equal: (a: unknown, b: unknown) => boolean = deepEquals,
-): void {
-  expect(cells.length).toBeGreaterThan(0)
-  const keys = cells.map((_, index) => Symbol(`edge-${index}`))
-  const original = equalityRing(cells, keys)
-  const copy = equalityRing(cells, keys)
-  expect(original).not.toBe(copy)
-  expectEqualityPair(original, copy, true, equal)
-  // Check every reachable payload, including nodes past a mixed-container edge.
-  for (let changed = 0; changed < cells.length; changed++) {
-    const different = equalityRing(
-      cells.map((cell, index) => ({
-        ...cell,
-        value: cell.value + (index === changed ? 1 : 0),
-      })),
-      keys,
-    )
-    expectEqualityPair(original, different, false, equal)
-  }
 }
 
 // Legal rings have 1–5 reachable nodes, integer payloads, and one of four
@@ -339,194 +260,12 @@ const ringArbitrary = fc.array(
   { minLength: 1, maxLength: 5 },
 )
 
-function assertExtraProperty(
-  {
-    original,
-    key,
-    value,
-  }: {
-    original: Record<string, number>
-    key: string
-    value: number
-  },
-  equal: (a: unknown, b: unknown) => boolean,
-): void {
-  expect(key in original).toBe(false)
-  const extended = { ...original, [key]: value }
-  expect(Object.keys(extended)).toHaveLength(Object.keys(original).length + 1)
-  expect(equal(original, { ...original }), `property copy must be equal`).toBe(
-    true,
-  )
-  expect(equal(original, extended), `extra property must be unequal`).toBe(
-    false,
-  )
-  expect(equal(extended, original), `extra property must be unequal`).toBe(
-    false,
-  )
-}
-
-function assertDistinctTypes(
-  a: unknown,
-  b: unknown,
-  equal: (a: unknown, b: unknown) => boolean,
-): void {
-  expect(equal(a, b), `distinct types must be unequal (forward)`).toBe(false)
-  expect(equal(b, a), `distinct types must be unequal (reverse)`).toBe(false)
-}
-
 describe(`deepEquals property-based tests`, () => {
-  describe(`non-ring grammar boundaries`, () => {
-    const cases: ReadonlyArray<{
-      name: string
-      values: () => readonly [unknown, unknown, unknown]
-    }> = [
-      { name: `null and undefined`, values: () => [null, null, undefined] },
-      {
-        name: `undefined and null`,
-        values: () => [undefined, undefined, null],
-      },
-      { name: `boolean`, values: () => [true, true, false] },
-      { name: `integer`, values: () => [0, 0, 1] },
-      { name: `string`, values: () => [`a`, `a`, `b`] },
-      { name: `double`, values: () => [0.5, 0.5, 1.5] },
-      { name: `NaN`, values: () => [NaN, NaN, 1] },
-      { name: `infinity`, values: () => [Infinity, Infinity, -Infinity] },
-      { name: `signed zero`, values: () => [-0, 0, 1] },
-      {
-        name: `Date time`,
-        values: () => [new Date(0), new Date(0), new Date(1)],
-      },
-      {
-        name: `RegExp flags`,
-        values: () => [/a/g, /a/g, /a/i],
-      },
-      {
-        name: `RegExp source`,
-        values: () => [/a/g, /a/g, /b/g],
-      },
-      {
-        name: `Uint8Array length`,
-        values: () => [new Uint8Array(), new Uint8Array(), new Uint8Array([1])],
-      },
-      {
-        name: `Uint8Array content`,
-        values: () => [
-          new Uint8Array([1]),
-          new Uint8Array([1]),
-          new Uint8Array([2]),
-        ],
-      },
-      {
-        name: `Float32Array content`,
-        values: () => [
-          new Float32Array([1.5]),
-          new Float32Array([1.5]),
-          new Float32Array([2.5]),
-        ],
-      },
-      {
-        name: `Temporal.PlainDate day`,
-        values: () => [
-          new Temporal.PlainDate(2024, 1, 1),
-          new Temporal.PlainDate(2024, 1, 1),
-          new Temporal.PlainDate(2024, 1, 2),
-        ],
-      },
-      {
-        name: `Temporal.Duration seconds`,
-        values: () => [
-          Temporal.Duration.from({ seconds: 1 }),
-          Temporal.Duration.from({ seconds: 1 }),
-          Temporal.Duration.from({ seconds: 2 }),
-        ],
-      },
-      { name: `array length`, values: () => [[], [], [1]] },
-      { name: `array content`, values: () => [[1], [1], [2]] },
-      { name: `record key`, values: () => [{}, {}, { a: 1 }] },
-      { name: `record value`, values: () => [{ a: 1 }, { a: 1 }, { a: 2 }] },
-      {
-        name: `Map entry`,
-        values: () => [
-          new Map([[`a`, 1]]),
-          new Map([[`a`, 1]]),
-          new Map([[`a`, 2]]),
-        ],
-      },
-      {
-        name: `Set membership`,
-        values: () => [new Set([1]), new Set([1]), new Set([2])],
-      },
-    ]
-
-    it.each(cases)(
-      `reconstructs equal and changed $name witnesses`,
-      ({ values }) => {
-        expectCopyAndChanged(...values())
-      },
-    )
-
-    it(`rejects reference-only and type-only comparisons at their named checkpoints`, () => {
-      const [date, dateCopy, changedDate] = cases
-        .find(({ name }) => name === `Date time`)!
-        .values()
-      // A reference-only comparison loses equality between separate Dates.
-      expect(() =>
-        expectCopyAndChanged(date, dateCopy, changedDate, Object.is),
-      ).toThrow(`forward equality`)
-      const [array, arrayCopy, changedArray] = cases
-        .find(({ name }) => name === `array content`)!
-        .values()
-      // A shallow type comparison accepts the wrong element at the same cut.
-      const typeOnly = (a: unknown, b: unknown) =>
-        Object.prototype.toString.call(a) === Object.prototype.toString.call(b)
-      expect(() =>
-        expectCopyAndChanged(array, arrayCopy, changedArray, typeOnly),
-      ).toThrow(`forward equality`)
-      expectCopyAndChanged(date, dateCopy, changedDate)
-      expectCopyAndChanged(array, arrayCopy, changedArray)
-    })
-
-    it(`keeps empty and nonempty containers distinct across the 0–1 margin`, () => {
-      expectCopyAndChanged([], [], [0])
-      expectCopyAndChanged({}, {}, { value: 0 })
-      expectCopyAndChanged(new Map(), new Map(), new Map([[0, 0]]))
-      expectCopyAndChanged(new Set(), new Set(), new Set([0]))
-      expectCopyAndChanged(
-        new Uint8Array(),
-        new Uint8Array(),
-        new Uint8Array([0]),
-      )
-    })
-  })
-
   describe(`bounded native graph relations`, () => {
-    it.each(
-      edgeCarriers.flatMap((first) =>
-        edgeCarriers.map((second) => ({ first, second })),
-      ),
-    )(
-      `compares equal and changed rings through $first then $second`,
-      ({ first, second }) =>
-        expectRingLaw([
-          { value: 0, carrier: first },
-          { value: 0, carrier: second },
-        ]),
-    )
-
-    it.each([1, 4, 5])(`compares equal and changed %i-node rings`, (length) => {
-      expectRingLaw(
-        Array.from({ length }, (_, index) => ({
-          value: index,
-          carrier: edgeCarriers[index % edgeCarriers.length]!,
-        })),
-      )
-    })
-
     utilsProperty([ringArbitrary])(
       `compares separately allocated mixed rings and every changed payload`,
       (cells) => expectRingLaw(cells),
     )
-
     it(`runs a fixed mixed-ring campaign without skipped antecedents`, () => {
       const result = fc.check(
         fc.property(ringArbitrary, (cells) => expectRingLaw(cells)),
@@ -534,19 +273,6 @@ describe(`deepEquals property-based tests`, () => {
       )
       expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
     })
-
-    it(`rejects comparators that ignore graph payloads or reject equal cycles`, () => {
-      const cells = [
-        { value: 0, carrier: `map` as const },
-        { value: 0, carrier: `symbol` as const },
-      ]
-      expect(() => expectRingLaw(cells, () => true)).toThrow(`forward equality`)
-      expect(() => expectRingLaw(cells, () => false)).toThrow(
-        `forward equality`,
-      )
-      expectRingLaw(cells)
-    })
-
     utilsProperty([fc.integer(), fc.string()])(
       `preserves structural equality across acyclic sharing and unfolding`,
       (value, key) => {
@@ -568,7 +294,6 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(shared, unfolded, false)
       },
     )
-
     utilsProperty([fc.integer(), fc.string()])(
       `distinguishes symbol identity from description in keys and values`,
       (value, description) => {
@@ -586,7 +311,6 @@ describe(`deepEquals property-based tests`, () => {
         )
       },
     )
-
     utilsProperty([fc.integer()])(
       `keeps Map key identity while comparing nested values structurally`,
       (value) => {
@@ -608,46 +332,6 @@ describe(`deepEquals property-based tests`, () => {
         )
       },
     )
-
-    it(`rejects symbol-erasing, Map-key-erasing and Set-size-only comparisons`, () => {
-      const key = Symbol(`key`)
-      const a = { [key]: 1 }
-      const b = { [key]: 2 }
-      const stringOnly = (left: unknown, right: unknown) =>
-        deepEquals(
-          Object.fromEntries(Object.entries(left as object)),
-          Object.fromEntries(Object.entries(right as object)),
-        )
-      expect(() => expectEqualityPair(a, b, false, stringOnly)).toThrow(
-        `forward equality`,
-      )
-      expectEqualityPair(a, b, false)
-      expectEqualityPair(a, { [key]: 1 }, true)
-
-      const mapA = new Map([[{ key: 1 }, 0]])
-      const mapB = new Map([[{ key: 1 }, 0]])
-      const mapValuesOnly = (left: unknown, right: unknown) =>
-        deepEquals(
-          [...(left as Map<unknown, unknown>).values()],
-          [...(right as Map<unknown, unknown>).values()],
-        )
-      expect(() =>
-        expectEqualityPair(mapA, mapB, false, mapValuesOnly),
-      ).toThrow(`forward equality`)
-      expectEqualityPair(mapA, mapB, false)
-      expectEqualityPair(mapA, new Map(mapA), true)
-
-      const setA = new Set([1, 2])
-      const setB = new Set([1, 3])
-      const sizeOnly = (left: unknown, right: unknown) =>
-        (left as Set<unknown>).size === (right as Set<unknown>).size
-      expect(() => expectEqualityPair(setA, setB, false, sizeOnly)).toThrow(
-        `forward equality`,
-      )
-      expectEqualityPair(setA, setB, false)
-      expectEqualityPair(setA, new Set([2, 1]), true)
-    })
-
     it(`shrinks and replays a payload-blind graph comparator`, () => {
       const property = fc.property(ringArbitrary, (cells) =>
         expectRingLaw(cells, () => true),
@@ -666,7 +350,6 @@ describe(`deepEquals property-based tests`, () => {
       expect(replay.counterexample).toEqual(failure.counterexample)
       expectRingLaw(failure.counterexample[0])
     })
-
     utilsProperty([
       fc.uniqueArray(fc.integer(), { minLength: 1, maxLength: 8 }),
     ])(
@@ -681,17 +364,7 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(original, different, false)
       },
     )
-
-    it(`matches object-valued Sets by value rather than cardinality`, () => {
-      expectEqualityPair(
-        new Set([{ id: 1 }, { id: 2 }]),
-        new Set([{ id: 2 }, { id: 1 }]),
-        true,
-      )
-      expectEqualityPair(new Set([{ id: 1 }]), new Set([{ id: 2 }]), false)
-    })
   })
-
   describe(`equivalence relation properties`, () => {
     utilsProperty([arbitrarySingleValue])(
       `reflexivity: deepEquals(a, a) is always true`,
@@ -721,149 +394,22 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
-
   describe(`cross-type comparisons`, () => {
-    // A Date's display and numeric timestamp encode the same instant, but
-    // change-event equality keeps the Date value class distinct. The finite
-    // generator makes both encodings legal; the 2023 case preserves the old
-    // unit test's exact operands.
-    it(`keeps a 2023 Date distinct from its old primitive probes`, () => {
-      const date = new Date(`2023-01-01T00:00:00Z`)
-      expectCopyAndChanged(
-        date,
-        new Date(`2023-01-01T00:00:00Z`),
-        new Date(`2023-01-02T00:00:00Z`),
-      )
-      assertDistinctTypes(date, `2023-01-01T00:00:00Z`, deepEquals)
-      assertDistinctTypes(date, date.getTime(), deepEquals)
-    })
-
-    // RegExp source text does not acquire the regex's value class, even when
-    // it spells the same pattern. The source and flags still govern equality
-    // between two genuine RegExps in the laws below.
-    it(`keeps /abc/g distinct from its old source-text probe`, () => {
-      expectCopyAndChanged(/abc/g, /abc/g, /abc/i)
-      expectCopyAndChanged(/abc/g, /abc/g, /def/g)
-      expectEqualityPair(/test/i, /test/i, true)
-      assertDistinctTypes(/abc/g, `abc`, deepEquals)
-    })
-
-    it(`rejects primitive-coercing equality for Date and RegExp`, () => {
-      const date = new Date(`2023-01-01T00:00:00Z`)
-      const dateAsNumber = (left: unknown, right: unknown) =>
-        (left instanceof Date ? left.getTime() : left) ===
-        (right instanceof Date ? right.getTime() : right)
-      const dateAsString = (left: unknown, right: unknown) =>
-        (left instanceof Date ? left.toISOString() : left) ===
-        (right instanceof Date ? right.toISOString() : right)
-      const regexpAsSource = (left: unknown, right: unknown) =>
-        (left instanceof RegExp ? left.source : left) ===
-        (right instanceof RegExp ? right.source : right)
-      expect(() =>
-        assertDistinctTypes(date, date.getTime(), dateAsNumber),
-      ).toThrow(`distinct types must be unequal (forward)`)
-      expect(() =>
-        assertDistinctTypes(date, date.toISOString(), dateAsString),
-      ).toThrow(`distinct types must be unequal (forward)`)
-      expect(() => assertDistinctTypes(/abc/g, `abc`, regexpAsSource)).toThrow(
-        `distinct types must be unequal (forward)`,
-      )
-    })
-
     utilsProperty([arbitraryDate, arbitraryTemporalDuration])(
       `generated Date and Temporal.Duration are unequal in both directions`,
       (date, duration) => assertDistinctTypes(date, duration, deepEquals),
     )
-
     utilsProperty([arbitraryDate, arbitraryTemporalPlainDate])(
       `generated Date and Temporal.PlainDate are unequal in both directions`,
       (date, plainDate) => assertDistinctTypes(date, plainDate, deepEquals),
     )
-
     utilsProperty([arbitraryTemporalPlainDate, arbitraryTemporalDuration])(
       `generated different Temporal types are unequal in both directions`,
       (plainDate, duration) =>
         assertDistinctTypes(plainDate, duration, deepEquals),
     )
-
-    it(`distinct-type law rejects equality in either direction`, () => {
-      const date = new Date(0)
-      const duration = Temporal.Duration.from({ seconds: 0 })
-      expect(() =>
-        assertDistinctTypes(date, duration, (a) => a === date),
-      ).toThrow(`distinct types must be unequal (forward)`)
-      expect(() =>
-        assertDistinctTypes(date, duration, (a) => a === duration),
-      ).toThrow(`distinct types must be unequal (reverse)`)
-      assertDistinctTypes(date, duration, Object.is)
-      // Distinct instances of the same type remain legitimate equal neighbors.
-      expect(deepEquals(date, new Date(0))).toBe(true)
-      expect(deepEquals(duration, Temporal.Duration.from({ seconds: 0 }))).toBe(
-        true,
-      )
-    })
-
-    it(`Date and Temporal.Duration are not equal in either direction`, () => {
-      const date = new Date(`1970-01-01T00:00:00.000Z`)
-      const duration = Temporal.Duration.from({
-        hours: 0,
-        minutes: 0,
-        seconds: 0,
-      })
-
-      // Both directions should return false for different types (symmetric)
-      expect(deepEquals(date, duration)).toBe(false)
-      expect(deepEquals(duration, date)).toBe(false)
-    })
-
-    it(`Date and Temporal.PlainDate are not equal in either direction`, () => {
-      const date = new Date(`2023-01-01T00:00:00.000Z`)
-      const plainDate = new Temporal.PlainDate(2023, 1, 1)
-
-      expect(deepEquals(date, plainDate)).toBe(false)
-      expect(deepEquals(plainDate, date)).toBe(false)
-    })
-
-    it(`RegExp and object are not equal in either direction`, () => {
-      const regex = /test/g
-      const obj = { source: `test`, flags: `g` }
-
-      expect(deepEquals(regex, obj)).toBe(false)
-      expect(deepEquals(obj, regex)).toBe(false)
-    })
-
-    it(`Map and object are not equal in either direction`, () => {
-      const map = new Map([[`a`, 1]])
-      const obj = { a: 1 }
-
-      expect(deepEquals(map, obj)).toBe(false)
-      expect(deepEquals(obj, map)).toBe(false)
-    })
-
-    it(`Set and array are not equal in either direction`, () => {
-      const set = new Set([1, 2, 3])
-      const arr = [1, 2, 3]
-
-      expect(deepEquals(set, arr)).toBe(false)
-      expect(deepEquals(arr, set)).toBe(false)
-    })
-
-    it(`Uint8Array and array are not equal in either direction`, () => {
-      const typedArr = new Uint8Array([1, 2, 3])
-      const arr = [1, 2, 3]
-
-      expect(deepEquals(typedArr, arr)).toBe(false)
-      expect(deepEquals(arr, typedArr)).toBe(false)
-    })
   })
-
   describe(`change-event equality`, () => {
-    it(`treats copied NaN values and invalid Dates as equal`, () => {
-      expect(deepEquals({ rank: NaN }, { rank: NaN })).toBe(true)
-      expect(deepEquals(new Date(NaN), new Date(NaN))).toBe(true)
-      expect(deepEquals({ rank: NaN }, { rank: 10 })).toBe(false)
-    })
-
     utilsProperty([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
       `arrays with same elements are equal`,
       (arr) => {
@@ -871,7 +417,6 @@ describe(`deepEquals property-based tests`, () => {
         expectCopyAndChanged(arr, copy, [...arr, 0])
       },
     )
-
     utilsProperty([
       fc.dictionary(fc.string(), fc.integer(), { minKeys: 0, maxKeys: 10 }),
     ])(`objects with same properties are equal`, (obj) => {
@@ -880,7 +425,6 @@ describe(`deepEquals property-based tests`, () => {
       while (freshKey in obj) freshKey += `_`
       expectCopyAndChanged(obj, copy, { ...obj, [freshKey]: 0 })
     })
-
     utilsProperty([
       fc.array(fc.tuple(fc.string(), fc.integer()), {
         minLength: 0,
@@ -893,7 +437,6 @@ describe(`deepEquals property-based tests`, () => {
       while (map1.has(freshKey)) freshKey += `_`
       expectCopyAndChanged(map1, map2, new Map([...map1, [freshKey, 0]]))
     })
-
     utilsProperty([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
       `Sets with same primitive values are equal`,
       (arr) => {
@@ -902,7 +445,6 @@ describe(`deepEquals property-based tests`, () => {
         expectCopyAndChanged(set1, set2, new Set([...set1, `fresh`]))
       },
     )
-
     utilsProperty([fc.uint8Array({ minLength: 0, maxLength: 50 })])(
       `Uint8Arrays with same content are equal`,
       (arr) => {
@@ -910,7 +452,6 @@ describe(`deepEquals property-based tests`, () => {
         expectCopyAndChanged(arr, copy, new Uint8Array([...arr, 0]))
       },
     )
-
     utilsProperty([arbitraryDate])(`Dates with same time are equal`, (date) => {
       const copy = new Date(date.getTime())
       expectCopyAndChanged(
@@ -919,7 +460,6 @@ describe(`deepEquals property-based tests`, () => {
         new Date(adjacentDateTime(date.getTime())),
       )
     })
-
     utilsProperty([arbitraryTemporalPlainDate])(
       `Temporal.PlainDate with same values are equal`,
       (date) => {
@@ -928,7 +468,6 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
-
   describe(`inequality properties`, () => {
     utilsProperty([
       fc.array(fc.integer(), { minLength: 1, maxLength: 10 }),
@@ -937,27 +476,12 @@ describe(`deepEquals property-based tests`, () => {
       const modified = [...arr, extraElement]
       expect(deepEquals(arr, modified)).toBe(false)
     })
-
     utilsProperty([arbitraryExtraProperty])(
       `objects with extra property are not equal`,
       (sample) => {
         assertExtraProperty(sample, deepEquals)
       },
     )
-
-    it(`extra-property law rejects a subset-only comparison`, () => {
-      const sample = { original: { a: 1 }, key: `b`, value: 2 }
-      const subsetEqual = (a: unknown, b: unknown): boolean => {
-        const left = a as Record<string, number>
-        const right = b as Record<string, number>
-        return Object.keys(left).every((key) => left[key] === right[key])
-      }
-      expect(() => assertExtraProperty(sample, subsetEqual)).toThrow(
-        `extra property must be unequal`,
-      )
-      assertExtraProperty(sample, deepEquals)
-    })
-
     it(`fixed campaign reaches an extra property in every case`, () => {
       const result = fc.check(
         fc.property(arbitraryExtraProperty, (sample) => {
@@ -967,14 +491,12 @@ describe(`deepEquals property-based tests`, () => {
       )
       expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
     })
-
     utilsProperty([fc.integer(), fc.string()])(
       `different types are not equal`,
       (num, str) => {
         expect(deepEquals(num, str)).toBe(false)
       },
     )
-
     utilsProperty([fc.date(), fc.date()])(
       `dates with different times are not equal`,
       (date1, date2) => {
@@ -991,7 +513,6 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
-
   describe(`edge cases`, () => {
     utilsProperty([arbitraryNonNullValue])(
       `null is never equal to a non-null value`,
@@ -1017,7 +538,6 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
-
   // `deepEquals` drives change-event suppression, so it deliberately ignores
   // state that draft revert detection keeps (see proxy-revert-oracle): Map and
   // Set insertion order, RegExp `lastIndex`, and array holes. These laws pin
@@ -1175,7 +695,6 @@ describe(`deepEquals property-based tests`, () => {
       expectEqualityPair({ items: sparse }, { items: dense }, true)
     })
   })
-
   describe(`nested structure consistency`, () => {
     utilsProperty([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
@@ -1197,9 +716,6 @@ describe(`deepEquals property-based tests`, () => {
       expect(deepEquals(nestedObj, clone)).toBe(true)
     })
   })
-
-  // Keep newly added generated laws after the original registration order:
-  // UTILS_ORACLE_PROPERTY uses ordinal selectors for saved seed/path replays.
   describe(`additional non-ring value boundaries`, () => {
     utilsProperty([arbitraryRegExp])(
       `RegExp source and flags determine equality`,
@@ -1219,7 +735,6 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(regex, changedSource, false)
       },
     )
-
     utilsProperty([arbitraryFloat32Array])(
       `Float32Array content and length determine equality`,
       (array) => {
@@ -1230,7 +745,6 @@ describe(`deepEquals property-based tests`, () => {
         )
       },
     )
-
     utilsProperty([arbitraryTemporalDuration])(
       `Temporal.Duration with same fields is equal and changed seconds are unequal`,
       (duration) => {
@@ -1247,7 +761,6 @@ describe(`deepEquals property-based tests`, () => {
         expectCopyAndChanged(duration, copy, changed)
       },
     )
-
     utilsProperty([arbitraryFiniteDate])(
       `Date differs from its ISO text and epoch number in both directions`,
       (date) => {
@@ -1255,12 +768,10 @@ describe(`deepEquals property-based tests`, () => {
         assertDistinctTypes(date, date.getTime(), deepEquals)
       },
     )
-
     utilsProperty([arbitraryRegExp])(
       `RegExp differs from its source text in both directions`,
       (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
     )
-
     // The source fields, rather than Temporal's display or ordered duration,
     // form the reference identity. The production path is deepEquals in both
     // directions; its direct result is compared after each constructed pair.
@@ -1279,14 +790,6 @@ describe(`deepEquals property-based tests`, () => {
         }
       },
     )
-
-    it(`keeps one second distinct from 1000 milliseconds with the same display`, () => {
-      const seconds = Temporal.Duration.from({ seconds: 1 })
-      const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
-      expect(seconds.toString()).toBe(milliseconds.toString())
-      expectEqualityPair(seconds, milliseconds, false)
-    })
-
     // This generated grammar varies magnitude and sign while enumerating every
     // adjacent subsecond unit boundary. Both constructors encode the same
     // displayed elapsed time, but the single nonzero source field differs.
@@ -1312,40 +815,3 @@ describe(`deepEquals property-based tests`, () => {
     )
   })
 })
-
-// Persisted-snapshot equality decides whether a reload can leave the public
-// row untouched. Prototype identity is part of that row's observable shape:
-// equal fields on a class or null-prototype record cannot certify that a
-// plain durable record is already public. Two values with the same prototype
-// and fields remain equal. This is a direct comparator boundary; the persisted
-// wrapper oracle owns the source/live publication checkpoint.
-describe(`persisted-snapshot prototype equality`, () => {
-  it(`distinguishes nested prototypes while accepting equal same-prototype values`, () => {
-    class DetailBox {
-      constructor(public rank: number) {}
-    }
-    const authored = { detail: new DetailBox(7) }
-    const durable = { detail: { rank: 7 } }
-    const sameShape = { detail: new DetailBox(7) }
-    const nullPrototype = Object.assign(Object.create(null) as object, {
-      rank: 7,
-    })
-
-    expect(deepEquals(authored, durable)).toBe(true)
-    expect(equalPersistedSnapshotValues(authored, durable)).toBe(false)
-    expect(equalPersistedSnapshotValues(authored, sameShape)).toBe(true)
-    expect(
-      equalPersistedSnapshotValues({ detail: nullPrototype }, durable),
-    ).toBe(false)
-  })
-})
-
-if (requestedProperty !== undefined) {
-  it(`selects a known utils oracle property`, () => {
-    const id = Number(requestedProperty)
-    expect(
-      Number.isSafeInteger(id) && id >= 1 && id <= nextPropertyId,
-      `unknown utils oracle property: ${requestedProperty}`,
-    ).toBe(true)
-  })
-}

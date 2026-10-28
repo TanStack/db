@@ -232,8 +232,9 @@ changes.
 
 ```ts
 const todoCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
     queryKey: ['todos'],
+    queryClient,
     queryFn: () => api.todos.getAll(),
     getKey: (t) => t.id,
     onInsert: async ({ transaction, collection }) => {
