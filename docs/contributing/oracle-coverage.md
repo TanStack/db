@@ -3417,11 +3417,11 @@ The `source-health.history`, `source-health.on-demand`, and
 option that a declared state needs, as examples, so their reach does not depend
 on the seed (#2287). The oracle generates ledgers over two to four states, up to
 six histories, minimums up to three, and up to four fixed histories, under the
-three run kinds. It does not cover `runOracleCampaign` in
-`packages/db/tests/oracle-campaign.ts`, which passes its own `replaying` rule:
-a seed-only run of its campaign prefix still skips the check. A declared state
-of another property that only random histories reach can still miss by chance
-at the normal budget. Those properties have not been measured. Needed witness:
+three run kinds. It also drives `runOracleCampaign` in
+`packages/db/tests/oracle-campaign.ts`, whose seed-only run of its own replay
+prefix checks reach in the same way. A declared state of another property that
+only random histories reach can still miss by chance at the normal budget.
+Those properties have not been measured. Destination: #2289. Needed witness:
 per property, the declared states that no fixed example enters, and how often a
 normal-budget run misses each one.
 

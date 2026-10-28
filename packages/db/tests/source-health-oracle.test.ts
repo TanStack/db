@@ -6967,10 +6967,10 @@ describe(`lazy join demand grammar`, () => {
         ending: { at: `subscription-status`, dependents },
       }),
   )
-  // A reload whose replay fails. A row the provider deletes after it stays.
-  const failedReload = {
+  // A load, then a reload whose load fails.
+  const failedReload: { steps: ReadonlyArray<LazyStep> } = {
     steps: [{ kind: `settle-ok` }, { kind: `reload` }, { kind: `settle-fail` }],
-  } as const satisfies { steps: ReadonlyArray<LazyStep> }
+  }
   const reloadNotices: ReadonlyArray<ReloadNotice> = [
     `source-health`,
     `query-health`,
@@ -7078,40 +7078,57 @@ describe(`lazy join demand grammar`, () => {
       holdChildReady: false,
     },
   ]
-  type LazyExample = [
+  // The driver options a lazy history runs under, by name.
+  type LazyOptions = {
+    asyncChildReady: boolean
+    generatedHoldChildReady: boolean
+    directSubscriber: boolean
+    withEffect: boolean
+    windowed: boolean
+    deferredStart: `plain` | `reload-in-first-load` | undefined
+    ending: LazyEnding | undefined
+  }
+  const lazyOptions: fc.Arbitrary<LazyOptions> = fc.record({
+    asyncChildReady: fc.boolean(),
+    generatedHoldChildReady: fc.boolean(),
+    directSubscriber: fc.boolean(),
+    withEffect: fc.boolean(),
+    windowed: fc.boolean(),
+    deferredStart: fc.constantFrom(
+      undefined,
+      `plain` as const,
+      `reload-in-first-load` as const,
+    ),
+    ending: fc.option(
+      fc.record({
+        at: fc.constantFrom(...reloadNotices),
+        dependents: fc.boolean(),
+      }),
+      { freq: 2, nil: undefined },
+    ),
+  })
+  const lazyExample = (
+    prefix: (typeof lazyReachPrefixes)[number] | null,
+    rest: Array<LazyStep>,
+    options: Partial<LazyOptions> = {},
+  ): [
     {
       prefix: (typeof lazyReachPrefixes)[number] | null
       rest: Array<LazyStep>
     },
-    boolean,
-    boolean,
-    boolean,
-    boolean,
-    boolean,
-    `plain` | `reload-in-first-load` | undefined,
-    { at: ReloadNotice; dependents: boolean } | undefined,
-  ]
-  const lazyExample = (
-    prefix: (typeof lazyReachPrefixes)[number] | null,
-    rest: Array<LazyStep>,
-    {
-      withEffect = false,
-      deferredStart,
-      ending,
-    }: {
-      withEffect?: boolean
-      deferredStart?: `reload-in-first-load`
-      ending?: { at: ReloadNotice; dependents: boolean }
-    } = {},
-  ): LazyExample => [
+    LazyOptions,
+  ] => [
     { prefix, rest },
-    false,
-    false,
-    true,
-    withEffect,
-    false,
-    deferredStart,
-    ending,
+    {
+      asyncChildReady: false,
+      generatedHoldChildReady: false,
+      directSubscriber: true,
+      withEffect: false,
+      windowed: false,
+      deferredStart: undefined,
+      ending: undefined,
+      ...options,
+    },
   ]
   // Each prefix also runs as a fixed example, first in every run and on top
   // of the random histories, and so does each driver option that a declared
@@ -7155,23 +7172,7 @@ describe(`lazy join demand grammar`, () => {
           fc.array(step, { maxLength: 10 }),
         )
         .map(([prefix, rest]) => ({ prefix, rest })),
-      fc.boolean(),
-      fc.boolean(),
-      fc.boolean(),
-      fc.boolean(),
-      fc.boolean(),
-      fc.constantFrom(
-        undefined,
-        `plain` as const,
-        `reload-in-first-load` as const,
-      ),
-      fc.option(
-        fc.record({
-          at: fc.constantFrom(...reloadNotices),
-          dependents: fc.boolean(),
-        }),
-        { freq: 2, nil: undefined },
-      ),
+      lazyOptions,
     ],
     oraclePropertyOptions(100, `source-health.lazy-demand`, {
       examples: lazyExamples,
@@ -7180,13 +7181,15 @@ describe(`lazy join demand grammar`, () => {
     `generated lazy demand histories refine the model`,
     (
       { prefix, rest },
-      asyncChildReady,
-      generatedHoldChildReady,
-      directSubscriber,
-      withEffect,
-      windowed,
-      deferredStart,
-      ending,
+      {
+        asyncChildReady,
+        generatedHoldChildReady,
+        directSubscriber,
+        withEffect,
+        windowed,
+        deferredStart,
+        ending,
+      },
     ) => {
       const steps = [...(prefix?.steps ?? []), ...rest]
       const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady

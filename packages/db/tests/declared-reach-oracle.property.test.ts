@@ -16,15 +16,20 @@
  *   budget, so they never displace a random history, and a path replay still
  *   runs one history.
  *
+ * `runOracleCampaign` follows the first rule for its own replay prefix: a
+ * seed-only run of its campaign checks reach, and only a path replay skips it.
+ *
  * The model below states both rules over a generated ledger: a run kind, a
  * minimum, a number of fixed histories, and the states each history enters.
- * The driver runs `createOracleReach` and `oracleRandomParameters` under that
- * run kind's environment, and the check compares counts, the failure, and
- * the states the failure names with the model.
+ * The drivers run `createOracleReach`, `runOracleCampaign`, and
+ * `oracleRandomParameters` under that run kind's environment, and the checks
+ * compare counts, the failure, and the states the failure names with the
+ * model.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, expect } from 'vitest'
+import { afterAll, expect, vi } from 'vitest'
 import { createOracleReach } from './oracle-reach.js'
+import { runOracleCampaign } from './oracle-campaign.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
@@ -187,6 +192,67 @@ function checkLedger(ledger: Ledger) {
   return expected
 }
 
+// The campaign runner's replay prefix, and the environment each run kind sets
+// for it.
+const campaignPrefix = `TANSTACK_DB_REACH_LEDGER`
+function campaignEnvironment(run: RunKind): Record<string, string> {
+  if (run === `ordinary`) return {}
+  if (run === `seed`) return { [`${campaignPrefix}_SEED`]: `1` }
+  return { [`${campaignPrefix}_SEED`]: `1`, [`${campaignPrefix}_PATH`]: `0` }
+}
+
+// The driver: one ledger through each campaign that runOracleCampaign runs.
+async function observeCampaign(ledger: Ledger) {
+  const names = [`${campaignPrefix}_SEED`, `${campaignPrefix}_PATH`]
+  const saved = names.map((name) => [name, process.env[name]] as const)
+  for (const name of names) delete process.env[name]
+  Object.assign(process.env, campaignEnvironment(ledger.run))
+  // The runner reports each campaign's counts on the console.
+  const info = vi.spyOn(console, `info`).mockImplementation(() => {})
+  try {
+    await runOracleCampaign(campaignPrefix, ledger.states, (reach) => {
+      for (const history of ledger.histories) {
+        reach.beginHistory()
+        for (const index of history) reach.reach(ledger.states[index]!)
+      }
+    })
+    return undefined
+  } catch (error) {
+    return (error as Error).message
+  } finally {
+    info.mockRestore()
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+}
+
+// The check: a campaign's reach refines the model with a minimum of one and
+// no fixed histories, the campaign runner's own reach.
+async function checkCampaign(ledger: Ledger) {
+  const expected = expectedVerdict({
+    ...ledger,
+    minimum: 1,
+    fixedHistories: 0,
+  })
+  const failure = await observeCampaign(ledger)
+  if (expected === `skipped`) {
+    expect(
+      failure,
+      `a path replay of a campaign checks no reach`,
+    ).toBeUndefined()
+    return
+  }
+  expect(failure !== undefined, `the campaign's reach check fails`).toBe(
+    expected.belowMinimum.size > 0,
+  )
+  if (failure !== undefined)
+    expect(namedStates(failure).belowMinimum, `states below one`).toEqual(
+      expected.belowMinimum,
+    )
+}
+
 // The run budget: the examples come on top of the base runs, except in a
 // path replay of this property, which runs one history.
 function expectedNumRuns(run: RunKind, baseRuns: number, examples: number) {
@@ -215,7 +281,7 @@ function checkRunParameters(
 }
 
 declareOracle({
-  check: [checkLedger, checkRunParameters],
+  check: [checkLedger, checkCampaign, checkRunParameters],
   model: [expectedVerdict, expectedNumRuns],
   grammar: [ledgerArbitrary],
 })
@@ -242,10 +308,11 @@ fcTest.prop(
   oraclePropertyOptions(200, property),
 )(
   `reach ledgers refine the declared reach model`,
-  (ledger, baseRuns, examples) => {
+  async (ledger, baseRuns, examples) => {
     ledgersRan = true
     ledgerReach.beginHistory()
     const verdict = checkLedger(ledger)
+    await checkCampaign(ledger)
     checkRunParameters(ledger.run, baseRuns, examples)
     if (verdict === `skipped`) {
       const ordinary = expectedVerdict({ ...ledger, run: `ordinary` })
