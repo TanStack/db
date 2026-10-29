@@ -16,7 +16,11 @@ import {
   expectRingLaw,
 } from './deep-equals-support'
 import { createOracleReach } from './oracle-reach.js'
-import { checkSetFamily, setShapes } from './set-equality-oracle.js'
+import {
+  checkSetChain,
+  checkSetFamily,
+  setShapes,
+} from './set-equality-oracle.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -844,4 +848,52 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
+})
+
+// The chain family varies structural length, insertion order and a neighboring
+// isolated-column violation. Both campaigns use the same descriptor judgment.
+// The large finite witness checks flat matching depth without multiplying that
+// expensive witness by the random campaign budget.
+describe(`Set assignment paths`, () => {
+  const chainReach = createOracleReach(`Set augmenting chains`, [
+    `assignment`,
+    `isolated`,
+  ])
+  let entered = false
+  afterAll(() => {
+    if (entered) chainReach.assertReached()
+    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+      console.info(`Set chain reach`, Object.fromEntries(chainReach.counts()))
+  })
+  utilsProperty([fc.integer({ min: 2, max: 6 }), fc.boolean()])(
+    `preserves Set assignment across augmenting paths and isolated columns`,
+    (bits, rotate) => {
+      entered = true
+      chainReach.beginHistory()
+      for (const broken of [false, true]) {
+        checkSetChain(bits, broken, rotate)
+        chainReach.reach(broken ? `isolated` : `assignment`)
+      }
+    },
+  )
+  const scaleReach = createOracleReach(
+    `flat Set matching scale`,
+    [`positive`, `negative`],
+    { replaying: false },
+  )
+  let enteredScale = false
+  afterAll(() => {
+    if (enteredScale) scaleReach.assertReached()
+    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+      console.info(`Set scale reach`, Object.fromEntries(scaleReach.counts()))
+  })
+  it.each([false, true])(
+    `keeps flat Set matching off the call stack: isolated=%s`,
+    (broken) => {
+      enteredScale = true
+      scaleReach.beginHistory()
+      checkSetChain(13, broken, false)
+      scaleReach.reach(broken ? `negative` : `positive`)
+    },
+  )
 })

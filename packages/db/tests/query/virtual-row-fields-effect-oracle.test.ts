@@ -48,6 +48,7 @@ import { afterAll, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { Query, coalesce, eq } from '../../src/query/index.js'
 import { createEffect } from '../../src/query/effect.js'
+import { createTransaction } from '../../src/transactions.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
@@ -927,3 +928,283 @@ test(`preserves later interval judgments after an invalid unknown update`, () =>
   const update = expectedEffectDelta(before, after)
   checkEffectDelta(calibrationLedger(update, keyFor), update, active)
 })
+
+/**
+ * Membership is independent of the selected value's comparison domain. A fresh
+ * callable or opaque instance may compare unequal when the graph retracts a
+ * transient join contribution, but an absent occurrence still cannot update.
+ * These histories also coalesce legal source transactions inside a real
+ * optimistic-transaction scheduler scope. Their before/after source snapshots
+ * determine membership independently of output multiplicities.
+ *
+ * The rich-value observation records its kind and callable/readable result.
+ * It does not claim exact instance identity for a re-evaluated projection.
+ * Nondeterministic projections are not needed to expose this membership law.
+ */
+type BoundaryRepresentation = `scalar` | `function` | `private`
+class BoundaryValue {
+  #label: string
+  constructor(label: string) {
+    this.#label = label
+  }
+  read() {
+    return this.#label
+  }
+}
+const boundaryHistories = ([`scalar`, `function`, `private`] as const).flatMap(
+  (representation) =>
+    ([`single`, `join`] as const).flatMap((kind) =>
+      [false, true].flatMap((present) =>
+        [false, true].map((grouped) => ({
+          representation,
+          kind,
+          present,
+          grouped,
+        })),
+      ),
+    ),
+)
+function boundaryId(history: (typeof boundaryHistories)[number]) {
+  return `${history.representation}/${history.kind}/${history.present}/${history.grouped}`
+}
+const boundaryCuts = [`initial`, `sequence`, `absent`, `reentry`, `next-use`]
+const boundaryReach = createOracleReach(
+  `Effect membership independent of projection equality`,
+  boundaryHistories.flatMap((history) =>
+    boundaryCuts.map((cut) => `${boundaryId(history)}/${cut}`),
+  ),
+  { replaying: false },
+)
+let enteredBoundary = false
+afterAll(() => {
+  if (enteredBoundary) boundaryReach.assertReached()
+  if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+    console.info(
+      `Effect membership reach`,
+      Object.fromEntries(boundaryReach.counts()),
+    )
+})
+function boundaryModelRows(
+  kind: `single` | `join`,
+  representation: BoundaryRepresentation,
+  left: SourceState,
+  right: SourceState,
+): Array<ProjectedRow> {
+  return expectedEffectRows(kind, left, right).map((row) => ({
+    ...row,
+    payloadKind: representation,
+    payload: row.label,
+  }))
+}
+function captureBoundaryEvent(event: DeltaEvent): RecordedEvent {
+  const capture = (value: unknown) => {
+    const row = captureSelected(value) as Record<string, unknown>
+    const payload = row.payload
+    return {
+      ...row,
+      payloadKind:
+        typeof payload === `function`
+          ? `function`
+          : payload instanceof BoundaryValue
+            ? `private`
+            : `scalar`,
+      payload:
+        typeof payload === `function`
+          ? payload()
+          : payload instanceof BoundaryValue
+            ? payload.read()
+            : payload,
+    }
+  }
+  return {
+    type: event.type,
+    key: event.key,
+    value: capture(event.value),
+    ...(`previousValue` in event
+      ? { previousValue: capture(event.previousValue) }
+      : {}),
+  }
+}
+declareOracle({ model: [boundaryModelRows], grammar: [boundaryHistories] })
+test.each(boundaryHistories)(
+  `classifies callback-visible membership across coalesced source histories: %j`,
+  async (history) => {
+    enteredBoundary = true
+    boundaryReach.beginHistory()
+    const main: SourceRow = {
+      id: `a`,
+      parentId: `unused`,
+      side: `left`,
+      label: `v0`,
+    }
+    const anchor: SourceRow = {
+      id: `anchor`,
+      parentId: `unused`,
+      side: `left`,
+      label: `anchor`,
+    }
+    const joined: SourceRow = {
+      id: `r`,
+      parentId: `a`,
+      side: `right`,
+      label: `right`,
+    }
+    const state: SourceState = {
+      id: `boundary-left`,
+      base: history.present ? [main, anchor] : [anchor],
+      origins: new Map(),
+    }
+    const rightState: SourceState = {
+      id: `boundary-right`,
+      base: [joined],
+      origins: new Map(),
+    }
+    const left = createSource(state, gate())
+    const right = createSource(rightState, gate())
+    const ledger: Ledger = { batches: [], named: [] }
+    const active: KeyIntervals = new Map()
+    const failures: Array<unknown> = []
+    const callbackErrors: Array<unknown> = []
+    let effect: ReturnType<typeof createEffect> | undefined
+    let before: Array<ProjectedRow> = []
+    let checkedBatch = 0
+    let checkedNamed = 0
+    const cut = async (name?: string) => {
+      await flushPromises()
+      const after = boundaryModelRows(
+        history.kind,
+        history.representation,
+        state,
+        rightState,
+      )
+      try {
+        checkEffectDelta(
+          {
+            batches: ledger.batches.slice(checkedBatch),
+            named: ledger.named.slice(checkedNamed),
+          },
+          expectedEffectDelta(before, after),
+          active,
+        )
+        expect(callbackErrors).toStrictEqual([])
+      } catch (error) {
+        failures.push(
+          new Error(`membership cut ${name ?? `individual action`}`, {
+            cause: error,
+          }),
+        )
+      }
+      before = after
+      checkedBatch = ledger.batches.length
+      checkedNamed = ledger.named.length
+      if (name) boundaryReach.reach(`${boundaryId(history)}/${name}`)
+    }
+    // The model applies the authored source operation directly. Production
+    // receives the same operation through public sync writes and scheduling.
+    const apply = (type: `insert` | `delete` | `update`, label: string) => {
+      const row = { ...main, label }
+      state.base =
+        type === `delete`
+          ? state.base.filter((value) => value.id !== main.id)
+          : type === `insert`
+            ? [...state.base, row]
+            : state.base.map((value) => (value.id === main.id ? row : value))
+      left.utils.begin()
+      left.utils.write({ type, value: row })
+      left.utils.commit()
+    }
+    await checkWithCleanup(async () => {
+      await Promise.all([left.preload(), right.preload()])
+      effect = createEffect({
+        query: () => {
+          const base = new Query().from({ a: left })
+          const project = (a: SourceValue, b?: SourceValue) => {
+            const label = a.label
+            const payload =
+              history.representation === `function`
+                ? () => label
+                : history.representation === `private`
+                  ? new BoundaryValue(label)
+                  : label
+            return {
+              ...selectSource(a),
+              ...(history.kind === `join`
+                ? {
+                    rightLabel: b?.label,
+                    rightKey: b?.$key,
+                    rightCollectionId: b?.$collectionId,
+                    rightOrigin: b?.$origin,
+                    rightPending: b?.$hasPendingWrites,
+                  }
+                : {}),
+              payload,
+            }
+          }
+          return history.kind === `join`
+            ? base
+                .leftJoin({ b: right }, ({ a, b }) => eq(a.id, b.parentId))
+                .fn.select(({ a, b }) => project(a, b))
+            : base.fn.select(({ a }) => project(a))
+        },
+        onBatch: (events) => {
+          ledger.batches.push(events.map(captureBoundaryEvent))
+        },
+        onEnter: (event) => {
+          ledger.named.push({ route: `enter`, ...captureBoundaryEvent(event) })
+        },
+        onUpdate: (event) => {
+          ledger.named.push({ route: `update`, ...captureBoundaryEvent(event) })
+        },
+        onExit: (event) => {
+          ledger.named.push({ route: `exit`, ...captureBoundaryEvent(event) })
+        },
+        onError: (error) => callbackErrors.push(error),
+        onSourceError: (error) => callbackErrors.push(error),
+      })
+      await cut(`initial`)
+      const commands: Array<readonly [`insert` | `delete`, string]> =
+        history.present
+          ? [
+              [`delete`, `v0`],
+              [`insert`, `v1`],
+              [`delete`, `v1`],
+            ]
+          : [
+              [`insert`, `v0`],
+              [`delete`, `v0`],
+              [`insert`, `v1`],
+            ]
+      if (history.grouped) {
+        createTransaction({ mutationFn: async () => {} }).mutate(() => {
+          for (const [type, label] of commands) apply(type, label)
+        })
+      } else {
+        for (const [type, label] of commands) {
+          apply(type, label)
+          await cut()
+        }
+      }
+      await cut(`sequence`)
+      if (!history.present) apply(`delete`, `v1`)
+      await cut(`absent`)
+      apply(`insert`, `v2`)
+      await cut(`reentry`)
+      apply(`update`, `v3`)
+      await cut(`next-use`)
+      if (failures.length)
+        throw new AggregateError(failures, `Effect membership history failed`, {
+          cause: failures[0],
+        })
+    }, [
+      async () => {
+        await effect?.dispose()
+      },
+      async () => {
+        await right.cleanup()
+      },
+      async () => {
+        await left.cleanup()
+      },
+    ])
+  },
+)

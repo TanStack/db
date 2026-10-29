@@ -337,6 +337,7 @@ export function createEffect<
     effect,
     query: config.query,
     skipInitial: config.skipInitial ?? false,
+    observesUpdates: Boolean(config.onUpdate || config.onBatch),
     onBatchProcessed,
     onHealthChange: config.onHealthChange,
     onSourceError: (error: Error) => {
@@ -401,6 +402,7 @@ interface EffectPipelineRunnerConfig<
 > {
   query: EffectQueryInput<any>
   skipInitial: boolean
+  observesUpdates: boolean
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
@@ -483,12 +485,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
-  // Callback-visible result. Held repair deltas are classified against this
-  // last coherent membership rather than their net multiplicity alone.
+  // The preceding coherent result, including the skipped initial baseline.
+  // Multiplicity and value equality alone cannot determine prior membership.
   private readonly publishedRows = new Map<unknown, TRow>()
 
   // skipInitial state
   private readonly skipInitial: boolean
+  private readonly observesUpdates: boolean
   private initialLoadComplete = false
   // The Effect's initial gate: latched when every
   // initial load has settled, with or without skipInitial. After it,
@@ -514,6 +517,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   constructor(config: EffectPipelineRunnerConfig<TRow, TKey>) {
     this.skipInitial = config.skipInitial
+    this.observesUpdates = config.observesUpdates
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
     this.onHealthChange = config.onHealthChange
@@ -1059,7 +1063,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     const shouldPublish = !this.skipInitial || this.initialLoadComplete
-    const tracksPublishedRows = this.orderedLoaders.size > 0
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
@@ -1067,14 +1070,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const event = classifyDelta<TRow, TKey>(
         key as TKey,
         changes,
-        tracksPublishedRows ? this.publishedRows : undefined,
+        this.publishedRows,
+        shouldPublish && this.observesUpdates,
       )
       if (event) {
-        if (tracksPublishedRows) {
-          if (event.type === `exit`) this.publishedRows.delete(key)
-          else this.publishedRows.set(key, event.value)
-        }
-        if (shouldPublish) events.push(event)
+        if (event.type === `exit`) this.publishedRows.delete(key)
+        else this.publishedRows.set(key, event.value)
+        if (shouldPublish && (event.type !== `update` || this.observesUpdates))
+          events.push(event)
       }
     }
 
@@ -1319,18 +1322,17 @@ function accumulateEffectChanges<T>(
   return acc
 }
 
-/** Interpret a D2 batch against callback-visible state when a window holds it. */
+/** Interpret a D2 batch against the preceding coherent result membership. */
 function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
-  publishedRows?: ReadonlyMap<unknown, TRow>,
+  publishedRows: ReadonlyMap<unknown, TRow>,
+  observesUpdates: boolean,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
-  const wasPresent = publishedRows ? publishedRows.has(key) : deletes > 0
-  const previousValue = publishedRows?.get(key) ?? deleteValue
-  const isPresent = publishedRows
-    ? Number(wasPresent) + inserts - deletes > 0
-    : inserts > 0
+  const wasPresent = publishedRows.has(key)
+  const previousValue = publishedRows.get(key) ?? deleteValue
+  const isPresent = Number(wasPresent) + inserts - deletes > 0
 
   if (!wasPresent && isPresent) {
     // Row entered the query result
@@ -1347,10 +1349,10 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    !deepEquals(previousValue, insertValue)
+    (!observesUpdates || !deepEquals(previousValue, insertValue))
   ) {
-    // Equal insert/delete values can cancel an intermediate LEFT-join row
-    // within this graph run. Only a changed final value is an update.
+    // Presence is already established. Compare values only for a consumer that
+    // observes updates; otherwise refresh the retained value for a later exit.
     return {
       type: `update`,
       key,

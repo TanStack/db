@@ -1900,6 +1900,15 @@ reach count 1. Original-matcher and greedy mutants fail work and equality
 assertions respectively. This bounds the stated flat-member family, not nested
 graph complexity, changing getters, arbitrary graphs or every comparator caller.
 
+The subsequent high-review repair adds `utils.42`: generated Gray-code
+assignment chains vary length (4–64 members), insertion order, and an isolated
+column. Both 100-run campaigns reach `assignment` and `isolated` 200 times
+combined. Two finite 8,192-member witnesses use the same independent bijection
+or isolated-column judgment. They expose recursive matching depth, independently
+of arbitrary nested-value depth. The iterative matcher preserves reassignment,
+shares active ancestors, and takes a direct diagonal path for aligned members.
+See [the high-review evidence](oracle-reviews/effect-startup-high-review.md).
+
 The [Duration query equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/duration-query-equality-oracle.test.ts)
 uses ten public fields to predict direct BasicIndex/BTreeIndex exact lookups and
 public `eq` snapshots before and after indexing. The `in` evaluator owner also
@@ -5808,6 +5817,20 @@ production passes all 216 owner tests and the combined 619 targeted tests.
 Native histories and all 5,512 reach cells are unchanged. See the follow-up's
 [calibration evidence](oracle-reviews/effect-startup-delta.md#key-interval-checker-calibration)
 for the new owner fingerprint and the limits of the continuity claim.
+
+The subsequent high-review repair extends the same owner with 24 finite
+histories crossing scalar/callable/private-field payloads, one source/LEFT join,
+initially absent/present membership, and separate/coalesced source transactions.
+The independent source snapshots still determine the full delta. Both callback
+channels preserve event multiplicity, previous readable payloads, and active key
+intervals across initial, sequence, absent, reentry and next-use cuts. All 120
+new reach cells have count 1. On unchanged `d97c1aaf4`, 14 histories fail;
+retaining preceding result membership repairs them without relying on payload
+equality. The original classifier and a net-count-only classifier fail these
+comparisons. This finite extension does not claim exact rich-payload instance
+identity, arbitrary nondeterministic projections, changing join keys, provider
+schedules or framework behavior. The earlier scalar and ordered-repair limits
+remain. See [the high-review evidence](oracle-reviews/effect-startup-high-review.md).
 
 ### RC bound schema mutation receivers (2026-10-28)
 

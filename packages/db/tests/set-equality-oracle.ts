@@ -184,3 +184,102 @@ declareOracle({
   check: [checkSetEquality, checkSetFamily],
   grammar: [setShapes, setWorkSizes, setMemberKinds],
 })
+
+/**
+ * An augmenting chain has a known bijection without solving production's
+ * matching problem. Gray-code columns differ in one coordinate. Each left
+ * word permits the two adjacent columns by using a plain record in that
+ * coordinate. Its other coordinates use the column's keyed classes. The final
+ * left word names column zero exactly. Matching every earlier word to its
+ * successor and the final word to zero is a complete assignment witness.
+ *
+ * A changed leaf in the final right column instead isolates that column:
+ * every left leaf is zero, so no left word can match it. These are sufficient
+ * positive and negative judgments for this grammar, not a general graph solver.
+ * Rotation varies Set insertion order. Flat matching depth must not become
+ * JavaScript call depth, even though arbitrary nested-value depth is unbounded
+ * by this instrument. Small generated chains and a finite 8,192-member chain
+ * share the same descriptor judgment and production comparison.
+ */
+type WordDescriptor = ReadonlyArray<SetMemberSpec>
+export function setChainDescriptors(
+  bits: number,
+  broken: boolean,
+  rotate: boolean,
+) {
+  const size = 2 ** bits
+  const column = (index: number): Array<SetMemberSpec> => {
+    const gray = index ^ (index >> 1)
+    return Array.from({ length: bits }, (_, coordinate) => ({
+      kind: ((gray >> coordinate) & 1) === 0 ? `first` : `second`,
+      value: broken && index === size - 1 ? 1 : 0,
+    }))
+  }
+  const right = Array.from({ length: size }, (_, index) => column(index))
+  const left = Array.from({ length: size }, (_, index) => {
+    const start = index === size - 1 ? 0 : index
+    const a = column(start).map((member) => ({ ...member, value: 0 }))
+    const b = column(index === size - 1 ? 0 : index + 1)
+    return a.map((member, coordinate): SetMemberSpec => ({
+      ...member,
+      kind: member.kind === b[coordinate]!.kind ? member.kind : `plain`,
+    }))
+  })
+  const witness = left.map((_, index) => (index + 1) % size)
+  if (rotate) {
+    right.push(right.shift()!)
+    for (const [index, slot] of witness.entries())
+      witness[index] = (slot + size - 1) % size
+  }
+  return { left, right, witness }
+}
+function expectedChainEquality(
+  left: ReadonlyArray<WordDescriptor>,
+  right: ReadonlyArray<WordDescriptor>,
+  witness: ReadonlyArray<number>,
+): boolean {
+  const compatible = (a: WordDescriptor, b: WordDescriptor) =>
+    a.length === b.length &&
+    a.every(
+      (member, index) =>
+        member.value === b[index]!.value &&
+        (member.kind === `plain` ||
+          b[index]!.kind === `plain` ||
+          member.kind === b[index]!.kind),
+    )
+  if (
+    right.some((word) =>
+      left.every((candidate) => !compatible(candidate, word)),
+    )
+  )
+    return false
+  if (
+    left.length === right.length &&
+    new Set(witness).size === right.length &&
+    witness.every(
+      (slot, index) =>
+        slot >= 0 &&
+        slot < right.length &&
+        compatible(left[index]!, right[slot]!),
+    )
+  )
+    return true
+  throw new Error(
+    `Chain grammar supplied neither a bijection nor an isolated-column witness`,
+  )
+}
+export function checkSetChain(bits: number, broken: boolean, rotate: boolean) {
+  const { left, right, witness } = setChainDescriptors(bits, broken, rotate)
+  const expected = expectedChainEquality(left, right, witness)
+  const word = (specs: WordDescriptor) => [
+    ...authoredSet(specs, `flat`, () => {}),
+  ]
+  expect(deepEquals(new Set(left.map(word)), new Set(right.map(word)))).toBe(
+    expected,
+  )
+}
+declareOracle({
+  model: [expectedChainEquality],
+  check: [checkSetChain],
+  grammar: [setChainDescriptors],
+})
