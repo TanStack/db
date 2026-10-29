@@ -3354,9 +3354,11 @@ describe(`source failure and health oracle`, () => {
     ]),
   ]
   // Each prefix also runs as a fixed example, first in every run and on top
-  // of the random histories, with a direct subscriber and the `join` shape,
-  // which queries both sources that the prefixes drive. The reach check fails
-  // for a declared state that these examples do not enter (#2287).
+  // of the random histories, with a direct subscriber. A prefix runs the shape
+  // that prefixShapes gives it, as a generated history with that prefix does,
+  // and otherwise the `join` shape, which queries both sources that the
+  // prefixes drive. The reach check fails for a declared state that these
+  // examples do not enter (#2287).
   const historyExamples = reachPrefixes.map(
     (prefix): [[Shape, Array<Step>], boolean] => [
       [prefixShapes.get(prefix) ?? `join`, [...prefix]],
@@ -7107,17 +7109,16 @@ describe(`lazy join demand grammar`, () => {
       { freq: 2, nil: undefined },
     ),
   })
+  // A history's steps: an optional reach prefix, then generated steps.
+  type LazySteps = {
+    prefix: (typeof lazyReachPrefixes)[number] | null
+    rest: Array<LazyStep>
+  }
   const lazyExample = (
-    prefix: (typeof lazyReachPrefixes)[number] | null,
-    rest: Array<LazyStep>,
+    prefix: LazySteps[`prefix`],
+    rest: LazySteps[`rest`],
     options: Partial<LazyOptions> = {},
-  ): [
-    {
-      prefix: (typeof lazyReachPrefixes)[number] | null
-      rest: Array<LazyStep>
-    },
-    LazyOptions,
-  ] => [
+  ): [LazySteps, LazyOptions] => [
     { prefix, rest },
     {
       asyncChildReady: false,
@@ -7171,7 +7172,7 @@ describe(`lazy join demand grammar`, () => {
           fc.option(fc.constantFrom(...lazyReachPrefixes), { freq: 4 }),
           fc.array(step, { maxLength: 10 }),
         )
-        .map(([prefix, rest]) => ({ prefix, rest })),
+        .map(([prefix, rest]): LazySteps => ({ prefix, rest })),
       lazyOptions,
     ],
     oraclePropertyOptions(100, `source-health.lazy-demand`, {
