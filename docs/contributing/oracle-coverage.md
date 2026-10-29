@@ -5774,7 +5774,11 @@ Limits: eager controlled core sources, scalar rows, one mutation per source,
 and these named paths. No real provider/framework, arbitrary scheduling,
 ordered repair, same-source overlap, callback-input sanitization or exact
 internal graph-run callback-count guarantee follows. P09 requires production
-repair after the full oracle campaign; this entry makes no closure claim.
+repair. The focused Effect follow-up restores the exact accepted owner and its
+`test:oracles` entry before production changes; current-main RED, GREEN and
+mutant results remain pending. See
+[the Effect startup follow-up](oracle-reviews/effect-startup-delta.md). This entry
+makes no closure claim.
 
 ### RC bound schema mutation receivers (2026-10-28)
 
