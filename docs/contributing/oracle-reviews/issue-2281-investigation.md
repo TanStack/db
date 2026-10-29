@@ -907,3 +907,19 @@ final loop restarted both existing Collections. The local `loss-trace.log`
 records those restarts at lines 101 and 110, followed by the missing-row
 source-head mismatch at line 119. This supplies the earlier restart defect
 witness; it does not retroactively supply the focused campaign's missing reach.
+
+
+### Committed-tree verification (2026-10-29)
+
+Implementation commit `20e2ad9f81c91c60e5d9c219892c6421ae12baca` contains the
+reviewed repair and both approved suggestions. Its pre-commit hook removed an
+unnecessary test-only non-null assertion and merged duplicate imports in the
+SQLite oracle. The merged import then received a formatting correction. These
+changes preserve runtime behavior, model rules, histories and comparisons.
+The SQLite resume owner passes again (61 reported tests, no type errors), as
+does Browser `tsc --noEmit`. Logs: `prep-committed-core-green.log` and
+`prep-committed-browser-tsc.log`. All five production files retain their
+previously verified content. The 17-file manifest excluding this record is
+`e2fda4fe3c0962594f71929acd20c4e8c03b79cdded5e6713594168525a53111`. This identity
+includes the accepted driver simplification and the hook's test-only edits.
+The earlier full runtime, real-host and mutant evidence retains its scope.

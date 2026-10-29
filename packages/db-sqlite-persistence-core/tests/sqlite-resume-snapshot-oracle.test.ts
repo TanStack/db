@@ -5,7 +5,8 @@ import { createCollection } from '@tanstack/db'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
-  oracleReplayTest, oracleRuns 
+  oracleReplayTest,
+  oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
