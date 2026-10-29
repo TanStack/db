@@ -12,12 +12,13 @@ type campaigns remain active.
 
 For the staged RC publication, the maintainer temporarily removed the duplicate
 test matrices and DB report merge from the Release workflow on 2026-10-29.
-The PR workflow retains its test gates; Release retains lint and release-script
-checks. Restore the release test matrices and report merge after the initial
-npm publications and permissions for Convex Collection, Preact DB, and React
-Router with DB are arranged. Those three package manifests are temporarily
-private, so Changesets excludes them from publication. This gate deferral does
-not close the counterexamples in [#2294](https://github.com/TanStack/db/issues/2294),
+Release run [40910451885](https://github.com/TanStack/db/actions/runs/40910451885)
+succeeded and reported all 20 included RC versions and the two stable versions
+already published on npm. The release test matrices and report merge are now
+restored. Convex Collection, Preact DB, and React Router with DB remain temporarily
+private until their initial npm publications and permissions are arranged.
+The successful release does not close the counterexamples in
+[#2294](https://github.com/TanStack/db/issues/2294),
 [#2281](https://github.com/TanStack/db/issues/2281), or
 [#2296](https://github.com/TanStack/db/issues/2296), or the reach gap in
 [#2287](https://github.com/TanStack/db/issues/2287).
