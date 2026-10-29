@@ -486,7 +486,7 @@ const checkSettlement = async (seed: number | undefined): Promise<void> => {
           )
           const expectedStatuses = Object.fromEntries([
             ...emptyReceipts.map((name) => [name, `fulfilled`]),
-            // A plain rollback rejects isPersisted with no reason (core
+            // A plain rollback rejects when('settled') with no reason (core
             // contract); the waiter names the rollback with an Error.
             ...rolledBack.flatMap(({ wait, receipt }) => [
               [receipt, undefined],
@@ -544,7 +544,7 @@ const checkSettlement = async (seed: number | undefined): Promise<void> => {
         // Receipts of transactions rolled back before they commit.
         const rolledBack: Array<{ wait: string; receipt: string }> = []
         // Start a transaction on one commit path. An auto-commit has no
-        // commit() caller; its receipt is isPersisted, which settles like a
+        // commit() caller; its receipt is when('settled'), which settles like a
         // manual commit's.
         const start = (
           commit: SettlementCommit,
@@ -576,7 +576,7 @@ const checkSettlement = async (seed: number | undefined): Promise<void> => {
         }
         let hasPrimaryFailure = false
         // No failure, manual or auto-committed, escapes as an unhandled
-        // process rejection, and none is logged again: isPersisted reports
+        // process rejection, and none is logged again: when('settled') reports
         // it.
         const { rejections: unhandled, cleanup: cleanupUnhandled } =
           captureUnhandledRejections()
@@ -902,7 +902,7 @@ const checkSettlement = async (seed: number | undefined): Promise<void> => {
           },
         ],
         // A failed auto-commit with the default option, and a failed
-        // action, settle through isPersisted only.
+        // action, settle through when('settled') only.
         [
           {
             sharedKeys: false,
