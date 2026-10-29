@@ -8,7 +8,19 @@ their exact recoverable source snapshot and retained evidence. Their detailed
 campaign entries below remain a lossless historical record; those named files
 and appended slices are deferred registrations, not active release coverage or
 closed laws. Original root metadata and the 24 nullable-facade/public-output
-type campaigns remain active. Every release gate remains required.
+type campaigns remain active.
+
+For the staged RC publication, the maintainer temporarily removed the duplicate
+test matrices and DB report merge from the Release workflow on 2026-10-29.
+The PR workflow retains its test gates; Release retains lint and release-script
+checks. Restore the release test matrices and report merge after the initial
+npm publications and permissions for Convex Collection, Preact DB, and React
+Router with DB are arranged. Those three package manifests are temporarily
+private, so Changesets excludes them from publication. This gate deferral does
+not close the counterexamples in [#2294](https://github.com/TanStack/db/issues/2294),
+[#2281](https://github.com/TanStack/db/issues/2281), or
+[#2296](https://github.com/TanStack/db/issues/2296), or the reach gap in
+[#2287](https://github.com/TanStack/db/issues/2287).
 
 Use [Oracle Testing Rubric](oracle-rubric.md) when adding or reviewing a
 law. This map identifies existing owners, their judgment, and their limits. It
