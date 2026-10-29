@@ -35,7 +35,7 @@ import { neonRealtimeDriver } from './neon/neon-realtime-driver'
 
 const property = `adapter-conformance.eager-live-source.neon-realtime`
 const driver = neonRealtimeDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
+const historyArb = eagerLiveSourceHistoryArb(driver)
 // `field-removed` needs a held row with a note and a later upsert without
 // one; at 400 histories every seed tried reached it at least 11 times.
 const runs = 400
@@ -43,13 +43,9 @@ const runs = 400
 const campaignTimeoutMs = 120_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(
-    property,
-    reachStatesFor(driver.capabilities),
-    {
-      minimum: 5,
-    },
-  )
+  const reach = createOracleReach(property, reachStatesFor(driver), {
+    minimum: 5,
+  })
   await fc.assert(eagerLiveSourceProperty(driver, reach), options)
   return reach
 }

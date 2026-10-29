@@ -34,16 +34,17 @@ import { trailBaseConformanceDriver } from './conformance-driver'
 
 const property = `adapter-conformance.eager-live-source.trailbase`
 const driver = trailBaseConformanceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
+const historyArb = eagerLiveSourceHistoryArb(driver)
 // `field-removed` needs a held row with a note and a later upsert without
-// one; at 400 histories every seed tried reached it at least 11 times.
-const runs = 400
+// one. With value kinds, 400 histories reached it as few as 7 times across
+// eight seeds, so TrailBase runs 600.
+const runs = 600
 const campaignTimeoutMs = 120_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {
   const reach = createOracleReach(
     property,
-    reachStatesFor(driver.capabilities),
+    reachStatesFor(driver),
     {
       minimum: 5,
     },

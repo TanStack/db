@@ -5974,8 +5974,16 @@ READY-2/3/4, HEALTH-1, PUB-1/2/3/7, FID-4, LIFE-2/5/10, HEALTH-5, EVID-1/2/3
 (`await-evidence`), HEALTH-2 and RETRY-1 for retried failures
 (`retry-policy`), RECON-1 (`transport-reconnect`), RENEW-1
 (`capability-renewal`), READY-8/10 with PUB-5/9 for batches committed
-during the initial fetch (`listen-before-fetch`), and FID-1 removal of an
-optional field. Every driver is also
+during the initial fetch (`listen-before-fetch`), FID-1 removal of an
+optional field, and FID-1 typed values per declared `valueKinds` on the
+initial load and live changes. Its reference driver is also the generated
+witness for core's synced commit change detection with `-0` and `0`
+(maintainer decision 2026-10-29: distinct row values; `sameRowValue`).
+Open in core, owner `packages/db/tests/change-event-history-oracle.test.ts`
+and the subscription lifecycle publication oracle, witness needed: an
+optimistic or local-only update and a subscription reconciliation that
+change only `-0` to `0` (`collectOptimisticChanges` and `subscription.ts`
+still compare with `deepEquals`). Every driver is also
 checked for the rows at the moment status becomes `ready`. Its model is an independent row Map and sync-run
 phase; drivers supply only a controlled provider and declare whether they
 commit per batch or per change. PUB-1 checks every change publication during
@@ -5991,8 +5999,9 @@ READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
 (subscription kept open after an error state) behind them. Limits: no
 on-demand loading, mutation handlers, or reload; publications are observed
 through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
-that rejects before its timeout; FID-1 covers one optional string field, not
-value domains; the Neon and TrailBase claims cover
+that rejects before its timeout; FID-1 covers ten value kinds, not Temporal,
+Map, Set, typed arrays, class instances, or field identity; the FID-3 and
+PUB-4 rejection lane is not built; the Neon and TrailBase claims cover
 controlled providers, not real clients. Owner:
 `packages/db-adapter-conformance`. Evidence: the package README.
 Migration goal (maintainer, 2026-10-29): every collection adapter gets a

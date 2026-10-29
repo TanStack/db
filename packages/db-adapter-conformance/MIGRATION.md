@@ -162,3 +162,26 @@ document update removes`) failed the same way.
   - **Fix:** the RxDB sync config declares `rowUpdateMode: 'full'`.
   - **GREEN:** RxDB suite 23/23; four repeats of the random campaign pass.
   - **Mutant:** removing `rowUpdateMode` fails FID-1 in both campaigns.
+- **2026-10-29, eager live source, typed values (FID-1).** A driver declares
+  `valueKinds`, the kinds of its `valueDomain`; rows then carry a `value`
+  drawn from edge cases of each kind, compared by an independent strict
+  description (`describeValue`). Reach is declared per kind and per path
+  (initial load, live change). A `retouch` change re-delivers a held row
+  with every zero's sign flipped (`zero-sign-flipped`), or equal when the
+  domain has no `-0`.
+  - **Calibration:** `dates-as-strings` (live changes), `bigints-as-numbers`
+    (initial load), `drops-nulls`, `loses-negative-zero`, each FID-1
+    (values). A path ablation shows the change-path states need their own
+    deliveries.
+  - **Core defect:** a synced update from `-0` to `0` published no change
+    event (PUB-2), because core compared rows with `deepEquals`. Maintainer
+    decision: `-0` and `0` are distinct row values. The synced commit path
+    now uses `sameRowValue`. A fix applied only at a value's top level
+    survived until the `retouch` dimension, then failed PUB-2.
+  - **Drivers:** RxDB, TrailBase, and Neon declare `jsonValueKinds`. RxDB and
+    TrailBase are GREEN; Neon passes 300 failure-free histories with values
+    and keeps its READY-4 and HEALTH-1 RED. TrailBase now runs 600 histories
+    (`field-removed` fell to 7 at 400).
+  - **Open:** the rejection lane (FID-3, PUB-4); the optimistic and
+    subscription-reconciliation paths in core still compare with
+    `deepEquals` (recorded in the coverage map).

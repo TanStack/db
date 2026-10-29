@@ -29,7 +29,13 @@
  * - **FID-1.** A delivered row is the complete backend row: a row without
  *   the optional `note` has no `note` in the Collection, also when the row
  *   it replaces had one. Fields compare by own property, so an own
- *   `undefined` differs from an absent field.
+ *   `undefined` differs from an absent field. With declared `valueKinds`,
+ *   each row's `value` strictly equals the delivered value, on the initial
+ *   load and on a live change: same type and prototype, `Object.is` for
+ *   numbers, Dates by time, and arrays and plain objects element by element
+ *   with no extra own keys. The law set parameterizes FID-1 by each
+ *   adapter's `valueDomain`; a driver declares the kinds of it this oracle
+ *   generates.
  * - **PUB-7** (capability `complete-snapshot`). A later complete delivery
  *   replaces the rows: keys it omits are gone.
  * - **LIFE-2, LIFE-5.** Cleanup releases the provider subscription. A restart
@@ -105,7 +111,35 @@ export interface ConformanceRow {
   readonly id: number
   readonly title: string
   readonly note?: string
+  /** A value of a declared kind (FID-1); present only with `valueKinds`. */
+  readonly value?: unknown
 }
+
+/**
+ * Value kinds from FID-1's `valueDomain`. `jsonValueKinds` are those a JSON
+ * backend represents: `-0`, Dates, and bigints are not among them.
+ */
+export type ValueKind =
+  | `string`
+  | `integer`
+  | `float`
+  | `negative-zero`
+  | `boolean`
+  | `null`
+  | `date`
+  | `bigint`
+  | `array`
+  | `object`
+
+export const jsonValueKinds: ReadonlyArray<ValueKind> = [
+  `string`,
+  `integer`,
+  `float`,
+  `boolean`,
+  `null`,
+  `array`,
+  `object`,
+]
 
 /** One change in a provider's committed batch. */
 export type ProviderChange =
@@ -204,6 +238,12 @@ export interface EagerLiveSourceDriver {
    */
   readonly changeCommits: `per-batch` | `per-change`
   /**
+   * The value kinds the backend represents (FID-1). Rows then carry a
+   * `value` of one of these kinds; the driver delivers it in the backend's
+   * own form, and the Collection must show it decoded.
+   */
+  readonly valueKinds?: ReadonlyArray<ValueKind>
+  /**
    * Console diagnostics the adapter declares (HEALTH-5). Any other
    * `console.error` or `console.warn` call is a violation.
    */
@@ -257,7 +297,7 @@ export type EagerLiveSourceStep =
     }
   | {
       readonly kind: `changes`
-      readonly changes: ReadonlyArray<ProviderChange>
+      readonly changes: ReadonlyArray<HistoryChange>
     }
   | {
       readonly kind: `wait`
@@ -271,26 +311,104 @@ export type EagerLiveSourceStep =
   | { readonly kind: `renew` }
   | { readonly kind: `restart` }
 
+/**
+ * A change in a generated batch. `retouch` re-delivers a row the source
+ * holds: the held key at position `id`, counted modulo the held keys in key
+ * order, so it rarely misses. With `negative-zero` in the value kinds, every zero in its
+ * value changes sign, so the row differs only by -0 versus 0. Without it,
+ * the re-delivery is equal. The model resolves it to an upsert.
+ */
+export type HistoryChange =
+  ProviderChange | { readonly type: `retouch`; readonly id: number }
+
 export type EagerLiveSourceHistory = ReadonlyArray<EagerLiveSourceStep>
 
-const rowArb: fc.Arbitrary<ConformanceRow> = fc.record(
-  {
+/**
+ * Edge cases for each value kind, as factories so no two rows share an
+ * object. They cover FID-1's named cases: explicit falsy values, embedded
+ * newlines, integers past 2^31 and at 2^53 - 1, bigints beyond 2^53, Dates
+ * with milliseconds and before the epoch, and nested objects and arrays.
+ */
+const valueExamples: Record<ValueKind, ReadonlyArray<() => unknown>> = {
+  string: [() => ``, () => `plain`, () => `two\nlines`, () => `ünïcødé ✓`],
+  integer: [() => 0, () => -7, () => 2 ** 31, () => Number.MAX_SAFE_INTEGER],
+  float: [() => 0.5, () => -1.25, () => 1e-7, () => Number.MAX_VALUE],
+  // Nested too, so an equality that tells -0 from 0 only at the root fails.
+  'negative-zero': [() => -0, () => [-0], () => ({ z: -0 })],
+  boolean: [() => true, () => false],
+  null: [() => null],
+  date: [
+    () => new Date(0),
+    () => new Date(Date.UTC(2026, 9, 29, 12, 34, 56, 789)),
+    () => new Date(-86_400_000),
+  ],
+  bigint: [() => 9_007_199_254_740_993n, () => -(2n ** 63n), () => 0n],
+  // Zeros inside containers give a retouch a sign to flip.
+  array: [() => [], () => [0, `a`, null], () => [[1], [true]]],
+  object: [
+    () => ({}),
+    () => ({ a: 0, b: `x` }),
+    () => ({ nested: { deep: [1, { k: null }] } }),
+    () => ({ '': false }),
+  ],
+}
+
+function valueArb(kinds: ReadonlyArray<ValueKind>): fc.Arbitrary<unknown> {
+  return fc.oneof(
+    ...kinds.map((kind) =>
+      fc
+        .integer({ min: 0, max: valueExamples[kind].length - 1 })
+        .map((index) => valueExamples[kind][index]!()),
+    ),
+  )
+}
+
+function rowArb(kinds: ReadonlyArray<ValueKind>): fc.Arbitrary<ConformanceRow> {
+  const fields = {
     id: fc.integer({ min: 1, max: 5 }),
     title: fc.constantFrom(`a`, `b`, `c`),
     note: fc.constantFrom(`x`, `y`),
-  },
-  { requiredKeys: [`id`, `title`] },
-)
+  }
+  if (kinds.length === 0) {
+    return fc.record(fields, { requiredKeys: [`id`, `title`] })
+  }
+  return fc.record(
+    { ...fields, value: valueArb(kinds) },
+    { requiredKeys: [`id`, `title`, `value`] },
+  )
+}
 
-const changeArb: fc.Arbitrary<ProviderChange> = fc.oneof(
-  rowArb.map((row) => ({ type: `upsert` as const, row })),
-  fc.integer({ min: 1, max: 5 }).map((id) => ({ type: `delete` as const, id })),
-)
+function changeArb(
+  kinds: ReadonlyArray<ValueKind>,
+): fc.Arbitrary<HistoryChange> {
+  const changes: Array<fc.Arbitrary<HistoryChange>> = [
+    rowArb(kinds).map((row) => ({ type: `upsert` as const, row })),
+    fc
+      .integer({ min: 1, max: 5 })
+      .map((id) => ({ type: `delete` as const, id })),
+  ]
+  if (kinds.length > 0) {
+    changes.push(
+      fc
+        .integer({ min: 1, max: 5 })
+        .map((id) => ({ type: `retouch` as const, id })),
+    )
+  }
+  return fc.oneof(...changes)
+}
 
-/** Generates histories whose steps use only `capabilities`. */
+/** What the grammar needs from a driver: its capabilities and value kinds. */
+export type GrammarDomain = Pick<
+  EagerLiveSourceDriver,
+  `capabilities` | `valueKinds`
+>
+
+/** Generates histories whose steps use only the driver's declarations. */
 export function eagerLiveSourceHistoryArb(
-  capabilities: ReadonlySet<EagerLiveSourceCapability>,
+  domain: GrammarDomain,
 ): fc.Arbitrary<EagerLiveSourceHistory> {
+  const { capabilities } = domain
+  const kinds = domain.valueKinds ?? []
   const steps: Array<{
     weight: number
     arbitrary: fc.Arbitrary<EagerLiveSourceStep>
@@ -299,7 +417,7 @@ export function eagerLiveSourceHistoryArb(
       weight: 4,
       arbitrary: fc
         .record({
-          rows: fc.uniqueArray(rowArb, {
+          rows: fc.uniqueArray(rowArb(kinds), {
             selector: (row) => row.id,
             maxLength: 4,
           }),
@@ -314,7 +432,7 @@ export function eagerLiveSourceHistoryArb(
     {
       weight: 6,
       arbitrary: fc
-        .array(changeArb, { maxLength: 3 })
+        .array(changeArb(kinds), { maxLength: 3 })
         .map((changes) => ({ kind: `changes` as const, changes })),
     },
     { weight: 2, arbitrary: fc.constant({ kind: `fail` as const }) },
@@ -363,7 +481,7 @@ export function eagerLiveSourceHistoryArb(
   // outstanding. Without it, two buffered batches that touch one key before
   // the read point are too rare for PUB-5 to be checked.
   const startup = fc
-    .array(changeArb, { minLength: 1, maxLength: 3 })
+    .array(changeArb(kinds), { minLength: 1, maxLength: 3 })
     .map((changes) => ({ kind: `changes` as const, changes }))
   return fc
     .tuple(fc.array(startup, { maxLength: 3 }), history)
@@ -439,22 +557,108 @@ export interface ExpectedObservation {
 }
 
 /**
- * A row's value as the model compares it: its title, then its note when the
- * row has its own `note` property. An own `undefined` shows as `undefined`.
+ * FID-1's strict equality as a canonical description, written here rather
+ * than taken from any codec or equality helper in production. Two values
+ * describe alike exactly when they have the same type and prototype, equal
+ * numbers under `Object.is`, equal Date times, and the same elements or own
+ * enumerable keys, whatever their key order. A value no kind produces, such
+ * as a class instance or an own `undefined`, describes as itself so that it
+ * differs from every generated value.
  */
-function rowValue(row: { readonly title: string; readonly note?: unknown }) {
-  return Object.hasOwn(row, `note`)
+export function describeValue(value: unknown): string {
+  switch (typeof value) {
+    case `string`:
+      return `s${JSON.stringify(value)}`
+    case `number`:
+      return Object.is(value, -0) ? `n-0` : `n${String(value)}`
+    case `boolean`:
+      return `b${String(value)}`
+    case `bigint`:
+      return `i${String(value)}`
+    case `undefined`:
+      return `undefined`
+    case `object`: {
+      if (value === null) return `null`
+      const prototype = Object.getPrototypeOf(value) as unknown
+      if (value instanceof Date && prototype === Date.prototype) {
+        const time = value.getTime()
+        return Number.isNaN(time) ? `d?` : `d${time}`
+      }
+      if (Array.isArray(value) && prototype === Array.prototype) {
+        return `[${value.map(describeValue).join(`,`)}]`
+      }
+      if (prototype === Object.prototype || prototype === null) {
+        const fields = Object.keys(value)
+          .sort()
+          .map(
+            (key) =>
+              `${JSON.stringify(key)}:${describeValue((value as Record<string, unknown>)[key])}`,
+          )
+        return `{${fields.join(`,`)}}`
+      }
+      return `?${Object.prototype.toString.call(value)}`
+    }
+    default:
+      return `?${typeof value}`
+  }
+}
+
+/** The kind of a generated value, for reach. */
+function kindOf(value: unknown): ValueKind {
+  if (value === null) return `null`
+  if (describeValue(value).includes(`n-0`)) return `negative-zero`
+  if (typeof value === `number`) {
+    return Number.isInteger(value) ? `integer` : `float`
+  }
+  if (value instanceof Date) return `date`
+  if (Array.isArray(value)) return `array`
+  return typeof value === `object` ? `object` : (typeof value as ValueKind)
+}
+
+type RowFields = Omit<ConformanceRow, `id`>
+
+/**
+ * A row as the model compares it: its title, then `/note` when the row has
+ * its own `note`, then `#` and the described `value` when it has its own
+ * `value`. An own `undefined` note shows as `undefined`.
+ */
+function rowValue(row: RowFields): string {
+  const head = Object.hasOwn(row, `note`)
     ? `${row.title}/${String(row.note)}`
     : row.title
+  return Object.hasOwn(row, `value`)
+    ? `${head}#${describeValue(row.value)}`
+    : head
+}
+
+/** Title and note, without the value. */
+function rowHead(value: string): string {
+  const mark = value.indexOf(`#`)
+  return mark === -1 ? value : value.slice(0, mark)
+}
+
+/**
+ * Rows the model generated, by description, so that a computed state can be
+ * delivered as rows again (the initial cut's read). Only generated rows are
+ * remembered, never observed ones.
+ */
+const generatedRows = new Map<string, RowFields>()
+
+function modelValue(row: ConformanceRow): string {
+  const { id: _id, ...fields } = row
+  const value = rowValue(fields)
+  generatedRows.set(value, fields)
+  return value
 }
 
 function rowFromValue(id: number, value: string): ConformanceRow {
-  const [title = ``, note] = value.split(`/`)
-  return note === undefined ? { id, title } : { id, title, note }
+  const fields = generatedRows.get(value)
+  if (!fields) throw new Error(`the model lost row ${value}`)
+  return { id, ...fields }
 }
 
 function rowMap(rows: ReadonlyArray<ConformanceRow>): Map<number, string> {
-  return new Map(rows.map((row) => [row.id, rowValue(row)]))
+  return new Map(rows.map((row) => [row.id, modelValue(row)]))
 }
 
 /** The rows a Collection holds, as the model compares them. */
@@ -502,29 +706,66 @@ function rowState(rows: ReadonlyMap<number, string>): RowState {
   return [...rows].sort(([a], [b]) => a - b)
 }
 
+/** A value with the sign of every zero in it changed, nested ones too. */
+function flipZeros(value: unknown): unknown {
+  if (typeof value === `number`) {
+    return value === 0 ? (Object.is(value, -0) ? 0 : -0) : value
+  }
+  if (Array.isArray(value)) return value.map(flipZeros)
+  if (
+    typeof value === `object` &&
+    value !== null &&
+    Object.getPrototypeOf(value) === Object.prototype
+  ) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        flipZeros(item),
+      ]),
+    )
+  }
+  return value
+}
+
 /**
  * Folds one batch onto `rows` in order and returns the changes a provider
- * delivers: a delete of a key it does not hold is dropped. `onChange` sees
- * the rows after each delivered change.
+ * delivers: a delete or retouch of a key it does not hold is dropped, and a
+ * retouch delivers the held row again, its zeros flipped when `flipZeros`.
+ * `onChange` sees the rows after each delivered change; `flipped` counts
+ * retouches that changed a value.
  */
 function foldBatch(
   rows: Map<number, string>,
-  changes: ReadonlyArray<ProviderChange>,
-  onChange: () => void = () => {},
-): Array<ProviderChange> {
+  changes: ReadonlyArray<HistoryChange>,
+  options: { onChange?: () => void; flipZeros?: boolean } = {},
+): { delivered: Array<ProviderChange>; flipped: number } {
   const delivered: Array<ProviderChange> = []
+  let flipped = 0
   for (const change of changes) {
     if (change.type === `upsert`) {
-      rows.set(change.row.id, rowValue(change.row))
-    } else if (rows.has(change.id)) {
+      rows.set(change.row.id, modelValue(change.row))
+      delivered.push(change)
+    } else if (change.type === `delete`) {
+      if (!rows.has(change.id)) continue
       rows.delete(change.id)
+      delivered.push(change)
     } else {
-      continue
+      const keys = [...rows.keys()].sort((a, b) => a - b)
+      if (keys.length === 0) continue
+      const id = keys[change.id % keys.length]!
+      const held = rowFromValue(id, rows.get(id)!)
+      const row =
+        options.flipZeros && Object.hasOwn(held, `value`)
+          ? { ...held, value: flipZeros(held.value) }
+          : held
+      const value = modelValue(row)
+      if (value !== rows.get(id)) flipped++
+      rows.set(id, value)
+      delivered.push({ type: `upsert`, row })
     }
-    delivered.push(change)
-    onChange()
+    options.onChange?.()
   }
-  return delivered
+  return { delivered, flipped }
 }
 
 /** Whether a key held in both lost the `note` it had in `before`. */
@@ -534,7 +775,9 @@ function lostField(
 ): boolean {
   return [...before].some(
     ([id, value]) =>
-      value.includes(`/`) && after.get(id)?.includes(`/`) === false,
+      rowHead(value).includes(`/`) &&
+      after.has(id) &&
+      !rowHead(after.get(id)!).includes(`/`),
   )
 }
 
@@ -569,6 +812,8 @@ type AcceptedStep =
       beforeReady: boolean
       /** Whether an upsert removed a field the row it replaced had. */
       removesField: boolean
+      /** Whether a retouch changed a value only by the sign of a zero. */
+      flipped: boolean
     }
   | { kind: `wait`; txid: number; timeout: boolean }
   | { kind: `fail`; failure: number }
@@ -587,6 +832,8 @@ type AcceptedStep =
 interface ModelOptions {
   changeCommits: EagerLiveSourceDriver[`changeCommits`]
   listenBeforeFetch: boolean
+  /** The value kinds include `negative-zero`, so a retouch flips zeros. */
+  flipZeros: boolean
 }
 
 /** EVID-1: a wait for `txid` fulfills once its batch applied. */
@@ -626,7 +873,9 @@ function initialCut(
       publishable.push(read)
     }
     const prefixes: Array<RowState> = []
-    foldBatch(backend, batch.changes, () => prefixes.push(rowState(backend)))
+    foldBatch(backend, batch.changes, {
+      onChange: () => prefixes.push(rowState(backend)),
+    })
     if (index < seen) return
     if (changeCommits === `per-change`) publishable.push(...prefixes)
     else publishable.push(rowState(backend))
@@ -698,7 +947,9 @@ function stepModel(
       if (state.phase === `loading` && options.listenBeforeFetch) {
         // READY-8: the listener is live, so a batch committed during the
         // fetch reaches the adapter. It shows nothing until the cut.
-        const delivered = foldBatch(state.backend, step.changes)
+        const { delivered, flipped } = foldBatch(state.backend, step.changes, {
+          flipZeros: options.flipZeros,
+        })
         state.lastTxid += 1
         state.buffered.push({ changes: delivered, txid: state.lastTxid })
         return {
@@ -708,6 +959,7 @@ function stepModel(
             txid: state.lastTxid,
             beforeReady: true,
             removesField: false,
+            flipped: flipped > 0,
           },
           publishable: [],
         }
@@ -716,9 +968,10 @@ function stepModel(
       // PUB-3: fold the batch in order. PUB-1: each prefix is a committed
       // state when the provider commits each change alone.
       const prefixes: Array<RowState> = []
-      const delivered = foldBatch(state.rows, step.changes, () =>
-        prefixes.push(rowState(state.rows)),
-      )
+      const { delivered, flipped } = foldBatch(state.rows, step.changes, {
+        onChange: () => prefixes.push(rowState(state.rows)),
+        flipZeros: options.flipZeros,
+      })
       // Reach: an upsert without `note` replaced a row that had one, before
       // or within this batch.
       const held = new Map(state.backend)
@@ -730,11 +983,11 @@ function stepModel(
         }
         if (
           !Object.hasOwn(change.row, `note`) &&
-          held.get(change.row.id)?.includes(`/`) === true
+          rowHead(held.get(change.row.id) ?? ``).includes(`/`)
         ) {
           removesField = true
         }
-        held.set(change.row.id, rowValue(change.row))
+        held.set(change.row.id, modelValue(change.row))
       }
       foldBatch(state.backend, delivered)
       state.lastTxid += 1
@@ -747,6 +1000,7 @@ function stepModel(
           txid: state.lastTxid,
           beforeReady: false,
           removesField,
+          flipped: flipped > 0,
         },
         publishable:
           options.changeCommits === `per-change`
@@ -888,11 +1142,19 @@ export const eagerLiveSourceReachStates = [
   `field-removed`,
 ] as const
 
+/**
+ * Per value kind, a value delivered on the initial load and one delivered by
+ * a live change: a decoder can differ between the two paths.
+ */
+export type ValueReachState = `value:${ValueKind}:${`load` | `change`}`
+
 export type EagerLiveSourceReachState =
-  (typeof eagerLiveSourceReachStates)[number]
+  | (typeof eagerLiveSourceReachStates)[number]
+  | ValueReachState
+  | `zero-sign-flipped`
 
 const capabilityOfState: Partial<
-  Record<EagerLiveSourceReachState, EagerLiveSourceCapability>
+  Record<(typeof eagerLiveSourceReachStates)[number], EagerLiveSourceCapability>
 > = {
   'replacing-snapshot': `complete-snapshot`,
   'wait-before-evidence-fulfilled': `await-evidence`,
@@ -907,14 +1169,38 @@ const capabilityOfState: Partial<
   'seen-change-superseded': `listen-before-fetch`,
 }
 
-/** The declared states a driver's capabilities let histories reach. */
+/** The declared states a driver's declarations let histories reach. */
 export function reachStatesFor(
-  capabilities: ReadonlySet<EagerLiveSourceCapability>,
+  domain: GrammarDomain,
 ): Array<EagerLiveSourceReachState> {
-  return eagerLiveSourceReachStates.filter((state) => {
-    const capability = capabilityOfState[state]
-    return capability === undefined || capabilities.has(capability)
-  })
+  const fixed: Array<EagerLiveSourceReachState> =
+    eagerLiveSourceReachStates.filter((state) => {
+      const capability = capabilityOfState[state]
+      return capability === undefined || domain.capabilities.has(capability)
+    })
+  const values = (domain.valueKinds ?? []).flatMap(
+    (kind): Array<ValueReachState> => [
+      `value:${kind}:load`,
+      `value:${kind}:change`,
+    ],
+  )
+  const zeros: Array<EagerLiveSourceReachState> = domain.valueKinds?.includes(
+    `negative-zero`,
+  )
+    ? [`zero-sign-flipped`]
+    : []
+  return [...fixed, ...values, ...zeros]
+}
+
+/** JSON for a message; a bigint shows as `<digits>n`, `-0` as `-0`. */
+function show(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    typeof item === `bigint`
+      ? `${String(item)}n`
+      : Object.is(item, -0)
+        ? `-0`
+        : item,
+  )
 }
 
 /** A law violation at one checkpoint. */
@@ -927,8 +1213,8 @@ export class ConformanceViolation extends Error {
     readonly history: EagerLiveSourceHistory,
   ) {
     super(
-      `${law} violated at step ${step} of ${JSON.stringify(history)}: ` +
-        `expected ${JSON.stringify(expected)}, observed ${JSON.stringify(actual)}`,
+      `${law} violated at step ${step} of ${show(history)}: ` +
+        `expected ${show(expected)}, observed ${show(actual)}`,
     )
     this.name = `ConformanceViolation`
   }
@@ -968,7 +1254,11 @@ const timeoutSettleMs = 30
 function lawFor(done: AcceptedStep, wasReady: boolean): string {
   switch (done.kind) {
     case `snapshot`:
-      return wasReady ? `PUB-7` : done.buffered > 0 ? `READY-10` : `READY-3`
+      return wasReady
+        ? `PUB-7`
+        : done.buffered > 0
+          ? `READY-10/PUB-9`
+          : `READY-3`
     case `changes`:
       return done.beforeReady ? `READY-10/PUB-9` : `PUB-3/FID-4`
     case `wait`:
@@ -1037,6 +1327,7 @@ export async function checkEagerLiveSourceHistory(
   const modelOptions: ModelOptions = {
     changeCommits: driver.changeCommits,
     listenBeforeFetch,
+    flipZeros: driver.valueKinds?.includes(`negative-zero`) === true,
   }
   // With `listen-before-fetch`, a sync run's backend starts with the rows of
   // its first complete delivery, committed before the adapter subscribes.
@@ -1055,7 +1346,7 @@ export async function checkEagerLiveSourceHistory(
   const failures: Array<Error> = []
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
-  if (listenBeforeFetch) provider.seed?.(seedFrom(0))
+  if (listenBeforeFetch) provider.seed?.(structuredClone(seedFrom(0)))
   // READY-3, READY-10: the rows at the moment status becomes `ready`.
   let readyRows: RowState | undefined
   const watchReady = () =>
@@ -1151,16 +1442,28 @@ export async function checkEagerLiveSourceHistory(
     // FID-1: rows that differ only in a field, with the right keys and
     // titles, name the field law.
     if (!sameRows(rows, expected.rows) && sameTitles(rows, expected.rows)) {
-      throw violation(`FID-1 (fields)`, stepIndex, expected.rows, rows)
+      const valuesOnly = rows.every(
+        ([, value], index) =>
+          rowHead(value) === rowHead(expected.rows[index]![1]),
+      )
+      throw violation(
+        valuesOnly ? `FID-1 (values)` : `FID-1 (fields)`,
+        stepIndex,
+        expected.rows,
+        rows,
+      )
     }
     check(`rows`, sameRows(rows, expected.rows), expected.rows, rows)
     if (readyRows !== undefined) {
-      check(
-        `rows when ready`,
-        sameRows(readyRows, expected.rows),
-        expected.rows,
-        readyRows,
-      )
+      // READY-10 when the cut folded buffered batches; READY-3 otherwise.
+      if (!sameRows(readyRows, expected.rows)) {
+        throw violation(
+          `${law.includes(`READY-10`) ? `READY-10` : `READY-3`} (rows when ready)`,
+          stepIndex,
+          expected.rows,
+          readyRows,
+        )
+      }
       readyRows = undefined
     }
     if (!sameRows(events.rows(), rows)) {
@@ -1296,7 +1599,12 @@ export async function checkEagerLiveSourceHistory(
       const { done, publishable } = result
       switch (done.kind) {
         case `snapshot`:
-          provider.deliverSnapshot(done.rows)
+          provider.deliverSnapshot(structuredClone(done.rows))
+          for (const row of done.rows) {
+            if (Object.hasOwn(row, `value`)) {
+              reach(`value:${kindOf(row.value)}:load`)
+            }
+          }
           reach(wasReady ? `replacing-snapshot` : `first-ready`)
           if (done.missed > 0) reach(`read-missed-change`)
           if (done.superseded) reach(`seen-change-superseded`)
@@ -1304,9 +1612,21 @@ export async function checkEagerLiveSourceHistory(
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           break
         case `changes`:
-          provider.deliverChanges(done.changes, String(done.txid))
+          provider.deliverChanges(
+            structuredClone(done.changes),
+            String(done.txid),
+          )
+          for (const change of done.changes) {
+            if (
+              change.type === `upsert` &&
+              Object.hasOwn(change.row, `value`)
+            ) {
+              reach(`value:${kindOf(change.row.value)}:change`)
+            }
+          }
           reach(done.beforeReady ? `change-before-ready` : `change-batch`)
           if (done.removesField) reach(`field-removed`)
+          if (done.flipped) reach(`zero-sign-flipped`)
           if (done.changes.length > 1) reach(`multi-change-batch`)
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           if (
@@ -1367,7 +1687,9 @@ export async function checkEagerLiveSourceHistory(
           events.stop()
           await collection.cleanup()
           // The backend may change while no sync run listens.
-          if (listenBeforeFetch) provider.seed?.(seedFrom(index + 1))
+          if (listenBeforeFetch) {
+            provider.seed?.(structuredClone(seedFrom(index + 1)))
+          }
           readyRows = undefined
           watchReady()
           preload = recordSettlement(collection.preload())
@@ -1510,7 +1832,7 @@ function supports(
 
 /** Same keys and titles, whatever the other fields. */
 function sameTitles(a: RowState, b: RowState): boolean {
-  const title = (value: string) => value.split(`/`)[0]
+  const title = (value: string) => rowHead(value).split(`/`)[0]
   return (
     a.length === b.length &&
     a.every(
@@ -1591,7 +1913,7 @@ export function eagerLiveSourceProperty(
 ) {
   let target: string | undefined
   return fc.asyncProperty(
-    eagerLiveSourceHistoryArb(driver.capabilities),
+    eagerLiveSourceHistoryArb(driver),
     async (history) => {
       reach?.beginHistory()
       try {

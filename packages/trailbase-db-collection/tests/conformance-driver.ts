@@ -31,6 +31,7 @@ import { createCollection } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import {
   fromSqlRow,
+  jsonValueKinds,
   observedView,
   toSqlRow,
 } from '../../db-adapter-conformance/src'
@@ -45,7 +46,15 @@ import type {
 } from '../../db-adapter-conformance/src'
 
 /** A TrailBase record: a SQL row, so an absent `note` is `NULL`. */
-type ConformanceRecord = ReturnType<typeof toSqlRow>
+type ConformanceRecord = {
+  id: number
+  title: string
+  note: string | null
+  // Every row carries a value, since the driver declares value kinds.
+  value: unknown
+}
+
+const toRecord = (row: ConformanceRow) => toSqlRow(row) as ConformanceRecord
 
 interface ProviderSession {
   stream: ReadableStream<Event>
@@ -115,7 +124,7 @@ class TrailBaseProvider implements ControlledProvider {
   deliverSnapshot = (rows: ReadonlyArray<ConformanceRow>) => {
     this.rows = new Map(rows.map((row) => [row.id, row]))
     // One short page drains TrailBase's paged list.
-    this.pendingList().resolve({ records: rows.map(toSqlRow) })
+    this.pendingList().resolve({ records: rows.map(toRecord) })
   }
 
   deliverChanges = (changes: ReadonlyArray<ProviderChange>) => {
@@ -124,13 +133,13 @@ class TrailBaseProvider implements ControlledProvider {
       if (change.type === `upsert`) {
         const held = this.rows.has(change.row.id)
         this.rows.set(change.row.id, change.row)
-        const record = toSqlRow(change.row)
+        const record = toRecord(change.row)
         controller.enqueue(held ? { Update: record } : { Insert: record })
       } else {
         const row = this.rows.get(change.id)
         if (!row) throw new Error(`provider does not hold row ${change.id}`)
         this.rows.delete(change.id)
-        controller.enqueue({ Delete: toSqlRow(row) })
+        controller.enqueue({ Delete: toRecord(row) })
       }
     }
   }
@@ -150,6 +159,7 @@ export function trailBaseConformanceDriver(): EagerLiveSourceDriver {
     adapter: `@tanstack/trailbase-db-collection (eager)`,
     capabilities: new Set(),
     changeCommits: `per-change`,
+    valueKinds: jsonValueKinds,
     create(): EagerLiveSourceFixture {
       const provider = new TrailBaseProvider()
       const collection = createCollection(

@@ -13,24 +13,24 @@ The package is private while its first oracle settles.
 pushes a complete result and then committed change batches. Its opening
 comment states the laws and their limits. In short:
 
-| Law                        | Checked behavior                                                                                                                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| READY-2, READY-3           | `loading` until the first complete delivery; then `ready` with exactly its rows                                                                                                              |
-| READY-4                    | A failure before ready: status `error`, `preload()` rejects with the value, `health.error.cause` is the value                                                                                |
-| HEALTH-1                   | A failure after ready: status stays `ready`, rows kept, `health.error.cause` is the value                                                                                                    |
-| PUB-1                      | Every change publication during a step is one whole committed state, in commit order; per batch or per change, as the driver declares                                                        |
-| PUB-2, PUB-3, PUB-7, FID-4 | Change events fold to the rows, with no insert of a held key and no update or delete of a missing one; batches fold onto rows; a complete delivery replaces (PUB-7 with `complete-snapshot`) |
-| FID-1                      | A delivered row is the whole backend row: a row without the optional `note` removes a `note` the Collection held                                                                             |
-| LIFE-2, LIFE-5             | Cleanup releases the provider subscription; a restart is a fresh, empty sync run                                                                                                             |
-| LIFE-10                    | A failed provider's subscription is released at the failure, and no subscription is released twice                                                                                           |
-| HEALTH-5                   | No unhandled rejection and no undeclared `console.error` or `console.warn`                                                                                                                   |
-| EVID-1, EVID-2, EVID-3     | `awaitTxId` fulfills after its batch applies, stays pending before, rejects after its timeout, and rejects at retirement                                                                     |
-| HEALTH-2, RETRY-1          | A retried failure stays hidden before ready, joins `failureReason` after it, and clears on the next delivery (`retry-policy`)                                                                |
-| RECON-1                    | Disconnect and reconnect keep status and rows                                                                                                                                                |
-| RENEW-1                    | Capability renewal reuses the provider subscription and changes nothing visible                                                                                                              |
-| READY-8, READY-10          | With `listen-before-fetch`: no fetch before the listener is live; batches committed during the fetch apply after its result, before ready                                                    |
-| PUB-5, PUB-9               | With `listen-before-fetch`: the cut publishes only backend states at or after the read point, in order; no replay regresses a row                                                            |
-| READY-3, READY-10          | When status becomes `ready`, the rows already equal the initial cut                                                                                                                          |
+| Law                        | Checked behavior                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| READY-2, READY-3           | `loading` until the first complete delivery; then `ready` with exactly its rows                                                                                                                                                                                                                                                                                              |
+| READY-4                    | A failure before ready: status `error`, `preload()` rejects with the value, `health.error.cause` is the value                                                                                                                                                                                                                                                                |
+| HEALTH-1                   | A failure after ready: status stays `ready`, rows kept, `health.error.cause` is the value                                                                                                                                                                                                                                                                                    |
+| PUB-1                      | Every change publication during a step is one whole committed state, in commit order; per batch or per change, as the driver declares                                                                                                                                                                                                                                        |
+| PUB-2, PUB-3, PUB-7, FID-4 | Change events fold to the rows, with no insert of a held key and no update or delete of a missing one; batches fold onto rows; a complete delivery replaces (PUB-7 with `complete-snapshot`)                                                                                                                                                                                 |
+| FID-1                      | A delivered row is the whole backend row: a row without the optional `note` removes a `note` the Collection held. With declared `valueKinds`, each `value` strictly equals the delivered one on the initial load and on a live change: same type and prototype, `Object.is` for numbers (`-0` is not `0`), Dates by time, nested arrays and plain objects element by element |
+| LIFE-2, LIFE-5             | Cleanup releases the provider subscription; a restart is a fresh, empty sync run                                                                                                                                                                                                                                                                                             |
+| LIFE-10                    | A failed provider's subscription is released at the failure, and no subscription is released twice                                                                                                                                                                                                                                                                           |
+| HEALTH-5                   | No unhandled rejection and no undeclared `console.error` or `console.warn`                                                                                                                                                                                                                                                                                                   |
+| EVID-1, EVID-2, EVID-3     | `awaitTxId` fulfills after its batch applies, stays pending before, rejects after its timeout, and rejects at retirement                                                                                                                                                                                                                                                     |
+| HEALTH-2, RETRY-1          | A retried failure stays hidden before ready, joins `failureReason` after it, and clears on the next delivery (`retry-policy`)                                                                                                                                                                                                                                                |
+| RECON-1                    | Disconnect and reconnect keep status and rows                                                                                                                                                                                                                                                                                                                                |
+| RENEW-1                    | Capability renewal reuses the provider subscription and changes nothing visible                                                                                                                                                                                                                                                                                              |
+| READY-8, READY-10          | With `listen-before-fetch`: no fetch before the listener is live; batches committed during the fetch apply after its result, before ready                                                                                                                                                                                                                                    |
+| PUB-5, PUB-9               | With `listen-before-fetch`: the cut publishes only backend states at or after the read point, in order; no replay regresses a row                                                                                                                                                                                                                                            |
+| READY-3, READY-10          | When status becomes `ready`, the rows already equal the initial cut                                                                                                                                                                                                                                                                                                          |
 
 The law IDs come from the adapter conformance law set, version 18.
 
@@ -44,6 +44,7 @@ Implement `EagerLiveSourceDriver`:
 - **`changeCommits`:** `per-batch` if your adapter commits a provider batch as one transaction, `per-change` if it commits each change alone.
 - **`declaredDiagnostic`:** optional; accepts console diagnostics your adapter documents, so HEALTH-5 does not reject them.
 - **`seed` and `fetchesBeforeListening`:** with `listen-before-fetch`, the provider holds backend rows set by `seed`, treats a batch before the first ready as a backend commit during the fetch, and counts fetches issued while its listener was not live (READY-8).
+- **`valueKinds`:** the kinds of FID-1's `valueDomain` your backend represents; `jsonValueKinds` for a JSON backend. The driver delivers each value in the backend's own form and the Collection must show it decoded.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
 Declare only the capabilities your adapter supports; the grammar generates
@@ -83,30 +84,51 @@ reach counter, so the run fails when histories miss a state the laws need.
 
   | Declared state                 | Histories |
   | ------------------------------ | --------- |
-  | first-ready                    | 230       |
-  | replacing-snapshot             | 74        |
-  | change-batch                   | 105       |
-  | multi-change-batch             | 317       |
-  | failure-before-ready           | 132       |
-  | failure-after-ready            | 41        |
-  | restart                        | 136       |
-  | wait-before-evidence-fulfilled | 54        |
-  | wait-timed-out                 | 91        |
-  | wait-rejected-at-retirement    | 199       |
-  | transient-failure-reported     | 64        |
-  | transient-failure-recovered    | 31        |
-  | reconnect                      | 65        |
-  | renewal                        | 154       |
+  | first-ready                    | 248       |
+  | replacing-snapshot             | 77        |
+  | change-batch                   | 97        |
+  | multi-change-batch             | 327       |
+  | failure-before-ready           | 124       |
+  | failure-after-ready            | 64        |
+  | restart                        | 116       |
+  | wait-before-evidence-fulfilled | 48        |
+  | wait-timed-out                 | 75        |
+  | wait-rejected-at-retirement    | 188       |
+  | transient-failure-reported     | 67        |
+  | transient-failure-recovered    | 33        |
+  | reconnect                      | 62        |
+  | renewal                        | 141       |
   | change-before-ready            | 514       |
-  | read-missed-change             | 116       |
-  | seen-change-superseded         | 31        |
-  | field-removed                  | 28        |
+  | read-missed-change             | 101       |
+  | seen-change-superseded         | 26        |
+  | field-removed                  | 27        |
+  | value:string:load              | 66        |
+  | value:string:change            | 95        |
+  | value:integer:load             | 85        |
+  | value:integer:change           | 130       |
+  | value:float:load               | 49        |
+  | value:float:change             | 61        |
+  | value:negative-zero:load       | 54        |
+  | value:negative-zero:change     | 103       |
+  | value:boolean:load             | 64        |
+  | value:boolean:change           | 104       |
+  | value:null:load                | 62        |
+  | value:null:change              | 95        |
+  | value:date:load                | 51        |
+  | value:date:change              | 93        |
+  | value:bigint:load              | 74        |
+  | value:bigint:change            | 91        |
+  | value:array:load               | 71        |
+  | value:array:change             | 99        |
+  | value:object:load              | 56        |
+  | value:object:change            | 99        |
+  | zero-sign-flipped              | 74        |
 
   Each campaign fails when a state is reached fewer than five times. Across
-  20 other seeds, the lowest count for any state was 15 (`field-removed`).
+  20 other seeds, the lowest count for any state was 12 (`field-removed`), across 12 seeds.
 
 - **GREEN:** `pnpm exec vitest run tests/reference-adapter-oracle.property.test.ts`:
-  58 tests pass (both campaigns, the per-change pair, 26 calibrations, and the
+  65 tests pass (both campaigns, the per-change pair, 30 calibrations, and the
   grammar controls). TrailBase: its full suite, 151 tests, passes.
 - **Mutants:** the fixed campaign rejects each with the law it breaks:
 
@@ -138,6 +160,10 @@ reach counter, so the run fails when histories miss a state the laws need.
   | `ready-before-buffer`                    | READY-10 (rows when ready) |
   | `merges-updates`                         | FID-1                      |
   | `relabels-inserts` (checker calibration) | PUB-2                      |
+  | `dates-as-strings` (live changes only)   | FID-1 (values)             |
+  | `bigints-as-numbers` (initial load only) | FID-1 (values)             |
+  | `drops-nulls`                            | FID-1 (values)             |
+  | `loses-negative-zero`                    | FID-1 (values)             |
   | `shows-buffered`                         | READY-10/PUB-9             |
 
   `reverses-batch` reverses only batches of distinct keys, so its final rows
@@ -147,10 +173,18 @@ reach counter, so the run fails when histories miss a state the laws need.
 
 - **Shrinking keeps the first violation (ORC-010):** `eagerLiveSourceProperty` treats a smaller history that fails a different law as passing. A shrunk counterexample therefore violates the law the campaign found. A cleanup error after a violation is kept with it in an `AggregateError`.
 - **Grammar controls (ORC-004):** these run in the reference oracle file.
-  - **Reconstruction:** eleven witnesses from the Neon, TrailBase, and RxDB suites and the retry contract are rebuilt as histories. Each is accepted with no skipped step and passes.
+  - **Reconstruction:** thirteen witnesses (eleven without values, run on the reference driver without value kinds, and two with values) from the Neon, TrailBase, and RxDB suites and the retry contract are rebuilt as histories. Each is accepted with no skipped step and passes.
   - **Exclusion:** six nearby invalid histories are each skipped by exactly one step; a batch before the first ready is invalid only without `listen-before-fetch`.
-  - **Ablation:** removing each step kind loses the declared state that only it reaches, reading after every buffered batch loses `read-missed-change`, and rows without notes lose `field-removed`.
+  - **Ablation:** removing each step kind loses the declared state that only it reaches, reading after every buffered batch loses `read-missed-change`, rows without notes lose `field-removed`, and live changes without values or retouches lose `value:date:change` while `value:date:load` stays reached.
 - **Replay:** during a path replay, fixed campaigns and calibrations stand aside (`oracleReplayTest`).
+- **Core finding (typed values):** a random campaign (seed 95028) found
+  that a synced update changing only `-0` to `0` published no change
+  event: the Collection held `0` while every subscriber kept `-0` (PUB-2).
+  Core compared the rows with `deepEquals`, which treats `-0` as `0`. By
+  maintainer decision (2026-10-29), `-0` and `0` are distinct row values;
+  the synced commit path now compares with `sameRowValue`. A fix that tells
+  `-0` from `0` only at the top of a value survives without the `retouch`
+  dimension and is rejected with it.
 - **RED (Neon):** `pnpm test:neon`. Both campaigns fail. The fixed campaign
   shrinks to `[fail, wait]`: READY-4, status `loading` where `error` is owed.
   Random seeds find READY-4 or, after ready, HEALTH-1: `health.error` is
@@ -172,8 +206,12 @@ reach counter, so the run fails when histories miss a state the laws need.
     timed wait settles within its own step, so no evidence arrives during
     it. An adapter that rejects a timed wait at once, before its timeout,
     is not distinguished from one that waits.
-  - FID-1 covers one optional string field. Value domains (Date, bigint,
-    nested objects) are not generated.
+  - FID-1 generates ten value kinds (string, integer, float, `-0`, boolean,
+    `null`, Date, bigint, array, plain object). Temporal values, Map, Set,
+    typed arrays, and class instances are not generated, and a stored
+    field's reference identity is not checked.
+  - The rejection side, FID-3 and PUB-4 (an out-of-domain value fails its
+    delivery and writes no row), has no lane yet.
   - READY-8's fetch order is checked only by a provider that implements
     `fetchesBeforeListening`. Commit receipts resolve at once in every
     driver, so a live commit whose receipt is still pending at the cut

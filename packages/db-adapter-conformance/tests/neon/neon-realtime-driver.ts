@@ -26,7 +26,7 @@
  * judges the Collection's public state after such an exception.
  */
 import { createCollection } from '@tanstack/db'
-import { fromSqlRow, observedView, toSqlRow } from '../../src'
+import { fromSqlRow, jsonValueKinds, observedView, toSqlRow } from '../../src'
 import { realtimeCollectionOptions } from './vendor/collection-options'
 import type {
   LiveQueryChange,
@@ -255,6 +255,7 @@ export function neonRealtimeDriver(): EagerLiveSourceDriver {
   return {
     adapter: `@neon/realtime-tanstack 0.1.1`,
     changeCommits: `per-batch`,
+    valueKinds: jsonValueKinds,
     capabilities: new Set([
       `complete-snapshot`,
       `await-evidence`,

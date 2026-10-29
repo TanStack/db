@@ -78,7 +78,13 @@ export function conformanceKey(key: unknown): number {
 
 /** A conformance row as a SQL row: an absent `note` is `NULL`. */
 export function toSqlRow(row: ConformanceRow) {
-  return { id: row.id, title: row.title, note: row.note ?? null }
+  return {
+    id: row.id,
+    title: row.title,
+    note: row.note ?? null,
+    // A JSON column; present only when the driver declares value kinds.
+    ...(Object.hasOwn(row, `value`) ? { value: row.value } : {}),
+  }
 }
 
 /**

@@ -45,6 +45,14 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, undefined)
 }
 
+/**
+ * @internal Whether a synced row changed observably: deep equality that
+ * tells -0 from 0, as row values do (FID-1; maintainer decision 2026-10-29).
+ */
+export function sameRowValue(a: unknown, b: unknown): boolean {
+  return deepEqualsInternal(a, b, undefined, false, false, true)
+}
+
 /** @internal Compare persisted public and durable value shapes before skipping a reload. */
 export function equalPersistedSnapshotValues(a: unknown, b: unknown): boolean {
   return deepEqualsInternal(a, b, undefined, true, true)
@@ -78,9 +86,11 @@ export function deepEqualsInternal(
   visited: Map<object, object> | undefined,
   draft = false,
   persistedSnapshot = false,
+  // Row change detection tells -0 from 0; general equality does not.
+  signedZero = false,
 ): boolean {
   // Handle strict equality (primitives, same reference)
-  if (a === b || Object.is(a, b)) return true
+  if (signedZero ? Object.is(a, b) : a === b || Object.is(a, b)) return true
 
   // Handle null/undefined
   if (a == null || b == null) return false
@@ -141,6 +151,7 @@ export function deepEqualsInternal(
             visited,
             true,
             persistedSnapshot,
+            signedZero,
           )
         : b.has(key) &&
           deepEqualsInternal(
@@ -149,6 +160,7 @@ export function deepEqualsInternal(
             visited,
             draft,
             persistedSnapshot,
+            signedZero,
           ),
     )
 
@@ -182,6 +194,7 @@ export function deepEqualsInternal(
           visited,
           draft,
           persistedSnapshot,
+          signedZero,
         ),
       )
       visited.delete(a)
@@ -212,6 +225,7 @@ export function deepEqualsInternal(
             candidateVisited,
             draft,
             persistedSnapshot,
+            signedZero,
           ) &&
           matchValues(
             index + 1,
@@ -311,7 +325,14 @@ export function deepEqualsInternal(
     visited.set(a, b)
 
     const result = a.every((item, index) =>
-      deepEqualsInternal(item, b[index], visited, draft, persistedSnapshot),
+      deepEqualsInternal(
+        item,
+        b[index],
+        visited,
+        draft,
+        persistedSnapshot,
+        signedZero,
+      ),
     )
     visited.delete(a)
     return result
@@ -361,7 +382,14 @@ export function deepEqualsInternal(
       }
       if (
         !Object.prototype.propertyIsEnumerable.call(b, key) ||
-        !deepEqualsInternal(value, b[key], visited, draft, persistedSnapshot)
+        !deepEqualsInternal(
+          value,
+          b[key],
+          visited,
+          draft,
+          persistedSnapshot,
+          signedZero,
+        )
       ) {
         result = false
         break

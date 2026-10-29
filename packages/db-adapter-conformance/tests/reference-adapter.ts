@@ -75,6 +75,14 @@ export type ReferenceMutant =
   | `shows-buffered`
   /** FID-1: an update merges over the held row, so a removed field stays. */
   | `merges-updates`
+  /** FID-1: a live change stores a Date as its ISO string. */
+  | `dates-as-strings`
+  /** FID-1: the initial load stores a bigint as a number. */
+  | `bigints-as-numbers`
+  /** FID-1: a `null` value is stored as an absent field. */
+  | `drops-nulls`
+  /** FID-1: `-0` is stored as `0`. */
+  | `loses-negative-zero`
   /**
    * PUB-2, checker calibration: the observed view relabels insert events as
    * updates. The adapter is unchanged; the comparison must see the events.
@@ -162,6 +170,40 @@ class ControlledPushProvider implements ControlledProvider {
 
 type Waiter = { resolve: () => void; reject: (error: Error) => void }
 
+/**
+ * The row the adapter stores. A conforming adapter stores the delivered row
+ * itself; each value mutant changes one kind on one path.
+ */
+function storedRow(
+  row: ConformanceRow,
+  path: `load` | `change`,
+  mutant: ReferenceMutant | undefined,
+): ConformanceRow {
+  const { value } = row
+  if (
+    mutant === `dates-as-strings` &&
+    path === `change` &&
+    value instanceof Date
+  ) {
+    return { ...row, value: value.toISOString() }
+  }
+  if (
+    mutant === `bigints-as-numbers` &&
+    path === `load` &&
+    typeof value === `bigint`
+  ) {
+    return { ...row, value: Number(value) }
+  }
+  if (mutant === `drops-nulls` && value === null) {
+    const { value: _value, ...rest } = row
+    return rest
+  }
+  if (mutant === `loses-negative-zero` && Object.is(value, -0)) {
+    return { ...row, value: 0 }
+  }
+  return row
+}
+
 const changeKey = (change: ProviderChange) =>
   change.type === `upsert` ? change.row.id : change.id
 
@@ -233,7 +275,7 @@ function referenceCollection(
           if (change.type === `upsert`) {
             write({
               type: keys.has(change.row.id) ? `update` : `insert`,
-              value: change.row,
+              value: storedRow(change.row, `change`, mutant),
             })
             keys.add(change.row.id)
           } else if (mutant !== `drops-deletes` || !ready) {
@@ -290,7 +332,10 @@ function referenceCollection(
               } else {
                 begin({ snapshot: true })
                 for (const row of event.rows)
-                  write({ type: `insert`, value: row })
+                  write({
+                    type: `insert`,
+                    value: storedRow(row, `load`, mutant),
+                  })
                 void commit()
                 keys = new Set(event.rows.map((row) => row.id))
               }
@@ -431,6 +476,18 @@ export function referenceDriver(
       `capability-renewal`,
       `listen-before-fetch`,
     ]),
+    valueKinds: [
+      `string`,
+      `integer`,
+      `float`,
+      `negative-zero`,
+      `boolean`,
+      `null`,
+      `date`,
+      `bigint`,
+      `array`,
+      `object`,
+    ],
     changeCommits: perChange ? `per-change` : `per-batch`,
     create(): EagerLiveSourceFixture {
       const provider = new ControlledPushProvider()

@@ -1,10 +1,12 @@
 export {
   checkEagerLiveSourceHistory,
+  describeValue,
   ConformanceViolation,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
   eagerLiveSourceProperty,
   eagerLiveSourceReachStates,
+  jsonValueKinds,
   reachStatesFor,
 } from './eager-live-source-oracle'
 export type {
@@ -18,9 +20,12 @@ export type {
   EagerLiveSourceReachState,
   EagerLiveSourceStep,
   ExpectedObservation,
+  GrammarDomain,
   ObservedCollection,
   ProviderChange,
   ReachCounter,
+  ValueKind,
+  ValueReachState,
 } from './eager-live-source-oracle'
 export {
   conformanceKey,

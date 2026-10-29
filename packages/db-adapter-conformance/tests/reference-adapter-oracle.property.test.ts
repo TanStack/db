@@ -17,9 +17,11 @@ import {
 } from '../src'
 import { referenceDriver } from './reference-adapter'
 import type {
+  ConformanceRow,
   EagerLiveSourceHistory,
   EagerLiveSourceReachState,
   EagerLiveSourceStep,
+  GrammarDomain,
 } from '../src'
 import type { ReferenceMutant } from './reference-adapter'
 
@@ -51,7 +53,7 @@ import type { ReferenceMutant } from './reference-adapter'
 
 const property = `adapter-conformance.eager-live-source.reference`
 const driver = referenceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
+const historyArb = eagerLiveSourceHistoryArb(driver)
 // The reference adapter declares every capability, so its grammar spreads
 // over the most step kinds. Across 20 seeds, 600 histories reached every
 // declared state at least 15 times.
@@ -60,13 +62,9 @@ const runs = 600
 const campaignTimeoutMs = 120_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(
-    property,
-    reachStatesFor(driver.capabilities),
-    {
-      minimum: 5,
-    },
-  )
+  const reach = createOracleReach(property, reachStatesFor(driver), {
+    minimum: 5,
+  })
   await fc.assert(eagerLiveSourceProperty(driver, reach), options)
   return reach
 }
@@ -112,11 +110,15 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`disconnect-fails`, `RECON-1`],
     [`renew-resubscribes`, `RENEW-1`],
     [`drops-buffered`, `READY-10`],
-    [`buffer-before-rows`, `READY-10`],
+    [`buffer-before-rows`, `PUB-9`],
     [`replays-per-batch`, `PUB-5`],
     [`ready-before-buffer`, `READY-10 (rows when ready)`],
     [`shows-buffered`, `READY-10/PUB-9`],
     [`merges-updates`, `FID-1`],
+    [`dates-as-strings`, `FID-1 (values)`],
+    [`bigints-as-numbers`, `FID-1 (values)`],
+    [`drops-nulls`, `FID-1 (values)`],
+    [`loses-negative-zero`, `FID-1 (values)`],
     [`relabels-inserts`, `PUB-2`],
   ]
   oracleReplayTest(it).each(mutants)(
@@ -303,12 +305,18 @@ const witnesses: Array<[string, EagerLiveSourceHistory]> = [
 ]
 
 /** Whether `history` lies in the generator's domain. */
-function withinGrammar(history: EagerLiveSourceHistory): boolean {
-  const row = (r: { id: number; title: string; note?: string }) =>
+function withinGrammar(
+  history: EagerLiveSourceHistory,
+  domain: GrammarDomain,
+): boolean {
+  // With value kinds every row carries a value; without them none does.
+  const valued = (domain.valueKinds ?? []).length > 0
+  const row = (r: ConformanceRow) =>
     r.id >= 1 &&
     r.id <= 5 &&
     [`a`, `b`, `c`].includes(r.title) &&
-    (!Object.hasOwn(r, `note`) || [`x`, `y`].includes(r.note!))
+    (!Object.hasOwn(r, `note`) || [`x`, `y`].includes(r.note!)) &&
+    Object.hasOwn(r, `value`) === valued
   return (
     history.length >= 1 &&
     history.length <= 15 &&
@@ -339,11 +347,73 @@ function withinGrammar(history: EagerLiveSourceHistory): boolean {
   )
 }
 
+// The witnesses above carry no values, so they reconstruct in the grammar
+// of the same driver without value kinds. Value witnesses use the full one.
+const withoutValues = { ...driver, valueKinds: undefined }
+
+const valueWitnesses: Array<[string, EagerLiveSourceHistory]> = [
+  [
+    // A random campaign (seed 95028) found this: a synced update that only
+    // changes -0 to 0 published no change event, so the event fold kept -0
+    // while the Collection held 0. Maintainer decision (2026-10-29): -0 and
+    // 0 are distinct row values.
+    `FID-1, PUB-2: an update from -0 to 0 publishes a change`,
+    [
+      {
+        kind: `snapshot`,
+        rows: [{ id: 5, title: `a`, value: -0 }],
+        seen: 0,
+      },
+      {
+        kind: `changes`,
+        changes: [{ type: `upsert`, row: { id: 5, title: `a`, value: 0 } }],
+      },
+    ],
+  ],
+  [
+    // FID-1's named cases: a Date and a bigint beyond 2^53 on the initial
+    // load, then an explicit falsy value and a nested object in a change.
+    `FID-1: typed values on the load and in a change`,
+    [
+      {
+        kind: `snapshot`,
+        rows: [
+          { id: 1, title: `a`, value: new Date(Date.UTC(2026, 9, 29)) },
+          { id: 2, title: `a`, value: 9_007_199_254_740_993n },
+        ],
+        seen: 0,
+      },
+      {
+        kind: `changes`,
+        changes: [
+          { type: `upsert`, row: { id: 1, title: `a`, value: false } },
+          {
+            type: `upsert`,
+            row: { id: 3, title: `b`, value: { nested: { deep: [1] } } },
+          },
+        ],
+      },
+    ],
+  ],
+]
+
 describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(witnesses)(
     `reconstructs %s`,
     async (_name, history) => {
-      expect(withinGrammar(history)).toBe(true)
+      expect(withinGrammar(history, withoutValues)).toBe(true)
+      const { skipped } = await checkEagerLiveSourceHistory(
+        withoutValues,
+        history,
+      )
+      expect(skipped).toBe(0)
+    },
+  )
+
+  oracleReplayTest(it).each(valueWitnesses)(
+    `reconstructs %s`,
+    async (_name, history) => {
+      expect(withinGrammar(history, driver)).toBe(true)
       const { skipped } = await checkEagerLiveSourceHistory(driver, history)
       expect(skipped).toBe(0)
     },
@@ -393,7 +463,10 @@ describe(`eager live-source grammar controls`, () => {
     ],
   ]
   oracleReplayTest(it).each(invalid)(`excludes %s`, async (_name, history) => {
-    const { skipped } = await checkEagerLiveSourceHistory(driver, history)
+    const { skipped } = await checkEagerLiveSourceHistory(
+      withoutValues,
+      history,
+    )
     expect(skipped).toBe(1)
   })
 
@@ -416,7 +489,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(ablations)(
     `without %s steps, histories never reach %s`,
     async (kind, lost) => {
-      const states = reachStatesFor(driver.capabilities)
+      const states = reachStatesFor(driver)
       const reach = createOracleReach(`${property}.ablation`, states, {
         replaying: false,
       })
@@ -444,7 +517,7 @@ describe(`eager live-source grammar controls`, () => {
     async () => {
       const reach = createOracleReach(
         `${property}.ablation`,
-        reachStatesFor(driver.capabilities),
+        reachStatesFor(driver),
         { replaying: false },
       )
       const plain = (row: { id: number; title: string }) => ({
@@ -483,6 +556,51 @@ describe(`eager live-source grammar controls`, () => {
     campaignTimeoutMs,
   )
 
+  // Path ablation: when live changes carry no value and no retouch, no
+  // history reaches a
+  // value kind on the change path, so the load and change states each need
+  // their own deliveries.
+  oracleReplayTest(it)(
+    `without values in live changes, histories never reach value:date:change`,
+    async () => {
+      const reach = createOracleReach(
+        `${property}.ablation`,
+        reachStatesFor(driver),
+        { replaying: false },
+      )
+      await fc.assert(
+        fc.asyncProperty(
+          historyArb.map((history) =>
+            history.map((step): EagerLiveSourceStep => {
+              if (step.kind !== `changes`) return step
+              return {
+                kind: `changes`,
+                // A retouch re-delivers a held value, so it goes too.
+                changes: step.changes
+                  .filter((change) => change.type !== `retouch`)
+                  .map((change) => {
+                    if (change.type !== `upsert`) return change
+                    const { value: _value, ...row } = change.row
+                    return { type: `upsert`, row }
+                  }),
+              }
+            }),
+          ),
+          async (history) => {
+            reach.beginHistory()
+            await checkEagerLiveSourceHistory(driver, history, {
+              reach: reach.reach,
+            })
+          },
+        ),
+        { seed: 2118, numRuns: 100 },
+      )
+      expect(reach.counts().get(`value:date:change`)).toBe(0)
+      expect(reach.counts().get(`value:date:load`)).toBeGreaterThan(0)
+    },
+    campaignTimeoutMs,
+  )
+
   // Ablation of the read point: when every fetch reads after all buffered
   // batches, no history reaches a cut whose result missed one.
   oracleReplayTest(it)(
@@ -490,7 +608,7 @@ describe(`eager live-source grammar controls`, () => {
     async () => {
       const reach = createOracleReach(
         `${property}.ablation`,
-        reachStatesFor(driver.capabilities),
+        reachStatesFor(driver),
         { replaying: false },
       )
       await fc.assert(

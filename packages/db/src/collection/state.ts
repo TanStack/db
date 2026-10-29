@@ -1,4 +1,4 @@
-import { deepEquals } from '../utils'
+import { deepEquals, sameRowValue } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import {
@@ -1453,7 +1453,7 @@ export class CollectionStateManager<
           previousVirtualProps.$hasPendingWrites !==
             nextVirtualProps.$hasPendingWrites ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
-          !deepEquals(previousVisibleValue, newVisibleValue)
+          !sameRowValue(previousVisibleValue, newVisibleValue)
         ) {
           events.push({
             type: `update`,

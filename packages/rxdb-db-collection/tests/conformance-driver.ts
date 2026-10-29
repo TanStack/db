@@ -48,7 +48,12 @@ import {
 } from 'rxdb/plugins/core'
 import { Observable } from 'rxjs'
 import { rxdbCollectionOptions } from '../src/rxdb'
-import { conformanceKey, observedView } from '../../db-adapter-conformance/src'
+import {
+  conformanceKey,
+  describeValue,
+  jsonValueKinds,
+  observedView,
+} from '../../db-adapter-conformance/src'
 import type {
   PreparedQuery,
   RxChangeEvent,
@@ -64,7 +69,7 @@ import type {
   ProviderChange,
 } from '../../db-adapter-conformance/src'
 
-type Doc = { id: string; title: string; note?: string }
+type Doc = { id: string; title: string; note?: string; value?: unknown }
 
 const schema = createRxSchema<Doc>(
   {
@@ -75,6 +80,8 @@ const schema = createRxSchema<Doc>(
       id: { type: `string`, maxLength: 10 },
       title: { type: `string` },
       note: { type: `string` },
+      // Any JSON value (FID-1); RxDB documents are JSON.
+      value: {},
     },
     required: [`id`, `title`],
   },
@@ -162,6 +169,7 @@ class RxdbProvider implements ControlledProvider {
       title: row.title,
       // A JSON document omits an absent field.
       ...(row.note === undefined ? {} : { note: row.note }),
+      ...(Object.hasOwn(row, `value`) ? { value: row.value } : {}),
       _deleted: deleted,
       _rev: `${lwt}-conformance`,
       _attachments: {},
@@ -256,7 +264,11 @@ function conformanceRow(doc: Doc): ConformanceRow {
 }
 
 function sameDocument(doc: Doc, row: ConformanceRow): boolean {
-  return doc.title === row.title && doc.note === row.note
+  return (
+    doc.title === row.title &&
+    doc.note === row.note &&
+    describeValue(doc.value) === describeValue(row.value)
+  )
 }
 
 function createRxdbCollection(provider: RxdbProvider) {
@@ -274,6 +286,7 @@ export function rxdbConformanceDriver(): EagerLiveSourceDriver {
     adapter: `@tanstack/rxdb-db-collection`,
     capabilities: new Set([`listen-before-fetch`]),
     changeCommits: `per-change`,
+    valueKinds: jsonValueKinds,
     create(): EagerLiveSourceFixture {
       const provider = new RxdbProvider()
       return {
