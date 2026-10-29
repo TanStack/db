@@ -662,8 +662,9 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 
 ### Migrating
 
-These changes compare the 0.9.2 API with the 1.0 RC. For the full upgrade,
-see [Migrating to the 1.0 RC](./migrate-to-1-0-rc.md).
+If you're upgrading from 0.9.2 to the 1.0 RC, update your error handling as
+shown below. For the other breaking changes, see
+[Migrating to the 1.0 RC](./migrate-to-1-0-rc.md).
 
 | Before | After |
 | --- | --- |
