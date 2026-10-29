@@ -15,8 +15,11 @@ test matrices and DB report merge from the Release workflow on 2026-10-29.
 Release run [40910451885](https://github.com/TanStack/db/actions/runs/40910451885)
 succeeded and reported all 20 included RC versions and the two stable versions
 already published on npm. The release test matrices and report merge are now
-restored. Convex Collection, Preact DB, and React Router with DB remain temporarily
-private until their initial npm publications and permissions are arranged.
+restored. At the maintainer's request, Convex Collection, Preact DB, and React
+Router with DB have their public manifests and consumed first-RC release entries
+restored too. Their initial manual publications and npm trusted publisher setup
+still require verification; restoring publication eligibility does not establish
+npm access.
 The successful release does not close the counterexamples in
 [#2294](https://github.com/TanStack/db/issues/2294),
 [#2281](https://github.com/TanStack/db/issues/2281), or
