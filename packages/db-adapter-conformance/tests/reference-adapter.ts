@@ -12,6 +12,7 @@
  * renewing the same subscription.
  */
 import { createCollection } from '@tanstack/db'
+import { observedView } from '../src'
 import type {
   ConformanceRow,
   ControlledProvider,
@@ -36,7 +37,7 @@ export type ReferenceMutant =
   | `transient-fails-loading`
   /** PUB-1: one provider batch is committed as one transaction per change. */
   | `splits-batch`
-  /** PUB-3: a batch's deletes are not written. */
+  /** PUB-3: a live batch's deletes are not written. */
   | `drops-deletes`
   /** PUB-7: a later complete delivery merges into the rows. */
   | `snapshot-merges`
@@ -72,6 +73,13 @@ export type ReferenceMutant =
   | `ready-before-buffer`
   /** READY-10, PUB-9: a batch during the initial fetch shows before ready. */
   | `shows-buffered`
+  /** FID-1: an update merges over the held row, so a removed field stays. */
+  | `merges-updates`
+  /**
+   * PUB-2, checker calibration: the observed view relabels insert events as
+   * updates. The adapter is unchanged; the comparison must see the events.
+   */
+  | `relabels-inserts`
 
 type ProviderEvent =
   | { type: `snapshot`; rows: ReadonlyArray<ConformanceRow> }
@@ -181,6 +189,8 @@ function referenceCollection(
     getKey: (row) => row.id,
     syncMode: `eager`,
     sync: {
+      // The provider delivers complete rows, so an update replaces the row.
+      rowUpdateMode: mutant === `merges-updates` ? `partial` : `full`,
       sync: ({
         begin,
         write,
@@ -226,7 +236,7 @@ function referenceCollection(
               value: change.row,
             })
             keys.add(change.row.id)
-          } else if (mutant !== `drops-deletes`) {
+          } else if (mutant !== `drops-deletes` || !ready) {
             write({ type: `delete`, key: change.id })
             keys.delete(change.id)
           }
@@ -429,7 +439,35 @@ export function referenceDriver(
         mutant,
         perChange,
       )
-      return { collection, provider, awaitTxId }
+      if (mutant !== `relabels-inserts`) {
+        return { collection, provider, awaitTxId }
+      }
+      const relabeled = observedView(collection, {
+        row: (row) => row,
+        key: (key) => key as number,
+      })
+      const subscribeChanges: typeof relabeled.subscribeChanges = (
+        callback,
+        options,
+      ) =>
+        relabeled.subscribeChanges(
+          (changes) =>
+            callback(
+              changes.map((change) =>
+                change.type === `insert`
+                  ? { ...change, type: `update` as const }
+                  : change,
+              ),
+            ),
+          options,
+        )
+      // The view's getters stay live on the derived object.
+      const view = Object.create(relabeled) as typeof relabeled
+      return {
+        collection: Object.assign(view, { subscribeChanges }),
+        provider,
+        awaitTxId,
+      }
     },
   }
 }

@@ -23,10 +23,17 @@
  *   `cancel`, so for it only the lock release is seen.
  *
  * The provider's own rows decide `Insert` versus `Update`, as a real service
- * would. The driver never reads the Collection.
+ * would. A record is a SQL row with every column, so an absent `note` is
+ * `NULL` (`toSqlRow`), and the observed view maps `NULL` back to absent
+ * (`fromSqlRow`). The driver never reads the Collection.
  */
 import { createCollection } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
+import {
+  fromSqlRow,
+  observedView,
+  toSqlRow,
+} from '../../db-adapter-conformance/src'
 import { MockRecordApi } from './mock-record-api'
 import type { Event, ListResponse } from 'trailbase'
 import type {
@@ -34,9 +41,11 @@ import type {
   ControlledProvider,
   EagerLiveSourceDriver,
   EagerLiveSourceFixture,
-  ObservedCollection,
   ProviderChange,
 } from '../../db-adapter-conformance/src'
+
+/** A TrailBase record: a SQL row, so an absent `note` is `NULL`. */
+type ConformanceRecord = ReturnType<typeof toSqlRow>
 
 interface ProviderSession {
   stream: ReadableStream<Event>
@@ -44,13 +53,13 @@ interface ProviderSession {
   cancels: number
   locked: boolean
   list?: {
-    resolve: (response: ListResponse<ConformanceRow>) => void
+    resolve: (response: ListResponse<ConformanceRecord>) => void
     reject: (error: unknown) => void
   }
 }
 
 class TrailBaseProvider implements ControlledProvider {
-  readonly api = new MockRecordApi<ConformanceRow>()
+  readonly api = new MockRecordApi<ConformanceRecord>()
   readonly sessions: Array<ProviderSession> = []
   private rows = new Map<number, ConformanceRow>()
 
@@ -75,7 +84,7 @@ class TrailBaseProvider implements ControlledProvider {
     })
     this.api.list.mockImplementation(
       () =>
-        new Promise<ListResponse<ConformanceRow>>((resolve, reject) => {
+        new Promise<ListResponse<ConformanceRecord>>((resolve, reject) => {
           this.latest().list = { resolve, reject }
         }),
     )
@@ -106,7 +115,7 @@ class TrailBaseProvider implements ControlledProvider {
   deliverSnapshot = (rows: ReadonlyArray<ConformanceRow>) => {
     this.rows = new Map(rows.map((row) => [row.id, row]))
     // One short page drains TrailBase's paged list.
-    this.pendingList().resolve({ records: [...rows] })
+    this.pendingList().resolve({ records: rows.map(toSqlRow) })
   }
 
   deliverChanges = (changes: ReadonlyArray<ProviderChange>) => {
@@ -115,14 +124,13 @@ class TrailBaseProvider implements ControlledProvider {
       if (change.type === `upsert`) {
         const held = this.rows.has(change.row.id)
         this.rows.set(change.row.id, change.row)
-        controller.enqueue(
-          held ? { Update: { ...change.row } } : { Insert: { ...change.row } },
-        )
+        const record = toSqlRow(change.row)
+        controller.enqueue(held ? { Update: record } : { Insert: record })
       } else {
         const row = this.rows.get(change.id)
         if (!row) throw new Error(`provider does not hold row ${change.id}`)
         this.rows.delete(change.id)
-        controller.enqueue({ Delete: { ...row } })
+        controller.enqueue({ Delete: toSqlRow(row) })
       }
     }
   }
@@ -147,14 +155,17 @@ export function trailBaseConformanceDriver(): EagerLiveSourceDriver {
       const collection = createCollection(
         trailBaseCollectionOptions({
           recordApi: provider.api,
-          getKey: (row: ConformanceRow) => row.id,
+          getKey: (row: ConformanceRecord) => row.id,
           syncMode: `eager`,
           parse: {},
           serialize: {},
         }),
       )
       return {
-        collection: collection as unknown as ObservedCollection,
+        collection: observedView(collection, {
+          row: fromSqlRow,
+          key: (key) => key as number,
+        }),
         provider,
       }
     },

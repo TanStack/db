@@ -14,16 +14,16 @@ reviewed change.
 
 ## Oracle families
 
-| Family                                | Status                                    | Laws                                                                                                               |
-| ------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
-| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                         |
-| On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                    |
-| Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                              |
-| Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                 |
-| Source shapes                         | Needed                                    | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                                 |
-| Local and shared stores               | Needed                                    | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                                       |
-| Persistence wrapper and storage hosts | Needed                                    | P-_, S-_                                                                                                           |
+| Family                                | Status                                    | Laws                                                                                                                 |
+| ------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-1/4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
+| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                           |
+| On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                      |
+| Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                                |
+| Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                   |
+| Source shapes                         | Needed                                    | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                                   |
+| Local and shared stores               | Needed                                    | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                                         |
+| Persistence wrapper and storage hosts | Needed                                    | P-_, S-_                                                                                                             |
 
 ## Adapters
 
@@ -133,3 +133,21 @@ a buffered insert and update`) failed the same way.
     rejected by both campaigns and reverted.
   - **Oracle change this exposed:** READY-8 is checked before any other
     observation, since a fetch before listening explains what follows.
+- **2026-10-29, eager live source, field removal and event fold (from the
+  RxDB migration).** A row now has an optional `note`, so a later row can
+  remove a field (FID-1); a mismatch only in fields is labeled FID-1, and
+  the declared state `field-removed` covers live batches, replacing
+  complete deliveries, and the initial cut. The change-event fold now also
+  flags an update of a key it does not hold (PUB-2). Drivers share
+  `observedView`; TrailBase and Neon, whose backends are SQL, carry an
+  absent `note` as `NULL` (`toSqlRow`, `fromSqlRow`).
+  - **Calibration:** `merges-updates` (FID-1) and `relabels-inserts`, a
+    checker calibration that relabels insert events as updates (PUB-2).
+  - **Budgets:** `field-removed` needs a held note and a later row without
+    it. At 200 histories TrailBase reached it as few as 2 times; drivers now
+    run 400 histories and the reference 600.
+  - **TrailBase:** GREEN; no defect. Its records carry every column, so a
+    removed note arrives as `NULL` and replaces the old value.
+  - **Neon:** still RED on READY-4 and HEALTH-1 only; a probe without
+    failure steps passed 300 histories with notes.
+  - **RxDB:** RED on FID-1; see the next entry.

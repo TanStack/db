@@ -35,7 +35,10 @@ import { trailBaseConformanceDriver } from './conformance-driver'
 const property = `adapter-conformance.eager-live-source.trailbase`
 const driver = trailBaseConformanceDriver()
 const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
-const runs = 200
+// `field-removed` needs a held row with a note and a later upsert without
+// one; at 400 histories every seed tried reached it at least 11 times.
+const runs = 400
+const campaignTimeoutMs = 120_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {
   const reach = createOracleReach(
@@ -50,10 +53,14 @@ async function campaign(options: fc.Parameters<[unknown]>) {
 }
 
 describe(`eager live-source conformance: TrailBase`, () => {
-  oracleReplayTest(it)(`conforms on a fixed-seed campaign`, async () => {
-    const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
-    reach.assertReached()
-  })
+  oracleReplayTest(it)(
+    `conforms on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
 
   oracleReplayTest(it, property)(
     `conforms on a random campaign or a replayed seed`,
@@ -61,6 +68,7 @@ describe(`eager live-source conformance: TrailBase`, () => {
       const reach = await campaign(oraclePropertyOptions(runs, property))
       reach.assertReached()
     },
+    campaignTimeoutMs,
   )
 })
 

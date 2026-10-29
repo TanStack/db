@@ -22,8 +22,14 @@
  *   ready (`emitEmptyReadyEvent` in `packages/db/src/collection/changes.ts`)
  *   is a readiness notification, not a commit publication.
  * - **PUB-2.** Folding the Collection's change events gives the current rows.
+ *   An insert of a held key, an update of a key not held, and a delete of a
+ *   key not held are each inconsistent.
  * - **PUB-3, FID-4.** After a committed change batch applies, the rows equal
  *   the batch folded onto the previous rows.
+ * - **FID-1.** A delivered row is the complete backend row: a row without
+ *   the optional `note` has no `note` in the Collection, also when the row
+ *   it replaces had one. Fields compare by own property, so an own
+ *   `undefined` differs from an absent field.
  * - **PUB-7** (capability `complete-snapshot`). A later complete delivery
  *   replaces the rows: keys it omits are gone.
  * - **LIFE-2, LIFE-5.** Cleanup releases the provider subscription. A restart
@@ -91,10 +97,14 @@ import type { ChangeMessage, HealthNode } from '@tanstack/db'
 // Production driver contract
 // ---------------------------------------------------------------------------
 
-/** The row every conformance history uses. A driver maps it to its provider. */
+/**
+ * The row every conformance history uses. A driver maps it to its provider.
+ * `note` is optional, so a later row can remove it.
+ */
 export interface ConformanceRow {
   readonly id: number
   readonly title: string
+  readonly note?: string
 }
 
 /** One change in a provider's committed batch. */
@@ -233,7 +243,8 @@ export interface EagerLiveSourceDriver {
  * - `restart`: cleanup, then `preload()` starts a new sync run.
  *
  * Keys range over 1..5 and titles over three values, so batches revisit
- * keys, deletes hit live rows, and complete deliveries omit held keys. With
+ * keys, deletes hit live rows, and complete deliveries omit held keys. A row
+ * carries `note` half the time, so an update can add or remove a field. With
  * `listen-before-fetch`, a history starts with up to three batches committed
  * during the first fetch.
  */
@@ -262,10 +273,14 @@ export type EagerLiveSourceStep =
 
 export type EagerLiveSourceHistory = ReadonlyArray<EagerLiveSourceStep>
 
-const rowArb: fc.Arbitrary<ConformanceRow> = fc.record({
-  id: fc.integer({ min: 1, max: 5 }),
-  title: fc.constantFrom(`a`, `b`, `c`),
-})
+const rowArb: fc.Arbitrary<ConformanceRow> = fc.record(
+  {
+    id: fc.integer({ min: 1, max: 5 }),
+    title: fc.constantFrom(`a`, `b`, `c`),
+    note: fc.constantFrom(`x`, `y`),
+  },
+  { requiredKeys: [`id`, `title`] },
+)
 
 const changeArb: fc.Arbitrary<ProviderChange> = fc.oneof(
   rowArb.map((row) => ({ type: `upsert` as const, row })),
@@ -423,8 +438,30 @@ export interface ExpectedObservation {
   renewalsThisRun: number
 }
 
+/**
+ * A row's value as the model compares it: its title, then its note when the
+ * row has its own `note` property. An own `undefined` shows as `undefined`.
+ */
+function rowValue(row: { readonly title: string; readonly note?: unknown }) {
+  return Object.hasOwn(row, `note`)
+    ? `${row.title}/${String(row.note)}`
+    : row.title
+}
+
+function rowFromValue(id: number, value: string): ConformanceRow {
+  const [title = ``, note] = value.split(`/`)
+  return note === undefined ? { id, title } : { id, title, note }
+}
+
 function rowMap(rows: ReadonlyArray<ConformanceRow>): Map<number, string> {
-  return new Map(rows.map((row) => [row.id, row.title]))
+  return new Map(rows.map((row) => [row.id, rowValue(row)]))
+}
+
+/** The rows a Collection holds, as the model compares them. */
+function observedRows(collection: ObservedCollection): RowState {
+  return rowState(
+    new Map([...collection.values()].map((row) => [row.id, rowValue(row)])),
+  )
 }
 
 function initialModel(seed: ReadonlyArray<ConformanceRow> = []): ModelState {
@@ -478,7 +515,7 @@ function foldBatch(
   const delivered: Array<ProviderChange> = []
   for (const change of changes) {
     if (change.type === `upsert`) {
-      rows.set(change.row.id, change.row.title)
+      rows.set(change.row.id, rowValue(change.row))
     } else if (rows.has(change.id)) {
       rows.delete(change.id)
     } else {
@@ -488,6 +525,17 @@ function foldBatch(
     onChange()
   }
   return delivered
+}
+
+/** Whether a key held in both lost the `note` it had in `before`. */
+function lostField(
+  before: ReadonlyMap<number, string>,
+  after: ReadonlyMap<number, string>,
+): boolean {
+  return [...before].some(
+    ([id, value]) =>
+      value.includes(`/`) && after.get(id)?.includes(`/`) === false,
+  )
 }
 
 /** Whether replaying `changes` onto `rows` would change them. */
@@ -511,12 +559,16 @@ type AcceptedStep =
       missed: number
       /** Whether replaying a batch the read reflects would change the rows. */
       superseded: boolean
+      /** Whether a held row, or the read's row at the cut, lost a field. */
+      removesField: boolean
     }
   | {
       kind: `changes`
       changes: Array<ProviderChange>
       txid: number
       beforeReady: boolean
+      /** Whether an upsert removed a field the row it replaced had. */
+      removesField: boolean
     }
   | { kind: `wait`; txid: number; timeout: boolean }
   | { kind: `fail`; failure: number }
@@ -614,16 +666,18 @@ function stepModel(
         return {
           done: {
             kind: `snapshot`,
-            rows: cut.read.map(([id, title]) => ({ id, title })),
+            rows: cut.read.map(([id, value]) => rowFromValue(id, value)),
             buffered,
             missed: buffered - seen,
             superseded: cut.superseded,
+            removesField: lostField(new Map(cut.read), cut.backend),
           },
           publishable: cut.publishable,
         }
       }
-      // PUB-7: a complete delivery replaces the rows. READY-3: the first one
-      // opens the initial gate.
+      // PUB-7: a complete delivery replaces the rows, fields included.
+      // READY-3: the first one opens the initial gate.
+      const removesField = lostField(state.rows, rowMap(step.rows))
       state.rows = rowMap(step.rows)
       state.backend = rowMap(step.rows)
       state.phase = `ready`
@@ -634,6 +688,7 @@ function stepModel(
           buffered: 0,
           missed: 0,
           superseded: false,
+          removesField,
         },
         publishable: [rowState(state.rows)],
       }
@@ -652,6 +707,7 @@ function stepModel(
             changes: delivered,
             txid: state.lastTxid,
             beforeReady: true,
+            removesField: false,
           },
           publishable: [],
         }
@@ -663,6 +719,23 @@ function stepModel(
       const delivered = foldBatch(state.rows, step.changes, () =>
         prefixes.push(rowState(state.rows)),
       )
+      // Reach: an upsert without `note` replaced a row that had one, before
+      // or within this batch.
+      const held = new Map(state.backend)
+      let removesField = false
+      for (const change of delivered) {
+        if (change.type === `delete`) {
+          held.delete(change.id)
+          continue
+        }
+        if (
+          !Object.hasOwn(change.row, `note`) &&
+          held.get(change.row.id)?.includes(`/`) === true
+        ) {
+          removesField = true
+        }
+        held.set(change.row.id, rowValue(change.row))
+      }
       foldBatch(state.backend, delivered)
       state.lastTxid += 1
       state.transient = []
@@ -673,6 +746,7 @@ function stepModel(
           changes: delivered,
           txid: state.lastTxid,
           beforeReady: false,
+          removesField,
         },
         publishable:
           options.changeCommits === `per-change`
@@ -811,6 +885,7 @@ export const eagerLiveSourceReachStates = [
   `change-before-ready`,
   `read-missed-change`,
   `seen-change-superseded`,
+  `field-removed`,
 ] as const
 
 export type EagerLiveSourceReachState =
@@ -985,9 +1060,7 @@ export async function checkEagerLiveSourceHistory(
   let readyRows: RowState | undefined
   const watchReady = () =>
     collection.on(`status:ready`, () => {
-      readyRows = rowState(
-        new Map([...collection.values()].map((row) => [row.id, row.title])),
-      )
+      readyRows = observedRows(collection)
     })
   watchReady()
   let preload = recordSettlement(collection.preload())
@@ -1056,9 +1129,7 @@ export async function checkEagerLiveSourceHistory(
   ) => {
     await settle()
     const expected = expectedObservation(state)
-    const rows = rowState(
-      new Map([...collection.values()].map((row) => [row.id, row.title])),
-    )
+    const rows = observedRows(collection)
     const check = (name: string, ok: boolean, want: unknown, got: unknown) => {
       if (!ok) throw violation(`${law} (${name})`, stepIndex, want, got)
     }
@@ -1077,6 +1148,11 @@ export async function checkEagerLiveSourceHistory(
       expected.status,
       collection.status,
     )
+    // FID-1: rows that differ only in a field, with the right keys and
+    // titles, name the field law.
+    if (!sameRows(rows, expected.rows) && sameTitles(rows, expected.rows)) {
+      throw violation(`FID-1 (fields)`, stepIndex, expected.rows, rows)
+    }
     check(`rows`, sameRows(rows, expected.rows), expected.rows, rows)
     if (readyRows !== undefined) {
       check(
@@ -1087,7 +1163,9 @@ export async function checkEagerLiveSourceHistory(
       )
       readyRows = undefined
     }
-    check(`change events`, sameRows(events.rows(), rows), rows, events.rows())
+    if (!sameRows(events.rows(), rows)) {
+      throw violation(`PUB-2 (change events)`, stepIndex, rows, events.rows())
+    }
     const health = collection.health
     if (expected.healthError === null) {
       check(`health error`, health.error === null, null, health.error?.message)
@@ -1222,11 +1300,13 @@ export async function checkEagerLiveSourceHistory(
           reach(wasReady ? `replacing-snapshot` : `first-ready`)
           if (done.missed > 0) reach(`read-missed-change`)
           if (done.superseded) reach(`seen-change-superseded`)
+          if (done.removesField) reach(`field-removed`)
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           break
         case `changes`:
           provider.deliverChanges(done.changes, String(done.txid))
           reach(done.beforeReady ? `change-before-ready` : `change-batch`)
+          if (done.removesField) reach(`field-removed`)
           if (done.changes.length > 1) reach(`multi-change-batch`)
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           if (
@@ -1428,6 +1508,18 @@ function supports(
   }
 }
 
+/** Same keys and titles, whatever the other fields. */
+function sameTitles(a: RowState, b: RowState): boolean {
+  const title = (value: string) => value.split(`/`)[0]
+  return (
+    a.length === b.length &&
+    a.every(
+      ([id, value], index) =>
+        b[index]![0] === id && title(b[index]![1]) === title(value),
+    )
+  )
+}
+
 function sameRows(a: RowState, b: RowState): boolean {
   return (
     a.length === b.length &&
@@ -1440,8 +1532,8 @@ function sameRows(a: RowState, b: RowState): boolean {
 /**
  * Folds the Collection's change events into rows (PUB-2) and records the row
  * state after each publication (PUB-1). The fold keeps every event, so a
- * duplicate insert or a delete of an absent key shows as a mismatch rather
- * than disappearing. It subscribes right after `preload()`, while the sync
+ * duplicate insert, an update of an absent key, or a delete of an absent key
+ * shows as a mismatch rather than disappearing. It subscribes right after `preload()`, while the sync
  * run holds no rows, so it needs no initial state.
  */
 function foldChanges(collection: ObservedCollection) {
@@ -1457,9 +1549,10 @@ function foldChanges(collection: ObservedCollection) {
       if (change.type === `delete`) {
         if (!rows.delete(change.key)) inconsistent = true
       } else {
-        if (change.type === `insert` && rows.has(change.key))
+        // An insert of a held key, or an update of a key not held.
+        if ((change.type === `insert`) === rows.has(change.key))
           inconsistent = true
-        rows.set(change.key, change.value.title)
+        rows.set(change.key, rowValue(change.value))
       }
     }
     publications.push(rowState(rows))

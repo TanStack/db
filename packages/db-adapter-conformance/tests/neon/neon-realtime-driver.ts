@@ -26,6 +26,7 @@
  * judges the Collection's public state after such an exception.
  */
 import { createCollection } from '@tanstack/db'
+import { fromSqlRow, observedView, toSqlRow } from '../../src'
 import { realtimeCollectionOptions } from './vendor/collection-options'
 import type {
   LiveQueryChange,
@@ -42,18 +43,20 @@ import type {
   ControlledProvider,
   EagerLiveSourceDriver,
   EagerLiveSourceFixture,
-  ObservedCollection,
   ProviderChange,
 } from '../../src'
 
-class ControlledRawSubscription implements RawLiveQuerySubscription<ConformanceRow> {
-  readonly renewals: Array<SealedLiveQuery<ConformanceRow>> = []
+/** A Neon row is a Postgres row, so an absent `note` is `NULL`. */
+type NeonRow = ReturnType<typeof toSqlRow>
+
+class ControlledRawSubscription implements RawLiveQuerySubscription<NeonRow> {
+  readonly renewals: Array<SealedLiveQuery<NeonRow>> = []
   readonly listenerErrors: Array<unknown> = []
   unsubscribed = false
   unsubscribes = 0
   private state: LiveQueryState = { status: `connecting`, error: undefined }
   private readonly updates = new Set<
-    (update: RawLiveQueryUpdate<ConformanceRow>) => void
+    (update: RawLiveQueryUpdate<NeonRow>) => void
   >()
   private readonly states = new Set<(state: LiveQueryState) => void>()
   private readonly applied = new Set<string>()
@@ -64,9 +67,7 @@ class ControlledRawSubscription implements RawLiveQuerySubscription<ConformanceR
 
   getState = (): LiveQueryState => this.state
 
-  onUpdate = (
-    listener: (update: RawLiveQueryUpdate<ConformanceRow>) => void,
-  ) => {
+  onUpdate = (listener: (update: RawLiveQueryUpdate<NeonRow>) => void) => {
     this.updates.add(listener)
     return () => this.updates.delete(listener)
   }
@@ -100,7 +101,7 @@ class ControlledRawSubscription implements RawLiveQuerySubscription<ConformanceR
     })
   }
 
-  renew = (query: SealedLiveQuery<ConformanceRow>): Promise<void> => {
+  renew = (query: SealedLiveQuery<NeonRow>): Promise<void> => {
     this.renewals.push(query)
     return Promise.resolve()
   }
@@ -113,7 +114,7 @@ class ControlledRawSubscription implements RawLiveQuerySubscription<ConformanceR
   }
 
   deliver(
-    update: RawLiveQueryUpdate<ConformanceRow>,
+    update: RawLiveQueryUpdate<NeonRow>,
     txids: ReadonlyArray<string> = [],
   ) {
     for (const listener of this.updates) this.call(() => listener(update))
@@ -146,7 +147,7 @@ class ControlledRawSubscription implements RawLiveQuerySubscription<ConformanceR
   }
 }
 
-function sealed(expiresInMs: number): SealedLiveQuery<ConformanceRow> {
+function sealed(expiresInMs: number): SealedLiveQuery<NeonRow> {
   const header = Buffer.from(
     JSON.stringify({ alg: `dir`, enc: `A256GCM`, v: 1 }),
   ).toString(`base64url`)
@@ -157,24 +158,24 @@ function sealed(expiresInMs: number): SealedLiveQuery<ConformanceRow> {
   }
 }
 
-function rawRow(row: ConformanceRow): RawLiveQueryRow<ConformanceRow> {
-  return { rowId: `r${row.id}`, row }
+function rawRow(row: ConformanceRow): RawLiveQueryRow<NeonRow> {
+  return { rowId: `r${row.id}`, row: toSqlRow(row) }
 }
 
-function rawChange(change: ProviderChange): LiveQueryChange<ConformanceRow> {
+function rawChange(change: ProviderChange): LiveQueryChange<NeonRow> {
   return change.type === `upsert`
-    ? { type: `upsert`, rowId: `r${change.row.id}`, row: change.row }
+    ? { type: `upsert`, rowId: `r${change.row.id}`, row: toSqlRow(change.row) }
     : { type: `remove`, rowId: `r${change.id}` }
 }
 
 class NeonProvider implements ControlledProvider {
   readonly subscriptions: Array<ControlledRawSubscription> = []
   private pendingRefresh:
-    ((query: SealedLiveQuery<ConformanceRow>) => void) | undefined
+    ((query: SealedLiveQuery<NeonRow>) => void) | undefined
 
   readonly client: RealtimeClient = {
     subscribe: ((
-      _query: SealedLiveQuery<ConformanceRow>,
+      _query: SealedLiveQuery<NeonRow>,
       options?: RawLiveQueryOptions,
     ) => {
       if (options?.materialize !== false) {
@@ -190,7 +191,7 @@ class NeonProvider implements ControlledProvider {
   }
 
   refreshQuery = () =>
-    new Promise<SealedLiveQuery<ConformanceRow>>((resolve) => {
+    new Promise<SealedLiveQuery<NeonRow>>((resolve) => {
       this.pendingRefresh = resolve
     })
 
@@ -269,11 +270,14 @@ export function neonRealtimeDriver(): EagerLiveSourceDriver {
           // Expires within Neon's 10 s refresh lead, so a renewal is due at once.
           query: sealed(10_000),
           refreshQuery: provider.refreshQuery,
-          getKey: (row: ConformanceRow) => row.id,
+          getKey: (row: NeonRow) => row.id,
         }),
       )
       return {
-        collection: collection as unknown as ObservedCollection,
+        collection: observedView(collection, {
+          row: fromSqlRow,
+          key: (key) => key as number,
+        }),
         provider,
         awaitTxId: (txid, timeout) => collection.utils.awaitTxId(txid, timeout),
       }

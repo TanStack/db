@@ -22,3 +22,10 @@ export type {
   ProviderChange,
   ReachCounter,
 } from './eager-live-source-oracle'
+export {
+  conformanceKey,
+  fromSqlRow,
+  observedView,
+  toSqlRow,
+} from './observed-view'
+export type { AdapterCollection } from './observed-view'

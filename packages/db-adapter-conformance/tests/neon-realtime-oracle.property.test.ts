@@ -36,7 +36,9 @@ import { neonRealtimeDriver } from './neon/neon-realtime-driver'
 const property = `adapter-conformance.eager-live-source.neon-realtime`
 const driver = neonRealtimeDriver()
 const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
-const runs = 200
+// `field-removed` needs a held row with a note and a later upsert without
+// one; at 400 histories every seed tried reached it at least 11 times.
+const runs = 400
 // Timed waits sleep past their timeout, so a passing campaign takes seconds.
 const campaignTimeoutMs = 120_000
 

@@ -256,7 +256,7 @@ No service-backed E2E run is claimed.
 `eager-live-source-conformance-oracle.property.test.ts` runs the shared eager
 live-source oracle from `packages/db-adapter-conformance` through
 `conformance-driver.ts`, with the same controlled RecordApi. It checks
-READY-2/3/4, HEALTH-1, PUB-1 (per-change commits), PUB-2/3, FID-4,
+READY-2/3/4, HEALTH-1, PUB-1 (per-change commits), PUB-2/3, FID-1/4,
 LIFE-2/5/10, and HEALTH-5 in eager mode. TrailBase declares no optional
 capability, so it is not checked for PUB-7, waits, retried failures,
 reconnect, or renewal. This file's

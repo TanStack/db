@@ -53,9 +53,9 @@ const property = `adapter-conformance.eager-live-source.reference`
 const driver = referenceDriver()
 const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
 // The reference adapter declares every capability, so its grammar spreads
-// over the most step kinds. Across 20 seeds, 400 histories reached every
-// declared state at least 11 times.
-const runs = 400
+// over the most step kinds. Across 20 seeds, 600 histories reached every
+// declared state at least 15 times.
+const runs = 600
 // Timed waits sleep past their timeout, so a campaign takes several seconds.
 const campaignTimeoutMs = 120_000
 
@@ -116,6 +116,8 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`replays-per-batch`, `PUB-5`],
     [`ready-before-buffer`, `READY-10 (rows when ready)`],
     [`shows-buffered`, `READY-10/PUB-9`],
+    [`merges-updates`, `FID-1`],
+    [`relabels-inserts`, `PUB-2`],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
@@ -279,6 +281,17 @@ const witnesses: Array<[string, EagerLiveSourceHistory]> = [
     ],
   ],
   [
+    // FID-1: an update without the optional field removes it.
+    `an update that omits a field removes it`,
+    [
+      { kind: `snapshot`, rows: [{ id: 1, title: `a`, note: `x` }] },
+      {
+        kind: `changes`,
+        changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
+      },
+    ],
+  ],
+  [
     // lifecycle-oracle.property.test.ts, restart fencing
     `TrailBase: a restart is a fresh sync run`,
     [
@@ -291,8 +304,11 @@ const witnesses: Array<[string, EagerLiveSourceHistory]> = [
 
 /** Whether `history` lies in the generator's domain. */
 function withinGrammar(history: EagerLiveSourceHistory): boolean {
-  const row = (r: { id: number; title: string }) =>
-    r.id >= 1 && r.id <= 5 && [`a`, `b`, `c`].includes(r.title)
+  const row = (r: { id: number; title: string; note?: string }) =>
+    r.id >= 1 &&
+    r.id <= 5 &&
+    [`a`, `b`, `c`].includes(r.title) &&
+    (!Object.hasOwn(r, `note`) || [`x`, `y`].includes(r.note!))
   return (
     history.length >= 1 &&
     history.length <= 15 &&
@@ -419,6 +435,50 @@ describe(`eager live-source grammar controls`, () => {
         { seed: 2118, numRuns: 100 },
       )
       expect(reach.counts().get(lost)).toBe(0)
+    },
+    campaignTimeoutMs,
+  )
+
+  oracleReplayTest(it)(
+    `without notes, histories never reach field-removed`,
+    async () => {
+      const reach = createOracleReach(
+        `${property}.ablation`,
+        reachStatesFor(driver.capabilities),
+        { replaying: false },
+      )
+      const plain = (row: { id: number; title: string }) => ({
+        id: row.id,
+        title: row.title,
+      })
+      await fc.assert(
+        fc.asyncProperty(
+          historyArb.map((history) =>
+            history.map((step): EagerLiveSourceStep => {
+              if (step.kind === `snapshot`) {
+                return { ...step, rows: step.rows.map(plain) }
+              }
+              if (step.kind !== `changes`) return step
+              return {
+                kind: `changes`,
+                changes: step.changes.map((change) =>
+                  change.type === `upsert`
+                    ? { type: `upsert`, row: plain(change.row) }
+                    : change,
+                ),
+              }
+            }),
+          ),
+          async (history) => {
+            reach.beginHistory()
+            await checkEagerLiveSourceHistory(driver, history, {
+              reach: reach.reach,
+            })
+          },
+        ),
+        { seed: 2118, numRuns: 100 },
+      )
+      expect(reach.counts().get(`field-removed`)).toBe(0)
     },
     campaignTimeoutMs,
   )
