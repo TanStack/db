@@ -382,9 +382,10 @@ export type LoadSubsetOptions = {
 export type LoadSubsetRequestResult = true | Promise<void>
 
 /**
- * Loads one subset and transfers its ongoing resource ownership only after
- * returning `true` or a promise. An implementation that throws synchronously
- * must release any partially acquired resource before throwing. A successful
+ * Loads one subset. A Collection subscription installs its logical owner
+ * before calling this function. A synchronous throw fails the load but keeps
+ * that owner; releasing the owner still calls `unloadSubset`, if provided,
+ * for the failed load. Make that handler safe after partial setup. A successful
  * implementation must await or return every receipt from the sync
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.

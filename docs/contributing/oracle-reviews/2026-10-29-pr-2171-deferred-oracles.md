@@ -60,3 +60,72 @@ The coverage map and architecture point here so historical full-campaign claims
 below those entries cannot be mistaken for current release registrations.
 Before follow-up repair, restore the exact dependent owner/driver/model slices,
 reproduce their retained RED and reach, and then supply GREEN/mutant evidence.
+
+## Further retained receiving and guidance gaps
+
+P06/P07/P13/P14 prose conflicts are corrected on the release branch. Two
+coverage obligations remain separate from that correction: P08 needs the actual
+custom-adapter fenced callback to hold an establishing applied receipt before
+load settlement; P14 needs the actual lazy child-ready call outcome compared
+with the existing source-health model, instead of catching and discarding a
+throw. Preserve the accepted owner, fresh-run neighbors and omitted-callback
+reach controls before any follow-up production repair.
+
+Installed declaration emission also exposes an unchanged-main portability gap.
+The exact initial RC artifacts and strict installed main `95460bc875` both fail
+in ESM and CommonJS for an exported inferred live-query factory (TS2742 twice,
+TS4058) and an exported inferred Collection value (TS2742 twice, TS4023).
+Private compiler/live types and `LIVE_QUERY_INTERNAL` cannot be named. This
+affects libraries emitting declarations for these inferred exports, rather than
+ordinary runtime use. Handler admission passes in both formats; it cannot prove
+this separate portability law. The release does not repair this broader gap.
+
+The following original factory witness is preserved verbatim so follow-up does
+not depend only on temporary artifacts. Compile its `.mts` and `.cts` forms
+with strict NodeNext declaration emission against actual installed tarballs.
+Keep the original export unannotated. A separate named public view containing
+only readonly `toArray` emits on both cuts, but is not a full-Collection
+annotation workaround. Add legal generated row/key shapes and both factory and
+inferred-value emission paths to the public-type owner before production repair.
+
+```text
+import { IR, Query, createLiveQueryCollection, eq, include, materialize, toArray } from '@tanstack/db';
+import type { Collection, QueryResult } from '@tanstack/db';
+type LiteralSourceRow = {
+    id: number;
+    version: number;
+    optional?: string | null;
+};
+declare const source: Collection<LiteralSourceRow>;
+declare const parents: Collection<{
+    id: number;
+    group: number;
+}>;
+declare function consume(row: object): void;
+declare function consumeChild(row: object): void;
+declare function consumeParent(row: object): void;
+type __ArrayBase = Array<unknown>;
+export function receiver() {
+    const selected = new Query()
+        .from({ row: source })
+        .select(({ row }) => ({ id: row.id, version: row.version, value: 0 }));
+    const __observedQuery = selected;
+    const __observedCollection = createLiveQueryCollection({
+        query: __observedQuery,
+        getKey: (row) => row.id
+    });
+    type __Observe_finalQuery = QueryResult<typeof __observedQuery>;
+    type __Observe_finalCollection = typeof __observedCollection.toArray[number];
+    return __observedCollection;
+}
+
+```
+
+Original source SHA256 is
+`c6c8c1da415901f4935f611387e7f6a3234b5f9753544256f0680038dcc1b50d`.
+Current/main final receiving receipts are
+`eb157fdc5f567fc04647d206762d794455a998620adc3d9383abf74e0bfc503c` /
+`2987feb2620ba1699869b12dbe51c811b6b0e6c389d06a176bf9a417d1827495`.
+The original strict emitted factory/value REDs remain required follow-up
+receivers. An agent-added narrow `Collection<Row, number>` annotation was an
+invalid control on both cuts and supplies no product-failure credit.

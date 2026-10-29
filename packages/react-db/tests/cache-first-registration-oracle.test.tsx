@@ -179,8 +179,9 @@ test.each(
       return rendering
     }
     let firstReads = 0
-    const views: Array<NonNullable<ReturnType<typeof resolveLiveQueryValue>>> =
-      []
+    const resolvedQueryCollections: Array<
+      NonNullable<ReturnType<typeof resolveLiveQueryValue>>
+    > = []
     const observers: Array<ReturnType<typeof createLiveQueryObserver>> = []
     const subscriptions: Array<() => void> = []
     let readObserver: (() => ReadonlyMap<string | number, unknown>) | undefined
@@ -291,7 +292,7 @@ test.each(
       expect(firstReads).toBeGreaterThan(0)
       vi.unstubAllGlobals()
       const view = resolveLiveQueryValue(first)!
-      views.push(view)
+      resolvedQueryCollections.push(view)
       const observer = createLiveQueryObserver(view, {
         client,
         queryHash: getLiveQueryHash(first, first.queryKey),
@@ -328,7 +329,9 @@ test.each(
         withOracleCleanup(() => {}, [
           ...subscriptions.map((release) => () => release()),
           ...observers.map((observer) => () => observer.dispose()),
-          ...views.map((view) => () => view.cleanup({ dependents: true })),
+          ...resolvedQueryCollections.map(
+            (view) => () => view.cleanup({ dependents: true }),
+          ),
         ]),
       () => client.cleanup(),
     ])

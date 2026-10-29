@@ -883,8 +883,8 @@ query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
 the adapter has installed a loader. The error is final for its sync run:
-`markReady()` in the same sync run is a contract violation and throws, and
-only a restart, which begins a new sync run, acquires that demand. Releasing it
+`markReady()` in the same sync run does nothing, and only a restart, which
+begins a new sync run, acquires that demand. Releasing it
 before the restart creates no physical acquisition or unload. Queued
 reacquisition must not retry a failed attempt merely because both loading and
 ready notifications scheduled it.

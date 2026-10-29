@@ -2,9 +2,16 @@
 // protocol mechanics; product tag judgments remain in the shared oracle.
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { withReleaseWorkspace } from './release-fixture.js'
@@ -150,6 +157,56 @@ const history = {
   failure: 'none',
   tagShape: 'ordinary',
 }
+
+test('HTTP receiver executes the PATH-selected relative pnpm launcher at its original location', () => {
+  const root = mkdtempSync(join(tmpdir(), "release pnpm's launcher-"))
+  try {
+    const native = realpathSync(
+      execFileSync('which', ['pnpm'], { encoding: 'utf8' }).trim(),
+    )
+    const bin = join(root, 'bin')
+    const tool = join(root, 'global', 'v11', 'pnpm')
+    mkdirSync(bin)
+    mkdirSync(join(root, 'global', 'v11'), { recursive: true })
+    const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`
+    writeFileSync(tool, `#!/bin/sh\nexec ${quote(native)} "$@"\n`, {
+      mode: 0o755,
+    })
+    const launcher = join(bin, 'pnpm')
+    writeFileSync(
+      launcher,
+      '#!/bin/sh\nbasedir=$(dirname "$0")\nexec "$basedir/../global/v11/pnpm" "$@"\n',
+      { mode: 0o755 },
+    )
+    const receiver = new URL('./release-http-fixture.js', import.meta.url).href
+    const workspace = new URL('./release-fixture.js', import.meta.url).href
+    const probe = `
+      const { withHttpPublishReceiver } = await import(${JSON.stringify(receiver)})
+      const { withReleaseWorkspace } = await import(${JSON.stringify(workspace)})
+      await withReleaseWorkspace(async ({ root }) => withHttpPublishReceiver(root, ${JSON.stringify(history)}, async (receiver) => {
+        await receiver.run()
+        console.log(JSON.stringify(receiver.tools))
+      }))
+    `
+    const probePath = join(root, 'probe.mjs')
+    writeFileSync(probePath, probe)
+    const result = spawnSync(process.execPath, [probePath], {
+      encoding: 'utf8',
+      timeout: 45_000,
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    })
+    assert.equal(result.error, undefined)
+    assert.equal(result.status, 0, result.stderr)
+    const tools = JSON.parse(result.stdout)
+    assert.equal(tools.paths.pnpm, realpathSync(launcher))
+    assert.equal(
+      tools.pnpm,
+      execFileSync(native, ['--version'], { encoding: 'utf8' }).trim(),
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 for (const outcome of ['error', 'undefined'])
   test(`HTTP receiver preserves callback throwing ${outcome}`, async () => {
     const primary =

@@ -107,8 +107,12 @@ workspaces. This is not a live Actions execution claim.
 
 The integrated product/input cut freezes 3,393 entries at 07:06:43 UTC, SHA256
 `e3c7f444478fa49412d18f18d44058baf8c2c91cff090f975b5d430d60b49bc2`.
-Later audit-only additions do not change its executable, manifest, lock, test or
-guidance inputs. The actual initial version CLI succeeds with private existing
+The normal precommit hook then reordered imports in ten test runners. An AST
+audit at `6e6034dcb14d35012e1bf41eb035d3c49a52845f` verifies identical import
+sets and test bodies: 3,382 entries remain byte-identical, one deletion remains
+absent, and ten differ only in import order. Frozen receiving results therefore
+do not claim byte equality for those ten runners. CI tests the pushed sources.
+The actual initial version CLI succeeds with private existing
 GitHub authentication for changelog reads. All 25 actual tarballs validate: 23
 versions at `1.0.0-rc.1`, Query `1.5.0` and Offline `1.2.0`; 156 export targets
 and 50 wrong-version/missing-export controls run. Packed consumer runtime and
@@ -144,3 +148,73 @@ Independent oracle review records all applicable ORC requirements per chunk.
 The initial packed instrument has its own bounded independent review and wrong
 observation calibrations. Passing package manifests or source-public types
 cannot substitute for its still-pending installed API comparisons.
+
+## Post-push receiving checks and mechanical corrections
+
+At `6e6034dcb`, every core, Collection-adapter, SQLite and Offline CI test
+group passes. Desktop and cloud/mobile E2E pass. The first pushed cut fails
+three fixture gates: a local name conflicts with the private-member mangle
+inventory; React's native source typecheck loses an inferred query context;
+and relocating CI's pnpm shell launcher breaks its relative CLI lookup.
+Browser E2E and the corrected final-head CI remain pending at this entry.
+
+The local array rename passes the actual 1,152-case React owner and the
+441-name mangle check. Explicitly deriving the schema receiver's context from
+its actual query passes the complete 2,956-case React package and the final
+237-case native/focused selection, including 1,728 receiving cuts. Independent
+transpilation proves identical emitted runtime code for the context annotation
+and alpha-equivalent code for the array rename. Models, histories, comparisons,
+cleanup assertions and run budgets stay unchanged. The CI inference failure
+does not reproduce locally even before the annotation, so the environmental
+cause remains unknown and only a successful actual CI rerun closes that gate.
+
+P06/P07/P13/P14 authored guidance now matches the existing logical-owner,
+release-before-reacquisition and same-run `markReady()` no-op laws. Changes to
+`src/types.ts` are confined to its `LoadSubsetFn` comment. Scoped validation and
+an exact executable-source comparison pass. P08's actual held-receipt callback
+witness and P14's discarded child-ready call-outcome observation remain open;
+correct prose does not establish behavioral coverage.
+
+The posthook AST audit has SHA256
+`92a2a5c7ef45596f27bc669a20b991e7ec7d46529930b7607957fcc7c130223e`.
+The schema fixture report is
+`892d79f14ff46b2dd14ba8da6033f536d1e0a8ed6f750e68d0a793cd84267090`;
+the guidance correction report is
+`626e724401575f4149f9857ed886d2274f0c8ab390c60aae537b4de03eccb75c`.
+Independent React fixture review retains the original CI RED and locally-green
+unchanged baseline rather than claiming a reproduced production repair.
+
+The HTTP fixture now invokes PATH-selected pnpm at its installed path through a
+quoted POSIX `exec` forwarder. Nine ordinary controls pass. The unchanged HTTP
+owner passes 35 cases with native pnpm and 35 through a relative shell launcher;
+all 29 histories reach each declared state once. Restoring the original
+relocation fails the actual relative-CLI setup control. This is setup evidence,
+not a new product-law RED. Publisher, models, histories and semantic assertions
+stay unchanged. Independent replay accepts the bounded correction. Report SHA256:
+`219dc2db851d73af211d377d46165f9233f9435ee96e73a1cc0b0c2b8cbbdb60`.
+
+### Initial installed package reception and baseline declaration attribution
+
+The initial candidate artifact cut passes eight installed runtime cells: ESM/CJS × Query/Offline × fulfilled/rejected. The shared mutation-confirmation and restored-settlement comparisons ran through real installed package imports, with 68 checkpoint/control receipts. Both installed declaration formats also pass the shared handler-admission law: 117 candidates and 72 expected negative diagnostics per format, including missing-negative calibration.
+
+The native npm install used a controlled loopback registry serving unchanged actual release tarballs plus seven explicitly cached external repacks. All 11 installed packages have actual metadata/archive HTTP receipts and exact lock version/origin/SRI checks; selected installed exports match the tarballs. This is native installed reception under a controlled registry premise, without a claim about public-registry archive provenance for external repacks.
+
+The original exported-inference witness remains RED in both formats. Exporting the inferred live-query factory produces TS2742 twice (private `query/compiler/types` and `query/live/internal`) and TS4058 (`LIVE_QUERY_INTERNAL`); exporting its inferred Collection value produces TS2742 twice and TS4023. A strict installed same-path baseline from exact fetched main `95460bc875a2259b34eea534e5592a9d0394e73f` reproduces the same diagnostics. This broader unchanged-main declaration-portability defect is preserved for followup, with no production repair or full declaration-compatibility claim. An agent-added narrow `Collection<Row, number>` annotation separately produces TS2322 on both cuts and is an invalid control, not the original product defect.
+
+A separately executed minimal public-view annotation emits without diagnostics in both formats on both cuts:
+
+```ts
+type PublicRows = {
+  readonly toArray: ReadonlyArray<{ id: number; version: number; value: number }>
+}
+// receiver is private in this separate control only.
+export function annotated(): PublicRows { return receiver() }
+```
+
+This preserves only the declared `toArray` view; it does not establish a full-Collection annotation workaround. The original factory remains exported and unannotated in its own preserved witness. The independently inferred Offline executor also emits in both candidate formats.
+
+One supplemental runtime assertion initially expected cleared health slots to be `undefined`; the public `HealthNode` contract requires `null`. That instrument error and original run remain preserved. The authority-corrected assertion received independent review and negative controls before all eight cells were rerun. Initial failed public/direct-file install attempts and a rejected npm update-notifier request in the first baseline lane also remain separate setup evidence, with no product-comparison credit.
+
+Artifacts: `/private/tmp/rc2171-oracle-challenge/o22-initial-frozen-070643/evidence/final-receiving-classification.json` (SHA256 `b8e2e501b3ca87b90ba76f61772d99b9e7272620efa886df8a82ec67bed4d13d`). Original factory source: `/private/tmp/rc2171-oracle-challenge/o22-initial-packed-support/exported-receiver-repro.mts` (SHA256 `c6c8c1da415901f4935f611387e7f6a3234b5f9753544256f0680038dcc1b50d`). Current/main final probe receipts have SHA256 `eb157fdc5f567fc04647d206762d794455a998620adc3d9383abf74e0bfc503c` / `2987feb2620ba1699869b12dbe51c811b6b0e6c389d06a176bf9a417d1827495`; each includes exact factory, const and control source paths.
+
+The tarballs derive from frozen input HEAD `5fa6eca05530bb9e1f4748b7c00ae60976da2808`. All 300 frozen production-source files matched committed `6e6034dcb14d35012e1bf41eb035d3c49a52845f` at the recorded continuity check. Later uncommitted LoadSubsetFn guidance comments and fixture-only edits were not rebuilt in this artifact cut. The scope is the initial candidate cut, not the full four-cut release matrix, hosted Actions, production authentication, browser/native hosts or live providers. Offline receiving seeds durable outbox data through the public OutboxManager, then starts a fresh executor; it does not exercise two actual executors creating durable state.

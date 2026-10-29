@@ -245,13 +245,22 @@ export async function withHttpPublishReceiver(root, history, body) {
   )
   const bin = join(root, 'real-bin')
   mkdirSync(bin)
-  for (const [name, resolvedPath] of Object.entries({
+  const toolPaths = {
     node: process.execPath,
     npm: executable('npm'),
     pnpm: executable('pnpm'),
     git: executable('git'),
-  }))
-    symlinkSync(realpathSync(resolvedPath), join(bin, name))
+  }
+  for (const [name, resolvedPath] of Object.entries(toolPaths)) {
+    // A pnpm shell launcher can find its CLI relative to $0. Invoke it at its
+    // installed path instead of relocating that pathname through a symlink.
+    if (name === 'pnpm') {
+      const quotedPath = `'${resolvedPath.replaceAll("'", "'\\''")}'`
+      writeFileSync(join(bin, name), `#!/bin/sh\nexec ${quotedPath} "$@"\n`, {
+        mode: 0o755,
+      })
+    } else symlinkSync(realpathSync(resolvedPath), join(bin, name))
+  }
   mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true })
   symlinkSync(changeset, join(root, 'node_modules', '.bin', 'changeset'))
   const manifests = Object.keys(packageNames).map((key) => {
@@ -431,17 +440,20 @@ export async function withHttpPublishReceiver(root, history, body) {
       manifests,
       initialRegistry,
       origin: registry.origin,
-      tools: Object.fromEntries(
-        ['npm', 'pnpm'].map((name) => [
-          name,
-          execFileSync(join(bin, name), ['--version'], {
-            cwd: root,
-            env: environment,
-            encoding: 'utf8',
-            timeout: 10_000,
-          }).trim(),
-        ]),
-      ),
+      tools: {
+        paths: toolPaths,
+        ...Object.fromEntries(
+          ['npm', 'pnpm'].map((name) => [
+            name,
+            execFileSync(join(bin, name), ['--version'], {
+              cwd: root,
+              env: environment,
+              encoding: 'utf8',
+              timeout: 10_000,
+            }).trim(),
+          ]),
+        ),
+      },
       readState: () => readJson(statePath),
       bytes: () =>
         Object.fromEntries(

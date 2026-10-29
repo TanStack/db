@@ -24,6 +24,7 @@ import {
   modelBoundSchemaRows,
 } from '../../db/tests/live-query-bound-options-oracle'
 import { runBoundSchemaHistory } from '../../db/tests/live-query-bound-options-support'
+import type { ExtractContext } from '@tanstack/db'
 import type { BoundSchemaNativeHost } from '../../db/tests/live-query-bound-options-support'
 import type { BoundSchemaObservation } from '../../db/tests/live-query-bound-options-oracle'
 
@@ -48,11 +49,14 @@ for (const hook of [`live`, `suspense`] as const) {
       ran = true
       const host: BoundSchemaNativeHost = {
         mount: (input) => {
+          type QueryContext = ExtractContext<
+            ReturnType<ReturnType<typeof input>[`query`]>
+          >
           const mounted = renderHook(
             (props: { revision: number; proposed: boolean }) =>
               hook === `live`
-                ? useLiveQuery(input(props))
-                : useLiveSuspenseQuery(input(props)),
+                ? useLiveQuery<QueryContext>(input(props))
+                : useLiveSuspenseQuery<QueryContext>(input(props)),
             { initialProps: { revision: 0, proposed: false } },
           )
           return {
