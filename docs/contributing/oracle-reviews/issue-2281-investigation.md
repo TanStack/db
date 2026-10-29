@@ -982,3 +982,57 @@ No behavioral finding, unresolved law decision, or new in-scope counterexample
 was identified. CodeRabbit is useful as a supplemental maintenance reviewer;
 this review supplies no independent behavioral proof. Earlier evidence and
 limits remain unchanged because no production or model semantics changed.
+
+### Independent cluster report reconciliation (2026-10-29)
+
+The SQLite/Electric peer pilot investigated frozen baseline `07bfc0eb2`.
+Its report, laws, retained oracle patch, raw reset/convergence logs, and claim
+ledger were compared with this repair. Its two row/cursor counterexamples
+confirm the mechanism already repaired here: an old row commit followed by
+another source's newer resume metadata can make restart skip a needed change.
+Both exact row traces and both reset traces pass again on `297e214fe`, with
+no type errors. The pilot's baseline failures do not describe that newer tree.
+
+The report contributes one oracle improvement. The broad generated owner now
+declares recovery first discovered during final catch-up separately from a
+reset failure earlier in the history. An earlier failure can no longer satisfy
+the reach requirement for that final branch. The model, history grammar,
+comparisons, production code, and run budgets remain unchanged.
+
+- **Law:** Law 5 requires a reset-abandoned commit to fail; Law 2 compares the
+  independent source head after successful recovery and complete delivery.
+  Their authority remains the coverage map and maintainer decisions on #2265.
+- **Reach:** `reset-abandoned source recovered during final catch-up` reached
+  2 of 80 histories at fixed seed `952051961`, and 6 of 80 random histories.
+  Both campaigns require at least one. Existing reach requirements also pass.
+- **RED / mutant:** Removing only the final restart/delivery block makes both
+  named reset histories fail at `after every tab caught up`, with wrong rows.
+  These are assertion failures, not setup failures or timeouts. This calibrates
+  the driver repair; it is not a new production mutant. Earlier production
+  RED and hostile source-progress evidence retain their scope.
+- **GREEN:** Both normal 80-history campaigns and both positive reset replays
+  pass (7 reported tests, no type errors). A measurement-only run repeats the
+  same campaigns (2 runtime tests) and records the counts above. Its temporary
+  direct stderr recorder was restored afterward because ordinary console
+  output was suppressed. Logs: `pilot-current-*.log`,
+  `pilot-final-recovery-ablation.log`, `pilot-final-recovery-green.log`, and
+  `pilot-final-recovery-measured.log` in the local evidence directory.
+- **Limits:** These remain bounded source-head observations. They do not
+  establish individual receipt fulfillment, clean teardown, generic source
+  ordering, or the other cluster issues' receiving paths.
+
+The report also sharpens two qualifications. The published Electric
+resume-safety contract requires rejecting a partial update for an unknown row.
+The separate #2267 no-error composition expectation needs an authority decision;
+this repair preserves the guard and does not resolve that expectation.
+The Node campaign's closed-database leadership warning is distinct from
+deliberately injected source failures. It also appears in earlier local logs.
+Its user-facing effect remains unverified, and the coverage map now records
+the teardown owner and needed held-election witness under pilot `PILOT/S02`.
+Passing convergence comparisons do not establish clean teardown.
+
+Follower reacquisition (#2139), seed metadata, real sync-metadata receiving
+(#2272), broader leader-close premises (#2085), loaded-subset relay (#2174), and
+real unknown-partial-message premises (#2138) remain separate boundaries.
+The report supplies no reason to merge them into this source-progress repair.
+The complete raw report and 16-item reconciliation ledger remain local.

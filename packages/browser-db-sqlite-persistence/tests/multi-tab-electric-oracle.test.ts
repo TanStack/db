@@ -1408,6 +1408,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
         await recover(index, `restart`)
         await deliver(index, `all`, true)
         await check(`after reset recovery of tab ${tabs[index]!.tab}`)
+        generatedReach.reach(
+          `reset-abandoned source recovered during final catch-up`,
+        )
       }
     }
     await check(`after every tab caught up`, rowsOf(log.rows))
@@ -1545,6 +1548,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | `peer commit after signal aborted mid-transaction`
     | `peer reset abandoned an open transaction`
     | `reset-abandoned commit put the Collection in error`
+    | `reset-abandoned source recovered during final catch-up`
   // The storm driver and the generated-history driver are the checks; the
   // generated driver folds committed batches into its own model of durable
   // rows. The storm cells and the generated-history arbitrary are the grammar.
@@ -1566,6 +1570,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `peer commit after signal aborted mid-transaction`,
       `peer reset abandoned an open transaction`,
       `reset-abandoned commit put the Collection in error`,
+      `reset-abandoned source recovered during final catch-up`,
     ])
   let generatedReach = createGeneratedReach()
 

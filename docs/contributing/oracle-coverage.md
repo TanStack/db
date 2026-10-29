@@ -4002,6 +4002,10 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       generated histories and pinned with `it.fails`: a resumed tab that lags
       behind a peer can receive an update for a row the peer already
       deleted, and Electric's resume check puts it in `error`.
+      The published Electric resume-safety contract requires rejecting an
+      unknown partial row. Whether composition must avoid that condition
+      without failing the source remains a separate contract question;
+      this repair does not remove the guard or resolve the pinned expectation.
       The histories also post a peer `collection:reset` on the tabs'
       coordinator channel; no shipped host sends one yet, so this premise is
       controlled. The reset abandons every open reserved transaction, and
@@ -4062,7 +4066,19 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       no-deploy reset trace (seed `-1371495859`, path
       `75:0:0:0:0:0:0:1:1:0:0`) pass on unchanged production with that repaired
       checkpoint. Both remain fixed inputs to the shared driver. A generated
-      cached-row regression also preserves intermediate observations during
+      reach separately requires recovery first discovered during that final
+      delivery, so an earlier reset failure cannot satisfy this premise.
+      It reached 2 of 80 fixed-seed histories and 6 of 80 random histories.
+      Removing the final restart makes both reset traces fail the final row
+      comparison. The broader Node campaign can also log a leadership term
+      write against a closed test database during teardown (pilot `PILOT/S02`,
+      fixed seed `952051961`). This is distinct from injected stream errors;
+      its user-facing effect is unverified. Owners: broadcast coordination and
+      this host driver. Needed witness: hold the election term write across
+      coordinator disposal and database close, then observe its settlement
+      and resource release on controlled and real hosts. Passing convergence
+      comparisons do not establish clean teardown.
+      A generated cached-row regression also preserves intermediate observations during
       source-continuity repair. #2209's permanent-close case and #2267's
       resumed-update gap remain pinned expected failures under this owner.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
