@@ -5972,14 +5972,16 @@ mutants remain required receiving checks. Generated docs remain CI-owned.
 shared eager live-source laws from the adapter conformance law set (v18):
 READY-2/3/4, HEALTH-1, PUB-1/2/3/7, FID-4, LIFE-2/5/10, HEALTH-5, EVID-1/2/3
 (`await-evidence`), HEALTH-2 and RETRY-1 for retried failures
-(`retry-policy`), RECON-1 (`transport-reconnect`), and RENEW-1
-(`capability-renewal`). Its model is an independent row Map and sync-run
+(`retry-policy`), RECON-1 (`transport-reconnect`), RENEW-1
+(`capability-renewal`), and READY-8/10 with PUB-5/9 for batches committed
+during the initial fetch (`listen-before-fetch`). Every driver is also
+checked for the rows at the moment status becomes `ready`. Its model is an independent row Map and sync-run
 phase; drivers supply only a controlled provider and declare whether they
 commit per batch or per change. PUB-1 checks every change publication during
 a step, not only the settled checkpoint. The reference push adapter
 (`tests/reference-adapter-oracle.property.test.ts`,
 `adapter-conformance.eager-live-source.reference`) runs fixed and random
-campaigns of 400 histories with declared reach, a per-change variant, and 20
+campaigns of 400 histories with declared reach, a per-change variant, and 25
 law-named hostile mutants, with ORC-004 reconstruction, exclusion, and
 ablation controls. The Neon Realtime receiving driver
 (`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
@@ -5988,7 +5990,9 @@ READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
 (subscription kept open after an error state) behind them. Limits: no
 on-demand loading, mutation handlers, or reload; publications are observed
 through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
-that rejects before its timeout; the Neon and TrailBase claims cover
+that rejects before its timeout; rows carry no optional field, so FID-1 field
+removal is not observed; the event fold does not flag an update of an absent
+key; the Neon and TrailBase claims cover
 controlled providers, not real clients. Owner:
 `packages/db-adapter-conformance`. Evidence: the package README.
 Migration goal (maintainer, 2026-10-29): every collection adapter gets a

@@ -50,12 +50,27 @@
  * - **RENEW-1** (capability `capability-renewal`). While the source's
  *   capability awaits renewal, status and rows do not change. Renewal reuses
  *   the existing provider subscription: no new subscription, no reset.
+ * - **READY-8, READY-10, PUB-5, PUB-9** (capability `listen-before-fetch`).
+ *   The adapter's change listener is live before it fetches. The backend can
+ *   commit batches while the fetch is outstanding; the listener sees them,
+ *   and the fetch result reflects only those committed before its read point.
+ *   Until the initial cut applies, status stays `loading` and no row shows.
+ *   The cut is the fetch result followed by the batches the listener saw, in
+ *   order, and status becomes `ready` only after it applied, with the rows
+ *   equal to the backend's current state. A batch the read already reflects
+ *   is never replayed so that an older value overtakes a newer one: every
+ *   publication is a backend state at or after the read point, in order.
+ * - **READY-3, READY-10.** When status becomes `ready`, the rows already
+ *   equal the initial cut. A `status:ready` listener never sees fewer rows.
  *
  * Authority: the sync callback contract in `packages/db/src/types.ts`
  * (`begin`, `commit`, `markReady`, `fail`, `reportError`, `reportHealthy`),
  * the Collection status and health terms in `docs/contributing/glossary.md`,
  * and the adapter conformance law set (issue #2118, version 18), whose law
- * IDs are used here.
+ * IDs are used here. READY-8 and READY-10 are that law set's laws for
+ * capability `live-changes`; this oracle checks them for adapters that
+ * declare `listen-before-fetch`, whose provider can deliver changes while
+ * the initial fetch is outstanding.
  *
  * Boundary. The oracle checks an eager Collection whose provider pushes one
  * complete result at a time. On-demand loading, mutation handlers, and
@@ -94,6 +109,7 @@ export type EagerLiveSourceCapability =
   | `transport-reconnect`
   | `capability-renewal`
   | `retry-policy`
+  | `listen-before-fetch`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -110,6 +126,8 @@ export interface ObservedCollection {
     callback: (changes: Array<ChangeMessage<ConformanceRow, number>>) => void,
     options?: { includeInitialState?: boolean },
   ) => { unsubscribe: () => void }
+  /** Core's status event; `cleanup()` removes its listeners. */
+  on: (event: `status:ready`, callback: () => void) => () => void
 }
 
 /**
@@ -143,6 +161,16 @@ export interface ControlledProvider {
   completeRenewal?: () => Promise<void>
   /** Renewals the adapter completed on its latest subscription. */
   renewals?: () => number
+  /**
+   * Sets the backend's rows before the adapter subscribes: rows committed
+   * before the subscription, which no change event announces (capability
+   * `listen-before-fetch`). A later `deliverChanges` before the first ready
+   * is a backend commit on top of them; `deliverSnapshot` then delivers the
+   * fetch result the oracle computed.
+   */
+  seed?: (rows: ReadonlyArray<ConformanceRow>) => void
+  /** Fetches the adapter issued while its change listener was not live. */
+  fetchesBeforeListening?: () => number
 }
 
 /** One adapter under test. */
@@ -186,10 +214,14 @@ export interface EagerLiveSourceDriver {
  * counted, so a generated list stays meaningful after shrinking.
  *
  * - `snapshot`: a complete delivery. Legal while the sync run is active and
- *   connected; after the first ready only with `complete-snapshot`.
- * - `changes`: one committed batch, legal after the first ready. Its txid is
- *   the next in the sync run. A delete of a key the source does not hold is
- *   dropped, because a provider never sends one.
+ *   connected; after the first ready only with `complete-snapshot`. With
+ *   `listen-before-fetch`, the first one is the initial fetch's result: its
+ *   rows are the backend's rows before the subscription, and `seen` places
+ *   the fetch's read point after that many of the batches committed since.
+ * - `changes`: one committed batch, legal after the first ready, and before
+ *   it with `listen-before-fetch`. Its txid is the next in the sync run. A
+ *   delete of a key the source does not hold is dropped, because a provider
+ *   never sends one.
  * - `wait`: `awaitTxId` for the last txid plus `ahead`, so a wait can target
  *   an applied batch (`ahead` 0) or a future one. With `timeout`, the wait
  *   carries a short timeout.
@@ -201,10 +233,17 @@ export interface EagerLiveSourceDriver {
  * - `restart`: cleanup, then `preload()` starts a new sync run.
  *
  * Keys range over 1..5 and titles over three values, so batches revisit
- * keys, deletes hit live rows, and complete deliveries omit held keys.
+ * keys, deletes hit live rows, and complete deliveries omit held keys. With
+ * `listen-before-fetch`, a history starts with up to three batches committed
+ * during the first fetch.
  */
 export type EagerLiveSourceStep =
-  | { readonly kind: `snapshot`; readonly rows: ReadonlyArray<ConformanceRow> }
+  | {
+      readonly kind: `snapshot`
+      readonly rows: ReadonlyArray<ConformanceRow>
+      /** The read point (`listen-before-fetch`); all batches when absent. */
+      readonly seen?: number
+    }
   | {
       readonly kind: `changes`
       readonly changes: ReadonlyArray<ProviderChange>
@@ -244,8 +283,18 @@ export function eagerLiveSourceHistoryArb(
     {
       weight: 4,
       arbitrary: fc
-        .uniqueArray(rowArb, { selector: (row) => row.id, maxLength: 4 })
-        .map((rows) => ({ kind: `snapshot` as const, rows })),
+        .record({
+          rows: fc.uniqueArray(rowArb, {
+            selector: (row) => row.id,
+            maxLength: 4,
+          }),
+          seen: fc.integer({ min: 0, max: 3 }),
+        })
+        .map(({ rows, seen }) =>
+          capabilities.has(`listen-before-fetch`)
+            ? { kind: `snapshot` as const, rows, seen }
+            : { kind: `snapshot` as const, rows },
+        ),
     },
     {
       weight: 6,
@@ -293,7 +342,17 @@ export function eagerLiveSourceHistoryArb(
       arbitrary: fc.constant({ kind: `renew` as const }),
     })
   }
-  return fc.array(fc.oneof(...steps), { minLength: 1, maxLength: 12 })
+  const history = fc.array(fc.oneof(...steps), { minLength: 1, maxLength: 12 })
+  if (!capabilities.has(`listen-before-fetch`)) return history
+  // A startup burst: batches the backend commits while the first fetch is
+  // outstanding. Without it, two buffered batches that touch one key before
+  // the read point are too rare for PUB-5 to be checked.
+  const startup = fc
+    .array(changeArb, { minLength: 1, maxLength: 3 })
+    .map((changes) => ({ kind: `changes` as const, changes }))
+  return fc
+    .tuple(fc.array(startup, { maxLength: 3 }), history)
+    .map(([burst, rest]) => [...burst, ...rest])
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +369,10 @@ export function eagerLiveSourceHistoryArb(
  *   a flag.
  * - `rows` is the source's result as the provider delivered it: an
  *   independent Map, folded from steps, never read from the adapter.
+ * - `backend` is the provider's current rows. It equals `rows` after the
+ *   first ready. Before it, with `listen-before-fetch`, it starts at `seed`
+ *   and `buffered` logs the batches committed since the subscription; the
+ *   initial cut folds them onto the fetch result.
  * - `lastTxid` numbers the sync run's batches. A wait targets it.
  * - `transient` lists the open transient failures, oldest first. Only a
  *   failure after the first ready is listed (RETRY-1).
@@ -331,6 +394,9 @@ interface ModelState {
   run: number
   phase: Phase
   rows: Map<number, string>
+  backend: Map<number, string>
+  seed: Map<number, string>
+  buffered: Array<{ changes: ReadonlyArray<ProviderChange>; txid: number }>
   connected: boolean
   lastTxid: number
   committed: Set<number>
@@ -357,11 +423,18 @@ export interface ExpectedObservation {
   renewalsThisRun: number
 }
 
-function initialModel(): ModelState {
+function rowMap(rows: ReadonlyArray<ConformanceRow>): Map<number, string> {
+  return new Map(rows.map((row) => [row.id, row.title]))
+}
+
+function initialModel(seed: ReadonlyArray<ConformanceRow> = []): ModelState {
   return {
     run: 1,
     phase: `loading`,
     rows: new Map(),
+    backend: rowMap(seed),
+    seed: rowMap(seed),
+    buffered: [],
     connected: true,
     lastTxid: 0,
     committed: new Set(),
@@ -392,10 +465,59 @@ function rowState(rows: ReadonlyMap<number, string>): RowState {
   return [...rows].sort(([a], [b]) => a - b)
 }
 
+/**
+ * Folds one batch onto `rows` in order and returns the changes a provider
+ * delivers: a delete of a key it does not hold is dropped. `onChange` sees
+ * the rows after each delivered change.
+ */
+function foldBatch(
+  rows: Map<number, string>,
+  changes: ReadonlyArray<ProviderChange>,
+  onChange: () => void = () => {},
+): Array<ProviderChange> {
+  const delivered: Array<ProviderChange> = []
+  for (const change of changes) {
+    if (change.type === `upsert`) {
+      rows.set(change.row.id, change.row.title)
+    } else if (rows.has(change.id)) {
+      rows.delete(change.id)
+    } else {
+      continue
+    }
+    delivered.push(change)
+    onChange()
+  }
+  return delivered
+}
+
+/** Whether replaying `changes` onto `rows` would change them. */
+function replayChanges(
+  rows: ReadonlyMap<number, string>,
+  changes: ReadonlyArray<ProviderChange>,
+): boolean {
+  const replayed = new Map(rows)
+  foldBatch(replayed, changes)
+  return !sameRows(rowState(replayed), rowState(rows))
+}
+
 /** A step the model accepts, with what it actually delivers. */
 type AcceptedStep =
-  | { kind: `snapshot`; rows: ReadonlyArray<ConformanceRow> }
-  | { kind: `changes`; changes: Array<ProviderChange>; txid: number }
+  | {
+      kind: `snapshot`
+      rows: ReadonlyArray<ConformanceRow>
+      /** Batches the initial cut folds after the fetch result. */
+      buffered: number
+      /** Buffered batches the fetch result does not reflect. */
+      missed: number
+      /** Whether replaying a batch the read reflects would change the rows. */
+      superseded: boolean
+    }
+  | {
+      kind: `changes`
+      changes: Array<ProviderChange>
+      txid: number
+      beforeReady: boolean
+    }
   | { kind: `wait`; txid: number; timeout: boolean }
   | { kind: `fail`; failure: number }
   | { kind: `transient-failure`; failure: number }
@@ -409,62 +531,153 @@ type AcceptedStep =
  * states that a publication during the step may show (PUB-1), or
  * `undefined` when the step is illegal now.
  */
+/** The driver facts the model depends on. */
+interface ModelOptions {
+  changeCommits: EagerLiveSourceDriver[`changeCommits`]
+  listenBeforeFetch: boolean
+}
+
+/** EVID-1: a wait for `txid` fulfills once its batch applied. */
+function applyEvidence(state: ModelState, txid: number): void {
+  state.committed.add(txid)
+  for (const wait of state.waits) {
+    if (
+      wait.run === state.run &&
+      wait.txid === txid &&
+      wait.expected === `pending`
+    ) {
+      wait.expected = `fulfilled`
+    }
+  }
+}
+
+/**
+ * READY-10, PUB-5, PUB-9: the initial cut of a `listen-before-fetch` sync
+ * run. The fetch read the backend after `seen` of the buffered batches, so
+ * its result is the seed with those folded on. The cut then folds every
+ * buffered batch, in order, onto the result. A publication may show the
+ * result or any backend state after it, in order; with per-change commits
+ * also each change's prefix of a batch the read did not reflect. A replayed
+ * batch the read already reflects is never a publishable state of its own.
+ */
+function initialCut(
+  state: ModelState,
+  seen: number,
+  changeCommits: ModelOptions[`changeCommits`],
+) {
+  const backend = new Map(state.seed)
+  const publishable: Array<RowState> = []
+  let read = rowState(backend)
+  state.buffered.forEach((batch, index) => {
+    if (index === seen) {
+      read = rowState(backend)
+      publishable.push(read)
+    }
+    const prefixes: Array<RowState> = []
+    foldBatch(backend, batch.changes, () => prefixes.push(rowState(backend)))
+    if (index < seen) return
+    if (changeCommits === `per-change`) publishable.push(...prefixes)
+    else publishable.push(rowState(backend))
+  })
+  if (seen === state.buffered.length) {
+    read = rowState(backend)
+    publishable.push(read)
+  }
+  const readRows = new Map(read)
+  const superseded = state.buffered
+    .slice(0, seen)
+    .some((batch) => replayChanges(readRows, batch.changes))
+  return { backend, read, publishable, superseded }
+}
+
 function stepModel(
   state: ModelState,
   step: EagerLiveSourceStep,
   failures: { next: number },
-  changeCommits: EagerLiveSourceDriver[`changeCommits`],
+  options: ModelOptions,
+  nextSeed: ReadonlyArray<ConformanceRow> = [],
 ): { done: AcceptedStep; publishable: ReadonlyArray<RowState> } | undefined {
   switch (step.kind) {
     case `snapshot`: {
       if (!canDeliver(state)) return undefined
-      // PUB-7: a complete delivery replaces the rows. READY-3: the first one
-      // opens the initial gate. HEALTH-2: a successful delivery clears the
-      // open transient failures.
-      state.rows = new Map(step.rows.map((row) => [row.id, row.title]))
-      state.phase = `ready`
+      // HEALTH-2: a successful delivery clears the open transient failures.
       state.transient = []
+      if (options.listenBeforeFetch && state.phase === `loading`) {
+        const buffered = state.buffered.length
+        const seen = Math.min(step.seen ?? buffered, buffered)
+        const cut = initialCut(state, seen, options.changeCommits)
+        state.rows = cut.backend
+        state.backend = new Map(cut.backend)
+        state.phase = `ready`
+        for (const batch of state.buffered) applyEvidence(state, batch.txid)
+        state.buffered = []
+        return {
+          done: {
+            kind: `snapshot`,
+            rows: cut.read.map(([id, title]) => ({ id, title })),
+            buffered,
+            missed: buffered - seen,
+            superseded: cut.superseded,
+          },
+          publishable: cut.publishable,
+        }
+      }
+      // PUB-7: a complete delivery replaces the rows. READY-3: the first one
+      // opens the initial gate.
+      state.rows = rowMap(step.rows)
+      state.backend = rowMap(step.rows)
+      state.phase = `ready`
       return {
-        done: { kind: `snapshot`, rows: step.rows },
+        done: {
+          kind: `snapshot`,
+          rows: step.rows,
+          buffered: 0,
+          missed: 0,
+          superseded: false,
+        },
         publishable: [rowState(state.rows)],
       }
     }
     case `changes`: {
-      if (state.phase !== `ready` || !state.connected) return undefined
-      // PUB-3: fold the batch in order. A provider never deletes a key it
-      // does not hold, so such a delete is not delivered. PUB-1: each prefix
-      // is a committed state when the provider commits each change alone.
-      const delivered: Array<ProviderChange> = []
+      if (!state.connected) return undefined
+      if (state.phase === `loading` && options.listenBeforeFetch) {
+        // READY-8: the listener is live, so a batch committed during the
+        // fetch reaches the adapter. It shows nothing until the cut.
+        const delivered = foldBatch(state.backend, step.changes)
+        state.lastTxid += 1
+        state.buffered.push({ changes: delivered, txid: state.lastTxid })
+        return {
+          done: {
+            kind: `changes`,
+            changes: delivered,
+            txid: state.lastTxid,
+            beforeReady: true,
+          },
+          publishable: [],
+        }
+      }
+      if (state.phase !== `ready`) return undefined
+      // PUB-3: fold the batch in order. PUB-1: each prefix is a committed
+      // state when the provider commits each change alone.
       const prefixes: Array<RowState> = []
-      for (const change of step.changes) {
-        if (change.type === `upsert`) {
-          state.rows.set(change.row.id, change.row.title)
-          delivered.push(change)
-        } else if (state.rows.has(change.id)) {
-          state.rows.delete(change.id)
-          delivered.push(change)
-        } else {
-          continue
-        }
-        prefixes.push(rowState(state.rows))
-      }
+      const delivered = foldBatch(state.rows, step.changes, () =>
+        prefixes.push(rowState(state.rows)),
+      )
+      foldBatch(state.backend, delivered)
       state.lastTxid += 1
-      state.committed.add(state.lastTxid)
       state.transient = []
-      // EVID-1: a wait for this txid fulfills once the batch applied.
-      for (const wait of state.waits) {
-        if (
-          wait.run === state.run &&
-          wait.txid === state.lastTxid &&
-          wait.expected === `pending`
-        ) {
-          wait.expected = `fulfilled`
-        }
-      }
+      applyEvidence(state, state.lastTxid)
       return {
-        done: { kind: `changes`, changes: delivered, txid: state.lastTxid },
+        done: {
+          kind: `changes`,
+          changes: delivered,
+          txid: state.lastTxid,
+          beforeReady: false,
+        },
         publishable:
-          changeCommits === `per-change` ? prefixes : [rowState(state.rows)],
+          options.changeCommits === `per-change`
+            ? prefixes
+            : [rowState(state.rows)],
       }
     }
     case `wait`: {
@@ -527,11 +740,16 @@ function stepModel(
       return { done: { kind: `renew` }, publishable: [] }
     }
     case `restart`: {
-      // LIFE-5: cleanup retires the sync run; the next one starts empty.
+      // LIFE-5: cleanup retires the sync run; the next one starts empty. The
+      // backend may change while no sync run listens: it then holds
+      // `nextSeed`.
       retireWaits(state)
       state.run += 1
       state.phase = `loading`
       state.rows = new Map()
+      state.backend = rowMap(nextSeed)
+      state.seed = rowMap(nextSeed)
+      state.buffered = []
       state.connected = true
       state.lastTxid = 0
       state.committed = new Set()
@@ -590,6 +808,9 @@ export const eagerLiveSourceReachStates = [
   `transient-failure-recovered`,
   `reconnect`,
   `renewal`,
+  `change-before-ready`,
+  `read-missed-change`,
+  `seen-change-superseded`,
 ] as const
 
 export type EagerLiveSourceReachState =
@@ -606,6 +827,9 @@ const capabilityOfState: Partial<
   'transient-failure-recovered': `retry-policy`,
   reconnect: `transport-reconnect`,
   renewal: `capability-renewal`,
+  'change-before-ready': `listen-before-fetch`,
+  'read-missed-change': `listen-before-fetch`,
+  'seen-change-superseded': `listen-before-fetch`,
 }
 
 /** The declared states a driver's capabilities let histories reach. */
@@ -669,9 +893,9 @@ const timeoutSettleMs = 30
 function lawFor(done: AcceptedStep, wasReady: boolean): string {
   switch (done.kind) {
     case `snapshot`:
-      return wasReady ? `PUB-7` : `READY-3`
+      return wasReady ? `PUB-7` : done.buffered > 0 ? `READY-10` : `READY-3`
     case `changes`:
-      return `PUB-3/FID-4`
+      return done.beforeReady ? `READY-10/PUB-9` : `PUB-3/FID-4`
     case `wait`:
       return done.timeout ? `EVID-3` : `EVID-1`
     case `fail`:
@@ -734,13 +958,38 @@ export async function checkEagerLiveSourceHistory(
   options: CheckOptions = {},
 ): Promise<{ accepted: number; skipped: number }> {
   const reach = options.reach ?? (() => {})
+  const listenBeforeFetch = driver.capabilities.has(`listen-before-fetch`)
+  const modelOptions: ModelOptions = {
+    changeCommits: driver.changeCommits,
+    listenBeforeFetch,
+  }
+  // With `listen-before-fetch`, a sync run's backend starts with the rows of
+  // its first complete delivery, committed before the adapter subscribes.
+  const seedFrom = (start: number): ReadonlyArray<ConformanceRow> => {
+    if (!listenBeforeFetch) return []
+    for (const step of history.slice(start)) {
+      if (step.kind === `restart`) break
+      if (step.kind === `snapshot`) return step.rows
+    }
+    return []
+  }
   const detached = watchDetachedFailures(driver)
   const fixture = driver.create()
   const { collection, provider } = fixture
-  const state = initialModel()
+  const state = initialModel(seedFrom(0))
   const failures: Array<Error> = []
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
+  if (listenBeforeFetch) provider.seed?.(seedFrom(0))
+  // READY-3, READY-10: the rows at the moment status becomes `ready`.
+  let readyRows: RowState | undefined
+  const watchReady = () =>
+    collection.on(`status:ready`, () => {
+      readyRows = rowState(
+        new Map([...collection.values()].map((row) => [row.id, row.title])),
+      )
+    })
+  watchReady()
   let preload = recordSettlement(collection.preload())
   let events = foldChanges(collection)
   let accepted = 0
@@ -763,13 +1012,19 @@ export async function checkEagerLiveSourceHistory(
     stepIndex: number,
     publishable: ReadonlyArray<RowState>,
     becameReady: boolean,
+    law: string,
   ) => {
     let last = -1
     let readiness = becameReady ? 1 : 0
     for (const publication of events.take()) {
       if (publication === `empty`) {
         if (readiness-- > 0) continue
-        throw violation(`PUB-1 (empty publication)`, stepIndex, `none`, `empty`)
+        throw violation(
+          `${law} (empty publication)`,
+          stepIndex,
+          `none`,
+          `empty`,
+        )
       }
       // A publication shows a commit after the last one shown. Prefix states
       // can repeat within a batch, so the search starts after that commit.
@@ -778,7 +1033,7 @@ export async function checkEagerLiveSourceHistory(
       )
       if (index === -1) {
         throw violation(
-          `PUB-1 (publication)`,
+          `${law} (publication)`,
           stepIndex,
           publishable,
           publication,
@@ -790,7 +1045,8 @@ export async function checkEagerLiveSourceHistory(
 
   // `law` names the step's law. Observations whose law does not depend on
   // the step name their own: HEALTH-2 when a delivery should have cleared a
-  // retried failure, EVID-1 for a wait that fulfilled without evidence,
+  // retried failure, EVID-1 for a wait that fulfilled without evidence
+  // (READY-10/PUB-9 when its batch should still be buffered),
   // EVID-3 for a timed wait that did not reject, and LIFE-10 for a failed
   // provider's subscription that stays open or is released twice.
   const compare = async (
@@ -817,6 +1073,19 @@ export async function checkEagerLiveSourceHistory(
       collection.status,
     )
     check(`rows`, sameRows(rows, expected.rows), expected.rows, rows)
+    if (readyRows !== undefined) {
+      check(
+        `rows when ready`,
+        sameRows(readyRows, expected.rows),
+        expected.rows,
+        readyRows,
+      )
+      readyRows = undefined
+    }
+    const early = provider.fetchesBeforeListening?.() ?? 0
+    if (early > 0) {
+      throw violation(`READY-8 (fetch before listening)`, stepIndex, 0, early)
+    }
     check(`change events`, sameRows(events.rows(), rows), rows, events.rows())
     const health = collection.health
     if (expected.healthError === null) {
@@ -866,9 +1135,18 @@ export async function checkEagerLiveSourceHistory(
       const gotWait = waits[index]!.current
       const gotKind = typeof gotWait === `object` ? `rejected` : gotWait
       if (gotKind === wantWait) return
+      // A wait for a batch still buffered before the cut fulfilled because
+      // the adapter applied that batch early.
+      const buffered = state.buffered.some(
+        (batch) =>
+          batch.txid === state.waits[index]!.txid &&
+          state.waits[index]!.run === state.run,
+      )
       const waitLaw =
         gotKind === `fulfilled`
-          ? `EVID-1`
+          ? buffered
+            ? `READY-10/PUB-9`
+            : `EVID-1`
           : wantWait === `rejected` && state.waits[index]!.run === state.run
             ? `EVID-3`
             : law
@@ -923,7 +1201,13 @@ export async function checkEagerLiveSourceHistory(
       // Support is decided before the model moves, so a skipped step leaves
       // the model unchanged.
       const result = supports(driver, fixture, step, wasReady)
-        ? stepModel(state, step, failureCounter, driver.changeCommits)
+        ? stepModel(
+            state,
+            step,
+            failureCounter,
+            modelOptions,
+            seedFrom(index + 1),
+          )
         : undefined
       if (result === undefined) {
         skipped++
@@ -935,11 +1219,13 @@ export async function checkEagerLiveSourceHistory(
         case `snapshot`:
           provider.deliverSnapshot(done.rows)
           reach(wasReady ? `replacing-snapshot` : `first-ready`)
+          if (done.missed > 0) reach(`read-missed-change`)
+          if (done.superseded) reach(`seen-change-superseded`)
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           break
         case `changes`:
           provider.deliverChanges(done.changes, String(done.txid))
-          reach(`change-batch`)
+          reach(done.beforeReady ? `change-before-ready` : `change-batch`)
           if (done.changes.length > 1) reach(`multi-change-batch`)
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           if (
@@ -999,6 +1285,10 @@ export async function checkEagerLiveSourceHistory(
           const pendingBefore = waits.some((wait) => wait.current === `pending`)
           events.stop()
           await collection.cleanup()
+          // The backend may change while no sync run listens.
+          if (listenBeforeFetch) provider.seed?.(seedFrom(index + 1))
+          readyRows = undefined
+          watchReady()
           preload = recordSettlement(collection.preload())
           events = foldChanges(collection)
           reach(`restart`)
@@ -1016,6 +1306,11 @@ export async function checkEagerLiveSourceHistory(
           index,
           publishable,
           !wasReady && state.phase === `ready`,
+          done.kind === `snapshot` && done.buffered > 0
+            ? `PUB-5/PUB-9`
+            : done.kind === `changes` && done.beforeReady
+              ? `READY-10/PUB-9`
+              : `PUB-1`,
         )
       } else {
         events.take()

@@ -5,7 +5,9 @@
  * calibration tests run (ORC-006). It is not a published adapter.
  *
  * The provider pushes a complete result, then committed batches that carry a
- * txid. It can fail, report a failure it is retrying, drop and restore its
+ * txid. Its subscription is live before the result arrives, so batches can
+ * arrive first; the adapter buffers them and applies them, in one
+ * transaction after the result, before it reports ready. It can fail, report a failure it is retrying, drop and restore its
  * transport, and ask for a capability renewal, which the adapter answers by
  * renewing the same subscription.
  */
@@ -60,6 +62,16 @@ export type ReferenceMutant =
   | `renew-resubscribes`
   /** PUB-1, per-change commits: a batch of distinct keys commits in reverse. */
   | `reverses-batch`
+  /** READY-10: batches committed during the initial fetch are dropped. */
+  | `drops-buffered`
+  /** PUB-9: buffered batches apply before the fetch result, which erases them. */
+  | `buffer-before-rows`
+  /** PUB-5: each buffered batch commits alone, so a replay can regress a row. */
+  | `replays-per-batch`
+  /** READY-10: status becomes `ready` before the buffered batches apply. */
+  | `ready-before-buffer`
+  /** READY-10, PUB-9: a batch during the initial fetch shows before ready. */
+  | `shows-buffered`
 
 type ProviderEvent =
   | { type: `snapshot`; rows: ReadonlyArray<ConformanceRow> }
@@ -180,6 +192,11 @@ function referenceCollection(
       }) => {
         let ready = false
         let failing = false
+        // Batches that arrived before the first complete result.
+        const buffered: Array<{
+          changes: ReadonlyArray<ProviderChange>
+          txid: string
+        }> = []
         let keys = new Set<number>()
         const opened: Array<ProviderSubscription> = []
         applied = new Set()
@@ -215,6 +232,25 @@ function referenceCollection(
           }
         }
 
+        // READY-10: the buffered batches follow the result in one commit, so
+        // a batch the result already reflects never shows on its own.
+        const applyBuffered = (batches: typeof buffered) => {
+          if (batches.length === 0) return
+          const commits: Array<Array<(typeof buffered)[number]>> =
+            mutant === `replays-per-batch`
+              ? batches.map((batch) => [batch])
+              : [batches]
+          for (const group of commits) {
+            begin()
+            for (const batch of group) batch.changes.forEach(writeChange)
+            const receipt = commit()
+            for (const { txid } of group) {
+              if (receipt === true) settleWaits(txid)
+              else void receipt.then(() => settleWaits(txid))
+            }
+          }
+        }
+
         // A successful delivery after a retried failure reports recovery.
         const delivered = () => {
           if (failing && mutant !== `never-recovers`) reportHealthy()
@@ -233,6 +269,8 @@ function referenceCollection(
         ) => {
           const subscription = provider.subscribe((event) => {
             if (event.type === `snapshot`) {
+              const cut = ready ? [] : buffered.splice(0)
+              if (mutant === `buffer-before-rows`) applyBuffered(cut)
               if (mutant === `snapshot-merges` && ready) {
                 begin()
                 for (const row of event.rows) {
@@ -246,6 +284,11 @@ function referenceCollection(
                 void commit()
                 keys = new Set(event.rows.map((row) => row.id))
               }
+              if (mutant === `ready-before-buffer` && !ready) {
+                ready = true
+                markReady()
+              }
+              if (mutant !== `buffer-before-rows`) applyBuffered(cut)
               previousRows = event.rows
               if (!ready) {
                 ready = true
@@ -253,6 +296,10 @@ function referenceCollection(
               }
               delivered()
             } else if (event.type === `changes`) {
+              if (!ready && mutant !== `shows-buffered`) {
+                if (mutant !== `drops-buffered`) buffered.push(event)
+                return
+              }
               let receipt: true | Promise<void> = true
               if (mutant === `splits-batch` || perChange) {
                 // The mutant reverses only batches of distinct keys, so the
@@ -372,6 +419,7 @@ export function referenceDriver(
       `retry-policy`,
       `transport-reconnect`,
       `capability-renewal`,
+      `listen-before-fetch`,
     ]),
     changeCommits: perChange ? `per-change` : `per-batch`,
     create(): EagerLiveSourceFixture {

@@ -14,16 +14,16 @@ reviewed change.
 
 ## Oracle families
 
-| Family                                | Status                                    | Laws                                                                                                      |
-| ------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4, HEALTH-1/2/5, PUB-1/2/3/7, FID-4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
-| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                |
-| On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                           |
-| Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                     |
-| Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                        |
-| Source shapes                         | Needed                                    | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                        |
-| Local and shared stores               | Needed                                    | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                              |
-| Persistence wrapper and storage hosts | Needed                                    | P-_, S-_                                                                                                  |
+| Family                                | Status                                    | Laws                                                                                                               |
+| ------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
+| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                         |
+| On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                    |
+| Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                              |
+| Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                 |
+| Source shapes                         | Needed                                    | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                                 |
+| Local and shared stores               | Needed                                    | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                                       |
+| Persistence wrapper and storage hosts | Needed                                    | P-_, S-_                                                                                                           |
 
 ## Adapters
 
@@ -101,3 +101,13 @@ reviewed change.
     earlier events are a consistent log. `rxdb.test.ts` keeps examples for
     it. Owner: this package; witness needed: a generated history with
     events between the subscription and the first ready.
+- **2026-10-29, eager live source, `listen-before-fetch` (from the RxDB
+  migration).** The RxDB open item became an oracle extension. A driver
+  that declares `listen-before-fetch` gets backend state, a seed of rows
+  committed before the subscription, a startup burst of batches committed
+  during the first fetch, and a read point (`seen`). The model folds the
+  buffered batches onto the fetch result at the initial cut; publications
+  must be backend states at or after the read point (PUB-5, PUB-9). Every
+  driver also gets a check of the rows at the moment status becomes `ready`
+  (READY-3, READY-10). Five reference mutants calibrate it, and the reach
+  of the three new states is declared. Evidence: `README.md`.

@@ -45,7 +45,7 @@ import type { ReferenceMutant } from './reference-adapter'
  *   model (exclusion). Removing each step kind loses the declared state that
  *   only it reaches (ablation). Range: keys 1..5 and three titles let batches
  *   revisit keys and complete deliveries omit held keys; histories hold up to
- *   12 steps; waits look 0..2 txids ahead, so an off-by-one boundary is
+ *   12 steps after a startup burst of up to three batches; waits look 0..2 txids ahead, so an off-by-one boundary is
  *   reachable on both sides.
  */
 
@@ -111,6 +111,11 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`wait-ignores-timeout`, `EVID-3`],
     [`disconnect-fails`, `RECON-1`],
     [`renew-resubscribes`, `RENEW-1`],
+    [`drops-buffered`, `READY-10`],
+    [`buffer-before-rows`, `READY-10`],
+    [`replays-per-batch`, `PUB-5`],
+    [`ready-before-buffer`, `READY-10 (rows when ready)`],
+    [`shows-buffered`, `READY-10/PUB-9`],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
@@ -257,6 +262,23 @@ const witnesses: Array<[string, EagerLiveSourceHistory]> = [
     ],
   ],
   [
+    // rxdb-db-collection rxdb.test.ts, `marks initial sync ready only after
+    // its rows are applied`: a document inserted after the initial query read
+    // and then patched is buffered; the newer value wins over the older one.
+    `RxDB: buffered startup changes apply after the initial rows, in order`,
+    [
+      {
+        kind: `changes`,
+        changes: [{ type: `upsert`, row: { id: 2, title: `b` } }],
+      },
+      {
+        kind: `changes`,
+        changes: [{ type: `upsert`, row: { id: 2, title: `c` } }],
+      },
+      { kind: `snapshot`, rows: [{ id: 1, title: `a` }], seen: 0 },
+    ],
+  ],
+  [
     // lifecycle-oracle.property.test.ts, restart fencing
     `TrailBase: a restart is a fresh sync run`,
     [
@@ -273,11 +295,9 @@ function withinGrammar(history: EagerLiveSourceHistory): boolean {
     r.id >= 1 && r.id <= 5 && [`a`, `b`, `c`].includes(r.title)
   return (
     history.length >= 1 &&
-    history.length <= 12 &&
+    history.length <= 15 &&
     history.every((step) => {
       switch (step.kind) {
-        case `snapshot`:
-          return step.rows.length <= 4 && step.rows.every(row)
         case `changes`:
           return (
             step.changes.length <= 3 &&
@@ -289,6 +309,13 @@ function withinGrammar(history: EagerLiveSourceHistory): boolean {
           )
         case `wait`:
           return step.ahead >= 0 && step.ahead <= 2
+        case `snapshot`:
+          return (
+            step.rows.length <= 4 &&
+            step.rows.every(row) &&
+            (step.seen ?? 0) >= 0 &&
+            (step.seen ?? 0) <= 3
+          )
         default:
           return true
       }
@@ -307,9 +334,27 @@ describe(`eager live-source grammar controls`, () => {
   )
 
   // Exclusion: each history ends with one step that is illegal where it
-  // stands. The check skips it and leaves the model where it was.
+  // stands. The check skips it and leaves the model where it was. A batch
+  // before the first ready is legal only with `listen-before-fetch`, so its
+  // case runs on a driver that does not declare it.
+  const lateListener = {
+    ...driver,
+    capabilities: new Set(
+      [...driver.capabilities].filter((c) => c !== `listen-before-fetch`),
+    ),
+  }
+  oracleReplayTest(it)(
+    `excludes a batch before the first ready without listen-before-fetch`,
+    async () => {
+      const history = [{ kind: `changes` as const, changes: [] }]
+      const { skipped } = await checkEagerLiveSourceHistory(
+        lateListener,
+        history,
+      )
+      expect(skipped).toBe(1)
+    },
+  )
   const invalid: Array<[string, EagerLiveSourceHistory]> = [
-    [`a batch before the first ready`, [{ kind: `changes`, changes: [] }]],
     [
       `a second renewal in one sync run`,
       [{ kind: `renew` }, { kind: `renew` }],
@@ -350,6 +395,7 @@ describe(`eager live-source grammar controls`, () => {
     [`reconnect`, `reconnect`],
     [`renew`, `renewal`],
     [`transient-failure`, `transient-failure-reported`],
+    [`changes`, `change-before-ready`],
   ]
   oracleReplayTest(it).each(ablations)(
     `without %s steps, histories never reach %s`,
@@ -373,6 +419,39 @@ describe(`eager live-source grammar controls`, () => {
         { seed: 2118, numRuns: 100 },
       )
       expect(reach.counts().get(lost)).toBe(0)
+    },
+    campaignTimeoutMs,
+  )
+
+  // Ablation of the read point: when every fetch reads after all buffered
+  // batches, no history reaches a cut whose result missed one.
+  oracleReplayTest(it)(
+    `with every read after all buffered batches, histories never reach read-missed-change`,
+    async () => {
+      const reach = createOracleReach(
+        `${property}.ablation`,
+        reachStatesFor(driver.capabilities),
+        { replaying: false },
+      )
+      await fc.assert(
+        fc.asyncProperty(
+          historyArb.map((history) =>
+            history.map((step) =>
+              step.kind === `snapshot`
+                ? { kind: step.kind, rows: step.rows }
+                : step,
+            ),
+          ),
+          async (history) => {
+            reach.beginHistory()
+            await checkEagerLiveSourceHistory(driver, history, {
+              reach: reach.reach,
+            })
+          },
+        ),
+        { seed: 2118, numRuns: 100 },
+      )
+      expect(reach.counts().get(`read-missed-change`)).toBe(0)
     },
     campaignTimeoutMs,
   )
