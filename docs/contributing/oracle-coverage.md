@@ -5998,4 +5998,10 @@ adapter oracles keep their laws until a shared family checks the same law,
 history, path, and observation. TrailBase (eager mode, per-change commits,
 `adapter-conformance.eager-live-source.trailbase`) is GREEN; its lifecycle
 oracle keeps its laws, so eager startup failure and stream-end health have
-two owners until this entry moves them.
+two owners until this entry moves them. RxDB
+(`adapter-conformance.eager-live-source.rxdb`, per-change commits, a
+controlled RxCollection with RxDB's own query matcher and sort comparator) is
+GREEN. Open: events during RxDB's initial fetch, which the eager grammar does
+not generate (owner: `packages/db-adapter-conformance`; witness needed: a
+provider-state history with events before the first ready); `rxdb.test.ts`
+keeps examples.

@@ -20,8 +20,8 @@ import { trailBaseConformanceDriver } from './conformance-driver'
  * # TrailBase on the shared eager live-source conformance oracle
  *
  * A receiving driver for `packages/db-adapter-conformance`. The shared
- * module states the laws (READY-2/3/4, HEALTH-1, PUB-2/3, FID-4, LIFE-2/5),
- * the model, the history grammar, and the check. This file supplies only the
+ * module states the laws (READY-2/3/4, HEALTH-1, PUB-1/2/3, FID-4,
+ * LIFE-2/5/10, HEALTH-5), the model, the history grammar, and the check. This file supplies only the
  * TrailBase production driver in `conformance-driver.ts` and the campaigns;
  * it states no expected results.
  *
