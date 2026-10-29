@@ -151,3 +151,14 @@ a buffered insert and update`) failed the same way.
   - **Neon:** still RED on READY-4 and HEALTH-1 only; a probe without
     failure steps passed 300 histories with notes.
   - **RxDB:** RED on FID-1; see the next entry.
+- **2026-10-29, RxDB on field removal: a second RxDB defect.** The driver
+  stores an absent `note` as an absent document field and uses the shared
+  `observedView`.
+  - **RED:** both campaigns failed FID-1: a removed `note` stayed (`a/x`
+    where `a` is owed). RxDB wrote whole documents as sync `update`s, and
+    core's default `partial` row mode merged them over the held row. A
+    memory-storage witness (`rxdb.test.ts`, `removes a field that a
+document update removes`) failed the same way.
+  - **Fix:** the RxDB sync config declares `rowUpdateMode: 'full'`.
+  - **GREEN:** RxDB suite 23/23; four repeats of the random campaign pass.
+  - **Mutant:** removing `rowUpdateMode` fails FID-1 in both campaigns.

@@ -37,7 +37,9 @@ import { rxdbConformanceDriver } from './conformance-driver'
 const property = `adapter-conformance.eager-live-source.rxdb`
 const driver = rxdbConformanceDriver()
 const historyArb = eagerLiveSourceHistoryArb(driver.capabilities)
-const runs = 200
+// `field-removed` needs a held row with a note and a later upsert without
+// one; at 400 histories every seed tried reached it at least 11 times.
+const runs = 400
 // Startup bursts lengthen histories, so a campaign takes several seconds.
 const campaignTimeoutMs = 120_000
 

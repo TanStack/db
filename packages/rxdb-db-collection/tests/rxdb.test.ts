@@ -437,6 +437,57 @@ describe(`RxDB Integration`, () => {
       }
     })
 
+    // A receiving witness for the conformance oracle's FID-1 lane on real
+    // memory storage: a document update that removes an optional field.
+    it(`removes a field that a document update removes`, async () => {
+      type NotedDoc = { id: string; name: string; note?: string }
+      const db = await createRxDatabase<
+        { noted: RxCollection<NotedDoc> },
+        unknown,
+        unknown,
+        unknown
+      >({
+        name: `my-rxdb-noted-` + dbNameId++,
+        ignoreDuplicate: true,
+        storage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }),
+      })
+      const { noted } = await db.addCollections({
+        noted: {
+          schema: {
+            version: 0,
+            type: `object`,
+            primaryKey: `id`,
+            properties: {
+              id: { type: `string`, maxLength: 100 },
+              name: { type: `string` },
+              note: { type: `string` },
+            },
+            required: [`id`, `name`],
+          },
+        },
+      })
+      const doc = await noted.insert({ id: `1`, name: `First`, note: `x` })
+      const collection = createCollection(
+        rxdbCollectionOptions({ rxCollection: noted }),
+      )
+
+      try {
+        await collection.preload()
+        await doc.incrementalModify(
+          ({ note: _note, ...rest }: NotedDoc) => rest,
+        )
+        await flushPromises()
+
+        expect(stripVirtualProps(collection.get(`1`))).toEqual({
+          id: `1`,
+          name: `First`,
+        })
+      } finally {
+        await collection.cleanup()
+        await db.remove()
+      }
+    })
+
     it(`does not let later live traffic extend the startup readiness boundary`, async () => {
       const db = await getDatababase()
       const rxCollection: RxCollection<TestDocType> = db.test

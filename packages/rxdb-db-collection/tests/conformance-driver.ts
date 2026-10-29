@@ -35,9 +35,9 @@
  * found by the cursor's primary-key tie-break.
  *
  * RxDB primary keys are strings. The driver stores row `n` as document id
- * `"n"`, and its observed view maps each key and row id back with
- * `conformanceId`, which rejects anything that is not such a key. The view
- * passes status, health, `preload`, and `cleanup` through unchanged.
+ * `"n"`, and the shared `observedView` maps each key and row id back with
+ * `conformanceKey`, which rejects anything that is not such a key. A JSON
+ * document omits an absent `note`, so rows otherwise pass through unchanged.
  */
 import { createCollection } from '@tanstack/db'
 import {
@@ -48,7 +48,7 @@ import {
 } from 'rxdb/plugins/core'
 import { Observable } from 'rxjs'
 import { rxdbCollectionOptions } from '../src/rxdb'
-import type { ChangeMessage } from '@tanstack/db'
+import { conformanceKey, observedView } from '../../db-adapter-conformance/src'
 import type {
   PreparedQuery,
   RxChangeEvent,
@@ -61,11 +61,10 @@ import type {
   ControlledProvider,
   EagerLiveSourceDriver,
   EagerLiveSourceFixture,
-  ObservedCollection,
   ProviderChange,
 } from '../../db-adapter-conformance/src'
 
-type Doc = { id: string; title: string }
+type Doc = { id: string; title: string; note?: string }
 
 const schema = createRxSchema<Doc>(
   {
@@ -75,6 +74,7 @@ const schema = createRxSchema<Doc>(
     properties: {
       id: { type: `string`, maxLength: 10 },
       title: { type: `string` },
+      note: { type: `string` },
     },
     required: [`id`, `title`],
   },
@@ -160,6 +160,8 @@ class RxdbProvider implements ControlledProvider {
     return {
       id: String(row.id),
       title: row.title,
+      // A JSON document omits an absent field.
+      ...(row.note === undefined ? {} : { note: row.note }),
       _deleted: deleted,
       _rev: `${lwt}-conformance`,
       _attachments: {},
@@ -206,7 +208,9 @@ class RxdbProvider implements ControlledProvider {
         const current = this.docs.get(id)
         return [
           id,
-          current?.title === row.title ? current : this.document(row, lwt),
+          current && sameDocument(current, row)
+            ? current
+            : this.document(row, lwt),
         ]
       }),
     )
@@ -229,11 +233,7 @@ class RxdbProvider implements ControlledProvider {
         const previous = this.docs.get(id)
         if (!previous) throw new Error(`provider does not hold row ${id}`)
         this.docs.delete(id)
-        const doc = this.document(
-          { id: change.id, title: previous.title },
-          lwt,
-          true,
-        )
+        const doc = this.document(conformanceRow(previous), lwt, true)
         this.emit(`DELETE`, doc, previous)
       }
     }
@@ -250,51 +250,13 @@ class RxdbProvider implements ControlledProvider {
   }
 }
 
-/** Maps an RxDB key back to its conformance row id; rejects anything else. */
-function conformanceId(key: unknown): number {
-  const id = Number(key)
-  if (typeof key !== `string` || !Number.isInteger(id) || String(id) !== key) {
-    throw new Error(`RxDB key ${JSON.stringify(key)} is not a conformance id`)
-  }
-  return id
-}
-
+/** An RxDB document as a conformance row: key `"n"` is row id `n`. */
 function conformanceRow(doc: Doc): ConformanceRow {
-  return { ...doc, id: conformanceId(doc.id) }
+  return { ...doc, id: conformanceKey(doc.id) }
 }
 
-/** The adapter's Collection, seen with conformance row ids. */
-function observedView(
-  collection: ReturnType<typeof createRxdbCollection>,
-): ObservedCollection {
-  return {
-    get status() {
-      return collection.status
-    },
-    get health() {
-      return collection.health
-    },
-    *values() {
-      for (const doc of collection.values()) yield conformanceRow(doc)
-    },
-    preload: () => collection.preload(),
-    cleanup: () => collection.cleanup(),
-    on: (event, callback) => collection.on(event, callback),
-    subscribeChanges: (callback, options) =>
-      collection.subscribeChanges(
-        (changes) =>
-          callback(
-            changes.map((change): ChangeMessage<ConformanceRow, number> => ({
-              ...change,
-              key: conformanceId(change.key),
-              value: conformanceRow(change.value),
-              previousValue:
-                change.previousValue && conformanceRow(change.previousValue),
-            })),
-          ),
-        options,
-      ),
-  }
+function sameDocument(doc: Doc, row: ConformanceRow): boolean {
+  return doc.title === row.title && doc.note === row.note
 }
 
 function createRxdbCollection(provider: RxdbProvider) {
@@ -315,7 +277,10 @@ export function rxdbConformanceDriver(): EagerLiveSourceDriver {
     create(): EagerLiveSourceFixture {
       const provider = new RxdbProvider()
       return {
-        collection: observedView(createRxdbCollection(provider)),
+        collection: observedView(createRxdbCollection(provider), {
+          row: conformanceRow,
+          key: conformanceKey,
+        }),
         provider,
       }
     },

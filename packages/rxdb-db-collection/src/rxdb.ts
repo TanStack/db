@@ -295,8 +295,9 @@ export function rxdbCollectionOptions(
 
       return stopOngoingFetch
     },
-    // Expose the getSyncMetadata function
-    getSyncMetadata: undefined,
+    // An RxDB event carries the whole document, so an update replaces the
+    // row and a field the document no longer has goes.
+    rowUpdateMode: `full`,
   }
 
   const collectionConfig: CollectionConfig<Row, string> = {
