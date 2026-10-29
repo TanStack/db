@@ -1,5 +1,26 @@
 # @tanstack/expo-db-sqlite-persistence
 
+## 1.0.0-rc.1
+
+### Major Changes
+
+- Release the first 1.0 candidate. Remove deprecated pre-1.0 APIs and give ([#2171](https://github.com/TanStack/db/pull/2171))
+  published row metadata precedence over colliding selected fields. Structured
+  source spreads and direct source-row returns keep source attribution; new
+  functional objects and other projections receive output Collection metadata.
+  Keep the two packages accidentally released as stable 1.x on their stable
+  release lines. Both stable minor releases require `@tanstack/db@^1.0.0-rc.0`
+  for the RC health and restoration settlement APIs; upgrade DB with them.
+
+  Remove Query Collection’s automatic refetch after mutation handlers. Handlers
+  return `Promise<void>` and must await `collection.utils.refetch()` or write
+  confirmed data with the `write*` utilities; `{ refetch: false }` is removed.
+
+### Patch Changes
+
+- Updated dependencies [[`45c3329`](https://github.com/TanStack/db/commit/45c33292b2c4f09a63f856a829c1e15ca2b470aa), [`205ab71`](https://github.com/TanStack/db/commit/205ab7158d81680c3cc4f06cd9ebe62b30911a5a), [`43d4ef6`](https://github.com/TanStack/db/commit/43d4ef65cfe5c3cfbce6c56891795cd36a73cc37), [`6bf0e86`](https://github.com/TanStack/db/commit/6bf0e86dbc12e903ef28bb6711968ad06b5d5036), [`4c39add`](https://github.com/TanStack/db/commit/4c39add293adb65b4f5537628849f97083a31531), [`4c39add`](https://github.com/TanStack/db/commit/4c39add293adb65b4f5537628849f97083a31531), [`205ab71`](https://github.com/TanStack/db/commit/205ab7158d81680c3cc4f06cd9ebe62b30911a5a), [`7d9ed02`](https://github.com/TanStack/db/commit/7d9ed02e085d11e871e4b6424d47e3c0d7073023), [`b052e91`](https://github.com/TanStack/db/commit/b052e91c79201ee376771f99503566e736e3d0dd), [`45eeef8`](https://github.com/TanStack/db/commit/45eeef81a7c64966473315558f46e8a53b00e462)]:
+  - @tanstack/db-sqlite-persistence-core@1.0.0-rc.1
+
 ## 0.2.37
 
 ### Patch Changes

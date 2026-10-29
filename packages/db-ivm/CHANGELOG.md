@@ -1,5 +1,31 @@
 # @tanstack/db-ivm
 
+## 1.0.0-rc.1
+
+### Major Changes
+
+- Release the first 1.0 candidate. Remove deprecated pre-1.0 APIs and give ([#2171](https://github.com/TanStack/db/pull/2171))
+  published row metadata precedence over colliding selected fields. Structured
+  source spreads and direct source-row returns keep source attribution; new
+  functional objects and other projections receive output Collection metadata.
+  Keep the two packages accidentally released as stable 1.x on their stable
+  release lines. Both stable minor releases require `@tanstack/db@^1.0.0-rc.0`
+  for the RC health and restoration settlement APIs; upgrade DB with them.
+
+  Remove Query Collection’s automatic refetch after mutation handlers. Handlers
+  return `Promise<void>` and must await `collection.utils.refetch()` or write
+  confirmed data with the `write*` utilities; `{ refetch: false }` is removed.
+
+### Patch Changes
+
+- Breaking: Collection keys now always match the declared key type, a string or a number. ([#2266](https://github.com/TanStack/db/pull/2266))
+
+  - A grouped live query that groups by one field now gives a `null`, `undefined`, boolean, or bigint group value a string key. Before, the key was the raw value, so `$key` was `null` for the `null` group. Read a group's key from its `$key`. String and number group values keep their keys.
+  - `sync.write` throws `UndefinedKeyError` or `InvalidKeyError` when `getKey` returns a key that is not a string or a number. Optimistic mutations already threw these errors. For a bigint key, the development message now shows the key instead of failing with a `TypeError`.
+  - `@tanstack/db` no longer exports `SortedMap`, and `SortedMap` no longer has `forEach`. `SortedMap` is the internal ordered map of Collection state.
+  - When one publication applies 512 or more sync operations, the Collection now merges the changed keys into the existing order. Before, it sorted all rows again. With 50,000 rows, a `compare` option, and 600 operations in each sync transaction, the load takes 181 ms instead of 1,589 ms.
+  - Keyed `MultiSet.consolidate` groups entries in nested maps. It no longer encodes each value as a string.
+
 ## 0.2.0
 
 ### Minor Changes
