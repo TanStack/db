@@ -34,12 +34,14 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => ({
-      subscribe: mockSubscribe,
-      unsubscribeAll: vi.fn(),
-      fetchSnapshot: mockFetchSnapshot,
-      requestSnapshot: vi.fn(),
-    })),
+    ShapeStream: vi.fn(function () {
+      return {
+        subscribe: mockSubscribe,
+        unsubscribeAll: vi.fn(),
+        fetchSnapshot: mockFetchSnapshot,
+        requestSnapshot: vi.fn(),
+      }
+    }),
   }
 })
 

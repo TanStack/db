@@ -42,7 +42,9 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => createMockStream(mockStream)),
+    ShapeStream: vi.fn(function () {
+      return createMockStream(mockStream)
+    }),
   }
 })
 

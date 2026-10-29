@@ -3,6 +3,7 @@ import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import type { MockInstance } from 'vitest'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -1149,7 +1150,7 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
 
   let teams: ReturnType<typeof makeTeamsCollection>
   let members: ReturnType<typeof makeMembersCollection>
-  let warnSpy: ReturnType<typeof vi.spyOn>
+  let warnSpy: MockInstance<typeof console.warn>
 
   beforeEach(() => {
     teams = makeTeamsCollection()

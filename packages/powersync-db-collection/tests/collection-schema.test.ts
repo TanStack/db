@@ -145,8 +145,11 @@ describePowerSyncSchema(`PowerSync Schema Integration`, () => {
         expect(collection.size).eq(0)
         expectInsertValidation(
           () => collection.insert({} as any),
-          `Required - path: id`,
-          { message: `Required`, path: [`id`] },
+          `Invalid input: expected string, received undefined - path: id`,
+          {
+            message: `Invalid input: expected string, received undefined`,
+            path: [`id`],
+          },
         )
         expect(collection.size).eq(0)
       } finally {

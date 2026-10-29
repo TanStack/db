@@ -53,19 +53,21 @@ let requestSnapshot: () => Promise<unknown> = () => new Promise(() => {})
 
 vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
-  ShapeStream: vi.fn(() => ({
-    subscribe: (subscriber: Subscriber) => {
-      subscribers.push(subscriber)
-      return () => {}
-    },
-    unsubscribeAll: () => {},
-    requestSnapshot: () => requestSnapshot(),
-    fetchSnapshot: () => fetchSnapshot(),
-    forceDisconnectAndRefresh: () => Promise.resolve(),
-    isUpToDate: false,
-    shapeHandle: `shape-1`,
-    lastOffset: `10_0`,
-  })),
+  ShapeStream: vi.fn(function () {
+    return {
+      subscribe: (subscriber: Subscriber) => {
+        subscribers.push(subscriber)
+        return () => {}
+      },
+      unsubscribeAll: () => {},
+      requestSnapshot: () => requestSnapshot(),
+      fetchSnapshot: () => fetchSnapshot(),
+      forceDisconnectAndRefresh: () => Promise.resolve(),
+      isUpToDate: false,
+      shapeHandle: `shape-1`,
+      lastOffset: `10_0`,
+    }
+  }),
 }))
 
 const rows: Array<Item> = [

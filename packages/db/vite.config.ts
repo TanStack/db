@@ -42,7 +42,11 @@ const config = defineConfig({
     name: packageJson.name,
     dir: `./tests`,
     environment: `jsdom`,
-    coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
+    coverage: {
+      enabled: true,
+      provider: `istanbul`,
+      include: [`src/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}`],
+    },
     typecheck: { enabled: true, tsconfig: `./tsconfig.test.json` },
     setupFiles: [`./tests/test-setup.ts`],
   },

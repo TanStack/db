@@ -36,7 +36,7 @@
     "tailwindcss": "^4.1.18",
     "vite": "^7.3.7",
     "vite-tsconfig-paths": "^5.1.4",
-    "zod": "^4.3.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/compat": "^1.4.1",
@@ -61,7 +61,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.7",
-    "vitest": "^3.2.4",
+    "vitest": "^4.1.12",
     "web-vitals": "^5.1.0"
   }
 }

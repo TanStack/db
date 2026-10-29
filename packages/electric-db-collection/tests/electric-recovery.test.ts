@@ -32,16 +32,18 @@ const mockSubscribe = vi.fn((callback: Subscriber) => {
 
 vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
-  ShapeStream: vi.fn(() => ({
-    subscribe: mockSubscribe,
-    unsubscribeAll: vi.fn(),
-    requestSnapshot: vi.fn().mockResolvedValue(undefined),
-    fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
-    forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-    isUpToDate: false,
-    shapeHandle: `shape-current`,
-    lastOffset: `20_0`,
-  })),
+  ShapeStream: vi.fn(function () {
+    return {
+      subscribe: mockSubscribe,
+      unsubscribeAll: vi.fn(),
+      requestSnapshot: vi.fn().mockResolvedValue(undefined),
+      fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+      forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+      isUpToDate: false,
+      shapeHandle: `shape-current`,
+      lastOffset: `20_0`,
+    }
+  }),
 }))
 
 describe(`persisted Electric recovery laws`, () => {

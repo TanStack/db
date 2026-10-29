@@ -147,58 +147,54 @@ vi.mock(
     const actual = await importOriginal<Record<string, unknown>>()
     return {
       ...actual,
-      ShapeStream: vi.fn(
-        (options: {
-          headers?: Record<string, string>
-          offset?: string
-          handle?: string
-          onError?: (error: unknown) => unknown
-        }) => {
-          const stream: ControlledStream = {
-            tab: options.headers?.[`x-tab`] ?? `unknown`,
-            startedAt: {
-              handle: options.handle,
-              offset: options.offset ?? `-1`,
-            },
-            stopped: false,
-            shapeHandle: options.handle,
-            lastOffset: options.offset ?? `-1`,
-            send: () => {
-              throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-            },
-            onError: (error) => options.onError?.(error),
-            giveUp: () => {
-              throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-            },
-          }
-          streams.push(stream)
-          return {
-            subscribe: (
-              send: ControlledStream[`send`],
-              giveUp: ControlledStream[`giveUp`],
-            ) => {
-              stream.send = send
-              stream.giveUp = giveUp
-              return () => undefined
-            },
-            unsubscribeAll: () => {
-              stream.stopped = true
-            },
-            requestSnapshot: vi.fn().mockResolvedValue(undefined),
-            fetchSnapshot: vi
-              .fn()
-              .mockResolvedValue({ metadata: {}, data: [] }),
-            forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-            isUpToDate: false,
-            get shapeHandle() {
-              return stream.shapeHandle
-            },
-            get lastOffset() {
-              return stream.lastOffset
-            },
-          }
-        },
-      ),
+      ShapeStream: vi.fn(function (options: {
+        headers?: Record<string, string>
+        offset?: string
+        handle?: string
+        onError?: (error: unknown) => unknown
+      }) {
+        const stream: ControlledStream = {
+          tab: options.headers?.[`x-tab`] ?? `unknown`,
+          startedAt: {
+            handle: options.handle,
+            offset: options.offset ?? `-1`,
+          },
+          stopped: false,
+          shapeHandle: options.handle,
+          lastOffset: options.offset ?? `-1`,
+          send: () => {
+            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+          },
+          onError: (error) => options.onError?.(error),
+          giveUp: () => {
+            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+          },
+        }
+        streams.push(stream)
+        return {
+          subscribe: (
+            send: ControlledStream[`send`],
+            giveUp: ControlledStream[`giveUp`],
+          ) => {
+            stream.send = send
+            stream.giveUp = giveUp
+            return () => undefined
+          },
+          unsubscribeAll: () => {
+            stream.stopped = true
+          },
+          requestSnapshot: vi.fn().mockResolvedValue(undefined),
+          fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+          forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+          isUpToDate: false,
+          get shapeHandle() {
+            return stream.shapeHandle
+          },
+          get lastOffset() {
+            return stream.lastOffset
+          },
+        }
+      }),
     }
   },
 )

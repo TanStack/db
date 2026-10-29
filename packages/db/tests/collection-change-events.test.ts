@@ -7,6 +7,7 @@ import {
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import type { SyncConfig } from '../src/types.js'
 
 interface TestUser {
   id: string
@@ -37,10 +38,10 @@ it(`treats predicate evaluation failures as nonmatches`, () => {
 })
 
 describe(`currentStateAsChanges`, () => {
-  let mockSync: ReturnType<typeof vi.fn>
+  let mockSync: ReturnType<typeof vi.fn<SyncConfig<TestUser>[`sync`]>>
 
   beforeEach(() => {
-    mockSync = vi.fn()
+    mockSync = vi.fn<SyncConfig<TestUser>[`sync`]>()
   })
 
   afterEach(() => {

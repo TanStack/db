@@ -17,10 +17,10 @@ class TestEventEmitter extends EventEmitter<{ event: { id: number } }> {
 
 describe(`Collection Events System`, () => {
   let collection: Collection
-  let mockSync: ReturnType<typeof vi.fn>
+  let mockSync: ReturnType<typeof vi.fn<() => void>>
 
   beforeEach(() => {
-    mockSync = vi.fn()
+    mockSync = vi.fn<() => void>()
     collection = createCollection({
       id: `test-collection`,
       getKey: (item: any) => item.id,

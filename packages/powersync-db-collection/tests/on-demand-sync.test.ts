@@ -2957,7 +2957,7 @@ describe(`On-Demand Sync Mode`, () => {
             await options.hooks?.beforeCreate?.({
               getAll: () => Promise.resolve([]),
             } as never)
-            return vi.fn()
+            return vi.fn<() => Promise<void>>()
           })
         const commit = vi.fn(() => {
           entered.resolve()
@@ -3050,7 +3050,7 @@ describe(`On-Demand Sync Mode`, () => {
           await options.hooks?.beforeCreate?.({
             getAll: () => Promise.resolve(rows.slice(cursor, ++cursor)),
           } as never)
-          return vi.fn()
+          return vi.fn<() => Promise<void>>()
         },
       )
       const commit = vi.fn(() => {

@@ -256,7 +256,7 @@ it('preserves exported transformed rows when invalid restore input is rejected',
       const backup = await c.utils.exportData()
       // @ts-expect-error Schema output is not the string input expected by import.
       await expect(c.utils.importData(backup)).rejects.toThrow(
-        /Expected string/,
+        /Invalid input: expected string, received Date/,
       )
       expect(await c.utils.exportData()).toEqual(backup)
       await c.utils.importData(

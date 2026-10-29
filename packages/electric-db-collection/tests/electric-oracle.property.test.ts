@@ -112,7 +112,9 @@ vi.mock(`@electric-sql/client`, async () => {
     ...actual,
     // Full SDK release clears this stream's callback, including when another
     // Collection has a separate stream using these shared request mocks.
-    ShapeStream: vi.fn(() => createMockStream(mockStream)),
+    ShapeStream: vi.fn(function () {
+      return createMockStream(mockStream)
+    }),
   }
 })
 
@@ -2388,7 +2390,9 @@ async function runSchedulerPermutation(
     },
   }
   vi.mocked(ShapeStream).mockReset()
-  vi.mocked(ShapeStream).mockImplementation(() => schedulerStream as never)
+  vi.mocked(ShapeStream).mockImplementation(function () {
+    return schedulerStream as never
+  })
 
   const collection = createCollection(
     persistedCollectionOptions<
@@ -2512,9 +2516,9 @@ async function runSchedulerPermutation(
   } finally {
     await collection.cleanup()
     vi.mocked(ShapeStream).mockReset()
-    vi.mocked(ShapeStream).mockImplementation(
-      () => createMockStream(mockStream) as never,
-    )
+    vi.mocked(ShapeStream).mockImplementation(function () {
+      return createMockStream(mockStream) as never
+    })
   }
 }
 
