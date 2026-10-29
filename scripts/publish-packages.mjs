@@ -57,7 +57,9 @@ async function publishWithHiddenPackages(
 /**
  * Publish stable versions first, then candidates, grouped by exact version.
  * npm reads that exact version even when dist-tags are missing or stale.
- * Explicit upload tags are independent of the metadata selector.
+ * Uploads use latest under the maintainer's RC policy (CONTRIBUTING.md),
+ * independently of the exact-version metadata selector. Existing versions
+ * are skipped; promoting their tags requires a separate npm dist-tag command.
  */
 export async function publishDuringRc(
   rootDirectory = root,
@@ -91,7 +93,7 @@ export async function publishDuringRc(
       publicPackages.filter(
         ({ packageJson }) => packageJson.version !== version,
       ),
-      { version, tag: stableVersion.test(version) ? 'latest' : 'rc' },
+      { version, tag: 'latest' },
       publishCommand,
     )
   }
