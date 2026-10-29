@@ -164,7 +164,10 @@ produces `1.0.0-rc.1.2`. A minor or major change advances the candidate number:
 `1.0.0-rc.1.2` becomes `1.0.0-rc.2`. Packages already on stable 1.x versions,
 including `@tanstack/query-db-collection` and
 `@tanstack/offline-transactions`, continue to use normal semantic versioning
-and publish under npm's `latest` tag.
+and publish under npm's `latest` tag. Release candidates also publish under
+`latest`, per the maintainer's 2026-10-29 decision. Existing versions are not
+republished to move a tag: use `npm dist-tag add <package>@<version> latest`.
+This preserves any existing `rc` alias.
 
 ## Pull requests
 

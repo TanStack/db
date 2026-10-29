@@ -2,7 +2,8 @@
  * Release laws come from CONTRIBUTING.md's Changesets and Releases sections:
  * candidates start at 1.0.0-rc.1, patches extend the current candidate, and a
  * minor or major starts the next candidate. Stable packages use ordinary semver
- * and latest; candidates use rc. Versioning consumes each changeset once.
+ * and latest. Candidates also use latest (maintainer decision 2026-10-29,
+ * recorded in CONTRIBUTING.md). Versioning consumes each changeset once.
  * Exit promotes candidates to 1.0.0 and applies only still-pending work.
  *
  * This independent model uses numeric tuples and an authored changeset ledger.
@@ -318,11 +319,7 @@ export function expectedPublishes(manifests, registry) {
     .map((manifest) => ({
       name: manifest.name,
       version: manifest.version,
-      tag:
-        manifest.name === packageNames.db ||
-        manifest.name === packageNames.react
-          ? 'rc'
-          : 'latest',
+      tag: 'latest',
     }))
 }
 
