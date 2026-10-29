@@ -8,6 +8,14 @@
  * The Node driver supplies its independent server log; the Chromium/real SDK
  * driver supplies PostgreSQL rows. Both use this same settled-row judgment.
  * It does not judge intermediate publication, on-demand subsets, or optimism.
+ *
+ * This module owns the independent model and refinement check: the source head
+ * predicts both durable and public rows, ignoring row order but retaining every
+ * row occurrence and requiring each tab to be ready. The legal history grammar
+ * and Node production driver live in multi-tab-electric-oracle.test.ts. The
+ * receiving grammar and Chromium driver live in
+ * ../e2e/electric-source-prefix-oracle.opfs.spec.ts and its page module.
+ * Each driver calls this comparison after recovery and complete source delivery.
  */
 import { declareOracle } from '../../db/tests/oracle-declaration'
 
@@ -19,6 +27,7 @@ function canonicalRows(rows: ReadonlyArray<SourceRow>): Array<SourceRow> {
     .sort((a, b) => String(a.id).localeCompare(String(b.id)))
 }
 
+/** Compare durable rows and ready tabs with the independently supplied head. */
 export function sourceHeadViolation(
   sourceHead: ReadonlyArray<SourceRow>,
   observation: {

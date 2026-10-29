@@ -230,7 +230,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
-    `startup-generation`,
+    `startup-generation source-progress`,
   ],
   [
     `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
@@ -410,7 +410,7 @@ const ownerGroups: ReadonlyArray<
   [
     `browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts`,
     `browser`,
-    `multi-tab-reserved-history`,
+    `multi-tab-reserved-history electric-source-prefix`,
   ],
   [
     `electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
@@ -724,6 +724,14 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `sqlite-resume.source-progress`,
+    `preserves source progress evidence.*random or replayed`,
+  ],
+  [
+    `browser.electric-source-prefix`,
+    `converges after interleaved source prefixes.*random or replayed`,
+  ],
   [
     `source-health.required-history`,
     `required histories refine the model.*random`,

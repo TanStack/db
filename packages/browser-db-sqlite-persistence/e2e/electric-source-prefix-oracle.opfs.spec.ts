@@ -96,10 +96,10 @@ for (const cell of cells) {
           () => window.__electricSourcePrefix !== undefined,
         )
         await expect
-          .poll(async () => (await observe(page)).status)
+          .poll(async () => (await observe(page)).status, { timeout: 30_000 })
           .toBe(`ready`)
         await expect
-          .poll(async () => (await observe(page)).commits)
+          .poll(async () => (await observe(page)).commits, { timeout: 30_000 })
           .toBeGreaterThan(0)
         return page
       }

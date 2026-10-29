@@ -923,3 +923,62 @@ previously verified content. The 17-file manifest excluding this record is
 `e2fda4fe3c0962594f71929acd20c4e8c03b79cdded5e6713594168525a53111`. This identity
 includes the accepted driver simplification and the hook's test-only edits.
 The earlier full runtime, real-host and mutant evidence retains its scope.
+
+### Published CI and CodeRabbit follow-up (2026-10-29)
+
+PR #2298 first ran at `e9b2dda669a3071e9cd31d7c2d46626e2a7070bc`.
+CI found two missing named replay registrations, four warm-reopen fixture
+failures, one Electron snapshot-shape assertion, and documentation-check drift.
+The recovery owner reproduced all four failures locally before its fixture
+changed. Its warm baseline supplied a resume record but omitted the complete
+source-position token. Under the new capability contract, that is a legacy
+baseline and correctly requests a full snapshot. The fixture now supplies the
+matching token for its existing compatible-reopen premise. Its model, request
+and row comparisons remain unchanged. Missing/foreign-token recovery remains
+generated in the Browser owner and exercised by the real receiving cells.
+
+The replay manifest now names both new properties and their exact replay lanes.
+The Electron assertion includes the new `sourceProgressCompatible` field.
+The Convex example declares its selected task ID as a string, so an ambient
+application variable cannot select the array-update overload. The obsolete
+passing Preact snippet was removed from the known-failure baseline. No new
+failure was added to that baseline. These changes alter no production code.
+
+Verification commands use `pnpm_config_verify_deps_before_run=false`:
+
+- Electric recovery owner: 60 reported tests passed, no type errors. The
+  preceding run reported four failures and 56 passes.
+- Electron IPC suite: 116 reported tests passed, no type errors.
+- Replay harness: 41 tests passed. Guarded direct replays of
+  `sqlite-resume.source-progress` and `browser.electric-source-prefix`, seed
+  `2281`, path `0`, each recorded one completed execution of the exact property.
+- Documentation checker: 806 examples; zero new failures, 250 known failures,
+  and 59 known non-parsing examples. The earlier run had one new failure and
+  one stale baseline entry.
+- Browser `tsc --noEmit` and the focused formatting check pass.
+- `pnpm lint:changed` and `git diff --check` pass; no run budget was lowered.
+- The real SDK/PostgreSQL/Chromium source-prefix receiver passes all ten cells;
+  every cell reaches each of its four declared states once.
+
+CodeRabbit review `5701493057`, inline `4415193533`, and mutable summary
+`6502484352` cover the original published head. Their complete raw text and a
+seven-item lossless ledger were preserved locally before edits. The startup
+polls now explicitly allow 30 seconds. The shared checker now locates its
+companion grammar and drivers and explains its independent source-head model.
+Its judgment, name, registration, and comparison remain unchanged.
+
+Two historical phrases receive clarifications here to preserve this record's
+append-only chronology: “new generated campaigns” means newly added
+generated-history properties; “Browser important generated properties” means
+both important generated properties in the Browser package. “Standalone type
+examples” retains its existing meaning and spelling.
+
+The loss audit accounts for seven items: four fixed, one spelling requirement
+refuted, one accepted documentation-policy choice, and one duplicate. The
+summary's aggregate docstring warning names no missing function obligation or
+repository authority for its 80% threshold. ORC-003's proportional prose and
+directly named companion modules remain the governing documentation contract.
+No behavioral finding, unresolved law decision, or new in-scope counterexample
+was identified. CodeRabbit is useful as a supplemental maintenance reviewer;
+this review supplies no independent behavioral proof. Earlier evidence and
+limits remain unchanged because no production or model semantics changed.
