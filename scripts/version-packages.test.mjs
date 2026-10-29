@@ -60,7 +60,10 @@ test('the first RC changeset covers the current public package inventory', () =>
   )
   for (const manifest of publicPackages) {
     const bump = entries.find((entry) => entry[1] === manifest.name)[2]
-    assert.equal(bump, manifest.version.startsWith('0.') ? 'major' : 'minor')
+    // Versioning keeps the first changeset during prerelease mode, so this
+    // inventory check must recognize candidates after the seed has run too.
+    const candidate = /^(?:0\.|1\.0\.0-rc\.)/.test(manifest.version)
+    assert.equal(bump, candidate ? 'major' : 'minor')
   }
 })
 
