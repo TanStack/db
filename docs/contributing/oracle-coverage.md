@@ -1889,6 +1889,17 @@ The [round 7 ledger](oracle-reviews/utils-unit-retirement-round-7.md) retains
 the retired examples. Caller-modified built-ins and Collection publication
 are outside this direct-return owner.
 
+The [Set-work extension](oracle-reviews/set-equality-work.md) adds `utils.41`
+and a shared descriptor judgment in `set-equality-oracle.ts`. Class/plain
+assignment and homologous cycles preserve equality while flat duplicate-valued
+members require quadratic leaf reads. Both 100-run campaigns reach all eight
+states 200 times together. `query/set-equality-receivers-oracle.test.ts` reuses
+the judgment for Collection changes and ordered/unordered Effects, including
+scalar sources that synthesize projected Sets. All 180 finite receiving cells
+reach count 1. Original-matcher and greedy mutants fail work and equality
+assertions respectively. This bounds the stated flat-member family, not nested
+graph complexity, changing getters, arbitrary graphs or every comparator caller.
+
 The [Duration query equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/duration-query-equality-oracle.test.ts)
 uses ten public fields to predict direct BasicIndex/BTreeIndex exact lookups and
 public `eq` snapshots before and after indexing. The `in` evaluator owner also
@@ -5788,6 +5799,15 @@ See [the Effect startup follow-up](oracle-reviews/effect-startup-delta.md) for
 commands, fingerprints and limits. Arbitrary scheduling, join multiplicity,
 ordered repair, same-source overlap and callback-input sanitization remain
 outside this bounded closure. Other deferred findings remain open.
+
+Subsequent checker calibration keeps both callback channels coherent when
+injecting a bad update key. The `key-collision` and `key-change` controls now
+reject deletion of the interval-continuity judgment itself: the full checker
+mutant passes 214 controls/histories and fails those two controls. Repaired
+production passes all 216 owner tests and the combined 619 targeted tests.
+Native histories and all 5,512 reach cells are unchanged. See the follow-up's
+[calibration evidence](oracle-reviews/effect-startup-delta.md#key-interval-checker-calibration)
+for the new owner fingerprint and the limits of the continuity claim.
 
 ### RC bound schema mutation receivers (2026-10-28)
 

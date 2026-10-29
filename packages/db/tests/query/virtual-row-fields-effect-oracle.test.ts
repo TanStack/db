@@ -798,8 +798,16 @@ test.each(effectFaults)(
     if (fault === `missing-named`) hostile.named.pop()
     if (fault === `delayed-extra`)
       hostile.batches.push([structuredClone(first)])
-    if (fault === `key-collision`) second.key = first.key
-    if (fault === `key-change`) first.key = `different-opaque-key`
+    // Both channels agree on each bad key, so only interval continuity can
+    // reject these faults; cross-channel agreement cannot mask its removal.
+    if (fault === `key-collision`) {
+      second.key = first.key
+      hostile.named[1]!.key = second.key
+    }
+    if (fault === `key-change`) {
+      first.key = `different-opaque-key`
+      hostile.named[0]!.key = first.key
+    }
     expect(() => checkEffectDelta(hostile, expected, new Map(active))).toThrow()
   },
 )

@@ -194,41 +194,43 @@ export function deepEqualsInternal(
       return aValues.every((val) => b.has(val))
     }
 
-    // Object-valued Sets are unordered. Match each value once, carrying a
-    // branch-local cycle map so a failed candidate cannot poison the next.
-    const matchValues = (
-      index: number,
-      remaining: ReadonlyArray<number>,
-      branchVisited: Map<object, object>,
-    ): boolean => {
-      if (index === aValues.length) return true
-      const value = aValues[index]
-      for (const [remainingIndex, candidateIndex] of remaining.entries()) {
-        const candidateVisited = new Map(branchVisited)
-        if (
-          deepEqualsInternal(
-            value,
-            bValues[candidateIndex],
-            candidateVisited,
+    // Candidate comparisons share only the active ancestors. Each recursive
+    // comparison removes its own pairs, so an edge's result is independent of
+    // other assignments. Cache edges and reassign matches instead of retrying
+    // permutations. Plain records can match distinct keyed classes, so a
+    // greedy first match alone would reject some equal Sets.
+    const edges: Array<Array<boolean | undefined>> = aValues.map(() => [])
+    const matched = bValues.map(() => -1)
+    const matchValue = (index: number, seen: Set<number>): boolean => {
+      // Prefer unused members to keep already aligned equal Sets inexpensive.
+      for (const occupied of [false, true]) {
+        for (const [candidateIndex, candidate] of bValues.entries()) {
+          if (
+            seen.has(candidateIndex) ||
+            (matched[candidateIndex] !== -1) !== occupied
+          )
+            continue
+          const equal = (edges[index]![candidateIndex] ??= deepEqualsInternal(
+            aValues[index],
+            candidate,
+            new Map(visited),
             draft,
             persistedSnapshot,
-          ) &&
-          matchValues(
-            index + 1,
-            remaining.filter((_, otherIndex) => otherIndex !== remainingIndex),
-            candidateVisited,
-          )
-        ) {
-          return true
+          ))
+          if (!equal) continue
+          seen.add(candidateIndex)
+          if (
+            matched[candidateIndex] === -1 ||
+            matchValue(matched[candidateIndex]!, seen)
+          ) {
+            matched[candidateIndex] = index
+            return true
+          }
         }
       }
       return false
     }
-    const result = matchValues(
-      0,
-      bValues.map((_, index) => index),
-      visited,
-    )
+    const result = aValues.every((_, index) => matchValue(index, new Set()))
     visited.delete(a)
     return result
   }

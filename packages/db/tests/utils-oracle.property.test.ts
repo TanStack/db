@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
@@ -15,6 +15,8 @@ import {
   expectEqualityPair,
   expectRingLaw,
 } from './deep-equals-support'
+import { createOracleReach } from './oracle-reach.js'
+import { checkSetFamily, setShapes } from './set-equality-oracle.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -811,6 +813,34 @@ describe(`deepEquals property-based tests`, () => {
             expectEqualityPair(left, right, false)
           }
         }
+      },
+    )
+  })
+  // Append this property so existing numeric replay selectors stay stable.
+  // Generated payload and order choices cross every class-pair/cycle shape;
+  // duplicate multiplicity and a late mismatch expose factorial work.
+  const setReach = createOracleReach(`utils Set equality`, [
+    ...setShapes,
+    `equal-duplicates`,
+    `late-mismatch`,
+    `cardinality`,
+  ])
+  let enteredSetProperty = false
+  afterAll(() => {
+    if (enteredSetProperty) setReach.assertReached()
+    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+      console.info(
+        `utils Set equality reach`,
+        Object.fromEntries(setReach.counts()),
+      )
+  })
+  describe(`ambiguous Set membership`, () => {
+    utilsProperty([fc.integer({ min: -100, max: 100 }), fc.boolean()])(
+      `matches ambiguous object Sets with quadratic flat-member reads`,
+      (value, reverse) => {
+        enteredSetProperty = true
+        setReach.beginHistory()
+        checkSetFamily(value, reverse, (state) => setReach.reach(state))
       },
     )
   })

@@ -205,3 +205,52 @@ keys, same-source overlap, ordered repair, real providers/frameworks, or
 callback-input sanitization. P10, P11/P12 and the other deferred runtime,
 retention and public-type findings remain open under their existing owners.
 No broader metadata or general delta-classifier closure follows.
+
+## Subsequent prep-pr review
+
+Review of `a7ea76cddf7ab2fe03f49d84c6d596dd598fedba` found a newly exposed
+factorial object-Set comparison path. The [Set-work repair](set-equality-work.md)
+records its independent model, pre-edit RED, receiving paths, GREEN and mutants.
+The scalar startup owner's native model and histories still pass all 216 cases.
+Its separate opaque-key calibration repair is recorded below; startup and work
+evidence alone would not close that test-integrity gap.
+
+### Key-interval checker calibration
+
+CodeRabbit review `5703351893` on `a7ea76cddf7ab2fe03f49d84c6d596dd598fedba`
+identified a compound-fault calibration. The `key-collision` and `key-change`
+controls changed only batch keys. Named callbacks retained their original keys,
+so cross-channel disagreement rejected the ledger even without the interval
+judgment. The checker still enforced continuity; these controls did not isolate
+it. ORC-006 requires sensitivity at the intended judgment.
+
+The maintainer accepted this repair. Both controls now put the same bad key in
+the matching named entry. `events()` constructs named entries directly from the
+batch, preserving their order. No production behavior, independent model,
+native history, assertion, exclusion, run budget or reach requirement changed.
+
+Before repair, deleting the interval judgment leaves both controls passing:
+the checker mutant survives. After coherent mutation, that deletion causes
+exactly two expected-to-throw assertion failures. Removing only the key-stability
+assertion from the full repaired owner gives **214 passes and those same two
+failures**, with zero skipped tests. Cross-channel agreement therefore cannot
+substitute for continuity enforcement.
+
+The repaired owner passes all **216 tests**. Combined equality, Collection/Effect
+receiving, proxy-revert and startup checks pass **619/619**. All 5,512 startup
+reach cells still count 1; Set-work reach is unchanged. Targeted TypeScript,
+ESLint, oracle lint and formatting pass. Tests use at most two workers; no full
+build ran. Other applicable rubric outcomes above remain unchanged.
+
+This is a test-integrity repair with a checker mutant, not a new production RED.
+These update faults calibrate continuity for a live occurrence. They do not
+independently mutate the distinct-key condition on a fresh enter, or establish
+arbitrary graph, provider, framework or rich named-callback coverage.
+
+The restoration and execution fingerprints above remain historical evidence.
+The current owner intentionally changes only key-fault setup and its explanation.
+Its SHA256 is `56de9e93892c6a4772f71846e25fc9e3700359b2cadbe3d6d9b359d7b9bcd46f`.
+Review identity is parent `a7ea76cddf7ab2fe03f49d84c6d596dd598fedba` plus that
+fingerprint and the Set-work fingerprints. The combined command is recorded in
+the Set-work review. Raw checker variants, reports and logs remain under
+`/private/tmp/effect-startup-delta/prep-pr/key-calibration/accepted-cr1/`.

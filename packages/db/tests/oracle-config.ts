@@ -358,7 +358,7 @@ const publicationProperties = [
 
 // utils-oracle and comparison-oracle number their properties in file order.
 const utilsProperties = Array.from(
-  { length: 40 },
+  { length: 41 },
   (_, index) => `utils.${index + 1}`,
 )
 const comparisonProperties = Array.from(
