@@ -3740,7 +3740,8 @@ checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
 
 `packages/db/tests/declared-reach-oracle.property.test.ts`
-(`oracle.declared-reach`) owns what `createOracleReach` (ORC-015) counts, when
+(`oracle.declared-reach`; [review record](oracle-reviews/pr-2290-declared-reach.md))
+owns what `createOracleReach` (ORC-015) counts, when
 it checks reach, and what fixed examples prove. It also owns the run
 parameters that `oracleRandomParameters` and `oraclePropertyOptions` return,
 and the campaigns that `runOracleCampaign` in
