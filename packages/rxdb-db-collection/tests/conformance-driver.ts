@@ -10,10 +10,15 @@
  *
  * The oracle's steps map onto RxDB like this:
  *
- * - a complete delivery is the initial fetch. The adapter's first query of a
- *   sync run waits until the oracle delivers; the provider then holds exactly
- *   those documents and answers every page from them. RxDB reads storage
- *   once per sync run, so the driver does not declare `complete-snapshot`;
+ * - the provider holds the backend's documents. `seed` sets them before a
+ *   sync run subscribes. A complete delivery is the initial fetch's result:
+ *   the adapter's first query of a sync run waits until the oracle delivers
+ *   it, and every page answers from it. RxDB reads storage once per sync
+ *   run, so the driver does not declare `complete-snapshot`;
+ * - RxDB subscribes to `$` before it queries, so the driver declares
+ *   `listen-before-fetch`: a change batch before the first ready is a
+ *   backend write during the fetch, announced on `$`. A query issued while
+ *   no `$` subscription is live counts as a fetch before listening (READY-8);
  * - a change batch is one change event per change on `$`: `INSERT` for a key
  *   the provider does not hold, `UPDATE` for one it does, `DELETE` otherwise.
  *   The adapter commits each event alone, so the driver declares `per-change`
@@ -80,6 +85,8 @@ interface ProviderSession {
   subscriber: Subscriber<RxChangeEvent<Doc>>
   releases: number
   delivered: boolean
+  /** The documents the initial fetch reads: the result at its read point. */
+  read: Map<string, RxDocumentData<Doc>>
   firstQuery?: {
     resolve: () => void
     reject: (error: unknown) => void
@@ -90,6 +97,7 @@ class RxdbProvider implements ControlledProvider {
   readonly sessions: Array<ProviderSession> = []
   private docs = new Map<string, RxDocumentData<Doc>>()
   private lwt = 0
+  private early = 0
 
   /** The controlled RxCollection that the adapter reads. */
   readonly rxCollection = {
@@ -103,6 +111,7 @@ class RxdbProvider implements ControlledProvider {
         subscriber,
         releases: 0,
         delivered: false,
+        read: new Map(),
       }
       this.sessions.push(session)
       return () => {
@@ -120,6 +129,8 @@ class RxdbProvider implements ControlledProvider {
   // The first query of a sync run waits for the complete delivery; later
   // pages answer from the documents the provider then holds.
   private async query(prepared: PreparedQuery<Doc>) {
+    const listening = this.sessions.at(-1)
+    if (!listening || listening.releases > 0) this.early += 1
     const session = this.latest()
     if (!session.delivered) {
       if (session.firstQuery) throw new Error(`a second query before delivery`)
@@ -130,7 +141,7 @@ class RxdbProvider implements ControlledProvider {
     const matches = getQueryMatcher(schema.jsonSchema, prepared.query)
     const order = getSortComparator(schema.jsonSchema, prepared.query)
     const { skip = 0, limit = Infinity } = prepared.query
-    const documents = [...this.docs.values()]
+    const documents = [...session.read.values()]
       .filter((doc) => matches(doc))
       .sort(order)
       .slice(skip, skip + limit)
@@ -172,14 +183,32 @@ class RxdbProvider implements ControlledProvider {
   }
 
   releases = () => this.sessions.map((session) => session.releases)
+  fetchesBeforeListening = () => this.early
 
+  // The backend's rows before the adapter subscribes, in one bulk write.
+  seed = (rows: ReadonlyArray<ConformanceRow>) => {
+    const lwt = ++this.lwt
+    this.docs = new Map(
+      rows.map((row) => [String(row.id), this.document(row, lwt)]),
+    )
+  }
+
+  // The fetch result at its read point. Its documents keep the backend's
+  // current versions where they agree, and the read's own otherwise.
   deliverSnapshot = (rows: ReadonlyArray<ConformanceRow>) => {
     const session = this.latest()
     const firstQuery = session.firstQuery
     if (!firstQuery) throw new Error(`the adapter has not queried`)
     const lwt = ++this.lwt
-    this.docs = new Map(
-      rows.map((row) => [String(row.id), this.document(row, lwt)]),
+    session.read = new Map(
+      rows.map((row) => {
+        const id = String(row.id)
+        const current = this.docs.get(id)
+        return [
+          id,
+          current?.title === row.title ? current : this.document(row, lwt),
+        ]
+      }),
     )
     session.delivered = true
     session.firstQuery = undefined
@@ -250,6 +279,7 @@ function observedView(
     },
     preload: () => collection.preload(),
     cleanup: () => collection.cleanup(),
+    on: (event, callback) => collection.on(event, callback),
     subscribeChanges: (callback, options) =>
       collection.subscribeChanges(
         (changes) =>
@@ -280,7 +310,7 @@ function createRxdbCollection(provider: RxdbProvider) {
 export function rxdbConformanceDriver(): EagerLiveSourceDriver {
   return {
     adapter: `@tanstack/rxdb-db-collection`,
-    capabilities: new Set(),
+    capabilities: new Set([`listen-before-fetch`]),
     changeCommits: `per-change`,
     create(): EagerLiveSourceFixture {
       const provider = new RxdbProvider()

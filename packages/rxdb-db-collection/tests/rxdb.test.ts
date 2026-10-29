@@ -392,6 +392,51 @@ describe(`RxDB Integration`, () => {
       }
     })
 
+    // A receiving witness for the conformance oracle's `listen-before-fetch`
+    // lane on real memory storage: the initial query reads a document that
+    // was inserted and then updated while the query waited, so the buffered
+    // insert event is already reflected in the result.
+    it(`becomes ready when the initial read already reflects a buffered insert and update`, async () => {
+      const db = await getDatababase()
+      const rxCollection: RxCollection<TestDocType> = db.test
+      const queryWaiting = createDeferred<void>()
+      const releaseRead = createDeferred<void>()
+      const storageQuery = rxCollection.storageInstance.query.bind(
+        rxCollection.storageInstance,
+      )
+      const query = vi
+        .spyOn(rxCollection.storageInstance, `query`)
+        .mockImplementationOnce(async (preparedQuery) => {
+          queryWaiting.resolve()
+          await releaseRead.promise
+          return storageQuery(preparedQuery)
+        })
+      const collection = createCollection(
+        rxdbCollectionOptions({ rxCollection, syncBatchSize: 10 }),
+      )
+
+      try {
+        const ready = collection.preload()
+        await queryWaiting.promise
+        const doc = await rxCollection.insert({ id: `1`, name: `First` })
+        await doc.patch({ name: `Second` })
+        await flushPromises()
+        releaseRead.resolve()
+        await ready
+
+        expect(collection.status).toBe(`ready`)
+        expect(stripVirtualProps(collection.get(`1`))).toEqual({
+          id: `1`,
+          name: `Second`,
+        })
+      } finally {
+        releaseRead.resolve()
+        query.mockRestore()
+        await collection.cleanup()
+        await db.remove()
+      }
+    })
+
     it(`does not let later live traffic extend the startup readiness boundary`, async () => {
       const db = await getDatababase()
       const rxCollection: RxCollection<TestDocType> = db.test

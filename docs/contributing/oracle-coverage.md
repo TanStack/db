@@ -6004,8 +6004,7 @@ history, path, and observation. TrailBase (eager mode, per-change commits,
 oracle keeps its laws, so eager startup failure and stream-end health have
 two owners until this entry moves them. RxDB
 (`adapter-conformance.eager-live-source.rxdb`, per-change commits, a
-controlled RxCollection with RxDB's own query matcher and sort comparator) is
-GREEN. Open: events during RxDB's initial fetch, which the eager grammar does
-not generate (owner: `packages/db-adapter-conformance`; witness needed: a
-provider-state history with events before the first ready); `rxdb.test.ts`
-keeps examples.
+controlled RxCollection with RxDB's own query matcher and sort comparator,
+`listen-before-fetch`) is GREEN after a fix for a buffered insert that the
+initial read already reflects; `rxdb.test.ts` holds a receiving witness for
+it on memory storage.

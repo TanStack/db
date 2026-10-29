@@ -1062,6 +1062,11 @@ export async function checkEagerLiveSourceHistory(
     const check = (name: string, ok: boolean, want: unknown, got: unknown) => {
       if (!ok) throw violation(`${law} (${name})`, stepIndex, want, got)
     }
+    // READY-8 comes first: a fetch before listening explains what follows.
+    const early = provider.fetchesBeforeListening?.() ?? 0
+    if (early > 0) {
+      throw violation(`READY-8 (fetch before listening)`, stepIndex, 0, early)
+    }
     const detachedNow = detached.found()
     if (detachedNow.length > 0) {
       throw violation(`HEALTH-5`, stepIndex, `no detached failure`, detachedNow)
@@ -1081,10 +1086,6 @@ export async function checkEagerLiveSourceHistory(
         readyRows,
       )
       readyRows = undefined
-    }
-    const early = provider.fetchesBeforeListening?.() ?? 0
-    if (early > 0) {
-      throw violation(`READY-8 (fetch before listening)`, stepIndex, 0, early)
     }
     check(`change events`, sameRows(events.rows(), rows), rows, events.rows())
     const health = collection.health

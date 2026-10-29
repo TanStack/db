@@ -234,9 +234,10 @@ export function rxdbCollectionOptions(
           next: (ev) => {
             const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
             switch (ev.operation) {
+              // The initial read can already hold a document whose insert
+              // event was buffered, so an insert writes as an update. Core
+              // inserts an updated key it does not hold.
               case `INSERT`:
-                queue({ type: `insert`, value: cur })
-                break
               case `UPDATE`:
                 queue({ type: `update`, value: cur })
                 break

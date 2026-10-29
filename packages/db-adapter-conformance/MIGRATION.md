@@ -27,19 +27,19 @@ reviewed change.
 
 ## Adapters
 
-| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                         |
-| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Not started                                                                                                                                                                                                                                                             |
-| PowerSync         | eager live source, mutations, on-demand                                               | Not started                                                                                                                                                                                                                                                             |
-| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29), per-change commits. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`; declares no optional capability. Open: events during the initial fetch (see log). Mutations: not started |
-| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started                             |
-| Convex            | eager live source, mutations, on-demand, source shapes                                | Not started                                                                                                                                                                                                                                                             |
-| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                      |
-| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                             |
-| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                             |
-| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                             |
-| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                             |
+| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                             |
+| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Not started                                                                                                                                                                                                                                 |
+| PowerSync         | eager live source, mutations, on-demand                                               | Not started                                                                                                                                                                                                                                 |
+| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                    |
+| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started |
+| Convex            | eager live source, mutations, on-demand, source shapes                                | Not started                                                                                                                                                                                                                                 |
+| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                          |
+| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                 |
+| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                 |
+| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                 |
+| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                 |
 
 ## Suggested order
 
@@ -111,3 +111,25 @@ reviewed change.
   driver also gets a check of the rows at the moment status becomes `ready`
   (READY-3, READY-10). Five reference mutants calibrate it, and the reach
   of the three new states is declared. Evidence: `README.md`.
+- **2026-10-29, RxDB on `listen-before-fetch`: one RxDB defect.** The
+  driver now seeds the backend, answers the initial fetch from its read
+  point, and counts queries issued without a live `$` subscription.
+  - **RED:** both campaigns failed READY-10 (status `error` where `ready` is
+    owed). Shrunk: a document inserted and then updated during the fetch,
+    which the read already reflects. RxDB replayed the buffered `INSERT` as
+    a sync `insert`, and core rejected it as a duplicate key with a
+    different value. A receiving witness on memory storage
+    (`rxdb.test.ts`, `becomes ready when the initial read already reflects
+a buffered insert and update`) failed the same way.
+  - **Fix:** RxDB writes `INSERT` and `UPDATE` events as a sync `update`;
+    core inserts an updated key it does not hold. One case less.
+  - **GREEN:** the RxDB suite, 22 tests, including both campaigns and the
+    witness.
+  - **Mutants of `src/rxdb.ts`:** the original insert write (READY-10
+    status), fetch before listen (READY-8), buffer dropped (READY-10 rows),
+    ready before the buffer applies (READY-10 rows when ready), no release
+    on a failed fetch (LIFE-10), a `$` error ignored (HEALTH-1), no cursor
+    tie-break (READY-10 rows), a live write dropped (PUB-3/FID-4). Each was
+    rejected by both campaigns and reverted.
+  - **Oracle change this exposed:** READY-8 is checked before any other
+    observation, since a fetch before listening explains what follows.
