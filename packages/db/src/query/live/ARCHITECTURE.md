@@ -385,6 +385,25 @@ Relaxing cross-publication reference stability does not permit changing these
 internal matches. The public-container copy matrix crosses reference-key type,
 ordered and unordered subqueries, materialization form, and parent/child updates.
 
+Reserved public row fields have a separate callback-input law (maintainer
+decision, 2026-10-28). Direct source rows and structured whole-row source
+spreads expose genuine source `$key`, `$origin`, `$hasPendingWrites`, and
+`$collectionId`, including when a spread selects conflicting reserved names.
+A subquery projection that creates its own row shape, including a new
+functional object or functional spread, exposes none of those reserved fields
+before downstream `fn.select()` code runs. An inline include value keeps its
+authored selected shape. Sanitizing only the eventual Collection publication
+cannot satisfy this law, because user code may already have derived an
+ordinary field from a spoofed input.
+
+Known implementation gap for the first RC: correlated-child functional callback
+inputs can still expose reserved fields from a new shape or authored collisions
+from a structured source spread. The root callback receiving path passes its
+bounded checks. The callback-input law above remains accepted; final publication
+sanitization does not close this earlier boundary. The separate runtime/type
+owners and exact RED witnesses are preserved in the
+[deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
+
 D2 hashes enumerable symbol keys and uses exact local-symbol identity plus
 registry keys for registered symbols. D2 rejects structural cycles with a clear
 error, including cycles through arrays, Maps, Sets, and enumerable symbol keys.

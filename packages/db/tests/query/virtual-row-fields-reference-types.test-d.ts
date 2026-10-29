@@ -1,3 +1,5 @@
+// Supplemental concrete type examples. The generated public consumer law
+// lives in virtual-row-fields-types-oracle.test.ts.
 /**
  * # Which types represent virtual-field-bearing rows?
  *
@@ -40,7 +42,6 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { rows } from './virtual-row-fields-type-fixture.js'
 import type { Profile, Row } from './virtual-row-fields-type-fixture.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
@@ -86,10 +87,6 @@ type IndexRefFor<
   : SingleRowRefProxy<T>
 
 type VirtualVariant = PublishedValueFor<Variant, `row-root`>
-
-declareOracle({
-  typeModel: [`PublishedValueFor`, `QueryRefFor`, `IndexRefFor`],
-})
 
 describe(`virtual row field type boundary`, () => {
   test(`WithoutVirtualProps preserves discriminated row unions`, () => {

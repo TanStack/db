@@ -1,6 +1,6 @@
 // Ordinary type test for virtual row fields: opaque scalar child results,
 // compared with written types. The row and value classification law is owned
-// by virtual-row-fields-oracle.test-d.ts.
+// by virtual-row-fields-types-oracle.test.ts.
 import { describe, expectTypeOf, test } from 'vitest'
 import {
   createLiveQueryCollection,

@@ -550,6 +550,9 @@ export class OfflineExecutor {
       return
     }
 
+    // A sibling rollback can settle this snapshot before its durable work.
+    if (restorationTx.state !== `pending`) return
+
     // Mark as completed: every Collection that tracked it recomputes and
     // releases it. The actual data will come from the sync.
     restorationTx.completeWithoutCommit()

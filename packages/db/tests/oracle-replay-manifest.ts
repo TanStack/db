@@ -21,6 +21,11 @@ const ownerGroups: ReadonlyArray<
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [
+    `../scripts/release-history-oracle.property.test.js`,
+    `scripts`,
+    `release-version release-seed-failure`,
+  ],
+  [
     `db/tests/ssr-stream-record-wait-oracle.test.ts`,
     `ssr`,
     `stream-record-lifetime`,

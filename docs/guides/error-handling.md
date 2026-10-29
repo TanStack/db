@@ -690,7 +690,7 @@ const todoCollection = createCollection(
   queryFn: fetchTodos,
   getKey: (todo) => todo.id,
   id: "todos",
-  onInsert: async ({ transaction }) => {
+  onInsert: async ({ transaction, collection }) => {
     const response = await fetch("/api/todos", {
       method: "POST",
       body: JSON.stringify(transaction.mutations[0].modified),
@@ -700,7 +700,8 @@ const todoCollection = createCollection(
       // Throwing an error will rollback the optimistic state
       throw new Error(`HTTP Error: ${response.status}`)
     }
-    
+
+    await collection.utils.refetch()
   },
 }))
 

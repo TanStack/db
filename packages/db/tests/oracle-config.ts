@@ -8,6 +8,8 @@ const staticOracleProperties = [
   `lint.part-reach`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
+  `scripts.release-version`,
+  `scripts.release-seed-failure`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
   `react.ssr-stream-cut`,

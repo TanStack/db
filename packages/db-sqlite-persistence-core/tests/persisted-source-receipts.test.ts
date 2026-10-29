@@ -957,7 +957,6 @@ describe(`persistedCollectionOptions`, () => {
         onInsert: async () => {
           hookEntered.resolve()
           await releaseHook.promise
-          return {}
         },
         persistence: { adapter, coordinator },
       }),

@@ -276,17 +276,51 @@ describe(`Outcome observer calibration`, () => {
   })
 })
 
-/** The admission grammar reaches every transaction state through public calls,
- * then attempts external completion 1–3 times. It replays the primary model's
- * rows, state and outcome comparisons after each attempt. The pending neighbor
- * must complete; all other states reject without changing their verdict.
- * A failed transaction cannot be resurrected by an internal helper.
+/** External completion shares the primary optimistic model. The finite grammar
+ * crosses each admission state with independent pending/persisting peers and
+ * source transactions on the target key, another key, or a truncate. These
+ * histories distinguish rejecting an inadmissible completion from preserving
+ * the peer, queued source work and the later usable Collection.
+ *
+ * State, immutable requests, rows, metadata, public callbacks, downstream rows
+ * and request verdicts are compared by runOptimisticHistory after every action.
+ * Only pending target work admits its first completion; all repeated or other
+ * state attempts reject. A same-key persisting peer holds accepted source work
+ * through the admitted completion, so fulfillment alone cannot prove publication.
  */
-it.each([`pending`, `persisting`, `completed`, `failed`] as const)(
-  `external completion preserves admission and outcomes from %s`,
-  async (state) => {
-    const reach = createOracleReach(`external completion ${state}`, [`attempt`])
-    for (const attempts of [1, 2, 3]) {
+const completionStates = [
+  `pending`,
+  `persisting`,
+  `completed`,
+  `failed`,
+] as const
+const completionPeers = [
+  `none`,
+  `pending-same`,
+  `pending-other`,
+  `persisting-same`,
+  `persisting-other`,
+] as const
+const completionSources = [`none`, `same`, `other`, `truncate`] as const
+const completionHistories = completionStates.flatMap((state) =>
+  completionPeers.flatMap((peer) =>
+    (peer.endsWith(`other`)
+      ? [...completionSources, `peer` as const]
+      : completionSources
+    ).flatMap((source) =>
+      [1, 2, 3].map((attempts) => ({ state, peer, source, attempts })),
+    ),
+  ),
+)
+
+describe(`external completion with peers and source work`, () => {
+  it.each(completionHistories)(
+    `preserves completion admission and independent work: %j`,
+    async ({ state, peer, source, attempts }) => {
+      const reach = createOracleReach(
+        `external completion ${state}/${peer}/${source}/${attempts}`,
+        [`attempts-compared`, `later-source-compared`],
+      )
       reach.beginHistory()
       const steps: Array<OptimisticStep> = [
         {
@@ -297,6 +331,14 @@ it.each([`pending`, `persisting`, `completed`, `failed`] as const)(
           pending: state === `pending`,
         },
       ]
+      if (peer !== `none`)
+        steps.push({
+          type: `edit`,
+          key: peer.endsWith(`same`) ? 1 : 2,
+          fields: { b: 2 },
+          optimistic: true,
+          pending: peer.startsWith(`pending`),
+        })
       if (state === `completed` || state === `failed`)
         steps.push({
           type: `settle`,
@@ -304,18 +346,50 @@ it.each([`pending`, `persisting`, `completed`, `failed`] as const)(
           success: state === `completed`,
           cascade: false,
         })
+      if (source !== `none`)
+        steps.push({
+          type: `sync`,
+          rows: [
+            {
+              id: source === `other` ? 3 : source === `peer` ? 2 : 1,
+              a: 7,
+              b: 8,
+              c: 9,
+            },
+          ],
+          truncate: source === `truncate`,
+          copies: 1,
+        })
       for (let i = 0; i < attempts; i++)
         steps.push({ type: `complete`, slot: 0 })
+      // Drain each still-active request by its own explicit success. Target
+      // and peer are independently held; an accepted completion removes only
+      // the pending target from this active ordering.
+      if (state === `persisting`)
+        steps.push({ type: `settle`, slot: 0, success: true, cascade: false })
+      if (peer !== `none`)
+        steps.push({ type: `settle`, slot: 0, success: true, cascade: false })
+      steps.push({
+        type: `sync`,
+        rows: [
+          { id: 1, a: 11, b: 12, c: 13 },
+          { id: 2, a: 21, b: 22, c: 23 },
+        ],
+        truncate: false,
+        copies: 1,
+      })
       const counts = await runOptimisticHistory(
         [{ id: 1, a: 0, b: 0, c: 0 }],
         steps,
       )
+      expect(counts.edits).toBe(peer === `none` ? 1 : 2)
       expect(counts.completionAttempts).toBe(attempts)
       expect(counts.completionRejections).toBe(
         attempts - (state === `pending` ? 1 : 0),
       )
-      reach.reach(`attempt`)
-    }
-    reach.assertReached()
-  },
-)
+      reach.reach(`attempts-compared`)
+      reach.reach(`later-source-compared`)
+      reach.assertReached()
+    },
+  )
+})

@@ -29,7 +29,7 @@
     "test:oracles": "pnpm --filter @tanstack/db test:oracles && pnpm --filter @tanstack/query-db-collection test:oracles && pnpm --filter @tanstack/db test:indexed-db:oracles && pnpm --filter @tanstack/db-sqlite-persistence-core test:oracles && pnpm --filter @tanstack/browser-db-sqlite-persistence test:oracles",
     "test:minified-db": "node scripts/test-minified-db.mjs",
     "test:ssr-bundle": "node scripts/ssr-bundle-oracle.mjs",
-    "test:production-errors": "node scripts/generate-error-docs.mjs --check && node scripts/test-production-errors.mjs",
+    "test:production-errors": "node scripts/test-production-errors.mjs",
     "test:release": "node --test scripts/version-packages.test.mjs scripts/publish-packages.test.mjs",
     "check:mangle": "node scripts/mangle-private-members.mjs",
     "size:compare": "node scripts/size-compare.mjs",
@@ -37,7 +37,7 @@
     "test:docs": "node scripts/verify-links.ts",
     "test:doc-snippets": "node scripts/check-doc-snippets.mjs",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
-    "generate-docs": "node scripts/generate-docs.ts"
+    "generate-docs": "node scripts/generate-error-docs.mjs && node scripts/generate-docs.ts"
   },
   "devDependencies": {
     "@changesets/apply-release-plan": "7.0.14",

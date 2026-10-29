@@ -132,6 +132,7 @@ export class LiveQueryObserverClient<
     if (preloadRequested) {
       void this.host.observer.preload().catch(() => {})
     }
+    if (typeof window === `undefined`) this.assertSources()
     const snapshot = this.host.read(true)
     const collection = this.collection
     if (!collection || this.seed) return snapshot

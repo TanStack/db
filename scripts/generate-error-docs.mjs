@@ -4,10 +4,23 @@
 // coded error site, a plain Error thrown elsewhere, gets an anchor, its source
 // file, and its message template.
 // With `--check`, it fails instead of writing when the page is out of date.
+// With `--stdout`, it emits the fresh page without reading or writing docs.
 // packages/db/tests/production-error-messages-oracle.test.ts checks the headings.
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const args = process.argv.slice(2)
+const [mode] = args
+if (
+  args.length > 1 ||
+  (mode !== undefined && !['--check', '--stdout'].includes(mode))
+) {
+  console.error(
+    'Usage: node scripts/generate-error-docs.mjs [--check | --stdout]',
+  )
+  process.exit(1)
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixtures = path.join(root, 'packages/db/tests/fixtures')
@@ -69,7 +82,7 @@ Each heading names the source file under \`packages/db/src\` that writes it.
 
 ${siteSections.join('\n')}`
 
-if (process.argv.includes('--check')) {
+if (mode === '--check') {
   const current = await readFile(pagePath, 'utf8').catch(() => '')
   if (current !== page) {
     console.error(
@@ -77,6 +90,8 @@ if (process.argv.includes('--check')) {
     )
     process.exit(1)
   }
+} else if (mode === '--stdout') {
+  process.stdout.write(page)
 } else {
   await writeFile(pagePath, page)
 }

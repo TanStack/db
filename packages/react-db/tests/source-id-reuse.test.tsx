@@ -1,7 +1,13 @@
 // Ordinary React tests for source ID reuse: a rejected render releases the sync
 // deferral it acquired, so a later reader can start a shared Collection. The reuse
 // law is owned by source-id-reuse-oracle.test.tsx.
-import { act, render, renderHook, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  waitFor,
+} from '@testing-library/react'
 import {
   DbClient,
   SourceCollectionIdReuseError,
@@ -13,12 +19,62 @@ import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
+import { withOracleCleanup } from '../../db/tests/utils'
 import { TestErrorBoundary, source } from './source-id-reuse-support'
 import type { Context, QueryBuilder } from '@tanstack/db'
 
 import type { Row } from './source-id-reuse-support'
 
 describe(`React source ID reuse`, () => {
+  it(`preserves a failure after native mount acquisition and releases its root`, async () => {
+    const rows = source(`partial-native-mount`, `authored`)
+    const primary = new Error(`driver failed before returning its mount handle`)
+    const secondary = new Error(`independent cleanup failed`)
+    let query:
+      { cleanup: () => Promise<void>; subscriberCount: number } | undefined
+    let rootReleased = false
+    let followingCleanup = false
+    let failure: unknown
+    try {
+      await withOracleCleanup(() => {
+        renderHook(() => {
+          const result = useLiveQuery({
+            query: (q) => q.from({ rows }),
+            gcTime: 1,
+          })
+          query = result.collection
+          return result
+        })
+        expect(query?.subscriberCount).toBe(1)
+        // Model the driver losing control after mount acquisition but before
+        // returning a handle. The root inventory still owns native cleanup.
+        throw primary
+      }, [
+        () => {
+          cleanup()
+          rootReleased = true
+          expect(query?.subscriberCount).toBe(0)
+        },
+        () => {
+          throw secondary
+        },
+        async () => {
+          await query?.cleanup()
+          await rows.cleanup()
+          followingCleanup = true
+        },
+      ])
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).cause).toBe(primary)
+    expect((failure as AggregateError).errors).toEqual([primary, secondary])
+    expect(rootReleased).toBe(true)
+    expect(followingCleanup).toBe(true)
+    expect(rows.subscriberCount).toBe(0)
+  })
+
   it(`releases a later shared source when earlier deferred sync starts fail`, async () => {
     const client = new DbClient()
     const first = source(`settings`, `first`)

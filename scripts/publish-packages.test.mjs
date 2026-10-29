@@ -55,24 +55,35 @@ test('RC publishing gives candidate and stable packages their own npm tags', asy
   const before = packageState(root)
   const phases = []
 
-  await publishDuringRc(root, () => {
+  await publishDuringRc(root, (_, publication) => {
     phases.push({
       publicNames: packageState(root)
         .filter((pkg) => !pkg.private)
         .map((pkg) => pkg.name),
       preMode: existsSync(join(root, '.changeset', 'pre.json')),
+      ...publication,
     })
   })
 
   assert.deepEqual(phases, [
     {
-      publicNames: [
-        '@tanstack/query-db-collection',
-        '@tanstack/offline-transactions',
-      ],
+      publicNames: ['@tanstack/query-db-collection'],
       preMode: false,
+      version: '1.4.6',
+      tag: 'latest',
     },
-    { publicNames: ['@tanstack/db'], preMode: true },
+    {
+      publicNames: ['@tanstack/offline-transactions'],
+      preMode: false,
+      version: '1.1.3',
+      tag: 'latest',
+    },
+    {
+      publicNames: ['@tanstack/db'],
+      preMode: false,
+      version: '1.0.0-rc.2',
+      tag: 'rc',
+    },
   ])
   assert.deepEqual(packageState(root), before)
   assert.equal(existsSync(join(root, '.changeset', 'pre.json')), true)
@@ -85,13 +96,13 @@ test('failed candidate publishing restores package manifests and prerelease stat
   let phase = 0
 
   await assert.rejects(
-    publishDuringRc(root, () => {
+    publishDuringRc(root, (_, publication) => {
       phase++
-      if (phase === 2) throw new Error('publish failed')
+      if (publication.tag === 'rc') throw new Error('publish failed')
     }),
     /publish failed/,
   )
-  assert.equal(phase, 2)
+  assert.equal(phase, 3)
   assert.deepEqual(packageState(root), before)
   assert.equal(existsSync(join(root, '.changeset', 'pre.json')), true)
 })

@@ -1509,6 +1509,10 @@ export async function runOptimisticHistory(
             op.tx.completeWithoutCommit()
             op.tx.touchCollection()
             await op.outcome.settled
+            expect(
+              op.settledRows,
+              `${position}: rows visible when external completion settled`,
+            ).toEqual(cuts[0])
           } else {
             counts.completionRejections++
             expect(

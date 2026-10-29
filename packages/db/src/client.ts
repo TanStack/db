@@ -1093,6 +1093,7 @@ export class DbClient {
       this.discardPreloadedLiveQuery(dehydratedQuery.queryHash)
     } else {
       record.sources = existing?.sources
+      record.rowOptions = existing?.rowOptions
     }
     this.liveQueries.set(record.queryHash, record)
     if (existing?.status === `pending`) {

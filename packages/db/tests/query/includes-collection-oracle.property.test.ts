@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
@@ -27,6 +27,8 @@ import {
   expectedMaterializations,
 } from './includes-collection-support.js'
 import {
+  advanceFacadeIntervals,
+  checkFacadeIntervals,
   createCollectionDriver,
   projectEventValue,
   projectLive,
@@ -35,7 +37,9 @@ import {
 import type {
   CollectionAction,
   CollectionContext,
+  FacadeIntervals,
   IncludedChildCollection,
+  MetadataFacade,
   ParentEvent,
   ProjectedParent,
 } from './includes-collection-driver-oracle.js'
@@ -906,28 +910,47 @@ describe(`Collection-valued includes oracle`, () => {
       const context = await driver.setup()
       await driver.start?.(context)
       const sharedFacade = context.live.get(1)!.children
+      let intervals: FacadeIntervals<number> = { active: new Map(), next: 0 }
+      const observedIntervals = new Map<number, MetadataFacade>()
+      const checkIntervals = (groups: ReadonlyArray<number>) => {
+        intervals = advanceFacadeIntervals(intervals, groups)
+        checkFacadeIntervals(
+          intervals,
+          context.live.toArray.map((row) => ({
+            group: row.group,
+            facade: row.children,
+          })),
+          observedIntervals,
+        )
+      }
 
       try {
+        checkIntervals([1, 1])
         expect(context.live.get(2)!.children).toBe(sharedFacade)
         context.parents.write(`delete`, { id: 1, group: 1 })
+        checkIntervals([1])
         expect(context.live.get(2)!.children).toBe(sharedFacade)
         expect([...sharedFacade.keys()]).toEqual([10])
         expect(sharedFacade.status).toBe(`ready`)
 
         context.parents.write(`delete`, { id: 2, group: 1 })
+        checkIntervals([])
         expect(context.live.toArray).toEqual([])
         expect(sharedFacade.toArray).toEqual([])
         expect(sharedFacade.status).toBe(`ready`)
 
         context.children.write(`insert`, { id: 20, parentGroup: 1, value: 2 })
+        checkIntervals([])
         expect(context.live.toArray).toEqual([])
         expect(sharedFacade.toArray).toEqual([])
         expect(sharedFacade.status).toBe(`ready`)
 
         context.parents.write(`insert`, { id: 1, group: 1 })
+        checkIntervals([1])
         const reactivated = context.live.get(1)!.children
         expect(reactivated).not.toBe(sharedFacade)
         const assertCurrent = (value: number) => {
+          checkIntervals([1])
           const rows = [
             { id: 10, parentGroup: 1, value: 1 },
             { id: 20, parentGroup: 1, value },
@@ -1605,4 +1628,68 @@ describe(`Collection-valued includes oracle`, () => {
     `matches optimistic child settlement histories with a random or replayed seed`,
     runOptimisticChildHistory,
   )
+})
+
+// These public-handle controls replay the same active-interval model used by
+// the metadata receiver. They challenge sharing, retirement and reactivation
+// separately; ordinary child values remain outside this partial checker.
+test.each([
+  `split-shared`,
+  `retargeted`,
+  `retired-rows`,
+  `retired-status`,
+  `missing-group`,
+  `active-status`,
+] as const)(`rejects a hostile facade interval observation: %s`, (fault) => {
+  const original: MetadataFacade = {
+    id: `original`,
+    status: `ready`,
+    toArray: [],
+  }
+  const replacement: MetadataFacade = {
+    id: `replacement`,
+    status: `ready`,
+    toArray: [],
+  }
+  const seen = new Map<number, MetadataFacade>()
+  const first = advanceFacadeIntervals<string>({ active: new Map(), next: 0 }, [
+    `a`,
+    `a`,
+  ])
+  checkFacadeIntervals(
+    first,
+    [
+      { group: `a`, facade: original },
+      { group: `a`, facade: original },
+    ],
+    seen,
+  )
+  if (fault === `split-shared`) {
+    expect(() =>
+      checkFacadeIntervals(
+        first,
+        [
+          { group: `a`, facade: original },
+          { group: `a`, facade: replacement },
+        ],
+        seen,
+      ),
+    ).toThrow()
+    return
+  }
+  const retired = advanceFacadeIntervals(first, [])
+  checkFacadeIntervals(retired, [], seen)
+  const returned = advanceFacadeIntervals(retired, [`a`])
+  if (fault === `retargeted`) {
+    expect(() =>
+      checkFacadeIntervals(returned, [{ group: `a`, facade: original }], seen),
+    ).toThrow()
+    return
+  }
+  if (fault === `active-status`) replacement.status = `cleaned-up`
+  if (fault === `retired-rows`) original.toArray = [{ id: `stale` }]
+  if (fault === `retired-status`) original.status = `cleaned-up`
+  const actual =
+    fault === `missing-group` ? [] : [{ group: `a`, facade: replacement }]
+  expect(() => checkFacadeIntervals(returned, actual, seen)).toThrow()
 })

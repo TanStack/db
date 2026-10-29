@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { createCollection, createTransaction } from '@tanstack/db'
-import { expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
@@ -8,6 +8,7 @@ import {
   oracleReplayTest,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   FakeStorageAdapter,
   createTestOfflineEnvironment,
@@ -191,22 +192,176 @@ function expectLocalRows(
   expect(localRows(actual)).toEqual(localRows(expected))
 }
 
-// The model of public Collection rows after a restored snapshot settles. The
-// server rows are the durable provider results so far, and each queued restored
-// row is still visible. Restoration holds pending snapshots. Core rollback
-// cancels conflicting pending peers, but not disjoint peers or their
-// independently queued work.
-function expectedRestoredLocalRows(
-  rows: Array<TestItem>,
-  sharedKey: boolean,
-  failedIndex: number,
-  index: number,
-  expectedServer: Map<string, TestItem>,
-): Map<string, TestItem> {
-  const pending = sharedKey && index >= failedIndex ? [] : rows.slice(index + 1)
-  const expected = new Map(expectedServer)
-  for (const row of pending) expected.set(row.id, row)
-  return expected
+/** Restored snapshots have a different lifetime from durable outbox work.
+ * A core rollback cancels conflicting pending snapshots, but their independently
+ * admitted outbox entries still execute and settle from their own providers.
+ * A cancelled snapshot stays failed even if its outbox entry later succeeds.
+ * Authority: core rollback/admission and the README's per-ID durable settlement.
+ * This stateless prefix fold uses authored keys, whole rows and provider results;
+ * it does not consult executor queues, restoration maps or actual Collection rows.
+ */
+type RestoredHistory = {
+  layout: `shared` | `disjoint` | `chain`
+  width: number
+  succeeds: ReadonlyArray<boolean>
+}
+function restoredRows(history: RestoredHistory): Array<Array<TestItem>> {
+  // Alternating field edits preserve the old insert/value-edit/flag-edit
+  // history. In particular, the flag-only snapshot carries the prior value.
+  // Its later success must still send that whole snapshot after sibling failure.
+  const authored = new Map<string, TestItem>()
+  return history.succeeds.map((_success, index) =>
+    Array.from({ length: history.width }, (_unused, slot) => {
+      const id =
+        history.layout === `shared`
+          ? `key-${slot}`
+          : history.layout === `chain`
+            ? `key-${index + slot}`
+            : `key-${index}-${slot}`
+      const before = authored.get(id)
+      const row = {
+        id,
+        value: before
+          ? index % 2 === 1
+            ? `edited-${index}-${id}`
+            : before.value
+          : `initial-${id}`,
+        completed: before ? (index % 2 === 0 ? true : before.completed) : false,
+        updatedAt: new Date(1700000000000),
+      }
+      authored.set(id, row)
+      return row
+    }),
+  )
+}
+
+type RestoredSnapshot = { rows: Array<TestItem>; pending: Array<string> }
+function restoredSnapshot(
+  rows: ReadonlyArray<ReadonlyArray<TestItem>>,
+  server: ReadonlyMap<string, TestItem>,
+  cancelled: ReadonlySet<number>,
+  completed: number,
+): RestoredSnapshot {
+  const local = new Map(server)
+  const pending = new Set<string>()
+  for (let index = completed + 1; index < rows.length; index++)
+    if (!cancelled.has(index))
+      for (const row of rows[index]!) {
+        local.set(row.id, row)
+        pending.add(row.id)
+      }
+  return { rows: [...local.values()], pending: [...pending].sort() }
+}
+type RestoredObservation = RestoredSnapshot & {
+  waiters: Array<RestoredSnapshot | undefined>
+  server: Map<string, TestItem>
+  outcomes: Array<unknown>
+  states: Array<Transaction[`state`]>
+  calls: Array<{ id: string; rows: Array<object> }>
+  outbox: Array<string>
+  errors: Array<ReadonlyArray<unknown>>
+  warnings: Array<ReadonlyArray<unknown>>
+  unhandled: Array<unknown>
+}
+function expectedRestoredState(
+  history: RestoredHistory,
+  failures: ReadonlyArray<Error>,
+  completed: number,
+): RestoredObservation {
+  const rows = restoredRows(history)
+  const server = new Map<string, TestItem>()
+  const cancelled = new Set<number>()
+  const waiters: RestoredObservation[`waiters`] = rows.map(() => undefined)
+  for (let index = 0; index <= completed; index++) {
+    if (history.succeeds[index]) {
+      for (const row of rows[index]!) server.set(row.id, row)
+    } else if (!cancelled.has(index)) {
+      cancelled.add(index)
+      const keys = new Set(rows[index]!.map((row) => row.id))
+      for (let peer = index + 1; peer < rows.length; peer++)
+        if (rows[peer]!.some((row) => keys.has(row.id))) cancelled.add(peer)
+    }
+    waiters[index] = restoredSnapshot(rows, server, cancelled, index)
+  }
+  return {
+    ...restoredSnapshot(rows, server, cancelled, completed),
+    waiters,
+    server,
+    outcomes: history.succeeds.map((success, index) =>
+      index > completed ? `pending` : success ? `fulfilled` : failures[index],
+    ),
+    states: history.succeeds.map((_success, index) =>
+      cancelled.has(index)
+        ? `failed`
+        : index <= completed
+          ? `completed`
+          : `pending`,
+    ),
+    calls: rows
+      .slice(0, Math.min(completed + 2, rows.length))
+      .map((batch, index) => ({ id: `restored-${index}`, rows: batch })),
+    outbox: rows
+      .slice(completed + 1)
+      .map((_row, offset) => `restored-${completed + 1 + offset}`),
+    errors: [],
+    warnings: [],
+    unhandled: [],
+  }
+}
+function checkRestoredState(
+  actual: RestoredObservation,
+  expected: RestoredObservation,
+): void {
+  expectLocalRows(actual.rows, expected.rows)
+  expect(
+    actual.pending,
+    `restored snapshot pending-write contribution`,
+  ).toEqual(expected.pending)
+  for (const [index, snapshot] of expected.waiters.entries()) {
+    expect(
+      Boolean(actual.waiters[index]),
+      `waiter snapshot presence ${index}`,
+    ).toBe(Boolean(snapshot))
+    if (snapshot) {
+      expectLocalRows(actual.waiters[index]!.rows, snapshot.rows)
+      expect(
+        actual.waiters[index]!.pending,
+        `pending writes at waiter ${index}`,
+      ).toEqual(snapshot.pending)
+    }
+  }
+  expect(actual.server).toEqual(expected.server)
+  expect(actual.outcomes).toEqual(expected.outcomes)
+  for (const [index, outcome] of expected.outcomes.entries())
+    if (outcome instanceof Error) expect(actual.outcomes[index]).toBe(outcome)
+  expect(actual.states).toEqual(expected.states)
+  expect(actual.calls).toEqual(expected.calls)
+  expect(actual.outbox).toEqual(expected.outbox)
+  expect(
+    actual.errors,
+    `restoration must not log an executor/cleanup failure`,
+  ).toEqual(expected.errors)
+  // An intentional permanent provider rejection may be reported as a warning.
+  // Its exact authored Error is allowed; a new cleanup/executor exception is
+  // not. Check reasons, without prescribing log text or duplicate-report policy.
+  const allowed = expected.outcomes.filter(
+    (outcome) => outcome instanceof Error,
+  )
+  for (const warning of actual.warnings) {
+    const reasons = warning.filter((value) => value instanceof Error)
+    expect(
+      reasons.length,
+      `warning must identify a known provider failure`,
+    ).toBeGreaterThan(0)
+    for (const reason of reasons)
+      expect(
+        allowed.some((failure) => failure === reason),
+        `unexpected restoration warning: ${String(reason)}`,
+      ).toBe(true)
+  }
+  expect(actual.unhandled, `restoration unhandled rejections`).toEqual(
+    expected.unhandled,
+  )
 }
 
 /**
@@ -828,175 +983,286 @@ oracleReplayTest(it, SETTLEMENT_PROPERTY).each([undefined])(
   checkSettlement,
 )
 
-it.each([
-  { sharedKey: false, failedIndex: 0 },
-  { sharedKey: false, failedIndex: 1 },
-  { sharedKey: true, failedIndex: 0 },
-  { sharedKey: true, failedIndex: 1 },
-])(
-  `restores whole snapshots across sibling rollback (shared=$sharedKey, failure=$failedIndex)`,
-  async ({ sharedKey, failedIndex }) => {
-    const rows: Array<TestItem> = [0, 1, 2].map((index) => ({
-      id: sharedKey ? `same` : `row-${index}`,
-      value: index === 0 ? `initial` : `edited`,
-      completed: index === 2,
-      updatedAt: new Date(1700000000000),
-    }))
-    // Seed real serialized mutations, not a second executor with ambiguous
-    // in-flight-disposal semantics. No encoder output defines expected rows.
-    const storage = new FakeStorageAdapter()
-    const seed = createCollection<TestItem, string>({
-      id: `test-items`,
-      getKey: (row) => row.id,
-      startSync: true,
-      sync: {
-        sync: (ops) => {
-          ops.markReady()
-        },
-      },
-    })
-    const outbox = new OutboxManager(storage, { [seed.id]: seed })
-    const rollbackSeeds: Array<() => void> = []
-    try {
-      for (const [index, row] of rows.entries()) {
-        const tx = createTransaction({
-          autoCommit: false,
-          mutationFn: () => Promise.resolve(),
-        })
-        rollbackSeeds.push(() => {
-          tx.rollback({ isSecondaryRollback: true })
-        })
-        void tx.when(`settled`).catch(() => {})
-        tx.mutate(() => {
-          if (sharedKey && index > 0)
-            seed.update(row.id, (draft) => {
-              if (index === 1) draft.value = row.value
-              else draft.completed = row.completed
-            })
-          else seed.insert(row)
-        })
-        await outbox.add({
-          id: `restored-${index}`,
-          mutationFnName: `syncData`,
-          mutations: tx.mutations,
-          keys: tx.mutations.map(({ globalKey }) => globalKey),
-          idempotencyKey: `restore-${index}`,
-          createdAt: new Date(1700000000000 + index),
-          retryCount: 0,
-          nextAttemptAt: 0,
-          version: 1,
-        })
-      }
-    } finally {
-      for (const rollback of rollbackSeeds) rollback()
-      await seed.cleanup()
-    }
-
-    const entered = rows.map(() => gate())
-    const released = rows.map(() => gate())
-    const failure = new NonRetriableError(`restored permanent failure`)
-    const outcomes: Array<unknown> = rows.map(() => `pending`)
-    const waits: Array<Promise<void>> = []
-    const calls: Array<{ id: string; rows: Array<Record<string, unknown>> }> =
-      []
-    const env = createTestOfflineEnvironment({
-      storage,
-      mutationFn: async (params) => {
-        const index = calls.length
-        const mutations = params.transaction.mutations
-        calls.push({
-          id: params.transaction.id,
-          rows: mutations.map((mutation) => structuredClone(mutation.modified)),
-        })
-        if (!entered[index]) throw new NonRetriableError(`unexpected replay`)
-        entered[index].resolve()
-        await released[index]!.promise
-        if (index === failedIndex) throw failure
-        env.applyMutations(mutations)
-      },
-    })
-    const expectedServer = new Map<string, TestItem>()
-    let hasPrimaryFailure = false
-    try {
-      await env.waitForLeader()
-      for (const index of rows.keys())
-        waits.push(
-          env.executor.waitForTransactionCompletion(`restored-${index}`).then(
-            () => {
-              outcomes[index] = `fulfilled`
-            },
-            (error: unknown) => {
-              outcomes[index] = error
-            },
-          ),
-        )
-      await atOracleCheckpoint(entered[0]!.promise, `restored provider entered`)
-      expectLocalRows(env.collection.toArray, sharedKey ? [rows[2]!] : rows)
-      for (const index of rows.keys()) {
-        released[index]!.resolve()
-        await atOracleCheckpoint(waits[index]!, `restored ${index} settled`)
-        if (index < 2)
-          await atOracleCheckpoint(
-            entered[index + 1]!.promise,
-            `restored sibling still held`,
-          )
-        await turn()
-        if (index !== failedIndex)
-          expectedServer.set(rows[index]!.id, rows[index]!)
-        const expected = expectedRestoredLocalRows(
-          rows,
-          sharedKey,
-          failedIndex,
-          index,
-          expectedServer,
-        )
-        expectLocalRows(env.collection.toArray, expected.values())
-        if (index === failedIndex) {
-          const wrong = localRows(env.collection.toArray)
-          if (wrong.length > 0) wrong.pop()
-          else wrong.push(rows[0]!)
-          expect(() => expectLocalRows(wrong, expected.values())).toThrowError(
-            expect.objectContaining({ name: `AssertionError` }),
-          )
-        }
-        expect(env.serverState).toEqual(expectedServer)
-        expect(calls).toEqual(
-          rows
-            .slice(0, Math.min(index + 2, 3))
-            .map((row, call) => ({ id: `restored-${call}`, rows: [row] })),
-        )
-        expect(outcomes).toEqual(
-          rows.map((_row, position) =>
-            position > index
-              ? `pending`
-              : position === failedIndex
-                ? failure
-                : `fulfilled`,
-          ),
-        )
-        if (index >= failedIndex) expect(outcomes[failedIndex]).toBe(failure)
-        expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual(
-          rows
-            .slice(index + 1)
-            .map((_row, offset) => `restored-${index + 1 + offset}`),
-        )
-      }
-    } catch (error) {
-      hasPrimaryFailure = true
-      throw error
-    } finally {
-      released.forEach((item) => item.resolve())
-      await cleanupOfflineOracle(
-        [
-          () => Promise.all(waits),
-          () => env.executor.dispose(),
-          () => env.collection.cleanup(),
-        ],
-        hasPrimaryFailure,
-      )
-    }
-  },
+/** Finite restored histories preserve the former shared/disjoint, first/middle
+ * failure examples and add no failure, last failure, multiple failures, two
+ * transactions, multirow snapshots and partial overlap. A chain has width two;
+ * width one would merely repeat the disjoint-key premise. Provider gates hold
+ * every tail. We seed real serialized outbox rows, then observe actual restore
+ * registrations without replacing them. At each provider completion, the next
+ * call has entered (or a task turn lets the final execution return). The check
+ * compares the complete prefix, including diagnostic output after waiter success.
+ * Controlled storage/provider behavior does not establish native durability.
+ */
+const restoredHistories: Array<RestoredHistory> = [2, 3].flatMap((count) =>
+  Array.from({ length: 2 ** count }, (_unused, mask) =>
+    (
+      [
+        { layout: `shared`, width: 1 },
+        { layout: `shared`, width: 2 },
+        { layout: `disjoint`, width: 1 },
+        { layout: `disjoint`, width: 2 },
+        { layout: `chain`, width: 2 },
+      ] as const
+    ).map((shape) => ({
+      ...shape,
+      succeeds: Array.from({ length: count }, (_entry, index) =>
+        Boolean(mask & (1 << index)),
+      ),
+    })),
+  ).flat(),
 )
+const restoredHistoryId = (history: RestoredHistory) =>
+  `${history.layout}/${history.width}/${history.succeeds.map(Number).join(``)}`
+describe(`restored snapshots and independent outbox settlement`, () => {
+  const reach = createOracleReach(
+    `offline.restored-settlement`,
+    restoredHistories.flatMap((history) => [
+      `${restoredHistoryId(history)}/registered`,
+      ...history.succeeds.map(
+        (_success, index) => `${restoredHistoryId(history)}/settled-${index}`,
+      ),
+    ]),
+  )
+  afterAll(() => {
+    reach.assertReached()
+    console.info(
+      `offline.restored-settlement reach`,
+      Object.fromEntries(reach.counts()),
+    )
+  })
+  it.each(restoredHistories)(
+    `restores whole snapshots through independent outcomes: %j`,
+    async (history) => {
+      reach.beginHistory()
+      const rows = restoredRows(history)
+      const storage = new FakeStorageAdapter()
+      const seed = createCollection<TestItem, string>({
+        id: `test-items`,
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: (ops) => {
+            ops.markReady()
+          },
+        },
+      })
+      const outbox = new OutboxManager(storage, { [seed.id]: seed })
+      const rollbackSeeds: Array<() => void> = []
+      let seedFailed = false
+      try {
+        for (const [index, batch] of rows.entries()) {
+          const tx = createTransaction({
+            autoCommit: false,
+            mutationFn: () => Promise.resolve(),
+          })
+          rollbackSeeds.push(() => {
+            tx.rollback({ isSecondaryRollback: true })
+          })
+          void tx.when(`settled`).catch(() => {})
+          tx.mutate(() => {
+            for (const row of batch)
+              if (seed.has(row.id))
+                seed.update(row.id, (draft) => {
+                  Object.assign(draft, row)
+                })
+              else seed.insert(row)
+          })
+          await outbox.add({
+            id: `restored-${index}`,
+            mutationFnName: `syncData`,
+            mutations: tx.mutations,
+            keys: tx.mutations.map(({ globalKey }) => globalKey),
+            idempotencyKey: `restore-${index}`,
+            createdAt: new Date(1700000000000 + index),
+            retryCount: 0,
+            nextAttemptAt: 0,
+            version: 1,
+          })
+        }
+      } catch (error) {
+        seedFailed = true
+        throw error
+      } finally {
+        await cleanupOfflineOracle(
+          [...rollbackSeeds, () => seed.cleanup()],
+          seedFailed,
+        )
+      }
+      const entered = rows.map(() => gate())
+      const released = rows.map(() => gate())
+      const failures = rows.map(
+        (_row, index) =>
+          new NonRetriableError(`restored permanent failure ${index}`),
+      )
+      const outcomes: Array<unknown> = rows.map(() => `pending`)
+      const waits: Array<Promise<void>> = []
+      const calls: RestoredObservation[`calls`] = []
+      const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const { rejections: unhandled, cleanup: cleanupUnhandled } =
+        captureUnhandledRejections()
+      const env = createTestOfflineEnvironment({
+        storage,
+        mutationFn: async (params) => {
+          const index = calls.length
+          const mutations = params.transaction.mutations
+          calls.push({
+            id: params.transaction.id,
+            rows: mutations.map((mutation) =>
+              structuredClone(mutation.modified),
+            ),
+          })
+          if (!entered[index]) throw new NonRetriableError(`unexpected replay`)
+          entered[index].resolve()
+          await released[index]!.promise
+          if (!history.succeeds[index]) throw failures[index]
+          env.applyMutations(mutations)
+        },
+      })
+      const registrations = vi.spyOn(
+        env.executor,
+        `registerRestorationTransaction`,
+      )
+      const waiterSnapshots: RestoredObservation[`waiters`] = rows.map(
+        () => undefined,
+      )
+      const readSnapshot = (): RestoredSnapshot => {
+        const current = env.collection.toArray
+        return {
+          rows: localRows(current),
+          pending: current
+            .filter((row) => row.$hasPendingWrites)
+            .map((row) => row.id)
+            .sort(),
+        }
+      }
+      let hasPrimaryFailure = false
+      try {
+        await env.waitForLeader()
+        expect(registrations.mock.calls.map(([id]) => id)).toEqual(
+          rows.map((_row, index) => `restored-${index}`),
+        )
+        const restored = new Map(registrations.mock.calls)
+        expect([...restored.keys()]).toEqual(
+          rows.map((_row, index) => `restored-${index}`),
+        )
+        reach.reach(`${restoredHistoryId(history)}/registered`)
+        for (const index of rows.keys())
+          waits.push(
+            env.executor.waitForTransactionCompletion(`restored-${index}`).then(
+              () => {
+                outcomes[index] = `fulfilled`
+                waiterSnapshots[index] = readSnapshot()
+              },
+              (error: unknown) => {
+                outcomes[index] = error
+                waiterSnapshots[index] = readSnapshot()
+              },
+            ),
+          )
+        const check = async (completed: number) =>
+          checkRestoredState(
+            {
+              ...readSnapshot(),
+              waiters: [...waiterSnapshots],
+              server: env.serverState,
+              outcomes: [...outcomes],
+              states: rows.map(
+                (_row, index) => restored.get(`restored-${index}`)!.state,
+              ),
+              calls: structuredClone(calls),
+              outbox: (await env.executor.peekOutbox()).map(({ id }) => id),
+              errors: [...logged.mock.calls],
+              warnings: [...warning.mock.calls],
+              unhandled: [...unhandled],
+            },
+            expectedRestoredState(history, failures, completed),
+          )
+        await atOracleCheckpoint(
+          entered[0]!.promise,
+          `restored provider entered`,
+        )
+        await check(-1)
+        for (const index of rows.keys()) {
+          released[index]!.resolve()
+          await atOracleCheckpoint(waits[index]!, `restored ${index} settled`)
+          if (index < rows.length - 1)
+            await atOracleCheckpoint(
+              entered[index + 1]!.promise,
+              `restored sibling still held`,
+            )
+          await turn()
+          reach.reach(`${restoredHistoryId(history)}/settled-${index}`)
+          await check(index)
+        }
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        released.forEach((item) => item.resolve())
+        registrations.mockRestore()
+        logged.mockRestore()
+        warning.mockRestore()
+        try {
+          await cleanupOfflineOracle(
+            [
+              () => Promise.all(waits),
+              () => env.executor.dispose(),
+              () => env.collection.cleanup(),
+            ],
+            hasPrimaryFailure,
+          )
+        } finally {
+          cleanupUnhandled()
+        }
+      }
+    },
+  )
+})
+
+// These are checker inputs, not alternate production histories. All expected
+// answers come from the same prefix fold as the real restoration receiver.
+it.each([
+  `extra-error`,
+  `extra-warning`,
+  `leaked-pending`,
+  `stale-waiter`,
+  `resurrect-failed`,
+  `early-peer`,
+  `missing-row`,
+] as const)(`rejects a wrong restored observation: %s`, (fault) => {
+  const history: RestoredHistory = {
+    layout: `shared`,
+    width: 2,
+    succeeds: [false, true, true],
+  }
+  const failures = history.succeeds.map(() => new Error(`provider failure`))
+  const expected = expectedRestoredState(history, failures, 1)
+  const actual = {
+    ...expected,
+    rows: [...expected.rows],
+    states: [...expected.states],
+    outcomes: [...expected.outcomes],
+  }
+  checkRestoredState(actual, expected)
+  if (fault === `extra-error`) actual.errors = [[new Error(`cleanup failed`)]]
+  if (fault === `extra-warning`)
+    actual.warnings = [
+      [`executor failed`, failures[0], new Error(`cleanup failed`)],
+    ]
+  if (fault === `leaked-pending`)
+    actual.pending = actual.rows.map((row) => row.id)
+  if (fault === `stale-waiter`)
+    actual.waiters = actual.waiters.map((snapshot) =>
+      snapshot
+        ? { ...snapshot, pending: snapshot.rows.map((row) => row.id) }
+        : snapshot,
+    )
+  if (fault === `resurrect-failed`) actual.states[1] = `completed`
+  if (fault === `early-peer`) actual.outcomes[2] = `fulfilled`
+  if (fault === `missing-row`) actual.rows.pop()
+  expect(() => checkRestoredState(actual, expected)).toThrow()
+})
 
 const retryErrorKinds = [
   `auth`,
@@ -1971,10 +2237,8 @@ declareOracle({
     checkRetryDecision,
     checkRetryRecordFailure,
     checkDurableAdmissionFailure,
+    checkRestoredState,
   ],
-  model: [
-    expectedRetryDecision,
-    expectedRestoredLocalRows,
-    expectedStartedPeer,
-  ],
+  model: [expectedRetryDecision, expectedRestoredState, expectedStartedPeer],
+  grammar: [restoredRows, restoredHistories],
 })

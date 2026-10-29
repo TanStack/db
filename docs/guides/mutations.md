@@ -518,7 +518,7 @@ const todoCollection = createCollection({
 
 Different collection types have specific patterns for their handlers:
 
-**QueryCollection** - currently refetches automatically after persisting changes. To adopt the explicit v1.0 pattern now:
+**QueryCollection** - explicitly refetch or apply the server response with the write utilities before the handler returns:
 ```typescript
 onUpdate: async ({ transaction, collection }) => {
   await Promise.all(

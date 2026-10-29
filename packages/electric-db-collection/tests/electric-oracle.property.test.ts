@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   IR,
   createCollection,
@@ -22,6 +22,11 @@ import {
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import {
+  checkMutationConfirmation,
+  mutationConfirmationHistories,
+  mutationConfirmationInputs,
+} from '../../db/tests/mutation-confirmation-oracle'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import { createMockStream } from './electric-stream-mock'
 import {
@@ -55,6 +60,7 @@ import {
   subsetEnd,
   upToDate,
 } from './electric-adapter-support'
+import type { MutationConfirmationObservation } from '../../db/tests/mutation-confirmation-oracle'
 import type {
   ObservedPreload,
   OracleRow,
@@ -118,132 +124,239 @@ vi.mock(`@electric-sql/client`, async () => {
   }
 })
 
-function checkHandlerOutcome(
-  operation: string,
-  reject: boolean,
-  observed: { error: unknown; writes: number; rows: Array<string> },
-  failure: Error,
-): void {
-  expect(observed.error, `Promise verdict, not its return value`).toBe(
-    reject ? failure : undefined,
-  )
-  expect(observed.writes).toBe(reject ? 0 : 1)
-  const expected = reject
-    ? operation === `insert`
-      ? []
-      : [`before`]
-    : operation === `delete`
-      ? []
-      : [`confirmed`]
-  expect(observed.rows).toEqual(expected)
-}
-
 /**
- * Handler settlement follows its Promise, independently of a discarded return
- * value (maintainer decision). The finite grammar crosses CRUD, both handler
- * verdicts, and legacy returns. A held handler exposes the optimistic row;
- * successful handlers deliver and await their explicit txid confirmation.
- * At settlement, exact rows and rejection identity must match the verdict.
- * This driver controls ShapeStream delivery; it claims no live-server witness.
+ * The same outcome/confirmation model receives a real Electric adapter through
+ * controlled ShapeStream delivery. The fixture keeps backend work separate from
+ * txid acknowledgement. A legacy txid return supplies no acknowledgement. A
+ * rejection after explicit acceptance preserves source data and error identity.
+ * This is a controlled SDK boundary, not a live Electric-service claim.
  */
-it.each(
-  ([`insert`, `update`, `delete`] as const).flatMap((operation) =>
-    [false, true].flatMap((reject) =>
-      [false, true].map((legacyReturn) => ({
-        operation,
-        reject,
-        legacyReturn,
-      })),
+describe(`mutation outcome and confirmation`, () => {
+  const mutationHistories = mutationConfirmationHistories(`electric`)
+  const mutationReach = createOracleReach(
+    `electric.mutation-confirmation`,
+    mutationHistories.map(
+      (h) =>
+        `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
     ),
-  ),
-)(
-  `settles a handler independently of discarded values: %j`,
-  async ({ operation, reject, legacyReturn }) => {
-    const handlerReach = createOracleReach(`checkHandlerOutcome`, [
-      `optimistic`,
-      `settled`,
-    ])
-    handlerReach.beginHistory()
-    resetElectricOracleMocks()
-    let subscriber!: (messages: Array<Message<OracleRow>>) => void
-    mockSubscribe.mockImplementationOnce((callback) => {
-      subscriber = callback
-      return () => {}
-    })
-    const release = createDeferred<void>()
-    const entered = createDeferred<void>()
-    const failure = new Error(`server rejected`)
-    let writes = 0
-    const handler = async () => {
-      entered.resolve()
-      await release.promise
-      if (reject) throw failure
-      writes++
-      const message = change(operation, 1, `confirmed`)
-      message.headers.txids = [55]
-      subscriber([message, upToDate])
-      await collection.utils.awaitTxId(55)
-      return legacyReturn ? { txid: 55 } : undefined
-    }
-    const runtimeHandler = handler as unknown as () => Promise<void>
-    const collection = createCollection(
-      electricCollectionOptions<OracleRow>({
-        id: `discarded-value-${operation}-${reject}-${legacyReturn}`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        startSync: true,
-        getKey: (row) => row.id,
-        onInsert: runtimeHandler,
-        onUpdate: runtimeHandler,
-        onDelete: runtimeHandler,
-      }),
+  )
+  afterAll(() => {
+    mutationReach.assertReached()
+    console.info(
+      `electric.mutation-confirmation reach`,
+      Object.fromEntries(mutationReach.counts()),
     )
-    subscriber(
-      operation === `insert`
-        ? [upToDate]
-        : [change(`insert`, 1, `before`), upToDate],
-    )
-    await collection.preload()
-    const transaction =
-      operation === `insert`
-        ? collection.insert({ id: 1, name: `optimistic`, stable: `stable-1` })
-        : operation === `delete`
-          ? collection.delete(1)
-          : collection.update(1, (row) => {
-              row.name = `optimistic`
+  })
+  it.each(mutationHistories)(
+    `settles a handler independently of discarded values: %j`,
+    async (history) => {
+      mutationReach.beginHistory()
+      const { operation, confirmation, outcome, returned } = history
+      const localReach = createOracleReach(`electric.mutation-cuts`, [
+        `entered`,
+        `settled`,
+        `settlement-waiter`,
+        ...(outcome === `reject-before-write` ? [] : [`server-written`]),
+        ...(confirmation === `none`
+          ? []
+          : [`confirmation-requested`, `confirmation-accepted`]),
+        ...(confirmation === `none` && outcome !== `reject-before-write`
+          ? [`late-confirmed`]
+          : []),
+      ])
+      localReach.beginHistory()
+      resetElectricOracleMocks()
+      let subscriber!: (messages: Array<Message<OracleRow>>) => void
+      mockSubscribe.mockImplementationOnce((callback) => {
+        subscriber = callback
+        return () => {}
+      })
+      const enterRelease = createDeferred<void>()
+      const confirmationRelease = createDeferred<void>()
+      const settleRelease = createDeferred<void>()
+      const entered = createDeferred<void>()
+      const serverWritten = createDeferred<void>()
+      const confirmationAccepted = createDeferred<void>()
+      const confirmationRequested = createDeferred<void>()
+      const failure = new Error(`handler ${outcome}`)
+      let handlerWrites = 0
+      let confirmationCalls = 0
+      let confirmationStatus: MutationConfirmationObservation[`confirmationStatus`] = `not-requested`
+      let settlement: MutationConfirmationObservation[`settlement`] = `pending`
+      let error: unknown
+      let verdict: Promise<MutationConfirmationObservation> | undefined
+      let releaseCollection: (() => Promise<void>) | undefined
+      await withElectricCleanup(async () => {
+        const message = change(operation, 1, `confirmed`)
+        if (operation !== `delete`)
+          message.value = { ...mutationConfirmationInputs.confirmed }
+        message.headers.txids = [55]
+        const handler = async () => {
+          entered.resolve()
+          await enterRelease.promise
+          if (outcome === `reject-before-write`) throw failure
+          handlerWrites++
+          serverWritten.resolve()
+          await confirmationRelease.promise
+          if (confirmation === `txid`) {
+            confirmationCalls++
+            confirmationStatus = `pending`
+            const ack = collection.utils.awaitTxId(55).then(() => {
+              confirmationStatus = `accepted`
             })
-    const verdict = transaction.when(`settled`).then(
-      () => undefined,
-      (error: unknown) => error,
-    )
-    try {
-      await entered.promise
-      expect(collection.toArray.map((row) => row.name)).toEqual(
-        operation === `delete` ? [] : [`optimistic`],
-      )
-      handlerReach.reach(`optimistic`)
-      release.resolve()
-      checkHandlerOutcome(
-        operation,
-        reject,
-        {
-          error: await verdict,
-          writes,
-          rows: collection.toArray.map((row) => row.name),
+            confirmationRequested.resolve()
+            await ack
+          }
+          confirmationAccepted.resolve()
+          await settleRelease.promise
+          if (outcome === `reject-after-write`) throw failure
+          return returned === `legacy-txid` ? { txid: 55 } : undefined
+        }
+        const runtimeHandler = handler as unknown as () => Promise<void>
+        const collection = createCollection(
+          electricCollectionOptions<OracleRow>({
+            id: `discarded-value-${JSON.stringify(history)}`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+            },
+            startSync: true,
+            getKey: (row) => row.id,
+            onInsert: runtimeHandler,
+            onUpdate: runtimeHandler,
+            onDelete: runtimeHandler,
+          }),
+        )
+        releaseCollection = () => collection.cleanup()
+        subscriber([
+          ...(history.peer ? [change(`insert`, 2, `peer`)] : []),
+          ...(operation === `insert` ? [] : [change(`insert`, 1, `before`)]),
+          upToDate,
+        ])
+        await atCheckpoint(collection.preload(), `initial Electric preload`)
+        const transaction =
+          operation === `insert`
+            ? collection.insert({ ...mutationConfirmationInputs.optimistic })
+            : operation === `delete`
+              ? collection.delete(1)
+              : collection.update(1, (draft) => {
+                  draft.name = `optimistic`
+                })
+        const observe = (): MutationConfirmationObservation => ({
+          rows: collection.toArray
+            .map(({ id, name, stable }) => ({ id, name, stable }))
+            .sort((a, b) => a.id - b.id),
+          handlerWrites,
+          confirmationCalls,
+          fetches: 0,
+          confirmationStatus,
+          providerRequests:
+            mockStream.requestSnapshot.mock.calls.length +
+            mockStream.fetchSnapshot.mock.calls.length +
+            mockStream.forceDisconnectAndRefresh.mock.calls.length,
+          state: transaction.state,
+          settlement,
+          error,
+        })
+        verdict = transaction.when(`settled`).then(
+          () => {
+            settlement = `fulfilled`
+            return observe()
+          },
+          (reason: unknown) => {
+            settlement = `rejected`
+            error = reason
+            return observe()
+          },
+        )
+        await atCheckpoint(entered.promise, `Electric handler entry`)
+        checkMutationConfirmation(history, `entered`, observe(), failure)
+        localReach.reach(`entered`)
+        enterRelease.resolve()
+        if (outcome !== `reject-before-write`) {
+          await atCheckpoint(serverWritten.promise, `Electric server write`)
+          checkMutationConfirmation(
+            history,
+            `server-written`,
+            observe(),
+            failure,
+          )
+          localReach.reach(`server-written`)
+          confirmationRelease.resolve()
+          if (confirmation === `txid`) {
+            await atCheckpoint(
+              confirmationRequested.promise,
+              `Electric acknowledgement registration`,
+            )
+            await Promise.resolve()
+            checkMutationConfirmation(
+              history,
+              `confirmation-requested`,
+              observe(),
+              failure,
+            )
+            localReach.reach(`confirmation-requested`)
+            subscriber([message, upToDate])
+          }
+          await atCheckpoint(
+            confirmationAccepted.promise,
+            `Electric confirmation acceptance`,
+          )
+          if (confirmation !== `none`) {
+            checkMutationConfirmation(
+              history,
+              `confirmation-accepted`,
+              observe(),
+              failure,
+            )
+            localReach.reach(`confirmation-accepted`)
+          }
+          settleRelease.resolve()
+        }
+        const atWaiter = await atCheckpoint(
+          verdict,
+          `Electric handler settlement`,
+        )
+        checkMutationConfirmation(history, `settled`, atWaiter, failure)
+        localReach.reach(`settlement-waiter`)
+        checkMutationConfirmation(history, `settled`, observe(), failure)
+        localReach.reach(`settled`)
+        if (confirmation === `none` && outcome !== `reject-before-write`) {
+          const ack = collection.utils.awaitTxId(55)
+          subscriber([message, upToDate])
+          await atCheckpoint(ack, `later Electric stream confirmation`)
+          checkMutationConfirmation(
+            history,
+            `late-confirmed`,
+            observe(),
+            failure,
+          )
+          localReach.reach(`late-confirmed`)
+          checkMutationConfirmation(history, `settled`, atWaiter, failure)
+        }
+        localReach.assertReached()
+        mutationReach.reach(
+          `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`,
+        )
+      }, [
+        () => {
+          enterRelease.resolve()
+          confirmationRelease.resolve()
+          settleRelease.resolve()
+          if (confirmationStatus === `pending`) {
+            const message = change(operation, 1, `confirmed`)
+            if (operation !== `delete`)
+              message.value = { ...mutationConfirmationInputs.confirmed }
+            message.headers.txids = [55]
+            subscriber([message, upToDate])
+          }
         },
-        failure,
-      )
-      handlerReach.reach(`settled`)
-      handlerReach.assertReached()
-    } finally {
-      release.resolve()
-      await verdict
-      await collection.cleanup()
-    }
-  },
-)
+        () => verdict && atCheckpoint(verdict, `Electric cleanup settlement`),
+        () => releaseCollection?.(),
+      ])
+    },
+  )
+})
 
 function isSdkResetFramedPartition(
   batches: Array<Array<Message<OracleRow>>>,
@@ -4796,7 +4909,7 @@ oracleReplayTest(describe, queuedPresenceProperty)(
 // presence and persistence interleaving campaigns.
 declareOracle({
   check: [
-    checkHandlerOutcome,
+    checkMutationConfirmation,
     runProcessGrammar,
     runQueuedPresenceCampaign,
     expectQueuedPresenceAtDurabilityHold,

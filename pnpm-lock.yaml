@@ -1499,14 +1499,13 @@ importers:
         version: 4.1.12(vitest@4.1.12)
 
   packages/offline-transactions:
-    dependencies:
-      '@tanstack/db':
-        specifier: ^1.0.0-rc.0
-        version: link:../db
     devDependencies:
       '@react-native-community/netinfo':
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.7)(@types/react@19.2.13)(react@19.2.4))
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
       '@types/node':
         specifier: ^25.2.2
         version: 25.2.2

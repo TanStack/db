@@ -219,7 +219,7 @@ the demand ends.
 Mutation handlers must not resolve until server changes have synced back to the collection. Five strategies:
 
 1. **Refetch** (simplest): `await collection.utils.refetch()`
-2. **Transaction ID**: return `{ txid }` and track via sync stream
+2. **Transaction ID**: await a utility that observes the mutation's transaction ID in the sync stream, such as Electric's `await collection.utils.awaitTxId(txid)`
 3. **ID-based tracking**: await specific record ID appearing in sync stream
 4. **Version/timestamp**: wait until sync stream catches up to mutation time
 5. **Provider method**: `await backend.waitForPendingWrites()`

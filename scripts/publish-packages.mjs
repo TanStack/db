@@ -8,17 +8,27 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const candidateVersion = /^1\.0\.0-rc\.\d+(?:\.\d+)?$/
 const stableVersion = /^\d+\.\d+\.\d+$/
 
-function publishChangesets(rootDirectory) {
-  execFileSync('pnpm', ['exec', 'changeset', 'publish'], {
+function publishChangesets(rootDirectory, publication) {
+  const flags = publication ? ['--tag', publication.tag] : []
+  execFileSync('pnpm', ['exec', 'changeset', 'publish', ...flags], {
     cwd: rootDirectory,
     stdio: 'inherit',
+    ...(publication
+      ? {
+          env: {
+            ...process.env,
+            npm_config_tag: publication.version,
+            NPM_CONFIG_TAG: publication.version,
+          },
+        }
+      : {}),
   })
 }
 
 async function publishWithHiddenPackages(
   rootDirectory,
   hiddenPackages,
-  hidePreState,
+  publication,
   publishCommand,
 ) {
   const originals = hiddenPackages.map(({ dir }) => {
@@ -26,7 +36,7 @@ async function publishWithHiddenPackages(
     return { path, contents: readFileSync(path) }
   })
   const preStatePath = join(rootDirectory, '.changeset', 'pre.json')
-  const preState = hidePreState ? readFileSync(preStatePath) : undefined
+  const preState = readFileSync(preStatePath)
 
   try {
     for (const { path, contents } of originals) {
@@ -36,17 +46,18 @@ async function publishWithHiddenPackages(
         `${JSON.stringify({ ...manifest, private: true }, null, 2)}\n`,
       )
     }
-    if (hidePreState) unlinkSync(preStatePath)
-    await publishCommand(rootDirectory)
+    unlinkSync(preStatePath)
+    await publishCommand(rootDirectory, publication)
   } finally {
     for (const { path, contents } of originals) writeFileSync(path, contents)
-    if (preState !== undefined) writeFileSync(preStatePath, preState)
+    writeFileSync(preStatePath, preState)
   }
 }
 
 /**
- * Changesets uses the `rc` npm tag for every package while pre mode is active.
- * Publish stable compatibility patches first, then publish candidates.
+ * Publish stable versions first, then candidates, grouped by exact version.
+ * npm reads that exact version even when dist-tags are missing or stale.
+ * Explicit upload tags are independent of the metadata selector.
  */
 export async function publishDuringRc(
   rootDirectory = root,
@@ -71,15 +82,19 @@ export async function publishDuringRc(
     )
   }
 
-  if (stable.length > 0) {
+  const versions = new Set(
+    [...stable, ...candidates].map(({ packageJson }) => packageJson.version),
+  )
+  for (const version of versions) {
     await publishWithHiddenPackages(
       rootDirectory,
-      candidates,
-      true,
+      publicPackages.filter(
+        ({ packageJson }) => packageJson.version !== version,
+      ),
+      { version, tag: stableVersion.test(version) ? 'latest' : 'rc' },
       publishCommand,
     )
   }
-  await publishWithHiddenPackages(rootDirectory, stable, false, publishCommand)
 }
 
 async function main() {

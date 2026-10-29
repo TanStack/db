@@ -60,6 +60,7 @@ import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
 import { expectDisabledResult } from './disabled-laws'
+import { expectPublishedRows } from './publication-laws-oracle'
 import {
   expectKeyedRows,
   expectOrderedRows,
@@ -133,21 +134,6 @@ function expectNoRowsAfterRejection(h: LiveQueryHandle): void {
     ).toEqual([])
     expect(state?.size ?? 0).toBe(0)
   }
-}
-
-/** A published `data` value holds no row outside `rows`. */
-function expectOnlyRowsOf(
-  value: unknown,
-  rows: ReadonlyArray<{ id: string }>,
-): void {
-  const allowed = new Set(rows.map(({ id }) => id))
-  const published = (Array.isArray(value) ? value : value ? [value] : []).map(
-    (row: { id: string }) => row.id,
-  )
-  expect(
-    published.filter((id) => !allowed.has(id)),
-    `published rows ${JSON.stringify(published)}`,
-  ).toEqual([])
 }
 
 async function wait(ms: number): Promise<void> {
@@ -402,6 +388,17 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const shared = driver.features?.pooledEqFilters ? 1 : 2
         expect(source.collection.subscriberCount).toBe(shared)
 
+        // The current result and the publication recorder are separate
+        // observations. A ready, nonempty accessor must reach the log before
+        // setParam's explicit first-turn read can supply another value.
+        const publicationReach = createOracleReach(
+          `pooled parameter publication`,
+          [`initial data rows`, `switched data rows`, `switched state rows`],
+        )
+        publicationReach.beginHistory()
+        expectPublishedRows(moving.publications(), [SEED[0]!, SEED[2]!])
+        publicationReach.reach(`initial data rows`)
+
         // Every value the binding publishes after a switch holds only rows of
         // the new group, or none while it loads; the old group's rows never
         // show again. The driver logs the first paint, so the law cannot
@@ -415,9 +412,10 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           const published = moving.publications().slice(before)
           // The keyed state map follows the same law as `data`.
           const states = moving.statePublications().slice(before)
-          expect(published.length).toBeGreaterThan(0)
-          for (const value of [...published, ...states])
-            expectOnlyRowsOf(value, rows)
+          expectPublishedRows(published, rows)
+          publicationReach.reach(`switched data rows`)
+          expectPublishedRows(states, rows)
+          publicationReach.reach(`switched state rows`)
         }
 
         await switchTo(`b`, [SEED[1]!])
@@ -439,6 +437,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [`1`, `3`],
           [`1`, `3`],
         ])
+        publicationReach.assertReached()
         for (const h of [moving, peer]) h.unmount()
         await expect
           .poll(() => source.collection.subscriberCount, {
@@ -1589,11 +1588,19 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           }
           keyedReach.assertReached()
         }
+        // The same 32 histories also witness the reactive driver's actual
+        // accessor recorder. Comparing bindings have a rejection obligation
+        // instead, so these publication states do not apply to their path.
+        const publicationReach = createOracleReach(
+          `reactive source-ID publication`,
+          comparesIdentity ? [] : [`initial data rows`, `swapped data rows`],
+        )
         const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`, `D`]
         for (const first of [`A`, `C`] as const) {
           for (const second of picks) {
             for (const third of picks) {
               reach.beginHistory()
+              publicationReach.beginHistory()
               const history: Array<Pick> = [first]
               const h = driver.mountControllable<Pick>(
                 (q, pick) =>
@@ -1606,6 +1613,10 @@ export function runSuite(rawDriver: LiveQueryDriver) {
               )
               await h.flush()
               expectUnorderedRows(h.current().data, rowsOf[first])
+              if (!comparesIdentity) {
+                expectPublishedRows(h.publications(), rowsOf[first])
+                publicationReach.reach(`initial data rows`)
+              }
               for (const next of [second, third]) {
                 const state = reachedState(history, next)
                 if (state) reach.reach(state)
@@ -1627,12 +1638,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
                   // value it published since then holds only the new
                   // source's rows, or none while it loads.
                   const swapped = h.publications().slice(published)
-                  // The driver logs the first paint, so the law cannot pass
-                  // on an empty log.
-                  expect(swapped.length).toBeGreaterThan(0)
-                  for (const value of swapped) {
-                    expectOnlyRowsOf(value, rowsOf[next as Exclude<Pick, `D`>])
-                  }
+                  // Empty/loading intermediate cuts remain legal. At the
+                  // settled cut, the log must contain the model's new rows.
+                  expectPublishedRows(
+                    swapped,
+                    rowsOf[next as Exclude<Pick, `D`>],
+                  )
+                  publicationReach.reach(`swapped data rows`)
                 }
                 history.push(next)
                 if (next === `D`) {
@@ -1649,6 +1661,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           }
         }
         reach.assertReached()
+        publicationReach.assertReached()
 
         if (comparesIdentity) await runKeyedClaimGrammar()
 

@@ -9,9 +9,17 @@ import {
   eq,
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import { withOracleCleanup } from '../../db/tests/utils'
+import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
+import {
+  checkMutationConfirmation,
+  mutationConfirmationHistories,
+  mutationConfirmationInputs,
+  mutationConfirmationRows,
+} from '../../db/tests/mutation-confirmation-oracle'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   compileSingleRowExpression,
@@ -20,6 +28,7 @@ import {
 
 import { InvalidQueryResultError } from '../src/errors.js'
 import { queryCollectionOptions } from '../src/query.js'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import {
   categorySubset,
   cleanups,
@@ -37,6 +46,10 @@ import {
   shared,
   storedItems,
 } from './ownership-lifecycle-support.js'
+import type {
+  MutationConfirmationObservation,
+  MutationConfirmationRow,
+} from '../../db/tests/mutation-confirmation-oracle'
 import type { LoadSubsetOptions, Transaction } from '@tanstack/db'
 import type { QueryClient, QueryFunctionContext } from '@tanstack/query-core'
 
@@ -1594,21 +1607,36 @@ function mergeDirectWritesOverFetch(
   )
 }
 
-// Handler completion itself authorizes no fetch. The chosen confirmation path
-// alone decides the fetch count and authoritative rows at transaction settlement.
-function checkMutationRefresh<Row>(
-  confirmation: string,
-  initial: Array<Row>,
-  confirmed: Array<Row>,
-  observed: { fetches: number; rows: Array<Row> },
+// A pending application obligation can include persistence after publication.
+// While its receipt is held, allow either complete source snapshot; never infer
+// receipt settlement merely from visible rows. Once it fulfills, the waiter
+// itself must read the confirmed snapshot. This composes the existing call
+// ledger with Collection commit coherence without copying persistence machinery.
+function checkPostHandlerRefetch(
+  model: RefetchCallSettlementModel,
+  observed: {
+    refetch: ReturnType<typeof observeRefetchCallSettlement>
+    rows: string
+    waiterRows: string | undefined
+  },
+  initial: string,
+  confirmed: string,
 ): void {
-  expect(observed.fetches).toBe(confirmation === `refetch` ? 2 : 1)
-  expect(observed.rows).toEqual(confirmation === `none` ? initial : confirmed)
+  const expected = observeRefetchCallSettlement(model)
+  expect(observed.refetch).toEqual(expected)
+  if (expected.refetch === `pending`) {
+    expect([initial, confirmed]).toContain(observed.rows)
+    expect(observed.waiterRows).toBeUndefined()
+  } else {
+    expect(observed.rows).toBe(confirmed)
+    expect(observed.waiterRows).toBe(confirmed)
+  }
 }
 
 declareOracle({
   check: [
-    checkMutationRefresh,
+    checkMutationConfirmation,
+    checkPostHandlerRefetch,
     expectPublicRefetchObservation,
     runDirectRowLifetimeHistory,
     runDirectWriteOrderHistory,
@@ -1636,104 +1664,501 @@ describe(`query collection ownership lifecycle`, () => {
     await runCleanups()
   })
 
-  // Explicit-refresh contract: a handler's completion starts no Query request.
-  // The backend edit alone cannot change synced rows. At settlement the
-  // optimistic overlay drops, exposing the initial rows unless the handler
-  // explicitly refetched or wrote the confirmed result. This bounded table
-  // crosses all three mutation wrappers and both confirmation paths and legacy returned values through
-  // real Collection transactions and QueryClient. It does not constrain
-  // Query's independent focus, polling, or invalidation triggers.
-  it.each(
-    ([`insert`, `update`, `delete`] as const).flatMap((mutation) =>
-      ([`none`, `refetch`, `write`] as const).flatMap((confirmation) =>
-        [false, true].map((legacyReturn) => ({
-          mutation,
-          confirmation,
-          legacyReturn,
-        })),
-      ),
-    ),
-  )(
-    `refreshes only when the handler requests it: %j`,
-    async ({ mutation, confirmation, legacyReturn }) => {
-      const refreshReach = createOracleReach(`checkMutationRefresh`, [
-        `optimistic`,
-        `settled`,
-      ])
-      refreshReach.beginHistory()
-      type Row = { id: string; name: string }
-      const initial: Array<Row> =
-        mutation === `insert` ? [] : [{ id: `a`, name: `old` }]
-      const confirmed: Array<Row> =
-        mutation === `delete` ? [] : [{ id: `a`, name: `confirmed` }]
-      let server = initial
-      const gate = createDeferred<void>()
-      const entered = createDeferred<void>()
-      const queryClient = createQueryClient()
-      const queryFn = vi.fn(() => Promise.resolve(structuredClone(server)))
-      const handler = async ({
-        collection,
-      }: Pick<
-        Parameters<NonNullable<QueryCollectionConfig<Row>[`onInsert`]>>[0],
-        `collection`
-      >) => {
-        entered.resolve()
-        await gate.promise
-        server = confirmed
-        if (confirmation === `refetch`) await collection.utils.refetch()
-        if (confirmation === `write`) {
-          if (mutation === `delete`) await collection.utils.writeDelete(`a`)
-          else await collection.utils.writeUpsert(confirmed[0]!)
+  // The shared independent model owns handler outcome versus confirmation.
+  // This real QueryClient driver controls the server edit, explicit acceptance,
+  // and handler settlement separately. No focus/poll/invalidation trigger runs.
+  // Rejections after a committed server edit must not undo accepted source data.
+  describe(`mutation outcome and confirmation`, () => {
+    const mutationHistories = mutationConfirmationHistories(`query`)
+    const mutationReachStates = mutationHistories.map(
+      (h) =>
+        `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
+    )
+    const mutationReach = createOracleReach(
+      `query.mutation-confirmation`,
+      mutationReachStates,
+    )
+    afterAll(() => {
+      mutationReach.assertReached()
+      console.info(
+        `query.mutation-confirmation reach`,
+        Object.fromEntries(mutationReach.counts()),
+      )
+    })
+    it.each(mutationHistories)(
+      `refreshes only when the handler requests it: %j`,
+      async (history) => {
+        mutationReach.beginHistory()
+        const { operation, confirmation, outcome, returned } = history
+        const localReach = createOracleReach(`query.mutation-cuts`, [
+          `entered`,
+          `settled`,
+          `settlement-waiter`,
+          ...(outcome === `reject-before-write` ? [] : [`server-written`]),
+          ...(confirmation === `none` ? [] : [`confirmation-accepted`]),
+          ...(confirmation === `refetch` ? [`confirmation-requested`] : []),
+          ...(confirmation === `none` && outcome !== `reject-before-write`
+            ? [`late-confirmed`]
+            : []),
+        ])
+        localReach.beginHistory()
+        const queryClient = createQueryClient()
+        const enterRelease = createDeferred<void>()
+        const confirmationRelease = createDeferred<void>()
+        const settleRelease = createDeferred<void>()
+        const entered = createDeferred<void>()
+        const serverWritten = createDeferred<void>()
+        const confirmationAccepted = createDeferred<void>()
+        const refetchRequested = createDeferred<void>()
+        const refetchResponse = createDeferred<void>()
+        const failure = new Error(`handler ${outcome}`)
+        const initial = mutationConfirmationRows(
+          operation,
+          `initial`,
+          history.peer,
+        )
+        const confirmed = mutationConfirmationRows(
+          operation,
+          `confirmed`,
+          history.peer,
+        )
+        let server = structuredClone(initial)
+        let handlerWrites = 0
+        let confirmationCalls = 0
+        let confirmationStatus: MutationConfirmationObservation[`confirmationStatus`] = `not-requested`
+        let settlement: MutationConfirmationObservation[`settlement`] = `pending`
+        let error: unknown
+        let holdRefetch = confirmation === `refetch`
+        const queryFn = vi.fn(async () => {
+          if (confirmationCalls > 0 && holdRefetch) {
+            refetchRequested.resolve()
+            await refetchResponse.promise
+          }
+          return structuredClone(server)
+        })
+        let releaseCollection: (() => Promise<void>) | undefined
+        let verdict: Promise<MutationConfirmationObservation> | undefined
+        await withOracleCleanup(async () => {
+          const handler = async ({
+            collection: target,
+          }: Pick<
+            Parameters<
+              NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onInsert`]
+              >
+            >[0],
+            `collection`
+          >) => {
+            entered.resolve()
+            await enterRelease.promise
+            if (outcome === `reject-before-write`) throw failure
+            server = structuredClone(confirmed)
+            handlerWrites++
+            serverWritten.resolve()
+            await confirmationRelease.promise
+            if (confirmation !== `none`) {
+              confirmationCalls++
+              confirmationStatus = `pending`
+            }
+            if (confirmation === `refetch`) await target.utils.refetch()
+            if (confirmation === `write`) {
+              if (operation === `delete`) await target.utils.writeDelete(1)
+              else
+                await target.utils.writeUpsert({
+                  ...mutationConfirmationInputs.confirmed,
+                })
+            }
+            if (confirmation !== `none`) confirmationStatus = `accepted`
+            confirmationAccepted.resolve()
+            await settleRelease.promise
+            if (outcome === `reject-after-write`) throw failure
+            return returned === `legacy-disable`
+              ? { refetch: false }
+              : returned === `legacy-enable`
+                ? { refetch: true }
+                : undefined
+          }
+          const collection = createCollection(
+            queryCollectionOptions<MutationConfirmationRow>({
+              queryKey: [`explicit-handler-refresh`, history],
+              queryClient,
+              queryFn,
+              getKey: (row) => row.id,
+              // JS callers may return coordination objects that TS now rejects.
+              onInsert: handler as unknown as NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onInsert`]
+              >,
+              onUpdate: handler as unknown as NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onUpdate`]
+              >,
+              onDelete: handler as unknown as NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onDelete`]
+              >,
+            }),
+          )
+          releaseCollection = () => collection.cleanup()
+          await atMutationCheckpoint(
+            collection.preload(),
+            `initial Query preload`,
+          )
+          const transaction =
+            operation === `insert`
+              ? collection.insert({ ...mutationConfirmationInputs.optimistic })
+              : operation === `delete`
+                ? collection.delete(1)
+                : collection.update(1, (draft) => {
+                    draft.name = `optimistic`
+                  })
+          const observe = (): MutationConfirmationObservation => ({
+            rows: collection.toArray
+              .map(({ id, name, stable }) => ({ id, name, stable }))
+              .sort((a, b) => a.id - b.id),
+            handlerWrites,
+            confirmationCalls,
+            fetches: queryFn.mock.calls.length,
+            providerRequests: 0,
+            confirmationStatus,
+            state: transaction.state,
+            settlement,
+            error,
+          })
+          verdict = transaction.when(`settled`).then(
+            () => {
+              settlement = `fulfilled`
+              return observe()
+            },
+            (reason: unknown) => {
+              settlement = `rejected`
+              error = reason
+              return observe()
+            },
+          )
+          await atMutationCheckpoint(entered.promise, `Query handler entry`)
+          checkMutationConfirmation(history, `entered`, observe(), failure)
+          localReach.reach(`entered`)
+          enterRelease.resolve()
+          if (outcome !== `reject-before-write`) {
+            await atMutationCheckpoint(
+              serverWritten.promise,
+              `Query server write`,
+            )
+            checkMutationConfirmation(
+              history,
+              `server-written`,
+              observe(),
+              failure,
+            )
+            localReach.reach(`server-written`)
+            confirmationRelease.resolve()
+            if (confirmation === `refetch`) {
+              await atMutationCheckpoint(
+                refetchRequested.promise,
+                `held Query refetch response`,
+              )
+              checkMutationConfirmation(
+                history,
+                `confirmation-requested`,
+                observe(),
+                failure,
+              )
+              localReach.reach(`confirmation-requested`)
+              holdRefetch = false
+              refetchResponse.resolve()
+            }
+            await atMutationCheckpoint(
+              confirmationAccepted.promise,
+              `Query confirmation acceptance`,
+            )
+            if (confirmation !== `none`) {
+              checkMutationConfirmation(
+                history,
+                `confirmation-accepted`,
+                observe(),
+                failure,
+              )
+              localReach.reach(`confirmation-accepted`)
+            }
+            settleRelease.resolve()
+          }
+          const atWaiter = await atMutationCheckpoint(
+            verdict,
+            `Query handler settlement`,
+          )
+          checkMutationConfirmation(history, `settled`, atWaiter, failure)
+          localReach.reach(`settlement-waiter`)
+          checkMutationConfirmation(history, `settled`, observe(), failure)
+          localReach.reach(`settled`)
+          if (confirmation === `none` && outcome !== `reject-before-write`) {
+            // Backend success alone supplied no source confirmation. A later
+            // explicit reader may refetch; the frozen settlement cut stays old.
+            await atMutationCheckpoint(
+              collection.utils.refetch(),
+              `later explicit Query refetch`,
+            )
+            checkMutationConfirmation(
+              history,
+              `late-confirmed`,
+              observe(),
+              failure,
+            )
+            localReach.reach(`late-confirmed`)
+            checkMutationConfirmation(history, `settled`, atWaiter, failure)
+          }
+          localReach.assertReached()
+          mutationReach.reach(
+            `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`,
+          )
+        }, [
+          () => {
+            enterRelease.resolve()
+            confirmationRelease.resolve()
+            settleRelease.resolve()
+            refetchResponse.resolve()
+          },
+          () =>
+            verdict &&
+            atMutationCheckpoint(verdict, `Query cleanup settlement`),
+          () => releaseCollection?.(),
+          () => queryClient.clear(),
+        ])
+      },
+    )
+  })
+
+  /**
+   * Handler exit restores the ordinary public-refetch boundary. A later call
+   * waits for its commit receipt, even if an earlier CRUD handler
+   * rejected. The existing call-obligation model owns that judgment. A real
+   * persisted wrapper holds the later durable commit with no optimistic work
+   * left; this distinguishes a leaked handler count from a legitimate mutation
+   * publication block. Ordinary source values are serialized without dropping
+   * fields; ordering is normalized because Collection order is unspecified.
+   */
+  describe(`refetch application after handler exit`, () => {
+    const histories = ([`insert`, `update`, `delete`] as const).flatMap(
+      (operation) => [false, true].map((reject) => ({ operation, reject })),
+    )
+    const reach = createOracleReach(
+      `query.post-handler-application`,
+      histories.flatMap((h) => [
+        `${h.operation}/${h.reject}/application-held`,
+        `${h.operation}/${h.reject}/applied-waiter`,
+      ]),
+    )
+    afterAll(() => {
+      reach.assertReached()
+      console.info(
+        `query.post-handler-application reach`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+    it.each([`early-receipt`, `partial-rows`, `stale-waiter`] as const)(
+      `rejects post-handler wrong observation: %s`,
+      (fault) => {
+        let model = createRefetchCallSettlementModel([`query`], true)
+        model = reduceRefetchCallSettlement(model, {
+          type: `accept-application`,
+          queryId: `query`,
+          applicationId: `later-result`,
+        })
+        model = reduceRefetchCallSettlement(model, {
+          type: `settle-fetch`,
+          queryId: `query`,
+          outcome: `fulfilled`,
+        })
+        if (fault === `stale-waiter`)
+          model = reduceRefetchCallSettlement(model, {
+            type: `settle-application`,
+            applicationId: `later-result`,
+            outcome: `fulfilled`,
+          })
+        const actual = {
+          refetch: observeRefetchCallSettlement(model),
+          rows: `confirmed`,
+          waiterRows: fault === `stale-waiter` ? `confirmed` : undefined,
         }
-        // Runtime JavaScript can still return old coordination objects.
-        return legacyReturn ? { refetch: false } : undefined
-      }
-      const collection = createCollection(
-        queryCollectionOptions<Row>({
-          queryKey: [`explicit-handler-refresh`, mutation, confirmation],
-          queryClient,
-          queryFn,
-          getKey: (row) => row.id,
-          onInsert: handler as unknown as NonNullable<
-            QueryCollectionConfig<Row>[`onInsert`]
-          >,
-          onUpdate: handler as unknown as NonNullable<
-            QueryCollectionConfig<Row>[`onUpdate`]
-          >,
-          onDelete: handler as unknown as NonNullable<
-            QueryCollectionConfig<Row>[`onDelete`]
-          >,
-        }),
-      )
-      cleanups.push(async () => {
-        gate.resolve()
-        await collection.cleanup()
-        queryClient.clear()
-      })
-      await collection.preload()
-      const transaction =
-        mutation === `insert`
-          ? collection.insert({ id: `a`, name: `optimistic` })
-          : mutation === `delete`
-            ? collection.delete(`a`)
-            : collection.update(`a`, (draft) => {
-                draft.name = `optimistic`
-              })
-      await entered.promise
-      expect(collection.toArray.map(({ id, name }) => ({ id, name }))).toEqual(
-        mutation === `delete` ? [] : [{ id: `a`, name: `optimistic` }],
-      )
-      refreshReach.reach(`optimistic`)
-      gate.resolve()
-      await transaction.when(`settled`)
-      checkMutationRefresh(confirmation, initial, confirmed, {
-        fetches: queryFn.mock.calls.length,
-        rows: collection.toArray.map(({ id, name }) => ({ id, name })),
-      })
-      refreshReach.reach(`settled`)
-      refreshReach.assertReached()
-    },
-  )
+        checkPostHandlerRefetch(model, actual, `initial`, `confirmed`)
+        if (fault === `early-receipt`)
+          actual.refetch = { refetch: `resolved`, resultOrder: [`query`] }
+        if (fault === `partial-rows`) actual.rows = `partial`
+        if (fault === `stale-waiter`) actual.waiterRows = `initial`
+        expect(() =>
+          checkPostHandlerRefetch(model, actual, `initial`, `confirmed`),
+        ).toThrow()
+      },
+    )
+    it.each(histories)(
+      `waits for later application after handler $operation rejection:$reject`,
+      async ({ operation, reject }) => {
+        reach.beginHistory()
+        const initial: Array<Item> = [
+          { id: `peer`, category: `peer`, name: `Peer` },
+          ...(operation === `insert`
+            ? []
+            : [{ id: `a`, category: `edited`, name: `Before` }]),
+        ]
+        const authoritative: Array<Item> = [
+          { id: `peer`, category: `peer`, name: `New peer` },
+          { id: `a`, category: `edited`, name: `New source row` },
+        ]
+        const encode = (values: ReadonlyArray<Item>) =>
+          JSON.stringify(
+            [...values]
+              .map(({ id, category, name }) => ({ id, category, name }))
+              .sort((left, right) => left.id.localeCompare(right.id)),
+          )
+        let server = structuredClone(initial)
+        const handlerFailure = new Error(`handler rejected`)
+        const handler = async () => {
+          await Promise.resolve()
+          if (reject) throw handlerFailure
+        }
+        const storage = createOwnershipStorage()
+        const entered = createDeferred<void>()
+        const release = createDeferred<void>()
+        let hold = false
+        const apply = storage.adapter.applyCommittedTx.bind(storage.adapter)
+        storage.adapter.applyCommittedTx = async (...args) => {
+          if (hold && args[1].mutations.length > 0) {
+            hold = false
+            entered.resolve()
+            await release.promise
+          }
+          return apply(...args)
+        }
+        const queryClient = createQueryClient()
+        const queryFn = vi.fn(() => Promise.resolve(structuredClone(server)))
+        let releaseCollection: (() => Promise<void>) | undefined
+        let external: Promise<unknown> | undefined
+        await withOracleCleanup(async () => {
+          const collection = createCollection(
+            persistedCollectionOptions<
+              Item,
+              string | number,
+              never,
+              QueryCollectionUtils<Item>
+            >({
+              ...queryCollectionOptions<Item>({
+                id: `post-handler-${operation}-${reject}`,
+                queryKey: [`post-handler`, operation, reject],
+                queryClient,
+                queryFn,
+                getKey: (row) => row.id,
+                onInsert: handler,
+                onUpdate: handler,
+                onDelete: handler,
+              }),
+              persistence: { adapter: storage.adapter },
+            }),
+          )
+          releaseCollection = () => collection.cleanup()
+          await atMutationCheckpoint(
+            collection.preload(),
+            `post-handler initial preload`,
+          )
+          const transaction =
+            operation === `insert`
+              ? collection.insert({
+                  id: `a`,
+                  category: `edited`,
+                  name: `Optimistic`,
+                })
+              : operation === `delete`
+                ? collection.delete(`a`)
+                : collection.update(`a`, (draft) => {
+                    draft.name = `Optimistic`
+                  })
+          const firstError = await transaction.when(`settled`).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          expect(firstError).toBe(reject ? handlerFailure : undefined)
+          expect(transaction.state).toBe(reject ? `failed` : `completed`)
+          expect(encode(collection.toArray)).toBe(encode(initial))
+          hold = true
+          server = structuredClone(authoritative)
+          let outcome: RefetchApplicationOutcome = `pending`
+          let resultOrder: Array<string> | undefined
+          let waiterRows: string | undefined
+          const observe = () => ({
+            rows: encode(collection.toArray),
+            waiterRows,
+            refetch: {
+              refetch: outcome,
+              ...(outcome === `resolved` ? { resultOrder } : {}),
+            },
+          })
+          let model = createRefetchCallSettlementModel([`query`], true)
+          model = reduceRefetchCallSettlement(model, {
+            type: `accept-application`,
+            queryId: `query`,
+            applicationId: `later-result`,
+          })
+          external = collection.utils.refetch({ throwOnError: true }).then(
+            (results) => {
+              outcome = `resolved`
+              resultOrder = results.map(() => `query`)
+              waiterRows = encode(collection.toArray)
+            },
+            (error: unknown) => {
+              outcome = `rejected`
+              throw error
+            },
+          )
+          void external.catch(() => {})
+          await atMutationCheckpoint(
+            entered.promise,
+            `post-handler durable application held`,
+          )
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(queryClient.isFetching()).toBe(0)
+          })
+          // Query's flags clear before the utility's queued Promise chain
+          // finishes. Keep the receipt held through a task boundary so every
+          // already-queued microtask can process that completed fetch. The
+          // leaked-count transform is the calibration for this timing premise.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          model = reduceRefetchCallSettlement(model, {
+            type: `settle-fetch`,
+            queryId: `query`,
+            outcome: `fulfilled`,
+          })
+          checkPostHandlerRefetch(
+            model,
+            observe(),
+            encode(initial),
+            encode(authoritative),
+          )
+          reach.reach(`${operation}/${reject}/application-held`)
+          release.resolve()
+          await atMutationCheckpoint(
+            external,
+            `post-handler external refetch settlement`,
+          )
+          model = reduceRefetchCallSettlement(model, {
+            type: `settle-application`,
+            applicationId: `later-result`,
+            outcome: `fulfilled`,
+          })
+          checkPostHandlerRefetch(
+            model,
+            observe(),
+            encode(initial),
+            encode(authoritative),
+          )
+          reach.reach(`${operation}/${reject}/applied-waiter`)
+        }, [
+          () => release.resolve(),
+          () =>
+            external &&
+            atMutationCheckpoint(external, `post-handler cleanup refetch`),
+          () => releaseCollection?.(),
+          () => queryClient.clear(),
+        ])
+      },
+    )
+  })
 
   it(`keeps an accepted empty-diff result pending until application`, () => {
     const initial: ExplicitRefetchApplicationModel = {
