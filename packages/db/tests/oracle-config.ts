@@ -144,6 +144,7 @@ const staticOracleProperties = [
   `sqlite-persistence.optimistic-history`,
   `trailbase.lifecycle`,
   `source-health.history`,
+  `source-health.required-history`,
   `source-health.on-demand`,
   `source-health.lazy-demand`,
   `source-health.request-errors`,

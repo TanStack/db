@@ -172,3 +172,80 @@ Both remain under the original campaign evidence directory as
 `metadata-mutation-classification-matrix.json` and
 `metadata-mutation-type-classification.md`. No production repair or bug-class
 closure is claimed.
+
+## Shared-source replay with late include demand
+
+The release defers a replay publication defect confirmed on release head
+`d9911f17b5e9de872cac5c9fd745c656ff50d3ad` and exact main
+`95460bc875a2259b34eea534e5592a9d0394e73f`. The primary owner is
+`packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts`.
+Its native named property `replay.ordered-failed-replay`, seed `521312968`,
+path `255:3:3:8:11:9` fails on both cuts at `checkRetention`, after the final
+settle: row1 is public while the retained complete window is `[]`. An
+independent reviewer reproduced both failures and accepted this classification.
+The owner is byte-identical on both cuts (SHA256
+`27f76be612a3058235953e5b984b77ba9274f1aab073035543161b71d4d14e48`).
+
+The accepted authority is `packages/db/src/query/live/ARCHITECTURE.md`,
+“Replay participants and failure,” and normative law 9. A live query's join
+and include subscriptions to one source share one publication barrier; demand
+started while that source replay remains open must hold the prior complete
+result until its current acquisition settles or aborts. Here the include has
+no demand at truncate. It acquires and replaces marker demand while the join
+replay remains open. Its failed acquisition retires, but its replacement for
+key1 is still pending and nonaborted when the final join load settles. The
+model has no retained failure at that cut. Publishing row1 therefore violates
+the shared-source barrier; a stale model failure does not explain the RED.
+
+The preserved seven-command witness is:
+
+```json
+[
+  { "type": "hold" },
+  { "type": "truncateMarkers" },
+  { "type": "settle", "ok": true, "keepHolding": true, "newest": false },
+  { "type": "settle", "ok": false, "newest": true, "keepHolding": true },
+  { "type": "settle", "ok": true, "keepHolding": true, "newest": false },
+  { "type": "mark", "id": 1, "on": false },
+  { "type": "settle", "ok": true, "keepHolding": false, "newest": false }
+]
+```
+
+Its scenario is descending, offset1, limit2, no ties, no peer, `joined: none`
+(anti-join), on-demand markers, includes enabled, aborted marker loads resolve,
+and history starts after preload. From each frozen snapshot's `packages/db`,
+the actual noninstrumented replay command was:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=replay.ordered-failed-replay \
+TANSTACK_DB_ORACLE_SEED=521312968 \
+TANSTACK_DB_ORACLE_PATH=255:3:3:8:11:9 \
+../../node_modules/.bin/vitest run --config ../../replay-db.config.mts \
+  --coverage.enabled=false --typecheck.enabled=false \
+  tests/query/load-subset-replay-refinement-oracle.test.ts \
+  -t 'keeps the last publication through a failed replay'
+```
+
+Both runs used Node 24.19.0, Vitest 4.1.12 and fast-check 3.23.2. The scratch
+config merges each cut's DB config and aliases DB/IVM to that cut's own source;
+tools alone are borrowed. Independent verification compared all 154 DB/IVM
+source files with their Git objects, with no differences or foreign source.
+This reproduces the named assertion failure, not CI's entire environment.
+The original CI log remains under the campaign evidence directory at
+`ci-head-d9911f17b/failed-123338231520.log`; the frozen cuts, exact logs,
+diagnostic logs and independent review remain in `ci-replay-521312968/`.
+The independent report
+`independent-retention-review.md` has SHA256
+`a36d5793c87495efb5516ca42ee4adeede867da462bc2e869e6c3698a44b63db`;
+its source verification receipt has SHA256
+`7385d6a029caa6daeab3b1d285164df7a8dd3c4598c1e892b4bba0f944b51bde`.
+
+Before production repair, preserve this replay and add measured reach for a
+receiving subscription with no demand at truncate, late demand while a sibling
+replay is loading, failure retirement followed by a held replacement, and
+success/abort neighbors across multiple subscriptions to the same source.
+Then demonstrate the retained-publication comparison before replacement
+settlement and after it. The original oracle remains active and unchanged;
+there is no skip, narrowed comparison, retry-away, GREEN, or bug-class closure
+claim. Its CI RED remains an open baseline defect under this explicit release
+scope deferral.

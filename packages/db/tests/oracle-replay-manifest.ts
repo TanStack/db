@@ -200,7 +200,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/source-health-oracle.test.ts`,
     `source-health`,
-    `history on-demand lazy-demand request-errors`,
+    `history required-history on-demand lazy-demand request-errors`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
@@ -395,7 +395,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
     `persisted-demand-coverage`,
-    `history`,
+    `history required`,
   ],
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
@@ -724,6 +724,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `source-health.required-history`,
+    `required histories refine the model.*random`,
+  ],
   [
     `collection-lifecycle.gc-mutation-shapes`,
     `retains every touched Collection across mutation shapes.*seed undefined`,

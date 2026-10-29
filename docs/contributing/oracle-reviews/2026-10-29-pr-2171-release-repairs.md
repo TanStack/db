@@ -304,3 +304,96 @@ The independent verdict `demand-reach-independent-review.md` has SHA256
 `45c2e7d843a6ebd4c3898957c1b4d698450341beda8af8382b13e72959060e43`.
 It binds the copied source hashes, direct replay, both intended control failures
 and the two outer timeout literals.
+
+
+## Named replay registration receiving correction
+
+CI on `d9911f17b` passes 40 of 41 replay controls but rejects the new
+`persisted-demand-coverage.required` coordinate as `no-named-owner`. Earlier
+direct Vitest replay proved the property and its guard could run but bypassed
+the repository's manifest-to-command lookup. The existing independent manifest
+check correctly catches this integration omission; its expectations stay intact.
+
+Adding `required` beside `history` in the existing owner entry repairs that
+lookup. No production, model, grammar, guard, comparison or budget changes.
+The author reproduces the manifest RED, then passes all 41 existing replay
+controls. Author and reviewer each execute the actual repository named replay
+CLI through the default SQLite package config at required/seed18/path0. Both
+runs emit exactly one successful matching guarded witness with numRuns1.
+The reviewer also independently reproduces pre-edit CLI rejection and passes
+all six manifest controls. A custom runner alone no longer supplies the claimed
+named-command receiving evidence. Hosted final-head CI remains required.
+
+Author evidence `demand-registration-author-evidence.md` has SHA256
+`3cd8bb335a916fc073a7ae2139aa104e9351ad4f75d22ee99a2c44b8a2c218d9`.
+Independent verdict `demand-registration-independent-review.md` has SHA256
+`b22e5109bd08f0436d9fcc62d78de5d26da686584b9a2882e626621f66177385`.
+The manifest source hash is
+`3f1c724c48171b94413c787021d9d948212bdd28edcd84e783996b86722ac9eb`.
+Evidence remains in the original campaign directory.
+
+
+## Formatting continuity and later CI discoveries
+
+The formatting bot's `d9911f17b` changes only the schema recorder's callback
+parameter layout and optional trailing comma. Its TypeScript output differs
+only by that comma; minified runtime output is byte-identical. Strict raw-output
+hash checks initially reject the formatting difference, and the retained audit
+records both hashes and the exact normalized difference. Audit
+`release-autofix-d9911f17b-audit.json` has SHA256 `16c36655accb99744919b7e4d97a9e035f6a85b85f13ac2ccf900d4ea9b87f6b`.
+No product code changes in that bot commit.
+
+On this cut, framework and SQLite core CI pass. The replay manifest omission
+above and source-health's missing random reach still fail separate gates.
+DB core also finds a retained-publication mismatch that independently
+reproduces on exact main. Its active oracle remains unchanged, and the
+[scope record](2026-10-29-pr-2171-deferred-oracles.md#shared-source-replay-with-late-include-demand)
+preserves that open baseline defect. A later passing random run cannot close
+its recorded counterexample. Final-head CI and release readiness are separate
+judgments from this deferred class.
+
+
+## Source-health structural reach correction
+
+CI seed -2135407433 passes all 60 original source-health history comparisons
+but never selects the opt-in snapshot prefix. The unchanged campaign reproduces
+its afterAll RED: snapshot outside reload, markReady after fail and blind insert
+of a kept key during reload each have zero reach. The established snapshot,
+reload and source-health laws remain unchanged; this is missing sampling reach.
+
+The additive `source-health.required-history` lanes execute every one of the
+nine existing structural prefixes, followed by 0–12 generated existing steps.
+Each fixed/random lane runs six cases, independently enforces all 26 declared
+states and reaches every state at least six times. Required cases use join or
+nested contexts with direct subscribers. The unchanged original 60 random
+histories retain all six shapes and both subscriber choices. Models, driver,
+public comparisons, named histories, original grammar and budgets stay intact.
+Both replay registries and selectors include the new coordinate, preserving
+the separately accepted SQLite required mapping.
+
+Author and independent reviewer each pass the complete 506-test owner and
+scoped TypeScript checks. Actual default-config named CLI replay selects the
+new coordinate with one matching successful receipt at seed -2135407433/path0;
+all four existing coordinates also execute in author checks. Global manifest
+controls pass six tests. Prettier, scoped lint, changed-oracle lint and the
+441-name mangle check pass. All 154 DB/IVM production source files match d991.
+No executable production repair enters this change.
+
+Omitting a required prefix rejects its lane's missing reach. The fixed-only
+ablation fails even when the other lane covers the aggregate. A scratch-only
+snapshot mutant preserves begin but merges commit; the guarded CLI rejects
+public Collection rows at step3 commit, actual [[1,1]] versus expected [].
+Restoring production passes the captured seed/path0:0. The restored formerly
+shrunk path reports one property receipt and ten fast-check runs, which are
+preserved rather than reported as one history. These are assertion failures,
+not setup failures. Independent review repeats both sensitivity checks.
+
+This closes the bounded sampling gap for the owner's declared premises, not
+all source-health, provider, framework or concurrency behavior. Author evidence
+`source-health-reach-repair-evidence.md` has SHA256
+`0a711cfeeb1f3e3ef5d6bd4270f2f74a3b3532edb08c4c9790df537cf9a2f62e`.
+Independent verdict `source-health-independent-review.md` has SHA256
+`51693ba468e03c347988877d865faf0328bc8a637f2364eafa3a963dd6e80023`.
+Both remain under the original campaign evidence directory. Actual final-head
+CI remains required, and the independently confirmed baseline replay defect
+above stays open under the documented release scope.
