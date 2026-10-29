@@ -399,7 +399,7 @@ describe(`TrailBase Integration`, () => {
       expect(collection.get(1)).toBeUndefined()
 
       resolvePersistence()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await preload
 
       expect(collection.status).toBe(`ready`)
@@ -413,7 +413,7 @@ describe(`TrailBase Integration`, () => {
     } finally {
       resolveList({ records: [] })
       resolvePersistence()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       await collection.cleanup()
       await Promise.allSettled([preload])
     }
@@ -557,7 +557,7 @@ describe(`TrailBase Integration`, () => {
       expect(collection.get(1)).toBeUndefined()
       abortController.abort()
       resolvePersistence()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       if (load === true) {
         throw new Error(`Expected a pending applied receipt`)
       }
@@ -568,7 +568,7 @@ describe(`TrailBase Integration`, () => {
     } finally {
       abortController.abort()
       resolvePersistence()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -615,14 +615,14 @@ describe(`TrailBase Integration`, () => {
       expect(collection.get(1)).toBeUndefined()
 
       resolvePersistence()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       if (load instanceof Promise) await load
 
       expect(collection.get(1)?.data).toBe(`remote`)
       expect(collection.get(257)?.data).toBe(`remote`)
     } finally {
       resolvePersistence()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -883,12 +883,12 @@ describe(`TrailBase Integration`, () => {
       }
 
       const inserted = collection.insert(data)
-      outcomes.push(inserted.isPersisted.promise)
+      outcomes.push(inserted.when(`settled`))
 
       expect(createBulkMock).toHaveBeenCalledOnce()
 
       expect(stripState(collection.state)).toEqual(new Map([[data.id, data]]))
-      await inserted.isPersisted.promise
+      await inserted.when(`settled`)
 
       const updatedData: Data = {
         ...data,
@@ -905,14 +905,14 @@ describe(`TrailBase Integration`, () => {
       const updated = collection.update(data.id!, (old: Data) => {
         old.updated = updatedData.updated
       })
-      outcomes.push(updated.isPersisted.promise)
+      outcomes.push(updated.when(`settled`))
 
       expect(updateMock).toHaveBeenCalledOnce()
 
       expect(stripState(collection.state)).toEqual(
         new Map([[updatedData.id, updatedData]]),
       )
-      await updated.isPersisted.promise
+      await updated.when(`settled`)
 
       const deleteMock = recordApi.delete.mockImplementation(
         async (_id: string | number) => {
@@ -921,12 +921,12 @@ describe(`TrailBase Integration`, () => {
       )
 
       const deleted = collection.delete(updatedData.id!)
-      outcomes.push(deleted.isPersisted.promise)
+      outcomes.push(deleted.when(`settled`))
 
       expect(deleteMock).toHaveBeenCalledOnce()
 
       expect(stripState(collection.state)).toEqual(new Map([]))
-      await deleted.isPersisted.promise
+      await deleted.when(`settled`)
     } finally {
       await collection.cleanup()
       await Promise.allSettled(outcomes)
@@ -1012,8 +1012,9 @@ describe(`TrailBase Integration`, () => {
       await collection.preload()
       expect(rows()).toEqual([{ id: 1, updated: 2000, data: `peer` }])
       const first = observe(
-        collection.insert({ id: 2, updated: new Date(7000), data: `local` })
-          .isPersisted.promise,
+        collection
+          .insert({ id: 2, updated: new Date(7000), data: `local` })
+          .when(`settled`),
       )
       await apiEntered.promise
       expect(first.result).toEqual({ status: `pending` })
@@ -1035,8 +1036,9 @@ describe(`TrailBase Integration`, () => {
         { id: 2, updated: 8000, data: `acknowledged` },
       ])
       const rejected = observe(
-        collection.insert({ id: 3, updated: new Date(9000), data: `rejected` })
-          .isPersisted.promise,
+        collection
+          .insert({ id: 3, updated: new Date(9000), data: `rejected` })
+          .when(`settled`),
       )
       expect(rows()).toContainEqual({ id: 3, updated: 9000, data: `rejected` })
       await rejected.outcome
@@ -1046,8 +1048,9 @@ describe(`TrailBase Integration`, () => {
         { id: 2, updated: 8000, data: `acknowledged` },
       ])
       const next = observe(
-        collection.insert({ id: 4, updated: new Date(11000), data: `next` })
-          .isPersisted.promise,
+        collection
+          .insert({ id: 4, updated: new Date(11000), data: `next` })
+          .when(`settled`),
       )
       await vi.waitFor(() =>
         expect(recordApi.createBulk).toHaveBeenCalledTimes(3),
@@ -1176,7 +1179,7 @@ describe(`TrailBase aborted subset loads`, () => {
         expect(settled, `load waits for its accepted page`).toBe(false)
       }
       release()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       const outcome = await load.then(
         () => `resolved`,
         (error: { name?: string }) => error.name,
@@ -1189,7 +1192,7 @@ describe(`TrailBase aborted subset loads`, () => {
     } finally {
       controller.abort()
       release()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       await collection.cleanup()
     }
   })

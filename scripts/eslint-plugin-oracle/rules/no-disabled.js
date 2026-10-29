@@ -408,6 +408,115 @@ function isPinnedOrObservation(object, sourceCode) {
 }
 
 /**
+ * The shared replay writer serializes completed-history counts. They are
+ * observations, not run options. A type name alone proves nothing: every
+ * value reference must pass directly to the unshadowed one-argument standard
+ * serializer. Aliases, writes, callbacks and additional uses retain reporting.
+ */
+function isSerializedReplayWitness(object, filename, sourceCode) {
+  if (
+    !/(^|[/\\])packages[/\\]db[/\\]tests[/\\]oracle-replay-witness\.ts$/.test(
+      filename,
+    )
+  )
+    return false
+  // Standard JSON invokes own or inherited toJSON hooks. A spread, accessor,
+  // method or prototype field can expose the record through `this` without
+  // another binding reference. Only the plain witness data shape qualifies.
+  const fields = new Set([`property`, `seed`, `path`, `numRuns`, `failed`])
+  if (
+    !object.properties.every(
+      (property) =>
+        property.type === `Property` &&
+        property.kind === `init` &&
+        !property.method &&
+        !property.computed &&
+        fields.has(propertyName(property)),
+    )
+  )
+    return false
+  const declaration = object.parent
+  if (
+    declaration.type !== `VariableDeclarator` ||
+    declaration.init !== object ||
+    declaration.id.type !== `Identifier`
+  )
+    return false
+  if (
+    declaration.parent.type === `VariableDeclaration` &&
+    declaration.parent.parent.type === `ExportNamedDeclaration`
+  )
+    return false
+  const id = declaration.id
+  const type = id.typeAnnotation?.typeAnnotation
+  if (
+    type?.type !== `TSTypeReference` ||
+    type.typeName.type !== `Identifier` ||
+    type.typeName.name !== `OracleReplayWitness`
+  )
+    return false
+  const variable = findVariable(sourceCode.getScope(object), id.name)
+  if (variable === null || variable === undefined) return false
+  const uses = variable.references.filter(({ identifier }) => {
+    if (identifier === id) return false
+    // A TS typeof query resolves a value symbol, so scope-manager marks it as
+    // a value reference. Its syntax still has no runtime consumption.
+    let name = identifier
+    while (name.parent.type === `TSQualifiedName` && name.parent.left === name)
+      name = name.parent
+    return name.parent.type !== `TSTypeQuery` || name.parent.exprName !== name
+  })
+  return (
+    uses.length > 0 &&
+    uses.every((reference) => {
+      if (!reference.isReadOnly()) return false
+      const call = reference.identifier.parent
+      if (
+        call.type !== `CallExpression` ||
+        call.optional ||
+        call.arguments.length !== 1 ||
+        call.arguments[0] !== reference.identifier
+      )
+        return false
+      const callee = call.callee
+      if (
+        callee.type !== `MemberExpression` ||
+        callee.computed ||
+        callee.optional ||
+        callee.object.type !== `Identifier` ||
+        callee.object.name !== `JSON` ||
+        callee.property.type !== `Identifier` ||
+        callee.property.name !== `stringify`
+      )
+        return false
+      // Type-only names do not shadow the standard runtime JSON binding. Keep
+      // walking: an inner type alias can hide an outer runtime parameter from
+      // findVariable, although that parameter still supplies JSON.stringify.
+      for (
+        let scope = sourceCode.getScope(call);
+        scope !== null;
+        scope = scope.upper
+      ) {
+        const json = scope.set.get(`JSON`)
+        if (
+          json?.defs.some(
+            (definition) =>
+              definition.isVariableDefinition !== false &&
+              !(
+                definition.type === `ImportBinding` &&
+                (definition.parent?.importKind === `type` ||
+                  definition.node.importKind === `type`)
+              ),
+          )
+        )
+          return false
+      }
+      return true
+    })
+  )
+}
+
+/**
  * Whether a call skips the test that it runs in through the test context,
  * as in `it('law', (ctx) => { ctx.skip() })`.
  */
@@ -503,7 +612,12 @@ export default {
         parent.type === `Property` &&
         propertyName(parent) === `numRuns` &&
         parent.parent.type === `ObjectExpression` &&
-        isPinnedOrObservation(parent.parent, sourceCode)
+        (isPinnedOrObservation(parent.parent, sourceCode) ||
+          isSerializedReplayWitness(
+            parent.parent,
+            context.filename,
+            sourceCode,
+          ))
       )
     }
 

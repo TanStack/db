@@ -45,6 +45,6 @@ export function pendingTransaction() {
     autoCommit: false,
     mutationFn: () => done.promise,
   })
-  const settled = tx.isPersisted.promise.catch((error: unknown) => error)
+  const settled = tx.when('settled').catch((error: unknown) => error)
   return { tx, done, settled }
 }

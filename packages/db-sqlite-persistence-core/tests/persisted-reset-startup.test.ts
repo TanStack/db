@@ -1205,13 +1205,13 @@ describe(`persistedCollectionOptions`, () => {
       // so the load settles once that mutation does. It must not also wait
       // for the unrelated receipt.
       releaseMutation.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when('settled')
       await expect(load).resolves.toBeUndefined()
       await unrelated.receipt.catch(() => undefined)
     } finally {
       unrelated?.abortController.abort()
       releaseMutation.resolve()
-      await mutation?.isPersisted.promise.catch(() => undefined)
+      await mutation?.when('settled').catch(() => undefined)
       await load?.catch(() => undefined)
       await collection.cleanup()
     }

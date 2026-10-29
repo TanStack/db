@@ -596,7 +596,7 @@ it.each(
           postId: 999,
           body: `unrelated`,
         })
-        transactionOutcome = transaction.isPersisted.promise.then(
+        transactionOutcome = transaction.when('settled').then(
           () => undefined,
           () => undefined,
         )
@@ -624,7 +624,7 @@ it.each(
         })
       }
       mutation.resolve()
-      if (transaction) await transaction.isPersisted.promise
+      if (transaction) await transaction.when('settled')
       await preload
       await Promise.all(requests.map(({ outcome }) => outcome))
       expect(requests.every(({ settled }) => settled)).toBe(true)

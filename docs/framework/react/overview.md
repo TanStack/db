@@ -161,8 +161,6 @@ const { data } = useLiveQuery({
 })
 ```
 
-Dependency arrays are still accepted for backwards compatibility, but they warn in development and will be removed in 1.0.
-
 For SSR setup, collection hydration, and migration details, see the [SSR and Hydration guide](../../guides/ssr.md).
 
 ### useLiveInfiniteQuery
@@ -190,7 +188,7 @@ or skip remote rows. For server pagination, use an on-demand Query Collection
 whose `queryFn` fulfills `meta.loadSubsetOptions`. See the
 [server pagination guide](../../collections/query-collection.md#server-pagination-with-live-queries).
 
-The deprecated dependency array is only available when using the query function variant, not when passing a pre-created collection.
+React hook dependency arrays were removed in the first 1.0 RC. Use derived query identity or an explicit `queryKey`.
 
 ### useLiveSuspenseQuery
 

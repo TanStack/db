@@ -221,7 +221,7 @@
  * started after the failure.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it as vitestIt } from 'vitest'
 import { createCollection, findProblems } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createEffect } from '../src/query/effect.js'
@@ -236,7 +236,12 @@ import {
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { createDeferred } from '../src/deferred.js'
 import { createOracleReach } from './oracle-reach.js'
-import { oraclePropertyOptions } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import { createSource } from './source-health-support.js'
@@ -3117,6 +3122,9 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
   ],
 }
 
+// Named path replay executes its generated property without the fixed examples.
+const it = oracleReplayTest(vitestIt)
+
 describe(`source failure and health oracle`, () => {
   for (const shape of shapes) {
     for (const [name, steps] of Object.entries(namedHistories)) {
@@ -3353,25 +3361,12 @@ describe(`source failure and health oracle`, () => {
       on(`ready`, `A`),
     ]),
   ]
-  // Each prefix also runs as a fixed example, first in every run and on top
-  // of the random histories, with a direct subscriber. A prefix runs the shape
-  // that prefixShapes gives it, as a generated history with that prefix does,
-  // and otherwise the `join` shape, which queries both sources that the
-  // prefixes drive. The reach check fails for a declared state that these
-  // examples do not enter (#2287).
-  const historyExamples = reachPrefixes.map(
-    (prefix): [[Shape, Array<Step>], boolean] => [
-      [prefixShapes.get(prefix) ?? `join`, [...prefix]],
-      true,
-    ],
-  )
   const historyReach = createOracleReach(
     `source-health.history`,
     historyReachStates,
-    { fixedHistories: historyExamples.length },
   )
   let historiesRan = false
-  fcTest.prop(
+  oracleReplayTest(fcTest, `source-health.history`).prop(
     [
       fc
         .tuple(
@@ -3385,9 +3380,7 @@ describe(`source failure and health oracle`, () => {
         ]),
       fc.boolean(),
     ],
-    oraclePropertyOptions(60, `source-health.history`, {
-      examples: historyExamples,
-    }),
+    oraclePropertyOptions(60, `source-health.history`),
   )(
     `generated histories refine the model`,
     ([shape, steps], directSubscribers) => {
@@ -3399,6 +3392,66 @@ describe(`source failure and health oracle`, () => {
     },
     120_000,
   )
+  // Optional prefixes preserve broad exploration, but cannot guarantee rare
+  // premises at a finite random budget. Every structural campaign therefore
+  // executes each existing prefix in a context that can observe its law.
+  // The same generated suffix follows each prefix; runHistory still compares
+  // every step, including snapshot commits, against the unchanged model.
+  // Join exercises both sources; only the inner-ready prefix requires nested.
+  // Direct subscribers remain present here. The original 60 random histories
+  // retain all six shapes and both direct-subscriber choices above.
+  const requiredProperty = `source-health.required-history`
+  const config = readOracleRunConfig()
+  for (const seed of config.replaySeed === undefined
+    ? [20261029, undefined]
+    : [undefined]) {
+    const requiredReach = createOracleReach(
+      requiredProperty,
+      historyReachStates,
+      { replaying: oracleReplayRequested() },
+    )
+    let requiredRan = false
+    oracleReplayTest(fcTest, requiredProperty).prop(
+      [fc.array(stepArb, { maxLength: 12 })],
+      {
+        ...oraclePropertyOptions(6, requiredProperty),
+        ...(seed === undefined ? {} : { seed }),
+      },
+    )(
+      `required histories refine the model (${seed ?? `random`})`,
+      async (rest) => {
+        requiredRan = true
+        historiesRan = true
+        for (const prefix of reachPrefixes) {
+          historyReach.beginHistory()
+          requiredReach.beginHistory()
+          await withDeadline(
+            runHistory(
+              prefixShapes.get(prefix) ?? `join`,
+              [...prefix, ...rest],
+              true,
+              {
+                ...requiredReach,
+                reach(state) {
+                  requiredReach.reach(state)
+                  historyReach.reach(state)
+                },
+              },
+            ),
+          )
+        }
+      },
+      120_000,
+    )
+    afterAll(() => {
+      if (requiredRan) {
+        requiredReach.assertReached()
+        console.info(
+          `source-health required reach (${seed ?? `random`}): ${JSON.stringify(Object.fromEntries(requiredReach.counts()))}`,
+        )
+      }
+    })
+  }
   afterAll(() => {
     if (historiesRan) historyReach.assertReached()
   })
@@ -5253,7 +5306,7 @@ describe(`on-demand demand grammar`, () => {
   afterAll(() => {
     if (demandHistoriesRan) demandReach.assertReached()
   })
-  fcTest.prop(
+  oracleReplayTest(fcTest, `source-health.on-demand`).prop(
     [
       fc
         .tuple(
@@ -7165,7 +7218,7 @@ describe(`lazy join demand grammar`, () => {
   afterAll(() => {
     if (lazyHistoriesRan) lazyReach.assertReached()
   })
-  fcTest.prop(
+  oracleReplayTest(fcTest, `source-health.lazy-demand`).prop(
     [
       fc
         .tuple(
@@ -7253,7 +7306,7 @@ describe(`request error bookkeeping`, () => {
     fc.record({ kind: fc.constant(`fail-again` as const), key }),
     fc.record({ kind: fc.constant(`settle` as const), key }),
   )
-  fcTest.prop(
+  oracleReplayTest(fcTest, `source-health.request-errors`).prop(
     [fc.array(step, { maxLength: 12 })],
     oraclePropertyOptions(100, `source-health.request-errors`),
   )(

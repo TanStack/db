@@ -123,7 +123,7 @@ it.each(cells)(
       await receipt
       if (held) expect(c.get(9)?.value).toBe('optimistic')
       finish.resolve()
-      await optimistic?.isPersisted.promise
+      await optimistic?.when(`settled`)
       expect.soft(c.status).toBe(expectedStatus)
       // A later independent ordinary replacement is ready.
       sync.begin()

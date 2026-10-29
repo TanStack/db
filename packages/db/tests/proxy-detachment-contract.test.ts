@@ -54,7 +54,7 @@ describe(`Mutation result detachment`, () => {
         const collection = storedRow(make())
         try {
           const tx = collection.update(1, run)
-          await tx.isPersisted.promise
+          await tx.when('settled')
           expect(collection.get(1)!.child).toStrictEqual(expected.child)
           expect(collection.get(1)!.alias).toStrictEqual(expected.alias)
         } finally {
@@ -101,7 +101,7 @@ describe(`Mutation result detachment`, () => {
           const tx = collection.update(1, (draft) => {
             for (const value of values) draft.value = makeValue(value)
           })
-          await tx.isPersisted.promise
+          await tx.when('settled')
           expect(observe(collection.get(1)!.value)).toStrictEqual(
             observe(expected.value),
           )
@@ -168,7 +168,7 @@ describe(`Mutation result detachment`, () => {
       const collection = storedRow(make())
       try {
         const tx = collection.update(1, reorder)
-        await tx.isPersisted.promise
+        await tx.when('settled')
         expect(entries(collection.get(1)!.value)).toEqual(
           entries(expected.value),
         )
@@ -215,7 +215,7 @@ describe(`Mutation result detachment`, () => {
       expect(collection.get(1)!.value).toBe(label)
       label.rename(`after`)
       expect((collection.get(1)!.value as Label).read()).toBe(`after`)
-      await tx.isPersisted.promise
+      await tx.when('settled')
     } finally {
       await collection.cleanup()
     }
@@ -259,7 +259,7 @@ describe(`Mutation result detachment`, () => {
         else if (value instanceof Label)
           expect((saved as Label).read()).toBe(`saved`)
         else expect(saved).toEqual(value)
-        await tx.isPersisted.promise
+        await tx.when('settled')
       } finally {
         await collection.cleanup()
       }
@@ -295,7 +295,7 @@ describe(`Mutation result detachment`, () => {
       })
       value.pathname = `/after`
       expect((collection.get(1)!.value as URL).pathname).toBe(`/before`)
-      await tx.isPersisted.promise
+      await tx.when('settled')
     } finally {
       await collection.cleanup()
     }
@@ -338,7 +338,7 @@ describe(`Mutation result detachment`, () => {
             ? back.s.values().next().value!.back
             : back.arr[0]!.owner
         expect(cycle).toBe(back)
-        await tx.isPersisted.promise
+        await tx.when('settled')
       } finally {
         await collection.cleanup()
       }

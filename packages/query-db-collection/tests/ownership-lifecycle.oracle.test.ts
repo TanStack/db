@@ -9,8 +9,17 @@ import {
   eq,
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { createOracleReach } from '../../db/tests/oracle-reach'
+import { withOracleCleanup } from '../../db/tests/utils'
+import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
+import {
+  checkMutationConfirmation,
+  mutationConfirmationHistories,
+  mutationConfirmationInputs,
+  mutationConfirmationRows,
+} from '../../db/tests/mutation-confirmation-oracle'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   compileSingleRowExpression,
@@ -19,6 +28,7 @@ import {
 
 import { InvalidQueryResultError } from '../src/errors.js'
 import { queryCollectionOptions } from '../src/query.js'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import {
   categorySubset,
   cleanups,
@@ -36,10 +46,17 @@ import {
   shared,
   storedItems,
 } from './ownership-lifecycle-support.js'
+import type {
+  MutationConfirmationObservation,
+  MutationConfirmationRow,
+} from '../../db/tests/mutation-confirmation-oracle'
 import type { LoadSubsetOptions, Transaction } from '@tanstack/db'
 import type { QueryClient, QueryFunctionContext } from '@tanstack/query-core'
 
-import type { QueryCollectionUtils } from '../src/query.js'
+import type {
+  QueryCollectionConfig,
+  QueryCollectionUtils,
+} from '../src/query.js'
 import type {
   Item,
   MetadataRecorder,
@@ -53,7 +70,10 @@ import type {
  * remains public while any committed owner needs it. Provisional ownership
  * begins during result application, becomes durable only after publication and
  * persistence, and retires when superseded, canceled, cleaned up, or released.
- * Mutation refetches add a second authority path but do not bypass those rules.
+ * Explicit mutation refetches add a second authority path but do not bypass
+ * those rules. Completing a mutation handler starts no Query request and does
+ * not change synced rows. The first-RC migration requires handlers to refetch
+ * or write confirmed data explicitly to retain their optimistic changes.
  * An accepted direct write changes its Collection without starting a Query
  * request. In eager mode, compatible Collections sharing a physical Query
  * project representable cache patches made by either writer. In on-demand
@@ -295,8 +315,9 @@ function expectPublicRefetchObservation(
  *   application from the handler call while retaining its later error record.
  * - `HandlerIdentityObservation` is a model-only projection of strict
  *   transaction, mutation, and Collection identity plus identity-keyed
- *   registry results. Its bounded grammar exhausts insert, update, and delete;
- *   handler parameter and mutation-alias access; and refetch and clearError.
+ *   registry results. Its bounded grammar crosses insert, update, and delete
+ *   through handler parameter and mutation-alias access during explicit refetch.
+ *   Historical operation labels are replay coordinates only, not model state.
  * - `MutationRefreshLivenessModel` is a wait-for graph. Its mutation, fetch,
  *   and application nodes map to the user transaction, Query promise, and
  *   Collection publication boundary. Invocation labels test both owned and
@@ -699,7 +720,21 @@ function observeHandlerRefetchBoundary(model: HandlerRefetchBoundaryModel): {
  * create the forbidden cycle mutation -> refresh -> application -> mutation;
  * for an external caller it would add an unrelated persistence delay.
  */
-type MutationRefreshOperation = `refetch` | `clearError`
+/**
+ * Before the RC, these matrices exercised refetch and the removed clearError
+ * utility. Both paths now explicitly refetch. Keep the former operation labels
+ * only as replay coordinates: existing traces, fixture IDs, and all 12 runs of
+ * each matrix survive. The labels add no semantic history or model distinction.
+ * To select the former clearError rows, use the test-name pattern
+ * `legacy replay:.*clearError`; Vitest can quote interpolated string values.
+ */
+type LegacyRefreshReplayCoordinate = `refetch` | `clearError`
+const legacyRefreshReplayCoordinates = [`refetch`, `clearError`] as const
+
+type LegacyRefreshReplay = {
+  legacyOperation: LegacyRefreshReplayCoordinate
+}
+
 type MutationRefreshInvocation =
   | `manual-transaction`
   | `optimistic-action`
@@ -714,7 +749,6 @@ type MutationRefreshSchedule =
 
 type MutationRefreshHistory = {
   invocation: MutationRefreshInvocation
-  operation: MutationRefreshOperation
   schedule: MutationRefreshSchedule
 }
 
@@ -725,8 +759,9 @@ const mutationRefreshInvocations = [
   `external-handler-overlap`,
   `external-persisted-application-overlap`,
 ] as const
-const mutationRefreshOperations = [`refetch`, `clearError`] as const
-const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> = [
+const mutationRefreshHistoryGrammar: ReadonlyArray<
+  MutationRefreshHistory & LegacyRefreshReplay
+> = [
   ...mutationRefreshInvocations
     .filter(
       (invocation) =>
@@ -734,24 +769,24 @@ const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> = [
         invocation !== `external-persisted-application-overlap`,
     )
     .flatMap((invocation) =>
-      mutationRefreshOperations.map((operation) => ({
+      legacyRefreshReplayCoordinates.map((legacyOperation) => ({
         invocation,
-        operation,
+        legacyOperation,
         schedule: `mutation-first` as const,
       })),
     ),
-  ...mutationRefreshOperations.flatMap((operation) =>
+  ...legacyRefreshReplayCoordinates.flatMap((legacyOperation) =>
     ([`mutation-first`, `refresh-first-during-fetch`] as const).map(
       (schedule) => ({
         invocation: `external-handler-overlap` as const,
-        operation,
+        legacyOperation,
         schedule,
       }),
     ),
   ),
-  ...mutationRefreshOperations.map((operation) => ({
+  ...legacyRefreshReplayCoordinates.map((legacyOperation) => ({
     invocation: `external-persisted-application-overlap` as const,
-    operation,
+    legacyOperation,
     schedule: `refresh-first-during-application` as const,
   })),
 ]
@@ -854,12 +889,10 @@ function observeFetchRecordSuccessorWork(model: FetchRecordLifecycleModel): {
 
 type MutationHandlerKind = `insert` | `update` | `delete`
 type HandlerCollectionAccessPath = `parameter` | `mutation-alias`
-type HandlerCollectionOperation = `refetch` | `clearError`
 
 type HandlerCollectionHistory = {
   handlerKind: MutationHandlerKind
   accessPath: HandlerCollectionAccessPath
-  operation: HandlerCollectionOperation
 }
 
 type HandlerIdentityObservation = HandlerCollectionHistory & {
@@ -877,18 +910,17 @@ type HandlerIdentityObservation = HandlerCollectionHistory & {
 
 const mutationHandlerKinds = [`insert`, `update`, `delete`] as const
 const handlerCollectionAccessPaths = [`parameter`, `mutation-alias`] as const
-const handlerCollectionOperations = [`refetch`, `clearError`] as const
-
-const handlerCollectionHistoryGrammar: ReadonlyArray<HandlerCollectionHistory> =
-  mutationHandlerKinds.flatMap((handlerKind) =>
-    handlerCollectionAccessPaths.flatMap((accessPath) =>
-      handlerCollectionOperations.map((operation) => ({
-        handlerKind,
-        accessPath,
-        operation,
-      })),
-    ),
-  )
+const handlerCollectionHistoryGrammar: ReadonlyArray<
+  HandlerCollectionHistory & LegacyRefreshReplay
+> = mutationHandlerKinds.flatMap((handlerKind) =>
+  handlerCollectionAccessPaths.flatMap((accessPath) =>
+    legacyRefreshReplayCoordinates.map((legacyOperation) => ({
+      handlerKind,
+      accessPath,
+      legacyOperation,
+    })),
+  ),
+)
 
 /**
  * A direct mutation handler receives the real Collection. Every matching
@@ -904,7 +936,8 @@ function observeHandlerIdentity(
     throw new Error(`A direct handler requires a matching mutation alias`)
   }
   return {
-    ...history,
+    handlerKind: history.handlerKind,
+    accessPath: history.accessPath,
     matchingAliasCount,
     transactionIsExternal: true,
     allMutationsPreserveIdentity: true,
@@ -1587,8 +1620,36 @@ function mergeDirectWritesOverFetch(
   )
 }
 
+// A pending application obligation can include persistence after publication.
+// While its receipt is held, allow either complete source snapshot; never infer
+// receipt settlement merely from visible rows. Once it fulfills, the waiter
+// itself must read the confirmed snapshot. This composes the existing call
+// ledger with Collection commit coherence without copying persistence machinery.
+function checkPostHandlerRefetch(
+  model: RefetchCallSettlementModel,
+  observed: {
+    refetch: ReturnType<typeof observeRefetchCallSettlement>
+    rows: string
+    waiterRows: string | undefined
+  },
+  initial: string,
+  confirmed: string,
+): void {
+  const expected = observeRefetchCallSettlement(model)
+  expect(observed.refetch).toEqual(expected)
+  if (expected.refetch === `pending`) {
+    expect([initial, confirmed]).toContain(observed.rows)
+    expect(observed.waiterRows).toBeUndefined()
+  } else {
+    expect(observed.rows).toBe(confirmed)
+    expect(observed.waiterRows).toBe(confirmed)
+  }
+}
+
 declareOracle({
   check: [
+    checkMutationConfirmation,
+    checkPostHandlerRefetch,
     expectPublicRefetchObservation,
     runDirectRowLifetimeHistory,
     runDirectWriteOrderHistory,
@@ -1614,6 +1675,502 @@ declareOracle({
 describe(`query collection ownership lifecycle`, () => {
   afterEach(async () => {
     await runCleanups()
+  })
+
+  // The shared independent model owns handler outcome versus confirmation.
+  // This real QueryClient driver controls the server edit, explicit acceptance,
+  // and handler settlement separately. No focus/poll/invalidation trigger runs.
+  // Rejections after a committed server edit must not undo accepted source data.
+  describe(`mutation outcome and confirmation`, () => {
+    const mutationHistories = mutationConfirmationHistories(`query`)
+    const mutationReachStates = mutationHistories.map(
+      (h) =>
+        `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
+    )
+    const mutationReach = createOracleReach(
+      `query.mutation-confirmation`,
+      mutationReachStates,
+    )
+    afterAll(() => {
+      mutationReach.assertReached()
+      console.info(
+        `query.mutation-confirmation reach`,
+        Object.fromEntries(mutationReach.counts()),
+      )
+    })
+    it.each(mutationHistories)(
+      `refreshes only when the handler requests it: %j`,
+      async (history) => {
+        mutationReach.beginHistory()
+        const { operation, confirmation, outcome, returned } = history
+        const localReach = createOracleReach(`query.mutation-cuts`, [
+          `entered`,
+          `settled`,
+          `settlement-waiter`,
+          ...(outcome === `reject-before-write` ? [] : [`server-written`]),
+          ...(confirmation === `none` ? [] : [`confirmation-accepted`]),
+          ...(confirmation === `refetch` ? [`confirmation-requested`] : []),
+          ...(confirmation === `none` && outcome !== `reject-before-write`
+            ? [`late-confirmed`]
+            : []),
+        ])
+        localReach.beginHistory()
+        const queryClient = createQueryClient()
+        const enterRelease = createDeferred<void>()
+        const confirmationRelease = createDeferred<void>()
+        const settleRelease = createDeferred<void>()
+        const entered = createDeferred<void>()
+        const serverWritten = createDeferred<void>()
+        const confirmationAccepted = createDeferred<void>()
+        const refetchRequested = createDeferred<void>()
+        const refetchResponse = createDeferred<void>()
+        const failure = new Error(`handler ${outcome}`)
+        const initial = mutationConfirmationRows(
+          operation,
+          `initial`,
+          history.peer,
+        )
+        const confirmed = mutationConfirmationRows(
+          operation,
+          `confirmed`,
+          history.peer,
+        )
+        let server = structuredClone(initial)
+        let handlerWrites = 0
+        let confirmationCalls = 0
+        let confirmationStatus: MutationConfirmationObservation[`confirmationStatus`] = `not-requested`
+        let settlement: MutationConfirmationObservation[`settlement`] = `pending`
+        let error: unknown
+        let holdRefetch = confirmation === `refetch`
+        const queryFn = vi.fn(async () => {
+          if (confirmationCalls > 0 && holdRefetch) {
+            refetchRequested.resolve()
+            await refetchResponse.promise
+          }
+          return structuredClone(server)
+        })
+        let releaseCollection: (() => Promise<void>) | undefined
+        let verdict: Promise<MutationConfirmationObservation> | undefined
+        await withOracleCleanup(async () => {
+          const handler = async ({
+            collection: target,
+          }: Pick<
+            Parameters<
+              NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onInsert`]
+              >
+            >[0],
+            `collection`
+          >) => {
+            entered.resolve()
+            await enterRelease.promise
+            if (outcome === `reject-before-write`) throw failure
+            server = structuredClone(confirmed)
+            handlerWrites++
+            serverWritten.resolve()
+            await confirmationRelease.promise
+            if (confirmation !== `none`) {
+              confirmationCalls++
+              confirmationStatus = `pending`
+            }
+            if (confirmation === `refetch`) await target.utils.refetch()
+            if (confirmation === `write`) {
+              if (operation === `delete`) await target.utils.writeDelete(1)
+              else
+                await target.utils.writeUpsert({
+                  ...mutationConfirmationInputs.confirmed,
+                })
+            }
+            if (confirmation !== `none`) confirmationStatus = `accepted`
+            confirmationAccepted.resolve()
+            await settleRelease.promise
+            if (outcome === `reject-after-write`) throw failure
+            return returned === `legacy-disable`
+              ? { refetch: false }
+              : returned === `legacy-enable`
+                ? { refetch: true }
+                : undefined
+          }
+          const collection = createCollection(
+            queryCollectionOptions<MutationConfirmationRow>({
+              queryKey: [`explicit-handler-refresh`, history],
+              queryClient,
+              queryFn,
+              getKey: (row) => row.id,
+              // JS callers may return coordination objects that TS now rejects.
+              onInsert: handler as unknown as NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onInsert`]
+              >,
+              onUpdate: handler as unknown as NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onUpdate`]
+              >,
+              onDelete: handler as unknown as NonNullable<
+                QueryCollectionConfig<MutationConfirmationRow>[`onDelete`]
+              >,
+            }),
+          )
+          releaseCollection = () => collection.cleanup()
+          await atMutationCheckpoint(
+            collection.preload(),
+            `initial Query preload`,
+          )
+          const transaction =
+            operation === `insert`
+              ? collection.insert({ ...mutationConfirmationInputs.optimistic })
+              : operation === `delete`
+                ? collection.delete(1)
+                : collection.update(1, (draft) => {
+                    draft.name = `optimistic`
+                  })
+          const observe = (): MutationConfirmationObservation => ({
+            rows: collection.toArray
+              .map(({ id, name, stable }) => ({ id, name, stable }))
+              .sort((a, b) => a.id - b.id),
+            handlerWrites,
+            confirmationCalls,
+            fetches: queryFn.mock.calls.length,
+            providerRequests: 0,
+            confirmationStatus,
+            state: transaction.state,
+            settlement,
+            error,
+          })
+          verdict = transaction.when(`settled`).then(
+            () => {
+              settlement = `fulfilled`
+              return observe()
+            },
+            (reason: unknown) => {
+              settlement = `rejected`
+              error = reason
+              return observe()
+            },
+          )
+          await atMutationCheckpoint(entered.promise, `Query handler entry`)
+          checkMutationConfirmation(history, `entered`, observe(), failure)
+          localReach.reach(`entered`)
+          enterRelease.resolve()
+          if (outcome !== `reject-before-write`) {
+            await atMutationCheckpoint(
+              serverWritten.promise,
+              `Query server write`,
+            )
+            checkMutationConfirmation(
+              history,
+              `server-written`,
+              observe(),
+              failure,
+            )
+            localReach.reach(`server-written`)
+            confirmationRelease.resolve()
+            if (confirmation === `refetch`) {
+              await atMutationCheckpoint(
+                refetchRequested.promise,
+                `held Query refetch response`,
+              )
+              checkMutationConfirmation(
+                history,
+                `confirmation-requested`,
+                observe(),
+                failure,
+              )
+              localReach.reach(`confirmation-requested`)
+              holdRefetch = false
+              refetchResponse.resolve()
+            }
+            await atMutationCheckpoint(
+              confirmationAccepted.promise,
+              `Query confirmation acceptance`,
+            )
+            if (confirmation !== `none`) {
+              checkMutationConfirmation(
+                history,
+                `confirmation-accepted`,
+                observe(),
+                failure,
+              )
+              localReach.reach(`confirmation-accepted`)
+            }
+            settleRelease.resolve()
+          }
+          const atWaiter = await atMutationCheckpoint(
+            verdict,
+            `Query handler settlement`,
+          )
+          checkMutationConfirmation(history, `settled`, atWaiter, failure)
+          localReach.reach(`settlement-waiter`)
+          checkMutationConfirmation(history, `settled`, observe(), failure)
+          localReach.reach(`settled`)
+          if (confirmation === `none` && outcome !== `reject-before-write`) {
+            // Backend success alone supplied no source confirmation. A later
+            // explicit reader may refetch; the frozen settlement cut stays old.
+            await atMutationCheckpoint(
+              collection.utils.refetch(),
+              `later explicit Query refetch`,
+            )
+            checkMutationConfirmation(
+              history,
+              `late-confirmed`,
+              observe(),
+              failure,
+            )
+            localReach.reach(`late-confirmed`)
+            checkMutationConfirmation(history, `settled`, atWaiter, failure)
+          }
+          localReach.assertReached()
+          mutationReach.reach(
+            `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`,
+          )
+        }, [
+          () => {
+            enterRelease.resolve()
+            confirmationRelease.resolve()
+            settleRelease.resolve()
+            refetchResponse.resolve()
+          },
+          () =>
+            verdict &&
+            atMutationCheckpoint(verdict, `Query cleanup settlement`),
+          () => releaseCollection?.(),
+          () => queryClient.clear(),
+        ])
+      },
+    )
+  })
+
+  /**
+   * Handler exit restores the ordinary public-refetch boundary. A later call
+   * waits for its commit receipt, even if an earlier CRUD handler
+   * rejected. The existing call-obligation model owns that judgment. A real
+   * persisted wrapper holds the later durable commit with no optimistic work
+   * left; this distinguishes a leaked handler count from a legitimate mutation
+   * publication block. Ordinary source values are serialized without dropping
+   * fields; ordering is normalized because Collection order is unspecified.
+   */
+  describe(`refetch application after handler exit`, () => {
+    const histories = ([`insert`, `update`, `delete`] as const).flatMap(
+      (operation) => [false, true].map((reject) => ({ operation, reject })),
+    )
+    const reach = createOracleReach(
+      `query.post-handler-application`,
+      histories.flatMap((h) => [
+        `${h.operation}/${h.reject}/application-held`,
+        `${h.operation}/${h.reject}/applied-waiter`,
+      ]),
+    )
+    afterAll(() => {
+      reach.assertReached()
+      console.info(
+        `query.post-handler-application reach`,
+        Object.fromEntries(reach.counts()),
+      )
+    })
+    it.each([`early-receipt`, `partial-rows`, `stale-waiter`] as const)(
+      `rejects post-handler wrong observation: %s`,
+      (fault) => {
+        let model = createRefetchCallSettlementModel([`query`], true)
+        model = reduceRefetchCallSettlement(model, {
+          type: `accept-application`,
+          queryId: `query`,
+          applicationId: `later-result`,
+        })
+        model = reduceRefetchCallSettlement(model, {
+          type: `settle-fetch`,
+          queryId: `query`,
+          outcome: `fulfilled`,
+        })
+        if (fault === `stale-waiter`)
+          model = reduceRefetchCallSettlement(model, {
+            type: `settle-application`,
+            applicationId: `later-result`,
+            outcome: `fulfilled`,
+          })
+        const actual = {
+          refetch: observeRefetchCallSettlement(model),
+          rows: `confirmed`,
+          waiterRows: fault === `stale-waiter` ? `confirmed` : undefined,
+        }
+        checkPostHandlerRefetch(model, actual, `initial`, `confirmed`)
+        if (fault === `early-receipt`)
+          actual.refetch = { refetch: `resolved`, resultOrder: [`query`] }
+        if (fault === `partial-rows`) actual.rows = `partial`
+        if (fault === `stale-waiter`) actual.waiterRows = `initial`
+        expect(() =>
+          checkPostHandlerRefetch(model, actual, `initial`, `confirmed`),
+        ).toThrow()
+      },
+    )
+    it.each(histories)(
+      `waits for later application after handler $operation rejection:$reject`,
+      async ({ operation, reject }) => {
+        reach.beginHistory()
+        const initial: Array<Item> = [
+          { id: `peer`, category: `peer`, name: `Peer` },
+          ...(operation === `insert`
+            ? []
+            : [{ id: `a`, category: `edited`, name: `Before` }]),
+        ]
+        const authoritative: Array<Item> = [
+          { id: `peer`, category: `peer`, name: `New peer` },
+          { id: `a`, category: `edited`, name: `New source row` },
+        ]
+        const encode = (values: ReadonlyArray<Item>) =>
+          JSON.stringify(
+            [...values]
+              .map(({ id, category, name }) => ({ id, category, name }))
+              .sort((left, right) => left.id.localeCompare(right.id)),
+          )
+        let server = structuredClone(initial)
+        const handlerFailure = new Error(`handler rejected`)
+        const handler = async () => {
+          await Promise.resolve()
+          if (reject) throw handlerFailure
+        }
+        const storage = createOwnershipStorage()
+        const entered = createDeferred<void>()
+        const release = createDeferred<void>()
+        let hold = false
+        const apply = storage.adapter.applyCommittedTx.bind(storage.adapter)
+        storage.adapter.applyCommittedTx = async (...args) => {
+          if (hold && args[1].mutations.length > 0) {
+            hold = false
+            entered.resolve()
+            await release.promise
+          }
+          return apply(...args)
+        }
+        const queryClient = createQueryClient()
+        const queryFn = vi.fn(() => Promise.resolve(structuredClone(server)))
+        let releaseCollection: (() => Promise<void>) | undefined
+        let external: Promise<unknown> | undefined
+        await withOracleCleanup(async () => {
+          const collection = createCollection(
+            persistedCollectionOptions<
+              Item,
+              string | number,
+              never,
+              QueryCollectionUtils<Item>
+            >({
+              ...queryCollectionOptions<Item>({
+                id: `post-handler-${operation}-${reject}`,
+                queryKey: [`post-handler`, operation, reject],
+                queryClient,
+                queryFn,
+                getKey: (row) => row.id,
+                onInsert: handler,
+                onUpdate: handler,
+                onDelete: handler,
+              }),
+              persistence: { adapter: storage.adapter },
+            }),
+          )
+          releaseCollection = () => collection.cleanup()
+          await atMutationCheckpoint(
+            collection.preload(),
+            `post-handler initial preload`,
+          )
+          const transaction =
+            operation === `insert`
+              ? collection.insert({
+                  id: `a`,
+                  category: `edited`,
+                  name: `Optimistic`,
+                })
+              : operation === `delete`
+                ? collection.delete(`a`)
+                : collection.update(`a`, (draft) => {
+                    draft.name = `Optimistic`
+                  })
+          const firstError = await transaction.when(`settled`).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          expect(firstError).toBe(reject ? handlerFailure : undefined)
+          expect(transaction.state).toBe(reject ? `failed` : `completed`)
+          expect(encode(collection.toArray)).toBe(encode(initial))
+          hold = true
+          server = structuredClone(authoritative)
+          let outcome: RefetchApplicationOutcome = `pending`
+          let resultOrder: Array<string> | undefined
+          let waiterRows: string | undefined
+          const observe = () => ({
+            rows: encode(collection.toArray),
+            waiterRows,
+            refetch: {
+              refetch: outcome,
+              ...(outcome === `resolved` ? { resultOrder } : {}),
+            },
+          })
+          let model = createRefetchCallSettlementModel([`query`], true)
+          model = reduceRefetchCallSettlement(model, {
+            type: `accept-application`,
+            queryId: `query`,
+            applicationId: `later-result`,
+          })
+          external = collection.utils.refetch({ throwOnError: true }).then(
+            (results) => {
+              outcome = `resolved`
+              resultOrder = results.map(() => `query`)
+              waiterRows = encode(collection.toArray)
+            },
+            (error: unknown) => {
+              outcome = `rejected`
+              throw error
+            },
+          )
+          void external.catch(() => {})
+          await atMutationCheckpoint(
+            entered.promise,
+            `post-handler durable application held`,
+          )
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(queryClient.isFetching()).toBe(0)
+          })
+          // Query's flags clear before the utility's queued Promise chain
+          // finishes. Keep the receipt held through a task boundary so every
+          // already-queued microtask can process that completed fetch. The
+          // leaked-count transform is the calibration for this timing premise.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          model = reduceRefetchCallSettlement(model, {
+            type: `settle-fetch`,
+            queryId: `query`,
+            outcome: `fulfilled`,
+          })
+          checkPostHandlerRefetch(
+            model,
+            observe(),
+            encode(initial),
+            encode(authoritative),
+          )
+          reach.reach(`${operation}/${reject}/application-held`)
+          release.resolve()
+          await atMutationCheckpoint(
+            external,
+            `post-handler external refetch settlement`,
+          )
+          model = reduceRefetchCallSettlement(model, {
+            type: `settle-application`,
+            applicationId: `later-result`,
+            outcome: `fulfilled`,
+          })
+          checkPostHandlerRefetch(
+            model,
+            observe(),
+            encode(initial),
+            encode(authoritative),
+          )
+          reach.reach(`${operation}/${reject}/applied-waiter`)
+        }, [
+          () => release.resolve(),
+          () =>
+            external &&
+            atMutationCheckpoint(external, `post-handler cleanup refetch`),
+          () => releaseCollection?.(),
+          () => queryClient.clear(),
+        ])
+      },
+    )
   })
 
   it(`keeps an accepted empty-diff result pending until application`, () => {
@@ -1948,10 +2505,10 @@ describe(`query collection ownership lifecycle`, () => {
     })
   })
 
-  it(`enumerates every direct handler identity history exactly once`, () => {
+  it(`preserves every direct handler identity legacy replay coordinate`, () => {
     const historyKeys = handlerCollectionHistoryGrammar.map(
-      ({ handlerKind, accessPath, operation }) =>
-        `${handlerKind}:${accessPath}:${operation}`,
+      ({ handlerKind, accessPath, legacyOperation }) =>
+        `${handlerKind}:${accessPath}:${legacyOperation}`,
     )
     expect(historyKeys).toEqual([
       `insert:parameter:refetch`,
@@ -1968,6 +2525,14 @@ describe(`query collection ownership lifecycle`, () => {
       `delete:mutation-alias:clearError`,
     ])
     expect(new Set(historyKeys).size).toBe(historyKeys.length)
+    // Six semantic histories each keep their two historical replay runs.
+    expect(
+      new Set(
+        handlerCollectionHistoryGrammar.map(
+          ({ handlerKind, accessPath }) => `${handlerKind}:${accessPath}`,
+        ),
+      ).size,
+    ).toBe(6)
   })
 
   it(`rejects handler identity wrong-result controls`, () => {
@@ -2156,7 +2721,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
     cleanups.push(async () => {
       persistence.resolve()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       consoleError.mockRestore()
       await collection.cleanup()
       queryClient.clear()
@@ -2204,7 +2769,7 @@ describe(`query collection ownership lifecycle`, () => {
     expect(collection.get(shared.id)?.name).toBe(`Optimistic`)
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     const results = await refetch
     model = reduceMutationRefreshLiveness(model, {
       type: `settle-application`,
@@ -2376,7 +2941,7 @@ describe(`query collection ownership lifecycle`, () => {
     cleanups.push(async () => {
       unsubscribeCache()
       persistence.resolve()
-      await transaction?.isPersisted.promise.catch(() => undefined)
+      await transaction?.when(`settled`).catch(() => undefined)
       await collection.cleanup()
       queryClient.clear()
     })
@@ -2428,7 +2993,7 @@ describe(`query collection ownership lifecycle`, () => {
       outcome: `rejected`,
     })
     persistence.resolve()
-    await transaction?.isPersisted.promise
+    await transaction?.when(`settled`)
     const results = await refetch
 
     expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
@@ -2560,7 +3125,7 @@ describe(`query collection ownership lifecycle`, () => {
       })
       cleanups.push(async () => {
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
       })
 
       let model: MutationRefreshLivenessModel = {
@@ -2608,7 +3173,7 @@ describe(`query collection ownership lifecycle`, () => {
       }).toEqual(observeMutationRefreshLiveness(model))
 
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await refetch
       model = reduceMutationRefreshLiveness(model, {
         type: `settle-application`,
@@ -2666,7 +3231,7 @@ describe(`query collection ownership lifecycle`, () => {
       explicitResult.resolve([authoritative])
       persistence.resolve()
       if (transactionStarted) {
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
       }
       await Promise.allSettled([eager.cleanup(), onDemand.cleanup()])
       queryClient.clear()
@@ -2723,7 +3288,7 @@ describe(`query collection ownership lifecycle`, () => {
     }).toEqual(observeMutationRefreshLiveness(model))
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     const results = await refetch
     model = reduceMutationRefreshLiveness(model, {
       type: `settle-application`,
@@ -2741,8 +3306,8 @@ describe(`query collection ownership lifecycle`, () => {
       ({ invocation }) => invocation === `external-handler-overlap`,
     ),
   )(
-    `settles an external $operation at fetch with $schedule overlap`,
-    async ({ operation, schedule }) => {
+    `settles an external refetch at fetch with $schedule overlap (legacy replay: $legacyOperation)`,
+    async ({ legacyOperation, schedule }) => {
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -2755,16 +3320,17 @@ describe(`query collection ownership lifecycle`, () => {
         .mockReturnValueOnce(refreshResult.promise)
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `external-${operation}-${schedule}-overlaps-handler`,
+          id: `external-${legacyOperation}-${schedule}-overlaps-handler`,
           queryClient,
-          queryKey: [`external-${operation}-${schedule}-overlaps-handler`],
+          queryKey: [
+            `external-${legacyOperation}-${schedule}-overlaps-handler`,
+          ],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,
           onUpdate: async () => {
             handlerStarted.resolve()
             await releaseHandler.promise
-            return { refetch: false }
           },
         }),
       )
@@ -2784,11 +3350,7 @@ describe(`query collection ownership lifecycle`, () => {
       }
       let refetchOutcome: RefetchApplicationOutcome = `pending`
       const startRefresh = () => {
-        const refresh = (
-          operation === `refetch`
-            ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.refetch({ throwOnError: true })
-        ).then(
+        const refresh = collection.utils.refetch({ throwOnError: true }).then(
           (result) => {
             refetchOutcome = `resolved`
             return result
@@ -2841,7 +3403,7 @@ describe(`query collection ownership lifecycle`, () => {
       }).toEqual(observeMutationRefreshLiveness(model))
 
       releaseHandler.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       await refresh
       model = reduceMutationRefreshLiveness(model, {
         type: `settle-application`,
@@ -2860,9 +3422,9 @@ describe(`query collection ownership lifecycle`, () => {
         invocation === `external-persisted-application-overlap`,
     ),
   )(
-    `settles an external $operation when mutation starts during persisted application preparation`,
-    async ({ operation }) => {
-      const id = `external-${operation}-persisted-application-overlap`
+    `settles an external refetch when mutation starts during persisted application preparation (legacy replay: $legacyOperation)`,
+    async ({ legacyOperation }) => {
+      const id = `external-${legacyOperation}-persisted-application-overlap`
       const queryHash = hashKey([id])
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
@@ -2916,11 +3478,7 @@ describe(`query collection ownership lifecycle`, () => {
         throwOnError: true,
       }
       let refetchOutcome: RefetchApplicationOutcome = `pending`
-      const refresh = (
-        operation === `refetch`
-          ? collection.utils.refetch({ throwOnError: true })
-          : collection.utils.refetch({ throwOnError: true })
-      ).then(
+      const refresh = collection.utils.refetch({ throwOnError: true }).then(
         (result) => {
           refetchOutcome = `resolved`
           return result
@@ -2942,7 +3500,7 @@ describe(`query collection ownership lifecycle`, () => {
         mutationFn: () => persistence.promise,
       })
       transaction.mutate(() => collection.insert(optimistic))
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       applicationScan.resolve([])
       model = reduceMutationRefreshLiveness(model, {
         type: `accept-application`,
@@ -2959,7 +3517,7 @@ describe(`query collection ownership lifecycle`, () => {
       expect(collection.get(shared.id)?.name).not.toBe(authoritative.name)
 
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await refresh
       model = reduceMutationRefreshLiveness(model, {
         type: `settle-application`,
@@ -2976,9 +3534,9 @@ describe(`query collection ownership lifecycle`, () => {
 
   it(`rejects a call-entry-only boundary mutant for refresh-first overlap`, () => {
     const history = mutationRefreshHistoryGrammar.find(
-      ({ invocation, operation, schedule }) =>
+      ({ invocation, legacyOperation, schedule }) =>
         invocation === `external-handler-overlap` &&
-        operation === `refetch` &&
+        legacyOperation === `refetch` &&
         schedule === `refresh-first-during-fetch`,
     )
     expect(history).toBeDefined()
@@ -3006,16 +3564,23 @@ describe(`query collection ownership lifecycle`, () => {
     expect(callEntryOnlyMutant).not.toEqual(expected)
   })
 
-  it(`enumerates every mutation refresh history exactly once`, () => {
+  it(`preserves every mutation refresh legacy replay coordinate`, () => {
     expect(mutationRefreshHistoryGrammar).toHaveLength(12)
     expect(
       new Set(
         mutationRefreshHistoryGrammar.map(
-          ({ invocation, operation, schedule }) =>
-            `${invocation}:${operation}:${schedule}`,
+          ({ invocation, legacyOperation, schedule }) =>
+            `${invocation}:${legacyOperation}:${schedule}`,
         ),
       ).size,
     ).toBe(mutationRefreshHistoryGrammar.length)
+    expect(
+      new Set(
+        mutationRefreshHistoryGrammar.map(
+          ({ invocation, schedule }) => `${invocation}:${schedule}`,
+        ),
+      ).size,
+    ).toBe(6)
   })
 
   it.each(
@@ -3025,9 +3590,9 @@ describe(`query collection ownership lifecycle`, () => {
         invocation === `optimistic-action`,
     ),
   )(
-    `settles a $invocation $operation at the fetch boundary`,
-    async ({ invocation, operation }) => {
-      const id = `mutation-refresh-${invocation}-${operation}`
+    `settles a $invocation refetch at the fetch boundary (legacy replay: $legacyOperation)`,
+    async ({ invocation, legacyOperation }) => {
+      const id = `mutation-refresh-${invocation}-${legacyOperation}`
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -3049,10 +3614,7 @@ describe(`query collection ownership lifecycle`, () => {
       )
       let refreshOutcome: RefetchApplicationOutcome = `pending`
       const mutationFn = async (): Promise<void> => {
-        const refresh =
-          operation === `refetch`
-            ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.refetch({ throwOnError: true })
+        const refresh = collection.utils.refetch({ throwOnError: true })
         await refresh.then(
           () => {
             refreshOutcome = `resolved`
@@ -3074,7 +3636,7 @@ describe(`query collection ownership lifecycle`, () => {
           // breaks the deliberately reproduced cycle during RED cleanup.
           collection.utils.writeUpdate(authoritative)
           releaseMutation.resolve()
-          await transactionReference.current.isPersisted.promise
+          await transactionReference.current.when(`settled`)
         }
         await collection.cleanup()
         queryClient.clear()
@@ -3103,7 +3665,7 @@ describe(`query collection ownership lifecycle`, () => {
         transaction = action(`refresh`)
       }
       transactionReference.current = transaction
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       let model: MutationRefreshLivenessModel = {
@@ -3138,9 +3700,9 @@ describe(`query collection ownership lifecycle`, () => {
       ({ invocation }) => invocation === `captured-handler-collection`,
     ),
   )(
-    `settles a captured handler Collection $operation at the fetch boundary`,
-    async ({ operation }) => {
-      const id = `captured-handler-refresh-${operation}`
+    `settles a captured handler Collection refetch at the fetch boundary (legacy replay: $legacyOperation)`,
+    async ({ legacyOperation }) => {
+      const id = `captured-handler-refresh-${legacyOperation}`
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -3166,10 +3728,9 @@ describe(`query collection ownership lifecycle`, () => {
             if (!capturedCollection) {
               throw new Error(`The captured Collection is not available`)
             }
-            const refresh =
-              operation === `refetch`
-                ? capturedCollection.utils.refetch({ throwOnError: true })
-                : capturedCollection.utils.refetch({ throwOnError: true })
+            const refresh = capturedCollection.utils.refetch({
+              throwOnError: true,
+            })
             await refresh.then(
               () => {
                 refreshOutcome = `resolved`
@@ -3180,7 +3741,6 @@ describe(`query collection ownership lifecycle`, () => {
               },
             )
             await releaseHandler.promise
-            return { refetch: false }
           },
         }),
       )
@@ -3193,7 +3753,7 @@ describe(`query collection ownership lifecycle`, () => {
         if (transactionReference.current) {
           collection.utils.writeUpdate(authoritative)
           releaseHandler.resolve()
-          await transactionReference.current.isPersisted.promise
+          await transactionReference.current.when(`settled`)
         }
         await collection.cleanup()
         queryClient.clear()
@@ -3204,7 +3764,7 @@ describe(`query collection ownership lifecycle`, () => {
         draft.name = `Optimistic`
       })
       transactionReference.current = transaction
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       let model: MutationRefreshLivenessModel = {
@@ -3375,9 +3935,9 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it.each(handlerCollectionHistoryGrammar)(
-    `preserves $handlerKind handler identity through $accessPath $operation`,
+    `preserves $handlerKind handler identity through $accessPath refetch (legacy replay: $legacyOperation)`,
     async (history) => {
-      const { handlerKind, accessPath, operation } = history
+      const { handlerKind, accessPath, legacyOperation } = history
       const initial = [
         { id: `first`, category: `shared`, name: `First` },
         { id: `second`, category: `shared`, name: `Second` },
@@ -3421,7 +3981,7 @@ describe(`query collection ownership lifecycle`, () => {
         transaction: {
           mutations: ReadonlyArray<{ collection: unknown }>
         },
-      ): Promise<{ refetch: false }> => {
+      ): Promise<void> => {
         await inspectIdentity.promise
         const externalCollection = externalCollectionReference.current
         if (!externalCollection) {
@@ -3451,7 +4011,6 @@ describe(`query collection ownership lifecycle`, () => {
         identityObservation = {
           handlerKind: actualHandlerKind,
           accessPath,
-          operation,
           matchingAliasCount: aliases.length,
           transactionIsExternal: transaction === externalTransaction,
           allMutationsPreserveIdentity: transaction.mutations.every(
@@ -3481,10 +4040,7 @@ describe(`query collection ownership lifecycle`, () => {
           accessPath === `parameter`
             ? handlerCollection
             : (aliases[0] as typeof handlerCollection)
-        const boundary =
-          operation === `refetch`
-            ? refetchCollection.utils.refetch({ throwOnError: true })
-            : refetchCollection.utils.refetch({ throwOnError: true })
+        const boundary = refetchCollection.utils.refetch({ throwOnError: true })
         await boundary.then(
           () => {
             handlerOutcome = `resolved`
@@ -3494,13 +4050,12 @@ describe(`query collection ownership lifecycle`, () => {
             throw error
           },
         )
-        return { refetch: false }
       }
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `handler-scope-${handlerKind}-${accessPath}-${operation}`,
+          id: `handler-scope-${handlerKind}-${accessPath}-${legacyOperation}`,
           queryClient,
-          queryKey: [`handler-scope`, handlerKind, accessPath, operation],
+          queryKey: [`handler-scope`, handlerKind, accessPath, legacyOperation],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,
@@ -3540,7 +4095,7 @@ describe(`query collection ownership lifecycle`, () => {
             : collection.delete(initial.map(({ id }) => id))
       externalTransactionReference.current = mutation
       inspectIdentity.resolve()
-      void mutation.isPersisted.promise.catch(() => undefined)
+      void mutation.when(`settled`).catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
       expect(handlerOutcome).toBe(observeHandlerRefetchBoundary(model).refetch)
       if (!identityObservation) {
@@ -3567,7 +4122,7 @@ describe(`query collection ownership lifecycle`, () => {
         )
       })
 
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       model = reduceHandlerRefetchBoundary(model, {
         type: `settle-application`,
         outcome: `fulfilled`,
@@ -3696,7 +4251,6 @@ describe(`query collection ownership lifecycle`, () => {
               throw error
             },
           )
-          return { refetch: false }
         },
       }),
     )
@@ -3715,7 +4269,7 @@ describe(`query collection ownership lifecycle`, () => {
     const mutation = collection.update(shared.id, (draft) => {
       draft.name = `Optimistic`
     })
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     model = reduceHandlerRefetchBoundary(model, {
       type: `accept-application`,
     })
@@ -4716,7 +5270,7 @@ describe(`query collection ownership lifecycle`, () => {
       cleanups.push(async () => {
         persistence.resolve()
         refetch.reject(new Error(`cleanup`))
-        await mutation.isPersisted.promise.catch(() => undefined)
+        await mutation.when(`settled`).catch(() => undefined)
       })
 
       // The release's sync transaction is accepted but held behind the blocker.
@@ -4737,7 +5291,7 @@ describe(`query collection ownership lifecycle`, () => {
         await settleTurn()
       }
       persistence.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       await settleTurn()
       const published = rows(collection)
 
@@ -4841,7 +5395,7 @@ describe(`query collection ownership lifecycle`, () => {
       cleanups.push(async () => {
         persistence.resolve()
         reacquiredFetch.reject(new Error(`cleanup`))
-        await mutation.isPersisted.promise.catch(() => undefined)
+        await mutation.when(`settled`).catch(() => undefined)
       })
 
       await server.collection._sync.loadSubset(a)
@@ -4870,11 +5424,11 @@ describe(`query collection ownership lifecycle`, () => {
         await settleTurn()
         await failReacquiredFetch()
         persistence.resolve()
-        await mutation.isPersisted.promise
+        await mutation.when(`settled`)
         await claimed
       } else {
         persistence.resolve()
-        await mutation.isPersisted.promise
+        await mutation.when(`settled`)
         await settleTurn()
         await server.collection._sync.loadSubset(b)
         await failReacquiredFetch()
@@ -4911,7 +5465,7 @@ describe(`query collection ownership lifecycle`, () => {
   // began keeps its accepted row. Reference: the fetched rows, overlaid by the
   // direct writes made after the fetch started, in order. Checkpoint: visible
   // rows and the Query cache after the fetch settles. Cuts: the initial load,
-  // a handler's automatic refetch while another handler writes a different
+  // a handler's explicit refetch while another handler writes a different
   // key or the same key, and a user refetch. The review probes are these cuts.
   type MergeCut =
     | `initial-load`
@@ -4961,11 +5515,11 @@ describe(`query collection ownership lifecycle`, () => {
           onUpdate: async ({ transaction, collection: handlerCollection }) => {
             const modified = transaction.mutations[0].modified
             if (modified.value === `A`) {
-              // Handler A: the server accepts the change, and the automatic
-              // refetch confirms it.
+              // Handler A explicitly reads back the accepted server change.
               server = server.map((row) =>
                 row.id === `1` ? { id: `1`, value: `A` } : row,
               )
+              await handlerCollection.utils.refetch()
               return
             }
             server = server.map((row) =>
@@ -4975,7 +5529,6 @@ describe(`query collection ownership lifecycle`, () => {
               id: writtenKey,
               value: `B`,
             })
-            return { refetch: false }
           },
         }),
       )
@@ -5038,11 +5591,13 @@ describe(`query collection ownership lifecycle`, () => {
         await vi.waitFor(() => expect(held).toHaveLength(1))
         hold = false
         const fetched = server
-        await collection.update(writtenKey, (draft) => {
-          draft.value = `B-optimistic`
-        }).isPersisted.promise
+        await collection
+          .update(writtenKey, (draft) => {
+            draft.value = `B-optimistic`
+          })
+          .when(`settled`)
         held[0]!.resolve()
-        await first.isPersisted.promise
+        await first.when('settled')
         expected = mergeDirectWritesOverFetch(fetched, [
           { id: writtenKey, value: `B` },
         ])

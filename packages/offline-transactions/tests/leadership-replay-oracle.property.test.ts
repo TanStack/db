@@ -590,9 +590,7 @@ async function checkReport({
           autoCommit: false,
           mutationFn: async () => {},
         })
-        const rolledBack = transaction.isPersisted.promise.catch(
-          () => undefined,
-        )
+        const rolledBack = transaction.when('settled').catch(() => undefined)
         const expected = [{ id: `valid`, key: `once`, row }]
         const report = async (count: number) => {
           expect(callbacks.size).toBe(1)

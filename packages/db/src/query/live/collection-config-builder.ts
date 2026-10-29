@@ -1,5 +1,5 @@
 import { D2, output } from '@tanstack/db-ivm'
-import { compileQuery } from '../compiler/index.js'
+import { compileCollectionQuery } from '../compiler/index.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
@@ -400,17 +400,40 @@ export class CollectionConfigBuilder<
     const request = ++this.windowRequestGeneration
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
-      const deferred: Promise<void> = sourceRecovery.then(async () => {
+      const syncRuns = this.syncRuns()
+      const resume = async (): Promise<void> => {
+        // Wait for every replay that holds publication, including one a
+        // newer truncate starts meanwhile. A replay that a newer truncate or
+        // a retired demand discards rejects its completion with an
+        // AbortError, but it did not fail. Cleanup and a reload end the sync
+        // run the move waits in, and the move rejects with that error.
+        for (
+          let recovery: Promise<void> | undefined = sourceRecovery;
+          recovery;
+          recovery = this.pendingSourceRecovery()
+        ) {
+          try {
+            await recovery
+          } catch (error) {
+            if (
+              !(error instanceof LoadSubsetOperationAbortedError) ||
+              syncRuns !== this.syncRuns()
+            )
+              throw error
+          }
+        }
         // A newer call wins, even if this deferred one resumes after it.
         if (request !== this.windowRequestGeneration) {
           await this.latestWindowRequest
           return
         }
+        // A failed replay rejects the call. Otherwise it applies the window.
         const settlement = this.setWindow(requestedWindow)
         // The resumed call settles on behalf of this one.
         this.latestWindowRequest = deferred
         if (settlement !== true) await settlement
-      })
+      }
+      const deferred = resume()
       return (this.latestWindowRequest = deferred)
     }
     if (this.hasFailedSourceRecovery()) {
@@ -559,7 +582,13 @@ export class CollectionConfigBuilder<
     )
   }
 
-  failDemand(planId: string, generation: number, error: unknown): void {
+  failDemand(
+    subscription: CollectionSubscription,
+    collection: Collection,
+    planId: string,
+    generation: number,
+    error: unknown,
+  ): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
@@ -567,8 +596,19 @@ export class CollectionConfigBuilder<
     if (this.liveQueryCollection?._lifecycle.status === `ready`) {
       // The failure settles the demand: the request errors of its keys show
       // it, and ordered work must not wait for a load that already ended.
-      // Output held for this demand publishes now.
+      // Output held for this demand publishes now, unless a failed replay of
+      // this source holds publication: the failure then holds this
+      // subscription's publication too, so retiring the other replay's
+      // failed demand cannot publish without this demand's rows.
       demand.settled = true
+      if (
+        this.collectionSources.some(
+          (source) =>
+            source.collection === collection &&
+            this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+        )
+      )
+        subscription.failReplacement(normalized)
       this.maybeRunGraphFn?.()
       return
     }
@@ -711,6 +751,34 @@ export class CollectionConfigBuilder<
   /** A request settled later, or the query no longer needs its data. */
   clearFailedRequest(key: string): void {
     this.liveQueryCollection?._lifecycle.clearRequestError(key)
+  }
+
+  /** This query's sync run and its sources' sync runs. */
+  private syncRuns(): string {
+    return [
+      this.syncRunGeneration,
+      ...this.collectionSources.map(({ collection }) =>
+        collection._sync.getSyncRunGeneration(),
+      ),
+    ].join()
+  }
+
+  /** Replays of other subscriptions to a source's collection that still load. */
+  siblingReplays(
+    collection: Collection,
+    sourceId: string,
+  ): Promise<unknown> | undefined {
+    const pending = this.collectionSources.flatMap((source) => {
+      const subscription = this.subscriptions[source.sourceId]
+      // A replay whose completion already settled cannot be waited on.
+      return source.sourceId !== sourceId &&
+        source.collection === collection &&
+        subscription?.hasTruncateReplayWork &&
+        subscription.pendingTruncateReplacement
+        ? [subscription.pendingTruncateReplacement]
+        : []
+    })
+    return pending.length > 0 ? Promise.allSettled(pending) : undefined
   }
 
   hasPendingSourceRecovery(): boolean {
@@ -1025,7 +1093,7 @@ export class CollectionConfigBuilder<
     }
     this.inputsCache = inputs
 
-    const compilation = compileQuery(
+    const compilation = compileCollectionQuery(
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,

@@ -37,13 +37,13 @@ instances still exist. The migration is required when you want SSR-safe request
 isolation, hydration, incremental chunks, Suspense streaming, or the 1.0-ready
 React hook shape.
 
-The old dependency-array form now warns:
+The dependency-array form was removed in the first 1.0 RC:
 
 ```tsx
 useLiveQuery((q) => q.from({ todos }).where(...), [status])
 ```
 
-It still works, but warns in development and will be removed in 1.0. Prefer:
+Use the query config form instead:
 
 ```tsx
 useLiveQuery({
@@ -714,14 +714,7 @@ captures in `queryKey`, so the query recompiles when they change.
 DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
 
-Dependency arrays are accepted for backwards compatibility:
-
-```tsx
-useLiveQuery((q) => q.from({ todo: todoCollection }), [status])
-```
-
-They warn in development and will be removed in 1.0. Migrate to the config
-object form:
+Use the config object form:
 
 ```tsx
 useLiveQuery({
@@ -820,6 +813,7 @@ useLiveQuery(
     q
       .from({ todo: todoCollection })
       .where(({ todo }) => eq(todo.status, status)),
+  // @ts-expect-error Dependency arrays are removed in the RC.
   [status],
 )
 
@@ -884,23 +878,25 @@ rendering instead.
 
 ## Compatibility
 
-No existing public API is removed by this change.
+The SSR APIs remain available in the first 1.0 RC. React dependency-array hook forms have been removed.
 
 Still supported:
 
 - `createCollection(...)`
 - passing collection instances to `useLiveQuery(...)`
-- `useLiveQuery(queryFn, deps)`
-- `useLiveSuspenseQuery(queryFn, deps)`
 - mutation APIs such as `insert`, `update`, `delete`, `subscribe`, and
   optimistic mutation helpers
 
-Warnings:
+Query identity checks:
 
-- React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` throws `UnhashableQueryIRError` in a
-  hook that compares identity (React, Preact, or any `DbClient`-backed hook).
+- React hooks use derived query identity or an explicit, nonempty `queryKey`.
+- Opaque query IR without a nonempty `queryKey` throws
+  `UnhashableQueryIRError` in a hook that compares identity (React, Preact, or
+  any `DbClient`-backed hook).
 - Expensive derived identity warns in development and suggests `queryKey`.
+
+Opaque query IR without a serializable `queryKey` throws when React cannot
+derive a stable identity.
 
 Required for SSR:
 
@@ -916,7 +912,10 @@ Required for render-time Suspense streaming:
 - `useLiveSuspenseQuery(...)` inside a Suspense boundary
 - a stable derived query identity or explicit serializable `queryKey`
 
-## Detailed Changelog
+## SSR Introduction Changelog
+
+This section records the original SSR feature release. Its React dependency
+array deprecation was completed in the first 1.0 RC.
 
 ### Added
 
@@ -956,7 +955,7 @@ Required for render-time Suspense streaming:
   `from`, `join`, `leftJoin`, and `unionAll` sources when a `DbProvider` is
   present.
 - React live query identity is derived from normalized structured IR when no
-  explicit `queryKey` or legacy dependency array is supplied.
+  explicit `queryKey` is supplied.
 - Explicit collection preloading serializes normalized collection rows.
 - Live-query preloading and render-time discovery serialize ordered result
   snapshots without implicitly serializing source collections.
@@ -971,10 +970,10 @@ Required for render-time Suspense streaming:
 - Incremental chunks use the same collection payload shape as full dehydration.
 - Streamed live-query promises resolve to live-query result snapshots.
 
-### Deprecated
+### Since Removed
 
 - React dependency arrays for `useLiveQuery` and wrappers that delegate to it.
-  They still work and warn in development. They are planned for removal in 1.0.
+  They were removed in the first 1.0 RC.
 
 ### Not Changed
 
@@ -992,7 +991,8 @@ The SSR strategy is covered by:
 - core `DbClient` tests for hydration, streaming chunks, sync metadata,
   initial data precedence, explicit ids, and no optimistic serialization
 - React tests for `DbProvider`, descriptor resolution, derived query identity,
-  `queryKey`, deprecation warnings, SSR result snapshots, and atomic handoff
+  `queryKey`, derived-identity performance warnings, SSR result snapshots, and
+  atomic handoff
 - Svelte tests for provider ownership, server snapshot rendering, and browser
   handoff
 - query adapter tests to ensure Query cache behavior still holds

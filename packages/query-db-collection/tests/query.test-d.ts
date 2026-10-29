@@ -60,6 +60,14 @@ describe(`Query collection type resolution tests`, () => {
     })
   })
 
+  it(`rejects mutation handler return-value refetch controls`, () => {
+    type Config = QueryCollectionConfig<ExplicitType>
+    const legacyReturn = async () => ({ refetch: false })
+    expectTypeOf(legacyReturn).not.toExtend<NonNullable<Config[`onInsert`]>>()
+    expectTypeOf(legacyReturn).not.toExtend<NonNullable<Config[`onUpdate`]>>()
+    expectTypeOf(legacyReturn).not.toExtend<NonNullable<Config[`onDelete`]>>()
+  })
+
   it(`should prioritize explicit type in QueryCollectionConfig`, () => {
     const options = queryCollectionOptions<ExplicitType>({
       id: `test`,

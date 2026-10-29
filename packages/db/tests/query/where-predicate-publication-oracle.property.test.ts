@@ -7,10 +7,10 @@
  * null or undefined operand is UNKNOWN, `NaN` equals `NaN` (PostgreSQL float
  * semantics), a valid Date compares as its millisecond timestamp, and other
  * values of different types are unequal. `not`, `and`, and `or` follow Kleene
- * logic, so `not(UNKNOWN)` is UNKNOWN. Virtual row fields (`$synced`,
- * `$origin`, `$key`) are row fields for filtering; a pending optimistic insert
- * is `$synced: false` and `$origin: 'local'`, and a synced row from this
- * adapter is `$synced: true` and `$origin: 'remote'`.
+ * logic, so `not(UNKNOWN)` is UNKNOWN. Virtual row fields
+ * (`$hasPendingWrites`, `$origin`, `$key`) are row fields for filtering; a
+ * pending optimistic insert has `$hasPendingWrites: true` and local origin.
+ * A settled source row has `$hasPendingWrites: false` and remote origin.
  *
  * Filtered publication must agree with that predicate after every source
  * transaction. `Collection.subscribeChanges` with a `whereExpression` turns an
@@ -164,7 +164,7 @@ type History =
 type ModelRow = {
   id: string
   v: FieldValue
-  $synced: boolean
+  $hasPendingWrites: boolean
   $origin: `local` | `remote`
   $key: string
 }
@@ -242,8 +242,8 @@ function equivalentFieldValues(a: FieldValue, b: FieldValue): boolean {
   return Object.is(a, b)
 }
 
-function syncedModelRow(id: string, v: FieldValue): ModelRow {
-  return { id, v, $synced: true, $origin: `remote`, $key: id }
+function settledModelRow(id: string, v: FieldValue): ModelRow {
+  return { id, v, $hasPendingWrites: false, $origin: `remote`, $key: id }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +262,11 @@ const operandArbitrary: fc.Arbitrary<Operand> = fc.oneof(
   {
     weight: 1,
     arbitrary: fc
-      .constantFrom(`$synced` as const, `$origin` as const, `$key` as const)
+      .constantFrom(
+        `$hasPendingWrites` as const,
+        `$origin` as const,
+        `$key` as const,
+      )
       .map((name): Operand => ({ kind: `virtual`, name })),
   },
 )
@@ -397,8 +401,8 @@ const pinnedHistories: ReadonlyArray<History> = [
         },
         {
           kind: `eq`,
-          left: { kind: `virtual`, name: `$synced` },
-          right: { kind: `literal`, value: false },
+          left: { kind: `virtual`, name: `$hasPendingWrites` },
+          right: { kind: `literal`, value: true },
         },
       ],
     },
@@ -568,8 +572,8 @@ const peerPredicates: ReadonlyArray<Predicate> = [
   ...[`a`, `b`, PREFIXED, true, false].map(fieldEq),
   {
     kind: `eq`,
-    left: { kind: `virtual`, name: `$synced` },
-    right: { kind: `literal`, value: true },
+    left: { kind: `virtual`, name: `$hasPendingWrites` },
+    right: { kind: `literal`, value: false },
   },
 ]
 
@@ -613,8 +617,8 @@ async function observeHistory(
     seeds.map((seed) => [
       seed.id,
       {
-        ...syncedModelRow(seed.id, seed.v),
-        $synced: !seed.optimistic,
+        ...settledModelRow(seed.id, seed.v),
+        $hasPendingWrites: seed.optimistic,
         $origin: seed.optimistic ? `local` : `remote`,
       },
     ]),
@@ -728,7 +732,7 @@ async function observeHistory(
               type: `insert`,
               value: sourceRow(id, operation.v),
             })
-            modelRows.set(id, syncedModelRow(id, operation.v))
+            modelRows.set(id, settledModelRow(id, operation.v))
             touched.add(id)
             continue
           }
@@ -755,7 +759,7 @@ async function observeHistory(
             type: `update`,
             value: { id, v: operation.v === MISSING ? undefined : operation.v },
           })
-          modelRows.set(id, syncedModelRow(id, operation.v))
+          modelRows.set(id, settledModelRow(id, operation.v))
           touched.add(id)
         }
         collection.utils.commit()
@@ -856,8 +860,8 @@ describe(`WHERE predicate publication oracle`, () => {
           history.rows.map((seed, index): [string, ModelRow] => [
             `r${index}`,
             {
-              ...syncedModelRow(`r${index}`, seed.v),
-              $synced: !seed.optimistic,
+              ...settledModelRow(`r${index}`, seed.v),
+              $hasPendingWrites: seed.optimistic,
               $origin: seed.optimistic ? `local` : `remote`,
             },
           ]),

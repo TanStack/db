@@ -219,7 +219,7 @@ export class CollectionStateManager<
     TKey,
     {
       row: TOutput
-      synced: boolean
+      hasPendingWrites: boolean
       origin: VirtualOrigin
       collectionId: string
       enriched: WithVirtualProps<TOutput, TKey>
@@ -281,10 +281,10 @@ export class CollectionStateManager<
 
   /**
    * Snapshot virtual properties from the current or supplied prior state.
-   * A row with an optimistic write is local and unsynced; otherwise it keeps
-   * the source row's attribution. Local-only rows are always local and synced.
+   * A row with an optimistic write is local and pending; otherwise it keeps
+   * the source row's attribution. Local-only rows are always local without pending writes.
    *
-   * This is local mutation status, not backend confirmation: `$synced: true` means the
+   * This is local mutation status, not backend confirmation: `$hasPendingWrites: false` means the
    * row is not currently affected by an optimistic transaction in this
    * collection's visible state.
    */
@@ -302,7 +302,6 @@ export class CollectionStateManager<
 
     return {
       $hasPendingWrites: hasOptimisticChange,
-      $synced: !hasOptimisticChange,
       $origin:
         this.isLocalOnly || hasOptimisticChange
           ? 'local'
@@ -332,7 +331,8 @@ export class CollectionStateManager<
     virtualProps: VirtualRowProps<TKey>,
   ): WithVirtualProps<TOutput, TKey> {
     const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
-    const synced = existingRow.$synced ?? virtualProps.$synced
+    const hasPendingWrites =
+      existingRow.$hasPendingWrites ?? virtualProps.$hasPendingWrites
     const origin = existingRow.$origin ?? virtualProps.$origin
     const resolvedKey = existingRow.$key ?? virtualProps.$key
     const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
@@ -341,7 +341,7 @@ export class CollectionStateManager<
     if (
       cached &&
       cached.row === row &&
-      cached.synced === synced &&
+      cached.hasPendingWrites === hasPendingWrites &&
       cached.origin === origin &&
       cached.collectionId === collectionId
     ) {
@@ -350,8 +350,7 @@ export class CollectionStateManager<
 
     const enriched = {
       ...row,
-      $hasPendingWrites: !synced,
-      $synced: synced,
+      $hasPendingWrites: hasPendingWrites,
       $origin: origin,
       $key: resolvedKey,
       $collectionId: collectionId,
@@ -359,7 +358,7 @@ export class CollectionStateManager<
 
     this.virtualPropsCache.set(resolvedKey, {
       row,
-      synced,
+      hasPendingWrites,
       origin,
       collectionId,
       enriched,
@@ -790,7 +789,8 @@ export class CollectionStateManager<
         currentValue !== undefined &&
         (!deepEquals(previousValue, currentValue) ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
-          previousVirtualProps.$synced !== nextVirtualProps.$synced)
+          previousVirtualProps.$hasPendingWrites !==
+            nextVirtualProps.$hasPendingWrites)
       ) {
         events.push({
           type: `update`,
@@ -1436,7 +1436,7 @@ export class CollectionStateManager<
             value,
             key,
             this.collection.id,
-            () => previousVirtualProps.$synced,
+            () => previousVirtualProps.$hasPendingWrites,
             () => previousVirtualProps.$origin,
           )
 
@@ -1450,7 +1450,8 @@ export class CollectionStateManager<
         }
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         if (
-          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
+          previousVirtualProps.$hasPendingWrites !==
+            nextVirtualProps.$hasPendingWrites ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
           !deepEquals(previousVisibleValue, newVisibleValue)
         ) {

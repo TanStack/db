@@ -14,7 +14,7 @@ export type Row = { id: string; v?: unknown }
 export type Operand =
   | { kind: `field` }
   | { kind: `literal`; value: FieldValue }
-  | { kind: `virtual`; name: `$synced` | `$origin` | `$key` }
+  | { kind: `virtual`; name: `$hasPendingWrites` | `$origin` | `$key` }
 
 export type Predicate =
   | { kind: `eq`; left: Operand; right: Operand }

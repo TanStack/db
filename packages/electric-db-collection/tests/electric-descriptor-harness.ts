@@ -7,6 +7,7 @@
  */
 import { isDeepStrictEqual } from 'node:util'
 import { expect, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import type { TestRow } from './electric-persistence-fixture'
 import type { Message } from '@electric-sql/client'
 
@@ -46,11 +47,16 @@ export const harnessState: {
   onStreamSubscribed: (() => void) | undefined
 } = { holdNewSnapshots: false, onStreamSubscribed: undefined }
 
-export async function createMockedElectricClient() {
+export async function createMockedElectricClient(): Promise<{
+  ShapeStream: Mock
+}> {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn((options: { log?: string; signal?: AbortSignal }) => {
+    ShapeStream: vi.fn(function (options: {
+      log?: string
+      signal?: AbortSignal
+    }) {
       const pendingSnapshots: Array<{
         resolve: () => void
         reject: (error: Error) => void

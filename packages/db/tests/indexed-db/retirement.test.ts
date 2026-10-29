@@ -80,9 +80,11 @@ for (const reason of reasons) {
           if (read === 'replacement')
             await sender.utils.importData([{ id: 3, name: 'new snapshot' }])
           else
-            await sender.update(1, (row) => {
-              row.name = 'peer update'
-            }).isPersisted.promise
+            await sender
+              .update(1, (row) => {
+                row.name = 'peer update'
+              })
+              .when('settled')
         }
         const gate = holdStore(h.db.db)
         h.disposers.push(() => gate.release())
@@ -191,7 +193,7 @@ for (const reason of reasons)
       const native = observeTransactions(h.db.db)
       h.disposers.push(() => native.restore())
       const row = { id: 3, name: 'admitted during startup' }
-      const caller = observe(c.insert(row).isPersisted.promise, () =>
+      const caller = observe(c.insert(row).when('settled'), () =>
         sorted(c.base.values()),
       )
       await vi.waitFor(() =>

@@ -1,13 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import {
-  deepEquals,
-  equalPersistedSnapshotValues,
-  resetWarnings,
-  warnOnce,
-} from '../src/utils'
+import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
 import { normalizeError } from '../src/utils/error'
 import { isPromiseLike } from '../src/utils/type-guards'
+import { withOracleCleanup } from './utils'
 import {
   assertDistinctTypes,
   assertExtraProperty,
@@ -47,28 +43,6 @@ describe(`normalizeError`, () => {
     for (const thrownValue of thrownValues) {
       expect(() => normalizeError(thrownValue)).not.toThrow()
       expect(normalizeError(thrownValue)).toEqual(new Error(`Unknown error`))
-    }
-  })
-})
-
-describe(`warnOnce`, () => {
-  it(`logs each warning key once and permits an explicit reset`, () => {
-    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
-
-    try {
-      resetWarnings()
-      warnOnce(`first`, `first message`)
-      warnOnce(`first`, `ignored replacement`)
-      warnOnce(`second`, `second message`)
-
-      expect(warn.mock.calls).toEqual([[`first message`], [`second message`]])
-
-      resetWarnings()
-      warnOnce(`first`, `after reset`)
-      expect(warn).toHaveBeenLastCalledWith(`after reset`)
-    } finally {
-      resetWarnings()
-      warn.mockRestore()
     }
   })
 })
@@ -967,3 +941,28 @@ describe(`persisted-snapshot prototype equality`, () => {
     ).toBe(false)
   })
 })
+
+// Failure-fidelity calibration for oracle drivers: a comparison is primary,
+// cleanup errors remain distinguishable, and all later releases still run.
+it.each([0, 1, 2])(
+  `preserves an oracle mismatch when cleanup %s fails`,
+  async (failedCleanup) => {
+    const mismatch = new Error(`row mismatch at source publication`)
+    const cleanupFailure = new Error(`cleanup ${failedCleanup}`)
+    const released: Array<number> = []
+    const result = withOracleCleanup(
+      () => {
+        throw mismatch
+      },
+      [0, 1, 2].map((index) => () => {
+        released.push(index)
+        if (index === failedCleanup) throw cleanupFailure
+      }),
+    )
+    await expect(result).rejects.toMatchObject({
+      cause: mismatch,
+      errors: [mismatch, cleanupFailure],
+    })
+    expect(released).toEqual([0, 1, 2])
+  },
+)

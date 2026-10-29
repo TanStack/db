@@ -59,11 +59,9 @@
     "src",
     "skills"
   ],
-  "dependencies": {
-    "@tanstack/db": "workspace:*"
-  },
   "peerDependencies": {
     "@react-native-community/netinfo": ">=11.0.0",
+    "@tanstack/db": "^1.0.0-rc.0",
     "react-native": ">=0.70.0"
   },
   "peerDependenciesMeta": {
@@ -76,10 +74,11 @@
   },
   "devDependencies": {
     "@react-native-community/netinfo": "11.4.1",
+    "@tanstack/db": "workspace:*",
     "@types/node": "^25.2.2",
     "eslint": "^9.39.2",
     "react-native": "0.79.6",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   }
 }

@@ -246,7 +246,7 @@ describe(`PowerSync correctness oracle`, () => {
       })
 
       await heldChanges.flush()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
 
       const crud = await db.getAll<CrudRow>(
         `SELECT data FROM ps_crud ORDER BY id`,
@@ -547,9 +547,11 @@ describe(`PowerSync correctness oracle`, () => {
       watcherDeliveries.length = 0
 
       const metadata = { source: `Collection.update` }
-      await collection.update(`t1`, { metadata }, (draft) => {
-        draft.done = 1
-      }).isPersisted.promise
+      await collection
+        .update(`t1`, { metadata }, (draft) => {
+          draft.done = 1
+        })
+        .when(`settled`)
 
       expect(
         watcherDeliveries.some((tables) =>
@@ -630,12 +632,14 @@ describe(`PowerSync correctness oracle`, () => {
     let failure: { error: unknown } | undefined
     try {
       await collection.preload()
-      await collection.update(`f1`, (draft) => {
-        draft.label = ``
-        draft.note = null
-        draft.count = 0
-        draft.active = false
-      }).isPersisted.promise
+      await collection
+        .update(`f1`, (draft) => {
+          draft.label = ``
+          draft.note = null
+          draft.count = 0
+          draft.active = false
+        })
+        .when(`settled`)
 
       const crud = await db.getAll<CrudRow>(
         `SELECT data FROM ps_crud ORDER BY id`,
@@ -679,9 +683,11 @@ describe(`PowerSync correctness oracle`, () => {
     let failure: { error: unknown } | undefined
     try {
       await collection.preload()
-      await collection.update(`t1`, { metadata: ignoredMetadata }, (draft) => {
-        draft.title = `after`
-      }).isPersisted.promise
+      await collection
+        .update(`t1`, { metadata: ignoredMetadata }, (draft) => {
+          draft.title = `after`
+        })
+        .when(`settled`)
       await collection.cleanup()
 
       expect(
@@ -766,7 +772,8 @@ describe(`PowerSync correctness oracle`, () => {
         .update(`t1`, (draft) => {
           draft.title = `Write report today`
         })
-        .isPersisted.promise.catch((error: unknown) => {
+        .when(`settled`)
+        .catch((error: unknown) => {
           persistenceError = error
         })
         .finally(() => {

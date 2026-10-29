@@ -10,7 +10,9 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleReplaySkips,
   oracleRuns,
+  recordOracleReplay,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -135,7 +137,13 @@ import type { SQLiteDriver } from '../src/index.js'
  * other rows than it recorded, and a window whose tie-boundary load is
  * uncovered. Teardown drops every waiting load before it aborts them, so
  * only a release during the commands settles an aborted load. The fixed and random
- * campaigns run the same property with 40 histories each.
+ * campaigns retain the same unconstrained property with 40 histories each.
+ * Each campaign also generates two packs of nine required histories. Row-key
+ * permutations, the unordered demand, and row ranks vary inside those legal
+ * structures. Their actual source logs must reach all declared states through
+ * the same model, driver, and comparison; random sampling cannot supply that
+ * guarantee. The pack has its own seed/path replay coordinate, so a failure
+ * inside a required history replays directly without the 40-history campaign.
  *
  * Parts 2 and 3 sweep a storage failure over every adapter call and a
  * release over every step of a load; their laws are stated beside them.
@@ -1026,8 +1034,106 @@ const historyArb: fc.Arbitrary<History> = fc.record({
     .map((steps) => steps.flat()),
 })
 
+// The unrestricted grammar can erase a rare premise before the offline check:
+// a later successful load covers an aborted demand, and a reset ends its log.
+// These generated structures keep every required premise until that check.
+// They contain only the commands above and carry no expected observations.
+const requiredHistoriesArb = fc
+  .tuple(
+    fc.shuffledSubarray([...IDS], { minLength: 3, maxLength: 3 }),
+    groupArb,
+    rankArb,
+  )
+  .map(([ids, group, rank]) => {
+    const [first, second, third] = ids as [Id, Id, Id]
+    const other: Group = group === `a` ? `b` : `a`
+    const write = (id: Id, inGroup = group, atRank = rank): Command => ({
+      type: `write`,
+      id,
+      group: inGroup,
+      rank: atRank,
+    })
+    const history = (
+      name: string,
+      commands: ReadonlyArray<Command>,
+      {
+        abort = `rejects`,
+        waitMs = 0,
+        upstream = `never answers`,
+      }: {
+        abort?: AbortBehavior
+        waitMs?: 0 | 1000
+        upstream?: OfflineUpstream
+      } = {},
+    ): { name: string; history: History } => ({
+      name,
+      history: { initial: {}, commands, abort, offline: { waitMs, upstream } },
+    })
+    const windowRows = [write(first, `a`, 2), write(second, `a`, 3)]
+    return [
+      history(
+        `only an aborted load settles`,
+        [
+          write(first),
+          { type: `start`, demand: group },
+          { type: `release`, demand: group },
+        ],
+        { abort: `stops and resolves` },
+      ),
+      history(
+        `repeated coverage waits for its own deadline`,
+        [write(first), ...cycle(group), ...cycle(group)],
+        { waitMs: 1000 },
+      ),
+      history(
+        `covered and uncovered loads meet upstream failure`,
+        [write(first), ...cycle(group)],
+        { upstream: `fails at once` },
+      ),
+      history(
+        `a truncate ends coverage before an obsolete load settles`,
+        [
+          write(first, other),
+          ...cycle(other),
+          { type: `start`, demand: group },
+          { type: `truncate` },
+          { type: `settle-oldest`, demand: group },
+          { type: `release`, demand: group },
+        ],
+        { abort: `ignores` },
+      ),
+      history(`a snapshot ends coverage`, [
+        write(first),
+        ...cycle(group),
+        { type: `snapshot` },
+      ]),
+      history(`a covered demand loses a row to another demand`, [
+        write(first),
+        ...cycle(group),
+        write(first, other),
+      ]),
+      history(`every load of a window is covered`, [
+        ...windowRows,
+        ...cycle(`w`),
+      ]),
+      history(`a covered window holds another row`, [
+        ...windowRows,
+        ...cycle(`w`),
+        write(third, `a`, 1),
+      ]),
+      history(`a window has no covered tie-boundary load`, [
+        ...windowRows,
+        { type: `start`, demand: `w` },
+        { type: `answer`, demand: `w` },
+        { type: `release`, demand: `w` },
+      ]),
+    ]
+  })
+
 const PROPERTY = `persisted-demand-coverage.history`
+const REQUIRED_PROPERTY = `persisted-demand-coverage.required`
 const RUNS = 40
+const REQUIRED_RUNS = 2
 const REACH_STATES: ReadonlyArray<CoverageReach> = [
   `covered offline`,
   `uncovered offline`,
@@ -1046,20 +1152,95 @@ const REACH_STATES: ReadonlyArray<CoverageReach> = [
   `uncovered load fails with its upstream`,
 ]
 
+async function checkHistory(
+  history: History,
+  ...reaches: ReadonlyArray<ReturnType<typeof createOracleReach<CoverageReach>>>
+): Promise<void> {
+  for (const reach of reaches) reach.beginHistory()
+  for (const record of await runHistory(history)) {
+    expect(
+      coverageViolations(record, (state) => {
+        for (const reach of reaches) reach.reach(state)
+      }),
+    ).toEqual([])
+  }
+}
+
+// fc.check exposes the actual random seed even when comparisons pass but the
+// subsequent reach assertion fails. Preserve fast-check's native failure text
+// and the guarded replay witness, rather than losing a shrink path or cause.
+async function assertRun<T>(property: string, result: fc.RunDetails<T>) {
+  recordOracleReplay(property, result)
+  const message = await fc.asyncDefaultReportMessage(result)
+  if (message !== undefined)
+    throw new Error(message, { cause: result.errorInstance })
+}
+
 async function campaign(options: Parameters<typeof fc.assert>[1]) {
-  const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES)
-  await fc.assert(
-    fc.asyncProperty(historyArb, async (history) => {
-      reach.beginHistory()
-      for (const record of await runHistory(history)) {
-        expect(
-          coverageViolations(record, (state) => reach.reach(state)),
-        ).toEqual([])
-      }
-    }),
-    options,
-  )
-  reach.assertReached()
+  // A seed alone replays the whole campaign and must still enforce reach.
+  // A path replays one input directly and does not owe campaign-wide reach.
+  const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES, {
+    replaying: oracleReplayRequested(),
+  })
+  let seed: number | undefined
+  if (!oracleReplaySkips(PROPERTY)) {
+    const result = await fc.check(
+      fc.asyncProperty(historyArb, (history) => checkHistory(history, reach)),
+      options,
+    )
+    seed = result.seed
+    await assertRun(PROPERTY, result)
+  }
+  if (!oracleReplayRequested() || !oracleReplaySkips(REQUIRED_PROPERTY)) {
+    const result = await fc.check(
+      fc.asyncProperty(requiredHistoriesArb, async (histories) => {
+        const requiredReach = createOracleReach<CoverageReach>(
+          REQUIRED_PROPERTY,
+          REACH_STATES,
+          { replaying: false },
+        )
+        for (const { name, history } of histories) {
+          try {
+            await checkHistory(history, requiredReach, reach)
+          } catch (error) {
+            throw new Error(
+              `required history: ${name}\n${JSON.stringify(history)}`,
+              { cause: error },
+            )
+          }
+        }
+        // Credit only real model/driver observations inside this generated pack.
+        // An unrelated random history cannot hide a missing required witness.
+        requiredReach.assertReached()
+        if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT) {
+          console.log(
+            REQUIRED_PROPERTY,
+            JSON.stringify(Object.fromEntries(requiredReach.counts())),
+          )
+        }
+      }),
+      oracleReplayRequested()
+        ? oraclePropertyOptions(REQUIRED_RUNS, REQUIRED_PROPERTY)
+        : { seed, numRuns: oracleRuns(REQUIRED_RUNS) },
+    )
+    seed = result.seed
+    await assertRun(REQUIRED_PROPERTY, result)
+  }
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT) {
+    console.log(
+      PROPERTY,
+      `seed=${seed}`,
+      JSON.stringify(Object.fromEntries(reach.counts())),
+    )
+  }
+  try {
+    reach.assertReached()
+  } catch (error) {
+    throw new Error(
+      `${PROPERTY}: seed=${seed}, numRuns=${options?.numRuns}; replay the full campaign with this seed`,
+      { cause: error },
+    )
+  }
   return reach.counts()
 }
 
@@ -1079,160 +1260,187 @@ function checkRelease(
 
 declareOracle({
   check: [coverageViolations, checkFault, checkRelease],
-  grammar: [historyArb],
+  grammar: [historyArb, requiredHistoriesArb],
 })
 
 describe(`persisted demand coverage over generated histories`, () => {
-  it(`keeps the law when any one storage call fails`, async () => {
-    quietConsole()
-    const baseline = await runWithFault(undefined)
-    // Positive witness: without a failure, session 2 settles D offline.
-    expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
-    const reach = createOracleReach<FaultReach>(
-      `persisted demand coverage storage failures`,
-      [
-        `coverage read failed`,
-        `row write failed`,
-        `coverage check failed`,
-        `coverage write failed`,
-      ],
-    )
-    for (const session of [1, 2] as const) {
-      const count = baseline.calls.filter((c) => c.session === session).length
-      for (let index = 0; index < count; index++) {
-        for (const timing of [`before effect`, `after effect`] as const) {
-          reach.beginHistory()
-          const run = await runWithFault({ session, index, timing })
-          const failed = run.calls.filter((c) => c.session === session)[index]
-          if (!failed) continue
-          try {
-            checkFault(failed, timing, run, (state) => reach.reach(state))
-          } catch (error) {
-            throw new Error(
-              `failure at session ${session} call ${index} ` +
-                `(${failed.method}, ${timing}, late: ${failed.late})`,
-              { cause: error },
-            )
+  it.skipIf(oracleReplayRequested())(
+    `keeps the law when any one storage call fails`,
+    async () => {
+      quietConsole()
+      const baseline = await runWithFault(undefined)
+      // Positive witness: without a failure, session 2 settles D offline.
+      expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
+      const reach = createOracleReach<FaultReach>(
+        `persisted demand coverage storage failures`,
+        [
+          `coverage read failed`,
+          `row write failed`,
+          `coverage check failed`,
+          `coverage write failed`,
+        ],
+      )
+      for (const session of [1, 2] as const) {
+        const count = baseline.calls.filter((c) => c.session === session).length
+        for (let index = 0; index < count; index++) {
+          for (const timing of [`before effect`, `after effect`] as const) {
+            reach.beginHistory()
+            const run = await runWithFault({ session, index, timing })
+            const failed = run.calls.filter((c) => c.session === session)[index]
+            if (!failed) continue
+            try {
+              checkFault(failed, timing, run, (state) => reach.reach(state))
+            } catch (error) {
+              throw new Error(
+                `failure at session ${session} call ${index} ` +
+                  `(${failed.method}, ${timing}, late: ${failed.late})`,
+                { cause: error },
+              )
+            }
           }
         }
       }
-    }
-    reach.assertReached()
-  }, 600_000)
+      reach.assertReached()
+    },
+    600_000,
+  )
 
-  it(`owns no wait after a release at any step of a load`, async () => {
-    quietConsole()
-    const driver = createDriver(new DatabaseSync(`:memory:`))
-    await coverGroupA(driver)
-    const reach = createOracleReach<ReleaseReach>(
-      `persisted demand coverage releases`,
-      [
-        `released before the source load`,
-        `released while the source load waited`,
-        `released during a coverage read`,
-      ],
-    )
-    for (let steps = 0; steps <= 24; steps++) {
-      reach.beginHistory()
-      checkRelease(
-        steps,
-        await runReleaseAt(driver, steps, (state) => reach.reach(state)),
+  it.skipIf(oracleReplayRequested())(
+    `owns no wait after a release at any step of a load`,
+    async () => {
+      quietConsole()
+      const driver = createDriver(new DatabaseSync(`:memory:`))
+      await coverGroupA(driver)
+      const reach = createOracleReach<ReleaseReach>(
+        `persisted demand coverage releases`,
+        [
+          `released before the source load`,
+          `released while the source load waited`,
+          `released during a coverage read`,
+        ],
       )
-    }
-    reach.assertReached()
-  }, 300_000)
+      for (let steps = 0; steps <= 24; steps++) {
+        reach.beginHistory()
+        checkRelease(
+          steps,
+          await runReleaseAt(driver, steps, (state) => reach.reach(state)),
+        )
+      }
+      reach.assertReached()
+    },
+    300_000,
+  )
 
-  it(`rejects observations that ignore lost rows, obsolete loads, or other window rows`, () => {
-    // Checker calibration (ORC-006): the shared judgment must reject a wrong
-    // observation of each kind. Each record below states what production
-    // would wrongly show; the comparison must report it.
-    const loadA: LoadSubsetOptions = {
-      where: new IR.Func(`eq`, [new IR.PropRef([`group`]), new IR.Value(`a`)]),
-    }
-    const loadW = {
-      ...loadA,
-      orderBy: [
-        {
-          expression: new IR.PropRef([`rank`]),
-          compareOptions: { direction: `asc`, nulls: `first` },
+  it.skipIf(oracleReplayRequested())(
+    `rejects observations that ignore lost rows, obsolete loads, or other window rows`,
+    () => {
+      // Checker calibration (ORC-006): the shared judgment must reject a wrong
+      // observation of each kind. Each record below states what production
+      // would wrongly show; the comparison must report it.
+      const loadA: LoadSubsetOptions = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`group`]),
+          new IR.Value(`a`),
+        ]),
+      }
+      const loadW = {
+        ...loadA,
+        orderBy: [
+          {
+            expression: new IR.PropRef([`rank`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        limit: WINDOW_LIMIT,
+      } as unknown as LoadSubsetOptions
+      const rows: SourceEvent = {
+        type: `rows`,
+        rows: [
+          [`r1`, { group: `a`, rank: 1 }],
+          [`r2`, { group: `a`, rank: 2 }],
+        ],
+      }
+      const covered: Array<SourceEvent> = [
+        rows,
+        { type: `settled`, load: loadA, current: true },
+        { type: `settled`, load: loadW, current: true },
+      ]
+      const ready = (ids: Array<string>): QueryObservation => ({
+        status: `ready`,
+        rows: ids,
+      })
+      const record = (
+        events: ReadonlyArray<SourceEvent>,
+        a: QueryObservation,
+        w: QueryObservation,
+      ): CoverageRecord => ({
+        events,
+        // The offline session's own loads of the same demands.
+        queries: {
+          a: { spec: SPECS.a, sent: [{ ...loadA }], observed: a },
+          w: { spec: SPECS.w, sent: [{ ...loadW }], observed: w },
         },
-      ],
-      limit: WINDOW_LIMIT,
-    } as unknown as LoadSubsetOptions
-    const rows: SourceEvent = {
-      type: `rows`,
-      rows: [
-        [`r1`, { group: `a`, rank: 1 }],
-        [`r2`, { group: `a`, rank: 2 }],
-      ],
-    }
-    const covered: Array<SourceEvent> = [
-      rows,
-      { type: `settled`, load: loadA, current: true },
-      { type: `settled`, load: loadW, current: true },
-    ]
-    const ready = (ids: Array<string>): QueryObservation => ({
-      status: `ready`,
-      rows: ids,
-    })
-    const record = (
-      events: ReadonlyArray<SourceEvent>,
-      a: QueryObservation,
-      w: QueryObservation,
-    ): CoverageRecord => ({
-      events,
-      // The offline session's own loads of the same demands.
-      queries: {
-        a: { spec: SPECS.a, sent: [{ ...loadA }], observed: a },
-        w: { spec: SPECS.w, sent: [{ ...loadW }], observed: w },
-      },
-      upstream: `never answers`,
-      waitPassed: true,
-    })
-    // The right observations pass.
-    expect(
-      coverageViolations(
-        record(covered, ready([`r1`, `r2`]), ready([`r1`, `r2`])),
-      ),
-    ).toEqual([])
-    // A demand that lost a row, settled anyway.
-    expect(
-      coverageViolations(
-        record([...covered, { type: `delete`, id: `r1` }], ready([`r2`]), {
-          status: `loading`,
-        }),
-      ),
-    ).toHaveLength(1)
-    // An obsolete load treated as coverage.
-    expect(
-      coverageViolations(
-        record(
-          [rows, { type: `settled`, load: loadA, current: false }],
-          ready([`r1`, `r2`]),
-          { status: `loading` },
+        upstream: `never answers`,
+        waitPassed: true,
+      })
+      // The right observations pass.
+      expect(
+        coverageViolations(
+          record(covered, ready([`r1`, `r2`]), ready([`r1`, `r2`])),
         ),
-      ),
-    ).toHaveLength(1)
-    // A window that holds another row, settled anyway.
-    expect(
-      coverageViolations(
-        record(
-          [
-            ...covered,
-            { type: `rows`, rows: [[`r3`, { group: `a`, rank: 0 }]] },
-          ],
-          ready([`r1`, `r2`, `r3`]),
-          ready([`r3`, `r1`]),
+      ).toEqual([])
+      // A demand that lost a row, settled anyway.
+      expect(
+        coverageViolations(
+          record([...covered, { type: `delete`, id: `r1` }], ready([`r2`]), {
+            status: `loading`,
+          }),
         ),
-      ),
-    ).toHaveLength(1)
-    // A window shown out of order.
-    expect(
-      coverageViolations(
-        record(covered, ready([`r1`, `r2`]), ready([`r2`, `r1`])),
-      ),
-    ).toHaveLength(1)
-  })
+      ).toHaveLength(1)
+      // An obsolete load treated as coverage.
+      expect(
+        coverageViolations(
+          record(
+            [rows, { type: `settled`, load: loadA, current: false }],
+            ready([`r1`, `r2`]),
+            { status: `loading` },
+          ),
+        ),
+      ).toHaveLength(1)
+      // A released load that the source resolves must not certify its demand.
+      expect(
+        coverageViolations(
+          record(
+            [
+              rows,
+              { type: `settled`, load: loadA, current: true, aborted: true },
+            ],
+            ready([`r1`, `r2`]),
+            { status: `loading` },
+          ),
+        ),
+      ).toHaveLength(1)
+      // A window that holds another row, settled anyway.
+      expect(
+        coverageViolations(
+          record(
+            [
+              ...covered,
+              { type: `rows`, rows: [[`r3`, { group: `a`, rank: 0 }]] },
+            ],
+            ready([`r1`, `r2`, `r3`]),
+            ready([`r3`, `r1`]),
+          ),
+        ),
+      ).toHaveLength(1)
+      // A window shown out of order.
+      expect(
+        coverageViolations(
+          record(covered, ready([`r1`, `r2`]), ready([`r2`, `r1`])),
+        ),
+      ).toHaveLength(1)
+    },
+  )
 
   it.skipIf(oracleReplayRequested())(
     `refines the model over a fixed campaign`,
@@ -1240,11 +1448,15 @@ describe(`persisted demand coverage over generated histories`, () => {
       quietConsole()
       await campaign({ seed: 2102, numRuns: oracleRuns(RUNS) })
     },
-    120_000,
+    180_000,
   )
 
-  it(`refines the model over a random or replayed campaign`, async () => {
-    quietConsole()
-    await campaign(oraclePropertyOptions(RUNS, PROPERTY))
-  }, 120_000)
+  it.skipIf(oracleReplaySkips(PROPERTY, REQUIRED_PROPERTY))(
+    `refines the model over a random or replayed campaign`,
+    async () => {
+      quietConsole()
+      await campaign(oraclePropertyOptions(RUNS, PROPERTY))
+    },
+    180_000,
+  )
 })

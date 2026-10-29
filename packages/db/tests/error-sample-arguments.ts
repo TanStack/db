@@ -114,7 +114,7 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
     ['alias', 'collection-1', ['key1', 'key2']],
     ['alias'],
   ],
-  DuplicateAliasInSubqueryError: [['alias', ['parent1', 'parent2']]],
+  // Error 57 is retired. Keep its code and documentation for older logs.
   UnsupportedFromTypeError: [['string']],
   UnknownExpressionTypeError: [['custom']],
   EmptyReferencePathError: [[]],

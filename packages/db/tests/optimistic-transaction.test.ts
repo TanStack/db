@@ -428,10 +428,10 @@ describe(`Delete then insert transaction laws`, () => {
         return Promise.resolve()
       },
     })
-    const overlaySettlement = overlay.isPersisted.promise.catch(() => undefined)
-    const replacementSettlement = replacement.isPersisted.promise.catch(
-      () => undefined,
-    )
+    const overlaySettlement = overlay.when('settled').catch(() => undefined)
+    const replacementSettlement = replacement
+      .when('settled')
+      .catch(() => undefined)
 
     await withHistoryCleanup(
       async () => {
@@ -506,12 +506,12 @@ describe(`Delete then insert transaction laws`, () => {
         return Promise.resolve()
       },
     })
-    const insertSettlement = pendingInsert.isPersisted.promise.catch(
-      () => undefined,
-    )
-    const replacementSettlement = replacement.isPersisted.promise.catch(
-      () => undefined,
-    )
+    const insertSettlement = pendingInsert
+      .when('settled')
+      .catch(() => undefined)
+    const replacementSettlement = replacement
+      .when('settled')
+      .catch(() => undefined)
 
     await withHistoryCleanup(
       async () => {

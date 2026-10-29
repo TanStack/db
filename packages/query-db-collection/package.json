@@ -47,10 +47,10 @@
     "src"
   ],
   "dependencies": {
-    "@standard-schema/spec": "^1.1.0",
-    "@tanstack/db": "workspace:*"
+    "@standard-schema/spec": "^1.1.0"
   },
   "peerDependencies": {
+    "@tanstack/db": "^1.0.0-rc.0",
     "@tanstack/query-core": "^5.90.15",
     "typescript": ">=4.7"
   },
@@ -58,7 +58,7 @@
     "@tanstack/node-db-sqlite-persistence": "workspace:*",
     "@tanstack/offline-transactions": "workspace:*",
     "@tanstack/query-core": "^5.90.20",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "seroval": "1.6.3"
   }
 }

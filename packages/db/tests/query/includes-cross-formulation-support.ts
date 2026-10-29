@@ -121,7 +121,6 @@ export function referenceRequestPredicate(
 // this projection.
 const virtualKeys = new Set<string>([
   `$hasPendingWrites`,
-  `$synced`,
   `$origin`,
   `$key`,
   `$collectionId`,

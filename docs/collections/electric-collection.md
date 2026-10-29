@@ -468,7 +468,7 @@ const matchFn = (message) => {
 
 ### Common Issue: awaitTxId Stalls or Times Out
 
-A frequent issue developers encounter is that `awaitTxId` (or the transaction's `isPersisted.promise`) stalls indefinitely, eventually timing out with no error messages. The data persists correctly to the database, but the optimistic mutation never resolves.
+A frequent issue developers encounter is that `awaitTxId` (or the transaction's `when('settled')`) stalls indefinitely, eventually timing out with no error messages. The data persists correctly to the database, but the optimistic mutation never resolves.
 
 **Root Cause:** This happens when the transaction ID (txid) returned from your API doesn't match the actual transaction ID of the mutation in Postgres. This mismatch occurs when you query `pg_current_xact_id()` **outside** the same transaction that performs the mutation.
 

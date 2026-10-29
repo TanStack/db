@@ -1,6 +1,6 @@
 import { Client } from 'pg'
 import type { ClientConfig } from 'pg'
-import type { GlobalSetupContext } from 'vitest/node'
+import type { TestProject } from 'vitest/node'
 
 const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000'
 const POSTGRES_HOST = process.env.POSTGRES_HOST ?? 'localhost'
@@ -102,7 +102,7 @@ async function waitForPostgres(client: Client): Promise<void> {
  * 4. Provides context to all tests
  * 5. Returns cleanup function
  */
-export default async function ({ provide }: GlobalSetupContext) {
+export default async function ({ provide }: TestProject) {
   console.log('🚀 Starting e2e test suite global setup...')
 
   // Wait for Electric server to be ready

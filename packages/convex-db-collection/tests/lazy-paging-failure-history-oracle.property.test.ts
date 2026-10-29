@@ -100,7 +100,7 @@ async function runFailureHistory(h: History) {
     )
     releaseApplication = async () => {
       pending.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
       await drain()
     }
   }

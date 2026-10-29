@@ -32,10 +32,9 @@ The result types are automatically inferred from your query structure, providing
 Live query results include computed, read-only virtual properties on every row:
 
 - `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
-- `$synced` (deprecated): the inverse of `$hasPendingWrites`. It will be removed in the 1.0 RC. Replace `row.$synced` with `!row.$hasPendingWrites`, and `eq(row.$synced, true)` with `eq(row.$hasPendingWrites, false)`.
 - `$origin`: Collection attribution for the current row. Optimistic rows are `"local"`; source rows use key and timing, not a source client ID. A peer write can be `"local"`. A truncate does not consume an active mutation's attribution for an untouched key. See [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md) for settlement, truncate, and overlap rules. Local-only Collections always use `"local"`.
 - `$key`: the row key for the result.
-- `$collectionId`: the source collection ID.
+- `$collectionId`: the selected source Collection's ID for a whole-row `.select` or a `.select` projection that spreads a source row, including a joined row. With multiple source spreads, the last spread supplies the metadata. Other projections receive the live-query Collection's ID, regardless of selected virtual field names. A functional `.fn.select()` retains source metadata only when it returns a source row directly. A new object, including a spread, receives the live-query Collection's metadata.
 
 These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
 query outputs automatically and should not be persisted back to storage.
@@ -207,9 +206,10 @@ export class UserListComponent {
 ```
 
 > **Note:** React hooks derive query identity from structured query IR by
-> default. Dependency arrays are still accepted for backwards compatibility,
-> but warn in development and will be removed in 1.0. In React and Preact, an
-> unhashable query without `queryKey` throws `UnhashableQueryIRError`. See the
+> default. Dependency-array hook forms were removed in the first 1.0 RC. Use
+> derived query identity or an explicit, nonempty `queryKey`. In React and
+> Preact, an unhashable query without a nonempty `queryKey` throws
+> `UnhashableQueryIRError`. See the
 > [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 

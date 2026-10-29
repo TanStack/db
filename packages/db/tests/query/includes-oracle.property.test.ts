@@ -802,7 +802,7 @@ async function applyAction(
         action,
         sources.roots.resolveSync,
         sources.roots.rejectSync,
-        transaction.isPersisted.promise,
+        transaction.when(`settled`),
         pending,
         entry,
       )
@@ -864,7 +864,7 @@ async function applyAction(
       action,
       source.resolveSync,
       source.rejectSync,
-      transaction.isPersisted.promise,
+      transaction.when(`settled`),
       pending,
       entry,
     )
@@ -4517,7 +4517,7 @@ describe(`includes recompute oracle`, () => {
               position: 0,
             })
             releasePendingWork(pending, entry, children.resolveSync)
-            await transaction.isPersisted.promise
+            await transaction.when(`settled`)
 
             expect(stripVirtualProperties(live.toArray)).toEqual([
               { id: 1, children: [{ id: 1, value: confirmedValue }] },

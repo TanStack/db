@@ -126,7 +126,7 @@ it(`generates ownership and callback schedules against one independent scope law
             )
             applicationHold = {
               release,
-              persisted: transaction.isPersisted.promise,
+              persisted: transaction.when('settled'),
             }
           }
           const attempts: Array<{

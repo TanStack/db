@@ -208,7 +208,7 @@ async function checkRoundtrip(
     autoCommit: false,
     mutationFn: async () => {},
   })
-  const rollback = transaction.isPersisted.promise.catch(() => undefined)
+  const rollback = transaction.when(`settled`).catch(() => undefined)
   let hasPrimaryFailure = false
   let primaryFailure: unknown
   try {
@@ -865,7 +865,7 @@ oracleReplayTest(it)(
               autoCommit: false,
               mutationFn: async () => {},
             })
-            const rollback = local.isPersisted.promise.catch(() => undefined)
+            const rollback = local.when('settled').catch(() => undefined)
             const storage = new FakeStorageAdapter()
             let hasPrimaryFailure = false
             try {

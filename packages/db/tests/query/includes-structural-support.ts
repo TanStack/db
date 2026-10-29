@@ -94,7 +94,7 @@ export function trackPendingWork(
     entry.settled = true
     if (entry.released) pending.delete(entry)
   }
-  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
+  entry.receipt = transaction.when('settled').then(settled, settled)
   return entry
 }
 

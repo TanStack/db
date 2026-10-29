@@ -23,8 +23,11 @@
  * - **Both:** the class, its `name`, `instanceof`, and its extra fields are the
  *   same. The switch is an inline `process.env.NODE_ENV` check, so a production
  *   bundler drops the full text; a separate bundle check owns that.
- * - **Docs:** `docs/errors.md` has a heading for every code that names its
- *   class.
+ * - **Docs:** the freshly generated errors page has a heading for every code
+ *   that names its class, and an HTML ID matching its production-message link.
+ *   Source PRs judge the actual generator's stdout.
+ *   The release docs pipeline owns tracked generated-page freshness, following
+ *   the maintainer's decision to keep generated docs out of source PRs.
  *
  * - **Error sites:** code outside `errors.ts` also throws plain `Error`,
  *   `TypeError`, and `RangeError` values with library text. Each such site
@@ -35,6 +38,8 @@
  *   expressions in the same scope give the same message for every input.
  *   Descriptor error 113 follows the same missing-client condition from source
  *   construction to query consumption; its new template is framework-neutral.
+ *   Cache conflict 234 also names getKey/schema options after the maintainer's
+ *   decision to reject incompatible local row behavior under one query identity.
  *   Every interpolated expression whose values production can show, or one of
  *   its sub-expressions, is passed to the code line. Plain objects, such as
  *   rows, never reach it (maintainer decision, 2026-10-07). `AggregateError` messages count too. A message built only
@@ -67,9 +72,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
 import { codedWarning } from '../src/error-message'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import { errorSampleArguments } from './error-sample-arguments'
 import { exportedErrorClasses } from './production-error-messages-fixture'
 import { findErrorSites } from './error-sites-oracle'
+import { withErrorDocsFixture } from './generate-error-docs-fixture'
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url))
 const devMessages: Record<string, Array<string>> = JSON.parse(
@@ -81,7 +88,6 @@ const developmentOnlyPath = resolve(
   testsDirectory,
   `fixtures/development-only-messages.json`,
 )
-const docsPath = resolve(testsDirectory, `../../../docs/errors.md`)
 const docsUrl = `https://tanstack.com/db/latest/docs/errors`
 
 /** The production line, as the decision states it. */
@@ -301,14 +307,27 @@ function expectUnencodableValuesShown(): void {
 }
 
 // The check: the production outputs match the expected record for this claim.
-function expectCodesDocumented(): void {
+function expectCodesDocumented(docs: string): void {
   const codes: Record<string, number> = JSON.parse(
     readFileSync(codesPath, `utf8`),
   )
-  const docs = readFileSync(docsPath, `utf8`)
+  // The link names an HTML ID, not one spelling of an anchor tag. Parsing
+  // admits valid quote, attribute-spacing and element choices.
+  // The actual generator puts literal messages in canonical ```text fences.
+  // Their contents render as code, so they cannot supply link targets. This
+  // bounded extraction covers those fences, not arbitrary Markdown layouts.
+  const html = docs.replace(/^```text\r?\n[\s\S]*?^```(?:\r?\n|$)/gm, ``)
+  const ids = new Set(
+    [
+      ...new DOMParser()
+        .parseFromString(html, `text/html`)
+        .querySelectorAll(`[id]`),
+    ].map((element) => element.id),
+  )
   for (const [name, code] of Object.entries(codes)) {
     const heading = new RegExp(`^## Error ${code}\\b.*${name}`, `m`)
     expect(docs, `${name} (${code})`).toMatch(heading)
+    expect(ids, `${name} (${code}) anchor`).toContain(`error-${code}`)
   }
   const sites: Record<string, { file: string; kind?: string }> = JSON.parse(
     readFileSync(sitesPath, `utf8`),
@@ -322,7 +341,45 @@ function expectCodesDocumented(): void {
   }
 }
 
+// Checker calibration supplies only the catalog facts the law requires.
+// This forged observation has no prose/examples/layout from the renderer and
+// supplies no production evidence. Its validity is independent of CLI stdout.
+function catalogObservation(): string {
+  const codes: Record<string, number> = JSON.parse(
+    readFileSync(codesPath, `utf8`),
+  )
+  const sites: Record<string, { file: string; kind?: string }> = JSON.parse(
+    readFileSync(sitesPath, `utf8`),
+  )
+  return [
+    ...Object.entries(codes).flatMap(([name, code]) => [
+      `<a id="error-${code}"></a>`,
+      `## Error ${code}: ${name}`,
+    ]),
+    ...Object.entries(sites).flatMap(([code, { file, kind }]) => [
+      `<a id="${kind ?? `error`}-${code}"></a>`,
+      `## ${kind === `warning` ? `Warning` : `Error`} ${code}: ${file}`,
+    ]),
+  ].join(`\n`)
+}
+
+// This receiving driver copies the actual CLI and full frozen catalog into a
+// disposable repository, then judges its real stdout. Even a broken stdout
+// mode cannot write the active checkout's generated page.
+function renderErrorDocs(): string {
+  return withErrorDocsFixture((fixture) => {
+    const result = fixture.run(`--stdout`)
+    if (result.error) throw result.error
+    if (result.status !== 0)
+      throw new Error(
+        `Error docs CLI failed (${result.status}):\n${result.stderr}`,
+      )
+    return result.stdout
+  })
+}
+
 declareOracle({
+  model: [catalogObservation],
   check: [
     expectEveryClassCoded,
     expectFullTextInProduction,
@@ -518,7 +575,70 @@ describe(`production error messages`, () => {
     expectUnencodableValuesShown()
   })
 
+  it.each([`heading`, `class-anchor`, `site-anchor`] as const)(
+    `rejects a missing generated %s`,
+    (part) => {
+      const docs = catalogObservation()
+      expectCodesDocumented(docs)
+      let wrong: string
+      if (part === `heading` || part === `class-anchor`) {
+        const codes: Record<string, number> = JSON.parse(
+          readFileSync(codesPath, `utf8`),
+        )
+        const code = Object.values(codes)[0]!
+        if (part === `class-anchor`)
+          expectCodesDocumented(
+            docs.replace(
+              `<a id="error-${code}"></a>`,
+              `<span data-catalog="class" id = 'error-${code}'></span>`,
+            ),
+          )
+        wrong =
+          part === `heading`
+            ? docs.replace(new RegExp(`^## Error ${code}\\b.*$`, `m`), ``)
+            : docs.replace(`<a id="error-${code}"></a>`, ``)
+      } else {
+        const sites: Record<string, { kind?: string }> = JSON.parse(
+          readFileSync(sitesPath, `utf8`),
+        )
+        const [code, { kind = `error` }] = Object.entries(sites)[0]!
+        wrong = docs.replace(`<a id="${kind}-${code}"></a>`, ``)
+      }
+      expect(() => expectCodesDocumented(wrong)).toThrow()
+    },
+  )
+
+  it(`rejects class IDs inside canonical fenced message examples`, () => {
+    const docs = catalogObservation()
+    const codes: Record<string, number> = JSON.parse(
+      readFileSync(codesPath, `utf8`),
+    )
+    const code = Object.values(codes)[0]!
+    const anchor = `<a id="error-${code}"></a>`
+    const wrong = docs.replace(anchor, `\`\`\`text\n${anchor}\n\`\`\`\n`)
+    expectCodesDocumented(docs)
+    expect(() => expectCodesDocumented(wrong)).toThrow()
+  })
+
   it(`documents every code with its class`, () => {
-    expectCodesDocumented()
+    const reach = createOracleReach(
+      `production-errors.generated-docs`,
+      [`cli-stdout-received`, `catalog-compared`],
+      { replaying: false },
+    )
+    reach.beginHistory()
+    try {
+      const docs = renderErrorDocs()
+      reach.reach(`cli-stdout-received`)
+      expectCodesDocumented(docs)
+      reach.reach(`catalog-compared`)
+      reach.assertReached()
+    } finally {
+      if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+        console.info(
+          `production-errors.generated-docs reach`,
+          Object.fromEntries(reach.counts()),
+        )
+    }
   })
 })

@@ -83,7 +83,7 @@ export function observeReceipt<T extends object>(transaction: Transaction<T>) {
     returnedSame?: boolean
     error?: unknown
   } = { outcome: `pending` }
-  void transaction.isPersisted.promise.then(
+  void transaction.when('settled').then(
     (resolved) => {
       receipt.outcome = `fulfilled`
       receipt.returnedSame = resolved === transaction

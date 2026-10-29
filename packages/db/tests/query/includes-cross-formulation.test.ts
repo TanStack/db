@@ -263,7 +263,7 @@ describe(`includes cross-formulation oracle`, () => {
       const rows = captureOrderedNested(expected)
       Object.assign(rows[0]!, {
         $hasPendingWrites: false,
-        $synced: true,
+
         $origin: `remote`,
         $key: 0,
         $collectionId: `source`,

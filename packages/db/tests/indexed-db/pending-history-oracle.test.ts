@@ -187,7 +187,6 @@ async function run(
             row.id,
             {
               pending: row.$hasPendingWrites,
-              synced: row.$synced,
               origin: row.$origin,
             },
           ]),
@@ -224,7 +223,6 @@ async function run(
         const metadata = observation.metadata.get(row.id)!
         expect(metadata, `${label} metadata ${row.id}`).toEqual({
           pending,
-          synced: !pending,
           origin: pending ? 'local' : origins.get(row.id),
         })
       }
@@ -255,7 +253,7 @@ async function run(
           if (metadata) metadata.origin = 'remote'
         }
     }
-    const outcome = tx.isPersisted.promise.then(
+    const outcome = tx.when(`settled`).then(
       () => {
         captureSettlement()
         return undefined
@@ -315,14 +313,15 @@ async function run(
         await peer.utils.importData(structuredClone(change.rows))
       else if (step.kind === 'delete') {
         if (!durable.some((row) => row.id === change.deletes[0])) continue
-        await peer.delete(change.deletes[0]!).isPersisted.promise
+        await peer.delete(change.deletes[0]!).when(`settled`)
       } else if (durable.some((row) => row.id === id))
-        await peer.update(id, (row) => {
-          row.name = `peer-${step.value}`
-          delete row.optional
-        }).isPersisted.promise
-      else
-        await peer.insert(structuredClone(change.rows[0]!)).isPersisted.promise
+        await peer
+          .update(id, (row) => {
+            row.name = `peer-${step.value}`
+            delete row.optional
+          })
+          .when(`settled`)
+      else await peer.insert(structuredClone(change.rows[0]!)).when(`settled`)
       // Collection updates that leave every authored value unchanged author no
       // mutation, so they provide no source acknowledgement or notification.
       if (
@@ -380,7 +379,7 @@ async function run(
       'settled durable',
     )
     const suffix = { id: 'suffix', name: 'ordinary suffix' }
-    await subject.insert(suffix).isPersisted.promise
+    await subject.insert(suffix).when(`settled`)
     await Channel.drain()
     durable = apply(durable, { rows: [suffix], deletes: [], replace: false })
     assertSnapshot(peer.values(), durable, 'suffix peer')

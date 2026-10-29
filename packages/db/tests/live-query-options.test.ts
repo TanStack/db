@@ -392,21 +392,28 @@ describe(`live query identity`, () => {
     expect(getLiveQueryHash(first, [])).not.toBe(getLiveQueryHash(second, []))
   })
 
-  it(`does not collapse configs with opaque row identity behavior`, () => {
+  it(`binds row identity and schema options outside query identity`, () => {
     const source = createCollection<{ id: string }>({
       id: `live-query-config-identity-source`,
       getKey: (row) => row.id,
       sync: { sync: ({ markReady }) => markReady() },
     })
     const query = new BaseQueryBuilder().from({ source })
-    const first = { query, getKey: (row: { id: string }) => row.id }
-    const second = { query, getKey: (row: { id: string }) => `x-${row.id}` }
+    const getKey = (row: { id: string }) => row.id
+    const otherGetKey = (row: { id: string }) => `x-${row.id}`
+    const schema = { parse: (row: unknown) => row }
+    const otherSchema = { parse: (row: unknown) => row }
+    const first = { query, getKey, schema }
+    const same = { query, getKey, schema }
+    const second = { query, getKey: otherGetKey, schema }
+    const third = { query, getKey, schema: otherSchema }
 
-    expect(getPreparedLiveQueryIdentity(first)).not.toEqual(
+    expect(getPreparedLiveQueryIdentity(first)).toEqual(
       getPreparedLiveQueryIdentity(second),
     )
-    expect(() => getLiveQueryHash(first)).toThrow(/function value/)
-    expect(() => getLiveQueryHash(second)).toThrow(/function value/)
+    expect(getLiveQueryHash(first)).toBe(getLiveQueryHash(same))
+    expect(getLiveQueryHash(first)).toBe(getLiveQueryHash(second))
+    expect(getLiveQueryHash(first)).toBe(getLiveQueryHash(third))
   })
 
   it(`uses exact custom comparator identity in live-query config hashes`, () => {

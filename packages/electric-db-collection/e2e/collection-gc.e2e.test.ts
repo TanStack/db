@@ -276,7 +276,7 @@ for (const gcTime of [10, 100]) {
             expect(collection.get(id)).toMatchObject({
               id,
               value: `confirmed`,
-              $synced: true,
+
               $hasPendingWrites: false,
             })
           expect(idleHost.callbacks.size).toBe(0)

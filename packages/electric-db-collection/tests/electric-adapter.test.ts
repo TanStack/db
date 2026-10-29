@@ -42,7 +42,9 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => createMockStream(mockStream)),
+    ShapeStream: vi.fn(function () {
+      return createMockStream(mockStream)
+    }),
   }
 })
 
@@ -147,12 +149,12 @@ describe(`Electric adapter laws`, () => {
         void acquired.catch(() => {})
         trace.subscriber([change(`update`, 1, `partial`), upToDate])
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when('settled')
         await acquired
         expect(trace.collection.has(1)).toBe(false)
       } finally {
         persistence.resolve()
-        await transaction?.isPersisted.promise
+        await transaction?.when('settled')
         await trace.collection.cleanup()
         await acquired
       }
@@ -1209,7 +1211,7 @@ describe(`Electric adapter laws`, () => {
     expect(trace.collection.has(2)).toBe(false)
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await trace.collection.cleanup()
   })
   // Readiness counts accepted rows; they publish when the mutation settles.
@@ -1239,7 +1241,7 @@ describe(`Electric adapter laws`, () => {
     expect(trace.collection.has(1)).toBe(false)
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await trace.collection.stateWhenReady()
 
     expect(trace.collection.status).toBe(`ready`)
@@ -1305,7 +1307,7 @@ describe(`Electric adapter laws`, () => {
           `pending`,
         )
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when('settled')
         await atCheckpoint(loading!, `full recovery applied settlement`)
         expect(outcome).toBe(`fulfilled`)
         expect(trace.collection.get(1)).toMatchObject({
@@ -1658,7 +1660,7 @@ describe(`Electric adapter laws`, () => {
       expect(trace.collection.has(1), `applied receipt is held`).toBe(false)
       external.abort()
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
       await expect(
         atCheckpoint(first, `externally aborted held subset`),
       ).rejects.toMatchObject({ name: `AbortError` })
@@ -1728,7 +1730,7 @@ describe(`Electric adapter laws`, () => {
       expect(firstOutcome).toBe(`rejected`)
       expect(firstError).toMatchObject({ name: `AbortError` })
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
       await observedFirst
       expect(trace.collection.has(1)).toBe(true)
     }, [
@@ -1852,7 +1854,7 @@ describe(`Electric adapter laws`, () => {
 
     await trace.collection.cleanup()
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await Promise.resolve()
 
     expect(trace.collection.status).toBe(`cleaned-up`)

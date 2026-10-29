@@ -6,6 +6,7 @@ import {
   UNSUBSCRIBED_GC_FLOOR_MS,
 } from './collection/lifecycle.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
+import { LIVE_QUERY_INTERNAL } from './query/live/internal.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
   getStableQueryBuilderHash,
@@ -254,6 +255,24 @@ export function getPreparedLiveQuerySources(
   return isCollection(query) ? [query] : []
 }
 
+/** Local row behavior, kept separate from the portable query identity. */
+export type LiveQueryRowOptions = readonly [getKey: unknown, schema: unknown]
+
+export function getLiveQueryRowOptions(value: unknown): LiveQueryRowOptions {
+  if (isCollection(value)) {
+    const { config } = value
+    const internal = config.utils?.[LIVE_QUERY_INTERNAL] as
+      { hasCustomGetKey?: boolean } | undefined
+    return [
+      internal?.hasCustomGetKey ? config.getKey : undefined,
+      config.schema,
+    ]
+  }
+  const config = value as
+    { getKey?: unknown; schema?: unknown } | null | undefined
+  return [config?.getKey, config?.schema]
+}
+
 export function getPreparedLiveQueryIdentity(
   value: unknown,
   pool?: PooledLiveQueries,
@@ -270,10 +289,10 @@ export function getPreparedLiveQueryIdentity(
   if (value && typeof value === `object` && `query` in value) {
     const config = value as LiveQueryCollectionConfig<any>
     return [
+      // getKey and schema bind for this query identity. Inline options must
+      // not turn a normal framework render into a new Collection.
       `config`,
       getPreparedLiveQueryIdentity(config.query, configPool(config)),
-      [`getKey`, config.getKey],
-      [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
       [
         `defaultStringCollation`,

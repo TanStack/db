@@ -56,7 +56,7 @@ for (const replacement of ['clear', 'import'] as const) {
           if (replacement === 'clear') await source.utils.clearObjectStore()
           else await source.utils.importData([imported])
           const inserted = { id: 'later', name: 'accepted after replacement' }
-          await receiver.insert(inserted).isPersisted.promise
+          await receiver.insert(inserted).when('settled')
           const expected = expectedAfterReplacement(
             replacement,
             imported,
@@ -135,10 +135,12 @@ for (const metadata of ['none', 'mixed', 'all'] as const) {
           const receiver = await h.open()
           const sender = await h.open('items', { db: await h.connect() })
           if (action === 'update')
-            await sender.update(key, (row) => {
-              row.name = 'new'
-            }).isPersisted.promise
-          else await sender.delete(key).isPersisted.promise
+            await sender
+              .update(key, (row) => {
+                row.name = 'new'
+              })
+              .when(`settled`)
+          else await sender.delete(key).when(`settled`)
           // Repeat delivery: missing versions cannot turn an update into a second
           // insert, and repeated deletes must leave the independent anchor intact.
           Channel.pending.push(...Channel.pending)

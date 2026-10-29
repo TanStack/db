@@ -919,7 +919,7 @@ describe(`persistedCollectionOptions`, () => {
       releaseReplacementHydration.resolve()
       await cleanupPersistedOracle(
         [
-          () => localTransaction?.isPersisted.promise.catch(() => undefined),
+          () => localTransaction?.when('settled').catch(() => undefined),
           () => replacementReady,
           () => (cleanedUp ? undefined : collection.cleanup()),
         ],
@@ -957,7 +957,6 @@ describe(`persistedCollectionOptions`, () => {
         onInsert: async () => {
           hookEntered.resolve()
           await releaseHook.promise
-          return {}
         },
         persistence: { adapter, coordinator },
       }),
@@ -985,7 +984,7 @@ describe(`persistedCollectionOptions`, () => {
         id: `old-hook`,
         title: `must not enter replacement coordinator`,
       })
-      transactionOutcome = transaction.isPersisted.promise.then(
+      transactionOutcome = transaction.when('settled').then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -1942,7 +1941,7 @@ describe(`persistedCollectionOptions`, () => {
         id: `local`,
         title: `durable before confirmation settles`,
       })
-      const transactionOutcome = transaction.isPersisted.promise.then(
+      const transactionOutcome = transaction.when('settled').then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -2768,7 +2767,7 @@ describe(`persistedCollectionOptions`, () => {
         title: `must roll back`,
       })
       const firstOutcome = await atPersistedOracleCheckpoint(
-        firstTransaction.isPersisted.promise.then(
+        firstTransaction.when('settled').then(
           () => ({ status: `fulfilled` as const }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         ),
@@ -2806,7 +2805,7 @@ describe(`persistedCollectionOptions`, () => {
               id: `late-local`,
               title: `must not be admitted`,
             })
-            await lateTransaction.isPersisted.promise
+            await lateTransaction.when('settled')
           })
           .then(
             () => ({ status: `fulfilled` as const }),

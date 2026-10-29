@@ -209,7 +209,7 @@ function expectedEventTrace(
 function applyOp(
   collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,
   op: Op,
-): { isPersisted: { promise: Promise<unknown> } } {
+): { when: (state: 'settled') => Promise<unknown> } {
   switch (op.kind) {
     case `insert`:
       return collection.insert({
@@ -226,8 +226,8 @@ function applyOp(
   }
 }
 
-const settle = (tx: { isPersisted: { promise: Promise<unknown> } }) =>
-  tx.isPersisted.promise
+const settle = (tx: { when: (state: 'settled') => Promise<unknown> }) =>
+  tx.when(`settled`)
 
 function publicRows(
   collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,

@@ -164,7 +164,7 @@ it.each([
       if (loss === `before-call`) env.leader.setLeader(false)
       const transaction = action(row)
       transactionId = transaction.id
-      const settled = transaction.isPersisted.promise.then(
+      const settled = transaction.when('settled').then(
         () => {
           outcome.status = `fulfilled`
         },
@@ -249,7 +249,7 @@ it(`rejects a selected manual offline transaction that loses leadership before a
     })
     const transaction = offline.mutate(() => env.collection.insert(row))
     transactionId = transaction.id
-    persistedObserved = transaction.isPersisted.promise.then(
+    persistedObserved = transaction.when('settled').then(
       () => `fulfilled`,
       (error: unknown) => error,
     )

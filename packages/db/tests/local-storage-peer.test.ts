@@ -37,7 +37,7 @@ it('keeps an authored Date in the writer while peers read JSON bytes', async () 
     async () => {
       await Promise.all([writer.preload(), peer.preload()])
       const at = new Date('2020-01-02T03:04:05.000Z')
-      await writer.insert({ id: 'row', at }).isPersisted.promise
+      await writer.insert({ id: 'row', at }).when('settled')
       const expected = [{ id: 'row', at: at.toISOString() }]
       const durable = JSON.parse(host.storage.getItem('dated')!) as Record<
         string,
@@ -88,8 +88,8 @@ it('keeps a native authored Date through a disjoint peer write', async () => {
     async () => {
       await Promise.all([first.preload(), second.preload()])
       const at = new Date('2020-01-02T03:04:05.000Z')
-      await first.insert({ id: 'first-row', at }).isPersisted.promise
-      await second.insert({ id: 'second-row', at: 'later' }).isPersisted.promise
+      await first.insert({ id: 'first-row', at }).when('settled')
+      await second.insert({ id: 'second-row', at: 'later' }).when('settled')
       const durable = JSON.parse(host.storage.getItem('dated')!) as Record<
         string,
         { data: DatedRow }
@@ -129,9 +129,11 @@ it('keeps a native authored Date through a disjoint peer write', async () => {
 
       // A peer's actual same-key edit has a new version and must replace the
       // retained native value in the first Collection.
-      await second.update('first-row', (draft) => {
-        draft.at = 'changed'
-      }).isPersisted.promise
+      await second
+        .update('first-row', (draft) => {
+          draft.at = 'changed'
+        })
+        .when('settled')
       expect(
         [...first.values()].find(({ id }) => id === 'first-row'),
       ).toMatchObject({ at: 'changed' })
@@ -184,7 +186,7 @@ for (const unrelatedKey of ['first-store', 'second-store']) {
       () => [
         () => {
           if (transaction) {
-            void transaction.isPersisted.promise.catch(() => undefined)
+            void transaction.when('settled').catch(() => undefined)
             transaction.rollback()
           }
         },
@@ -221,7 +223,7 @@ it('restores a serializable NaN key alongside distinct number and string keys', 
         { id: 'number', key: 1, value: 2 },
         { id: 'string', key: '1', value: 3 },
       ]
-      for (const row of authored) await writer.insert(row).isPersisted.promise
+      for (const row of authored) await writer.insert(row).when('settled')
       expect(
         [...writer.values()].map(({ id, key, value }) => ({ id, key, value })),
       ).toEqual(expect.arrayContaining(authored))

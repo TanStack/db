@@ -10,6 +10,7 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, onTestFailed, vi } from 'vitest'
+import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
@@ -454,6 +455,9 @@ type Run = {
   failAfter: (count: number | undefined) => void
   // The Query cache entries this Collection owns: one per tracked request.
   cachedQueries: () => number
+  // Queries an observer still holds. A refetch re-runs only these; a released
+  // Query stays cached until its gcTime.
+  activeQueries: () => number
   // Reports that served pages may have shifted (`loadedSubsets:invalidated`
   // events on the source Collection) so far.
   reports: () => number
@@ -572,11 +576,9 @@ async function startRun(testCase: Case): Promise<Run> {
       // backend does not change.
       onUpdate: async () => {
         await heldWrite
-        return { refetch: false }
       },
       onDelete: async () => {
         await heldWrite
-        return { refetch: false }
       },
     }),
   )
@@ -597,7 +599,7 @@ async function startRun(testCase: Case): Promise<Run> {
         : items.delete(rowId)
     return async () => {
       release()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await settle()
     }
   }
@@ -737,6 +739,9 @@ async function startRun(testCase: Case): Promise<Run> {
     },
     cachedQueries: () =>
       queryClient.getQueryCache().findAll({ queryKey: [id] }).length,
+    activeQueries: () =>
+      queryClient.getQueryCache().findAll({ queryKey: [id], type: `active` })
+        .length,
     reports: () => reports,
     changedReanswers: () => changedReanswers,
     failNextApplication: () => {
@@ -798,6 +803,10 @@ type Observation = {
   // Such a refetch that also reported, so a loader may have judged the skip
   // while the refetched rows were held back.
   reachedReportDuringHold: boolean
+  // A refetch that reported while the window was full: the loader then
+  // judges whether its own first page still proves the window, and repairs
+  // when a moved end leaves it unproven.
+  reachedReportOverFullWindow: boolean
   // Reports over the whole run.
   reports: number
 }
@@ -826,6 +835,7 @@ async function checkCase(testCase: Case): Promise<Observation> {
   let reachedLaggingRefetchAfterContinuation = false
   let reachedLaggingRefetchDuringHold = false
   let reachedReportDuringHold = false
+  let reachedReportOverFullWindow = false
   let primary: unknown
   const check = (checkpoint: string) => {
     const expected = expectedWindow(run.backend, run.markers, testCase.scenario)
@@ -887,6 +897,13 @@ async function checkCase(testCase: Case): Promise<Observation> {
         run.reports() > reportsBefore
       ) {
         reachedReportDuringHold = true
+      }
+      if (
+        command.type === `refetch` &&
+        run.reports() > reportsBefore &&
+        run.windowIds().length === testCase.scenario.limit
+      ) {
+        reachedReportOverFullWindow = true
       }
       checkReports(
         command,
@@ -984,6 +1001,7 @@ async function checkCase(testCase: Case): Promise<Observation> {
     reachedLaggingRefetchAfterContinuation,
     reachedLaggingRefetchDuringHold,
     reachedReportDuringHold,
+    reachedReportOverFullWindow,
     reports: run.reports(),
   }
 }
@@ -1283,10 +1301,14 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   })
 
   // The ordinary insert into a top-N list. The page's end moves earlier, so
-  // Query DB reports, but every window row is in the window's own first page:
-  // the refetch must send only the Queries it refetches, with no repair.
+  // Query DB reports, but every window row is in the window's own first page.
+  // The tie the loader read belongs to the old end, so its rows prove
+  // nothing about rows that tie with the new end. The loader proves the
+  // window again with bounded reads (a repair, or the new end's tie; the
+  // shape is the loader's choice), reads nothing unbounded, and retires the
+  // requests it replaces, so the Query count stays the same.
   it.each([1, 2] as const)(
-    `a refetch of a window inside its first page starts no repair (%i order terms)`,
+    `a refetch that moves a first page's end proves the window again with bounded reads (%i order terms)`,
     async (terms) => {
       const scenario: Scenario = {
         encoding: `cursor`,
@@ -1307,14 +1329,22 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         await run.apply({ type: `upsert`, id: 5, rank: 5 })
         await run.apply({ type: `flip`, id: 5 })
         const queries = run.cachedQueries()
+        const activeBefore = run.activeQueries()
         const requestsBefore = run.requests.length
         await run.apply({ type: `refetch` })
         expect(run.windowIds()).toEqual(
           expectedWindow(run.backend, run.markers, scenario),
         )
-        expect(run.requests.length - requestsBefore).toBeLessThanOrEqual(
-          queries,
-        )
+        const extra = run.requests.slice(requestsBefore + queries)
+        expect(extra.length).toBeGreaterThan(0)
+        // Every read is bounded: an ordered prefix with a limit, or a tie
+        // that reads equal leading values. None reads the full source.
+        for (const request of extra) {
+          expect(
+            request.limit !== undefined || request.where !== undefined,
+          ).toBe(true)
+        }
+        expect(run.activeQueries()).toBe(activeBefore)
       } catch (error) {
         primary = error
       }
@@ -1888,8 +1918,16 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each(campaigns)(
     `generated refetch histories (%s campaign)`,
     async (campaign) => {
-      let reached = 0
-      let reachedDuringHold = 0
+      // Declared reach: generated histories serve continuation pages before
+      // a refetch of a lagging provider (the premise of the gap), do so while
+      // a hold runs, and report a refetch while the window is full, where the
+      // loader decides between ignoring the report and repairing.
+      const states = [
+        `reachedLaggingRefetchAfterContinuation`,
+        `reachedLaggingRefetchDuringHold`,
+        `reachedReportOverFullWindow`,
+      ] as const
+      const reach = createOracleReach(property, states, { minimum: 3 })
       const options =
         campaign === `fixed`
           ? { seed: 20261013, numRuns: oracleRuns(80) }
@@ -1904,18 +1942,15 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       })
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
+          reach.beginHistory()
           const observation = await withDeadline(checkCase(testCase))
-          if (observation.reachedLaggingRefetchAfterContinuation) reached++
-          if (observation.reachedLaggingRefetchDuringHold) reachedDuringHold++
+          for (const state of states) {
+            if (observation[state]) reach.reach(state)
+          }
         }),
         { ...options, seed },
       )
-      // Positive reach witness: generated histories serve continuation pages
-      // before a refetch, which is the premise of the gap.
-      if (campaign !== `replay`) {
-        expect(reached).toBeGreaterThan(0)
-        expect(reachedDuringHold).toBeGreaterThan(0)
-      }
+      reach.assertReached()
     },
     120_000,
   )

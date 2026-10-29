@@ -1,6 +1,6 @@
 // Ordinary type test for virtual row fields: opaque scalar child results,
 // compared with written types. The row and value classification law is owned
-// by virtual-row-fields-oracle.test-d.ts.
+// by virtual-row-fields-types-oracle.test.ts.
 import { describe, expectTypeOf, test } from 'vitest'
 import {
   createLiveQueryCollection,
@@ -38,6 +38,6 @@ describe(`virtual row field type boundary`, () => {
     // @ts-expect-error Date values are not rows and have no virtual row fields.
     result.dates[0]!.$key
     // @ts-expect-error Materialized Date values are not rows either.
-    result.firstDate?.$synced
+    result.firstDate?.$hasPendingWrites
   })
 })

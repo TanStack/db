@@ -146,7 +146,7 @@ async function runMutationHistory(history: History): Promise<void> {
         state: string
         mutations: ReadonlyArray<{ collection: unknown }>
         rollback: () => unknown
-        isPersisted: { promise: Promise<unknown> }
+        when: (state: 'settled') => Promise<unknown>
       }
     | undefined
   let receipt: `pending` | `fulfilled` | `rejected` = `pending`
@@ -253,7 +253,7 @@ async function runMutationHistory(history: History): Promise<void> {
       void manual.commit().catch(() => {})
       transaction = manual
     }
-    void transaction.isPersisted.promise.then(
+    void transaction.when('settled').then(
       () => {
         receipt = `fulfilled`
       },

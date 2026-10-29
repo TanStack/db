@@ -138,10 +138,10 @@ function mountConfig(
   return makeHandle(hook)
 }
 
-// An empty dependency list compiles the query once, at mount, where the hook
-// checks its identity and claims its sources.
+// Retain this registration for replay coordinates. It uses the current
+// derived-identity API, which checks identity and source claims on each render.
 function mountWithDependencyList(build: QueryBuild) {
-  const hook = renderHook(() => useLiveQuery(build as any, []))
+  const hook = renderHook(() => useLiveQuery(build as any))
   return makeHandle(hook)
 }
 
@@ -150,7 +150,7 @@ function mountConfigWithDependencyList(
   opts?: { gcTime?: number; pool?: PooledLiveQueries },
 ) {
   const hook = renderHook(() =>
-    useLiveQuery({ query: build as any, ...opts } as any, []),
+    useLiveQuery({ query: build as any, ...opts } as any),
   )
   return makeHandle(hook)
 }
@@ -161,10 +161,9 @@ function mountDisabled() {
   return makeHandle(hook)
 }
 
-// React compares query identity on two production paths: the identity derived
-// from the query IR on every render (the 1.0 form), and a deprecated
-// dependency list, which decides reuse and checks identity when the query
-// compiles. The suite runs once per path.
+// The legacy dependency-list label preserves receiving registrations and replay
+// coordinates. Both branches now use the current derived-identity API; these
+// labels do not represent separate production paths.
 type IdentityPath = `derived` | `dependency list`
 
 const mountControllableWith = (path: IdentityPath) =>
@@ -177,16 +176,16 @@ const mountControllableWith = (path: IdentityPath) =>
     const hook = renderHook(
       ({ param }: { param: P }) => {
         const query = (q: any) => build(q, param)
-        // A pooled query uses the config form, on either identity path.
+        // Both retained registrations use the config form for a pooled query.
         const result =
           opts?.pool !== undefined
             ? path === `derived`
               ? useLiveQuery({ query, pool: opts.pool })
-              : useLiveQuery({ query, pool: opts.pool }, [param])
+              : useLiveQuery({ query, pool: opts.pool })
             : path === `derived`
               ? // The callback captures param, so its IR identity changes with it.
                 useLiveQuery(query)
-              : useLiveQuery(query, [param])
+              : useLiveQuery(query)
         // A layout effect records each committed value.
         useLayoutEffect(() => {
           published.record(result.data, result.state)
@@ -249,7 +248,7 @@ function makeHandle(hook: RenderHookResult<any, any>) {
 }
 
 // The config-object form with a queryKey chosen per step; an undefined key
-// leaves the hook to derive the identity, or to follow the dependency list.
+// leaves the hook to derive the identity.
 const mountKeyedControllableWith = (path: IdentityPath) =>
   function mountKeyedControllable<P>(
     build: (q: any, param: P) => any,
@@ -264,9 +263,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
           queryKey: key(param),
         } as any
         const result =
-          path === `derived`
-            ? useLiveQuery(config)
-            : useLiveQuery(config, [param])
+          path === `derived` ? useLiveQuery(config) : useLiveQuery(config)
         useLayoutEffect(() => {
           published.record(result.data, result.state)
         })

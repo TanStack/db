@@ -32,6 +32,7 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 
 ## Contents
 
+- [Migrating to the 1.0 RC](./guides/migrate-to-1-0-rc.md) — update apps from pre-1.0 releases
 - [How it works](#how-it-works) — understand the TanStack DB development model and how the pieces fit together
 - [SSR and hydration](./guides/ssr.md) — use `DbClient` to transport explicit collection rows or live-query result snapshots
 - [SQLite persistence](./guides/sqlite-persistence.md) — retain Collection rows across restarts and save sync metadata for supported adapters
@@ -440,6 +441,7 @@ import {
   collectionOptions,
   useLiveQuery,
 } from "@tanstack/react-db"
+import { eq } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { QueryClient } from "@tanstack/query-core"
 
@@ -449,7 +451,7 @@ const dbClient = new DbClient({ queryClient })
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
 const todoCollection = collectionOptions("todos", (client) =>
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; list_id: string; text: string; status: string }>({
     id: "todos",
     queryKey: ["todos"],
     queryClient: client.requireDependency<QueryClient>("queryClient"),
@@ -462,14 +464,12 @@ const todoCollection = collectionOptions("todos", (client) =>
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
-      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
 )
 const listCollection = collectionOptions("todo-lists", (client) =>
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; name: string; active: boolean }>({
     id: "todo-lists",
     queryKey: ["todo-lists"],
     queryClient: client.requireDependency<QueryClient>("queryClient"),
@@ -483,8 +483,6 @@ const listCollection = collectionOptions("todo-lists", (client) =>
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
-      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -511,7 +509,7 @@ const Todos = () => {
         })),
   })
 
-  // ...
+  return <ul>{todos.map((todo) => <li key={todo.id}>{todo.text}</li>)}</ul>
 }
 
 const App = () => (

@@ -102,7 +102,7 @@ for (const [kind, effects] of Object.entries(grammars)) {
                   : c.insert({ ...effect.row })
                 : c.delete(effect.key)
               outcomes.push(
-                tx.isPersisted.promise.then(
+                tx.when(`settled`).then(
                   () => {
                     succeeded.add(index)
                     return true
@@ -126,11 +126,12 @@ for (const [kind, effects] of Object.entries(grammars)) {
                     ? [peerRow, initial[1]!]
                     : initial
             if (peerAction === 'update')
-              await peer.update(1, (row) => {
-                row.name = 'peer'
-              }).isPersisted.promise
-            if (peerAction === 'delete')
-              await peer.delete(1).isPersisted.promise
+              await peer
+                .update(1, (row) => {
+                  row.name = 'peer'
+                })
+                .when(`settled`)
+            if (peerAction === 'delete') await peer.delete(1).when(`settled`)
             if (peerAction === 'replace') await peer.utils.importData([peerRow])
             await Channel.deliver()
             assertRows(

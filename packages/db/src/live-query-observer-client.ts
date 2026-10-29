@@ -1,3 +1,4 @@
+import { getLiveQueryRowOptions } from './live-query-options.js'
 import { codedMessage, devBuild } from './error-message.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPooledLiveQuerySource } from './query/pooled-source.js'
@@ -131,6 +132,7 @@ export class LiveQueryObserverClient<
     if (preloadRequested) {
       void this.host.observer.preload().catch(() => {})
     }
+    if (typeof window === `undefined`) this.assertSources()
     const snapshot = this.host.read(true)
     const collection = this.collection
     if (!collection || this.seed) return snapshot
@@ -173,6 +175,7 @@ export class LiveQueryObserverClient<
             }),
       },
       sources,
+      getLiveQueryRowOptions(collection),
     )
     return this.host.read(true)
   }
@@ -242,7 +245,11 @@ export class LiveQueryObserverClient<
   assertSources(): void {
     const { sources } = this.getSourceInfo()
     if (this.queryHash && sources)
-      this.client._assertLiveQuerySources(this.queryHash, sources)
+      this.client._assertLiveQuerySources(
+        this.queryHash,
+        sources,
+        getLiveQueryRowOptions(this.collection),
+      )
   }
 
   subscribe(): () => void {
@@ -303,7 +310,11 @@ export class LiveQueryObserverClient<
       try {
         this.client._waitForSsrLiveQuery(this.queryHash)
         if (sources)
-          this.client._assertLiveQuerySources(this.queryHash, sources)
+          this.client._assertLiveQuerySources(
+            this.queryHash,
+            sources,
+            getLiveQueryRowOptions(this.collection),
+          )
         if (
           query?.status === `pending` ||
           (query?.status === `success` && query.snapshot?.status === undefined)
@@ -328,6 +339,7 @@ export class LiveQueryObserverClient<
             this.queryHash,
             collectionPromise.then(() => this.host.observer.dehydrate()),
             sources,
+            getLiveQueryRowOptions(this.collection),
           )
         : collectionPromise
     this.preloadPromise = promise

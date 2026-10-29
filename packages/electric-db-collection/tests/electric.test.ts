@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShapeStream } from '@electric-sql/client'
 import {
-  CollectionImpl,
   IR,
   createCollection,
   createLiveQueryCollection,
   createTransaction,
   gt,
-  resetWarnings,
   withAcceptedReceipt,
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
@@ -23,7 +21,6 @@ import type {
   PendingMutation,
   SyncMetadataApi,
   Transaction,
-  TransactionWithMutations,
 } from '@tanstack/db'
 import type { Message, Row } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -61,7 +58,9 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => createMockStream(mockStream)),
+    ShapeStream: vi.fn(function () {
+      return createMockStream(mockStream)
+    }),
   }
 })
 
@@ -814,7 +813,7 @@ describe(`Electric Integration`, () => {
     expect(collection.get(1)).toBeUndefined()
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     await collection.stateWhenReady()
 
     expect(collection.status).toBe(`ready`)
@@ -1381,7 +1380,7 @@ describe(`Electric Integration`, () => {
         collection.insert({ id: 1, name: `Test item 1` }),
       )
 
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
 
       transaction = collection._state.transactions.get(transaction.id)!
 
@@ -1400,9 +1399,9 @@ describe(`Electric Integration`, () => {
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
       // Create mock handlers
-      const onInsert = vi.fn().mockResolvedValue({ txid: 123 })
-      const onUpdate = vi.fn().mockResolvedValue({ txid: 456 })
-      const onDelete = vi.fn().mockResolvedValue({ txid: 789 })
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+      const onUpdate = vi.fn().mockResolvedValue(undefined)
+      const onDelete = vi.fn().mockResolvedValue(undefined)
 
       const config = {
         id: `test-handlers`,
@@ -1424,123 +1423,6 @@ describe(`Electric Integration`, () => {
       expect(options.onInsert).toBeDefined()
       expect(options.onUpdate).toBeDefined()
       expect(options.onDelete).toBeDefined()
-    })
-
-    it(`warns once while continuing to handle legacy txid returns`, async () => {
-      resetWarnings()
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const awaitTxId = vi.fn().mockResolvedValue(true)
-      const onInsert = vi.fn().mockResolvedValue({ txid: 123 })
-      const options = electricCollectionOptions({
-        id: `legacy-handler-warning`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        getKey: (item: Row) => item.id as number,
-        onInsert,
-      })
-      const params = {
-        transaction: {
-          id: `legacy-handler-transaction`,
-          mutations: [],
-        },
-        collection: { utils: { awaitTxId } },
-      } as unknown as InsertMutationFnParams<
-        Row,
-        string | number,
-        ElectricCollectionUtils<Row>
-      >
-
-      try {
-        await options.onInsert!(params)
-        await options.onInsert!(params)
-
-        expect(onInsert).toHaveBeenCalledTimes(2)
-        expect(awaitTxId).toHaveBeenCalledTimes(2)
-        expect(warning).toHaveBeenCalledTimes(1)
-        expect(warning).toHaveBeenCalledWith(
-          expect.stringContaining(`Returning { txid }`),
-        )
-      } finally {
-        resetWarnings()
-        warning.mockRestore()
-      }
-    })
-
-    it(`treats an empty handler result as no synchronization strategy`, async () => {
-      // Create a mock transaction for testing
-      const mockTransaction = {
-        id: `test-transaction`,
-        mutations: [],
-      } as unknown as TransactionWithMutations<Row, `insert`>
-      const mockParams: InsertMutationFnParams<
-        Row,
-        string | number,
-        ElectricCollectionUtils<Row>
-      > = {
-        transaction: mockTransaction,
-        // @ts-expect-error not relevant to test
-        collection: CollectionImpl,
-      }
-
-      // Create a handler that doesn't return a txid
-      const onInsert = vi.fn().mockResolvedValue({})
-
-      const config = {
-        id: `test-handlers`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: {
-            table: `test_table`,
-          },
-        },
-        getKey: (item: Row) => item.id as number,
-        onInsert,
-      }
-
-      const options = electricCollectionOptions(config)
-
-      // Empty objects retain the existing no-wait behavior.
-      await expect(options.onInsert!(mockParams)).resolves.not.toThrow()
-    })
-
-    it.each([
-      [`string`, `legacy-result`],
-      [`number`, 42],
-      [`null`, null],
-      [`function`, () => undefined],
-      [`object`, {}],
-      [`void`, undefined],
-    ])(`tolerates an out-of-contract %s handler result`, async (_, result) => {
-      const awaitTxId = vi.fn().mockResolvedValue(true)
-      const options = electricCollectionOptions({
-        id: `out-of-contract-handler-result`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        getKey: (item: Row) => item.id as number,
-        onInsert: vi.fn().mockResolvedValue(result),
-      })
-      const params = {
-        transaction: { id: `test-transaction`, mutations: [] },
-        collection: { utils: { awaitTxId } },
-      } as unknown as InsertMutationFnParams<
-        Row,
-        string | number,
-        ElectricCollectionUtils<Row>
-      >
-
-      let thrown: unknown
-      try {
-        await options.onInsert!(params)
-      } catch (error) {
-        thrown = error
-      }
-
-      expect(thrown).toBeUndefined()
-      expect(awaitTxId).not.toHaveBeenCalled()
     })
 
     it(`should simulate complete flow with direct persistence handlers`, async () => {
@@ -1599,10 +1481,18 @@ describe(`Electric Integration`, () => {
         return txid
       })
 
-      // Create direct persistence handler that returns the txid
-      const onInsert = vi.fn(async (params: MutationFnParams<Row>) => {
-        return { txid: await mutationFn(params) }
-      })
+      const onInsert = vi.fn(
+        async (
+          params: InsertMutationFnParams<
+            Row,
+            string | number,
+            ElectricCollectionUtils<Row>
+          >,
+        ) => {
+          const txid = await mutationFn(params)
+          await params.collection.utils.awaitTxId(txid)
+        },
+      )
 
       // Create a test collection with our direct persistence handler
       const config = {
@@ -1626,13 +1516,13 @@ describe(`Electric Integration`, () => {
         name: `Direct Persistence User`,
       })
 
-      // If awaitTxId wasn't called automatically, this wouldn't be true.
+      // The handler is still waiting for awaitTxId at this checkpoint.
       expect(testCollection._state.syncedData.size).toEqual(0)
 
       // Verify that our onInsert handler was called
       expect(onInsert).toHaveBeenCalled()
 
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Verify that the data was added to the collection via the sync process
       expect(testCollection.has(1)).toBe(true)
@@ -1643,9 +1533,40 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.syncedData.size).toEqual(1)
     })
 
+    it(`ignores a legacy handler return value without waiting for its txid`, async () => {
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `legacy-return-value`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          startSync: true,
+          getKey: (item: Row) => item.id as number,
+          onInsert: (() =>
+            Promise.resolve({ txid: 123 })) as unknown as () => Promise<void>,
+        }),
+      )
+
+      const transaction = testCollection.insert({ id: 1, name: `pending` })
+      await expect(transaction.when(`settled`)).resolves.toBe(transaction)
+      expect(testCollection.has(1)).toBe(false)
+      await testCollection.cleanup()
+    })
+
     it(`should remove optimistic insert when txid sync confirms a different server-generated key`, async () => {
       const txid = 1234
-      const onInsert = vi.fn().mockResolvedValue({ txid })
+      const onInsert = vi.fn(
+        async ({
+          collection,
+        }: InsertMutationFnParams<
+          Row,
+          string | number,
+          ElectricCollectionUtils<Row>
+        >) => {
+          await collection.utils.awaitTxId(txid)
+        },
+      )
 
       const testCollection = createCollection(
         electricCollectionOptions({
@@ -1676,7 +1597,7 @@ describe(`Electric Integration`, () => {
         { headers: { control: `up-to-date` } },
       ])
 
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       expect(testCollection.has(4733)).toBe(false)
       expect(stripVirtualProps(testCollection.get(24))).toEqual({
@@ -1686,7 +1607,7 @@ describe(`Electric Integration`, () => {
       expect(Array.from(testCollection.state.keys())).toEqual([24])
     })
 
-    it(`should support void strategy when handler returns nothing`, async () => {
+    it(`settles immediately when a handler does not wait for sync`, async () => {
       const onInsert = vi.fn().mockResolvedValue(undefined)
 
       const config = {
@@ -1705,15 +1626,22 @@ describe(`Electric Integration`, () => {
       // Insert with void strategy - should complete immediately without waiting
       const tx = testCollection.insert({ id: 1, name: `Void Test` })
 
-      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      await expect(tx.when(`settled`)).resolves.toBeDefined()
       expect(onInsert).toHaveBeenCalled()
     })
 
-    it(`should support custom timeout in matching strategy`, async () => {
-      const onInsert = vi.fn(() => {
-        // Return a txid that will never arrive with a very short timeout
-        return Promise.resolve({ txid: 999999, timeout: 100 })
-      })
+    it(`supports a custom awaitTxId timeout`, async () => {
+      const onInsert = vi.fn(
+        async ({
+          collection,
+        }: InsertMutationFnParams<
+          Row,
+          string | number,
+          ElectricCollectionUtils<Row>
+        >) => {
+          await collection.utils.awaitTxId(999999, 100)
+        },
+      )
 
       const config = {
         id: `test-custom-timeout`,
@@ -1735,12 +1663,12 @@ describe(`Electric Integration`, () => {
       expect(onInsert).toHaveBeenCalled()
 
       // The transaction should reject due to timeout
-      await expect(tx.isPersisted.promise).rejects.toThrow(
+      await expect(tx.when(`settled`)).rejects.toThrow(
         `Timeout waiting for txId: 999999`,
       )
     })
 
-    it(`should handle array of txids returned from handler`, async () => {
+    it(`waits for every txid requested by a handler`, async () => {
       // Create a fake backend that returns multiple txids
       const fakeBackend = {
         persist: (
@@ -1752,43 +1680,52 @@ describe(`Electric Integration`, () => {
         },
       }
 
-      // Create handler that returns array of txids
-      const onInsert = vi.fn(async (params: MutationFnParams<Row>) => {
-        const txids = await fakeBackend.persist(params.transaction.mutations)
+      // Create handler that waits for each txid
+      const onInsert = vi.fn(
+        async (
+          params: InsertMutationFnParams<
+            Row,
+            string | number,
+            ElectricCollectionUtils<Row>
+          >,
+        ) => {
+          const txids = await fakeBackend.persist(params.transaction.mutations)
 
-        // Simulate server sending sync messages on different ticks
-        // In the real world, multiple txids rarely arrive together
-        setTimeout(() => {
-          subscriber([
-            {
-              key: `1`,
-              value: { id: 1, name: `Item 1` },
-              headers: {
-                operation: `insert`,
-                txids: [txids[0]!],
+          // Simulate server sending sync messages on different ticks
+          // In the real world, multiple txids rarely arrive together
+          setTimeout(() => {
+            subscriber([
+              {
+                key: `1`,
+                value: { id: 1, name: `Item 1` },
+                headers: {
+                  operation: `insert`,
+                  txids: [txids[0]!],
+                },
               },
-            },
-            { headers: { control: `up-to-date` } },
-          ])
-        }, 1)
+              { headers: { control: `up-to-date` } },
+            ])
+          }, 1)
 
-        setTimeout(() => {
-          subscriber([
-            {
-              key: `2`,
-              value: { id: 2, name: `Item 2` },
-              headers: {
-                operation: `insert`,
-                txids: [txids[1]!],
+          setTimeout(() => {
+            subscriber([
+              {
+                key: `2`,
+                value: { id: 2, name: `Item 2` },
+                headers: {
+                  operation: `insert`,
+                  txids: [txids[1]!],
+                },
               },
-            },
-            { headers: { control: `up-to-date` } },
-          ])
-        }, 2)
+              { headers: { control: `up-to-date` } },
+            ])
+          }, 2)
 
-        // Return array of txids - this is the pattern that's failing
-        return { txid: txids }
-      })
+          await Promise.all(
+            txids.map((txid) => params.collection.utils.awaitTxId(txid)),
+          )
+        },
+      )
 
       const config = {
         id: `test-array-txids`,
@@ -1810,7 +1747,7 @@ describe(`Electric Integration`, () => {
       ])
 
       // This should resolve when all txids are seen
-      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      await expect(tx.when(`settled`)).resolves.toBeDefined()
       expect(onInsert).toHaveBeenCalled()
 
       // Verify both items were added
@@ -1873,7 +1810,7 @@ describe(`Electric Integration`, () => {
       }, 100)
 
       // Wait for both the custom match and persistence
-      await Promise.all([customMatchPromise, insertPromise.isPersisted.promise])
+      await Promise.all([customMatchPromise, insertPromise.when(`settled`)])
 
       expect(onInsert).toHaveBeenCalled()
       expect(testCollection.has(1)).toBe(true)
@@ -1909,7 +1846,7 @@ describe(`Electric Integration`, () => {
       const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
 
       // Capture the rejection promise before advancing timers
-      const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
+      const rejectionPromise = expect(tx.when(`settled`)).rejects.toThrow(
         `Timeout waiting for custom match function`,
       )
 
@@ -1993,7 +1930,7 @@ describe(`Electric Integration`, () => {
       resolveServerCall!()
 
       // Should complete successfully - awaitMatch should find the message in the buffer
-      await insertPromise.isPersisted.promise
+      await insertPromise.when(`settled`)
 
       expect(onInsert).toHaveBeenCalled()
       expect(testCollection.has(42)).toBe(true)
@@ -2061,7 +1998,7 @@ describe(`Electric Integration`, () => {
         subscriber([{ headers: { control: `up-to-date` } }])
       }, 150)
 
-      await insertPromise.isPersisted.promise
+      await insertPromise.when(`settled`)
 
       expect(onInsert).toHaveBeenCalled()
       // Match should have been found before resolve (both times should exist)
@@ -2147,7 +2084,7 @@ describe(`Electric Integration`, () => {
       // even though item 200 from the first batch is no longer in the buffer
       resolveServerCall!()
 
-      await insertPromise.isPersisted.promise
+      await insertPromise.when(`settled`)
 
       expect(testCollection.has(201)).toBe(true)
     })
@@ -2194,7 +2131,7 @@ describe(`Electric Integration`, () => {
       // Insert looking for id 999 which doesn't exist
       const tx = testCollection.insert({ id: 301, name: `Test` })
 
-      await expect(tx.isPersisted.promise).rejects.toThrow(
+      await expect(tx.when(`settled`)).rejects.toThrow(
         `Timeout waiting for custom match function`,
       )
     })
@@ -2277,9 +2214,9 @@ describe(`Electric Integration`, () => {
       serverCalls.forEach((call) => call.resolve())
 
       await Promise.all([
-        insert1.isPersisted.promise,
-        insert2.isPersisted.promise,
-        insert3.isPersisted.promise,
+        insert1.when(`settled`),
+        insert2.when(`settled`),
+        insert3.when(`settled`),
       ])
 
       expect(matches).toContain(400)
@@ -2347,7 +2284,7 @@ describe(`Electric Integration`, () => {
       // Resolve server call for insert 1
       const call1 = serverCalls.find((c) => c.id === 500)
       call1?.resolve()
-      await insert1.isPersisted.promise
+      await insert1.when(`settled`)
       expect(testCollection.has(500)).toBe(true)
 
       // Insert 2 - starts waiting on server call
@@ -2368,7 +2305,7 @@ describe(`Electric Integration`, () => {
       // Resolve server call for insert 2
       const call2 = serverCalls.find((c) => c.id === 501)
       call2?.resolve()
-      await insert2.isPersisted.promise
+      await insert2.when(`settled`)
       expect(testCollection.has(501)).toBe(true)
 
       // Insert 3 - starts waiting on server call
@@ -2389,7 +2326,7 @@ describe(`Electric Integration`, () => {
       // Resolve server call for insert 3
       const call3 = serverCalls.find((c) => c.id === 502)
       call3?.resolve()
-      await insert3.isPersisted.promise
+      await insert3.when(`settled`)
       expect(testCollection.has(502)).toBe(true)
     })
 
@@ -2474,7 +2411,7 @@ describe(`Electric Integration`, () => {
       resolveServerCall!()
 
       // Should complete successfully
-      await insertPromise.isPersisted.promise
+      await insertPromise.when(`settled`)
 
       expect(onInsert).toHaveBeenCalled()
       expect(testCollection.has(600)).toBe(true)
@@ -2538,9 +2475,9 @@ describe(`Electric Integration`, () => {
       expect(typeof testCollection.utils.awaitMatch).toBe(`function`)
     })
 
-    it(`should support multiple strategies in different handlers`, () => {
-      const onInsert = vi.fn().mockResolvedValue({ txid: 100 }) // Txid strategy
-      const onUpdate = vi.fn().mockResolvedValue(undefined) // Void strategy (no return)
+    it(`passes distinct handlers through to collection options`, () => {
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+      const onUpdate = vi.fn().mockResolvedValue(undefined)
       const onDelete = vi
         .fn()
         .mockImplementation(async ({ collection: col }) => {
@@ -2566,7 +2503,7 @@ describe(`Electric Integration`, () => {
 
       const options = electricCollectionOptions(config)
 
-      // All handlers should be wrapped properly
+      // All handlers are present on the resulting options
       expect(options.onInsert).toBeDefined()
       expect(options.onUpdate).toBeDefined()
       expect(options.onDelete).toBeDefined()
@@ -2604,7 +2541,7 @@ describe(`Electric Integration`, () => {
       const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
 
       // Capture the rejection promise before advancing timers
-      const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
+      const rejectionPromise = expect(tx.when(`settled`)).rejects.toThrow(
         `Timeout waiting for custom match function`,
       )
 
@@ -2671,7 +2608,7 @@ describe(`Electric Integration`, () => {
       })
 
       // Set up persistence completion tracking
-      insertPromise.isPersisted.promise.then(() => {
+      insertPromise.when(`settled`).then(() => {
         persistenceCompleted = true
       })
 
@@ -2698,7 +2635,7 @@ describe(`Electric Integration`, () => {
       subscriber([{ headers: { control: `up-to-date` } }])
 
       // Wait for persistence to complete
-      await insertPromise.isPersisted.promise
+      await insertPromise.when(`settled`)
 
       // Verify persistence completed after up-to-date
       expect(persistenceCompleted).toBe(true)
@@ -2734,7 +2671,7 @@ describe(`Electric Integration`, () => {
       // Use runOnlyPendingTimers to execute the timeout
       await vi.runOnlyPendingTimersAsync()
 
-      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      await expect(tx.when(`settled`)).resolves.toBeDefined()
       expect(onInsert).toHaveBeenCalled()
 
       vi.useRealTimers()
@@ -2767,9 +2704,9 @@ describe(`Electric Integration`, () => {
       })
 
       // Mock AbortController
-      global.AbortController = vi
-        .fn()
-        .mockImplementation(() => mockAbortController)
+      global.AbortController = vi.fn().mockImplementation(function () {
+        return mockAbortController
+      })
     })
 
     afterEach(() => {
@@ -3534,7 +3471,7 @@ describe(`Electric Integration`, () => {
         expect(testCollection.has(2)).toBe(false)
 
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         await load
         expect(stripVirtualProps(testCollection.get(2))).toEqual({
           id: 2,
@@ -3543,7 +3480,7 @@ describe(`Electric Integration`, () => {
       } finally {
         request.resolve()
         persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await testCollection.cleanup()
       }
     })
@@ -3906,7 +3843,7 @@ describe(`Electric Integration`, () => {
         expect(testCollection.has(2)).toBe(false)
         abortController.abort()
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         // The accepted snapshot applies, but the aborted caller sees
         // `AbortError`.
         if (load === true) throw new Error(`Expected a pending subset load`)
@@ -3916,7 +3853,7 @@ describe(`Electric Integration`, () => {
       } finally {
         abortController.abort()
         persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await testCollection.cleanup()
       }
     })

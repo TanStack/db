@@ -63,7 +63,6 @@ const rootVirtualKeys = [
   `$hasPendingWrites`,
   `$key`,
   `$origin`,
-  `$synced`,
 ]
 
 /**

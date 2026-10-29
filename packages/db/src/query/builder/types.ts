@@ -10,10 +10,7 @@ import type {
   Value,
 } from '../ir.js'
 import type { InitialQueryBuilder, QueryBuilder } from './index.js'
-import type {
-  PublishedVirtualRowProps,
-  WithVirtualProps,
-} from '../../virtual-props.js'
+import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
 import type {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
@@ -894,9 +891,7 @@ type NonNull<T> = T extends null ? never : T
  * ```
  */
 type VirtualPropsRef<TKey extends string | number = string | number> = {
-  readonly [K in keyof PublishedVirtualRowProps<TKey>]: RefLeaf<
-    PublishedVirtualRowProps<TKey>[K]
-  >
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
 /**
@@ -987,13 +982,14 @@ export type RefLeaf<T = any, Nullable extends boolean = false> = {
 // Detect NullableBrand by checking for the key's presence
 type IsNullableRef<T> = typeof NullableBrand extends keyof T ? true : false
 
-// Helper type to remove RefBrand and NullableBrand from objects
-type WithoutRefBrand<T> =
-  IsPlainObject<T> extends true
+// Remove brands per union member so Omit preserves discriminant-specific fields.
+type WithoutRefBrand<T> = T extends unknown
+  ? IsPlainObject<T> extends true
     ? Extract<keyof T, RefBrandKeys> extends never
       ? T
       : Omit<T, RefBrandKeys>
     : T
+  : never
 
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
@@ -1106,10 +1102,21 @@ export type InferResultType<TContext extends Context> =
 type WithVirtualPropsIfAttachable<TResult> = TResult extends unknown
   ? TResult extends object
     ? IsPlainObject<TResult> extends true
-      ? WithVirtualProps<TResult, string | number>
+      ? WithRequiredVirtualProps<TResult>
       : TResult
     : TResult
   : never
+
+// An unmatched whole-row selection has optional, absent virtual fields.
+// Publication supplies metadata on that empty row instead of intersecting
+// required metadata with those absent fields and losing the empty alternative.
+type WithRequiredVirtualProps<T extends object> =
+  Extract<OptionalKeys<T>, keyof VirtualRowProps> extends never
+    ? WithVirtualProps<T, string | number>
+    : WithVirtualProps<
+        Omit<T, Extract<OptionalKeys<T>, keyof VirtualRowProps>>,
+        string | number
+      >
 
 type OptionalKeys<T> = {
   [K in keyof T]-?: {} extends Pick<T, K> ? K : never

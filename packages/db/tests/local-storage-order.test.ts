@@ -62,7 +62,7 @@ it('routes module-level manual acceptance before explicit preload', async () => 
     () => [
       () => {
         if (transaction) {
-          void transaction.isPersisted.promise.catch(() => undefined)
+          void transaction.when('settled').catch(() => undefined)
           if (transaction.state === 'pending') transaction.rollback()
         }
       },
@@ -105,7 +105,7 @@ for (const directState of ['idle', 'ready', 'cleaned-up'] as const) {
         })
         manual.mutate(() => materialized.insert({ id: 'owned', value: 1 }))
         await manual.commit()
-        await manual.isPersisted.promise
+        await manual.when('settled')
         const expected = [{ id: 'owned', value: 1 }]
         expect(
           storedRows(storage.getItem('rows')),
@@ -163,17 +163,17 @@ it('persists handler-free direct mutations before their calls return', async () 
       expect(storedRows(storage.getItem('rows'))).toEqual([
         { id: 'a', value: 1 },
       ])
-      await insert.isPersisted.promise
+      await insert.when('settled')
       const update = collection.update('a', (draft) => {
         draft.value = 2
       })
       expect(storedRows(storage.getItem('rows'))).toEqual([
         { id: 'a', value: 2 },
       ])
-      await update.isPersisted.promise
+      await update.when('settled')
       const deletion = collection.delete('a')
       expect(storedRows(storage.getItem('rows'))).toEqual([])
-      await deletion.isPersisted.promise
+      await deletion.when('settled')
     },
     () => [() => collection.cleanup()],
   )
@@ -208,7 +208,7 @@ it('holds a handler-free write behind an earlier pending handler', async () => {
       })
       expect(storedRows(storage.getItem('rows'))).toEqual(initial)
       release.resolve()
-      await Promise.all([first.isPersisted.promise, second.isPersisted.promise])
+      await Promise.all([first.when('settled'), second.when('settled')])
       expect(storedRows(storage.getItem('rows'))).toEqual([
         { id: 'a', value: 2 },
         { id: 'b', value: 0 },
@@ -222,7 +222,7 @@ it('holds a handler-free write behind an earlier pending handler', async () => {
         { id: 'b', value: 4 },
         { id: 'new', value: 3 },
       ])
-      await afterDrain.isPersisted.promise
+      await afterDrain.when('settled')
     },
     () => [() => release.resolve(), () => collection.cleanup()],
   )
@@ -269,13 +269,13 @@ it('waits for queued acceptance before reporting a later mutationFn failure', as
       })
       manual.mutate(() => collection.insert({ id: 'manual', value: 2 }))
       const commit = observeHistoryPromise(manual.commit())
-      const receipt = observeHistoryPromise(manual.isPersisted.promise)
+      const receipt = observeHistoryPromise(manual.when('settled'))
       await accepted.promise
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(commit.read().status, 'held commit').toBe('pending')
       expect(receipt.read().status, 'held persistence receipt').toBe('pending')
       release.resolve()
-      await first.isPersisted.promise
+      await first.when('settled')
       await Promise.all([commit.settled, receipt.settled])
       expect(commit.read()).toMatchObject({
         status: 'rejected',
@@ -367,7 +367,7 @@ it('waits for every un-awaited manual acceptance in one transaction', async () =
         slow.insert({ id: 'slow-manual', value: 2 })
         fast.insert({ id: 'fast-manual', value: 3 })
       })
-      const receipt = observeHistoryPromise(manual.isPersisted.promise)
+      const receipt = observeHistoryPromise(manual.when('settled'))
       const commit = observeHistoryPromise(manual.commit())
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(storedRows(fastStorage.getItem('fast-rows'))).toEqual([
@@ -378,7 +378,7 @@ it('waits for every un-awaited manual acceptance in one transaction', async () =
       expect(commit.read().status).toBe('pending')
       release.resolve()
       await Promise.all([
-        first.isPersisted.promise,
+        first.when('settled'),
         receipt.settled,
         commit.settled,
       ])
@@ -450,7 +450,7 @@ for (const queued of [false, true]) {
         if (queued) {
           expect(storage.getItem('rows')).toBeNull()
           release.resolve()
-          await first!.isPersisted.promise
+          await first!.when('settled')
         }
         await expect(receipt).rejects.toBe(storageError)
         if (queued)
@@ -463,7 +463,7 @@ for (const queued of [false, true]) {
         () => release.resolve(),
         () => {
           if (manual) {
-            void manual.isPersisted.promise.catch(() => undefined)
+            void manual.when('settled').catch(() => undefined)
             manual.rollback()
           }
         },
@@ -519,7 +519,7 @@ it('returns a rejected manual acceptance Promise for invalid serialized data', a
     () => [
       () => {
         if (manual) {
-          void manual.isPersisted.promise.catch(() => undefined)
+          void manual.when('settled').catch(() => undefined)
           manual.rollback()
         }
       },
@@ -564,7 +564,7 @@ for (const secondId of ['a', 'b']) {
         const second = collection.update(secondId, (draft) => {
           draft.value = 2
         })
-        const rejected = second.isPersisted.promise.then(
+        const rejected = second.when('settled').then(
           () => false,
           () => true,
         )
@@ -582,7 +582,7 @@ for (const secondId of ['a', 'b']) {
         ])
         expect(storedRows(storage.getItem('rows'))).toEqual(initial)
         releaseFirst.resolve()
-        await first.isPersisted.promise
+        await first.when('settled')
         expect(storedRows(storage.getItem('rows'))).toEqual([
           { id: 'a', value: 1 },
           { id: 'b', value: 0 },
@@ -656,7 +656,7 @@ for (const sameKey of [true, false]) {
         async () => {
           await collection.preload()
           const first = collection.insert({ id: 'k', value: 1 })
-          const firstOutcome = first.isPersisted.promise.then(
+          const firstOutcome = first.when('settled').then(
             () => true,
             () => false,
           )
@@ -767,7 +767,7 @@ for (const queued of [false, true]) {
           })
           manual.mutate(() => collection.insert({ id: 'manual', value: 2 }))
           const commit = observeHistoryPromise(manual.commit())
-          const receipt = observeHistoryPromise(manual.isPersisted.promise)
+          const receipt = observeHistoryPromise(manual.when('settled'))
           await accepted.promise
           if (queued) {
             await new Promise((resolve) => setTimeout(resolve, 0))
@@ -777,7 +777,7 @@ for (const queued of [false, true]) {
             )
             expect(storage.getItem('rows')).toBeNull()
             release.resolve()
-            await first!.isPersisted.promise
+            await first!.when('settled')
           }
           await Promise.all([commit.settled, receipt.settled])
           if (storageFails) {

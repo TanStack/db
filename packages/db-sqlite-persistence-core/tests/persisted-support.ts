@@ -437,7 +437,6 @@ export const stripVirtualProps = <T extends Record<string, any> | undefined>(
   if (!value || typeof value !== `object`) return value
   const {
     $hasPendingWrites: _hasPendingWrites,
-    $synced: _synced,
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
@@ -809,7 +808,7 @@ export async function runRejectedHydrationBufferWitness(
     const freshTransaction = reopened.insert(freshRow)
     await atPersistedOracleCheckpoint(
       (async () => {
-        await freshTransaction.isPersisted.promise
+        await freshTransaction.when('settled')
       })(),
       `${id} fresh transaction persisted`,
     )
@@ -1244,7 +1243,7 @@ export const assertGenerationNoticeHistory = async ({
       expect(publishedFreshTitles).toEqual([])
       releaseMutation.resolve()
       await atPersistedOracleCheckpoint<unknown>(
-        mutation.isPersisted.promise,
+        mutation.when('settled'),
         `optimistic publication released`,
       )
       await atPersistedOracleCheckpoint(
@@ -1294,7 +1293,7 @@ export const assertGenerationNoticeHistory = async ({
     await cleanupPersistedOracle(
       [
         () => recovery,
-        () => mutation?.isPersisted.promise.catch(() => undefined),
+        () => mutation?.when('settled').catch(() => undefined),
         () => demand?.catch(() => undefined),
         () => collection.cleanup(),
       ],

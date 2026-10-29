@@ -120,7 +120,7 @@ export function runRuntimePersistenceContractSuite(
             title: `Persisted from collection`,
             score: 42,
           })
-          await insertTx.isPersisted.promise
+          await insertTx.when(`settled`)
 
           const readerAdapter = factory.createAdapter(readerDriver)
           const loadedRows = await readerAdapter.loadSubset(

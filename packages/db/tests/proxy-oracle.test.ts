@@ -239,7 +239,7 @@ describe(`native array callback oracle`, () => {
         })
         try {
           const tx = collection.update(1, run)
-          await tx.isPersisted.promise
+          await tx.when(`settled`)
           const saved = collection.get(1)!
           // This oracle covers row data, not collection-owned virtual fields.
           expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)

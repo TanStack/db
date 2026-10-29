@@ -107,14 +107,14 @@ for (const firstId of [1, '1'] as const) {
             { id: firstId, value: 1 },
             { id: firstId === 1 ? '1' : 1, value: 2 },
           ]
-          await first.insert({ ...authored[0]! }).isPersisted.promise
+          await first.insert({ ...authored[0]! }).when('settled')
           expect(durableRows(host, 'shared'), 'first durable receipt').toEqual(
             expectedRows(authored.slice(0, 1)),
           )
           expect(publicRows(second), 'first same-tab peer receipt').toEqual(
             expectedRows(authored.slice(0, 1)),
           )
-          await second.insert({ ...authored[1]! }).isPersisted.promise
+          await second.insert({ ...authored[1]! }).when('settled')
           const expected = expectedRows(authored)
           expect(
             durableRows(host, 'shared'),
@@ -159,7 +159,7 @@ it('publishes manual and automatic same-key edits to a same-tab peer', async () 
   await withHistoryCleanup(
     async () => {
       await Promise.all([first.preload(), second.preload()])
-      await first.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await first.insert({ id: 'row', value: 1 }).when('settled')
       expect(publicRows(second)).toEqual([{ id: 'row', value: 1 }])
 
       const transaction = createTransaction({
@@ -182,15 +182,17 @@ it('publishes manual and automatic same-key edits to a same-tab peer', async () 
         expected,
       )
       expect(publicRows(second), 'manual writer receipt').toEqual(expected)
-      await first.update('row', (draft) => {
-        draft.value = 3
-      }).isPersisted.promise
+      await first
+        .update('row', (draft) => {
+          draft.value = 3
+        })
+        .when('settled')
       const updated = expectedRows([{ id: 'row', value: 3 }])
       expect(durableRows(host, 'shared'), 'automatic update durable').toEqual(
         updated,
       )
       expect(publicRows(second), 'automatic update peer').toEqual(updated)
-      await second.delete('row').isPersisted.promise
+      await second.delete('row').when('settled')
       expect(durableRows(host, 'shared'), 'automatic delete durable').toEqual(
         [],
       )
@@ -214,7 +216,7 @@ it('does not publish a rejected same-tab write', async () => {
   await withHistoryCleanup(
     async () => {
       await Promise.all([first.preload(), second.preload()])
-      await first.insert({ id: 'kept', value: 1 }).isPersisted.promise
+      await first.insert({ id: 'kept', value: 1 }).when('settled')
       const writeError = new Error('storage write failed')
       const setItem = host.storage.setItem
       host.storage.setItem = () => {
@@ -222,7 +224,7 @@ it('does not publish a rejected same-tab write', async () => {
       }
       try {
         await expect(
-          second.insert({ id: 'rejected', value: 2 }).isPersisted.promise,
+          second.insert({ id: 'rejected', value: 2 }).when('settled'),
         ).rejects.toBe(writeError)
       } finally {
         host.storage.setItem = setItem
@@ -262,7 +264,7 @@ it('keeps a durable receipt when a writer subscriber throws', async () => {
         },
         { includeInitialState: false },
       )
-      await writer.insert({ id: 'saved', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'saved', value: 1 }).when('settled')
       expect(
         postStorageCallbacks,
         'post-Storage callback reached',
@@ -314,7 +316,7 @@ it('isolates a failing same-tab receiver after a durable write', async () => {
   await withHistoryCleanup(
     async () => {
       await Promise.all([writer.preload(), failed.preload(), later.preload()])
-      await writer.insert({ id: 'accepted', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'accepted', value: 1 }).when('settled')
       const expected = [{ id: 'accepted', value: 1 }]
       expect(durableRows(host, 'shared'), 'durable receipt').toEqual(expected)
       expect(publicRows(writer), 'writer receipt').toEqual(expected)
@@ -368,7 +370,7 @@ it('publishes a durable row even when local confirmation fails', async () => {
     async () => {
       await Promise.all([writer.preload(), peer.preload()])
       await expect(
-        writer.insert({ id: 'durable', value: 1 }).isPersisted.promise,
+        writer.insert({ id: 'durable', value: 1 }).when('settled'),
       ).rejects.toBe(confirmationError)
       const expected = [{ id: 'durable', value: 1 }]
       expect(
@@ -398,8 +400,7 @@ it('preserves a nested same-tab write during peer publication', async () => {
     (changes) => {
       if (!admitted && changes.some((change) => change.key === 'first')) {
         admitted = true
-        nested = nestedWriter.insert({ id: 'nested', value: 2 }).isPersisted
-          .promise
+        nested = nestedWriter.insert({ id: 'nested', value: 2 }).when('settled')
       }
     },
     { includeInitialState: false },
@@ -411,7 +412,7 @@ it('preserves a nested same-tab write during peer publication', async () => {
         writer.preload(),
         nestedWriter.preload(),
       ])
-      await writer.insert({ id: 'first', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'first', value: 1 }).when('settled')
       expect(nested, 'peer admitted nested write').toBeDefined()
       await nested
       const expected = expectedRows([
@@ -426,9 +427,11 @@ it('preserves a nested same-tab write during peer publication', async () => {
       expect(publicRows(nestedWriter), 'nested writer public receipt').toEqual(
         expected,
       )
-      await nestedWriter.update('nested', (draft) => {
-        draft.value = 3
-      }).isPersisted.promise
+      await nestedWriter
+        .update('nested', (draft) => {
+          draft.value = 3
+        })
+        .when('settled')
       const final = expectedRows([
         { id: 'first', value: 1 },
         { id: 'nested', value: 3 },
@@ -491,7 +494,7 @@ it('avoids reparsing the writer snapshot during same-tab publication', async () 
       await Promise.all(collections.map((collection) => collection.preload()))
       defaultParse.mockClear()
       peerParses.fill(0)
-      await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'new', value: 1 }).when('settled')
       expect(
         defaultParse.mock.calls.filter(
           ([raw]) => typeof raw === 'string' && raw.includes('s:prior'),
@@ -572,7 +575,7 @@ for (const changesVersion of [false, true]) {
       async () => {
         await Promise.all([writer.preload(), peer.preload()])
         parses = 0
-        await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
+        await writer.insert({ id: 'new', value: 1 }).when('settled')
         const expected = expectedRows([
           { id: 'prior', value: 9 },
           { id: 'new', value: 1 },
@@ -630,16 +633,18 @@ it('publishes a parser-normalized authored row with an unchanged version token',
   await withHistoryCleanup(
     async () => {
       await Promise.all([writer.preload(), peer.preload()])
-      await writer.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'row', value: 1 }).when('settled')
       const expected = [{ id: 'row', value: 9 }]
       expect(durableRows(host, 'shared'), 'normalized insert durable').toEqual(
         expected,
       )
       expect(publicRows(writer), 'normalized insert writer').toEqual(expected)
       expect(publicRows(peer), 'normalized insert peer').toEqual(expected)
-      await writer.update('row', (draft) => {
-        draft.value = 2
-      }).isPersisted.promise
+      await writer
+        .update('row', (draft) => {
+          draft.value = 2
+        })
+        .when('settled')
       expect(durableRows(host, 'shared'), 'normalized update durable').toEqual(
         expected,
       )
@@ -669,14 +674,13 @@ it('restores same-tab publication after cleanup and restart', async () => {
     async () => {
       await Promise.all([first.preload(), second.preload()])
       await first.cleanup()
-      await second.insert({ id: 'during-cleanup', value: 1 }).isPersisted
-        .promise
+      await second.insert({ id: 'during-cleanup', value: 1 }).when('settled')
       expect(first.status).toBe('cleaned-up')
       first.startSyncImmediate()
       expect(publicRows(first), 'restart restore').toEqual([
         { id: 'during-cleanup', value: 1 },
       ])
-      await second.insert({ id: 'after-restart', value: 2 }).isPersisted.promise
+      await second.insert({ id: 'after-restart', value: 2 }).when('settled')
       const expected = expectedRows([
         { id: 'during-cleanup', value: 1 },
         { id: 'after-restart', value: 2 },
@@ -711,29 +715,33 @@ for (const otherTab of [`update`, `delete`, `clear`] as const) {
             { id: 2, value: 2 },
           ]
           for (const row of authored)
-            await first.insert({ ...row }).isPersisted.promise
+            await first.insert({ ...row }).when('settled')
           if (localEdit) {
             authored = [{ id: 1, value: 10 }, authored[1]!]
-            await first.update(1, (draft) => {
-              draft.value = 10
-            }).isPersisted.promise
+            await first
+              .update(1, (draft) => {
+                draft.value = 10
+              })
+              .when('settled')
           }
           await tab.preload()
           if (otherTab === `update`) {
             authored = [{ id: 1, value: 11 }, authored[1]!]
-            await tab.update(1, (draft) => {
-              draft.value = 11
-            }).isPersisted.promise
+            await tab
+              .update(1, (draft) => {
+                draft.value = 11
+              })
+              .when('settled')
           } else if (otherTab === `delete`) {
             authored = [authored[1]!]
-            await tab.delete(1).isPersisted.promise
+            await tab.delete(1).when('settled')
           }
           if (otherTab === `clear`) {
             authored = []
             tab.utils.clearStorage()
           } else {
             authored = [...authored, { id: 3, value: 3 }]
-            await tab.insert({ id: 3, value: 3 }).isPersisted.promise
+            await tab.insert({ id: 3, value: 3 }).when('settled')
           }
           const expected = expectedRows(authored)
           expect(durableRows(host, 'shared'), 'other tab durable').toEqual(
@@ -754,7 +762,7 @@ for (const otherTab of [`update`, `delete`, `clear`] as const) {
 
           // The reloaded run confirms the first tab's next write.
           authored = [...authored, { id: 4, value: 4 }]
-          await first.insert({ id: 4, value: 4 }).isPersisted.promise
+          await first.insert({ id: 4, value: 4 }).when('settled')
           expect(durableRows(host, 'shared'), 'durable after write').toEqual(
             expectedRows(authored),
           )
@@ -791,15 +799,16 @@ it('receives a peer write authored during persisted restore publication', async 
         (changes) => {
           if (!admitted && changes.some((change) => change.key === 'seed')) {
             admitted = true
-            nestedReceipt = first.insert({ id: 'nested', value: 2 }).isPersisted
-              .promise
+            nestedReceipt = first
+              .insert({ id: 'nested', value: 2 })
+              .when('settled')
           }
         },
         { includeInitialState: false },
       )
       try {
         await second.cleanup()
-        await first.insert({ id: 'seed', value: 1 }).isPersisted.promise
+        await first.insert({ id: 'seed', value: 1 }).when('settled')
         second.startSyncImmediate()
         expect(admitted, 'restore callback admitted peer write').toBe(true)
         await nestedReceipt
@@ -813,9 +822,11 @@ it('receives a peer write authored during persisted restore publication', async 
         )
         expect(publicRows(first), 'nested writer receipt').toEqual(expected)
         expect(publicRows(second), 'restored peer receipt').toEqual(expected)
-        await first.update('nested', (draft) => {
-          draft.value = 3
-        }).isPersisted.promise
+        await first
+          .update('nested', (draft) => {
+            draft.value = 3
+          })
+          .when('settled')
         const later = expectedRows([
           { id: 'seed', value: 1 },
           { id: 'nested', value: 3 },
@@ -845,8 +856,7 @@ it('receives a same-tab write started by its ready listener', async () => {
   let writeReceipt: Promise<unknown> | undefined
   const off = second.on('status:change', ({ status }) => {
     if (status === 'ready') {
-      writeReceipt = first.insert({ id: 'at-ready', value: 1 }).isPersisted
-        .promise
+      writeReceipt = first.insert({ id: 'at-ready', value: 1 }).when('settled')
     }
   })
   await withHistoryCleanup(
@@ -890,7 +900,7 @@ it('publishes through the default same-tab Storage object', async () => {
   await withHistoryCleanup(
     async () => {
       await Promise.all([first.preload(), second.preload()])
-      await first.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await first.insert({ id: 'row', value: 1 }).when('settled')
       expect(publicRows(second)).toEqual([{ id: 'row', value: 1 }])
     },
     () => [
@@ -1044,7 +1054,7 @@ it.each([`copy first`, `owner first`] as const)(
           await first.stateWhenReady()
         }
         expect(host.listenerCount()).toBe(1)
-        await first.insert({ id: `owned`, value: 1 }).isPersisted.promise
+        await first.insert({ id: `owned`, value: 1 }).when('settled')
         expect(publicRows(first)).toEqual([{ id: `owned`, value: 1 }])
         expect([...selected.values()]).toEqual([])
         expect(durableRows(host, `selected-owner`)).toEqual([
@@ -1219,8 +1229,8 @@ it('does not retain a same-tab callback after a late constructor failure', async
       await Promise.all([failedWriter.preload(), controlWriter.preload()])
       failedHost.resetReadCount()
       controlHost.resetReadCount()
-      await failedWriter.insert({ id: 'row', value: 1 }).isPersisted.promise
-      await controlWriter.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await failedWriter.insert({ id: 'row', value: 1 }).when('settled')
+      await controlWriter.insert({ id: 'row', value: 1 }).when('settled')
       const failedWriteReads = failedHost.readCount()
       const controlWriteReads = controlHost.readCount()
       expect(durableRows(failedHost, 'shared')).toEqual(
@@ -1277,7 +1287,7 @@ it('does not retain cleared rows after the next local write settles', async () =
   await withHistoryCleanup(
     async () => {
       await Promise.all([collection.preload(), peer.preload()])
-      await collection.insert({ id: 'old', value: 1 }).isPersisted.promise
+      await collection.insert({ id: 'old', value: 1 }).when('settled')
       host.deliver('shared')
       expect(publicRows(peer)).toEqual([{ id: 'old', value: 1 }])
       collection.utils.clearStorage()
@@ -1289,7 +1299,7 @@ it('does not retain cleared rows after the next local write settles', async () =
       expect(publicRows(peer), 'peer clear without event').toEqual([])
       host.deliver('shared')
       expect(publicRows(peer)).toEqual([])
-      await collection.insert({ id: 'new', value: 2 }).isPersisted.promise
+      await collection.insert({ id: 'new', value: 2 }).when('settled')
       const expected = [{ id: 'new', value: 2 }]
       expect(durableRows(host, 'shared')).toEqual(expected)
       expect(publicRows(collection)).toEqual(expected)
@@ -1331,7 +1341,7 @@ it('keeps a pending mutation through clear until it settles', async () => {
   await withHistoryCleanup(
     async () => {
       await collection.preload()
-      await collection.insert({ id: 'pending', value: 1 }).isPersisted.promise
+      await collection.insert({ id: 'pending', value: 1 }).when('settled')
       const update = collection.update('pending', (draft) => {
         draft.value = 2
       })
@@ -1340,7 +1350,7 @@ it('keeps a pending mutation through clear until it settles', async () => {
       expect(host.storage.getItem('shared')).toBeNull()
       expect(publicRows(collection)).toEqual([{ id: 'pending', value: 2 }])
       release.resolve()
-      await update.isPersisted.promise
+      await update.when('settled')
       expect(durableRows(host, 'shared')).toEqual([{ id: 'pending', value: 2 }])
       expect(publicRows(collection)).toEqual([{ id: 'pending', value: 2 }])
     },
@@ -1359,7 +1369,7 @@ it('refreshes each active Collection once when clearing storage', async () => {
   await withHistoryCleanup(
     async () => {
       await Promise.all([writer.preload(), peer.preload()])
-      await writer.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'row', value: 1 }).when('settled')
       const getItem = host.storage.getItem
       let reads = 0
       host.storage.getItem = (key) => {
@@ -1386,14 +1396,14 @@ it('distinguishes a missing storage key from malformed empty content', async () 
   await withHistoryCleanup(
     async () => {
       await collection.preload()
-      await collection.insert({ id: 'first', value: 1 }).isPersisted.promise
+      await collection.insert({ id: 'first', value: 1 }).when('settled')
       expect(durableRows(host, 'shared')).toEqual([{ id: 'first', value: 1 }])
       host.storage.setItem('shared', '')
       const rejected = collection.insert({ id: 'second', value: 2 })
-      await expect(rejected.isPersisted.promise).rejects.toThrow(SyntaxError)
+      await expect(rejected.when('settled')).rejects.toThrow(SyntaxError)
       expect(host.storage.getItem('shared')).toBe('')
       collection.utils.clearStorage()
-      await collection.insert({ id: 'third', value: 3 }).isPersisted.promise
+      await collection.insert({ id: 'third', value: 3 }).when('settled')
       expect(durableRows(host, 'shared')).toEqual([{ id: 'third', value: 3 }])
     },
     () => [() => collection.cleanup()],
@@ -1488,9 +1498,11 @@ it('keeps one legacy unprefixed string key writable and restorable', async () =>
     async () => {
       await writer.preload()
       expect(publicRows(writer)).toEqual([{ id: 'legacy', value: 1 }])
-      await writer.update('legacy', (draft) => {
-        draft.value = 2
-      }).isPersisted.promise
+      await writer
+        .update('legacy', (draft) => {
+          draft.value = 2
+        })
+        .when('settled')
       expect(durableRows(host, 'shared')).toEqual([{ id: 'legacy', value: 2 }])
       reopened = makeCollection(host, 'shared', 'reopened')
       await reopened.preload()
@@ -1512,7 +1524,7 @@ for (const invalid of [NaN, Infinity, -Infinity]) {
       async () => {
         await writer.preload()
         await expect(
-          writer.insert({ id: invalid, value: 1 }).isPersisted.promise,
+          writer.insert({ id: invalid, value: 1 }).when('settled'),
         ).rejects.toThrow()
         expect(host.storage.getItem('shared')).toBeNull()
         expect(publicRows(writer)).toEqual([])
@@ -1533,7 +1545,7 @@ it('retains the last valid peer snapshot through a null row and its repair', asy
   await withHistoryCleanup(
     async () => {
       await collection.preload()
-      await collection.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await collection.insert({ id: 'row', value: 1 }).when('settled')
       const old = [{ id: 'row', value: 1 }]
       host.storage.setItem(
         'shared',
@@ -1721,9 +1733,9 @@ it('a peer insert during a pending local insert confirms the final local row', a
     async () => {
       await Promise.all([local.preload(), peer.preload()])
       const localWrite = local.insert({ id: 'same', value: 1 })
-      const outcome = localWrite.isPersisted.promise
+      const outcome = localWrite.when('settled')
       await entered.promise
-      await peer.insert({ id: 'same', value: 2 }).isPersisted.promise
+      await peer.insert({ id: 'same', value: 2 }).when('settled')
       expect(durableRows(host, 'shared')).toEqual([{ id: 'same', value: 2 }])
       expect(publicRows(local), 'pending local intent overlays peer').toEqual([
         { id: 'same', value: 1 },
@@ -1787,10 +1799,10 @@ for (const failureKind of ['storage', 'parser'] as const) {
     await withHistoryCleanup(
       async () => {
         await collection.preload()
-        await collection.insert({ id: 'before', value: 1 }).isPersisted.promise
+        await collection.insert({ id: 'before', value: 1 }).when('settled')
         failRead = true
         await expect(
-          collection.insert({ id: 'rejected', value: 2 }).isPersisted.promise,
+          collection.insert({ id: 'rejected', value: 2 }).when('settled'),
         ).rejects.toBe(readError)
         expect(durableRows(host, 'shared')).toEqual([
           { id: 'before', value: 1 },
@@ -1801,7 +1813,7 @@ for (const failureKind of ['storage', 'parser'] as const) {
           publicRows(collection),
           'failed event read retains public rows',
         ).toEqual([{ id: 'before', value: 1 }])
-        await collection.insert({ id: 'after', value: 3 }).isPersisted.promise
+        await collection.insert({ id: 'after', value: 3 }).when('settled')
         const expected = expectedRows([
           { id: 'before', value: 1 },
           { id: 'after', value: 3 },
@@ -1849,7 +1861,7 @@ it('settles an accepted custom-parser write through a postwrite read fault', asy
     async () => {
       await Promise.all([writer.preload(), peer.preload()])
       faultOnRead = reads + 2
-      await writer.insert({ id: 'saved', value: 1 }).isPersisted.promise
+      await writer.insert({ id: 'saved', value: 1 }).when('settled')
       const expected = [{ id: 'saved', value: 1 }]
       expect(durableRows(host, 'shared'), 'durable receipt').toEqual(expected)
       expect(publicRows(writer), 'writer receipt').toEqual(expected)

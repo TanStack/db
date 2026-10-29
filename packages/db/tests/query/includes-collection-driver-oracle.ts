@@ -1,3 +1,4 @@
+import { expect } from 'vitest'
 // The Collection-valued include driver and its Map model. The driver runs
 // generated or fixed source histories through a live include query, and the
 // model recomputes the parent rows that the public Collection facade must
@@ -154,7 +155,74 @@ export function recompute(context: CollectionContext): Array<ProjectedParent> {
     })
 }
 
-declareOracle({ model: [recompute] })
+/**
+ * Facade lifetime is an active-bucket interval. Current parent routes decide
+ * active groups; a surviving route retains the interval, while reactivation
+ * after no route remained starts a new one. Tokens are model-only names for
+ * these intervals, not production Collection IDs or routing keys. Passing the
+ * complete current route groups makes route counts unnecessary model state.
+ * Metadata receiving histories use this same Collection-facade owner.
+ * Authority: ARCHITECTURE.md, "Nested materialization". Observations follow
+ * initial readiness. No facade-local optimistic mutation is active: such a
+ * mutation may legally keep a retired facade nonempty until its settlement.
+ */
+export type FacadeIntervals<TGroup> = {
+  active: ReadonlyMap<TGroup, number>
+  next: number
+}
+export function advanceFacadeIntervals<TGroup>(
+  previous: FacadeIntervals<TGroup>,
+  currentRouteGroups: Iterable<TGroup>,
+): FacadeIntervals<TGroup> {
+  let next = previous.next
+  const active = new Map<TGroup, number>()
+  for (const group of currentRouteGroups) {
+    if (!active.has(group))
+      active.set(group, previous.active.get(group) ?? next++)
+  }
+  return { active, next }
+}
+
+export type MetadataFacade = {
+  id: string
+  status: string
+  toArray: ReadonlyArray<object>
+}
+export function checkFacadeIntervals<TGroup>(
+  intervals: FacadeIntervals<TGroup>,
+  actual: ReadonlyArray<{ group: TGroup; facade: MetadataFacade }>,
+  observedIntervals: Map<number, MetadataFacade>,
+): void {
+  expect(new Set(actual.map(({ group }) => group))).toEqual(
+    new Set(intervals.active.keys()),
+  )
+  for (const { group, facade } of actual) {
+    expect(
+      facade.status,
+      `active facade is ready, including empty buckets`,
+    ).toBe(`ready`)
+    const interval = intervals.active.get(group)
+    expect(interval, `active route ${group}`).toBeDefined()
+    const previous = observedIntervals.get(interval!)
+    if (previous) expect(facade, `same active interval`).toBe(previous)
+    else {
+      expect(
+        [...observedIntervals.values()],
+        `new interval gets a new facade`,
+      ).not.toContain(facade)
+      observedIntervals.set(interval!, facade)
+    }
+  }
+  for (const [interval, facade] of observedIntervals)
+    if (![...intervals.active.values()].includes(interval)) {
+      expect(facade.status, `retired facade remains ready`).toBe(`ready`)
+      expect(facade.toArray, `retired facade remains empty`).toEqual([])
+    }
+}
+declareOracle({
+  model: [recompute, advanceFacadeIntervals],
+  check: [checkFacadeIntervals],
+})
 
 export function createCollectionDriver(
   initialParents: ReadonlyArray<ParentRow>,

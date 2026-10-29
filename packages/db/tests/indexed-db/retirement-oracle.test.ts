@@ -219,7 +219,7 @@ for (const reason of reasons) {
         tx.mutate(() => {
           void start(c, kind, 1)
         })
-        const caller = observe(tx.isPersisted.promise, () =>
+        const caller = observe(tx.when(`settled`), () =>
           sorted(c.base.values()),
         )
         await accepted.promise
@@ -374,7 +374,7 @@ it.each(mixedCells)(
           tx.mutate(() => {
             void start(c, op.kind, slot + 1)
           })
-          callers[slot] = observe(tx.isPersisted.promise, capture(slot))
+          callers[slot] = observe(tx.when(`settled`), capture(slot))
           await accepted.promise
           durable = apply(durable, op.kind, slot + 1)
           assertRows(

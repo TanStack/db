@@ -99,7 +99,7 @@ describe(`Mutation result detachment`, () => {
         const collection = storedDataRow(make(), identitySchema)
         try {
           const tx = collection.update(1, run)
-          await tx.isPersisted.promise
+          await tx.when(`settled`)
           expectOwnDataProperty(collection.get(1)!, key, { value: 2 })
         } finally {
           await collection.cleanup()
@@ -150,7 +150,7 @@ describe(`Mutation result detachment`, () => {
             const collection = storedDataRow(make(), identitySchema)
             try {
               const tx = collection.update(1, run)
-              await tx.isPersisted.promise
+              await tx.when(`settled`)
               const saved = collection.get(1)!
               expect(saved.read).toBe(expected.read)
               // Collection patches represent deletion with an own undefined.
@@ -225,10 +225,10 @@ describe(`Mutation result detachment`, () => {
           draft.link = cycleContainer(kind, draft)
           if (edit === `after`) draft.count = 1
         })
-        settled = Promise.allSettled([tx.isPersisted.promise])
+        settled = Promise.allSettled([tx.when(`settled`)])
         expectCycleSnapshot(collection.get(1)!, kind)
         expect(original).toEqual({ id: 1, count: 0 })
-        await tx.isPersisted.promise
+        await tx.when(`settled`)
         await settled
         expectCycleSnapshot(collection.get(1)!, kind)
         expect(original).toEqual({ id: 1, count: 0 })

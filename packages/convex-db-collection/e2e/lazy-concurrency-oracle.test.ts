@@ -321,7 +321,7 @@ async function receive(
         text: `optimistic`,
       }),
     )
-    persisted = transaction.isPersisted.promise
+    persisted = transaction.when('settled')
   }
   const drain = async () => {
     release()

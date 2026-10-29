@@ -385,7 +385,7 @@ it.each([
       ).toEqual([])
 
       rejectOutbound(refused)
-      await expect(transaction.isPersisted.promise).rejects.toBe(refused)
+      await expect(transaction.when(`settled`)).rejects.toBe(refused)
       await Promise.resolve(heldDelete)
       expect(transaction.state).toBe(`failed`)
       expect(collection.has(`local`)).toBe(false)
@@ -490,7 +490,7 @@ it.each([
       if (transaction) rejectOutbound(refused)
       await cleanupTestActions(
         [
-          () => transaction?.isPersisted.promise.catch(() => undefined),
+          () => transaction?.when(`settled`).catch(() => undefined),
           () =>
             heldDelete === undefined
               ? undefined

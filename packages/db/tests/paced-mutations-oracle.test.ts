@@ -261,7 +261,7 @@ async function runProduction(
             returnedSame: undefined as boolean | undefined,
           }
           persistence.set(transaction, observation)
-          void transaction.isPersisted.promise.then(
+          void transaction.when(`settled`).then(
             (resolved) => {
               observation.outcome = `fulfilled`
               observation.returnedSame = resolved === transaction

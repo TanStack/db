@@ -961,9 +961,11 @@ async function checkHeldPage(plan: HeldPlan) {
     let mutation: ReturnType<typeof observe> | undefined
     if (plan.held) {
       mutation = observe(
-        collection.update(2, (draft) => {
-          draft.data = `local`
-        }).isPersisted.promise,
+        collection
+          .update(2, (draft) => {
+            draft.data = `local`
+          })
+          .when(`settled`),
       )
       await turn()
     }

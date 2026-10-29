@@ -2178,7 +2178,7 @@ describe(`persistedCollectionOptions`, () => {
       expect(collection.get(`local`)).toMatchObject({ id: `local` })
       expect(collection.get(`old`)).toBeUndefined()
       release.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when('settled')
       source.begin()
       source.write({
         type: `insert`,
@@ -2195,7 +2195,7 @@ describe(`persistedCollectionOptions`, () => {
       ).toEqual([`optimistic-expiry-new`])
     } finally {
       release.resolve()
-      await mutation?.isPersisted.promise.catch(() => undefined)
+      await mutation?.when('settled').catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -2631,10 +2631,10 @@ describe(`persistedCollectionOptions`, () => {
       expect(recovery.read()).toEqual({ status: `fulfilled` })
       expect(collection.get(`local`)).toBeDefined()
       release.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when('settled')
     } finally {
       release.resolve()
-      await mutation?.isPersisted.promise.catch(() => undefined)
+      await mutation?.when('settled').catch(() => undefined)
       await collection.cleanup()
     }
   })

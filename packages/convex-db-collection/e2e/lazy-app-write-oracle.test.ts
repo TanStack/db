@@ -341,7 +341,7 @@ async function receive(h: History, sdk: `javascript` | `react`) {
                   draft.rank = row.rank
                   draft.text = row.text
                 })
-        const result = transaction.isPersisted.promise
+        const result = transaction.when('settled')
         void result.catch(() => undefined)
         persisted.push(result)
         // The direct Collection read is synchronous; graph propagation has its

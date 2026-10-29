@@ -147,58 +147,54 @@ vi.mock(
     const actual = await importOriginal<Record<string, unknown>>()
     return {
       ...actual,
-      ShapeStream: vi.fn(
-        (options: {
-          headers?: Record<string, string>
-          offset?: string
-          handle?: string
-          onError?: (error: unknown) => unknown
-        }) => {
-          const stream: ControlledStream = {
-            tab: options.headers?.[`x-tab`] ?? `unknown`,
-            startedAt: {
-              handle: options.handle,
-              offset: options.offset ?? `-1`,
-            },
-            stopped: false,
-            shapeHandle: options.handle,
-            lastOffset: options.offset ?? `-1`,
-            send: () => {
-              throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-            },
-            onError: (error) => options.onError?.(error),
-            giveUp: () => {
-              throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-            },
-          }
-          streams.push(stream)
-          return {
-            subscribe: (
-              send: ControlledStream[`send`],
-              giveUp: ControlledStream[`giveUp`],
-            ) => {
-              stream.send = send
-              stream.giveUp = giveUp
-              return () => undefined
-            },
-            unsubscribeAll: () => {
-              stream.stopped = true
-            },
-            requestSnapshot: vi.fn().mockResolvedValue(undefined),
-            fetchSnapshot: vi
-              .fn()
-              .mockResolvedValue({ metadata: {}, data: [] }),
-            forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-            isUpToDate: false,
-            get shapeHandle() {
-              return stream.shapeHandle
-            },
-            get lastOffset() {
-              return stream.lastOffset
-            },
-          }
-        },
-      ),
+      ShapeStream: vi.fn(function (options: {
+        headers?: Record<string, string>
+        offset?: string
+        handle?: string
+        onError?: (error: unknown) => unknown
+      }) {
+        const stream: ControlledStream = {
+          tab: options.headers?.[`x-tab`] ?? `unknown`,
+          startedAt: {
+            handle: options.handle,
+            offset: options.offset ?? `-1`,
+          },
+          stopped: false,
+          shapeHandle: options.handle,
+          lastOffset: options.offset ?? `-1`,
+          send: () => {
+            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+          },
+          onError: (error) => options.onError?.(error),
+          giveUp: () => {
+            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+          },
+        }
+        streams.push(stream)
+        return {
+          subscribe: (
+            send: ControlledStream[`send`],
+            giveUp: ControlledStream[`giveUp`],
+          ) => {
+            stream.send = send
+            stream.giveUp = giveUp
+            return () => undefined
+          },
+          unsubscribeAll: () => {
+            stream.stopped = true
+          },
+          requestSnapshot: vi.fn().mockResolvedValue(undefined),
+          fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+          forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+          isUpToDate: false,
+          get shapeHandle() {
+            return stream.shapeHandle
+          },
+          get lastOffset() {
+            return stream.lastOffset
+          },
+        }
+      }),
     }
   },
 )
@@ -1453,6 +1449,36 @@ describe(`multi-tab Electric over one persisted database`, () => {
             { kind: `catch up`, tab: 0, pick: 0 },
             { kind: `catch up`, tab: 1, pick: 1 },
             { kind: `close`, tab: 1 },
+          ],
+        },
+        () => undefined,
+      ),
+    60_000,
+  )
+
+  // Known gap, pinned from the random campaign (seed -1660880085, path
+  // 55:0:1:4:4:4:1:1:1:1:3:4:4:4:4): row 1 reaches v2 on the server and both
+  // tabs catch up, but after tab B stops, tab A catches up, and tab A stops,
+  // the durable rows lose row 1. Law 2 expects every open tab and the durable
+  // rows to show the head. This reproduces on main and is tracked with #2281.
+  // It replays through the same driver and checks with the known-gap detector
+  // off. Remove `fails` when the durable row survives the stops.
+  it.fails(
+    `keeps a durable row after both tabs catch up to it and then stop`,
+    () =>
+      runGeneratedHistory(
+        {
+          tabCount: 2,
+          steps: [
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `catch up`, tab: 1, pick: 1 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `stop`, tab: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `stop`, tab: 0, pick: 0 },
           ],
         },
         () => undefined,

@@ -55,7 +55,6 @@ export function plain(row: OracleRow): OracleRow {
     $key: _key,
     $origin: _origin,
     $hasPendingWrites: _pending,
-    $synced: _synced,
     $collectionId: _id,
     ...value
   } = row as OracleRow & Record<string, unknown>

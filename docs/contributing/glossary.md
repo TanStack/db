@@ -133,7 +133,7 @@ earlier node alone.
 | demand | The logical need for source data. Demand may outlive or replace physical work. | Request, transport, or row ownership. |
 | logical subset owner | One subscription claim that keeps a subset demand active. | Physical acquisition. |
 | request data | The immutable `LoadSubsetOptions` and attached signal passed to an adapter. | Demand or established coverage. |
-| acquisition attempt | One invocation that asks a sync adapter to start physical work. A synchronous throw ends the attempt before acceptance. If cleanup invalidates the captured sync run after the adapter returns but before activation, core cancels the tentative acquisition without retaining its lease; cleanup owns the adapter resources. | Physical acquisition or transport. |
+| acquisition attempt | One invocation that asks a sync adapter to start physical work. A synchronous throw is a rejection: the attempt fails, keeps its owner, and the owner's release unloads it. If cleanup invalidates the captured sync run after the adapter returns but before activation, core cancels the tentative acquisition without retaining its lease; cleanup owns the adapter resources. | Physical acquisition or transport. |
 | physical acquisition | Request-scoped work accepted by a sync adapter for a demand. | Acquisition attempt, logical demand, or transport. |
 | lease | An ownership token that requires a matching release. TanStack DB leases do not expire on a timer. Always qualify which resource the lease owns. | Demand, request, or data coverage. |
 | acquisition lease | The release obligation created when an adapter accepts a physical acquisition. | The acquisition attempt itself. |
@@ -223,7 +223,7 @@ Use nouns for state and verbs for transitions:
 - A demand **becomes active** or **retires**.
 - Core **starts an acquisition attempt**. If the adapter accepts it, the attempt
   **establishes a physical acquisition** and its **acquisition lease**. A
-  synchronous throw **fails the attempt** before either is established. Cleanup
+  synchronous throw **fails the attempt** as a rejection does. Cleanup
   may instead invalidate a returned attempt before activation; core then
   **cancels the tentative acquisition** without retaining its lease.
 - A logical owner **retires**. Core **releases an acquisition lease**. The

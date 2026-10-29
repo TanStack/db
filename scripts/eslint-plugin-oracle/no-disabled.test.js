@@ -1,4 +1,8 @@
 import { describe, it } from 'vitest'
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { RuleTester } from 'eslint'
 import tsParser from '@typescript-eslint/parser'
 import noDisabled from './rules/no-disabled.js'
@@ -8,6 +12,35 @@ RuleTester.it = it
 
 const ruleTester = new RuleTester({
   languageOptions: { parser: tsParser },
+})
+
+it(`permits selecting only the replay observation checker controls`, () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url))
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(root, 'node_modules/vitest/vitest.mjs'),
+      'run',
+      '--config',
+      'scripts/eslint-plugin-oracle/vitest.config.mjs',
+      'scripts/eslint-plugin-oracle/replay-observation-oracle.test.js',
+      '-t',
+      'rejects wrong report observation',
+      '--reporter=json',
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  )
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.numPassedTests, 2)
+  assert.equal(report.numFailedTests, 0)
+  assert.equal(report.numPendingTests, 3848)
 })
 
 ruleTester.run(`oracle/no-disabled`, noDisabled, {
@@ -61,6 +94,18 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     // runs no property.
     `expect(report).toMatchObject({ numRuns: 1, failed: true })`,
     `fc.sample(historyArbitrary, { numRuns: 1 })`,
+    {
+      code: `const witness: OracleReplayWitness = { numRuns: 1 }; appendFileSync(channel, JSON.stringify(witness))`,
+      filename: `/repo/packages/db/tests/oracle-replay-witness.ts`,
+    },
+    {
+      code: `const witness: OracleReplayWitness = { numRuns: 1 }; type Snapshot = typeof witness; appendFileSync(channel, JSON.stringify(witness)); type Count = typeof witness.numRuns`,
+      filename: `/repo/packages/db/tests/oracle-replay-witness.ts`,
+    },
+    {
+      code: `type JSON = { marker: true }; const witness: OracleReplayWitness = { numRuns: 1 }; JSON.stringify(witness)`,
+      filename: `/repo/packages/db/tests/oracle-replay-witness.ts`,
+    },
     // A known gap is pinned as failing on a fixed seed, not skipped.
     `it.fails('checks the fixed history', () => fc.assert(property, { seed: 2128, numRuns: oracleRuns(12) }))`,
     // The shared replay helpers may select a replay, in either polarity for
@@ -100,6 +145,24 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     `it('reads a page', (_, ctx) => { ctx.skip() })`,
   ],
   invalid: [
+    ...[
+      `fc.assert(property, { numRuns: 1 })`,
+      `const witness: OracleReplayWitness = { numRuns: 1 }; appendFileSync(channel, JSON.stringify(witness)); fc.assert(property, witness)`,
+      `const witness: OracleReplayWitness = { numRuns: 1 }; const options = witness; fc.assert(property, options)`,
+      `export const witness: OracleReplayWitness = { numRuns: 1 }; JSON.stringify(witness)`,
+      `function outer(JSON) { { type JSON = { marker: true }; const witness: OracleReplayWitness = { numRuns: 1 }; JSON.stringify(witness) } }`,
+      `const budgetHook = { toJSON() { fc.assert(property, this); return null } }; const witness: OracleReplayWitness = { ...budgetHook, numRuns: 1 }; JSON.stringify(witness)`,
+      `const budgetHook = { toJSON() { fc.assert(property, this); return null } }; const witness: OracleReplayWitness = { __proto__: budgetHook, numRuns: 1 }; JSON.stringify(witness)`,
+    ].map((code) => ({
+      code,
+      filename: `/repo/packages/db/tests/oracle-replay-witness.ts`,
+      errors: [{ messageId: `singleRun` }],
+    })),
+    {
+      code: `const witness: OracleReplayWitness = { numRuns: 1 }; appendFileSync(channel, JSON.stringify(witness))`,
+      filename: `/repo/packages/db/tests/other-output.ts`,
+      errors: [{ messageId: `singleRun` }],
+    },
     // A private variable that selects a replay or a run count.
     {
       code: `const seed = process.env.TANSTACK_DB_LIKE_ORACLE_SEED`,

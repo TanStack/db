@@ -1070,7 +1070,7 @@ describe(`persistedCollectionOptions`, () => {
     } finally {
       hydration.resolve()
       localPersistence.reject(appliedError)
-      await localTransaction.isPersisted.promise.catch(() => undefined)
+      await localTransaction.when('settled').catch(() => undefined)
       await cleanupPersistedOracle(
         [() => collection.cleanup()],
         hasPrimaryFailure,
@@ -1171,7 +1171,7 @@ describe(`persistedCollectionOptions`, () => {
         }
 
         outbound.reject(refused)
-        await expect(transaction.isPersisted.promise).rejects.toBe(refused)
+        await expect(transaction.when('settled')).rejects.toBe(refused)
         expect(transaction.state).toBe(`failed`)
         checkSource(`after refused mutation settled`)
         if (firstReceipt !== undefined) {
@@ -1204,7 +1204,7 @@ describe(`persistedCollectionOptions`, () => {
         if (transaction) outbound.reject(refused)
         await cleanupPersistedOracle(
           [
-            () => transaction?.isPersisted.promise.catch(() => undefined),
+            () => transaction?.when('settled').catch(() => undefined),
             () =>
               firstReceipt === undefined
                 ? undefined
@@ -1281,7 +1281,7 @@ describe(`persistedCollectionOptions`, () => {
 
         releaseHandler.resolve()
         await atPersistedOracleCheckpoint(
-          transaction.isPersisted.promise.then(() => undefined),
+          transaction.when('settled').then(() => undefined),
           `successful persisted origin mutation settled`,
         )
         await Promise.all(receipts.map((receipt) => Promise.resolve(receipt)))
@@ -1299,7 +1299,7 @@ describe(`persistedCollectionOptions`, () => {
         releaseHandler.resolve()
         await cleanupPersistedOracle(
           [
-            () => transaction?.isPersisted.promise.catch(() => undefined),
+            () => transaction?.when('settled').catch(() => undefined),
             ...receipts.map(
               (receipt) => () =>
                 Promise.resolve(receipt).catch(() => undefined),
@@ -1390,7 +1390,7 @@ describe(`persistedCollectionOptions`, () => {
 
       localPersistence.resolve()
       await atPersistedOracleCheckpoint(
-        localTransaction.isPersisted.promise,
+        localTransaction.when('settled'),
         `local settlement publishes the source commit`,
       )
       expect(stripVirtualProps(collection.get(`remote`))).toEqual({
@@ -1489,7 +1489,7 @@ describe(`persistedCollectionOptions`, () => {
         `handler dependency submitted`,
       )
       await atPersistedOracleCheckpoint(
-        localTransaction.isPersisted.promise,
+        localTransaction.when('settled'),
         `user persistence completes after its awaited source commit`,
       )
       await atPersistedOracleCheckpoint(
@@ -1533,7 +1533,7 @@ describe(`persistedCollectionOptions`, () => {
       normalAbort.abort()
       await cleanupPersistedOracle(
         [
-          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => localTransaction.when('settled').catch(() => undefined),
           () => normalReceipt?.catch(() => undefined),
           () =>
             dependencyReceipt === true
@@ -1929,7 +1929,7 @@ describe(`persistedCollectionOptions`, () => {
       local.mutate(() => {
         collection.insert({ id: `local`, title: `optimistic local` })
       })
-      localReceipt = local.isPersisted.promise
+      localReceipt = local.when('settled')
       void localReceipt.catch(() => undefined)
       await mutationEntered.promise
 
@@ -2035,7 +2035,7 @@ describe(`persistedCollectionOptions`, () => {
       local.mutate(() => {
         collection.insert({ id: `local`, title: `optimistic local` })
       })
-      localReceipt = local.isPersisted.promise
+      localReceipt = local.when('settled')
       void localReceipt.catch(() => undefined)
       await mutationEntered.promise
 

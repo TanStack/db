@@ -109,7 +109,7 @@ describe(`derived updates beneath optimistic deletes`, () => {
       })
       const done = createDeferred<void>()
       const tx = createTransaction({ mutationFn: () => done.promise })
-      const settled = tx.isPersisted.promise.catch(() => {})
+      const settled = tx.when('settled').catch(() => {})
       try {
         await derived.preload()
         tx.mutate(() => derived.delete(0))

@@ -93,7 +93,7 @@ it(`keeps concrete options ownership across generated lifecycle checkpoints`, as
                     const transaction = second.update(`a`, (row) => {
                       row.text = `optimistic`
                     })
-                    await transaction.isPersisted.promise
+                    await transaction.when('settled')
                     expect(second.get(`a`)?.text).toBe(text)
                     reach.reach(`independent-confirmation`)
                   }
@@ -105,7 +105,7 @@ it(`keeps concrete options ownership across generated lifecycle checkpoints`, as
                   const transaction = first.update(`a`, (row) => {
                     row.text = `optimistic`
                   })
-                  await transaction.isPersisted.promise
+                  await transaction.when('settled')
                   expect(first.get(`a`)?.text).toBe(`owner:${text}`)
                   reach.reach(`${form}:${checkpoint}`)
                   reach.reach(

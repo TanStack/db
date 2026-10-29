@@ -197,7 +197,7 @@ function trackRuntimeMutation(
     if (entry.syncReleased) context.runtimePending.delete(entry)
   }
   // Attach both outcome handlers before a checkpoint or sibling source write.
-  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
+  entry.receipt = transaction.when(`settled`).then(settled, settled)
   return entry
 }
 
@@ -387,7 +387,7 @@ async function rollback(
   runtime: PendingRuntimeMutation,
 ) {
   const message = `optimistic relationship oracle rollback`
-  const persisted = transaction.isPersisted.promise.catch(() => undefined)
+  const persisted = transaction.when(`settled`).catch(() => undefined)
   await withExpectedRejection(message, async () => {
     releaseRuntimeMutation(context, runtime, () =>
       source.rejectSync(new Error(message)),
@@ -488,7 +488,7 @@ function createDriver(
       // Sync delivery must not displace the pending optimistic projection.
       checkpoint()
       releaseRuntimeMutation(context, pending.runtime, source.resolveSync)
-      await pending.transaction.isPersisted.promise
+      await pending.transaction.when(`settled`)
       context.pending.delete(step.handle)
     },
     cleanup: async (context) => {
@@ -808,7 +808,7 @@ describe(`optimistic relationship-transition oracle`, () => {
           const transaction = roots.update(1, (draft) => {
             draft.value = `B`
           })
-          persistence = transaction.isPersisted.promise.then(
+          persistence = transaction.when(`settled`).then(
             () => undefined,
             () => undefined,
           )

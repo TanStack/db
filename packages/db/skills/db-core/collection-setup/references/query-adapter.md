@@ -57,17 +57,22 @@ not cache data, so it must not become collection-wide rows.
 
 ### Persistence Handlers
 
-```typescript
-onInsert: async ({ transaction }) => {
+Handlers return `Promise<void>` and must explicitly refresh or write confirmed
+server data before settlement. Without that confirmation, optimistic changes
+revert to the previous synced rows. `{ refetch: false }` is no longer supported.
+
+```typescript nocheck
+onInsert: async ({ transaction, collection }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
-  // Query Collection automatically refetches and awaits the result.
-  // return { refetch: false } to skip refetch
+  await collection.utils.refetch()
 },
-onUpdate: async ({ transaction }) => {
+onUpdate: async ({ transaction, collection }) => {
   await api.updateTodos(transaction.mutations.map((m) => ({ id: m.key, changes: m.changes })))
+  await collection.utils.refetch()
 },
-onDelete: async ({ transaction }) => {
+onDelete: async ({ transaction, collection }) => {
   await api.deleteTodos(transaction.mutations.map((m) => m.key))
+  await collection.utils.refetch()
 },
 ```
 
@@ -293,7 +298,7 @@ import {
 const queryClient = new QueryClient()
 
 const productsCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; name: string }>({
     id: 'products',
     queryKey: ['products'],
     queryClient,
@@ -318,24 +323,23 @@ const productsCollection = createCollection(
         signal: ctx.signal,
       }).then((r) => r.json())
     },
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const serverItems = await api.createProducts(
         transaction.mutations.map((m) => m.modified),
       )
-      productsCollection.utils.writeBatch(() => {
-        serverItems.forEach((item) =>
-          productsCollection.utils.writeInsert(item),
-        )
+      await collection.utils.writeBatch(() => {
+        serverItems.forEach((item) => collection.utils.writeInsert(item))
       })
-      return { refetch: false }
     },
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       await api.updateProducts(
         transaction.mutations.map((m) => ({ id: m.key, changes: m.changes })),
       )
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       await api.deleteProducts(transaction.mutations.map((m) => m.key))
+      await collection.utils.refetch()
     },
   }),
 )
@@ -380,5 +384,5 @@ When using a function-based `queryKey`, all derived keys must share the base key
 - An empty subset removes that subset's ownership; overlapping subsets can keep
   the same rows materialized
 - Direct writes update TQ cache but are overridden by subsequent `queryFn` results
-- Persistence handlers automatically refetch unless they return `{ refetch: false }`
+- Persistence handlers explicitly await `collection.utils.refetch()` or direct writes with confirmed data
 - On-demand `collection.preload()` is a no-op; preload the live query instead

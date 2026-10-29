@@ -279,7 +279,7 @@ async function createPersistedDriver(
   let holdCount = 0
   // Signals of the outermost transactions committed during a read hold.
   let readCommits: Array<AbortController> = []
-  let blocker: { isPersisted: { promise: Promise<unknown> } } | undefined
+  let blocker: { when: (state: 'settled') => Promise<unknown> } | undefined
   const receipts: Array<Promise<void>> = []
   const rejections: Array<string> = []
   const receiptStates: Array<ReceiptState> = []
@@ -326,7 +326,7 @@ async function createPersistedDriver(
     blocker = undefined
     resolveMutation?.()
     resolveMutation = undefined
-    await pending?.isPersisted.promise
+    await pending?.when('settled')
   }
   const asMetadata = (value: unknown) =>
     value === undefined ? {} : { metadata: value as Record<string, unknown> }
@@ -1208,6 +1208,29 @@ describe(`sync metadata session oracle through the persisted wrapper: peer repla
   )
   it.each(peerFullReplays)(`replays under full rows: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerFullLane),
+  )
+  // Known gap, pinned from the persisted-peers-full random campaign (seed
+  // 654774679, shrunk to this prefix): an outer transaction inserts over a
+  // bare seed, an inner one re-inserts the row and commits, and a peer's full
+  // reload then leaves row 1 with the cached seed's metadata, where the model
+  // expects none. This reproduces on main and is tracked with #2281. It
+  // replays through the same model, driver, and comparison. Remove `fails`
+  // when the reload stops restoring that metadata.
+  it.fails(
+    `replays under full rows: a reload after an inner re-insert over a seed clears the seed's metadata`,
+    () =>
+      assertPersistedHistory(
+        [
+          { type: `begin` },
+          { type: `seed`, key: 1, narrow: false, bare: true },
+          { type: `insertOverSeed`, key: 1, metadata: false },
+          { type: `begin` },
+          { type: `reinsert`, key: 1, metadata: false },
+          { type: `commit` },
+          { type: `peer`, key: 2, notice: `reload` },
+        ],
+        persistedPeerFullLane,
+      ),
   )
   it.each(peerOnDemandReplays)(`replays on demand: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerOnDemandLane),
