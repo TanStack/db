@@ -1,0 +1,74 @@
+# Migrating every collection adapter onto the conformance oracles
+
+Goal (maintainer, 2026-10-29): every collection adapter runs the shared
+conformance oracles through its own production driver, not only Neon. An
+adapter is migrated when it has a driver for every oracle family whose
+capabilities it declares in the law set's section A, and each driver is GREEN
+or has a recorded RED with an owner.
+
+Migration does not delete an adapter's existing oracles. An existing owner
+keeps its laws until a shared family checks the same law, history, path, and
+observation. Then the coverage map moves the law to the shared owner, and the
+old test either stays as supplemental coverage or is removed in its own
+reviewed change.
+
+## Oracle families
+
+| Family                                | Status                                    | Laws                                                                                                      |
+| ------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4, HEALTH-1/2/5, PUB-1/2/3/7, FID-4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
+| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                |
+| On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                           |
+| Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                     |
+| Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                        |
+| Source shapes                         | Needed                                    | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                        |
+| Local and shared stores               | Needed                                    | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                              |
+| Persistence wrapper and storage hosts | Needed                                    | P-_, S-_                                                                                                  |
+
+## Adapters
+
+| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                             |
+| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Not started                                                                                                                                                                                                                                 |
+| PowerSync         | eager live source, mutations, on-demand                                               | Not started                                                                                                                                                                                                                                 |
+| RxDB              | eager live source, mutations                                                          | Not started                                                                                                                                                                                                                                 |
+| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started |
+| Convex            | eager live source, mutations, on-demand, source shapes                                | Not started                                                                                                                                                                                                                                 |
+| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                          |
+| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                 |
+| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                 |
+| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                 |
+| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                 |
+
+## Suggested order
+
+1. **Push adapters on the existing family:** RxDB, TrailBase (done), PowerSync, Electric (eager mode), and Convex. Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
+2. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN.
+3. **The mutations family.** It applies to every adapter except the storage hosts.
+4. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
+
+## Migration log
+
+- **2026-10-29, TrailBase, eager live source.** Both campaigns are GREEN.
+  - **Reach:** every declared state reached by at least five histories.
+  - **Driver evidence:** a temporary adapter edit, `fail()` only on a closed stream, was rejected with HEALTH-1 by both campaigns, then reverted.
+  - **Oracle changes this migration exposed:**
+    - PUB-7 replacement is now gated on `complete-snapshot`, because TrailBase lists once per sync run.
+    - The check now decides whether a driver supports a step before it moves the model.
+  - **Ownership:** `lifecycle-oracle.property.test.ts` keeps its laws. It also checks eager startup failure and stream-end health, so those laws now have two owners until the coverage map moves them.
+- **2026-10-29, eager live source, closed limits.** The family now also
+  checks PUB-1 publications during each step, LIFE-10 release at failure,
+  HEALTH-5 detached failures and console diagnostics, EVID-3 timeouts, and
+  retried failures (`retry-policy`: HEALTH-2, RETRY-1). The evidence is in
+  `README.md`.
+  - **TrailBase** stays GREEN on the stronger check, with `per-change`
+    commits. It found no TrailBase defect. It found one checker defect: the
+    PUB-1 match took the first equal state, so a batch that returned to an
+    earlier state was flagged. The match now searches forward from the last
+    matched commit.
+  - **Neon** stays RED with READY-4 and HEALTH-1. Two probes, not kept,
+    showed what is behind them. With `markError` mapped to `fail`, Neon fails
+    LIFE-10: it keeps the raw subscription open after an error state until
+    cleanup. With that subscription also released once at the error state,
+    300 histories pass. These two changes are the Neon update's scope.

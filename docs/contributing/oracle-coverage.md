@@ -5965,3 +5965,37 @@ controls are separate files. The [chunk 26 record](oracle-reviews/2026-10-28-pr-
 retains exact source/evidence hashes and all ORC outcomes. Actual production
 bundle erasure, Typedoc generation, tooling GREEN and restored-old-tooling
 mutants remain required receiving checks. Generated docs remain CI-owned.
+
+## Adapter conformance: eager live sources (#2118)
+
+`packages/db-adapter-conformance/src/eager-live-source-oracle.ts` owns the
+shared eager live-source laws from the adapter conformance law set (v18):
+READY-2/3/4, HEALTH-1, PUB-1/2/3/7, FID-4, LIFE-2/5/10, HEALTH-5, EVID-1/2/3
+(`await-evidence`), HEALTH-2 and RETRY-1 for retried failures
+(`retry-policy`), RECON-1 (`transport-reconnect`), and RENEW-1
+(`capability-renewal`). Its model is an independent row Map and sync-run
+phase; drivers supply only a controlled provider and declare whether they
+commit per batch or per change. PUB-1 checks every change publication during
+a step, not only the settled checkpoint. The reference push adapter
+(`tests/reference-adapter-oracle.property.test.ts`,
+`adapter-conformance.eager-live-source.reference`) runs fixed and random
+campaigns of 400 histories with declared reach, a per-change variant, and 20
+law-named hostile mutants, with ORC-004 reconstruction, exclusion, and
+ablation controls. The Neon Realtime receiving driver
+(`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
+`@neon/realtime-tanstack` 0.1.1 vendored at neon-pkgs `7ac55e3e` and is RED on
+READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
+(subscription kept open after an error state) behind them. Limits: no
+on-demand loading, mutation handlers, or reload; publications are observed
+through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
+that rejects before its timeout; the Neon and TrailBase claims cover
+controlled providers, not real clients. Owner:
+`packages/db-adapter-conformance`. Evidence: the package README.
+Migration goal (maintainer, 2026-10-29): every collection adapter gets a
+driver for each conformance family it declares; the plan and per-adapter
+status are in `packages/db-adapter-conformance/MIGRATION.md`. Existing
+adapter oracles keep their laws until a shared family checks the same law,
+history, path, and observation. TrailBase (eager mode, per-change commits,
+`adapter-conformance.eager-live-source.trailbase`) is GREEN; its lifecycle
+oracle keeps its laws, so eager startup failure and stream-end health have
+two owners until this entry moves them.

@@ -1,0 +1,387 @@
+/**
+ * A small push adapter written for this package, and the controlled provider
+ * it reads. It exists to give the eager live-source oracle a production path
+ * that is expected to conform, and to host the hostile mutants that the
+ * calibration tests run (ORC-006). It is not a published adapter.
+ *
+ * The provider pushes a complete result, then committed batches that carry a
+ * txid. It can fail, report a failure it is retrying, drop and restore its
+ * transport, and ask for a capability renewal, which the adapter answers by
+ * renewing the same subscription.
+ */
+import { createCollection } from '@tanstack/db'
+import type {
+  ConformanceRow,
+  ControlledProvider,
+  EagerLiveSourceDriver,
+  EagerLiveSourceFixture,
+  ProviderChange,
+} from '../src'
+
+/** Wrong designs the calibration tests inject, one decision each. */
+export type ReferenceMutant =
+  /** READY-2: the sync run reports ready before its first delivery. */
+  | `ready-before-delivery`
+  /** READY-4: a failure before ready reports a different error value. */
+  | `wraps-loading-failure`
+  /** HEALTH-1: a failure after ready empties the rows. */
+  | `failure-clears-rows`
+  /** HEALTH-1: a retried failure is reported as a given-up one. */
+  | `transient-is-fatal`
+  /** HEALTH-2: a successful delivery does not clear a retried failure. */
+  | `never-recovers`
+  /** RETRY-1: a retried failure before ready fails the first load. */
+  | `transient-fails-loading`
+  /** PUB-1: one provider batch is committed as one transaction per change. */
+  | `splits-batch`
+  /** PUB-3: a batch's deletes are not written. */
+  | `drops-deletes`
+  /** PUB-7: a later complete delivery merges into the rows. */
+  | `snapshot-merges`
+  /** LIFE-2: cleanup does not release the provider subscription. */
+  | `leaks-subscription`
+  /** LIFE-5: a new sync run starts from the previous run's rows. */
+  | `restart-replays-rows`
+  /** LIFE-10: a failed provider's subscription stays open until cleanup. */
+  | `keeps-failed-source`
+  /** LIFE-10: a failed provider's subscription is released twice. */
+  | `double-release`
+  /** HEALTH-5: a failure also leaves a detached rejection. */
+  | `detached-rejection`
+  /** HEALTH-5: a failure is also logged with console.error. */
+  | `logs-failure`
+  /** EVID-1: a wait for the next txid fulfills before that batch arrives. */
+  | `wait-off-by-one`
+  /** EVID-3: a wait ignores its timeout. */
+  | `wait-ignores-timeout`
+  /** RECON-1: a transport drop is reported as a failure. */
+  | `disconnect-fails`
+  /** RENEW-1: renewal opens a second subscription instead of renewing. */
+  | `renew-resubscribes`
+  /** PUB-1, per-change commits: a batch of distinct keys commits in reverse. */
+  | `reverses-batch`
+
+type ProviderEvent =
+  | { type: `snapshot`; rows: ReadonlyArray<ConformanceRow> }
+  | { type: `changes`; changes: ReadonlyArray<ProviderChange>; txid: string }
+  | { type: `failed`; error: Error }
+  | { type: `transient`; error: Error }
+  | { type: `transport`; connected: boolean }
+
+interface ProviderSubscription {
+  releases: number
+  renewed: number
+  listener: (event: ProviderEvent) => void
+}
+
+/** The controlled provider: one live subscription per sync run. */
+class ControlledPushProvider implements ControlledProvider {
+  readonly subscriptions: Array<ProviderSubscription> = []
+  private pendingRenewal: ((capability: string) => void) | undefined
+
+  subscribe(
+    listener: ProviderSubscription[`listener`],
+    onRenewalDue: (renew: (capability: string) => void) => void,
+  ): ProviderSubscription {
+    const subscription: ProviderSubscription = {
+      releases: 0,
+      renewed: 0,
+      listener,
+    }
+    this.subscriptions.push(subscription)
+    // The capability is due for renewal as soon as the subscription opens;
+    // the adapter's renewal stays pending until `completeRenewal`.
+    onRenewalDue((capability) => {
+      // The provider accepts any replacement for an open subscription.
+      if (subscription.releases === 0 && capability.length > 0) {
+        this.pendingRenewal = undefined
+        subscription.renewed += 1
+      }
+    })
+    return subscription
+  }
+
+  requestReplacement(): Promise<string> {
+    return new Promise((resolve) => {
+      this.pendingRenewal = resolve
+    })
+  }
+
+  private latest(): ProviderSubscription {
+    const subscription = this.subscriptions.at(-1)
+    if (!subscription) throw new Error(`no provider subscription`)
+    return subscription
+  }
+
+  releases = () =>
+    this.subscriptions.map((subscription) => subscription.releases)
+  deliverSnapshot = (rows: ReadonlyArray<ConformanceRow>) =>
+    this.latest().listener({ type: `snapshot`, rows })
+  deliverChanges = (changes: ReadonlyArray<ProviderChange>, txid: string) =>
+    this.latest().listener({ type: `changes`, changes, txid })
+  fail = (error: Error) => this.latest().listener({ type: `failed`, error })
+  transientFailure = (error: Error) =>
+    this.latest().listener({ type: `transient`, error })
+  // The provider tells its subscription about transport loss and return, as
+  // a real client's state events do.
+  disconnect = () =>
+    this.latest().listener({ type: `transport`, connected: false })
+  reconnect = () =>
+    this.latest().listener({ type: `transport`, connected: true })
+  completeRenewal = async () => {
+    const resolve = this.pendingRenewal
+    if (!resolve) throw new Error(`the adapter did not request a renewal`)
+    const before = this.latest().renewed
+    resolve(`capability-${this.subscriptions.length}`)
+    for (let turn = 0; turn < 10 && this.latest().renewed === before; turn++) {
+      await new Promise((settle) => setTimeout(settle, 0))
+    }
+  }
+  renewals = () => this.subscriptions.at(-1)?.renewed ?? 0
+}
+
+type Waiter = { resolve: () => void; reject: (error: Error) => void }
+
+const changeKey = (change: ProviderChange) =>
+  change.type === `upsert` ? change.row.id : change.id
+
+/** Builds the reference adapter's Collection over `provider`. */
+function referenceCollection(
+  provider: ControlledPushProvider,
+  mutant: ReferenceMutant | undefined,
+  perChange: boolean,
+) {
+  let applied = new Set<string>()
+  let waiters = new Map<string, Set<Waiter>>()
+  let highestTxid = 0
+  // Only the `restart-replays-rows` mutant reads this across sync runs.
+  let previousRows: ReadonlyArray<ConformanceRow> = []
+
+  const settleWaits = (txid: string) => {
+    applied.add(txid)
+    highestTxid = Math.max(highestTxid, Number(txid))
+    for (const waiter of waiters.get(txid) ?? []) waiter.resolve()
+    waiters.delete(txid)
+  }
+
+  const collection = createCollection<ConformanceRow, number>({
+    id: `reference-push`,
+    getKey: (row) => row.id,
+    syncMode: `eager`,
+    sync: {
+      sync: ({
+        begin,
+        write,
+        commit,
+        markReady,
+        fail,
+        reportError,
+        reportHealthy,
+      }) => {
+        let ready = false
+        let failing = false
+        let keys = new Set<number>()
+        const opened: Array<ProviderSubscription> = []
+        applied = new Set()
+        waiters = new Map()
+        highestTxid = 0
+
+        const release = (subscription: ProviderSubscription) => {
+          if (subscription.releases === 0 || mutant === `double-release`) {
+            subscription.releases += 1
+          }
+        }
+        if (mutant === `restart-replays-rows` && previousRows.length > 0) {
+          begin()
+          for (const row of previousRows) write({ type: `insert`, value: row })
+          void commit()
+          keys = new Set(previousRows.map((row) => row.id))
+        }
+        if (mutant === `ready-before-delivery`) {
+          ready = true
+          markReady()
+        }
+
+        const writeChange = (change: ProviderChange) => {
+          if (change.type === `upsert`) {
+            write({
+              type: keys.has(change.row.id) ? `update` : `insert`,
+              value: change.row,
+            })
+            keys.add(change.row.id)
+          } else if (mutant !== `drops-deletes`) {
+            write({ type: `delete`, key: change.id })
+            keys.delete(change.id)
+          }
+        }
+
+        // A successful delivery after a retried failure reports recovery.
+        const delivered = () => {
+          if (failing && mutant !== `never-recovers`) reportHealthy()
+          failing = false
+        }
+
+        const stop = (subscription: ProviderSubscription, error: Error) => {
+          if (mutant === `detached-rejection`) void Promise.reject(error)
+          if (mutant === `logs-failure`) console.error(`source failed`, error)
+          if (mutant !== `keeps-failed-source`) release(subscription)
+          fail(error)
+        }
+
+        const subscribe = (
+          renewalDue: (renew: (capability: string) => void) => void,
+        ) => {
+          const subscription = provider.subscribe((event) => {
+            if (event.type === `snapshot`) {
+              if (mutant === `snapshot-merges` && ready) {
+                begin()
+                for (const row of event.rows) {
+                  writeChange({ type: `upsert`, row })
+                }
+                void commit()
+              } else {
+                begin({ snapshot: true })
+                for (const row of event.rows)
+                  write({ type: `insert`, value: row })
+                void commit()
+                keys = new Set(event.rows.map((row) => row.id))
+              }
+              previousRows = event.rows
+              if (!ready) {
+                ready = true
+                markReady()
+              }
+              delivered()
+            } else if (event.type === `changes`) {
+              let receipt: true | Promise<void> = true
+              if (mutant === `splits-batch` || perChange) {
+                // The mutant reverses only batches of distinct keys, so the
+                // final rows match and only the intermediate commits differ.
+                const ordered =
+                  mutant === `reverses-batch` &&
+                  new Set(event.changes.map(changeKey)).size ===
+                    event.changes.length
+                    ? [...event.changes].reverse()
+                    : event.changes
+                for (const change of ordered) {
+                  begin()
+                  writeChange(change)
+                  receipt = commit()
+                }
+              } else {
+                begin()
+                for (const change of event.changes) writeChange(change)
+                receipt = commit()
+              }
+              if (receipt === true) settleWaits(event.txid)
+              else void receipt.then(() => settleWaits(event.txid))
+              delivered()
+            } else if (event.type === `transport`) {
+              if (mutant === `disconnect-fails` && !event.connected) {
+                stop(subscription, new Error(`transport lost`))
+              }
+            } else if (event.type === `transient`) {
+              if (!ready) {
+                if (mutant === `transient-fails-loading`) {
+                  stop(subscription, event.error)
+                }
+                return
+              }
+              if (mutant === `transient-is-fatal`) {
+                stop(subscription, event.error)
+                return
+              }
+              failing = true
+              reportError(event.error)
+            } else if (!ready) {
+              stop(
+                subscription,
+                mutant === `wraps-loading-failure`
+                  ? new Error(`wrapped`, { cause: event.error })
+                  : event.error,
+              )
+            } else {
+              if (mutant === `failure-clears-rows`) {
+                begin({ snapshot: true })
+                void commit()
+              }
+              stop(subscription, event.error)
+            }
+          }, renewalDue)
+          opened.push(subscription)
+          return subscription
+        }
+
+        subscribe((renew) => {
+          void provider.requestReplacement().then((capability) => {
+            if (mutant === `renew-resubscribes`) subscribe(() => {})
+            renew(capability)
+          })
+        })
+
+        return () => {
+          if (mutant !== `leaks-subscription`) {
+            for (const subscription of opened) release(subscription)
+          }
+          const error = new Error(`reference collection was cleaned up`)
+          for (const set of waiters.values()) {
+            for (const waiter of set) waiter.reject(error)
+          }
+          waiters.clear()
+        }
+      },
+    },
+  })
+
+  const awaitTxId = (txid: string, timeout?: number): Promise<boolean> => {
+    if (applied.has(txid)) return Promise.resolve(true)
+    if (mutant === `wait-off-by-one` && Number(txid) <= highestTxid + 1) {
+      return Promise.resolve(true)
+    }
+    return new Promise<boolean>((resolve, reject) => {
+      const set = waiters.get(txid) ?? new Set<Waiter>()
+      const waiter: Waiter = { resolve: () => resolve(true), reject }
+      set.add(waiter)
+      waiters.set(txid, set)
+      if (timeout !== undefined && mutant !== `wait-ignores-timeout`) {
+        setTimeout(() => {
+          if (!set.delete(waiter)) return
+          reject(new Error(`timed out waiting for txid ${txid}`))
+        }, timeout)
+      }
+    })
+  }
+
+  return { collection, awaitTxId }
+}
+
+/**
+ * A production driver for the reference adapter, optionally mutated. With
+ * `perChange`, the adapter commits each change of a batch on its own and
+ * declares `per-change` commits, as TrailBase does.
+ */
+export function referenceDriver(
+  mutant?: ReferenceMutant,
+  { perChange = false }: { perChange?: boolean } = {},
+): EagerLiveSourceDriver {
+  return {
+    adapter: `reference${perChange ? ` per-change` : ``}${mutant ? ` (${mutant})` : ``}`,
+    capabilities: new Set([
+      `complete-snapshot`,
+      `await-evidence`,
+      `retry-policy`,
+      `transport-reconnect`,
+      `capability-renewal`,
+    ]),
+    changeCommits: perChange ? `per-change` : `per-batch`,
+    create(): EagerLiveSourceFixture {
+      const provider = new ControlledPushProvider()
+      const { collection, awaitTxId } = referenceCollection(
+        provider,
+        mutant,
+        perChange,
+      )
+      return { collection, provider, awaitTxId }
+    },
+  }
+}
