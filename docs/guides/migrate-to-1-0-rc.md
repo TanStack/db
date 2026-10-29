@@ -3,10 +3,10 @@ title: Migrating to the 1.0 RC
 id: migrate-to-1-0-rc
 ---
 
-This guide covers the API changes in `1.0.0-rc.1` and the changes shipped since
-`@tanstack/db@0.9.2` in September 2026 that may require changes to an app. It
-includes changes merged through October 28, 2026. For the earlier `DbClient`
-and SSR migration, see the
+This guide covers breaking changes when upgrading from `@tanstack/db@0.9.2`
+to `1.0.0-rc.1`, including the accompanying Collection adapter releases. Every
+"before" example uses the APIs available alongside DB 0.9.2. Optional new
+features are listed separately at the end. For SSR setup, see the
 [SSR and Hydration guide](./ssr.md#migration-guide).
 
 ## Update your packages
@@ -25,12 +25,12 @@ releases use the app's `@tanstack/db` as a peer dependency, so the RC and stable
 packages share one DB instance. Both accompanying minor releases require
 `@tanstack/db@^1.0.0-rc.0`; upgrade DB at the same time. Query Collection uses
 the RC's status and health API, and Offline Transactions uses the RC's
-restoration settlement API. DB 0.15 is no longer a supported peer for either
-new minor. Apps staying on DB 0.15 must keep their earlier adapter versions.
+restoration settlement API. Apps staying on an earlier DB release must keep
+their compatible adapter versions.
 
 ## Replace `$synced` with `$hasPendingWrites`
 
-The deprecated `$synced` virtual row property has been removed. Its replacement
+The `$synced` virtual row property has been removed. Its replacement
 has the opposite boolean meaning:
 
 | Before | After |
@@ -159,7 +159,7 @@ return-value type parameter. `BaseCollectionConfig` no longer takes its old
 `TReturn` type parameter. The Electric `MatchingStrategy` type was removed with
 the returned matching strategy.
 
-## Opt in to includes, grouping, and pooling
+## Import the includes and grouping operators
 
 These operators now need an explicit import so apps bundle only the operators
 they use.
@@ -188,7 +188,7 @@ q.from({ project: projectsCollection }).select(({ project }) => ({
 }))
 ```
 
-Existing `toArray()` and `materialize()` wrappers already opt in; they need no
+The `toArray()` and `materialize()` wrappers opt in; they need no
 additional `include()`. Apply the wrapper at every nested selection. See
 [Includes](./live-queries.md#includes).
 
@@ -211,36 +211,6 @@ If you construct query IR directly, pass `groupingCompiler` as the third
 argument to `IR.Aggregate`, and `includesRuntime` as the fifth argument to
 `IR.IncludesSubquery`, before `parentFilters`. Both values are exported from
 `@tanstack/db`. Queries built through the query builder use the operators above.
-
-### Enable pooling explicitly
-
-Framework hooks no longer pool queries by default. To retain shared work for
-eligible equality-filtered queries, pass the exported `pooledLiveQueries`
-value in the query config:
-
-```tsx
-import { eq, pooledLiveQueries } from '@tanstack/db'
-import { useLiveQuery } from '@tanstack/react-db'
-
-useLiveQuery({
-  query: (q) => q.from({ todo: todoCollection })
-    .where(({ todo }) => eq(todo.listId, listId)),
-  pool: pooledLiveQueries,
-})
-```
-
-Omit `pool` to use an independent query. Boolean `pool` values now throw
-`InvalidPoolOptionError`, including on disabled queries; replace `true` with
-`pooledLiveQueries` and remove `false`. Results do not change. Suspense queries
-and queries backed by a `DbClient` do not pool. Angular's `{ params, query }`
-form accepts the same `pool` value. See
-[Pooled Live Queries](./live-queries.md#pooled-live-queries).
-
-Custom framework adapters that use the unstable `resolveLiveQueryValue` helper
-must pass `pooledLiveQueries` or `false` as its `pool` option and validate
-caller config with `configPool`. Window helpers such as
-`resolveLiveQueryWindowInput` and `liveQueryWindowMatches` are no longer
-exported; use `bindLiveQueryWindow` for the shared infinite-query binding.
 
 ## Update React live-query hooks
 
@@ -412,58 +382,6 @@ discards its rows. For a closed IndexedDB connection, create a new connection
 and affected Collections. See
 [When a Collection crashes](./error-handling.md#when-a-collection-crashes).
 
-### Use one readiness signal for persisted data
-
-Remove `persistedStatus`, `isPersistedReady`, `persistedError`,
-`preloadForInitialRender()`, and `PERSISTED_READINESS`. Use normal `status`,
-`preload()`, and `health` instead.
-
-With `initialRender: { strategy: 'network-first', networkTimeoutMs }`, an eager
-persisted Collection becomes ready from restored rows when the deadline passes
-or the remote first load fails. The restore must finish and contain at least
-one row. An empty restore waits for the network and cannot rescue a failed
-first load; a failed restore crashes the Collection. The default deadline is
-three seconds, and it does not stop sync.
-Without `initialRender`, restored rows do not make the Collection ready before
-its sync adapter does. Suspense and ordinary hooks now follow the same status.
-A storage reload triggered by another tab's commit keeps this tab's status:
-it cannot mark a loading source ready or recover its failed first load. Use
-`reload()` to retry that failure.
-See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore).
-
-### Enable network-first for on-demand persisted queries
-
-`initialRender: { strategy: 'network-first', networkTimeoutMs }` now also works
-with `syncMode: 'on-demand'` and Electric's `syncMode: 'progressive'`. These
-configurations previously threw `InvalidPersistedCollectionConfigError`.
-
-On-demand fallback uses persisted demand coverage: an earlier online load of
-the exact filter, order, and window must have settled and saved its rows in
-SQLite. A later load of that demand can settle from SQLite after its deadline
-or when its network load fails. Coverage can include a confirmed empty result.
-This settles the query's load; it does not change the source Collection's own
-status. Network loading continues, and later results update the visible rows.
-
-Check these limits when enabling the option:
-
-- Rows in SQLite alone do not establish coverage. An overlapping query or a
-  different order or window does not cover a demand that never loaded online.
-- A source truncate, snapshot transaction, scoped recovery, or cache-generation
-  rotation clears coverage. Loads during the rest of a scoped-recovery sync
-  run cannot use or record it. Released or obsolete loads record none.
-- Coverage requires at least the recorded row count to remain in SQLite.
-  Limited ordered windows require the same rows. Deletion or cache retention
-  can therefore require another online load.
-- `refetch: true` loads always wait for the network. Only the default
-  single-process coordinator supports on-demand fallback; multi-tab
-  coordinators such as `BrowserCollectionCoordinator` still wait for the
-  network.
-
-A joined query waits for every eager source to become ready and every
-on-demand load it needs to settle. Coverage proves earlier completeness, not
-current server data. See
-[On-demand Collections offline](./sqlite-persistence.md#on-demand-collections-offline).
-
 ## Prepare SSR data explicitly
 
 An ordinary server hook can render empty/loading state without preloading.
@@ -531,28 +449,7 @@ the latest seed wins. Persisted cache rows also remain provisional to later
 `DbClient` seeds, including after a storage reload from another tab. See
 [Initial Data](./ssr.md#initial-data).
 
-## Changes since `@tanstack/db@0.9.2`
-
-The following changes shipped before the RC. Check the sections that match the
-packages and APIs your app uses when upgrading directly from an older release.
-
-### Check transaction and outbox lifetimes
-
-A persisting transaction now retains every Collection it touches until its
-handler settles; the `gcTime` delay starts again after the last persisting
-transaction finishes. Unmounting a screen no longer permits garbage collection
-to interrupt its persisting write. A pending manual transaction still does not
-retain its Collections: keep a subscription while its draft rows are needed.
-Explicit `cleanup()` still discards rows during a persisting transaction. See
-[Manual Transactions](./mutations.md#manual-transactions).
-
-Offline Transactions keeps its default outbox format, so existing apps need
-no data conversion. If adopting the optional `mutationCodec`, keep its codec ID
-and decoder available across restarts: encoded records use wire version 4,
-which older readers cannot replay. Default writers still use version 3. See
-[Mutation value codecs](./offline-transactions.md#mutation-value-codecs).
-
-### Await Query Collection direct writes
+## Await Query Collection direct writes
 
 `writeInsert`, `writeUpdate`, `writeDelete`, `writeUpsert`, and `writeBatch` now
 return promises whose validation errors reject. Catch errors from an awaited
@@ -567,22 +464,14 @@ try {
 }
 ```
 
-Direct writes no longer automatically refetch active on-demand Query subsets.
-They update Collection and Query cache rows where the write can be represented.
-Call `await todosCollection.utils.refetch()` when you need current server rows.
-Mutation handlers also require explicit synchronization as described above.
+Direct writes update Collection and Query cache rows where the write can be
+represented. Call `await todosCollection.utils.refetch()` when you need current
+server rows. Mutation handlers require explicit synchronization as described above.
 Use TanStack Query Core
 5.90.15 or later for post-write refetch replacement and error recovery. See
 [Direct Writes](../collections/query-collection.md#direct-writes).
 
-### Import IndexedDB APIs from core
-
-The standalone `@tanstack/indexeddb-db-collection` package was removed. Import
-`createIndexedDB` and `indexedDBCollectionOptions` from `@tanstack/db` and
-remove the old package dependency. See the
-[IndexedDB Collection guide](../collections/indexed-db-collection.md).
-
-### Update custom sync adapters
+## Update custom sync adapters
 
 - Remove the `immediate` argument from `begin({ immediate: true })` in sync
   callbacks. Call `begin()` instead. Sync writes made while a mutation persists
@@ -600,16 +489,13 @@ remove the old package dependency. See the
 - Track readiness inside each `sync` invocation. During a reload,
   `collection.status` still describes the previous run and cannot tell you
   whether the new run has reached its first ready.
-- Remove `begin({ direct: true })`. Ordinary `begin()` writes against the rows
-  the Collection holds, including during reload. To replace all synced rows
-  with a complete authoritative snapshot, use `begin({ snapshot: true })` or
-  `truncate()` in the new run. An ordinary first commit no longer implies
-  replacement. Core does not delete rows omitted by ordinary writes.
 - When keeping rows during reload, update existing keys and explicitly delete
   removed rows. Inserting an existing key with a changed value throws
   `DuplicateKeySyncError`. A partial on-demand `loadSubset` result must never
-  claim to be a full snapshot. Honor its `signal`: aborted loads no longer hold
-  readiness, and core ignores their later promise results.
+  claim to be a full snapshot. Use `begin({ snapshot: true })` or `truncate()`
+  only for a complete authoritative replacement. Honor the load's `signal`:
+  aborted loads no longer hold readiness, and core ignores their later promise
+  results.
 - Treat a synchronous `loadSubset` throw like a rejected load. Core keeps its
   logical demand and calls `unloadSubset` when that demand is released. Ensure
   `unloadSubset` can clean up partially initialized or failed loads.
@@ -625,7 +511,7 @@ remove the old package dependency. See the
 See [For sync adapter authors](./error-handling.md#for-sync-adapter-authors)
 for an example and the full reload contract.
 
-### Update persistence integrations and browser assets
+## Update persistence integrations and browser assets
 
 - Custom SQLite `PersistenceAdapter` implementations must implement
   `loadResumeSnapshot`. A custom sync wrapper must forward
@@ -647,20 +533,6 @@ for an example and the full reload contract.
   utilities with those names. `persistedCollectionOptions` now throws
   `InvalidPersistedCollectionConfigError` for them, even when inherited or set
   to `undefined`. Collections with a `sync` option keep their adapter utilities.
-
-Custom sync adapters using `metadata.persistence.reserveCommitTurn()` must
-finish every reserved sync transaction. Every persisted hydration now waits
-for that transaction, including reloads from peer commit notices and recovery
-after a gap in notification sequence numbers. Commit it, or abandon it by
-calling `commit()` with an already-aborted signal when the source stops for
-good. Abandonment releases waiting hydrations too. A peer reset can instead
-abandon an older reservation; its commit rejects with
-`SyncTransactionAbortedError`.
-
-Finish any needed `hydrateBaseline()` before reserving the commit turn. Calling
-it with a reservation open now rejects, and awaiting an earlier baseline while
-holding a reservation can deadlock. Built-in Electric handling already ends
-its open transaction when its stream stops for good.
 
 Browser SQLite now ships `wa-sqlite.wasm` separately from its OPFS worker.
 Deploy both emitted assets. Vite, webpack 5, and Next.js include them
@@ -686,7 +558,7 @@ exclusion is needed if the database opens inside a worker or the page's Vite
 client has no script `src`. See the
 [Browser SQLite runtime notes](https://github.com/TanStack/db/tree/main/packages/browser-db-sqlite-persistence#notes).
 
-### Review query windows, joins, and aggregates
+## Review query windows, joins, and aggregates
 
 - An ordered `findOne` keeps its compiled limit of one, or zero after
   `.limit(0).findOne()`. `setWindow` may move its offset but cannot change its
@@ -698,17 +570,16 @@ client has no script `src`. See the
   side. Code that constructs a key to call `collection.get()` must use the new
   format. Reading the published row's `$key` avoids reconstructing it,
   especially for non-finite numeric keys.
-- A source field selected outside an aggregate or `groupBy` key now throws
-  `NonAggregateExpressionNotInGroupByError`; the same rule applies in `having`.
-  Aggregate the field or include it in `groupBy`. Nested includes inside a
-  grouped or aggregate select now throw as well.
-- An aggregate used in `orderBy` or `having` must also appear in `select()`.
-  Otherwise the query throws `AggregateFunctionNotInSelectError`.
+- Aggregate validation also applies to queries without `groupBy`, source fields
+  inside expressions that mix aggregate and non-aggregate values, and `having`.
+  These cases could pass validation in 0.9.2. Aggregate each source field or
+  include it in `groupBy` to avoid `NonAggregateExpressionNotInGroupByError`.
+  Nested includes inside a grouped or aggregate select now throw as well.
 - Clean up the owning live query rather than calling `cleanup()` on one of its
   included child Collections. The child cleanup now rejects because several
   parent rows can share that Collection.
 
-### Use string or number keys throughout
+## Use string or number keys throughout
 
 `sync.write` now enforces the same key restriction as optimistic writes:
 `getKey` must return a string or number. An undefined key throws
@@ -726,7 +597,7 @@ still overrides the default. See [groupBy and Aggregations](./live-queries.md#gr
 `SortedMap` is no longer exported from `@tanstack/db`. Remove imports of this
 internal ordered map; use public Collection reads or an application-owned map.
 
-### Check stricter inputs and adapter requirements
+## Check stricter inputs and adapter requirements
 
 - A custom index `compareFn` or collation `compare` must return a number other
   than `NaN`. Invalid comparator results now throw instead of silently
@@ -761,3 +632,49 @@ Production error messages now contain a short code and a link to the
 [error reference](../errors.md). Code that compared the old message text should
 use error classes, names, or fields instead. The development messages remain
 descriptive.
+
+## Update custom framework adapters
+
+If you maintain a framework adapter using the unstable window-controller
+exports from 0.9.2, replace helpers such as `resolveLiveQueryWindowInput` and
+`createLiveQueryWindowController` with `bindLiveQueryWindow` for the shared
+infinite-query binding. Ordinary apps using the first-party hooks do not need
+this change.
+
+## Optional new features
+
+### Enable pooling for screens with many live queries
+
+Pooling is a new performance option for screens with dozens or more live
+queries of the same shape, such as one query per list row. Eligible queries
+share work instead of compiling a separate graph for each query. To enable it,
+pass the exported `pooledLiveQueries` value in the query config:
+
+```tsx
+import { eq, pooledLiveQueries } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/react-db'
+
+useLiveQuery({
+  query: (q) => q.from({ todo: todoCollection })
+    .where(({ todo }) => eq(todo.listId, listId)),
+  pool: pooledLiveQueries,
+})
+```
+
+Pooling supports queries that filter one eager source with `eq(field, literal)`.
+Omit `pool` to keep each query independent. Results are the same either way.
+Suspense queries and queries backed by a `DbClient` do not pool. Angular's
+`{ params, query }` form accepts the same `pool` value. See
+[Pooled Live Queries](./live-queries.md#pooled-live-queries).
+
+### Explore storage options
+
+IndexedDB Collections are new since 0.9.2. Import `createIndexedDB` and
+`indexedDBCollectionOptions` from `@tanstack/db` to use them. See the
+[IndexedDB Collection guide](../collections/indexed-db-collection.md).
+
+SQLite persistence has a new `initialRender` option for rendering restored
+data when the network is slow or unavailable. See
+[Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore)
+and [On-demand Collections offline](./sqlite-persistence.md#on-demand-collections-offline)
+for configuration and limits.

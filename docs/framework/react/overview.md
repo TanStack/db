@@ -182,7 +182,7 @@ const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
 `fetchNextPage()` returns a promise that resolves after the page request settles. A failed page load does not reject the promise or change `status`; it appears as a request error in the returned `health` tree.
 
 This hook widens an ordered live query; it is not TanStack Query's
-`useInfiniteQuery`. `getNextPageParam` was previously ignored and is now rejected.
+`useInfiniteQuery`. `getNextPageParam` is not supported.
 `initialPageParam` only labels the returned pages; it does not set a server cursor
 or skip remote rows. For server pagination, use an on-demand Query Collection
 whose `queryFn` fulfills `meta.loadSubsetOptions`. See the
