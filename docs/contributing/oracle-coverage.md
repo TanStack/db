@@ -1,5 +1,22 @@
 # Oracle coverage and closeout
 
+## RC npm tag policy, 2026-10-29
+
+The maintainer directed RC versions to npm's `latest` tag on 2026-10-29.
+`CONTRIBUTING.md` records this policy. The release-history model and command/HTTP
+receivers now expect `latest` for candidate and stable uploads. Exact-version
+membership still decides whether an upload is needed; an existing version is
+never republished to move a tag. Existing `rc` aliases are preserved by the
+separate `npm dist-tag add <package>@<version> latest` operation.
+
+Historical campaign records below retain the former `rc`-only authority and
+its P01 findings. They are not current tag-policy evidence. The existing
+histories, comparisons, reach declarations, and run budgets remain intact.
+The maintainer explicitly stopped local tests during this release. No RED,
+GREEN, or mutant campaign was run for this policy change; execution evidence
+is pending CI. The command/HTTP owners do not cover manual tag promotion,
+production npm credentials, or Actions authentication.
+
 ## RC scope partition, 2026-10-29
 
 The [deferred oracle record](oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md)

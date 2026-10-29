@@ -49,7 +49,7 @@ function packageState(root) {
   )
 }
 
-test('RC publishing gives candidate and stable packages their own npm tags', async (t) => {
+test('RC publishing uses latest while isolating candidate and stable versions', async (t) => {
   const root = createWorkspace()
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const before = packageState(root)
@@ -82,7 +82,7 @@ test('RC publishing gives candidate and stable packages their own npm tags', asy
       publicNames: ['@tanstack/db'],
       preMode: false,
       version: '1.0.0-rc.2',
-      tag: 'rc',
+      tag: 'latest',
     },
   ])
   assert.deepEqual(packageState(root), before)
@@ -98,7 +98,8 @@ test('failed candidate publishing restores package manifests and prerelease stat
   await assert.rejects(
     publishDuringRc(root, (_, publication) => {
       phase++
-      if (publication.tag === 'rc') throw new Error('publish failed')
+      if (publication.version.startsWith('1.0.0-rc.'))
+        throw new Error('publish failed')
     }),
     /publish failed/,
   )
