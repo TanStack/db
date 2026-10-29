@@ -315,8 +315,9 @@ function expectPublicRefetchObservation(
  *   application from the handler call while retaining its later error record.
  * - `HandlerIdentityObservation` is a model-only projection of strict
  *   transaction, mutation, and Collection identity plus identity-keyed
- *   registry results. Its bounded grammar exhausts insert, update, and delete;
- *   handler parameter and mutation-alias access; and refetch and clearError.
+ *   registry results. Its bounded grammar crosses insert, update, and delete
+ *   through handler parameter and mutation-alias access during explicit refetch.
+ *   Historical operation labels are replay coordinates only, not model state.
  * - `MutationRefreshLivenessModel` is a wait-for graph. Its mutation, fetch,
  *   and application nodes map to the user transaction, Query promise, and
  *   Collection publication boundary. Invocation labels test both owned and
@@ -719,7 +720,21 @@ function observeHandlerRefetchBoundary(model: HandlerRefetchBoundaryModel): {
  * create the forbidden cycle mutation -> refresh -> application -> mutation;
  * for an external caller it would add an unrelated persistence delay.
  */
-type MutationRefreshOperation = `refetch` | `clearError`
+/**
+ * Before the RC, these matrices exercised refetch and the removed clearError
+ * utility. Both paths now explicitly refetch. Keep the former operation labels
+ * only as replay coordinates: existing traces, fixture IDs, and all 12 runs of
+ * each matrix survive. The labels add no semantic history or model distinction.
+ * To select the former clearError rows, use the test-name pattern
+ * `legacy replay:.*clearError`; Vitest can quote interpolated string values.
+ */
+type LegacyRefreshReplayCoordinate = `refetch` | `clearError`
+const legacyRefreshReplayCoordinates = [`refetch`, `clearError`] as const
+
+type LegacyRefreshReplay = {
+  legacyOperation: LegacyRefreshReplayCoordinate
+}
+
 type MutationRefreshInvocation =
   | `manual-transaction`
   | `optimistic-action`
@@ -734,7 +749,6 @@ type MutationRefreshSchedule =
 
 type MutationRefreshHistory = {
   invocation: MutationRefreshInvocation
-  operation: MutationRefreshOperation
   schedule: MutationRefreshSchedule
 }
 
@@ -745,8 +759,9 @@ const mutationRefreshInvocations = [
   `external-handler-overlap`,
   `external-persisted-application-overlap`,
 ] as const
-const mutationRefreshOperations = [`refetch`, `clearError`] as const
-const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> = [
+const mutationRefreshHistoryGrammar: ReadonlyArray<
+  MutationRefreshHistory & LegacyRefreshReplay
+> = [
   ...mutationRefreshInvocations
     .filter(
       (invocation) =>
@@ -754,24 +769,24 @@ const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> = [
         invocation !== `external-persisted-application-overlap`,
     )
     .flatMap((invocation) =>
-      mutationRefreshOperations.map((operation) => ({
+      legacyRefreshReplayCoordinates.map((legacyOperation) => ({
         invocation,
-        operation,
+        legacyOperation,
         schedule: `mutation-first` as const,
       })),
     ),
-  ...mutationRefreshOperations.flatMap((operation) =>
+  ...legacyRefreshReplayCoordinates.flatMap((legacyOperation) =>
     ([`mutation-first`, `refresh-first-during-fetch`] as const).map(
       (schedule) => ({
         invocation: `external-handler-overlap` as const,
-        operation,
+        legacyOperation,
         schedule,
       }),
     ),
   ),
-  ...mutationRefreshOperations.map((operation) => ({
+  ...legacyRefreshReplayCoordinates.map((legacyOperation) => ({
     invocation: `external-persisted-application-overlap` as const,
-    operation,
+    legacyOperation,
     schedule: `refresh-first-during-application` as const,
   })),
 ]
@@ -874,12 +889,10 @@ function observeFetchRecordSuccessorWork(model: FetchRecordLifecycleModel): {
 
 type MutationHandlerKind = `insert` | `update` | `delete`
 type HandlerCollectionAccessPath = `parameter` | `mutation-alias`
-type HandlerCollectionOperation = `refetch` | `clearError`
 
 type HandlerCollectionHistory = {
   handlerKind: MutationHandlerKind
   accessPath: HandlerCollectionAccessPath
-  operation: HandlerCollectionOperation
 }
 
 type HandlerIdentityObservation = HandlerCollectionHistory & {
@@ -897,18 +910,17 @@ type HandlerIdentityObservation = HandlerCollectionHistory & {
 
 const mutationHandlerKinds = [`insert`, `update`, `delete`] as const
 const handlerCollectionAccessPaths = [`parameter`, `mutation-alias`] as const
-const handlerCollectionOperations = [`refetch`, `clearError`] as const
-
-const handlerCollectionHistoryGrammar: ReadonlyArray<HandlerCollectionHistory> =
-  mutationHandlerKinds.flatMap((handlerKind) =>
-    handlerCollectionAccessPaths.flatMap((accessPath) =>
-      handlerCollectionOperations.map((operation) => ({
-        handlerKind,
-        accessPath,
-        operation,
-      })),
-    ),
-  )
+const handlerCollectionHistoryGrammar: ReadonlyArray<
+  HandlerCollectionHistory & LegacyRefreshReplay
+> = mutationHandlerKinds.flatMap((handlerKind) =>
+  handlerCollectionAccessPaths.flatMap((accessPath) =>
+    legacyRefreshReplayCoordinates.map((legacyOperation) => ({
+      handlerKind,
+      accessPath,
+      legacyOperation,
+    })),
+  ),
+)
 
 /**
  * A direct mutation handler receives the real Collection. Every matching
@@ -924,7 +936,8 @@ function observeHandlerIdentity(
     throw new Error(`A direct handler requires a matching mutation alias`)
   }
   return {
-    ...history,
+    handlerKind: history.handlerKind,
+    accessPath: history.accessPath,
     matchingAliasCount,
     transactionIsExternal: true,
     allMutationsPreserveIdentity: true,
@@ -2492,10 +2505,10 @@ describe(`query collection ownership lifecycle`, () => {
     })
   })
 
-  it(`enumerates every direct handler identity history exactly once`, () => {
+  it(`preserves every direct handler identity legacy replay coordinate`, () => {
     const historyKeys = handlerCollectionHistoryGrammar.map(
-      ({ handlerKind, accessPath, operation }) =>
-        `${handlerKind}:${accessPath}:${operation}`,
+      ({ handlerKind, accessPath, legacyOperation }) =>
+        `${handlerKind}:${accessPath}:${legacyOperation}`,
     )
     expect(historyKeys).toEqual([
       `insert:parameter:refetch`,
@@ -2512,6 +2525,14 @@ describe(`query collection ownership lifecycle`, () => {
       `delete:mutation-alias:clearError`,
     ])
     expect(new Set(historyKeys).size).toBe(historyKeys.length)
+    // Six semantic histories each keep their two historical replay runs.
+    expect(
+      new Set(
+        handlerCollectionHistoryGrammar.map(
+          ({ handlerKind, accessPath }) => `${handlerKind}:${accessPath}`,
+        ),
+      ).size,
+    ).toBe(6)
   })
 
   it(`rejects handler identity wrong-result controls`, () => {
@@ -3285,8 +3306,8 @@ describe(`query collection ownership lifecycle`, () => {
       ({ invocation }) => invocation === `external-handler-overlap`,
     ),
   )(
-    `settles an external $operation at fetch with $schedule overlap`,
-    async ({ operation, schedule }) => {
+    `settles an external refetch at fetch with $schedule overlap (legacy replay: $legacyOperation)`,
+    async ({ legacyOperation, schedule }) => {
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -3299,9 +3320,11 @@ describe(`query collection ownership lifecycle`, () => {
         .mockReturnValueOnce(refreshResult.promise)
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `external-${operation}-${schedule}-overlaps-handler`,
+          id: `external-${legacyOperation}-${schedule}-overlaps-handler`,
           queryClient,
-          queryKey: [`external-${operation}-${schedule}-overlaps-handler`],
+          queryKey: [
+            `external-${legacyOperation}-${schedule}-overlaps-handler`,
+          ],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,
@@ -3327,11 +3350,7 @@ describe(`query collection ownership lifecycle`, () => {
       }
       let refetchOutcome: RefetchApplicationOutcome = `pending`
       const startRefresh = () => {
-        const refresh = (
-          operation === `refetch`
-            ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.refetch({ throwOnError: true })
-        ).then(
+        const refresh = collection.utils.refetch({ throwOnError: true }).then(
           (result) => {
             refetchOutcome = `resolved`
             return result
@@ -3403,9 +3422,9 @@ describe(`query collection ownership lifecycle`, () => {
         invocation === `external-persisted-application-overlap`,
     ),
   )(
-    `settles an external $operation when mutation starts during persisted application preparation`,
-    async ({ operation }) => {
-      const id = `external-${operation}-persisted-application-overlap`
+    `settles an external refetch when mutation starts during persisted application preparation (legacy replay: $legacyOperation)`,
+    async ({ legacyOperation }) => {
+      const id = `external-${legacyOperation}-persisted-application-overlap`
       const queryHash = hashKey([id])
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
@@ -3459,11 +3478,7 @@ describe(`query collection ownership lifecycle`, () => {
         throwOnError: true,
       }
       let refetchOutcome: RefetchApplicationOutcome = `pending`
-      const refresh = (
-        operation === `refetch`
-          ? collection.utils.refetch({ throwOnError: true })
-          : collection.utils.refetch({ throwOnError: true })
-      ).then(
+      const refresh = collection.utils.refetch({ throwOnError: true }).then(
         (result) => {
           refetchOutcome = `resolved`
           return result
@@ -3519,9 +3534,9 @@ describe(`query collection ownership lifecycle`, () => {
 
   it(`rejects a call-entry-only boundary mutant for refresh-first overlap`, () => {
     const history = mutationRefreshHistoryGrammar.find(
-      ({ invocation, operation, schedule }) =>
+      ({ invocation, legacyOperation, schedule }) =>
         invocation === `external-handler-overlap` &&
-        operation === `refetch` &&
+        legacyOperation === `refetch` &&
         schedule === `refresh-first-during-fetch`,
     )
     expect(history).toBeDefined()
@@ -3549,16 +3564,23 @@ describe(`query collection ownership lifecycle`, () => {
     expect(callEntryOnlyMutant).not.toEqual(expected)
   })
 
-  it(`enumerates every mutation refresh history exactly once`, () => {
+  it(`preserves every mutation refresh legacy replay coordinate`, () => {
     expect(mutationRefreshHistoryGrammar).toHaveLength(12)
     expect(
       new Set(
         mutationRefreshHistoryGrammar.map(
-          ({ invocation, operation, schedule }) =>
-            `${invocation}:${operation}:${schedule}`,
+          ({ invocation, legacyOperation, schedule }) =>
+            `${invocation}:${legacyOperation}:${schedule}`,
         ),
       ).size,
     ).toBe(mutationRefreshHistoryGrammar.length)
+    expect(
+      new Set(
+        mutationRefreshHistoryGrammar.map(
+          ({ invocation, schedule }) => `${invocation}:${schedule}`,
+        ),
+      ).size,
+    ).toBe(6)
   })
 
   it.each(
@@ -3568,9 +3590,9 @@ describe(`query collection ownership lifecycle`, () => {
         invocation === `optimistic-action`,
     ),
   )(
-    `settles a $invocation $operation at the fetch boundary`,
-    async ({ invocation, operation }) => {
-      const id = `mutation-refresh-${invocation}-${operation}`
+    `settles a $invocation refetch at the fetch boundary (legacy replay: $legacyOperation)`,
+    async ({ invocation, legacyOperation }) => {
+      const id = `mutation-refresh-${invocation}-${legacyOperation}`
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -3592,10 +3614,7 @@ describe(`query collection ownership lifecycle`, () => {
       )
       let refreshOutcome: RefetchApplicationOutcome = `pending`
       const mutationFn = async (): Promise<void> => {
-        const refresh =
-          operation === `refetch`
-            ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.refetch({ throwOnError: true })
+        const refresh = collection.utils.refetch({ throwOnError: true })
         await refresh.then(
           () => {
             refreshOutcome = `resolved`
@@ -3681,9 +3700,9 @@ describe(`query collection ownership lifecycle`, () => {
       ({ invocation }) => invocation === `captured-handler-collection`,
     ),
   )(
-    `settles a captured handler Collection $operation at the fetch boundary`,
-    async ({ operation }) => {
-      const id = `captured-handler-refresh-${operation}`
+    `settles a captured handler Collection refetch at the fetch boundary (legacy replay: $legacyOperation)`,
+    async ({ legacyOperation }) => {
+      const id = `captured-handler-refresh-${legacyOperation}`
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -3709,10 +3728,9 @@ describe(`query collection ownership lifecycle`, () => {
             if (!capturedCollection) {
               throw new Error(`The captured Collection is not available`)
             }
-            const refresh =
-              operation === `refetch`
-                ? capturedCollection.utils.refetch({ throwOnError: true })
-                : capturedCollection.utils.refetch({ throwOnError: true })
+            const refresh = capturedCollection.utils.refetch({
+              throwOnError: true,
+            })
             await refresh.then(
               () => {
                 refreshOutcome = `resolved`
@@ -3917,9 +3935,9 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it.each(handlerCollectionHistoryGrammar)(
-    `preserves $handlerKind handler identity through $accessPath $operation`,
+    `preserves $handlerKind handler identity through $accessPath refetch (legacy replay: $legacyOperation)`,
     async (history) => {
-      const { handlerKind, accessPath, operation } = history
+      const { handlerKind, accessPath, legacyOperation } = history
       const initial = [
         { id: `first`, category: `shared`, name: `First` },
         { id: `second`, category: `shared`, name: `Second` },
@@ -3993,7 +4011,6 @@ describe(`query collection ownership lifecycle`, () => {
         identityObservation = {
           handlerKind: actualHandlerKind,
           accessPath,
-          operation,
           matchingAliasCount: aliases.length,
           transactionIsExternal: transaction === externalTransaction,
           allMutationsPreserveIdentity: transaction.mutations.every(
@@ -4023,10 +4040,7 @@ describe(`query collection ownership lifecycle`, () => {
           accessPath === `parameter`
             ? handlerCollection
             : (aliases[0] as typeof handlerCollection)
-        const boundary =
-          operation === `refetch`
-            ? refetchCollection.utils.refetch({ throwOnError: true })
-            : refetchCollection.utils.refetch({ throwOnError: true })
+        const boundary = refetchCollection.utils.refetch({ throwOnError: true })
         await boundary.then(
           () => {
             handlerOutcome = `resolved`
@@ -4039,9 +4053,9 @@ describe(`query collection ownership lifecycle`, () => {
       }
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `handler-scope-${handlerKind}-${accessPath}-${operation}`,
+          id: `handler-scope-${handlerKind}-${accessPath}-${legacyOperation}`,
           queryClient,
-          queryKey: [`handler-scope`, handlerKind, accessPath, operation],
+          queryKey: [`handler-scope`, handlerKind, accessPath, legacyOperation],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,

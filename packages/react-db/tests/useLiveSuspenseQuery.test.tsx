@@ -1055,7 +1055,7 @@ describe(`useLiveSuspenseQuery`, () => {
     expect(suspenseCount).toBe(initialSuspenseCount)
   })
 
-  it(`should only suspend on deps change, not on every re-render`, async () => {
+  it(`should only suspend on queryKey change, not on every re-render`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-suspense-12`,
@@ -1086,7 +1086,7 @@ describe(`useLiveSuspenseQuery`, () => {
 
     const dataAfterInitial = result.current.data
 
-    // Re-render with SAME deps - should NOT suspend (data stays available)
+    // Re-render with the same queryKey - should NOT suspend (data stays available)
     rerender({ minAge: 20 })
     expect(result.current.data).toHaveLength(3)
     expect(result.current.data).toBe(dataAfterInitial)
@@ -1097,7 +1097,7 @@ describe(`useLiveSuspenseQuery`, () => {
     rerender({ minAge: 20 })
     expect(result.current.data).toHaveLength(3)
 
-    // Change deps - SHOULD suspend and get new data
+    // Change queryKey - SHOULD suspend and get new data
     rerender({ minAge: 30 })
 
     await waitFor(() => {

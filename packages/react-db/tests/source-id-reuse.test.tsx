@@ -225,10 +225,6 @@ describe(`React source ID reuse`, () => {
     )
   })
 
-  // A Suspense mount suspends before it commits, so its retry render may
-  // reuse the cached Suspense collection instead of compiling again. With a
-  // dependency list, that retry must still claim the source's ID.
-
   it(`permits independent client scopes to use the same ID`, async () => {
     const firstClient = new DbClient()
     const secondClient = new DbClient()

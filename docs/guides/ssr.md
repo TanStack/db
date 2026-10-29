@@ -887,11 +887,12 @@ Still supported:
 - mutation APIs such as `insert`, `update`, `delete`, `subscribe`, and
   optimistic mutation helpers
 
-Warnings:
+Query identity checks:
 
-- React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` throws `UnhashableQueryIRError` in a
-  hook that compares identity (React, Preact, or any `DbClient`-backed hook).
+- React hooks use derived query identity or an explicit, nonempty `queryKey`.
+- Opaque query IR without a nonempty `queryKey` throws
+  `UnhashableQueryIRError` in a hook that compares identity (React, Preact, or
+  any `DbClient`-backed hook).
 - Expensive derived identity warns in development and suggests `queryKey`.
 
 Opaque query IR without a serializable `queryKey` throws when React cannot
@@ -990,7 +991,8 @@ The SSR strategy is covered by:
 - core `DbClient` tests for hydration, streaming chunks, sync metadata,
   initial data precedence, explicit ids, and no optimistic serialization
 - React tests for `DbProvider`, descriptor resolution, derived query identity,
-  `queryKey`, deprecation warnings, SSR result snapshots, and atomic handoff
+  `queryKey`, derived-identity performance warnings, SSR result snapshots, and
+  atomic handoff
 - Svelte tests for provider ownership, server snapshot rendering, and browser
   handoff
 - query adapter tests to ensure Query cache behavior still holds

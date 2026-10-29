@@ -206,9 +206,10 @@ export class UserListComponent {
 ```
 
 > **Note:** React hooks derive query identity from structured query IR by
-> default. Dependency arrays are still accepted for backwards compatibility,
-> but warn in development and will be removed in 1.0. In React and Preact, an
-> unhashable query without `queryKey` throws `UnhashableQueryIRError`. See the
+> default. Dependency-array hook forms were removed in the first 1.0 RC. Use
+> derived query identity or an explicit, nonempty `queryKey`. In React and
+> Preact, an unhashable query without a nonempty `queryKey` throws
+> `UnhashableQueryIRError`. See the
 > [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 

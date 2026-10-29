@@ -258,7 +258,7 @@ function referenceRows(
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
-/** Row data fields only; collection virtual props such as `$synced` are not data. */
+/** Row data fields only; collection virtual props such as `$hasPendingWrites` are not data. */
 function rowData(row: Row): Row {
   return { id: row.id, name: row.name, seeded: row.seeded }
 }

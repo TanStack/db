@@ -159,7 +159,7 @@ describe(`useLiveInfiniteQuery`, () => {
     rendered.unmount()
   })
 
-  it(`preserves committed pages across an abandoned dependency update`, async () => {
+  it(`preserves committed pages across an abandoned queryKey update`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         autoIndex: `eager`,

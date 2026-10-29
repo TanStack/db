@@ -140,7 +140,8 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   )
 }
 
-// An empty dependency list compiles the query once, at mount.
+// Retain this registration for replay coordinates. It uses the current
+// derived-identity API.
 function mountWithDependencyList(
   build: QueryBuild,
   config: InfiniteQueryConfig = {},
@@ -154,9 +155,9 @@ function mountWithDependencyList(
   )
 }
 
-// React compares query identity on two production paths: the identity derived
-// from the query IR on every render (the 1.0 form), and a deprecated
-// dependency list. The suite runs once per path.
+// The legacy dependency-list label preserves receiving registrations and replay
+// coordinates. Both branches now use the current derived-identity API; these
+// labels do not represent separate production paths.
 type IdentityPath = `derived` | `dependency list`
 
 const mountControllableWith = (path: IdentityPath) =>
@@ -339,7 +340,7 @@ runInfiniteQuerySuite(
   registerInfiniteQueryUnitScenarios,
 )
 
-it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {
+it(`publishes query-function pages on the first layout commit after mount and queryKey replacement`, async () => {
   const source = makeSource(
     Array.from({ length: 10 }, (_, index) => ({
       id: String(index + 1),
@@ -386,7 +387,7 @@ it(`publishes query-function pages on the first layout commit after mount and de
     await waitFor(() =>
       expect(hook.result.current.data.map(({ rank }) => rank)).toEqual([10, 9]),
     )
-    // Replacing the dependency builds a fresh eager collection, so its first
+    // Replacing queryKey builds a fresh eager collection, so its first
     // commit is ready too — no idle flash on re-query.
     expect(commits[0]).toEqual({
       ranks: [10, 9],

@@ -273,7 +273,7 @@ describe(`useLiveQuery type assertions`, () => {
     >()
   })
 
-  it(`keeps the deprecated dependency-array overload typed`, () => {
+  it(`types an explicit queryKey config`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-deprecated-deps`,

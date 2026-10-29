@@ -2008,7 +2008,7 @@ async function runJoined(
   const { inner, query } = shapedQuery(shape, parents, children.collection)
 
   const subscription = query.subscribeChanges(() => {})
-  // Virtual row properties (`$key`, `$synced`, ...) are not part of the law.
+  // Virtual row properties (`$key`, `$hasPendingWrites`, ...) are not part of the law.
   const visibleRows = () =>
     (query.toArray as Array<object>).map((row) =>
       Object.fromEntries(

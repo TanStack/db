@@ -122,36 +122,26 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
-   * Error recovery law: a previous Query failure remains public while an
-   * explicit retry is pending. A failed retry is another consecutive failure;
-   * a successful retry clears the error. This follows the documented
-   * `lastError`/`errorCount` reset-on-success contract. The model represents
-   * only these three public error fields, not Collection status or row changes.
+   * These fixed error-recovery scenarios observe the exact cause in Collection
+   * health through `reportedError`. The glossary's `loading error` and
+   * `failure reason` contracts distinguish the phases. A failed initial load
+   * is final for its sync run, even if a later refetch succeeds. After readiness, a
+   * pending retry keeps the prior failure reason; a failed retry reports its
+   * cause, and a successfully applied result clears the failure reason.
    *
    * The bounded history crosses a failed initial load, a failed background
    * refetch, or a failed Collection application with a held retry. One retry
    * holds Collection application after Query fetch success. A background
    * failure crosses an intermediate Query retry attempt before a held final
-   * attempt. A repeated error at clock time zero distinguishes consecutive
-   * failures from duplicate observer notifications. The real QueryClient and
-   * `clearError()` are the driver.
-   * The refinement check reads the public utils
-   * when the retry starts but before its result settles, then after settlement.
+   * attempt. Reusing an Error value at clock time zero checks cause identity
+   * independently of Query's timestamp. The driver uses a real QueryClient and
+   * `collection.utils.refetch()`. Checks run while the retry is held and after
+   * settlement. The persisted-baseline scan is a controlled application hold.
    *
-   * ORC-001: `query.ts` getter comments and the error-handling guide promise
-   * reset on success. ORC-002/003/005: the three-state public model below is
-   * separate from Query's timestamp and is checked at both named boundaries.
-   * ORC-004/007: this is a bounded fixed matrix, not a generated property.
-   * ORC-006: the original `clearError()` fails both initial pending cases;
-   * an observer-success reset fails the application-error and held-application
-   * cases; an unconditional error-result classifier recounts the old error
-   * during a Query retry attempt; a zero timestamp sentinel fails the
-   * epoch-zero repeated-error case.
-   * ORC-008:
-   * no model state is combined or removed. ORC-009: `retry pending` maps to
-   * a held Query result; no new production concept is named. ORC-010: cleanup
-   * settles the held result and retains primary assertion failures. ORC-011:
-   * no plausible shared semantic helper needs a second formulation here.
+   * An observer-success reset would hide an application error too early; an
+   * older applied success must not clear a newer Query failure. These ordinary
+   * scenarios supplement the ownership oracle; they do not add an error-count
+   * contract or prove native SQLite persistence.
    * The matrix does not cover concurrent retries for multiple tracked Queries,
    * mutation-handler fetch-boundary settlement, or deferred result application.
    */
@@ -384,24 +374,24 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
-   * A completed failure remains visible until a later successful result
-   * applies. The model counts terminal failures, including reuse of the same
-   * Error object in one clock tick. The persisted scan holds the older success
-   * between fetch completion and application; the public checkpoint is after
+   * A newer Query failure remains visible when an older successful result
+   * applies, including reuse of the same Error object in one clock tick.
+   * The persisted scan holds the older success between fetch completion and
+   * application; the public checkpoint is after
    * that scan is released. This does not exercise native SQLite persistence.
    */
-  it.each([`clearError`, `reused-error`] as const)(
+  it.each([`new-error`, `reused-error`] as const)(
     `does not let an older held revalidation clear a newer Query error after %s`,
-    async (retryMode) => {
+    async (errorIdentity) => {
       const id = `held-revalidation-newer-error`
       const queryHash = hashKey([id])
       const previousError = new Error(`initial fetch failed`)
       const newerError =
-        retryMode === `reused-error`
+        errorIdentity === `reused-error`
           ? previousError
           : new Error(`later fetch failed`)
       const dateNow =
-        retryMode === `reused-error`
+        errorIdentity === `reused-error`
           ? vi.spyOn(Date, `now`).mockReturnValue(1_000)
           : undefined
       const firstResult = createDeferred<Array<Item>>()
@@ -441,14 +431,12 @@ describe(`query collection ownership lifecycle`, () => {
         ).rejects.toBe(previousError)
         expect(reportedError(collection)).toBe(previousError)
 
-        const firstRetry = (
-          retryMode === `clearError`
-            ? collection.utils.refetch({ throwOnError: true })
-            : collection.utils.refetch({ throwOnError: true })
-        ).then(
-          () => ({ outcome: `fulfilled` as const }),
-          (error: unknown) => ({ outcome: `rejected` as const, error }),
-        )
+        const firstRetry = collection.utils
+          .refetch({ throwOnError: true })
+          .then(
+            () => ({ outcome: `fulfilled` as const }),
+            (error: unknown) => ({ outcome: `rejected` as const, error }),
+          )
         await vi.waitFor(() => {
           expect(queryFn).toHaveBeenCalledTimes(2)
           expect(scanPersistedRows).toHaveBeenCalledOnce()

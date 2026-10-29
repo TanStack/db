@@ -2110,7 +2110,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isEnabled).toBe(false)
     })
 
-    it(`disables a config query with deprecated dependencies`, async () => {
+    it(`disables a config query with an explicit queryKey`, async () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -2201,7 +2201,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).toBeUndefined()
     })
 
-    it(`should handle callback returning undefined without a dependency array`, async () => {
+    it(`should handle callback returning undefined with derived query identity`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `undefined-callback-test`,
@@ -2278,7 +2278,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isCleanedUp).toBe(false)
     })
 
-    it(`should handle callback returning null without a dependency array`, async () => {
+    it(`should handle callback returning null with derived query identity`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `null-callback-test`,
@@ -2502,7 +2502,7 @@ describe(`Query Collections`, () => {
       ])
     })
 
-    it(`should handle conditional returns with dependencies`, async () => {
+    it(`should handle conditional returns with queryKey changes`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `conditional-deps-test`,
@@ -3289,12 +3289,6 @@ describe(`Query Collections`, () => {
         ),
       ).toThrow(UnhashableQueryIRError)
     })
-
-    // A dependency list decides reuse, so the identity is checked when the
-    // query compiles: at mount and when a dependency changes. With a
-    // DbClient, the hook also hashes the query for hydration on every render;
-    // an unhashable query there leaves hydration without a key until the
-    // query compiles again.
 
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
