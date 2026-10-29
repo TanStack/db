@@ -10,7 +10,11 @@ import {
   openBrowserWASQLiteOPFSDatabase,
   persistedCollectionOptions,
 } from '../src/index'
-import type { Offset } from '../../electric-db-collection/node_modules/@electric-sql/client'
+import type { ElectricCollectionConfig } from '../../electric-db-collection/src/electric'
+
+type Offset = NonNullable<
+  ElectricCollectionConfig<Item>[`shapeOptions`][`offset`]
+>
 
 type Item = { id: string; label: string }
 const parameters = new URL(location.href).searchParams
@@ -19,7 +23,7 @@ const collectionId = parameters.get(`collectionId`)!
 const table = parameters.get(`table`)!
 if (!databaseId || !collectionId || !table)
   throw new Error(`Missing prefix driver parameters`)
-let hold = false
+let hold = parameters.get(`holdInitial`) === `true`
 let refresh = false
 const pending: Array<{ release: () => void; rows: number }> = []
 const requests: Array<{ offset: string | null; handle: string | null }> = []

@@ -1217,3 +1217,135 @@ continues to run shared judgments without example-specific answers (ORC-016).
 
 The restored shrunk replay passes with no type errors (two reported tests).
 No production file remains changed by this calibration.
+
+### Interrupted eager recovery preserves its reset obligation
+
+CodeRabbit review `5702891774` on `124ce667c` identified the next missing
+transition: recovery can stop after its reset marker commits but before a
+replacement snapshot arrives. The next start selected `kind: reset`, which
+bypassed the resume-only source-progress predicate. An explicit numeric position
+or `now` could then request only incremental changes over the wrong cached rows.
+
+This violates the existing eager replacement and next-sync reset contracts in
+`docs/collections/electric-collection.md`, under “Cleanup and resume safety.”
+It requires no new source-ordering law and does not change #2267's safety guard.
+The independent review agrees with that authority and identifies the receiving
+seams below. No model rule or comparison changes.
+
+Each source-prefix generated input now runs its original uninterrupted history
+and an interrupted neighbor. The neighbor starts recovery without explicit
+options, stops before any source delivery, and recovers again with the selected
+caller form. Production writes the reset; the driver reads its actual durable
+kind before the second start. All original axes remain. Each campaign still
+uses 80 inputs, now 160 histories. Original histories contain 6–13 actions;
+interrupted histories add two actions. Numeric offsets without handles remain
+SDK-invalid. Omitting the first recovery loses the reset premise; completing
+its delivery loses the unfinished replacement. The unchanged draining neighbor
+keeps the source-head comparison independently sensitive to missing/extra rows.
+
+The real driver holds the first actual SDK response of the pending recovery
+before delivery. It observes the durable reset and closes that run. Caller
+positions are captured before the reset removes their fields. The surviving
+peer's responses are held too, preventing an empty commit from replacing the
+marker. The next page uses the captured numeric position or `now`; PostgreSQL
+still supplies the head to the unchanged shared comparison. Ten added cells
+cross both membership directions and all five caller forms. They preserve all
+20 earlier receiving cells.
+
+The eager-only reset predicate now participates in both fresh-evidence admission
+and effective-position selection. Thus the requested source position and
+snapshot replacement agree. Progressive/on-demand explicit-position behavior
+and eager resumes with no incompatible/reset evidence retain their prior path.
+
+- **Law:** After successful eager recovery and complete delivery, durable rows
+  and every open Collection match the source head. An interrupted replacement's
+  reset still requires a full snapshot at the next start, including explicit
+  caller positions. Authority: the existing public recovery contract above and
+  Browser Law 2/#2209.
+- **Reach:** Actual reset before divergent numeric/`now` recovery reaches 10/6
+  and 7/8 fixed/random histories. All 13 earlier source-prefix reaches pass;
+  their final counts appear below. Each added real cell reaches actual durable
+  reset before interruption and all its original/explicit required states once.
+- **RED:** Before production edits, both paired Node campaigns fail the final
+  `after every tab caught up` comparison with row 1 missing. Fixed seed `2281`,
+  path `1:0:0`; random seed `-636405297`, path `14:0:0:0:0`. The interrupted
+  real matrix reports four concrete wrong-row comparisons (numeric/`now` ×
+  lost/resurrected), while six none/initial/handle controls pass. Production
+  SHA-256 was still `df8a918e736ca073619a693316c475040db46e2e30fc20fdbcc566934be695e6`.
+  Bot commit `623c59955` only formatted the earlier stop grammar and was
+  fast-forwarded without dropping any witness or production change.
+- **GREEN:** The full Browser owner passes 312 tests and two tracked expected
+  failures, with no type errors. Browser `tsc --noEmit` passes. Electric ordinary,
+  recovery, and SDK suites report 336 passes; supplemental recovery, resume
+  races, and SDK grammar report 97 passes. Both commands report no type errors.
+  All 30 real receiving cells pass, including all ten interruptions.
+- **Mutant:** Retain eager reset recovery admission but remove reset from the
+  effective-position override. Replay seed `2281`, path `1:0:0` rejects the
+  missing row at the final source-head comparison. Exact source restoration
+  uses SHA-256 `46a417f2d65ccc21adcc72f56d80388d6f2f9fc32a172ab6e3fa1e4702508047`.
+- **Limits:** This covers bounded eager startup/restart/reopen after interrupted
+  recovery. It does not decide progressive/on-demand explicit-reset policy,
+  malformed/tagged/changed-shape explicit resumes, arbitrary cursor selection
+  over certified rows, real foreign-token receiving, mixed clients, native
+  hosts, permanent closure, receipt fulfillment, or clean teardown.
+
+| Source-prefix state | Fixed/random histories |
+| --- | --- |
+| present/empty | 28/26 |
+| present/disjoint | 22/14 |
+| absent/empty | 12/34 |
+| absent/disjoint | 14/18 |
+| drained before recovery | 84/68 |
+| missing progress at recovery | 52/64 |
+| foreign progress at recovery | 42/56 |
+| divergent source restart | 50/52 |
+| divergent source reload | 26/40 |
+| explicit resume at divergent recovery | 20/12 |
+| explicit now at divergent recovery | 14/16 |
+| explicit initial offset at recovery | 34/42 |
+| explicit handle at recovery | 42/32 |
+| interrupted reset before explicit resume recovery | 10/6 |
+| interrupted reset before explicit now recovery | 7/8 |
+
+The broad reserved-history campaign also passes every reach at the original
+80-input budgets. Its fixed counts match the earlier constructed-grammar run.
+Random counts are refetch 50, open-reservation peer 20, each constructed stop
+boundary 80, peer reset 14, reset failure 5, and final reset recovery 2.
+The first fixed campaign drives 81 histories including one documented #2267
+discard; its 80 accepted histories remain. No exclusion or reach minimum changes.
+
+Commands retain the earlier owner invocations. Node RED selects
+`-t 'converges after interleaved source prefixes'`; final Browser GREEN omits
+that selector. Real RED selects `--grep 'after interrupted recovery'`; final
+real GREEN omits it. Replay uses property `browser.electric-source-prefix`,
+seed `2281`, and path `1:0:0`. Logs are `reset-cursor-node-red.log`,
+`reset-cursor-real-red.log`, `reset-cursor-browser-green.log`,
+`reset-cursor-real-green.log`, `reset-cursor-electric{,-neighbors}-green.log`,
+`reset-cursor-browser-types.log`, `reset-cursor-incomplete-mutant.log`, and
+`reset-cursor-restored-replay.log`. The final production bundle delta is 573
+Gzip bytes across three packages, including 168 for Electric. The typical app
+delta remains 45 bytes. The comparison uses merge-base `672684846` of fetched
+main `bea84cd4554b7bd49df50cb0c569a34d8b2cd915`.
+
+The paired histories preserve reconstruction and direct replay (ORC-004/007).
+Production-observed reset plus the shared comparison and incomplete-fix mutant
+supply ORC-005/006/013/015 evidence. The real held-response receiving path supplies
+ORC-014. Authority, independence, literate boundaries, cleanup, and law-only tests
+retain ORC-001–003/010/016. No model state changes, new abstraction, or named
+shared semantic fault trigger new ORC-008/009/011 work. This versioned append and
+its finite limits supply ORC-012 evidence.
+
+Review maintenance items: the receiver now derives its offset type through
+public `ElectricCollectionConfig`, avoiding the sibling `node_modules` path
+without approximating the SDK's bigint offset form. The earlier phrase
+“test-driver type import” means a type import in the test driver. Historical
+validation wording and counts remain intact. The review's repeated reset risk,
+aggregate docstring warning, and related-issue prose retain separate local
+ledger entries; no review claim or pilot boundary disappears.
+
+After exact source restoration, the same shrunk replay passes (two reported
+tests, no type errors). Lint and whitespace checks pass. The fourth review's
+loss audit retains 24 items: eight fixed, four refuted, one accepted design,
+and eleven duplicates. No in-scope finding remains open. External review covers
+`124ce667c`; its automatic review is paused, so subsequent semantic changes
+have the independent local source review and executed evidence above.

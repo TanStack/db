@@ -4076,9 +4076,23 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       requests recovery but preserves the caller position fails the final Node
       source-head comparison (seed 2281, path `1:0:0`). Explicit positions cannot
       bypass eager source-progress recovery. Other sync modes and explicit
-      malformed/reset/tag/shape regimes retain their earlier behavior and are
-      outside this added evidence. Real foreign-token provenance and changing
-      caller forms within one history still need separate receiving witnesses.
+      malformed/tag/shape regimes retain their earlier behavior and are
+      outside this added evidence. Real foreign-token provenance and arbitrary
+      changes of caller form still need separate receiving witnesses.
+      Each of the source-prefix property's 80 generated inputs now runs both
+      its original history and an interrupted-recovery neighbor (160 histories
+      per campaign). The latter starts recovery without a caller cursor, stops
+      before any source delivery, and reopens with the generated caller form.
+      Actual persisted reset markers before divergent numeric/`now` recovery
+      are required reaches: fixed/random counts are 10/6 and 7/8. Both campaigns
+      fail on `623c59955` before the eager-only reset fix, and pass afterward.
+      The real matrix adds ten interrupted histories across both membership
+      directions and all five caller forms. A held first SDK response prevents
+      replacement publication; the driver observes the durable reset before
+      closing that run. Numeric/`now` give four wrong-row RED comparisons;
+      six neighboring controls pass. All thirty real cells pass after the fix.
+      The reset marker now requires eager recovery and clears the effective
+      caller position. No expectation, model rule, or comparison is relaxed.
       This is bounded same-version eager Browser evidence, not
       arbitrary scheduling, mixed client versions, native-device, Electron,
       on-demand, optimistic, or monotonic-live-write coverage.

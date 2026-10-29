@@ -381,6 +381,8 @@ An eager persisted resume also needs compatible source progress when its adapter
 supplies that capability. Missing or incompatible progress requires a fresh
 snapshot, even with an explicit offset or handle. Those options do not certify
 the cached rows.
+An interrupted eager recovery keeps its durable reset marker. The next start
+also requires a fresh snapshot, even with an explicit offset or handle.
 
 Eager and progressive recovery fetch a full snapshot. Cached rows remain visible
 until that replacement completes; a partial batch or subset completion cannot

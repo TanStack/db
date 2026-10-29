@@ -21,6 +21,7 @@ type Cell = {
   drain: boolean
   legacy: boolean
   callerCursor: `none` | `initial-offset` | `handle` | `resume` | `now`
+  interrupted?: boolean
 }
 const cells: Array<Cell> = [true, false]
   .flatMap((present) =>
@@ -66,6 +67,22 @@ cells.push(
     callerCursor,
   })),
 )
+// Interrupt recovery before the first SDK response can publish its snapshot.
+// The real eager adapter durably records reset; numeric/now positions cannot
+// turn that marker into a certified baseline. The other forms are controls.
+cells.push(
+  ...([`none`, `initial-offset`, `handle`, `resume`, `now`] as const).flatMap(
+    (callerCursor) =>
+      [true, false].map((present): Cell => ({
+        present,
+        advance: `disjoint`,
+        drain: false,
+        legacy: false,
+        callerCursor,
+        interrupted: true,
+      })),
+  ),
+)
 const observe = (page: Page) =>
   page.evaluate(() => window.__electricSourcePrefix!.observe())
 const rowIds = async (page: Page) =>
@@ -73,7 +90,7 @@ const rowIds = async (page: Page) =>
 
 declareOracle({ check: [sourceHeadViolation], grammar: [cells] })
 for (const cell of cells) {
-  test(`recovers ${cell.present ? `lost` : `resurrected`} rows after ${cell.advance} advancement${cell.drain ? ` with peer drain` : ``}${cell.legacy ? ` from legacy progress` : ``}${cell.callerCursor !== `none` ? ` with explicit ${cell.callerCursor}` : ``}`, async ({
+  test(`recovers ${cell.present ? `lost` : `resurrected`} rows after ${cell.advance} advancement${cell.drain ? ` with peer drain` : ``}${cell.legacy ? ` from legacy progress` : ``}${cell.callerCursor !== `none` ? ` with explicit ${cell.callerCursor}` : ``}${cell.interrupted ? ` after interrupted recovery` : ``}`, async ({
     context,
   }) => {
     const reach = createOracleReach(
@@ -83,6 +100,7 @@ for (const cell of cells) {
         `stale commit applied`,
         `later advancement applied`,
         `reopened source compared`,
+        ...(cell.interrupted ? [`interrupted recovery reset persisted`] : []),
         ...(cell.callerCursor === `none`
           ? []
           : [`explicit ${cell.callerCursor} supplied at recovery`]),
@@ -122,14 +140,23 @@ for (const cell of cells) {
       await pg.query(`INSERT INTO public.${table} VALUES ('anchor', 'anchor')`)
       if (cell.present)
         await pg.query(`INSERT INTO public.${table} VALUES ('target', 'old')`)
-      const open = async (callerPosition: Record<string, string> = {}) => {
+      const open = async (
+        callerPosition: Record<string, string> = {},
+        holdInitial = false,
+      ) => {
         const page = await context.newPage()
         pages.push(page)
         page.on(`pageerror`, (error) => diagnostics.push(error.message))
-        await page.goto(`${url}&${new URLSearchParams(callerPosition)}`)
+        await page.goto(
+          `${url}&${new URLSearchParams({
+            ...callerPosition,
+            ...(holdInitial ? { holdInitial: `true` } : {}),
+          })}`,
+        )
         await page.waitForFunction(
           () => window.__electricSourcePrefix !== undefined,
         )
+        if (holdInitial) return page
         await expect
           .poll(async () => (await observe(page)).status, { timeout: 30_000 })
           .toBe(`ready`)
@@ -240,6 +267,31 @@ for (const cell of cells) {
         if (cell.callerCursor === `initial-offset`) callerPosition.offset = `-1`
         if (cell.callerCursor === `now`) callerPosition.offset = `now`
         reach.reach(`explicit ${cell.callerCursor} supplied at recovery`)
+      }
+      if (cell.interrupted) {
+        // Preserve the real position above before recovery replaces its
+        // resume record with reset. Hold A too, so an empty peer response
+        // cannot overwrite that marker while this boundary is observed.
+        await a.evaluate(() => window.__electricSourcePrefix!.arm())
+        const pendingRecovery = await open({}, true)
+        await expect
+          .poll(async () => (await observe(pendingRecovery)).pending.length, {
+            timeout: 30_000,
+          })
+          .toBeGreaterThan(0)
+        await expect
+          .poll(
+            async () => {
+              const { resume } = await observe(pendingRecovery)
+              return resume && typeof resume === `object` && `kind` in resume
+                ? resume.kind
+                : undefined
+            },
+            { timeout: 30_000 },
+          )
+          .toBe(`reset`)
+        reach.reach(`interrupted recovery reset persisted`)
+        await close(pendingRecovery)
       }
       const reopened = await open(callerPosition)
       // Source readiness follows an applied SDK receipt. The wrapper may

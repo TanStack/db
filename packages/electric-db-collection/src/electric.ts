@@ -1717,6 +1717,8 @@ function createElectricSync<T extends Row<unknown>>(
       expectSourceProgress !== undefined &&
       (metadata?.collection.get(progressKey) !== sourceProgress ||
         resumeSnapshot?.getSourceProgressCompatible?.() !== true)
+    const hasPersistedReset =
+      syncMode === `eager` && persistedResumeState?.kind === `reset`
     // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
     // One fresh replacement establishes consistent evidence for later resumes.
     const lacksCompletePersistedResume =
@@ -1733,6 +1735,7 @@ function createElectricSync<T extends Row<unknown>>(
       !freshScopedGeneration &&
       (hasIncompatibleManagedCache ||
         hasIncompatibleSourceProgress ||
+        hasPersistedReset ||
         (shapeOptions.offset === undefined &&
           shapeOptions.handle === undefined &&
           (persistedResumeState !== undefined || malformedPersistedResume) &&
@@ -1748,12 +1751,14 @@ function createElectricSync<T extends Row<unknown>>(
       requiresFreshSourceEvidence &&
       persistence?.managedCacheGeneration === true &&
       persistence.startScopedRecovery !== undefined
-    // A provider position cannot certify incompatible source progress.
+    // A provider position cannot certify incompatible source progress or
+    // finish an interrupted eager replacement recorded by a reset marker.
     // Eager recovery overrides the caller's position and replaces its rows.
     // Other sync modes keep their existing explicit-position behavior.
-    const requestedPosition = hasIncompatibleSourceProgress
-      ? {}
-      : { offset: shapeOptions.offset, handle: shapeOptions.handle }
+    const requestedPosition =
+      hasIncompatibleSourceProgress || hasPersistedReset
+        ? {}
+        : { offset: shapeOptions.offset, handle: shapeOptions.handle }
     if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
     const usesChangesOnlyLog =
       syncMode === `on-demand` &&

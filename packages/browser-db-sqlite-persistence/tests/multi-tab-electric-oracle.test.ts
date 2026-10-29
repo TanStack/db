@@ -414,6 +414,20 @@ function openHost() {
     openTab,
     quiesce,
     commitNotices: () => commitNotices,
+    hasResetMarker: async () => {
+      observer ??= createWASQLiteTestDatabase({ filename, timeout: 1000 })
+      const records = await observer.execute<{ value: string }>(
+        `SELECT value FROM collection_metadata WHERE collection_id = ? AND key = ?`,
+        [`items`, `electric:resume`],
+      )
+      const value: unknown = JSON.parse(records[0]?.value ?? `null`)
+      return (
+        value !== null &&
+        typeof value === `object` &&
+        `kind` in value &&
+        value.kind === `reset`
+      )
+    },
     // A pre-protocol cache or mismatched provenance record still has rows
     // and an Electric cursor. Reopen must not trust that cursor blindly.
     rewriteSourceProgress: async (format: `missing` | `foreign`) => {
@@ -895,7 +909,12 @@ describe(`multi-tab Electric over one persisted database`, () => {
     // only the pinned #2209 replay does (see below).
     | { kind: `close`; tab: number }
     | { kind: `stop`; tab: number; pick: number }
-    | { kind: `recover`; tab: number; pick: number }
+    | {
+        kind: `recover`
+        tab: number
+        pick: number
+        callerCursor?: CallerCursor
+      }
   const historyStep: fc.Arbitrary<HistoryStep> = fc.oneof(
     {
       weight: 3,
@@ -1067,6 +1086,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
     onRecovery?: (
       divergentBeforeRecovery: boolean,
       how: `restart` | `reload`,
+      cursor: CallerCursor,
+      hadResetMarker: boolean,
     ) => void,
     progressFormat: `current` | `missing` | `foreign` = `current`,
     callerCursor: CallerCursor = `none`,
@@ -1201,13 +1222,18 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }
       await activeHost.quiesce(`tab ${tab.tab} delivered`)
     }
-    const recover = async (index: number, how: `restart` | `reload`) => {
+    const recover = async (
+      index: number,
+      how: `restart` | `reload`,
+      cursor = callerCursor,
+    ) => {
       if (progressFormat !== `current`) {
         await activeHost.rewriteSourceProgress(progressFormat)
         progressFormat = `current`
       }
       const divergentBeforeRecovery =
         JSON.stringify(rowsOf(durable)) !== JSON.stringify(rowsOf(log.rows))
+      const hadResetMarker = await activeHost.hasResetMarker()
       const stopped = tabs[index]!
       const streamsBefore = stopped.streamCount()
       // A caller can repeat the current source position, but that position
@@ -1215,16 +1241,16 @@ describe(`multi-tab Electric over one persisted database`, () => {
       // are legal full-snapshot neighbors of the explicit resumed request.
       const head = position(log, serverVersion)
       const callerPosition: ExplicitPosition =
-        callerCursor === `resume`
+        cursor === `resume`
           ? {
               handle: head.handle,
               offset: head.offset as `${number}_${number}`,
             }
-          : callerCursor === `handle`
+          : cursor === `handle`
             ? { handle: head.handle }
-            : callerCursor === `initial-offset`
+            : cursor === `initial-offset`
               ? { offset: `-1` }
-              : callerCursor === `now`
+              : cursor === `now`
                 ? { offset: `now` }
                 : {}
       let recovered = stopped
@@ -1250,7 +1276,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
         ...requested,
       })
       await activeHost.quiesce(`tab ${recovered.tab} recovered`)
-      onRecovery?.(divergentBeforeRecovery, how)
+      onRecovery?.(divergentBeforeRecovery, how, cursor, hadResetMarker)
     }
 
     const check = async (label: string, head?: Array<Item>) => {
@@ -1400,7 +1426,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
             (step.kind === `recover` && step.pick === 1)
               ? `reload`
               : `restart`
-          await recover(index, how)
+          await recover(
+            index,
+            how,
+            step.kind === `recover` ? step.callerCursor : undefined,
+          )
         } else if (step.kind === `stop`) {
           const how = stops[step.pick % stops.length]!
           if (model.open !== undefined) {
@@ -1548,65 +1578,93 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `explicit now at divergent recovery`,
       `explicit initial offset at recovery`,
       `explicit handle at recovery`,
+      `interrupted reset before explicit resume recovery`,
+      `interrupted reset before explicit now recovery`,
     ] as const
     const reach = createOracleReach(`browser.electric-source-prefix`, states)
     await fc.assert(
       fc.asyncProperty(sourcePrefixHistory, async (history) => {
-        reach.beginHistory()
         const slowTab = 1 - history.fastTab
-        const steps: Array<HistoryStep> = [
-          ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
-            kind: `server change`,
-            key: history.key,
-            pick: 0,
-          })),
-          { kind: `catch up`, tab: history.fastTab, pick: 0 },
-          { kind: `catch up`, tab: slowTab, pick: 1 },
-          ...(history.advancingBatch === `disjoint`
-            ? [{ kind: `server change` as const, key: 2, pick: 1 }]
-            : []),
-          { kind: `catch up`, tab: history.fastTab, pick: 0 },
-          ...(history.drain
-            ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
-            : []),
-          ...(history.recovery === 0
-            ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
-            : []),
-          { kind: `recover`, tab: slowTab, pick: history.recovery },
-        ]
-        let primary: { error: unknown } | undefined
-        try {
-          await runGeneratedHistory(
-            { tabCount: 2, steps },
-            () => fc.pre(false),
-            (divergent, how) => {
-              if (history.drain && !divergent)
-                reach.reach(`drained before recovery`)
-              if (!history.drain && divergent) {
-                if (history.callerCursor === `resume`)
-                  reach.reach(`explicit resume at divergent recovery`)
-                if (history.callerCursor === `now`)
-                  reach.reach(`explicit now at divergent recovery`)
-                reach.reach(`divergent source ${how}`)
-                reach.reach(
-                  `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
-                )
-              }
-              if (history.progressFormat !== `current`) {
-                reach.reach(`${history.progressFormat} progress at recovery`)
-              }
-              if (history.callerCursor === `initial-offset`)
-                reach.reach(`explicit initial offset at recovery`)
-              if (history.callerCursor === `handle`)
-                reach.reach(`explicit handle at recovery`)
-            },
-            history.progressFormat,
-            history.callerCursor,
-          )
-        } catch (error) {
-          primary = { error }
-        } finally {
-          await finishHistory(primary)
+        // Keep every original history, then repeat it with a recovery that
+        // stops before its first source delivery. The first start writes its
+        // reset marker through production; the second must still recover.
+        // Pairing both paths preserves the uninterrupted domain and gives
+        // every generated cursor form an interrupted neighbor.
+        for (const interrupted of [false, true]) {
+          reach.beginHistory()
+          const steps: Array<HistoryStep> = [
+            ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
+              kind: `server change`,
+              key: history.key,
+              pick: 0,
+            })),
+            { kind: `catch up`, tab: history.fastTab, pick: 0 },
+            { kind: `catch up`, tab: slowTab, pick: 1 },
+            ...(history.advancingBatch === `disjoint`
+              ? [{ kind: `server change` as const, key: 2, pick: 1 }]
+              : []),
+            { kind: `catch up`, tab: history.fastTab, pick: 0 },
+            ...(history.drain
+              ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
+              : []),
+            ...(history.recovery === 0
+              ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
+              : []),
+            ...(interrupted
+              ? [
+                  {
+                    kind: `recover` as const,
+                    tab: slowTab,
+                    pick: history.recovery,
+                    callerCursor: `none` as const,
+                  },
+                  { kind: `stop` as const, tab: slowTab, pick: 0 },
+                ]
+              : []),
+            { kind: `recover`, tab: slowTab, pick: history.recovery },
+          ]
+          let primary: { error: unknown } | undefined
+          try {
+            await runGeneratedHistory(
+              { tabCount: 2, steps },
+              () => fc.pre(false),
+              (divergent, how, cursor, hadResetMarker) => {
+                if (history.drain && !divergent)
+                  reach.reach(`drained before recovery`)
+                if (!history.drain && divergent) {
+                  if (cursor === `resume`)
+                    reach.reach(`explicit resume at divergent recovery`)
+                  if (cursor === `now`)
+                    reach.reach(`explicit now at divergent recovery`)
+                  if (
+                    interrupted &&
+                    hadResetMarker &&
+                    (cursor === `resume` || cursor === `now`)
+                  )
+                    reach.reach(
+                      `interrupted reset before explicit ${cursor} recovery`,
+                    )
+                  reach.reach(`divergent source ${how}`)
+                  reach.reach(
+                    `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
+                  )
+                }
+                if (history.progressFormat !== `current`) {
+                  reach.reach(`${history.progressFormat} progress at recovery`)
+                }
+                if (cursor === `initial-offset`)
+                  reach.reach(`explicit initial offset at recovery`)
+                if (cursor === `handle`)
+                  reach.reach(`explicit handle at recovery`)
+              },
+              history.progressFormat,
+              history.callerCursor,
+            )
+          } catch (error) {
+            primary = { error }
+          } finally {
+            await finishHistory(primary)
+          }
         }
       }),
       parameters,
