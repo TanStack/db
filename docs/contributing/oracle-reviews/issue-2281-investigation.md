@@ -1036,3 +1036,13 @@ Follower reacquisition (#2139), seed metadata, real sync-metadata receiving
 real unknown-partial-message premises (#2138) remain separate boundaries.
 The report supplies no reason to merge them into this source-progress repair.
 The complete raw report and 16-item reconciliation ledger remain local.
+
+The next CI run exposed a Preact documentation fragment that inferred `{}`
+for todo fields from the checker's synthetic source Collection. The example
+now creates its own typed local Collection. A temporary source-resolution probe
+against the real Preact hook reproduces both original JSX errors and passes
+the typed example; the checker was restored afterward. The full documentation
+check passes all 806 examples with zero new failures (250 known, 59 non-parsing).
+No baseline entry or production code changed. Logs:
+`pilot-preact-source-before.log`, `pilot-preact-source-after.log`, and
+`pilot-preact-snippets-full.log`.
