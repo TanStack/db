@@ -3766,7 +3766,15 @@ Those properties have not been measured. Destination: #2289. Needed witness:
 per property, the declared states that no fixed example enters, and how often a
 normal-budget run misses each one. The oracle does not judge reporter keys,
 which only a replay witness channel adds, or a reach shared across properties,
-which the precondition above rules out but no check detects.
+which the precondition above rules out but no check detects. A path replay
+turns off every reach check in its process, also for a property that the replay
+does not name and that still runs its seeded budget: a reach need not carry its
+property's name, so it cannot tell whose replay runs. When a run stops inside
+its fixed examples, the check reports only that. When a property fails after
+its examples, the check still reports the states that the stopped run missed.
+About twenty other properties set fast-check's `examples` inside their base
+runs instead of through `oraclePropertyOptions(…, { examples })`; #2289 owns
+moving them when it measures their reach.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest

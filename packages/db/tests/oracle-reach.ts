@@ -20,11 +20,15 @@ import { readOracleRunConfig } from './oracle-config.js'
  * fails for every declared state that those first histories did not enter:
  * that state's reach would depend on the seed (#2287). The first histories
  * are the examples only when the reach belongs to that one property and its
- * callback begins every history, so such a reach is not shared.
+ * callback begins every history, so such a reach is not shared. When fewer
+ * histories ran than the fixed ones, a failure stopped the run inside the
+ * examples, and the check reports only that, without naming states.
  *
  * A path replay checks one recorded history, not reach, so the check does
- * nothing then. A seed alone reseeds the whole campaign, which runs its full
- * budget, so its reach is checked like an ordinary run's.
+ * nothing then, in every reach of that process: a reach need not carry its
+ * property's name, so it cannot tell whose replay runs. A seed alone reseeds
+ * the whole campaign, which runs its full budget, so its reach is checked like
+ * an ordinary run's.
  * `packages/db/tests/declared-reach-oracle.property.test.ts` owns these rules.
  */
 export function createOracleReach<TState extends string>(
@@ -72,6 +76,13 @@ export function createOracleReach<TState extends string>(
     /** Fails for each declared state that too few histories entered. */
     assertReached(): void {
       if (replaying) return
+      if (histories < fixedHistories) {
+        throw new Error(
+          `${property}: only ${histories} of its ${fixedHistories} fixed ` +
+            `histories ran, so a failure stopped the run inside the fixed ` +
+            `examples`,
+        )
+      }
       const missed = [...counts]
         .filter(([, count]) => count < minimum)
         .map(([state, count]) => `${state} (${count})`)

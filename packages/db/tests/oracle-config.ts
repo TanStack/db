@@ -810,7 +810,9 @@ export function oracleRuns(baseRuns: number): number {
 
 /**
  * Replays broad randomized properties when a campaign seed is supplied.
- * `examples` run first in every run, on top of the base runs.
+ * `examples` run first in every run, on top of the base runs. A site that
+ * spreads these options and sets fast-check's `examples` itself runs them
+ * inside the base runs instead, so they displace random histories.
  */
 export function oraclePropertyOptions<TExample>(
   baseRuns: number,
