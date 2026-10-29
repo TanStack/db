@@ -53,6 +53,8 @@ const staticOracleProperties = [
   `query-db.refetch-ordered-prefix`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
+  `ordered-loader.replay-continuation`,
+  `ordered-loader.retirement-invalidation`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
   `replay.ordered-preload-recovery`,

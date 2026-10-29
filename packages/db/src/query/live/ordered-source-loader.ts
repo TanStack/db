@@ -762,7 +762,13 @@ export class OrderedSourceLoader {
       if (!this.active || !hasSupersededAcquisition) {
         this.cancelRepairRetry()
         this.repairRetries = 0
-        this.moveWork({ kind: `idle` }, [`repair`], `none`)
+        // Retirement can deliver a newer invalidation. This chain pays only
+        // its own epoch; the next pass must still repair that newer order.
+        this.moveWork(
+          { kind: `idle` },
+          [`repair`],
+          this.repairNeedsReplacement() ? this.debt : `none`,
+        )
       }
     }
   }
