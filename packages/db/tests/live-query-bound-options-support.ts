@@ -167,9 +167,7 @@ export async function runBoundSchemaHistory(
   let pending: ReturnType<SchemaCollection[`update`]> | undefined
   let mutations: Array<BoundSchemaMutation> = []
   let renders = 0
-  const onUpdate: SchemaUpdateHandler = async ({
-    transaction,
-  }) => {
+  const onUpdate: SchemaUpdateHandler = async ({ transaction }) => {
     expect(gate, `the authored handler hold exists`).toBeDefined()
     mutations.push(
       ...transaction.mutations.map((mutation) => ({
