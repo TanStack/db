@@ -13,8 +13,8 @@
  *   `fixedHistories: n`, the check also fails for each declared state that
  *   the first n histories, the examples, did not enter. Such a state's reach
  *   would depend on the seed. The examples come on top of the base run
- *   budget, so they never displace a random history, and a path replay still
- *   runs one history.
+ *   budget, so they never displace a random history. A replay keeps its seed,
+ *   and a path replay keeps its path and still runs one history.
  *
  * `runOracleCampaign` follows the first rule for its own replay prefix: a
  * seed-only run of its campaign checks reach, and only a path replay skips it.
@@ -47,10 +47,15 @@ type Ledger = {
   // The indices of the states each history enters, with repeats.
   histories: ReadonlyArray<ReadonlyArray<number>>
 }
-type Verdict = {
-  counts: ReadonlyMap<string, number>
+// The states a failing reach check names, and an absent failure when the check
+// passes or does not run.
+type Failure = {
   belowMinimum: ReadonlyMap<string, number>
   unfixed: ReadonlyArray<string>
+}
+type Verdict = {
+  counts: ReadonlyMap<string, number>
+  failure: Failure | undefined
 }
 
 // The grammar: two to four states, and up to six histories over them.
@@ -73,11 +78,11 @@ const ledgerArbitrary: fc.Arbitrary<Ledger> = fc
     }),
   )
 
-// The model. A history counts once per state it enters. A path replay checks
-// nothing. Otherwise a state fails below the minimum, and, when fixed
-// histories are declared, a state the first ones did not enter fails too.
-function expectedVerdict(ledger: Ledger): Verdict | `skipped` {
-  if (ledger.run === `path`) return `skipped`
+// The model. A history counts once per state it enters, in every run kind. A
+// path replay checks nothing. Otherwise a state fails below the minimum, and,
+// when fixed histories are declared, a state the first ones did not enter
+// fails too.
+function expectedVerdict(ledger: Ledger): Verdict {
   const entered = ledger.histories.map(
     (history) => new Set(history.map((index) => ledger.states[index]!)),
   )
@@ -88,17 +93,20 @@ function expectedVerdict(ledger: Ledger): Verdict | `skipped` {
     ]),
   )
   const fixed = entered.slice(0, ledger.fixedHistories)
+  const belowMinimum = new Map(
+    [...counts].filter(([, count]) => count < ledger.minimum),
+  )
+  const unfixed =
+    ledger.fixedHistories === 0
+      ? []
+      : ledger.states.filter((state) =>
+          fixed.every((history) => !history.has(state)),
+        )
+  const fails = belowMinimum.size > 0 || unfixed.length > 0
   return {
     counts,
-    belowMinimum: new Map(
-      [...counts].filter(([, count]) => count < ledger.minimum),
-    ),
-    unfixed:
-      ledger.fixedHistories === 0
-        ? []
-        : ledger.states.filter((state) =>
-            fixed.every((history) => !history.has(state)),
-          ),
+    failure:
+      ledger.run !== `path` && fails ? { belowMinimum, unfixed } : undefined,
   }
 }
 
@@ -113,32 +121,36 @@ function runEnvironment(run: RunKind): Record<string, string> {
   }
 }
 
-function withEnvironment<T>(variables: Record<string, string>, run: () => T) {
-  const names = [
-    `TANSTACK_DB_ORACLE_SEED`,
-    `TANSTACK_DB_ORACLE_PATH`,
-    `TANSTACK_DB_ORACLE_PROPERTY`,
-  ]
-  const saved = names.map((name) => [name, process.env[name]] as const)
-  for (const name of names) delete process.env[name]
-  Object.assign(process.env, variables)
+// Runs `run` with the given variables set and the other named ones unset, and
+// restores the environment afterward.
+async function withEnvironment<T>(
+  names: ReadonlyArray<string>,
+  variables: Record<string, string>,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  for (const name of names) vi.stubEnv(name, variables[name])
   try {
-    return run()
+    return await run()
   } finally {
-    for (const [name, value] of saved) {
-      if (value === undefined) delete process.env[name]
-      else process.env[name] = value
-    }
+    vi.unstubAllEnvs()
   }
 }
+const replayNames = [
+  `TANSTACK_DB_ORACLE_SEED`,
+  `TANSTACK_DB_ORACLE_PATH`,
+  `TANSTACK_DB_ORACLE_PROPERTY`,
+]
 
 // The driver: one ledger through createOracleReach.
-function observeLedger(ledger: Ledger) {
-  const reach = withEnvironment(runEnvironment(ledger.run), () =>
-    createOracleReach(`ledger`, ledger.states, {
-      minimum: ledger.minimum,
-      fixedHistories: ledger.fixedHistories,
-    }),
+async function observeLedger(ledger: Ledger): Promise<Verdict> {
+  const reach = await withEnvironment(
+    replayNames,
+    runEnvironment(ledger.run),
+    () =>
+      createOracleReach(`ledger`, ledger.states, {
+        minimum: ledger.minimum,
+        fixedHistories: ledger.fixedHistories,
+      }),
   )
   for (const history of ledger.histories) {
     reach.beginHistory()
@@ -150,12 +162,13 @@ function observeLedger(ledger: Ledger) {
   } catch (error) {
     failure = (error as Error).message
   }
-  return { counts: new Map(reach.counts()), failure }
+  return { counts: new Map(reach.counts()), failure: namedStates(failure) }
 }
 
 // The states a failure names: `name (count)` below the minimum, and a list of
 // names for the fixed histories.
-function namedStates(failure: string) {
+function namedStates(failure: string | undefined): Failure | undefined {
+  if (failure === undefined) return undefined
   const below = /not enforced there: (.*)$/m.exec(failure)?.[1]
   const unfixed = /reach depends on the seed: (.*)$/m.exec(failure)?.[1]
   return {
@@ -170,25 +183,9 @@ function namedStates(failure: string) {
 }
 
 // The check: the observed ledger refines the model.
-function checkLedger(ledger: Ledger) {
+async function checkLedger(ledger: Ledger) {
   const expected = expectedVerdict(ledger)
-  const observed = observeLedger(ledger)
-  if (expected === `skipped`) {
-    expect(observed.failure, `a path replay checks no reach`).toBeUndefined()
-    return expected
-  }
-  expect(observed.counts, `histories per state`).toEqual(expected.counts)
-  const fails = expected.belowMinimum.size > 0 || expected.unfixed.length > 0
-  expect(observed.failure !== undefined, `the reach check fails`).toBe(fails)
-  if (observed.failure !== undefined) {
-    const named = namedStates(observed.failure)
-    expect(named.belowMinimum, `states below the minimum`).toEqual(
-      expected.belowMinimum,
-    )
-    expect(named.unfixed, `states the fixed histories missed`).toEqual(
-      expected.unfixed,
-    )
-  }
+  expect(await observeLedger(ledger), `reach verdict`).toEqual(expected)
   return expected
 }
 
@@ -202,61 +199,58 @@ function campaignEnvironment(run: RunKind): Record<string, string> {
 }
 
 // The driver: one ledger through each campaign that runOracleCampaign runs.
-async function observeCampaign(ledger: Ledger) {
-  const names = [`${campaignPrefix}_SEED`, `${campaignPrefix}_PATH`]
-  const saved = names.map((name) => [name, process.env[name]] as const)
-  for (const name of names) delete process.env[name]
-  Object.assign(process.env, campaignEnvironment(ledger.run))
-  // The runner reports each campaign's counts on the console.
-  const info = vi.spyOn(console, `info`).mockImplementation(() => {})
-  try {
-    await runOracleCampaign(campaignPrefix, ledger.states, (reach) => {
-      for (const history of ledger.histories) {
-        reach.beginHistory()
-        for (const index of history) reach.reach(ledger.states[index]!)
+function observeCampaign(ledger: Ledger): Promise<Failure | undefined> {
+  return withEnvironment(
+    [`${campaignPrefix}_SEED`, `${campaignPrefix}_PATH`],
+    campaignEnvironment(ledger.run),
+    async () => {
+      // The runner reports each campaign's counts on the console.
+      const info = vi.spyOn(console, `info`).mockImplementation(() => {})
+      try {
+        await runOracleCampaign(campaignPrefix, ledger.states, (reach) => {
+          for (const history of ledger.histories) {
+            reach.beginHistory()
+            for (const index of history) reach.reach(ledger.states[index]!)
+          }
+        })
+        return undefined
+      } catch (error) {
+        return namedStates((error as Error).message)
+      } finally {
+        info.mockRestore()
       }
-    })
-    return undefined
-  } catch (error) {
-    return (error as Error).message
-  } finally {
-    info.mockRestore()
-    for (const [name, value] of saved) {
-      if (value === undefined) delete process.env[name]
-      else process.env[name] = value
-    }
-  }
+    },
+  )
 }
 
 // The check: a campaign's reach refines the model with a minimum of one and
 // no fixed histories, the campaign runner's own reach.
 async function checkCampaign(ledger: Ledger) {
-  const expected = expectedVerdict({
+  const { failure } = expectedVerdict({
     ...ledger,
     minimum: 1,
     fixedHistories: 0,
   })
-  const failure = await observeCampaign(ledger)
-  if (expected === `skipped`) {
-    expect(
-      failure,
-      `a path replay of a campaign checks no reach`,
-    ).toBeUndefined()
-    return
-  }
-  expect(failure !== undefined, `the campaign's reach check fails`).toBe(
-    expected.belowMinimum.size > 0,
+  expect(await observeCampaign(ledger), `campaign reach failure`).toEqual(
+    failure,
   )
-  if (failure !== undefined)
-    expect(namedStates(failure).belowMinimum, `states below one`).toEqual(
-      expected.belowMinimum,
-    )
 }
 
-// The run budget: the examples come on top of the base runs, except in a
-// path replay of this property, which runs one history.
-function expectedNumRuns(run: RunKind, baseRuns: number, examples: number) {
-  return run === `path` ? 1 : baseRuns + examples
+// The run parameters: the examples come on top of the base runs, and the
+// replay selection stays. A seed replay keeps its seed. A path replay of this
+// property keeps its seed and path, and runs one history. A replay witness
+// channel adds reporter keys; no run kind here opens one, so the check leaves
+// them out.
+function expectedRunParameters(
+  run: RunKind,
+  baseRuns: number,
+  examples: ReadonlyArray<number>,
+) {
+  if (run === `ordinary`)
+    return { numRuns: baseRuns + examples.length, examples }
+  if (run === `seed`)
+    return { numRuns: baseRuns + examples.length, seed: 1, examples }
+  return { numRuns: 1, seed: 1, path: `0`, examples }
 }
 
 function checkRunParameters(
@@ -264,7 +258,12 @@ function checkRunParameters(
   baseRuns: number,
   examples: ReadonlyArray<number>,
 ) {
-  const parameters = oracleRandomParameters(
+  const {
+    numRuns,
+    seed,
+    path,
+    examples: observed,
+  } = oracleRandomParameters(
     baseRuns,
     run === `ordinary`
       ? undefined
@@ -274,15 +273,15 @@ function checkRunParameters(
     property,
     examples,
   )
-  expect(parameters.numRuns, `runs`).toBe(
-    expectedNumRuns(run, baseRuns, examples.length),
+  // toEqual treats an undefined key as absent.
+  expect({ numRuns, seed, path, examples: observed }, `run parameters`).toEqual(
+    expectedRunParameters(run, baseRuns, examples),
   )
-  expect(parameters.examples, `examples`).toEqual(examples)
 }
 
 declareOracle({
   check: [checkLedger, checkCampaign, checkRunParameters],
-  model: [expectedVerdict, expectedNumRuns],
+  model: [expectedVerdict, expectedRunParameters],
   grammar: [ledgerArbitrary],
 })
 
@@ -334,22 +333,19 @@ fcTest.prop(
   async (ledger, baseRuns, examples) => {
     ledgersRan = true
     ledgerReach.beginHistory()
-    const verdict = checkLedger(ledger)
+    const { counts, failure } = await checkLedger(ledger)
     await checkCampaign(ledger)
     checkRunParameters(ledger.run, baseRuns, examples)
-    if (verdict === `skipped`) {
-      const ordinary = expectedVerdict({ ...ledger, run: `ordinary` })
-      if (ordinary !== `skipped` && ordinary.belowMinimum.size > 0)
-        ledgerReach.reach(`a path replay with a state below the minimum`)
-      return
-    }
-    if (ledger.run === `seed` && verdict.belowMinimum.size > 0)
+    const ordinary = expectedVerdict({ ...ledger, run: `ordinary` }).failure
+    if (ledger.run === `path` && (ordinary?.belowMinimum.size ?? 0) > 0)
+      ledgerReach.reach(`a path replay with a state below the minimum`)
+    if (ledger.run === `seed` && (failure?.belowMinimum.size ?? 0) > 0)
       ledgerReach.reach(`a seed-only run fails below the minimum`)
-    if (verdict.unfixed.some((state) => (verdict.counts.get(state) ?? 0) > 0))
+    if (failure?.unfixed.some((state) => (counts.get(state) ?? 0) > 0))
       ledgerReach.reach(`a fixed history miss that a later history enters`)
-    if (ledger.minimum > 1 && verdict.belowMinimum.size > 0)
+    if (ledger.minimum > 1 && (failure?.belowMinimum.size ?? 0) > 0)
       ledgerReach.reach(`a state below a minimum above one`)
-    if (verdict.belowMinimum.size === 0 && verdict.unfixed.length === 0)
+    if (ledger.run !== `path` && failure === undefined)
       ledgerReach.reach(`a ledger that passes`)
   },
 )
