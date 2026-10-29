@@ -669,21 +669,16 @@ export function oracleRandomParameters<TExample>(
   property?: string,
   examples?: ReadonlyArray<TExample>,
 ): OracleRunParameters & { examples?: Array<TExample> } {
+  return randomParameters(numRuns, replay, property, examples)
+}
+
+function randomParameters<TExample>(
+  numRuns: number,
+  replay: OracleReplayConfig | number | undefined,
+  property: string | undefined,
+  examples: ReadonlyArray<TExample> | undefined,
+): OracleRunParameters & { examples?: Array<TExample> } {
   if (property !== undefined) assertRegisteredOracleProperty(property)
-  // fast-check runs the examples first and counts them in numRuns, so they
-  // come on top of the random runs: the examples never displace one. A path
-  // replay runs one recorded history, which can be an example.
-  if (examples !== undefined) {
-    const parameters = oracleRandomParameters(numRuns, replay, property)
-    return {
-      ...parameters,
-      examples: [...examples],
-      numRuns:
-        parameters.path === undefined
-          ? parameters.numRuns + examples.length
-          : parameters.numRuns,
-    }
-  }
   const { replaySeed, replayPath, replayProperty } =
     typeof replay === `object`
       ? replay
@@ -692,22 +687,36 @@ export function oracleRandomParameters<TExample>(
           replayPath: undefined,
           replayProperty: undefined,
         }
-  if (replaySeed === undefined) return { numRuns }
-  return {
-    numRuns,
-    seed: replaySeed,
-    // A path replays one recorded counterexample, so the replay runs once.
-    // From a path with one segment, fast-check would otherwise run `numRuns`
-    // histories that start at that index.
-    ...(property !== undefined &&
-    replayPath !== undefined &&
-    replayProperty === property
-      ? {
-          numRuns: 1,
-          path: replayPath,
-          ...oracleReplayReporter(property, replaySeed, replayPath),
+  const parameters: OracleRunParameters =
+    replaySeed === undefined
+      ? { numRuns }
+      : {
+          numRuns,
+          seed: replaySeed,
+          // A path replays one recorded counterexample, so the replay runs
+          // once. From a path with one segment, fast-check would otherwise
+          // run `numRuns` histories that start at that index.
+          ...(property !== undefined &&
+          replayPath !== undefined &&
+          replayProperty === property
+            ? {
+                numRuns: 1,
+                path: replayPath,
+                ...oracleReplayReporter(property, replaySeed, replayPath),
+              }
+            : {}),
         }
-      : {}),
+  if (examples === undefined) return parameters
+  // fast-check runs the examples first and counts them in numRuns, so they
+  // come on top of the random runs: the examples never displace one. A path
+  // replay runs one recorded history, which can be an example.
+  return {
+    ...parameters,
+    examples: [...examples],
+    numRuns:
+      parameters.path === undefined
+        ? parameters.numRuns + examples.length
+        : parameters.numRuns,
   }
 }
 
@@ -808,7 +817,5 @@ export function oraclePropertyOptions<TExample>(
   property?: string,
   { examples }: { examples?: ReadonlyArray<TExample> } = {},
 ): OracleRunParameters & { examples?: Array<TExample> } {
-  return examples === undefined
-    ? oracleRandomParameters(oracleRuns(baseRuns), replay, property)
-    : oracleRandomParameters(oracleRuns(baseRuns), replay, property, examples)
+  return randomParameters(oracleRuns(baseRuns), replay, property, examples)
 }
