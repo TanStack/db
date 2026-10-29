@@ -1,6 +1,5 @@
 {
   "name": "@tanstack/react-router-with-db",
-  "private": true,
   "version": "1.0.0-rc.1",
   "description": "TanStack Router SSR integration for TanStack DB",
   "author": "Kyle Mathews",
