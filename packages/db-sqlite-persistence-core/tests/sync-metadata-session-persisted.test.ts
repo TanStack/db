@@ -5,6 +5,7 @@ import {
   absentMarker,
   cachedMetadata,
   cachedRow,
+  completedSeedReinsertReloadRegime,
   describeMismatch,
   historyRegimes,
   persistedCachedLane,
@@ -19,13 +20,17 @@ import {
   persistedReadSeedLane,
   persistedSeedLane,
   runSessionHistory,
+  seedReinsertReloadHistoryArbitrary,
+  seedReinsertReloadReplay,
   sessionCollectionKeys,
   sessionHistoryArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
   oraclePropertyOptions,
+  oracleReplayTest,
   oracleRuns,
   readOracleRunConfig,
+  recordOracleReplay,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { SingleProcessCoordinator, persistedCollectionOptions } from '../src'
@@ -1209,29 +1214,13 @@ describe(`sync metadata session oracle through the persisted wrapper: peer repla
   it.each(peerFullReplays)(`replays under full rows: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerFullLane),
   )
-  // Known gap, pinned from the persisted-peers-full random campaign (seed
-  // 654774679, shrunk to this prefix): an outer transaction inserts over a
-  // bare seed, an inner one re-inserts the row and commits, and a peer's full
-  // reload then leaves row 1 with the cached seed's metadata, where the model
-  // expects none. This reproduces on main and is tracked with #2281. It
-  // replays through the same model, driver, and comparison. Remove `fails`
-  // when the reload stops restoring that metadata.
-  it.fails(
-    `replays under full rows: a reload after an inner re-insert over a seed clears the seed's metadata`,
-    () =>
-      assertPersistedHistory(
-        [
-          { type: `begin` },
-          { type: `seed`, key: 1, narrow: false, bare: true },
-          { type: `insertOverSeed`, key: 1, metadata: false },
-          { type: `begin` },
-          { type: `reinsert`, key: 1, metadata: false },
-          { type: `commit` },
-          { type: `peer`, key: 2, notice: `reload` },
-        ],
-        persistedPeerFullLane,
-      ),
-  )
+  // Pinned from the persisted-peers-full random campaign (seed 654774679):
+  // an outer transaction inserts over a bare seed and an inner equal re-insert
+  // commits first. Its durable replacement must keep the accepted metadata
+  // (absent here), so a peer's full reload cannot restore the older cache
+  // metadata. This uses the campaigns' model, driver, and comparison.
+  it(`replays under full rows: a reload after an inner re-insert over a seed clears the seed's metadata`, () =>
+    assertPersistedHistory(seedReinsertReloadReplay, persistedPeerFullLane))
   it.each(peerOnDemandReplays)(`replays on demand: %s`, (_name, history) =>
     assertPersistedHistory(history, persistedPeerOnDemandLane),
   )
@@ -1241,48 +1230,140 @@ describe(`sync metadata session oracle through the persisted wrapper: peer repla
   )
 })
 
-describe(`sync metadata session oracle through the persisted wrapper: nesting and seeds`, () => {
-  for (const {
-    lane,
-    property: lanePropertyName,
-    seed,
-    runs,
-    reach: states,
-  } of extraLanes) {
-    const runLane = (history: Array<SessionAction>) =>
-      assertPersistedHistory(history, lane)
-    if (requestedReplayProperty === undefined) {
-      const reach = createOracleReach(`${lanePropertyName} (fixed)`, states, {
-        minimum: 5,
-      })
-      fcTest.prop([sessionHistoryArbitrary(lane)], {
-        numRuns: oracleRuns(runs),
-        seed,
-      })(
-        `keeps the session law on ${lane.name} histories (fixed)`,
-        (history) => {
+// The broad peer campaigns can already find this defect. This constructive
+// grammar measures its scarce overlap and adjacent legal histories directly;
+// it uses the existing independent model, driver, and per-action comparison.
+const seedReloadProperty = `sync-metadata-session.persisted-seed-reinsert-reload`
+for (const campaign of [`fixed`, `random`] as const) {
+  if (
+    requestedReplayProperty !== undefined &&
+    (requestedReplayProperty !== seedReloadProperty || campaign === `fixed`)
+  )
+    continue
+  it(`keeps inserted metadata across peer reloads (${campaign})`, async () => {
+    const lanes = [
+      persistedPeerLane,
+      persistedPeerFullLane,
+      persistedPeerOnDemandLane,
+    ]
+    const states = lanes.flatMap((lane) => [
+      `${lane.name}: inner commit`,
+      `${lane.name}: row`,
+      `${lane.name}: reload`,
+    ])
+    const completedStates = lanes.flatMap((lane) => [
+      `${lane.name}: completed kept bare seed reload`,
+      `${lane.name}: completed kept non-bare seed reload`,
+    ])
+    const reach = createOracleReach(seedReloadProperty, states)
+    const completedReach = createOracleReach(
+      seedReloadProperty,
+      completedStates,
+    )
+    const result = await fc.check(
+      fc.asyncProperty(seedReinsertReloadHistoryArbitrary, async (history) => {
+        const failures: Array<string> = []
+        for (const lane of lanes) {
           reach.beginHistory()
-          for (const regime of historyRegimes(lane, history))
-            if (states.includes(regime)) reach.reach(regime)
-          return runLane(history)
-        },
-        240_000,
+          completedReach.beginHistory()
+          const result = await runSessionHistory(lane, history, () =>
+            createPersistedDriver(
+              true,
+              true,
+              false,
+              true,
+              lane.fullRows === true,
+              lane.onDemand === true,
+            ),
+          )
+          const last = history.at(-1)!
+          const innerCommit = history.findIndex(
+            (action) => action.type === `commit`,
+          )
+          if (result.steps > innerCommit)
+            reach.reach(`${lane.name}: inner commit`)
+          if (last.type === `peer` && result.steps === history.length)
+            reach.reach(`${lane.name}: ${last.notice}`)
+          const completed = completedSeedReinsertReloadRegime(history, result)
+          if (completed !== undefined)
+            completedReach.reach(`${lane.name}: ${completed}`)
+          if (result.mismatch)
+            failures.push(
+              `${lane.name}\n${describeMismatch(history, result.mismatch)}`,
+            )
+        }
+        if (failures.length) throw new Error(failures.join(`\n\n`))
+      }),
+      campaign === `fixed`
+        ? { numRuns: oracleRuns(40), seed: 527962096 }
+        : oraclePropertyOptions(40, seedReloadProperty),
+    )
+    recordOracleReplay(seedReloadProperty, result)
+    console.info(
+      `ORACLE_REACH ${JSON.stringify({ property: seedReloadProperty, campaign, seed: result.seed, runs: result.numRuns, shrinks: result.numShrinks, completedBranchGuards: campaign === `fixed` ? `enforced` : `measured`, counts: Object.fromEntries([...reach.counts(), ...completedReach.counts()]) })}`,
+    )
+    if (result.failed)
+      throw new Error(
+        `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
       )
-      it(`reaches the declared states in the ${lane.name} fixed campaign`, () =>
-        reach.assertReached())
-      fcTest.prop(
-        [sessionHistoryArbitrary(lane)],
-        oraclePropertyOptions(50, lanePropertyName),
-      )(
-        `keeps the session law on ${lane.name} histories (random)`,
-        runLane,
-        120_000,
-      )
-    } else if (requestedReplayProperty === lanePropertyName) {
-      fcTest.prop(
-        [sessionHistoryArbitrary(lane)],
-        oraclePropertyOptions(50, lanePropertyName),
-      )(`replays ${lane.name} session histories`, runLane, 120_000)
+    reach.assertReached()
+    // The bare-key-1 conjunction has probability 1/24: random40 would miss it
+    // about 18% of the time. Every normal run enforces the fixed40 branch
+    // guards; the identical random40 campaign measures them without a promise
+    // of reach. Existing inner/row/reload guards apply to both campaigns.
+    if (campaign === `fixed`) completedReach.assertReached()
+  }, 120_000)
+}
+
+const describeNested = oracleReplayTest(
+  describe,
+  ...extraLanes.map(({ property }) => property),
+)
+describeNested(
+  `sync metadata session oracle through the persisted wrapper: nesting and seeds`,
+  () => {
+    for (const {
+      lane,
+      property: lanePropertyName,
+      seed,
+      runs,
+      reach: states,
+    } of extraLanes) {
+      const runLane = (history: Array<SessionAction>) =>
+        assertPersistedHistory(history, lane)
+      if (requestedReplayProperty === undefined) {
+        const reach = createOracleReach(`${lanePropertyName} (fixed)`, states, {
+          minimum: 5,
+        })
+        fcTest.prop([sessionHistoryArbitrary(lane)], {
+          numRuns: oracleRuns(runs),
+          seed,
+        })(
+          `keeps the session law on ${lane.name} histories (fixed)`,
+          (history) => {
+            reach.beginHistory()
+            for (const regime of historyRegimes(lane, history))
+              if (states.includes(regime)) reach.reach(regime)
+            return runLane(history)
+          },
+          240_000,
+        )
+        it(`reaches the declared states in the ${lane.name} fixed campaign`, () =>
+          reach.assertReached())
+        fcTest.prop(
+          [sessionHistoryArbitrary(lane)],
+          oraclePropertyOptions(50, lanePropertyName),
+        )(
+          `keeps the session law on ${lane.name} histories (random)`,
+          runLane,
+          120_000,
+        )
+      } else if (requestedReplayProperty === lanePropertyName) {
+        fcTest.prop(
+          [sessionHistoryArbitrary(lane)],
+          oraclePropertyOptions(50, lanePropertyName),
+        )(`replays ${lane.name} session histories`, runLane, 120_000)
+      }
     }
-  }
-})
+  },
+)

@@ -583,6 +583,109 @@ export function sessionHistoryArbitrary(
 }
 
 /**
+ * A source insert can be visible to an inner transaction before it commits.
+ * The inner equal re-insert keeps metadata; its durable replacement must keep
+ * the metadata of the accepted row, including a later seed, rather than the
+ * older cache's metadata. A peer notice then reads that durable replacement.
+ *
+ * This constructive subgrammar rebuilds the #2281 metadata prefix and varies
+ * both keys, seed shape/metadata and arrival, explicit metadata, repeated
+ * re-inserts, a core hold, the enclosing transaction's ending, and named
+ * versus full-reload notices. Every action is legal in the peer lanes. Store
+ * and read holds are excluded because their pending work blocks peer notices.
+ * The general session grammar continues to cover their independent laws.
+ */
+export const seedReinsertReloadHistoryArbitrary: fc.Arbitrary<
+  Array<SessionAction>
+> = fc
+  .record({
+    key: fc.constantFrom(...sessionRowKeys),
+    bare: fc.boolean(),
+    narrow: fc.boolean(),
+    seedInside: fc.boolean(),
+    outerMetadata: fc.boolean(),
+    innerMetadata: fc.boolean(),
+    repeats: fc.integer({ min: 1, max: 3 }),
+    hold: fc.boolean(),
+    ending: fc.constantFrom(`open`, `commit`, `cancel`),
+    notice: fc.constantFrom(`row` as const, `reload` as const),
+  })
+  .map((input): Array<SessionAction> => {
+    const seed: SessionAction = {
+      type: `seed`,
+      key: input.key,
+      bare: input.bare,
+      narrow: input.narrow,
+    }
+    return [
+      ...(input.hold ? [{ type: `hold` as const }] : []),
+      ...(input.seedInside
+        ? [{ type: `begin` as const }, seed]
+        : [seed, { type: `begin` as const }]),
+      { type: `insertOverSeed`, key: input.key, metadata: input.outerMetadata },
+      { type: `begin` },
+      ...Array.from({ length: input.repeats }, (): SessionAction => ({
+        type: `reinsert`,
+        key: input.key,
+        metadata: input.innerMetadata,
+      })),
+      { type: `commit` },
+      ...(input.ending === `open`
+        ? []
+        : [{ type: input.ending } as SessionAction]),
+      { type: `peer`, key: input.key === 1 ? 2 : 1, notice: input.notice },
+    ]
+  })
+
+/** The source report is input to the same model and comparison as generation. */
+export const seedReinsertReloadReplay: Array<SessionAction> = [
+  { type: `begin` },
+  { type: `seed`, key: 1, narrow: false, bare: true },
+  { type: `insertOverSeed`, key: 1, metadata: false },
+  { type: `begin` },
+  { type: `reinsert`, key: 1, metadata: false },
+  { type: `commit` },
+  { type: `peer`, key: 2, notice: `reload` },
+]
+
+/**
+ * A completed implicit re-insert must keep the later seed across a full reload
+ * while the enclosing write remains unaccepted. This reach classifier judges
+ * only the grammar and completed comparison, never production metadata values.
+ * Only key 1 starts with cached metadata, so only its bare seed distinguishes
+ * a stale cache value from absence. Both receiving drivers use these premises.
+ */
+export function completedSeedReinsertReloadRegime(
+  history: ReadonlyArray<SessionAction>,
+  result: { mismatch: SessionMismatch | undefined; steps: number },
+):
+  | `completed kept bare seed reload`
+  | `completed kept non-bare seed reload`
+  | undefined {
+  const last = history.at(-1)!
+  const seed = history.find((action) => action.type === `seed`)
+  const keptSeedReload =
+    last.type === `peer` &&
+    last.notice === `reload` &&
+    history.some((action) => action.type === `reinsert`) &&
+    history.every(
+      (action) => action.type !== `reinsert` || action.metadata === false,
+    ) &&
+    history.filter((action) => action.type === `commit`).length === 1
+  if (
+    !result.mismatch &&
+    result.steps === history.length &&
+    keptSeedReload &&
+    seed?.type === `seed`
+  ) {
+    if (seed.bare === true && seed.key === 1)
+      return `completed kept bare seed reload`
+    if (seed.bare === false) return `completed kept non-bare seed reload`
+  }
+  return undefined
+}
+
+/**
  * The regimes that a legal history reaches, read from the model as it
  * replays. The campaign reach test requires each law's premise.
  */
@@ -2525,5 +2628,11 @@ declareOracle({
     runSeedOrderInvariance,
   ],
   model: [SessionModel, createSessionModel, modelCheckpoints],
-  grammar: [sessionActionArbitrary, sessionHistoryArbitrary, historyRegimes],
+  grammar: [
+    sessionActionArbitrary,
+    sessionHistoryArbitrary,
+    historyRegimes,
+    seedReinsertReloadHistoryArbitrary,
+    completedSeedReinsertReloadRegime,
+  ],
 })

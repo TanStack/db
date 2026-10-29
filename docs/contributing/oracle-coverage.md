@@ -4422,24 +4422,50 @@ must equal the model's, which a restart would read.
 `persisted-peers-full` repeats the lane under full row updates, where an
 update replaces its row in storage too; `persisted-peers-on-demand` repeats
 it on demand with a demand for every row. A reset over metadata of a missing
-row is too rare in generated histories to declare; a replay pins it. A
-random CI campaign (seed `654774679`) found a `persisted-peers-full` history
-that reproduces on `main`: an outer transaction inserts over a bare seed, an
-inner one re-inserts the row and commits, and a peer's full reload leaves the
-row with the cached seed's metadata, where the model expects none (law:
-the source reads its row metadata). The maintainer chose to leave it open,
-tracked with #2281; an `it.fails` replay through the same model, driver, and
-comparison pins its shrunk prefix, and the random campaign can still draw it.
-Owner: this oracle. A reset
+row is too rare in generated histories to declare; a replay pins it. Durable source equal re-inserts preserve accepted row metadata, including absence
+or metadata supplied by a later DbClient hydration seed, without making the keep
+a source metadata write (decisions 9, 14, and 18). The constructive
+`seedReinsertReloadHistoryArbitrary` and ordinary original replay use the shared
+independent model and per-action source metadata comparison. Controlled
+partial/full/on-demand lanes and native SQLite receiving lanes each pass fixed
+40 and random 40 generated histories, with actual named/full-reload notices in
+every native lane. Final fixed seed `527962096` independently reaches 40 inner
+commits, 21 named notices, 19 full reloads, 2 completed bare-key1 implicit keeps,
+and 2 completed non-bare implicit keeps per lane on both hosts. Every normal run
+enforces those completed fixed-branch guards; random branch counts are measured
+without a guarantee of reach. Controlled final random seed `-704889444` measures
+0 bare/4 non-bare; native `1784284659` measures 2 bare/1 non-bare. Older
+commit/notice guards still apply to both campaigns. Original RED and direct
+replay seed `2281001` remain preserved. Original-defect and
+always-delete-kept-metadata mutants both fail the shared product comparison
+through both drivers. An all-explicit-inner grammar ablation passes 40 product
+comparisons per host but fails the new completed-branch guards, with all hashes
+restored. Native on-demand RED can occur at inner commit before the explicit peer
+notice because actual coordination reads storage sooner; eager partial/full RED
+reaches explicit peer step 6.
+
+The completed-branch guards were added in independent review after the first
+production edit. M16 revealed zero bare-key1 reach at fixed seed `2281001`, then
+measured seed `527962096` supplied both premises. The bare conjunction has
+probability 1/24, so the reproducible fixed campaign supplies its durable
+assertion while random campaigns measure it. No prior guard, comparison,
+minimum, or run budget was removed or lowered. The model, grammar, and comparison
+are unchanged; only the new properties' fixed seeds were calibrated. Broader
+#2272 transport and host gaps remain open: this receiver covers two real Browser
+coordinators over Node BroadcastChannel/Web Locks and native SQLite in one
+process. It does not establish Chromium OPFS, Electron, transport gaps,
+leadership turnover, every partial-notice shape, or every shared session grammar.
+The constructive receiver uses core holds; broad controlled histories retain
+store/read holds. Owner: this sync metadata session oracle. A reset
 may rewrite its rows, which its reload then applies as source writes.
 `persisted-reads-seeds` crosses read holds with seeds and the cached row and
 aborts a buffered commit's signal, which abandons it at the read's end
 (decision 21); a seed that arrived after it stays judged against it
 (decision 22). Dependent suffixes of an abandoned transaction belong to the
-abort-graph oracle. The peer is the driver, not a second
-Collection, so the claim stops at the controlled coordinator; a second
-production driver with two real coordinators is the open receiving
-witness (issue #2272). Missed notices and notices over the targeted key limit are not
+abort-graph oracle. The broad peer grammar uses a controlled coordinator. The new constructive
+seed/re-insert/reload receiver uses two real Collections and coordinators for
+the bounded metadata law above; it does not close the broader host and transport
+receiving scope of issue #2272. Missed notices and notices over the targeted key limit are not
 generated; the persisted oracle's grids cover them. Two held-cleanup
 Query retention witnesses race on CI; the maintainer deferred the race until
 a failure reports the timer trace these witnesses now print, and the review

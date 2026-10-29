@@ -4698,6 +4698,18 @@ class PersistedCollectionRuntime<
             value: operation.value as Record<string, unknown>,
           }
     })
+    // An equal re-insert keeps accepted metadata without writing it in this
+    // sync run. Its durable replacement must keep that same value, including
+    // a DbClient seed that never reached storage (decisions 9 and 14).
+    const rowMetadataWrites = new Map(transaction.rowMetadataWrites)
+    for (const { key } of transaction.insertOperations) {
+      if (rowMetadataWrites.has(key)) continue
+      const value = this.syncControls.metadata?.row.get(key)
+      rowMetadataWrites.set(
+        key,
+        value === undefined ? { type: `delete` } : { type: `set`, value },
+      )
+    }
     return {
       txId: safeRandomUUID(),
       term: streamPosition.term,
@@ -4706,7 +4718,7 @@ class PersistedCollectionRuntime<
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
       truncate: transaction.truncate,
       mutations,
-      rowMetadataMutations: toMetadataMutations(transaction.rowMetadataWrites),
+      rowMetadataMutations: toMetadataMutations(rowMetadataWrites),
       collectionMetadataMutations: toMetadataMutations(
         transaction.collectionMetadataWrites,
       ),
