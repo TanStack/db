@@ -10,6 +10,7 @@ import {
   openBrowserWASQLiteOPFSDatabase,
   persistedCollectionOptions,
 } from '../src/index'
+import type { Offset } from '../../electric-db-collection/node_modules/@electric-sql/client'
 
 type Item = { id: string; label: string }
 const parameters = new URL(location.href).searchParams
@@ -35,6 +36,8 @@ const source = electricCollectionOptions<Item>({
   syncMode: `eager`,
   getKey: (row) => row.id,
   shapeOptions: {
+    offset: (parameters.get(`offset`) ?? undefined) as Offset | undefined,
+    handle: parameters.get(`handle`) ?? undefined,
     url: `${location.origin}/electric/v1/shape`,
     params: { table: `public.${table}` },
     liveSse: false,
@@ -131,23 +134,25 @@ const probe = {
     if (!next) throw new Error(`No held response`)
     next.release()
   },
-  observe: async () => ({
-    status: collection.status,
-    rows: rows(collection.values()),
-    durableRows: rows(
-      (
-        await options.persistence.adapter.loadResumeSnapshot({
-          kind: `eager`,
-          collectionId,
-        })
-      ).rows.map(({ value }) => value as Item),
-    ),
-    commits,
-    emptyCommits,
-    pending: pending.map(({ rows: count }) => count),
-    requests: [...requests],
-    error: collection.health.error,
-  }),
+  observe: async () => {
+    const snapshot = await options.persistence.adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId,
+    })
+    return {
+      status: collection.status,
+      rows: rows(collection.values()),
+      durableRows: rows(snapshot.rows.map(({ value }) => value as Item)),
+      resume: snapshot.collectionMetadata.find(
+        ({ key }) => key === `electric:resume`,
+      )?.value,
+      commits,
+      emptyCommits,
+      pending: pending.map(({ rows: count }) => count),
+      requests: [...requests],
+      error: collection.health.error,
+    }
+  },
   cleanup: async () => {
     if (cleaned) return []
     cleaned = true

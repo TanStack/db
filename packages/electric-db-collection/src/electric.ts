@@ -1712,15 +1712,18 @@ function createElectricSync<T extends Row<unknown>>(
     const hasIncompatiblePersistedResume =
       persistedResumeState?.kind === `resume` &&
       persistedResumeState.shapeId !== shapeIdentity
+    const hasIncompatibleSourceProgress =
+      persistedResumeState?.kind === `resume` &&
+      expectSourceProgress !== undefined &&
+      (metadata?.collection.get(progressKey) !== sourceProgress ||
+        resumeSnapshot?.getSourceProgressCompatible?.() !== true)
     // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
     // One fresh replacement establishes consistent evidence for later resumes.
     const lacksCompletePersistedResume =
       persistedResumeState?.kind === `resume` &&
       ((getKeySetEvidence !== undefined &&
         persistedKeySetEvidence?.status !== `consistent`) ||
-        (expectSourceProgress !== undefined &&
-          (metadata?.collection.get(progressKey) !== sourceProgress ||
-            resumeSnapshot?.getSourceProgressCompatible?.() !== true)))
+        hasIncompatibleSourceProgress)
     // Claim expiry can leave a partial managed cache without a resume record.
     // Its incompatible key set alone requires a fresh source snapshot.
     const hasIncompatibleManagedCache =
@@ -1729,6 +1732,7 @@ function createElectricSync<T extends Row<unknown>>(
     const requiresFreshSourceEvidence =
       !freshScopedGeneration &&
       (hasIncompatibleManagedCache ||
+        hasIncompatibleSourceProgress ||
         (shapeOptions.offset === undefined &&
           shapeOptions.handle === undefined &&
           (persistedResumeState !== undefined || malformedPersistedResume) &&
@@ -1744,6 +1748,12 @@ function createElectricSync<T extends Row<unknown>>(
       requiresFreshSourceEvidence &&
       persistence?.managedCacheGeneration === true &&
       persistence.startScopedRecovery !== undefined
+    // A provider position cannot certify incompatible source progress.
+    // Eager recovery overrides the caller's position and replaces its rows.
+    // Other sync modes keep their existing explicit-position behavior.
+    const requestedPosition = hasIncompatibleSourceProgress
+      ? {}
+      : { offset: shapeOptions.offset, handle: shapeOptions.handle }
     if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
     const usesChangesOnlyLog =
       syncMode === `on-demand` &&
@@ -1775,7 +1785,8 @@ function createElectricSync<T extends Row<unknown>>(
       // Only a complete adapter ledger can justify a persisted cursor.
       !requiresFreshSourceEvidence
     const hasExplicitResumeOffset =
-      shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
+      requestedPosition.offset !== undefined &&
+      requestedPosition.offset !== `-1`
     if (!canUsePersistedResume && !hasExplicitResumeOffset) {
       clearTagTrackingState()
     }
@@ -1899,14 +1910,14 @@ function createElectricSync<T extends Row<unknown>>(
       // In on-demand mode, we only need the changes from the point of time the collection was created
       // so we default to `now` when there is no saved offset.
       offset:
-        shapeOptions.offset ??
+        requestedPosition.offset ??
         (canUsePersistedResume
           ? (persistedResumeState.offset as Offset)
           : usesChangesOnlyLog
             ? `now`
             : undefined),
       handle:
-        shapeOptions.handle ??
+        requestedPosition.handle ??
         (canUsePersistedResume ? persistedResumeState.handle : undefined),
       signal: abortController.signal,
       onError: async (errorParams) => {

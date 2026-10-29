@@ -119,6 +119,11 @@ import type {
 import type { ElectricCollectionUtils } from '../../electric-db-collection/src/electric'
 
 type Item = Row & { id: number; label: string }
+type CallerCursor = `none` | `initial-offset` | `handle` | `resume` | `now`
+type ExplicitPosition = {
+  handle?: string
+  offset?: `${number}_${number}` | `-1` | `now`
+}
 
 // ---------------------------------------------------------------------------
 // Controlled Electric SDK boundary. Each stream records the position Electric
@@ -267,7 +272,11 @@ function openHost() {
     }
   }
 
-  const openTab = (tab: string, syncMode: SyncMode) => {
+  const openTab = (
+    tab: string,
+    syncMode: SyncMode,
+    callerPosition: ExplicitPosition = {},
+  ) => {
     const database = createWASQLiteTestDatabase({ filename, timeout: 0 })
     const execute = database.execute.bind(database)
     database.execute = async <TRow>(
@@ -288,6 +297,7 @@ function openHost() {
     // The application's signal, which can stop the stream from outside.
     let external = new AbortController()
     const shapeOptions = {
+      ...callerPosition,
       url: `http://electric.test/v1/shape`,
       params: { table: `items` },
       headers: { 'x-tab': tab },
@@ -368,10 +378,11 @@ function openHost() {
       // The application's recovery: clean up and start the Collection again.
       // A signal that already aborted would stop the new stream too, so the
       // restarted session gets a fresh signal.
-      restart: async () => {
+      restart: async (nextPosition: ExplicitPosition = {}) => {
         await collection.cleanup()
         external = new AbortController()
         shapeOptions.signal = external.signal
+        Object.assign(shapeOptions, nextPosition)
         void collection.preload().catch(() => undefined)
       },
       publicRows: () =>
@@ -999,6 +1010,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
     startedAt: { handle: string | undefined; offset: string },
     log: ServerLog,
   ): Pick<TabModel, `handle` | `version`> => {
+    // Electric's legal `now` request begins at the current source head and
+    // supplies no baseline rows, even when no handle was specified.
+    if (startedAt.offset === `now`) {
+      return { handle: log.handle, version: log.changes.at(-1)?.version ?? 0 }
+    }
     if (startedAt.handle === undefined || startedAt.offset === `-1`) {
       return { handle: undefined, version: -1 }
     }
@@ -1017,6 +1033,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       how: `restart` | `reload`,
     ) => void,
     progressFormat: `current` | `missing` | `foreign` = `current`,
+    callerCursor: CallerCursor = `none`,
   ) => {
     host = openHost()
     const activeHost = host
@@ -1157,12 +1174,29 @@ describe(`multi-tab Electric over one persisted database`, () => {
         JSON.stringify(rowsOf(durable)) !== JSON.stringify(rowsOf(log.rows))
       const stopped = tabs[index]!
       const streamsBefore = stopped.streamCount()
+      // A caller can repeat the current source position, but that position
+      // supplies no missing rows. Initial-offset and handle-only requests
+      // are legal full-snapshot neighbors of the explicit resumed request.
+      const head = position(log, serverVersion)
+      const callerPosition: ExplicitPosition =
+        callerCursor === `resume`
+          ? {
+              handle: head.handle,
+              offset: head.offset as `${number}_${number}`,
+            }
+          : callerCursor === `handle`
+            ? { handle: head.handle }
+            : callerCursor === `initial-offset`
+              ? { offset: `-1` }
+              : callerCursor === `now`
+                ? { offset: `now` }
+                : {}
       let recovered = stopped
-      if (how === `restart`) await stopped.restart()
+      if (how === `restart`) await stopped.restart(callerPosition)
       else {
         await stopped.close()
         await activeHost.quiesce(`tab ${stopped.tab} closed`)
-        recovered = activeHost.openTab(stopped.tab, `eager`)
+        recovered = activeHost.openTab(stopped.tab, `eager`, callerPosition)
         tabs[index] = recovered
       }
       abandon(models[index]!)
@@ -1439,6 +1473,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // Removing the lagging commit or the later advancement loses the defect;
   // draining is the neighboring non-divergent control. A prefix longer than
   // the source log is excluded by construction.
+  // Explicit offset/handle options select a provider position, not a cache
+  // certificate. The source-head law is unchanged across caller cursor forms.
   const sourcePrefixHistory = fc.record({
     key: fc.constantFrom(1, 3),
     pairs: fc.integer({ min: 1, max: 3 }),
@@ -1450,6 +1486,13 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `current` as const,
       `missing` as const,
       `foreign` as const,
+    ),
+    callerCursor: fc.constantFrom<CallerCursor>(
+      `none`,
+      `initial-offset`,
+      `handle`,
+      `resume`,
+      `now`,
     ),
   })
   const runSourcePrefixCampaign = async (
@@ -1465,6 +1508,10 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `foreign progress at recovery`,
       `divergent source restart`,
       `divergent source reload`,
+      `explicit resume at divergent recovery`,
+      `explicit now at divergent recovery`,
+      `explicit initial offset at recovery`,
+      `explicit handle at recovery`,
     ] as const
     const reach = createOracleReach(`browser.electric-source-prefix`, states)
     await fc.assert(
@@ -1500,6 +1547,10 @@ describe(`multi-tab Electric over one persisted database`, () => {
               if (history.drain && !divergent)
                 reach.reach(`drained before recovery`)
               if (!history.drain && divergent) {
+                if (history.callerCursor === `resume`)
+                  reach.reach(`explicit resume at divergent recovery`)
+                if (history.callerCursor === `now`)
+                  reach.reach(`explicit now at divergent recovery`)
                 reach.reach(`divergent source ${how}`)
                 reach.reach(
                   `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
@@ -1508,8 +1559,13 @@ describe(`multi-tab Electric over one persisted database`, () => {
               if (history.progressFormat !== `current`) {
                 reach.reach(`${history.progressFormat} progress at recovery`)
               }
+              if (history.callerCursor === `initial-offset`)
+                reach.reach(`explicit initial offset at recovery`)
+              if (history.callerCursor === `handle`)
+                reach.reach(`explicit handle at recovery`)
             },
             history.progressFormat,
+            history.callerCursor,
           )
         } catch (error) {
           primary = { error }

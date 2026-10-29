@@ -15,7 +15,14 @@ import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { Page } from '@playwright/test'
 import type {} from './electric-source-prefix.opfs'
 
-const cells = [true, false]
+type Cell = {
+  present: boolean
+  advance: `empty` | `disjoint`
+  drain: boolean
+  legacy: boolean
+  callerCursor: `none` | `initial-offset` | `handle` | `resume` | `now`
+}
+const cells: Array<Cell> = [true, false]
   .flatMap((present) =>
     ([`empty`, `disjoint`] as const).flatMap((advance) =>
       [false, true].map((drain) => ({
@@ -23,6 +30,7 @@ const cells = [true, false]
         advance,
         drain,
         legacy: false,
+        callerCursor: `none` as const,
       })),
     ),
   )
@@ -32,8 +40,32 @@ const cells = [true, false]
       advance: `disjoint` as const,
       drain: false,
       legacy: true,
+      callerCursor: `none` as const,
     })),
   )
+// Repeat the legal explicit resumed position over both membership failures
+// and both current/legacy evidence. Initial-offset and handle-only options
+// request a complete snapshot and supply the distinguishing neighbors.
+cells.push(
+  ...([`resume`, `now`] as const).flatMap((callerCursor) =>
+    [true, false].flatMap((present) =>
+      [false, true].map((legacy): Cell => ({
+        present,
+        advance: `disjoint`,
+        drain: false,
+        legacy,
+        callerCursor,
+      })),
+    ),
+  ),
+  ...([`initial-offset`, `handle`] as const).map((callerCursor): Cell => ({
+    present: true,
+    advance: `disjoint`,
+    drain: false,
+    legacy: false,
+    callerCursor,
+  })),
+)
 const observe = (page: Page) =>
   page.evaluate(() => window.__electricSourcePrefix!.observe())
 const rowIds = async (page: Page) =>
@@ -41,7 +73,7 @@ const rowIds = async (page: Page) =>
 
 declareOracle({ check: [sourceHeadViolation], grammar: [cells] })
 for (const cell of cells) {
-  test(`recovers ${cell.present ? `lost` : `resurrected`} rows after ${cell.advance} advancement${cell.drain ? ` with peer drain` : ``}${cell.legacy ? ` from legacy progress` : ``}`, async ({
+  test(`recovers ${cell.present ? `lost` : `resurrected`} rows after ${cell.advance} advancement${cell.drain ? ` with peer drain` : ``}${cell.legacy ? ` from legacy progress` : ``}${cell.callerCursor !== `none` ? ` with explicit ${cell.callerCursor}` : ``}`, async ({
     context,
   }) => {
     const reach = createOracleReach(
@@ -51,6 +83,9 @@ for (const cell of cells) {
         `stale commit applied`,
         `later advancement applied`,
         `reopened source compared`,
+        ...(cell.callerCursor === `none`
+          ? []
+          : [`explicit ${cell.callerCursor} supplied at recovery`]),
       ],
       { replaying: false },
     )
@@ -87,11 +122,11 @@ for (const cell of cells) {
       await pg.query(`INSERT INTO public.${table} VALUES ('anchor', 'anchor')`)
       if (cell.present)
         await pg.query(`INSERT INTO public.${table} VALUES ('target', 'old')`)
-      const open = async () => {
+      const open = async (callerPosition: Record<string, string> = {}) => {
         const page = await context.newPage()
         pages.push(page)
         page.on(`pageerror`, (error) => diagnostics.push(error.message))
-        await page.goto(url)
+        await page.goto(`${url}&${new URLSearchParams(callerPosition)}`)
         await page.waitForFunction(
           () => window.__electricSourcePrefix !== undefined,
         )
@@ -183,7 +218,30 @@ for (const cell of cells) {
       await close(b)
       if (cell.legacy)
         await a.evaluate(() => window.__electricSourcePrefix!.legacy())
-      const reopened = await open()
+      const callerPosition: Record<string, string> = {}
+      if (cell.callerCursor !== `none`) {
+        const { resume } = await observe(a)
+        if (
+          !resume ||
+          typeof resume !== `object` ||
+          !(`offset` in resume) ||
+          typeof resume.offset !== `string` ||
+          !(`handle` in resume) ||
+          typeof resume.handle !== `string`
+        )
+          throw new Error(`No complete real Electric position at recovery`)
+        if (
+          cell.callerCursor !== `initial-offset` &&
+          cell.callerCursor !== `now`
+        )
+          callerPosition.handle = resume.handle
+        if (cell.callerCursor === `resume`)
+          callerPosition.offset = resume.offset
+        if (cell.callerCursor === `initial-offset`) callerPosition.offset = `-1`
+        if (cell.callerCursor === `now`) callerPosition.offset = `now`
+        reach.reach(`explicit ${cell.callerCursor} supplied at recovery`)
+      }
+      const reopened = await open(callerPosition)
       // Source readiness follows an applied SDK receipt. The wrapper may
       // still propagate its notice to A, so poll the shared settled judgment.
       const source = await pg.query<{ id: string; label: string }>(

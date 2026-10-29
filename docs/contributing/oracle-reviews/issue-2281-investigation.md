@@ -1046,3 +1046,83 @@ check passes all 806 examples with zero new failures (250 known, 59 non-parsing)
 No baseline entry or production code changed. Logs:
 `pilot-preact-source-before.log`, `pilot-preact-source-after.log`, and
 `pilot-preact-snippets-full.log`.
+
+### Explicit caller positions cannot bypass source-progress recovery
+
+CodeRabbit review `5702393171` on `883b565ab` found a missing history dimension.
+The supplied cluster report still supports the repair's mechanism. This later
+review exposes an incomplete enforcement boundary within that repair.
+
+The accepted law remains Browser Law 2: after successful recovery and complete
+source delivery, durable rows and every open eager Collection equal the source
+head. Electric's documented fresh-snapshot contract requires omitted cached rows
+to disappear at replacement. A caller's provider position supplies no missing
+baseline rows and cannot certify incompatible persisted source progress.
+
+The primary source-prefix grammar now varies omitted options, initial `-1`,
+handle-only, numeric offset with handle, and the SDK's legal `now` offset.
+It crosses those choices with existing membership, repeated toggles, roles,
+advancement, draining, restart/reopen, and current/missing/foreign provenance.
+Numeric noninitial offsets without handles are SDK-invalid and excluded.
+The simulated server now interprets `now` as its head, supplying no baseline.
+The independent source-head model, comparison, exclusions, and budgets remain.
+
+The proposed one-clause repair was insufficient. Merely requesting recovery
+still let the explicit offset suppress replacement and reach `ShapeStream`.
+The final repair separately identifies incompatible eager source progress and
+uses the initial effective position for both stream construction and snapshot
+replacement. Physical key-set checks retain their prior cursor guard. Other
+sync modes and managed caches without scoped recovery retain their explicit
+options. An independent reviewer identified that scope distinction before
+publication. No generic ordering or new composition contract follows.
+
+- **Law:** Browser Law 2/#2209 and the Electric fresh-snapshot contract above.
+- **Reach:** Both 80-history campaigns require all earlier states plus explicit
+  numeric/`now` divergent recovery and initial-offset/handle controls. Final
+  fixed/random counts are numeric 10/8, `now` 7/19, initial 17/12, and handle
+  21/20. Fixed seed remains `2281`. Every original required state also passes.
+  Each of ten explicit real receiving cells reaches its supplied-position
+  state and all four original states once.
+- **RED:** Before production edits, both extended Node campaigns fail the final
+  `after every tab caught up` row comparison. Numeric replay: seed `2281`,
+  path `8:0:0:0` in the four-form grammar. Final five-form grammar: seed `2281`,
+  path `1:0:0`, `now`. Real SDK/HTTP/PostgreSQL/Chromium OPFS checks reject eight
+  cells: lost/resurrected membership, current/legacy evidence, and numeric/`now`
+  positions. Initial-offset and handle-only neighbors pass. Failures show
+  concrete missing or extra durable rows, not setup errors or readiness waits.
+- **GREEN:** The final complete Browser owner reports 312 passed and two tracked
+  expected failures, with no type errors. Electric recovery, resume races,
+  installed-SDK delivery, and ordinary Electric checks report 385 passed and
+  no type errors. Browser `tsc --noEmit` passes. The expanded real matrix passes
+  20 cells; after narrowing the predicate to eager source progress, all ten
+  explicit cells pass again. The narrow and earlier predicate are equivalent
+  for every eager cell. The first Node GREEN had passing runtime comparisons
+  but failed on a test-driver type import. The final run fixes that import and
+  succeeds with type checking enabled.
+- **Mutant:** Keep the independent recovery decision but restore raw caller
+  positions, as the one-clause suggested fix would do. The Node replay at
+  seed `2281`, path `1:0:0`, fails the original final row comparison. Restore
+  the exact production source and the same replay passes. The repaired source's
+  SHA-256 is `df8a918e736ca073619a693316c475040db46e2e30fc20fdbcc566934be695e6`.
+- **Limits:** No claim covers arbitrary explicit cursor selection over an
+  otherwise certified baseline, explicit malformed/reset/tag/shape regimes,
+  changing caller forms within one history, or real foreign-token provenance.
+  Existing on-demand, optimism, cross-version, permanent-close, receipt and
+  teardown limits remain. The coverage map retains their separate owners.
+
+Commands use the earlier owner invocations, with `-t 'converges after interleaved
+source prefixes'` for the focused Node campaign, and `--grep 'with explicit'`
+for the real explicit cells. Replay sets `TANSTACK_DB_ORACLE_PROPERTY` to
+`browser.electric-source-prefix`, seed `2281`, and path `1:0:0`.
+`--disableConsoleIntercept` exposes measured reach without a temporary recorder.
+Logs are `explicit-cursor-node-red{,-complete}.log`,
+`explicit-cursor-{now-,}real-red.log`, `explicit-cursor-browser-final-green.log`,
+`explicit-cursor-electric-final-green.log`, `explicit-cursor-real{,-final}-green.log`,
+`explicit-cursor-incomplete-fix-mutant.log`, and `explicit-cursor-replay-green.log`.
+
+The full third-review loss audit includes the outside-diff finding, repeated
+risk, aggregate docstring warning, and related-issue prose. The explicit-cursor
+finding is fixed with its generated dimension and receiving evidence. The
+summary's claim that the reported #2283 trace is outside this repair is stale:
+that exact row-loss replay already passes here. The #2267 safety/composition
+qualification remains separate. Raw reviews and dispositions remain local.

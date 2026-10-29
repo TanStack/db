@@ -4039,10 +4039,14 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       seed/path replay. It crosses initial membership, one to three toggle
       pairs, swapped source roles, empty/disjoint advancement, drain/no-drain,
       tab reload or source failure followed by same-Collection restart, and
-      current/missing/foreign progress. Declared reach
+      current/missing/foreign progress. Caller positions vary between omitted,
+      initial `-1`, handle-only, numeric offset with handle, and `now`.
+      Declared reach
       requires all four divergent membership/advancement cells, a draining
       control, missing/foreign provenance, and divergent recovery through both
-      actual lifecycle paths. Both Browser random registrations and the SQLite
+      actual lifecycle paths. It also requires divergent recovery with explicit
+      numeric and `now` positions, plus initial-offset and handle-only controls.
+      Both Browser random registrations and the SQLite
       source-progress registration stand aside during another property's path
       replay. The SQLite owner separately
       checks opaque predecessor paths, sticky gaps, duplicate endpoints,
@@ -4052,12 +4056,23 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       validation fails the Browser owner.
       The real installed SDK/HTTP/PostgreSQL/Chromium OPFS receiving driver
       `e2e/electric-source-prefix-oracle.opfs.spec.ts` shares the source-head
-      judgment. Ten cells cover both membership directions, empty/disjoint
+      judgment. The original ten cells cover both membership directions, empty/disjoint
       advancement and drain/no-drain, plus missing legacy provenance with
       disjoint advancement. Each declares held earlier response, stale commit,
       later advancement, and reopened source comparison. All ten pass; gap and
       legacy-validation mutants fail the matching real disjoint cells at that
-      comparison. This is bounded same-version eager Browser evidence, not
+      comparison. Ten more cells cross numeric and `now` caller positions with
+      both membership directions and current/legacy provenance, plus initial
+      offset and handle-only controls. Eight wrong-row comparisons were RED on
+      `883b565ab` before the eager-only repair; all ten explicit cells now pass.
+      Each explicit cell declares its caller-position reach. A mutant that
+      requests recovery but preserves the caller position fails the final Node
+      source-head comparison (seed 2281, path `1:0:0`). Explicit positions cannot
+      bypass eager source-progress recovery. Other sync modes and explicit
+      malformed/reset/tag/shape regimes retain their earlier behavior and are
+      outside this added evidence. Real foreign-token provenance and changing
+      caller forms within one history still need separate receiving witnesses.
+      This is bounded same-version eager Browser evidence, not
       arbitrary scheduling, mixed client versions, native-device, Electron,
       on-demand, optimistic, or monotonic-live-write coverage.
       The final checkpoint now observes a reset-abandoned commit's source
