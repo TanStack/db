@@ -306,16 +306,22 @@ function checkHandlerAdmission(
   )
 }
 
-const states = typeShapes.flatMap((shape) =>
-  surfaces.flatMap((surface) =>
-    handlers.flatMap((handler) =>
-      results.map(
-        (result) =>
-          `${shape.adapter}/${shape.schema ? `schema` : `plain`}/${shape.data}/${surface}/${handler}/${result.name}`,
+// A state name leaves out the key and scalar types, so the six shapes that
+// differ only there share one state, and `minimum: 6` asks for all of them.
+const states = [
+  ...new Set(
+    typeShapes.flatMap((shape) =>
+      surfaces.flatMap((surface) =>
+        handlers.flatMap((handler) =>
+          results.map(
+            (result) =>
+              `${shape.adapter}/${shape.schema ? `schema` : `plain`}/${shape.data}/${surface}/${handler}/${result.name}`,
+          ),
+        ),
       ),
     ),
   ),
-)
+]
 const reach = createOracleReach(`adapter.handler-types`, states, { minimum: 6 })
 describe(`public handler result admission`, () => {
   afterAll(() => {

@@ -5326,7 +5326,10 @@ describe(`on-demand demand grammar`, () => {
     `generated demand histories refine the model`,
     (steps, directSubscriber) => {
       demandHistoriesRan = true
-      demandReach.beginHistory()
+      // fast-check passes an example's input by reference.
+      demandReach.beginHistory({
+        fixed: demandExamples.some(([example]) => example === steps),
+      })
       return withDeadline(
         runDemandHistory(steps, directSubscriber, demandReach),
       )
@@ -7234,7 +7237,7 @@ describe(`lazy join demand grammar`, () => {
   )(
     `generated lazy demand histories refine the model`,
     (
-      { prefix, rest },
+      lazySteps,
       {
         asyncChildReady,
         generatedHoldChildReady,
@@ -7245,10 +7248,14 @@ describe(`lazy join demand grammar`, () => {
         ending,
       },
     ) => {
+      const { prefix, rest } = lazySteps
       const steps = [...(prefix?.steps ?? []), ...rest]
       const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady
       lazyHistoriesRan = true
-      lazyReach.beginHistory()
+      // fast-check passes an example's input by reference.
+      lazyReach.beginHistory({
+        fixed: lazyExamples.some(([example]) => example === lazySteps),
+      })
       return withDeadline(
         runLazyHistory(steps, {
           asyncChildReady,

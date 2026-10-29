@@ -9,19 +9,21 @@ import { readOracleRunConfig } from './oracle-config.js'
  * produces that state. Counting passing runs does not show reach.
  *
  * A property declares the states its laws depend on. Its driver calls
- * `reach(state)` when a history enters one. A call before the first
- * `beginHistory()` throws: it is a driver error, not a history. After the property ran,
- * `assertReached()` fails for every declared state that fewer than `minimum`
- * histories entered. A history counts once per state, however often it
- * enters it.
+ * `reach(state)` when a history enters one. A call for an undeclared state, or
+ * before the first `beginHistory()`, throws: it is a driver error, not a
+ * history. Options that cannot describe a reach throw at creation. After the
+ * property ran, `assertReached()` fails for every declared state that fewer
+ * than `minimum` histories entered. A history counts once per state, however
+ * often it enters it.
  *
  * A property that runs fixed examples first, through `oraclePropertyOptions`'
- * `examples`, passes their number as `fixedHistories`. The check then also
- * fails for every declared state that those first histories did not enter:
- * that state's reach would depend on the seed (#2287). The first histories
- * are the examples only when the reach belongs to that one property and its
- * callback begins every history, so such a reach is not shared. When fewer
- * histories ran than the fixed ones, a failure stopped the run inside the
+ * `examples`, passes their number as `fixedHistories` and begins each
+ * example's history with `beginHistory({ fixed: true })`. The check then also
+ * fails for every declared state that no fixed history entered: that state's
+ * reach would depend on the seed (#2287). Fixedness belongs to the history, so
+ * other tests may share the reach. Shrinking can run an example again, so a
+ * fixed history beyond the declared number counts as fixed too. When fewer
+ * fixed histories ran than were declared, a failure stopped the run inside the
  * examples, and the check reports only that, without naming states.
  *
  * A path replay checks one recorded history, not reach, so the check does
@@ -40,17 +42,30 @@ export function createOracleReach<TState extends string>(
     replaying: replayOverride,
   }: { minimum?: number; fixedHistories?: number; replaying?: boolean } = {},
 ) {
+  if (!Number.isInteger(minimum) || minimum < 1) {
+    throw new Error(`${property}: minimum must be an integer of at least 1`)
+  }
+  if (!Number.isInteger(fixedHistories) || fixedHistories < 0) {
+    throw new Error(`${property}: fixedHistories must be a nonnegative integer`)
+  }
+  if (new Set(states).size !== states.length) {
+    throw new Error(`${property}: a reach state is declared twice`)
+  }
   const counts = new Map<TState, number>(states.map((state) => [state, 0]))
   const enteredByFixed = new Set<TState>()
   let histories = 0
+  let fixedBegun = 0
+  let currentFixed = false
   let current = new Set<TState>()
   // Other packages use their own replay prefixes. An explicit campaign choice
   // must not inherit an unrelated DB replay selector from the environment.
   const replaying =
     replayOverride ?? readOracleRunConfig().replayPath !== undefined
   return {
-    /** Starts one generated history. */
-    beginHistory(): void {
+    /** Starts one generated history, a fixed example's when `fixed`. */
+    beginHistory({ fixed = false }: { fixed?: boolean } = {}): void {
+      if (fixed) fixedBegun += 1
+      currentFixed = fixed
       current = new Set()
       histories += 1
     },
@@ -64,7 +79,7 @@ export function createOracleReach<TState extends string>(
           `${property}: reach(${state}) came before the first beginHistory()`,
         )
       }
-      if (histories <= fixedHistories) enteredByFixed.add(state)
+      if (currentFixed) enteredByFixed.add(state)
       if (current.has(state)) return
       current.add(state)
       counts.set(state, counts.get(state)! + 1)
@@ -76,9 +91,9 @@ export function createOracleReach<TState extends string>(
     /** Fails for each declared state that too few histories entered. */
     assertReached(): void {
       if (replaying) return
-      if (histories < fixedHistories) {
+      if (fixedBegun < fixedHistories) {
         throw new Error(
-          `${property}: only ${histories} of its ${fixedHistories} fixed ` +
+          `${property}: only ${fixedBegun} of its ${fixedHistories} fixed ` +
             `histories ran, so a failure stopped the run inside the fixed ` +
             `examples`,
         )
@@ -100,7 +115,7 @@ export function createOracleReach<TState extends string>(
           : []),
         ...(unfixed.length > 0
           ? [
-              `${property}: its first ${fixedHistories} histories, the fixed ` +
+              `${property}: its ${fixedHistories} fixed histories, the ` +
                 `examples, did not enter these states, so their reach ` +
                 `depends on the seed: ${unfixed.join(`, `)}`,
             ]
