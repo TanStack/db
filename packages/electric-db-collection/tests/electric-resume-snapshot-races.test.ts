@@ -198,6 +198,19 @@ async function runRace(
           { type: `insert`, key: 2, value: { id: 2, name: `two` } },
         ],
         collectionMetadataMutations: [
+          // Seed the current eager format so this driver still exercises
+          // certification of a resumed baseline, not legacy-token migration.
+          {
+            type: `set`,
+            key: `electric:source-progress`,
+            value: JSON.stringify([
+              startupReset === `shape-identity`
+                ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
+                : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              `shape-old`,
+              `10_0`,
+            ]),
+          },
           {
             type: `set`,
             key: `electric:resume`,

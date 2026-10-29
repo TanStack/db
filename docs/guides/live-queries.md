@@ -2104,8 +2104,9 @@ const page2Users = createLiveQueryCollection((q) =>
 
 ## Pooled Live Queries
 
-Apps that mount many live queries of the same shape at once, such as one per
-list row, can share their work. Pass `pooledLiveQueries` as `pool` in a hook's
+Pooling is an optional performance feature for screens with dozens or more
+live queries of the same shape, such as one per list row. These queries can
+share their work. Pass `pooledLiveQueries` as `pool` in a hook's
 query config. Queries that filter one eager source with `eq(field, literal)`
 then read one shared partition instead of compiling a graph each:
 

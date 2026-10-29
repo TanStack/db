@@ -871,8 +871,7 @@ window. It does not run TanStack Query's `InfiniteQueryObserver`. Query
 Collections use `QueryObserver`, so `queryFn` receives
 `meta.loadSubsetOptions`, not `pageParam`.
 
-The previously ignored `getNextPageParam` option has been removed. Delete it
-from your hook config; passing it at runtime now throws a clear error.
+`getNextPageParam` is not supported; passing it at runtime throws an error.
 `initialPageParam` labels result pages only. It does not set a remote offset
 or server cursor.
 

@@ -1,6 +1,6 @@
 /**
- * Candidate releases reach rc; stable releases reach latest exactly once.
- * Authority: CONTRIBUTING.md Changesets/Releases and the accepted RC policy.
+ * Candidate and stable releases reach latest exactly once.
+ * Authority: CONTRIBUTING.md Changesets/Releases, maintainer decision 2026-10-29.
  * The existing release ledger supplies the independent version/tag judgment.
  * This receiver crosses the real npm11/pnpm11/Changesets HTTP boundary, with
  * the default production publish command and real package-manager archives.
@@ -9,8 +9,9 @@
  * The bounded shared grammar retains the original metadata/failure histories
  * and varies exact-version presence independently of tags. Current candidates
  * can have only latest, no tags, or rc pointing to an older present version.
- * The exact wrong-tag aftermath keeps old rc alongside latest=current. A
- * separate stable-phase neighbor removes stable latest while versions remain.
+ * A historical old-policy wrong-tag aftermath keeps old rc alongside
+ * latest=current. A separate stable-phase neighbor removes stable latest
+ * while versions remain.
  * Missing targets also have a no-tags neighbor. Two different candidate
  * versions vary which package is already current and reverse their assignment.
  * A later-candidate fault follows an actual successful candidate upload, in

@@ -479,6 +479,7 @@ export type PersistedTx<
   /** Claim authorizing this transaction's persisted cache generation. */
   cacheGenerationClaimId?: string
   truncate?: boolean
+  sourceProgress?: { key: string; previous: string | undefined }
   mutations: Array<
     | {
         type: `insert`
@@ -516,6 +517,8 @@ export const SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY = Symbol.for(
 )
 
 export interface PersistenceAdapter {
+  /** Implements PersistedTx.sourceProgress under the durable writer lock. */
+  readonly supportsSourceProgress?: boolean
   loadSubset: (
     target: PersistedStorageTarget,
     options: LoadSubsetOptions,
@@ -544,6 +547,7 @@ export interface PersistenceAdapter {
       metadata?: unknown
     }>
     keySet?: PersistedKeySetEvidence
+    sourceProgressCompatible?: boolean
     collectionMetadata: Array<{ key: string; value: unknown }>
     latestTerm: number
     latestSeq: number
@@ -1304,6 +1308,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   lifecycleGeneration: number
   admittedStorageCollectionId?: string
   expectedResumeGenerationOwner?: symbol
+  sourceProgress?: PersistedTx[`sourceProgress`]
   signal?: AbortSignal
   prependHydrationRows: (
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
@@ -1668,6 +1673,7 @@ class PersistedCollectionRuntime<
   private resumeBaselinePromise: Promise<void> | null = null
   private resumeCertificationPromise: Promise<void> | null = null
   private persistedKeySetEvidence: PersistedKeySetEvidence | undefined
+  private sourceProgressCompatible: boolean | undefined
   private persistedResumeGeneration: PersistedResumeGeneration | undefined
   private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
@@ -2631,6 +2637,14 @@ class PersistedCollectionRuntime<
     return this.persistedKeySetEvidence
   }
 
+  supportsSourceProgress(): boolean {
+    return this.persistence.adapter.supportsSourceProgress === true
+  }
+
+  getSourceProgressCompatible(): boolean | undefined {
+    return this.sourceProgressCompatible
+  }
+
   hasManagedCacheGeneration(): boolean {
     return this.cacheGenerationClaim !== undefined
   }
@@ -2913,6 +2927,7 @@ class PersistedCollectionRuntime<
     if (storageCollectionId !== this.storageCollectionId) return false
     this.persistedResumeGeneration = this.getResumeSnapshotGeneration(snapshot)
     this.persistedKeySetEvidence = snapshot.keySet
+    this.sourceProgressCompatible = snapshot.sourceProgressCompatible
     this.observeStreamPosition(
       snapshot.latestTerm,
       snapshot.latestSeq,
@@ -3620,6 +3635,7 @@ class PersistedCollectionRuntime<
     this.terminalFailure = undefined
     this.resumeCertificationPromise = null
     this.persistedKeySetEvidence = undefined
+    this.sourceProgressCompatible = undefined
     this.persistedResumeGeneration = undefined
     this.resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   }
@@ -4705,6 +4721,7 @@ class PersistedCollectionRuntime<
       rowVersion: streamPosition.rowVersion,
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
       truncate: transaction.truncate,
+      sourceProgress: transaction.sourceProgress,
       mutations,
       rowMetadataMutations: toMetadataMutations(transaction.rowMetadataWrites),
       collectionMetadataMutations: toMetadataMutations(
@@ -6729,6 +6746,24 @@ function createWrappedSyncConfig<
             openTransaction.expectedResumeGenerationOwner =
               runtime.getResumeGenerationOwner()
           },
+          ...(runtime.supportsSourceProgress()
+            ? {
+                expectSourceProgress: (
+                  progress: NonNullable<PersistedTx[`sourceProgress`]>,
+                ) => {
+                  if (startupState.cleanedUp) return
+                  const openTransaction = getOpenTransaction()
+                  if (!openTransaction) {
+                    throw new InvalidPersistedCollectionConfigError(
+                      `resumeSnapshot.expectSourceProgress must be called within an open sync transaction`,
+                    )
+                  }
+                  openTransaction.sourceProgress = progress
+                },
+                getSourceProgressCompatible: () =>
+                  runtime.getSourceProgressCompatible(),
+              }
+            : {}),
         },
       }
 
@@ -7083,6 +7118,7 @@ function createWrappedSyncConfig<
             lifecycleGeneration: openTransaction.lifecycleGeneration,
             expectedResumeGenerationOwner:
               openTransaction.expectedResumeGenerationOwner,
+            sourceProgress: openTransaction.sourceProgress,
             signal,
             prependHydrationRows: (
               rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
@@ -7263,6 +7299,22 @@ function createWrappedSyncConfig<
                   if (active())
                     metadata.persistence.resumeSnapshot.expectCurrentCommit()
                 },
+                ...(metadata.persistence.resumeSnapshot.expectSourceProgress
+                  ? {
+                      expectSourceProgress: (
+                        progress: NonNullable<PersistedTx[`sourceProgress`]>,
+                      ) => {
+                        if (active())
+                          metadata.persistence.resumeSnapshot.expectSourceProgress?.(
+                            progress,
+                          )
+                      },
+                      getSourceProgressCompatible: () =>
+                        active()
+                          ? metadata.persistence.resumeSnapshot.getSourceProgressCompatible?.()
+                          : undefined,
+                    }
+                  : {}),
               },
             },
           },

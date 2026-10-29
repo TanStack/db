@@ -78,13 +78,9 @@ const declaresTypes = (target) =>
 for (const pkg of readdirSync(join(root, `packages`))) {
   const manifest = join(root, `packages`, pkg, `package.json`)
   if (!existsSync(manifest)) continue
-  const {
-    name,
-    private: unpublished,
-    exports = {},
-  } = JSON.parse(readFileSync(manifest, `utf8`))
-  // Examples document published packages only.
-  if (unpublished) continue
+  const { name, exports = {} } = JSON.parse(readFileSync(manifest, `utf8`))
+  // Publication can be deferred while a package's documented API still needs
+  // source types. Keep private workspace packages in the same export mapping.
   for (const [subpath, target] of Object.entries(exports)) {
     // A typed snippet can import only an export that declares types. Untyped
     // exports, such as package.json, a WASM file, or a worker script, are

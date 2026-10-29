@@ -1,5 +1,22 @@
 # Oracle coverage and closeout
 
+## RC npm tag policy, 2026-10-29
+
+The maintainer directed RC versions to npm's `latest` tag on 2026-10-29.
+`CONTRIBUTING.md` records this policy. The release-history model and command/HTTP
+receivers now expect `latest` for candidate and stable uploads. Exact-version
+membership still decides whether an upload is needed; an existing version is
+never republished to move a tag. Existing `rc` aliases are preserved by the
+separate `npm dist-tag add <package>@<version> latest` operation.
+
+Historical campaign records below retain the former `rc`-only authority and
+its P01 findings. They are not current tag-policy evidence. The existing
+histories, comparisons, reach declarations, and run budgets remain intact.
+The maintainer explicitly stopped local tests during this release. No RED,
+GREEN, or mutant campaign was run for this policy change; execution evidence
+is pending CI. The command/HTTP owners do not cover manual tag promotion,
+production npm credentials, or Actions authentication.
+
 ## RC scope partition, 2026-10-29
 
 The [deferred oracle record](oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md)
@@ -8,7 +25,23 @@ their exact recoverable source snapshot and retained evidence. Their detailed
 campaign entries below remain a lossless historical record; those named files
 and appended slices are deferred registrations, not active release coverage or
 closed laws. Original root metadata and the 24 nullable-facade/public-output
-type campaigns remain active. Every release gate remains required.
+type campaigns remain active.
+
+For the staged RC publication, the maintainer temporarily removed the duplicate
+test matrices and DB report merge from the Release workflow on 2026-10-29.
+Release run [40910451885](https://github.com/TanStack/db/actions/runs/40910451885)
+succeeded and reported all 20 included RC versions and the two stable versions
+already published on npm. The release test matrices and report merge are now
+restored. At the maintainer's request, Convex Collection, Preact DB, and React
+Router with DB have their public manifests and consumed first-RC release entries
+restored too. Their initial manual publications and npm trusted publisher setup
+still require verification; restoring publication eligibility does not establish
+npm access.
+The successful release does not close the counterexamples in
+[#2294](https://github.com/TanStack/db/issues/2294),
+[#2281](https://github.com/TanStack/db/issues/2281), or
+[#2296](https://github.com/TanStack/db/issues/2296), or the reach gap in
+[#2287](https://github.com/TanStack/db/issues/2287).
 
 Use [Oracle Testing Rubric](oracle-rubric.md) when adding or reviewing a
 law. This map identifies existing owners, their judgment, and their limits. It
@@ -2693,6 +2726,18 @@ serialization, unavailable key evidence after raw loss, concurrent schema
 migration, WAL across processes, and arbitrary longer transaction histories
 remain with their existing owners or need explicit future witnesses.
 
+The same owner checks the optional source-progress bridge with an independent
+path-of-edges model. A discontinuity stays incompatible across matching and
+empty commits; a repeated endpoint is idempotent; a full replacement repairs
+continuity. Physical key integrity is checked separately after every transaction.
+The fixed/random `sqlite-resume.source-progress` campaigns use 80 runs each,
+seed 2281 and direct seed/path replay. Histories have 3–16 actions plus an initial
+replacement, opaque positions, stale predecessors, duplicates and optional old
+schema migration. Declared reaches require gaps, later matching commits,
+replacement after a gap, duplicate endpoints and migration. The primary Browser
+owner and real OPFS receiver supply source-head convergence evidence; the storage
+model alone does not establish provider framing or cross-host scheduling.
+
 The SQLite resume-snapshot owner also checks a cold, unique-key, non-delete
 full replacement with 205 rows. It compares exact durable rows, row metadata,
 key-set evidence, resume metadata, and applied position at transaction return;
@@ -2914,8 +2959,11 @@ lagging stream applies v1 at `20_0`, and tab B closes before it reaches v2.
 Tab A then shows v1, and the durable `electric:resume` offset is back at
 `20_0`. Nothing redelivers v2 to tab A while it stays open, because its
 stream is already past it. A tab that opens later resumes from `20_0` and
-repairs the cache. The convergence above therefore holds only while the
-lagging tab keeps running or another tab restarts its stream. The
+repairs the cache in that history. Restart formerly failed when a later commit advanced the resume position
+over stale rows (#2281). The eager SQLite bridge now records source
+continuity atomically and requires a fresh snapshot on reopen after a gap;
+see the [repair evidence](oracle-reviews/issue-2281-investigation.md).
+This preserves temporary arrival-order regressions and leaves #2209 open. The
 multi-tab Electric oracle in `browser-db-sqlite-persistence` pins this
 history with `it.fails` beside a passing control in which the lagging tab
 catches up. Ordering the copies would need a generic
@@ -4018,10 +4066,17 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Generated histories in the same file interleave server changes,
       deploys, partial and complete deliveries, every stop except resume
       invalidation, restarts, and reloads across two or three eager tabs
-      (fixed seed 952051961 and a random seed, 60 runs each; the shared
+      (fixed seed 952051961 and a random seed, 80 runs each; the shared
       `TANSTACK_DB_ORACLE_SEED`, `_PATH`, and `_PROPERTY=
       browser.multi-tab-reserved-history` replay one). The
-      model folds committed batches into the expected durable rows. After
+      grammar constructs a 24-step prefix before its unchanged 8–24 arbitrary
+      steps. Every stop kind occurs in a generated order: a source opens a
+      transaction, stops, lets a distinct peer commit, then recovers and catches
+      up. Source tab, initially absent key, and recovery method vary. Four
+      membership toggles restore the original rows before the arbitrary tail.
+      This makes stop/peer reach structural; an earlier CI random campaign
+      missed the SDK-give-up boundary with the unconstrained shuffle.
+      The model folds committed batches into the expected durable rows. After
       every step it judges the durable rows, every Collection status, and
       the rows of each tab with no open transaction; after every tab catches
       up it judges them again. A Collection status changes only through its
@@ -4035,6 +4090,10 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       generated histories and pinned with `it.fails`: a resumed tab that lags
       behind a peer can receive an update for a row the peer already
       deleted, and Electric's resume check puts it in `error`.
+      The published Electric resume-safety contract requires rejecting an
+      unknown partial row. Whether composition must avoid that condition
+      without failing the source remains a separate contract question;
+      this repair does not remove the guard or resolve the pinned expectation.
       The histories also post a peer `collection:reset` on the tabs'
       coordinator channel; no shipped host sends one yet, so this premise is
       controlled. The reset abandons every open reserved transaction, and
@@ -4050,17 +4109,95 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       A delivery may also commit only a prefix of what a stream owes, as a
       server answering at an earlier moment does, so lagging commits are
       generated. The final checkpoint requires the server head (Law 2).
-      Known gap #2209 is the one history that breaks it: a lagging tab
+      Known gap #2209 is one history that breaks it: a lagging tab
       commits an older row and closes for good. Generated histories never
       close a tab for good, and an `it.fails` replay through the same driver
       and checks pins that history.
-      A random CI campaign (seed `-1660880085`, path
-      `55:0:1:4:4:4:1:1:1:1:3:4:4:4:4`) found a second Law 2 history that
-      reproduces on `main`: row 1 reaches v2 and both tabs catch up, then
-      tab B stops, tab A catches up, and tab A stops, and the durable rows
-      lose row 1. The maintainer chose to leave it open with #2281; an
-      `it.fails` replay through the same driver and checks pins it, and the
-      random campaign can still draw it. Owner: this oracle.
+      The [#2281 repair record](oracle-reviews/issue-2281-investigation.md)
+      retains the row-loss and resurrection counterexamples on `82c5f999b`.
+      A lagging source changed rows; another source advanced the shared resume
+      position over the missing change. The eager Electric/SQLite bridge now
+      detects a discontinuous predecessor atomically with rows and metadata.
+      Source continuity remains incompatible until an authoritative replacement;
+      the physical key ledger stays independent, so cached rows remain visible.
+      Reopening a missing, foreign, or discontinuous source token requests a
+      fresh snapshot. The original row-loss replay and both six-step membership
+      replays now pass. The generated `browser.electric-source-prefix` property
+      runs 80 histories with seed 2281 and 80 without a seed, with direct
+      seed/path replay. It crosses initial membership, one to three toggle
+      pairs, swapped source roles, empty/disjoint advancement, drain/no-drain,
+      tab reload or source failure followed by same-Collection restart, and
+      current/missing/foreign progress. Caller positions vary between omitted,
+      initial `-1`, handle-only, numeric offset with handle, and `now`.
+      Declared reach
+      requires all four divergent membership/advancement cells, a draining
+      control, missing/foreign provenance, and divergent recovery through both
+      actual lifecycle paths. It also requires divergent recovery with explicit
+      numeric and `now` positions, plus initial-offset and handle-only controls.
+      Both Browser random registrations and the SQLite
+      source-progress registration stand aside during another property's path
+      replay. The SQLite owner separately
+      checks opaque predecessor paths, sticky gaps, duplicate endpoints,
+      replacement repair, and additive schema migration (80 fixed/random
+      histories each). Disabling gap retention fails both owners; rejecting
+      duplicate endpoints fails the SQLite law. Bypassing startup provenance
+      validation fails the Browser owner.
+      The real installed SDK/HTTP/PostgreSQL/Chromium OPFS receiving driver
+      `e2e/electric-source-prefix-oracle.opfs.spec.ts` shares the source-head
+      judgment. The original ten cells cover both membership directions, empty/disjoint
+      advancement and drain/no-drain, plus missing legacy provenance with
+      disjoint advancement. Each declares held earlier response, stale commit,
+      later advancement, and reopened source comparison. All ten pass; gap and
+      legacy-validation mutants fail the matching real disjoint cells at that
+      comparison. Ten more cells cross numeric and `now` caller positions with
+      both membership directions and current/legacy provenance, plus initial
+      offset and handle-only controls. Eight wrong-row comparisons were RED on
+      `883b565ab` before the eager-only repair; all ten explicit cells now pass.
+      Each explicit cell declares its caller-position reach. A mutant that
+      requests recovery but preserves the caller position fails the final Node
+      source-head comparison (seed 2281, path `1:0:0`). Explicit positions cannot
+      bypass eager source-progress recovery. Other sync modes and explicit
+      malformed/tag/shape regimes retain their earlier behavior and are
+      outside this added evidence. Real foreign-token provenance and arbitrary
+      changes of caller form still need separate receiving witnesses.
+      Each of the source-prefix property's 80 generated inputs now runs both
+      its original history and an interrupted-recovery neighbor (160 histories
+      per campaign). The latter starts recovery without a caller cursor, stops
+      before any source delivery, and reopens with the generated caller form.
+      Actual persisted reset markers before divergent numeric/`now` recovery
+      are required reaches: fixed/random counts are 10/6 and 7/8. Both campaigns
+      fail on `623c59955` before the eager-only reset fix, and pass afterward.
+      The real matrix adds ten interrupted histories across both membership
+      directions and all five caller forms. A held first SDK response prevents
+      replacement publication; the driver observes the durable reset before
+      closing that run. Numeric/`now` give four wrong-row RED comparisons;
+      six neighboring controls pass. All thirty real cells pass after the fix.
+      The reset marker now requires eager recovery and clears the effective
+      caller position. No expectation, model rule, or comparison is relaxed.
+      This is bounded same-version eager Browser evidence, not
+      arbitrary scheduling, mixed client versions, native-device, Electron,
+      on-demand, optimistic, or monotonic-live-write coverage.
+      The final checkpoint now observes a reset-abandoned commit's source
+      failure, restarts it, and only then judges catch-up. The original reset
+      trace (seed `-1115798760`, path `1:4:3:3:3:3:3:3:3:3:3`) and the later
+      no-deploy reset trace (seed `-1371495859`, path
+      `75:0:0:0:0:0:0:1:1:0:0`) pass on unchanged production with that repaired
+      checkpoint. Both remain fixed inputs to the shared driver. A generated
+      reach separately requires recovery first discovered during that final
+      delivery, so an earlier reset failure cannot satisfy this premise.
+      It reached 2 of 80 fixed-seed histories and 6 of 80 random histories.
+      Removing the final restart makes both reset traces fail the final row
+      comparison. The broader Node campaign can also log a leadership term
+      write against a closed test database during teardown (pilot `PILOT/S02`,
+      fixed seed `952051961`). This is distinct from injected stream errors;
+      its user-facing effect is unverified. Owners: broadcast coordination and
+      this host driver. Needed witness: hold the election term write across
+      coordinator disposal and database close, then observe its settlement
+      and resource release on controlled and real hosts. Passing convergence
+      comparisons do not establish clean teardown.
+      A generated cached-row regression also preserves intermediate observations during
+      source-continuity repair. #2209's permanent-close case and #2267's
+      resumed-update gap remain pinned expected failures under this owner.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in

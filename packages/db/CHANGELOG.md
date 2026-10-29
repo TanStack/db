@@ -1,5 +1,119 @@
 # @tanstack/db
 
+## 1.0.0-rc.1
+
+### Major Changes
+
+- Release the first 1.0 candidate. Remove deprecated pre-1.0 APIs and give ([#2171](https://github.com/TanStack/db/pull/2171))
+  published row metadata precedence over colliding selected fields. Structured
+  source spreads and direct source-row returns keep source attribution; new
+  functional objects and other projections receive output Collection metadata.
+  Keep the two packages accidentally released as stable 1.x on their stable
+  release lines. Both stable minor releases require `@tanstack/db@^1.0.0-rc.0`
+  for the RC health and restoration settlement APIs; upgrade DB with them.
+
+  Remove Query Collection’s automatic refetch after mutation handlers. Handlers
+  return `Promise<void>` and must await `collection.utils.refetch()` or write
+  confirmed data with the `write*` utilities; `{ refetch: false }` is removed.
+
+### Minor Changes
+
+- Collect the helpers the framework adapters share into one adapter layer, exported from `@tanstack/db` and marked unstable for external use. It adds `identifyLiveQuery`, which checks a prepared query's identity and source Collection IDs for a hook that compares query identity, and `bindLiveQueryWindow`, the window binding every `useLiveInfiniteQuery` now uses. The window helpers that binding replaces are no longer exported. ([#2235](https://github.com/TanStack/db/pull/2235))
+
+  Add `SourceCollectionIdReuseError`, which a mounted hook that compares query identity throws when a different source Collection appears under a Collection ID it already read.
+
+  Add `rejectLiveQueryInput` and `releaseDeferredOnReclaim` for framework hooks. The first releases the sync starts a rejected query deferred and rethrows the rejection. The second releases a render's deferred sync starts when garbage collection reclaims the live query it built, so a render that never commits, because a sibling threw or it suspended, does not keep its sources deferred. Each released source follows its own start policy, so `startSyncImmediate()` or another hook can still start it.
+
+- Breaking: grouping, includes, and pooling are now opt-in. An app bundles an operator's code only when it imports the value for that operator. Joins do not change. A typical app is about 8 kB smaller after gzip. This app has a query collection, a filtered live query, and React `useLiveQuery`. ([#2232](https://github.com/TanStack/db/pull/2232))
+
+  - An include needs `include()`, `toArray()`, or `materialize()`. Change `issues: q.from(...)` in `select()` to `issues: include(q.from(...))`. A subquery in `select()` without one of these throws `IncludeOperatorRequiredError`.
+  - Aggregates such as `count()` need no change. A `groupBy` with no aggregate takes `groupKeys()`: `.groupBy(groupKeys(({ todo }) => todo.status))`. Without it, the query throws `GroupingOperatorRequiredError`.
+  - Hooks do not pool live queries by default. To share one partition among many equality-filtered queries, pass `pool: pooledLiveQueries` in the hook's query config: `useLiveQuery({ query, pool: pooledLiveQueries })`. Results do not change. Angular's `{ params, query }` form takes `pool` the same way. Any other `pool` value, such as the old boolean, throws `InvalidPoolOptionError`, also for a disabled query. For adapter authors: the `pool` option of `resolveLiveQueryValue` is now `pooledLiveQueries` or `false`, not a boolean. An adapter that reads `pool` from its own options checks it with `configPool` first.
+  - Code that builds query IR by hand must supply the operator code. `IR.Aggregate` takes `groupingCompiler` as its third argument. `IR.IncludesSubquery` takes `includesRuntime` as its fifth argument, before `parentFilters`. Import both from `@tanstack/db`. IR without them throws `GroupingOperatorRequiredError` or `IncludeOperatorRequiredError` when it compiles, unless another aggregate or `groupKeys()` in the query supplies the grouping compiler. Queries that the query builder builds need no change.
+  - Operator code is part of query identity. A hook that re-renders a grouped query without `groupKeys()` now throws `GroupingOperatorRequiredError`. Before, React and Preact kept the grouped query.
+  - Vue: when a changed query fails to compile, `useLiveQuery` no longer shows the rows of the previous query.
+
+- Breaking: Collection keys now always match the declared key type, a string or a number. ([#2266](https://github.com/TanStack/db/pull/2266))
+
+  - A grouped live query that groups by one field now gives a `null`, `undefined`, boolean, or bigint group value a string key. Before, the key was the raw value, so `$key` was `null` for the `null` group. Read a group's key from its `$key`. String and number group values keep their keys.
+  - `sync.write` throws `UndefinedKeyError` or `InvalidKeyError` when `getKey` returns a key that is not a string or a number. Optimistic mutations already threw these errors. For a bigint key, the development message now shows the key instead of failing with a `TypeError`.
+  - `@tanstack/db` no longer exports `SortedMap`, and `SortedMap` no longer has `forEach`. `SortedMap` is the internal ordered map of Collection state.
+  - When one publication applies 512 or more sync operations, the Collection now merges the changed keys into the existing order. Before, it sorted all rows again. With 50,000 rows, a `compare` option, and 600 operations in each sync transaction, the load takes 181 ms instead of 1,589 ms.
+  - Keyed `MultiSet.consolidate` groups entries in nested maps. It no longer encodes each value as a string.
+
+- Collections now answer two questions separately: can the data be shown (`status`), and is it still kept up to date (`health`). Once a query has shown data, a network or backend failure never takes it off the screen. ([#2168](https://github.com/TanStack/db/pull/2168))
+
+  - `status` gains `crashed`: local storage broke (a closed IndexedDB connection, a failed SQLite persistence write or restore, a throwing sync function, or an invariant failure). Nothing recovers it in place, and `reload()` rejects. To recover, call `cleanup({ dependents: true })`, then start the Collection again (for example with `preload()`); it starts with no rows. It reaches every live query and Effect above it. `error` now means only "the first load failed".
+  - Every Collection has `collection.health`, a health node with `status`, `failureReason` (the adapter is still trying), `error` (the adapter stopped, or the first load failed), `reloading`, and `hasErrors`. A live query's `health` has one node per source alias, in query order, and keeps object identity while unchanged. `health:change` fires when it changes. `findProblems(health)` lists the nodes that have a problem, in query order. Each problem (`HealthProblem`) shows its newest failure in `message`, `cause`, and `at`, and lists every failure still open in `errors`, oldest first: each `reportError()` of the sync run until `reportHealthy()`, or each failed request for more data on a live query's node. One error value is one failure: reporting it again changes nothing, and `reportHealthy(error)` removes just that failure, so a query Collection whose failing Query recovers removes only that Query's failures. After a live query is ready, a failed request for more data (a page, a joined row, or a source reload's replay of its data) is an `error` on the query's own node; the source stays healthy.
+  - `collection.reload()` starts a new sync run and keeps the rows, status, and error on screen until the reload completes: when the new run's snapshot (`begin({ snapshot: true })`) or `truncate()` applies, or at its `markReady()`, which keeps the rows when no snapshot came. On a live query it reloads every Collection below it that shows an `error`, through nested live queries, then the query itself when its own node has an `error`, including a failed request for more data. It rejects on a `crashed` Collection. When the cleanup of the sync run that a reload retired rejects, the Collection crashes, also if the rejection comes later. A query in `error` stays there until its `reload()`.
+  - `cleanup()` rejects with `CollectionHasSubscribersError` while a live query with subscribers or an Effect reads the Collection. `cleanup({ dependents: true })` ends them first. `collection.subscribers` lists every dependent.
+  - A local-only Collection's `reload()` keeps its rows, including the user's writes: `initialData` loads only when the Collection starts, or starts again after cleanup.
+  - Persisted Collections have one status. With `initialRender: { strategy: 'network-first' }`, restored rows make the Collection `ready` once the deadline passes or the remote fails; an empty restore stays `loading`. Only a local storage failure crashes a persisted Collection: a failed remote subset request is a failure reason, which the next successful remote request clears.
+
+  Breaking changes and migration:
+
+  | Before                                                                                                      | After                                                                                            |
+  | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+  | hook `isError`                                                                                              | `isLoadingError` (first load failed) or `isCrashed`                                              |
+  | —                                                                                                           | `isSyncError`: `ready` and the health tree has a problem                                         |
+  | `status: 'error'` after a crash                                                                             | `status: 'crashed'`                                                                              |
+  | adapter `markError(error)`                                                                                  | `fail(error)`. After readiness it sets the node's `error` and keeps the rows. Later calls throw. |
+  | `cleanup()` then `preload()` to recover                                                                     | `reload()`                                                                                       |
+  | adapter `begin({ direct: true })`                                                                           | `begin()`: every write applies on the rows the Collection holds, also during a reload            |
+  | a reload's first commit replaced every row                                                                  | `begin({ snapshot: true })` or `truncate()` in the new run replaces them                         |
+  | adapter `markReady()` after `fail()` threw                                                                  | it does nothing                                                                                  |
+  | `cleanup()` while live queries or Effects read the Collection                                               | rejects; unmount first or pass `{ dependents: true }`                                            |
+  | `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()`, `PERSISTED_READINESS` | `status` and `health`                                                                            |
+  | query-db `utils.lastError`, `utils.isError`, `utils.errorCount`, `utils.clearError()`                       | `collection.health`, `reload()`                                                                  |
+  | infinite-query hooks' `error` (React, Preact, Vue, Svelte)                                                  | the root node's `error` in `health`; `fetchNextPage()` still resolves                            |
+
+  Custom sync adapters: keep the run's readiness in your `sync` function. A reload calls `sync` again while `collection.status` still shows the previous run's status and the Collection still holds the previous run's rows. The new run's writes apply on those rows; it replaces every row only with a snapshot, a transaction begun with `begin({ snapshot: true })`, or with its own `truncate()`. The reload completes when that replacement applies, or at the new run's `markReady()`, which keeps the rows when no snapshot came. So send the new run's full state as a snapshot, or write against the kept rows: an `insert` of a key the Collection holds throws `DuplicateKeySyncError`, during a reload as at any time, so write `update` for a kept row, also from a replayed load after the reload completed. A reload keeps every row its new run does not rewrite: core never deletes kept rows on its own, so removing a row the backend deleted is the adapter's job, through a snapshot, a `delete`, or row ownership ([#2269](https://github.com/TanStack/db/issues/2269)). An on-demand `loadSubset` result is partial and is never a snapshot. A live query's own reload keeps its rows and its window until its new run's result is complete. `reportError()` and `reportHealthy()` throw before the first `markReady()` and after `fail()`. `markReady()` after the run is ready, or after its `fail()`, does nothing, so an adapter needs no flag of its own to guard it. A second `fail()` in the same sync run does nothing. A first-ready callback that throws while `sync` runs is reported uncaught, and the Collection stays ready. `reload()` called from inside `sync` or a `loadSubset` call rejects, unless a reload is already in flight, whose promise it returns. Calls after a crash do nothing. For an on-demand Collection, a reload aborts the retired run's `loadSubset` calls and asks the new run's `loadSubset` for the current demand as soon as `sync` returns. Honor the `signal`: when core aborts a load, that load is over for core, and its later resolve or reject decides nothing, holds no readiness, and no replay waits for it. A `loadSubset` that throws synchronously is a rejection: a failed load, which `requestSnapshot()` and `setWindow()` report without throwing. A truncate's or reload's replay decides every request error of the query's demand: its success clears them all, and its failure replaces them with the replay's failures. `useLiveSuspenseQuery` now throws an Error for a failed first load or a crash: the cause itself when it is an Error, otherwise an Error with the problem's message whose `cause` holds the reported value.
+
+### Patch Changes
+
+- Garbage collection no longer cleans up a collection while a transaction that touches it is persisting. Cleaning it up dropped the transaction's optimistic rows while its mutation handler still ran, and rejected waits such as Electric's `awaitTxId`, so a write could fail after the screen that made it unmounted. The `gcTime` delay now starts again when the last such transaction completes or fails, cancels obsolete queued idle cleanup, and preserves the remaining startup grace. Rolling back a manual transaction that stayed pending preserves the existing deadline. Explicit `cleanup()` still starts immediately; a transaction that settles afterward no longer restores another transaction's cleared optimistic rows. ([#2258](https://github.com/TanStack/db/pull/2258))
+
+- A query that joins and includes the same source has two subscriptions to it. Their truncate replays now share one barrier, so neither publishes while the other still loads. When a lazy demand of either fails while a failed replay of the source holds the query's results, the query keeps its last complete result until a later replay of that source succeeds. Before, retiring the other replay's failed demand could publish the window without that demand's rows. ([#2231](https://github.com/TanStack/db/pull/2231))
+
+  Some sources refetch and then report that their pages shifted. An ordered window over such a source no longer skips a row tied with the refetched first page's new end. When the report shows that the page's end moved, the window repairs its first page. It no longer trusts a row that an older tie request installed.
+
+  A window move made while a truncate replay holds a live query's results now applies after that replay, even when a newer truncate discards it. Before, the move could reject, and an older move's window stayed. A reload of the query or of a source still ends the move.
+
+  An ordered, limited query over a source without an order index can read too few rows to fill its window. A join that drops rows can cause this. It no longer reads the whole source then. It reads a prefix twice as long instead. It grows again while that adds rows, so every request stays bounded.
+
+- Keep ordered live queries accurate and loading when source work overlaps. A window with `orderBy` and `limit` no longer stops loading, keeps old rows, or holds acquisitions in these cases: a failed or superseded request, a truncate replay, a source change during a repair, or an on-demand joined source. Recovery after a failure uses one full-source read, and a window move whose load succeeded now resolves. ([#2194](https://github.com/TanStack/db/pull/2194))
+
+  When an adapter's `unloadSubset` throws, TanStack DB now reports the error as an uncaught error and continues as if the release succeeded. The error is no longer a subset failure. It does not set `lastError` or `lastSubsetError`, fail a truncate replay, reject `setWindow()`, or dispose an Effect. `unsubscribe()`, `releaseSnapshot()`, and Effect `dispose()` no longer throw or reject with it.
+
+  The newest `setWindow()` call now wins. A pending source recovery that defers two calls no longer lets the older one set the window. A superseded call that succeeds now resolves only after the newest call settles, so awaiting it shows the window that won.
+
+- Keep a sync transaction that reserved its commit turn from failing when a persisted hydration starts while it is open. Before, only a subset load admitted during the reservation waited for the commit. A subset load admitted earlier, a reload or reset from a peer tab's notice, sequence-gap recovery, or a hydration that a shared scheduler held past its turn advanced the hydration cycle, and the commit then rejected with `a persisted sync transaction cannot cross a hydration cycle`. Electric reserves every stream transaction, so a deploy that made several tabs refetch at once could put their Collections into `error`. Each of these hydrations now waits outside the apply mutex until the reserved transaction commits, then starts. While it waits, readers keep the rows from before it. The `reserveCommitTurn` contract now covers every persisted hydration. ([#2265](https://github.com/TanStack/db/pull/2265))
+
+  A peer reset now applies in arrival order with peer commit notices, so a commit from before the reset can no longer publish a row that the reset removed.
+
+  Electric now abandons its open transaction when its stream stops for good, so hydrations that wait for that transaction can run.
+
+  An abandoned reservation now releases the subset loads that waited for it, as a commit does, so they run. Before, a load admitted while the turn was reserved rejected with `SyncTransactionAbortedError` when the source abandoned the transaction.
+
+- Start the required Collection sync run when an ordinary subscriber follows an abandoned suspended render. Deferred acquisition still starts no idle source sync run or acquisition attempt. ([#2229](https://github.com/TanStack/db/pull/2229))
+
+  Ordinary subscription admission and deferred acquisition resumption throw during cleanup, including automatic GC. Effects created then return disposed handles. Failed setup releases partial ownership, and throwing callbacks cannot prevent healthy observers receiving cleanup status. Subscribers surviving cleanup retain demand for an explicit restart.
+
+  SSR captures each reader's rows and Collection status. Hydration preserves that view through browser preloads, runtime errors, sibling commits, and delayed streamed records. Missing records reject when transport ends. Known pending results survive normal record-stream close. A new stream after client cleanup starts independently of prior failures.
+
+  Empty loading SSR needs no preload. Rendering rows or readiness requires matching query preparation or explicit source Collection preparation. Streaming Suspense prepares its result. Unsupported preparation throws with guidance. Prepared non-streaming Suspense remains supported. The DbClient query hash includes an infinite query's initial limit and offset.
+
+  Apps without `DbClient` exclude its SSR implementation. Its API stays unchanged.
+
+  Svelte roots initialized with `hydrate()` must set `hydrating` on `DbProvider`. Nested providers inherit it. Each provider clears initial hydration after mount so new children read live rows.
+
+- Fix sync metadata reads that missed committed sync writes while an optimistic transaction held them. A sync source now reads its own writes in commit order: `metadata.row.get`, `metadata.collection.get`, and `list()` include committed transactions that have not applied yet, then the open transactions. A transaction begun inside an open one is independent, and a hold no longer changes commit order. A source insert over a different source row is a duplicate even when a seed or a hold is present. ([#2262](https://github.com/TanStack/db/pull/2262))
+
+  Persisted collections treat cached rows as seeds, so a later `DbClient` seed can replace them, also after another tab's notice makes the collection reload from storage. A reload from another tab's notice keeps a seed accepted during a pending transaction, keeps row metadata of rows that do not exist, and keeps a seed's row metadata unless the notice names it. An update over a `DbClient` seed now stores the whole row the collection shows, so a reload or restart keeps the seed's fields. With `rowUpdateMode: 'full'`, an update now replaces its stored row, so a reload or restart no longer brings back fields the update dropped. A reload deletes rows that storage lacks also while a pending transaction holds them. After a notice that requires a full reload, a later notice that names its rows keeps a seed's row metadata again. A schema reset from another tab clears every row and its metadata; in on-demand mode it keeps the `DbClient` seeds the collection holds and still replays demand. Rows that storage holds after a reset keep their metadata, and an equal re-insert of one keeps it too. A commit whose signal aborts before the persisted wrapper applies it no longer takes a `DbClient` seed's place. An insert in the persisted wrapper replaces the row it lands on and writes an `insert` mutation to storage. An equal re-insert keeps the row's metadata without writing it, and the wrapper no longer slows down quadratically with the size of a transaction.
+
+- Updated dependencies [[`43d4ef6`](https://github.com/TanStack/db/commit/43d4ef65cfe5c3cfbce6c56891795cd36a73cc37), [`367ea7c`](https://github.com/TanStack/db/commit/367ea7c11e7dee5ca48ba524e55da2a6935d55fb)]:
+  - @tanstack/db-ivm@1.0.0-rc.1
+
 ## 0.15.2
 
 ### Patch Changes

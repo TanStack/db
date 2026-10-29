@@ -32,10 +32,12 @@ The SSR-friendly API adds six concepts:
 - `@tanstack/react-router-with-db` streams live queries discovered by Suspense
   during a TanStack Start server render.
 
-Existing apps continue to work. `createCollection(...)` and direct collection
-instances still exist. The migration is required when you want SSR-safe request
-isolation, hydration, incremental chunks, Suspense streaming, or the 1.0-ready
-React hook shape.
+`createCollection(...)` and direct collection instances remain supported.
+Adopt descriptors and a `DbClient` when you want SSR-safe request isolation,
+hydration, incremental chunks, or Suspense streaming. These APIs were already
+available in 0.9.2; adopting SSR is optional when upgrading to the RC. For the
+breaking changes from 0.9.2, see
+[Migrating to the 1.0 RC](./migrate-to-1-0-rc.md).
 
 The dependency-array form was removed in the first 1.0 RC:
 
@@ -726,6 +728,11 @@ Add `queryKey` only if the query uses opaque logic or trips the performance
 warning.
 
 ## Migration Guide
+
+This section shows how to adopt SSR from standalone Collections. If your app
+already uses `DbClient`, keep that setup and apply the
+[RC migration changes](./migrate-to-1-0-rc.md), including hook dependency arrays
+and explicit server preparation.
 
 ### 1. Create descriptors instead of SSR singletons
 
