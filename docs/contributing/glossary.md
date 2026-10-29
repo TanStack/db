@@ -98,6 +98,7 @@ until cleanup ends the run.
 | durable anchor | The row version and reset epoch observed before one source sync transaction is sent to a coordinator. If both still match and the exact transaction ID is absent, the replacement leader may apply that transaction once. |
 | exact-ID reconciliation | The replacement leader checks one immutable source transaction ID under the SQLite writer lock after its RPC result becomes indeterminate. A present ID acknowledges the original commit; an absent ID needs an unchanged durable anchor. |
 | reconciliation reload | A peer notification after exact-ID reconciliation that reloads persisted rows even when the receiver has already observed the same stream position. Equal public rows do not publish a second change batch. |
+| source progress token | A sync adapter's opaque identity for one complete materialization at a provider position. Re-delivering that position is idempotent. Its predecessor expectation lets persistence detect a discontinuity between interleaved source commits without ordering provider handles. A discontinuity invalidates source progress evidence until an authoritative replacement. It is separate from a durable row version and a sync-run generation. |
 
 ## Offline outbox terms
 

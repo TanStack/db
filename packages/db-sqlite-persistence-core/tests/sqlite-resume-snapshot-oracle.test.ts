@@ -2,8 +2,13 @@ import { DatabaseSync } from 'node:sqlite'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleReplayRequested,
+  oracleReplayTest, oracleRuns 
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -799,14 +804,183 @@ describe(`SQLite resume snapshots`, () => {
     )
   })
 
+  // A resume token may continue only the baseline that established its
+  // previous token. This is the storage obligation of the optional source
+  // progress protocol: a discontinuity invalidates resume evidence until an
+  // authoritative replacement. It does not reject committed rows or order
+  // opaque tokens. The independent model judges the edges since the last
+  // replacement; ordinary metadata commits cannot erase a missing edge.
+  type ProgressStep = {
+    kind: `advance` | `stale` | `empty` | `snapshot` | `duplicate`
+    pick: number
+  }
+  const progressSteps = fc.array(
+    fc.record<ProgressStep>({
+      kind: fc.constantFrom(
+        `advance`,
+        `stale`,
+        `empty`,
+        `snapshot`,
+        `duplicate`,
+      ),
+      pick: fc.nat(3),
+    }),
+    { minLength: 3, maxLength: 16 },
+  )
+  const progressHistory = fc.record({
+    legacySchema: fc.boolean(),
+    steps: progressSteps,
+  })
+  const runProgressCampaign = async (
+    parameters: ReturnType<typeof oraclePropertyOptions>,
+  ) => {
+    const reach = createOracleReach(`sqlite-resume.source-progress`, [
+      `discontinuous commit`,
+      `matching commit after discontinuity`,
+      `replacement after discontinuity`,
+      `duplicate source position`,
+      `legacy source progress column added`,
+    ])
+    await fc.assert(
+      fc.asyncProperty(
+        progressHistory,
+        async ({ legacySchema, steps: history }) => {
+          reach.beginHistory()
+          const database = new DatabaseSync(`:memory:`)
+          let primary: unknown
+          try {
+            let adapter = new SQLiteCorePersistenceAdapter({
+              driver: createDriver(database),
+            })
+            const target = {
+              kind: `eager` as const,
+              collectionId: `source-progress`,
+            }
+            if (legacySchema) {
+              await adapter.loadResumeSnapshot(target)
+              database.exec(
+                `ALTER TABLE collection_version DROP COLUMN source_progress_incompatible`,
+              )
+              adapter = new SQLiteCorePersistenceAdapter({
+                driver: createDriver(database),
+              })
+              await adapter.loadResumeSnapshot(target)
+              reach.reach(`legacy source progress column added`)
+            }
+            const tokens = [`initial`]
+            let current = `initial`
+            // Model-only path: each edge must begin where its predecessor ended.
+            let edges: Array<{ from: string; to: string }> = []
+            const coherent = () =>
+              edges.every(
+                (edge, index) =>
+                  index === 0 || edge.from === edges[index - 1]!.to,
+              )
+            const steps: Array<ProgressStep> = [
+              { kind: `snapshot`, pick: 0 },
+              ...history,
+            ]
+            for (const [index, step] of steps.entries()) {
+              const wasCoherent = coherent()
+              const previous =
+                step.kind === `stale` || step.kind === `duplicate`
+                  ? tokens[step.pick % tokens.length]!
+                  : current
+              const next =
+                step.kind === `empty` || step.kind === `duplicate`
+                  ? current
+                  : `position-${index}`
+              if (step.kind === `duplicate`)
+                reach.reach(`duplicate source position`)
+              if (step.kind === `snapshot`) {
+                if (!wasCoherent) reach.reach(`replacement after discontinuity`)
+                edges = [{ from: previous, to: next }]
+              } else {
+                if (previous !== current && next !== current)
+                  reach.reach(`discontinuous commit`)
+                if (!wasCoherent && previous === current)
+                  reach.reach(`matching commit after discontinuity`)
+                // Re-delivering the same source position is idempotent; it
+                // contributes no new edge and cannot repair an earlier gap.
+                if (next !== current) edges.push({ from: previous, to: next })
+              }
+              // The baseline adapter ignores this proposed optional field. Keeping
+              // it on a structurally assignable transaction lets the pre-edit RED
+              // reach the semantic comparison instead of failing type/setup.
+              const tx = {
+                txId: `progress-${index}`,
+                term: 1,
+                seq: index + 1,
+                rowVersion: index + 1,
+                truncate: step.kind === `snapshot`,
+                sourceProgress: { key: `source-progress`, previous },
+                mutations:
+                  step.kind === `empty`
+                    ? []
+                    : [
+                        {
+                          type: `insert` as const,
+                          key: `row`,
+                          value: { id: `row`, label: next },
+                        },
+                      ],
+                collectionMetadataMutations: [
+                  { type: `set` as const, key: `source-progress`, value: next },
+                ],
+              }
+              await adapter.applyCommittedTx(target, tx)
+              const observation = await adapter.loadResumeSnapshot(target)
+              expect(
+                observation.sourceProgressCompatible,
+                `source progress at step ${index}: ${JSON.stringify(steps.slice(0, index + 1))}`,
+              ).toBe(coherent())
+              // Physical key integrity and source continuity are separate laws.
+              // A broken source path must not quarantine an intact cached set.
+              expect(observation.keySet).toEqual({ status: `consistent` })
+              expect(
+                observation.collectionMetadata.find(
+                  ({ key }) => key === `source-progress`,
+                )?.value,
+              ).toBe(next)
+              current = next
+              tokens.push(next)
+            }
+          } catch (error) {
+            primary = error
+          } finally {
+            closeDatabasePreservingPrimary(database, primary)
+          }
+        },
+      ),
+      parameters,
+    )
+    console.info(`source progress reach`, Object.fromEntries(reach.counts()))
+    reach.assertReached()
+  }
+  it.skipIf(oracleReplayRequested())(
+    `preserves source progress evidence (fixed seed)`,
+    () => runProgressCampaign({ numRuns: oracleRuns(80), seed: 2281 }),
+  )
+  oracleReplayTest(it, `sqlite-resume.source-progress`)(
+    `preserves source progress evidence (random or replayed)`,
+    () =>
+      runProgressCampaign(
+        oraclePropertyOptions(80, `sqlite-resume.source-progress`),
+      ),
+  )
+
   // The retired-storage and managed-claim checks compare production with independent
   // models of retained generations and claim intervals. The fixed and generated
   // cases share those checks. The startup grammar is the generator whose coverage
   // the fixed startup corpus calibrates.
   declareOracle({
-    check: [assertRetiredStorageHistory, assertManagedClaimReadHistory],
+    check: [
+      assertRetiredStorageHistory,
+      assertManagedClaimReadHistory,
+      runProgressCampaign,
+    ],
     model: [expectedRetainedGenerations],
-    grammar: [startupHistoryArbitrary],
+    grammar: [startupHistoryArbitrary, progressHistory],
   })
 
   fcTest.prop([startupHistoryArbitrary], {

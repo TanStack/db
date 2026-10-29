@@ -1683,6 +1683,8 @@ function createElectricSync<T extends Row<unknown>>(
     const certifyResumeSnapshot = resumeSnapshot?.certify
     const getKeySetEvidence = resumeSnapshot?.getKeySetEvidence
     const expectCurrentCommit = resumeSnapshot?.expectCurrentCommit
+    const expectSourceProgress =
+      syncMode === `eager` ? resumeSnapshot?.expectSourceProgress : undefined
     const persistedKeySetEvidence = getKeySetEvidence?.()
 
     const storedResumeRecord = freshScopedGeneration
@@ -1699,15 +1701,26 @@ function createElectricSync<T extends Row<unknown>>(
       url: shapeOptions.url,
       params: shapeOptions.params as Record<string, unknown> | undefined,
     })
+    // Handles are opaque. Equality of the complete source position is enough
+    // to detect a broken continuation; wall-clock timestamps are not progress.
+    const progressToken = (state: ElectricResumeState | undefined) =>
+      state?.kind === `resume`
+        ? JSON.stringify([state.shapeId, state.handle, state.offset])
+        : undefined
+    const progressKey = `electric:source-progress`
+    let sourceProgress = progressToken(persistedResumeState)
     const hasIncompatiblePersistedResume =
       persistedResumeState?.kind === `resume` &&
       persistedResumeState.shapeId !== shapeIdentity
     // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
     // One fresh replacement establishes consistent evidence for later resumes.
-    const lacksCompletePersistedKeySet =
+    const lacksCompletePersistedResume =
       persistedResumeState?.kind === `resume` &&
-      getKeySetEvidence !== undefined &&
-      persistedKeySetEvidence?.status !== `consistent`
+      ((getKeySetEvidence !== undefined &&
+        persistedKeySetEvidence?.status !== `consistent`) ||
+        (expectSourceProgress !== undefined &&
+          (metadata?.collection.get(progressKey) !== sourceProgress ||
+            resumeSnapshot?.getSourceProgressCompatible?.() !== true)))
     // Claim expiry can leave a partial managed cache without a resume record.
     // Its incompatible key set alone requires a fresh source snapshot.
     const hasIncompatibleManagedCache =
@@ -1722,7 +1735,7 @@ function createElectricSync<T extends Row<unknown>>(
           (malformedPersistedResume ||
             hasIncompatiblePersistedResume ||
             persistedResumeState?.kind === `reset` ||
-            lacksCompletePersistedKeySet ||
+            lacksCompletePersistedResume ||
             (!retainsTagState &&
               persistedResumeState?.kind === `resume` &&
               persistedResumeState.requiresTagState !== false))))
@@ -2047,6 +2060,11 @@ function createElectricSync<T extends Row<unknown>>(
         shapeId: shapeIdentity,
         updatedAt: Date.now(),
         requiresTagState: tagState.hasTags(),
+      }
+      if (expectSourceProgress) {
+        expectSourceProgress({ key: progressKey, previous: sourceProgress })
+        sourceProgress = progressToken(resumeState)
+        metadata?.collection.set(progressKey, sourceProgress)
       }
       lifecycle.resumeState = resumeState
       metadata?.collection.set(`electric:resume`, resumeState)

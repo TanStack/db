@@ -2693,6 +2693,18 @@ serialization, unavailable key evidence after raw loss, concurrent schema
 migration, WAL across processes, and arbitrary longer transaction histories
 remain with their existing owners or need explicit future witnesses.
 
+The same owner checks the optional source-progress bridge with an independent
+path-of-edges model. A discontinuity stays incompatible across matching and
+empty commits; a repeated endpoint is idempotent; a full replacement repairs
+continuity. Physical key integrity is checked separately after every transaction.
+The fixed/random `sqlite-resume.source-progress` campaigns use 80 runs each,
+seed 2281 and direct seed/path replay. Histories have 3–16 actions plus an initial
+replacement, opaque positions, stale predecessors, duplicates and optional old
+schema migration. Declared reaches require gaps, later matching commits,
+replacement after a gap, duplicate endpoints and migration. The primary Browser
+owner and real OPFS receiver supply source-head convergence evidence; the storage
+model alone does not establish provider framing or cross-host scheduling.
+
 The SQLite resume-snapshot owner also checks a cold, unique-key, non-delete
 full replacement with 205 rows. It compares exact durable rows, row metadata,
 key-set evidence, resume metadata, and applied position at transaction return;
@@ -2914,8 +2926,11 @@ lagging stream applies v1 at `20_0`, and tab B closes before it reaches v2.
 Tab A then shows v1, and the durable `electric:resume` offset is back at
 `20_0`. Nothing redelivers v2 to tab A while it stays open, because its
 stream is already past it. A tab that opens later resumes from `20_0` and
-repairs the cache. The convergence above therefore holds only while the
-lagging tab keeps running or another tab restarts its stream. The
+repairs the cache in that history. Restart formerly failed when a later commit advanced the resume position
+over stale rows (#2281). The eager SQLite bridge now records source
+continuity atomically and requires a fresh snapshot on reopen after a gap;
+see the [repair evidence](oracle-reviews/issue-2281-investigation.md).
+This preserves temporary arrival-order regressions and leaves #2209 open. The
 multi-tab Electric oracle in `browser-db-sqlite-persistence` pins this
 history with `it.fails` beside a passing control in which the lagging tab
 catches up. Ordering the copies would need a generic
@@ -3958,7 +3973,7 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       Generated histories in the same file interleave server changes,
       deploys, partial and complete deliveries, every stop except resume
       invalidation, restarts, and reloads across two or three eager tabs
-      (fixed seed 952051961 and a random seed, 60 runs each; the shared
+      (fixed seed 952051961 and a random seed, 80 runs each; the shared
       `TANSTACK_DB_ORACLE_SEED`, `_PATH`, and `_PROPERTY=
       browser.multi-tab-reserved-history` replay one). The
       model folds committed batches into the expected durable rows. After
@@ -3990,17 +4005,54 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       A delivery may also commit only a prefix of what a stream owes, as a
       server answering at an earlier moment does, so lagging commits are
       generated. The final checkpoint requires the server head (Law 2).
-      Known gap #2209 is the one history that breaks it: a lagging tab
+      Known gap #2209 is one history that breaks it: a lagging tab
       commits an older row and closes for good. Generated histories never
       close a tab for good, and an `it.fails` replay through the same driver
       and checks pins that history.
-      A random CI campaign (seed `-1660880085`, path
-      `55:0:1:4:4:4:1:1:1:1:3:4:4:4:4`) found a second Law 2 history that
-      reproduces on `main`: row 1 reaches v2 and both tabs catch up, then
-      tab B stops, tab A catches up, and tab A stops, and the durable rows
-      lose row 1. The maintainer chose to leave it open with #2281; an
-      `it.fails` replay through the same driver and checks pins it, and the
-      random campaign can still draw it. Owner: this oracle.
+      The [#2281 repair record](oracle-reviews/issue-2281-investigation.md)
+      retains the row-loss and resurrection counterexamples on `82c5f999b`.
+      A lagging source changed rows; another source advanced the shared resume
+      position over the missing change. The eager Electric/SQLite bridge now
+      detects a discontinuous predecessor atomically with rows and metadata.
+      Source continuity remains incompatible until an authoritative replacement;
+      the physical key ledger stays independent, so cached rows remain visible.
+      Reopening a missing, foreign, or discontinuous source token requests a
+      fresh snapshot. The original row-loss replay and both six-step membership
+      replays now pass. The generated `browser.electric-source-prefix` property
+      runs 80 histories with seed 2281 and 80 without a seed, with direct
+      seed/path replay. It crosses initial membership, one to three toggle
+      pairs, swapped source roles, empty/disjoint advancement, drain/no-drain,
+      tab reload or source failure followed by same-Collection restart, and
+      current/missing/foreign progress. Declared reach
+      requires all four divergent membership/advancement cells, a draining
+      control, missing/foreign provenance, and divergent recovery through both
+      actual lifecycle paths. Both Browser random registrations and the SQLite
+      source-progress registration stand aside during another property's path
+      replay. The SQLite owner separately
+      checks opaque predecessor paths, sticky gaps, duplicate endpoints,
+      replacement repair, and additive schema migration (80 fixed/random
+      histories each). Disabling gap retention fails both owners; rejecting
+      duplicate endpoints fails the SQLite law. Bypassing startup provenance
+      validation fails the Browser owner.
+      The real installed SDK/HTTP/PostgreSQL/Chromium OPFS receiving driver
+      `e2e/electric-source-prefix-oracle.opfs.spec.ts` shares the source-head
+      judgment. Ten cells cover both membership directions, empty/disjoint
+      advancement and drain/no-drain, plus missing legacy provenance with
+      disjoint advancement. Each declares held earlier response, stale commit,
+      later advancement, and reopened source comparison. All ten pass; gap and
+      legacy-validation mutants fail the matching real disjoint cells at that
+      comparison. This is bounded same-version eager Browser evidence, not
+      arbitrary scheduling, mixed client versions, native-device, Electron,
+      on-demand, optimistic, or monotonic-live-write coverage.
+      The final checkpoint now observes a reset-abandoned commit's source
+      failure, restarts it, and only then judges catch-up. The original reset
+      trace (seed `-1115798760`, path `1:4:3:3:3:3:3:3:3:3:3`) and the later
+      no-deploy reset trace (seed `-1371495859`, path
+      `75:0:0:0:0:0:0:1:1:0:0`) pass on unchanged production with that repaired
+      checkpoint. Both remain fixed inputs to the shared driver. A generated
+      cached-row regression also preserves intermediate observations during
+      source-continuity repair. #2209's permanent-close case and #2267's
+      resumed-update gap remain pinned expected failures under this owner.
       A claimed leftover-replay/reset failure still needs a concrete schedule;
       the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in
