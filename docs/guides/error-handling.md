@@ -662,20 +662,16 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 
 ### Migrating
 
+These changes compare the 0.9.2 API with the 1.0 RC. For the full upgrade,
+see [Migrating to the 1.0 RC](./migrate-to-1-0-rc.md).
+
 | Before | After |
 | --- | --- |
 | `isError` | `isLoadingError` (first load failed) or `isCrashed` (storage broke) |
 | `status: 'error'` after a crash | `status: 'crashed'` |
 | `markError(error)` | `fail(error)` |
-| `reportError(error, { final })` | `reportError(error)` or `fail(error)` |
-| node `phase`, `final`, `isError` | node `failureReason` or `error` |
-| node `instances` | removed |
 | `cleanup()` then `preload()` to recover | `reload()` |
-| `begin({ direct: true })` | `begin()`: every write applies on the kept rows |
-| a reload's first commit replaced every row | `begin({ snapshot: true })` or `truncate()` replaces them |
-| `markReady()` after `fail()` threw | it does nothing |
 | `cleanup()` with live queries mounted | rejects; unmount first or `cleanup({ dependents: true })` |
-| `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()` | `status` and `health` |
 | query-db `utils.lastError`, `isError`, `errorCount`, `clearError()` | `health`, `reload()` |
 
 ## Transaction Error Handling
