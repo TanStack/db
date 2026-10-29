@@ -1,7 +1,7 @@
 /**
- * Candidates must reach rc and stable versions must reach latest, independent
- * of registry history. CONTRIBUTING.md supplies this policy; stable minors are
- * the maintainer's deliberate policy. The shared model states the independent
+ * Candidates and stable versions must reach latest, independent of registry
+ * history (maintainer decision 2026-10-29, recorded in CONTRIBUTING.md).
+ * Stable minors are the maintainer's deliberate policy. The shared model states the independent
  * version/tag law. A registry ledger is controlled input, not a tag classifier.
  *
  * The receiver invokes production publishDuringRc with its default command.
@@ -150,7 +150,7 @@ test.each(['duplicate', 'omission', 'tag', 'version', 'registry', 'access'])(
   'release publish judgment rejects wrong %s observation',
   (fault) => {
     const expected = [
-      { name: packageNames.db, version: '1.0.0-rc.1.10', tag: 'rc' },
+      { name: packageNames.db, version: '1.0.0-rc.1.10', tag: 'latest' },
     ]
     const correct = [
       {
@@ -168,7 +168,7 @@ test.each(['duplicate', 'omission', 'tag', 'version', 'registry', 'access'])(
     else
       wrong[0][fault] =
         fault === 'tag'
-          ? 'latest'
+          ? 'rc'
           : fault === 'version'
             ? '1.0.0-rc.1.9'
             : fault === 'registry'
