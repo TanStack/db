@@ -702,6 +702,7 @@ async function checkAuthorityCase(
     state: `release-invalidation` | `deferred-refill` | `reset-continuation`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
+  observeRelease: (released: boolean) => boolean = (released) => released,
 ): Promise<AuthorityObservation> {
   const ledger: Array<LedgerRequest> = []
   const participants: Array<Promise<unknown>> = []
@@ -1861,7 +1862,7 @@ async function checkAuthorityCase(
       const leaked = ledger.filter(
         (request) =>
           request.outcome === `ok` &&
-          !request.released &&
+          !observeRelease(request.released) &&
           request.index >= replayOwnedBefore &&
           !replayCoverage.has(request) &&
           request.index < authority,
@@ -2782,11 +2783,20 @@ describe(`Ordered source request authority`, () => {
     limit: fc.constantFrom(1 as const, 2 as const),
     synchronous: fc.boolean(),
   })
-  it.each(retirementCampaigns)(
+  // A shrink path belongs to one arbitrary and driver. The receiving grammar
+  // has its own identity so replay never applies a controlled history's path.
+  const retirementReceiverProperty = `ordered-loader.retirement-receiver`
+  const retirementReceiverCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === retirementReceiverProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+  it.each(retirementReceiverCampaigns)(
     `repairs retirement invalidation through a real subscription (%s campaign)`,
     async (campaign) => {
       const reach = createOracleReach(
-        retirementProperty,
+        retirementReceiverProperty,
         [`real-subscription-release`] as const,
         { minimum: 20 },
       )
@@ -2799,38 +2809,40 @@ describe(`Ordered source request authority`, () => {
         }),
         campaign === `fixed`
           ? { seed: 20261029, numRuns: oracleRuns(200) }
-          : oraclePropertyOptions(200, retirementProperty),
+          : oraclePropertyOptions(200, retirementReceiverProperty),
       )
       reach.assertReached()
       process.stderr.write(
-        `${retirementProperty} receiver ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+        `${retirementReceiverProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
       )
     },
   )
 
-  it(`rejects a loader that retains successful acquisitions across a covering repair`, async () => {
-    const retirement = vi
-      .spyOn(
-        OrderedSourceLoader.prototype as unknown as {
-          retireSettledFiniteAcquisitions: () => void
-        },
-        `retireSettledFiniteAcquisitions`,
-      )
-      .mockImplementation(() => {})
+  // Calibrate the shared no-leak judgment with a retained-lease observation.
+  // The real release callbacks still run; only their recorded result changes
+  // at comparison. This works for source and minified builds without reading
+  // private members. The same history first proves the unmodified path agrees.
+  it(`rejects retained successful acquisition observations after a covering repair`, async () => {
+    const testCase: AuthorityCase = {
+      ...ordinaryScenario,
+      indexed: true,
+      limit: 1,
+      settledFirst: true,
+      releaseFault: false,
+      syncRepair: false,
+      history: [{ type: `invalidate`, react: true }],
+    }
+    await checkAuthorityCase(testCase)
+    let substitutions = 0
     try {
       await expect(
-        checkAuthorityCase({
-          ...ordinaryScenario,
-          indexed: true,
-          limit: 1,
-          settledFirst: true,
-          releaseFault: false,
-          syncRepair: false,
-          history: [{ type: `invalidate`, react: true }],
+        checkAuthorityCase(testCase, undefined, undefined, (released) => {
+          if (released) substitutions++
+          return false
         }),
       ).rejects.toThrow(`no leak`)
     } finally {
-      retirement.mockRestore()
+      expect(substitutions).toBeGreaterThan(0)
     }
   })
 

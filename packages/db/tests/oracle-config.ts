@@ -55,6 +55,7 @@ const staticOracleProperties = [
   `ordered-loader.unproven-report`,
   `ordered-loader.replay-continuation`,
   `ordered-loader.retirement-invalidation`,
+  `ordered-loader.retirement-receiver`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
   `replay.ordered-preload-recovery`,
