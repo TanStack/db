@@ -129,3 +129,46 @@ Current/main final receiving receipts are
 The original strict emitted factory/value REDs remain required follow-up
 receivers. An agent-added narrow `Collection<Row, number>` annotation was an
 invalid control on both cuts and supplies no product-failure credit.
+
+## Live-query mutation input and full-handler receiving types
+
+The release also defers a public read/write type conflation. Independent source
+checking compared current `180b920edd6c88a7024ed407cd04934678c7d5bf` with main
+`95460bc875a2259b34eea534e5592a9d0394e73f` using TypeScript 5.9.3. Both already
+carry required virtual metadata from a no-select query's published result into
+its default mutation input and invariant full handler Transaction/Collection.
+The nullable-facade and union-brand repairs do not change this path. Required
+readonly metadata on published read rows remains the accepted law; this record
+does not authorize removing it.
+
+A stable public witness configures `onInsert`, then calls
+`collection.insert({ id: 'one', label: 'new', rank: 1 })` on a live-query
+Collection of that ordinary row. Both revisions reject the business row with
+TS2345 because computed virtual fields are missing. Separately, a reusable
+`UpdateMutationFn<Row>` on explicit live-query configs, core creation and React
+config hooks passes when a fresh Program requests diagnostics first, but fails
+with TS2322/TS2769 after observing its context/published aliases. This checking
+order sensitivity reproduces on both cuts; it is not a stable CLI RED. Ordinary
+source handlers, contextual live handlers and the free-result options factory
+are positive controls. All 26 final independent Programs have no setup errors.
+
+Root explicitly retained this public defect for follow-up while permitting a
+type-only structural recorder annotation in the JavaScript runtime schema
+receiver. That receiver still checks every ordinary handler field and makes no
+public mutation-type claim. Its green histories cannot close this separate gap.
+
+Extend the public metadata type owner and mutation-handler admission owner with
+the same authored business row through live-query factories and framework
+configs. Compare plain mutation input and reusable full-handler admission while
+read results retain required metadata. Add source-public, built/installed and
+framework receiving checkpoints; retain ordinary diagnostics and observed-type
+checking orders, or a stable source discriminator, before production repair.
+
+The exact source/diagnostic matrix SHA256 is
+`3aac69adf834870f402e3334cdfe372f6f07b924ff5f67fd54e406eba69ef14d`;
+the classification report is
+`2e60e015e5f42b24027eb53d13863d76c2b2530c01a49616cc746c70952906ab`.
+Both remain under the original campaign evidence directory as
+`metadata-mutation-classification-matrix.json` and
+`metadata-mutation-type-classification.md`. No production repair or bug-class
+closure is claimed.

@@ -28,8 +28,21 @@ import type {
 } from './live-query-bound-options-oracle.js'
 import type { Collection } from '../src/collection/index.js'
 import type { InitialQueryBuilder } from '../src/query/index.js'
-import type { UpdateMutationFn } from '../src/types.js'
 import type { createOracleReach } from './oracle-reach.js'
+
+type SchemaUpdateHandler = (params: {
+  // The recorder consumes these mutation fields, not the invariant full
+  // Transaction and Collection types. Published row metadata remains allowed;
+  // captureRow records every ordinary field before the shared comparison.
+  transaction: {
+    mutations: ReadonlyArray<{
+      key: string | number
+      original: object
+      modified: object
+      changes: object
+    }>
+  }
+}) => Promise<void>
 
 type RenderInput = { revision: number; proposed: boolean }
 type SchemaCollection = Pick<
@@ -76,7 +89,7 @@ function fixtureSchema(mode: `trim` | `uppercase`) {
 }
 function makeConfig(
   source: ReturnType<typeof createSource>,
-  onUpdate: UpdateMutationFn<BoundSchemaRow>,
+  onUpdate: SchemaUpdateHandler,
   history: BoundSchemaHistory,
   { revision, proposed }: RenderInput,
 ) {
@@ -154,7 +167,7 @@ export async function runBoundSchemaHistory(
   let pending: ReturnType<SchemaCollection[`update`]> | undefined
   let mutations: Array<BoundSchemaMutation> = []
   let renders = 0
-  const onUpdate: UpdateMutationFn<BoundSchemaRow> = async ({
+  const onUpdate: SchemaUpdateHandler = async ({
     transaction,
   }) => {
     expect(gate, `the authored handler hold exists`).toBeDefined()

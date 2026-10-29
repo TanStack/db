@@ -218,3 +218,89 @@ One supplemental runtime assertion initially expected cleared health slots to be
 Artifacts: `/private/tmp/rc2171-oracle-challenge/o22-initial-frozen-070643/evidence/final-receiving-classification.json` (SHA256 `b8e2e501b3ca87b90ba76f61772d99b9e7272620efa886df8a82ec67bed4d13d`). Original factory source: `/private/tmp/rc2171-oracle-challenge/o22-initial-packed-support/exported-receiver-repro.mts` (SHA256 `c6c8c1da415901f4935f611387e7f6a3234b5f9753544256f0680038dcc1b50d`). Current/main final probe receipts have SHA256 `eb157fdc5f567fc04647d206762d794455a998620adc3d9383abf74e0bfc503c` / `2987feb2620ba1699869b12dbe51c811b6b0e6c389d06a176bf9a417d1827495`; each includes exact factory, const and control source paths.
 
 The tarballs derive from frozen input HEAD `5fa6eca05530bb9e1f4748b7c00ae60976da2808`. All 300 frozen production-source files matched committed `6e6034dcb14d35012e1bf41eb035d3c49a52845f` at the recorded continuity check. Later uncommitted LoadSubsetFn guidance comments and fixture-only edits were not rebuilt in this artifact cut. The scope is the initial candidate cut, not the full four-cut release matrix, hosted Actions, production authentication, browser/native hosts or live providers. Offline receiving seeds durable outbox data through the public OutboxManager, then starts a fresh executor; it does not exercise two actual executors creating durable state.
+
+
+## Second CI schema-fixture correction
+
+At pushed head `180b920edd6c88a7024ed407cd04934678c7d5bf`, the framework
+job still rejects the two actual React schema-hook calls with TS2769. The
+previous context annotation did not close that gate. Independent source
+checking now reproduces both diagnostics after observing the context and hook
+return types before requesting diagnostics. The identical cold program passes.
+This is a TypeScript comparison-order distinction, not evidence of different
+runtime dependencies. The wider public mutation-input/full-handler problem
+also reproduces on exact main; its separate follow-up remains open in the
+[scope record](2026-10-29-pr-2171-deferred-oracles.md).
+
+The recorder now declares only the transaction mutation fields it consumes:
+key, original, modified and changes. It still records every ordinary payload
+field and compares against the unchanged independent model. Original and
+corrected runtime JavaScript are byte-identical, SHA256
+`3a560ea22d9bbb4f683b695a245869c8b1e71996e97ca35fac4374b5ae549091`.
+Actual corrected React and Preact programs pass cold and after type observation.
+Injected source-local TS2322 controls still fail in each checked mode. These
+controls establish compiler admission, not a new product-law mutant kill.
+
+Native React runs pass 237 checks in three files, including 21 typed cases;
+Preact passes 80 in three files, including eight typed cases. React live,
+ready-source Suspense and Preact each reach all 864 declared cells exactly once.
+Both full raw package typechecks and focused lint pass. No model, grammar,
+comparison, cleanup, reach requirement, runtime hook or production behavior
+changes. Two independent reviewers accept the bounded correction. Actual
+final-head CI remains required; these local results do not close public
+mutation typing, typed-schema inference, initial suspension or concurrent/SSR
+receiving paths.
+
+Report fingerprints, under the original campaign evidence directory:
+
+- `schema-180-structural-fixture-final-evidence.md`:
+  `a3a7710c5420f970b0b7105b780e50e24bebe354b07fd6301d4c4ee180ba3ed2`.
+- `schema-structural-driver-independent-review.md`:
+  `00456d80b6e356a77c93cc2df67f57961d7dbee075413684b9e4c039c9aa2540`.
+- `schema-structural-handler-second-review.md`:
+  `3c8a12ceada729cee932ff7090f486932c65175239fff76a371904cc800d2fd8`.
+
+
+## SQLite generated reach correction
+
+At `180b920ed`, all 40 random histories complete their public comparisons,
+but the campaign fails because none reaches an aborted-only demand. The
+post-campaign guard did not preserve its seed. Unchanged native seed 18
+reproduces that reach failure after 40 comparisons; this is an honest grammar
+gap, not a production mismatch.
+
+The original unrestricted history grammar and 40-run budget remain unchanged.
+Each normal campaign adds two generated packs of nine legal histories. Every
+pack independently requires all 15 existing reach states through the unchanged
+production driver, independent model and comparison. The required packs have
+their own registered seed/path replay coordinate. Seed-only full campaigns
+still enforce reach; direct path replay runs only its selected property. The
+native failure formatter now preserves the actual campaign seed and cause.
+
+The complete native owner passes five tests. Fixed and fresh-random campaigns
+each run 40 unrestricted plus 18 required histories and pass in 90–92 seconds.
+The formerly failing seed 18 now passes. Direct original and required-property
+replays pass separately; independent review observes the required replay's
+single guarded witness and all 15 states. Removing abort from the required
+pack fails its own reach requirement. Removing the production abort fence in
+an isolated host fails the actual offline status comparison: expected loading,
+observed ready with a row. Independent review repeats both controls.
+
+Only the two outer campaign timeouts increase from 120 to 180 seconds to allow
+for the additional histories. Internal deadlines, observations, comparisons,
+minimum reach and cleanup remain unchanged. Scoped source types, full ESLint,
+oracle admission and the run-budget audit pass. No executable production or
+model changes enter this correction. Controlled Node SQLite observations do
+not establish arbitrary-history, browser or live-provider behavior.
+
+The author report `demand-reach-final-evidence.md` has SHA256
+`cacc43eac3d276157606aefa09136a479e41e8be7db2b79dd805e60bee48ef68`.
+The final source freeze is
+`f2d80fbb4d1f2c2b82cbb0451b3d352b5f4cf1240017e63e45c9f6a0a96887ab`.
+Both are retained under the original campaign evidence directory. Actual
+final-head CI remains required.
+
+The independent verdict `demand-reach-independent-review.md` has SHA256
+`45c2e7d843a6ebd4c3898957c1b4d698450341beda8af8382b13e72959060e43`.
+It binds the copied source hashes, direct replay, both intended control failures
+and the two outer timeout literals.

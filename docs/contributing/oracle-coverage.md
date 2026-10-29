@@ -4266,7 +4266,15 @@ rejects, ignores, or stops and resolves an aborted load; declared reach
 covers an obsolete load that settles, an aborted load that settles, a demand
 settled only by an aborted load, coverage ended by a snapshot, coverage
 recorded twice, a row moved between demands, and a covered demand short of
-rows. Part 2 fails each
+rows. Each campaign also runs two generated packs of nine required histories,
+with varied row keys, unordered demands, and ranks. Every pack must reach all
+15 declared states through the same real driver and shared judgment; an
+unrelated random history cannot supply a missing pack witness. This preserves
+all 40 unrestricted histories. The separate
+`persisted-demand-coverage.required` seed/path coordinate replays a failing
+pack directly; `persisted-demand-coverage.history` retains its original
+history grammar and coordinates. A seed without a path still checks the full
+campaign's reach, and failures report the actual seed. Part 2 fails each
 adapter call of a covered history once, before or after its effect, in
 either session: safety holds for every call, a failed coverage read keeps
 the load ready, and a failed coverage check waits. Part 3 releases the
