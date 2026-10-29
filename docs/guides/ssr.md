@@ -729,8 +729,7 @@ warning.
 
 ## Migration Guide
 
-This section shows how to adopt SSR from standalone Collections. It is an
-optional setup guide, not a list of breaking changes from 0.9.2. If your app
+This section shows how to adopt SSR from standalone Collections. If your app
 already uses `DbClient`, keep that setup and apply the
 [RC migration changes](./migrate-to-1-0-rc.md), including hook dependency arrays
 and explicit server preparation.
