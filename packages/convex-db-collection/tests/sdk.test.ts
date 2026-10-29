@@ -210,7 +210,7 @@ describe.each([`javascript`, `react`] as const)(
           expect(transaction.state).toBe(`persisting`)
           expect(collection.get(`a`)?.text).toBe(`optimistic`)
           remote.snapshot([{ _id: `a`, text: `server` }])
-          await transaction.isPersisted.promise
+          await transaction.when('settled')
           expect(collection.get(`a`)?.text).toBe(`server`)
           expect(seen).not.toContain(`old`)
           subscription.unsubscribe()
@@ -242,7 +242,7 @@ describe.each([`javascript`, `react`] as const)(
           const nextRemote = server(replacement)
           nextRemote.acknowledge()
           nextRemote.snapshot([{ _id: `a`, text: `reconnected` }])
-          await transaction.isPersisted.promise
+          await transaction.when('settled')
           expect(collection.get(`a`)?.text).toBe(`reconnected`)
         },
         () => collection.cleanup(),
@@ -268,7 +268,7 @@ describe.each([`javascript`, `react`] as const)(
             row.text = `optimistic`
           })
           remote.acknowledge(false)
-          await expect(transaction.isPersisted.promise).rejects.toThrow(
+          await expect(transaction.when('settled')).rejects.toThrow(
             `permission denied`,
           )
           expect(collection.get(`a`)?.text).toBe(`old`)

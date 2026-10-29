@@ -1,8 +1,10 @@
+// Supplemental concrete type examples. The generated public consumer law
+// lives in virtual-row-fields-types-oracle.test.ts.
 /**
  * # Which types represent virtual-field-bearing rows?
  *
  * Law and source: `VirtualRowProps` gives Collection and live-query row roots
- * `$hasPendingWrites`, `$synced`, `$origin`, `$key`, and `$collectionId`. The reusable `Ref<T>`
+ * `$hasPendingWrites`, `$origin`, `$key`, and `$collectionId`. The reusable `Ref<T>`
  * contract in `docs/guides/live-queries.md` accepts nested refs without claiming
  * those refs are rows. The output contract established by `includes.test.ts`
  * keeps inline `toArray` and `materialize` selections in their selected shape.
@@ -40,7 +42,6 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { rows } from './virtual-row-fields-type-fixture.js'
 import type { Profile, Row } from './virtual-row-fields-type-fixture.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
@@ -67,7 +68,6 @@ type PublishedValueFor<
 > = TSubject extends `row-root` | `whole-row-child`
   ? T & {
       readonly $hasPendingWrites: boolean
-      readonly $synced: boolean
       readonly $origin: `local` | `remote`
       readonly $key: string | number
       readonly $collectionId: string
@@ -88,10 +88,6 @@ type IndexRefFor<
 
 type VirtualVariant = PublishedValueFor<Variant, `row-root`>
 
-declareOracle({
-  typeModel: [`PublishedValueFor`, `QueryRefFor`, `IndexRefFor`],
-})
-
 describe(`virtual row field type boundary`, () => {
   test(`WithoutVirtualProps preserves discriminated row unions`, () => {
     expectTypeOf<WithoutVirtualProps<VirtualVariant>>().toEqualTypeOf<Variant>()
@@ -106,7 +102,8 @@ describe(`virtual row field type boundary`, () => {
       q.from({ row: rows }).select(({ row }) => {
         expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
         expectTypeOf(row.$hasPendingWrites).toEqualTypeOf<RefLeaf<boolean>>()
-        expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
+        // @ts-expect-error The removed alias is absent from row types.
+        row.$synced
         expectTypeOf(row.$origin).toEqualTypeOf<RefLeaf<`local` | `remote`>>()
         expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
         profileLabelIs(row.profile)
@@ -117,7 +114,7 @@ describe(`virtual row field type boundary`, () => {
         // @ts-expect-error Nested user objects are not collection rows.
         row.profile.$key
         // @ts-expect-error Optional nested user objects are not collection rows.
-        row.optionalProfile?.$synced
+        row.optionalProfile?.$hasPendingWrites
         // @ts-expect-error Nullable nested user objects are not collection rows.
         row.nullableProfile?.$origin
 
@@ -129,7 +126,8 @@ describe(`virtual row field type boundary`, () => {
     expectTypeOf(result.profile).toEqualTypeOf<Profile>()
     expectTypeOf(result.$key).toEqualTypeOf<string | number>()
     expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
-    expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+    // @ts-expect-error The removed alias is absent from row types.
+    result.$synced
     expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
     expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
     // @ts-expect-error A selected nested user object remains a value, not a row.
@@ -145,7 +143,8 @@ describe(`virtual row field type boundary`, () => {
       expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
       expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
       expectTypeOf(row.$hasPendingWrites).toEqualTypeOf<RefLeaf<boolean>>()
-      expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
+      // @ts-expect-error The removed alias is absent from row types.
+      row.$synced
       expectTypeOf(row.$origin).toEqualTypeOf<RefLeaf<`local` | `remote`>>()
       profileLabelIs(row.profile)
       if (row.optionalProfile) profileLabelIs(row.optionalProfile)
@@ -155,7 +154,7 @@ describe(`virtual row field type boundary`, () => {
       // @ts-expect-error Nested user objects are not collection rows.
       row.profile.$key
       // @ts-expect-error Optional nested user objects are not collection rows.
-      row.optionalProfile?.$synced
+      row.optionalProfile?.$hasPendingWrites
       // @ts-expect-error Nullable nested user objects are not collection rows.
       row.nullableProfile?.$origin
 
@@ -229,7 +228,8 @@ describe(`virtual row field type boundary`, () => {
     expectTypeOf(
       result.selectedWholeRows[0]!.$hasPendingWrites,
     ).toEqualTypeOf<boolean>()
-    expectTypeOf(result.selectedWholeRows[0]!.$synced).toEqualTypeOf<boolean>()
+    // @ts-expect-error The removed alias is absent from row types.
+    result.selectedWholeRows[0]!.$synced
     expectTypeOf(result.selectedWholeRows[0]!.$origin).toEqualTypeOf<
       `local` | `remote`
     >()
@@ -248,9 +248,8 @@ describe(`virtual row field type boundary`, () => {
     expectTypeOf(result.unmatchedRows[0]!.$hasPendingWrites).toEqualTypeOf<
       boolean | undefined
     >()
-    expectTypeOf(result.unmatchedRows[0]!.$synced).toEqualTypeOf<
-      boolean | undefined
-    >()
+    // @ts-expect-error The removed alias is absent from row types.
+    result.unmatchedRows[0]!.$synced
     expectTypeOf(result.unmatchedRows[0]!.$origin).toEqualTypeOf<
       `local` | `remote` | undefined
     >()

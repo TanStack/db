@@ -216,7 +216,7 @@ export class PersistenceObject extends DurableObject {
         }
         await this.collectionReady
         const tx = this.collection.insert(requestBody.todo)
-        await tx.isPersisted.promise
+        await tx.when(`settled`)
 
         return jsonResponse(200, {
           ok: true,

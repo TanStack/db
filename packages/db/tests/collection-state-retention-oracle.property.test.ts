@@ -939,7 +939,7 @@ it(`rejects a partial update applied as a full replacement`, async () => {
     ),
     // A row observation must reject the replaced row, not the mutant checkpoint.
   ).rejects.toThrow(
-    /whole forward publication|: reads .* expected |rows visible when isPersisted settled/,
+    /whole forward publication|: reads .* expected |rows visible when settlement completed/,
   )
 })
 it(`rejects a default lost only after settlement`, async () => {

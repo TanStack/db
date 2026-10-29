@@ -6,5 +6,5 @@ export function runWithCommitCompletion<T extends object>(
   onCommit?: () => Promise<unknown> | undefined,
 ): Promise<unknown> {
   const transaction = run()
-  return onCommit?.() ?? transaction.isPersisted.promise
+  return onCommit?.() ?? transaction.when(`settled`)
 }

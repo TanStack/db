@@ -325,7 +325,8 @@ describe(`sync publication reentrancy`, () => {
         onUpdate: () => persistence.promise,
         onDelete: () => persistence.promise,
       })
-      const requests: Array<{ isPersisted: { promise: Promise<unknown> } }> = []
+      const requests: Array<{ when: (state: 'settled') => Promise<unknown> }> =
+        []
       const apply = (intent: ReadyIntent) => {
         requests.push(
           intent.type === `delete`
@@ -361,7 +362,8 @@ describe(`sync publication reentrancy`, () => {
               change.type !== `delete` &&
               sourceValues.has(change.value.value) &&
               prior?.key !== change.key &&
-              (!change.value.$synced || change.value.$origin !== `remote`)
+              (change.value.$hasPendingWrites ||
+                change.value.$origin !== `remote`)
             )
               violations.push(`source row ${change.key} published as local`)
             if (change.type === `delete`) mirror.delete(change.key)
@@ -448,7 +450,7 @@ describe(`sync publication reentrancy`, () => {
         persistence.resolve()
         await Promise.all(
           requests.map((request) =>
-            request.isPersisted.promise.catch(() => undefined),
+            request.when(`settled`).catch(() => undefined),
           ),
         )
         await collection.cleanup()

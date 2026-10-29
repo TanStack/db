@@ -7,7 +7,6 @@ import {
   createLiveQuerySourceIdClaims,
   deepEquals,
   getLiveQueryKey,
-  getPreparedLiveQueryIdentity,
   getSourceObjectToken,
   getStableValueHash,
   identifyLiveQuery,
@@ -53,7 +52,6 @@ const DEFAULT_SUSPENSE_GC_TIME_MS = 5000
 const DERIVED_IDENTITY_SINGLE_RENDER_WARN_MS = 16
 const DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD = 10
 const DERIVED_IDENTITY_TOTAL_WARN_MS = 50
-const warnedDepsCallsites = new Set<string>()
 const warnedDerivedIdentityCallsites = new Set<string>()
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
@@ -150,30 +148,6 @@ export type ConditionalUseLiveQueryConfig<TContext extends Context> =
           q: InitialQueryBuilder,
         ) => ConfiguredQueryBuilder<TContext> | undefined | null)
   }
-
-export function warnDeprecatedDepsArray(
-  hookName: `useLiveQuery` | `useLiveInfiniteQuery` = `useLiveQuery`,
-): void {
-  if (!(
-    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_DEPRECATION_WARNINGS`) &&
-    process.env.NODE_ENV !== `production`
-  )) {
-    return
-  }
-
-  const callsite = getWarningCallsite(4)
-  if (warnedDepsCallsites.has(callsite)) {
-    return
-  }
-  warnedDepsCallsites.add(callsite)
-  const replacement =
-    hookName === `useLiveQuery`
-      ? `useLiveQuery({ query })`
-      : `useLiveInfiniteQuery(query, { queryKey })`
-  console.warn(
-    `[${hookName}] The dependency-array form is deprecated and will be removed in 1.0. Use ${replacement} instead. Provide queryKey only for functional/opaque queries or to avoid deriving identity from structured query IR on render.`,
-  )
-}
 
 function getCurrentTime(): number {
   return typeof performance !== `undefined` &&
@@ -316,7 +290,6 @@ export function prepareDerivedQuery(
 /**
  * Create a live query using a query function.
  * @param queryFn - Query function that defines what data to fetch
- * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data, state, and status information
  * @example
  * // Prefer config object syntax
@@ -385,7 +358,6 @@ export function prepareDerivedQuery(
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -399,7 +371,6 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
   data: InferResultType<TContext> | undefined
@@ -413,7 +384,6 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => LiveQueryCollectionConfig<TContext> | undefined | null,
-  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
   data: InferResultType<TContext> | undefined
@@ -431,7 +401,6 @@ export function useLiveQuery<
   queryFn: (
     q: InitialQueryBuilder,
   ) => Collection<TResult, TKey, TUtils> | undefined | null,
-  deps?: Array<unknown>,
 ): {
   state: Map<TKey, TResult> | undefined
   data: Array<TResult> | undefined
@@ -455,7 +424,6 @@ export function useLiveQuery<
     | Collection<TResult, TKey, TUtils>
     | undefined
     | null,
-  deps?: Array<unknown>,
 ): {
   state:
     Map<string | number, GetResult<TContext>> | Map<TKey, TResult> | undefined
@@ -471,7 +439,6 @@ export function useLiveQuery<
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data, state, and status information
  * @example
  * // Basic config object usage
@@ -517,30 +484,6 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 7: Accept config object with a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   config: ConditionalUseLiveQueryConfig<TContext>,
-): {
-  state: Map<string | number, GetResult<TContext>> | undefined
-  data: InferResultType<TContext> | undefined
-  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
-  status: UseLiveQueryStatus
-  isEnabled: boolean
-} & LiveQueryStatusFlags
-
-// Overload 8: Accept config object with legacy deps
-export function useLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<unknown>,
-): {
-  state: Map<string | number, GetResult<TContext>>
-  data: InferResultType<TContext>
-  collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus // Can't be disabled when query always returns a builder
-  isEnabled: true // Always true when query always returns a builder
-} & LiveQueryStatusFlags
-
-// Overload 9: Accept config object with legacy deps and a query that can return undefined/null
-export function useLiveQuery<TContext extends Context>(
-  config: ConditionalUseLiveQueryConfig<TContext>,
-  deps: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
   data: InferResultType<TContext> | undefined
@@ -609,19 +552,13 @@ export function useLiveQuery<
 } & LiveQueryStatusFlags
 
 // Implementation - use function overloads to infer the actual collection type
-export function useLiveQuery(
-  configOrQueryOrCollection: any,
-  deps?: Array<unknown>,
-) {
-  return useLiveQueryImpl(configOrQueryOrCollection, deps)
+export function useLiveQuery(configOrQueryOrCollection: any) {
+  return useLiveQueryImpl(configOrQueryOrCollection)
 }
 
 /** @internal Shared implementation for the Suspense wrapper. */
-export function useLiveQueryForSuspense(
-  configOrQueryOrCollection: any,
-  deps: Array<unknown> | undefined,
-) {
-  return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
+export function useLiveQueryForSuspense(configOrQueryOrCollection: any) {
+  return useLiveQueryImpl(configOrQueryOrCollection, true)
 }
 
 // What one hook instance keeps across renders. It lives in a single ref
@@ -629,7 +566,7 @@ export function useLiveQueryForSuspense(
 function createHookInstance(dbClient: DbClient | undefined) {
   return {
     collection: null as Collection<object, string | number, {}> | null,
-    deps: null as Array<unknown> | null,
+    identityDeps: null as Array<unknown> | null,
     config: null as unknown,
     client: dbClient,
     derivedIdentityProfiler: {
@@ -651,18 +588,13 @@ function createHookInstance(dbClient: DbClient | undefined) {
   }
 }
 
-function useLiveQueryImpl(
-  configOrQueryOrCollection: any,
-  deps: Array<unknown> | undefined,
-  forSuspense = false,
-) {
+function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
   const contextDbClient = useOptionalDbClient()
   // Check if it's already a collection
   const inputIsCollection = isCollection(configOrQueryOrCollection)
   const dbClient = inputIsCollection
     ? contextDbClient
     : (getExplicitDbClient(configOrQueryOrCollection) ?? contextDbClient)
-  const resolvedDeps = deps ?? []
 
   const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
   const instance = (instanceRef.current ??= createHookInstance(dbClient))
@@ -682,34 +614,12 @@ function useLiveQueryImpl(
     let preparedQueryValue: unknown | typeof unpreparedQueryValue =
       unpreparedQueryValue
     let identityDeps: ReadonlyArray<unknown>
-    let depsQueryIdentity: unknown = unpreparedQueryValue
     let streamIdentity: unknown = undefined
     let identityError: UnhashableQueryIRError | undefined
 
     if (queryKey) {
       identityDeps = queryKey
       streamIdentity = [`queryKey`, queryKey]
-    } else if (deps !== undefined) {
-      identityDeps = resolvedDeps
-      // Deps decide reuse. Only hydration and Suspense read the query hash
-      // before compiling; every compile checks the identity below.
-      if (dbClient || forSuspense) {
-        preparedQueryValue = prepareQueryValue(
-          configOrQueryOrCollection,
-          dbClient,
-          instance.deferredCollections,
-        )
-        try {
-          depsQueryIdentity = getPreparedLiveQueryIdentity(preparedQueryValue)
-          streamIdentity = [`deps`, resolvedDeps, depsQueryIdentity]
-        } catch (error) {
-          // The dependency list, not this hash, decides reuse: an unhashable
-          // query leaves hydration without a key and rejects only when it
-          // compiles.
-          if (!(error instanceof UnhashableQueryIRError)) throw error
-          identityError = error
-        }
-      }
     } else if (inputIsCollection) {
       identityDeps = []
       streamIdentity = [`collection`, configOrQueryOrCollection.id]
@@ -737,10 +647,6 @@ function useLiveQueryImpl(
           throw error
         }
       }
-    }
-
-    if (deps !== undefined) {
-      warnDeprecatedDepsArray()
     }
 
     const canReuseSuspenseKey =
@@ -787,11 +693,8 @@ function useLiveQueryImpl(
     const suspenseCollection = suspenseEntry?.collection
 
     const identityChanged =
-      instance.deps === null ||
-      (deps !== undefined
-        ? instance.deps.length !== identityDeps.length ||
-          instance.deps.some((dep, index) => dep !== identityDeps[index])
-        : !deepEquals(instance.deps, identityDeps))
+      instance.identityDeps === null ||
+      !deepEquals(instance.identityDeps, identityDeps)
 
     // Check if we need to create/recreate the collection
     const needsNewCollection =
@@ -834,19 +737,7 @@ function useLiveQueryImpl(
             instance.deferredCollections,
           )
         }
-        if (queryKey === undefined && deps !== undefined) {
-          // A dependency list decides reuse, so check the query whenever the
-          // hook binds a live query, compiled or taken from the Suspense
-          // cache: it needs a stable identity and keeps its sources' IDs.
-          identifyLiveQuery(
-            preparedQueryValue,
-            getIdentityScope(instance.sourceIds, dbClient, `useLiveQuery`),
-            // Reuse the identity this render derived for hydration.
-            depsQueryIdentity === unpreparedQueryValue
-              ? undefined
-              : () => depsQueryIdentity,
-          )
-        }
+
         if (suspenseCollection) {
           instance.collection = suspenseCollection
         } else {
@@ -919,7 +810,7 @@ function useLiveQueryImpl(
           }
         }
         instance.config = configOrQueryOrCollection
-        instance.deps = [...identityDeps]
+        instance.identityDeps = [...identityDeps]
       }
       instance.client = dbClient
       instance.queryHash = queryHash

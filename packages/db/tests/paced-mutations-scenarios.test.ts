@@ -678,7 +678,7 @@ describe(`paced mutation timeline oracle`, () => {
         await vi.advanceTimersByTimeAsync(0)
         expect(started).toEqual([1, 2, 3])
         for (const transaction of [first, second, third]) {
-          expect(await transaction.isPersisted.promise).toBe(transaction)
+          expect(await transaction.when('settled')).toBe(transaction)
         }
       },
       async () => {
@@ -1968,7 +1968,7 @@ for (const admission of [`admitted`, `dropped`, `queued`] as const)
       const transaction = create.mock.results.at(-1)?.value as
         Transaction<{ id: number }> | undefined
       if (transaction?.state === `pending`) {
-        void transaction.isPersisted.promise.catch(() => {})
+        void transaction.when('settled').catch(() => {})
         transaction.rollback({ isSecondaryRollback: true })
       }
       create.mockRestore()

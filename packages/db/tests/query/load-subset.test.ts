@@ -143,7 +143,7 @@ async function expectPersistingLoadIsApplied(
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     if (persisting) {
       transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
     }
@@ -169,7 +169,7 @@ async function expectPersistingLoadIsApplied(
       expect(source.get(`r2`)).toBeUndefined()
 
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
     }
 
     const result = await ready
@@ -243,7 +243,7 @@ async function expectAppliedReceiptTiming(
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     if (gate === `parked`) {
       transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
     }
@@ -279,7 +279,7 @@ async function expectAppliedReceiptTiming(
       expect(fulfilled).toBe(false)
       expect(source.get(`remote`)).toBeUndefined()
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
     }
 
     await pending
@@ -348,7 +348,7 @@ async function expectAppliedLoadDoesNotFlushEarlierParkedSync() {
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
     publishUnrelated()
     const live = createLiveQueryCollection((query) =>
@@ -371,7 +371,7 @@ async function expectAppliedLoadDoesNotFlushEarlierParkedSync() {
     expect(source.get(`unrelated`)).toBeUndefined()
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await expect(ready).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: `r1` }),
@@ -438,7 +438,7 @@ async function expectCompletionWaitsForAppliedRows() {
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
     publishUnrelated()
     const first = source._sync.loadSubset({})
@@ -452,7 +452,7 @@ async function expectCompletionWaitsForAppliedRows() {
     expect(source.get(`r1`)).toBeUndefined()
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await Promise.all([first, concurrent])
     expect(source.get(`r1`)).toEqual(
       expect.objectContaining({ id: `r1`, projectId: `p1` }),
@@ -539,7 +539,7 @@ async function expectConcurrentStreamCommitStaysParked(
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
     const load = requirePendingLoadSubsetResult(source._sync.loadSubset({}))
     void load.catch(() => undefined)
@@ -564,7 +564,7 @@ async function expectConcurrentStreamCommitStaysParked(
       return
     }
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await load
     expect(source.get(`unrelated`)).toEqual(
       expect.objectContaining({ id: `unrelated`, projectId: `p2` }),
@@ -652,7 +652,7 @@ async function expectAbortedReceiptDoesNotSettleDemand(
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
     const first = requirePendingLoadSubsetResult(
       source._sync.loadSubset({ signal: controller.signal }),
@@ -662,7 +662,7 @@ async function expectAbortedReceiptDoesNotSettleDemand(
     }
     controller.abort()
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     // An accepted transaction always applies, so the row publishes when the
     // mutation settles. A caller that aborted still sees `AbortError`.
     if (abortPhase === `while-parked`)
@@ -726,7 +726,7 @@ async function expectAbortDuringPublicationDoesNotCancelReceipt() {
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() =>
       source.insert({ id: `local`, projectId: `pending` }),
     )
@@ -740,7 +740,7 @@ async function expectAbortDuringPublicationDoesNotCancelReceipt() {
       source._sync.loadSubset({ signal: controller.signal }),
     )
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     await expect(load).resolves.toBeUndefined()
     expect(controller.signal.aborted).toBe(true)
     expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
@@ -792,7 +792,7 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() =>
       source.insert({ id: `local`, projectId: `pending` }),
     )
@@ -893,7 +893,7 @@ async function expectCleanupRejectsDemandOnce() {
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
     const load = requirePendingLoadSubsetResult(source._sync.loadSubset({}))
     void load.catch(() => undefined)
@@ -911,7 +911,7 @@ async function expectCleanupRejectsDemandOnce() {
     expect(settlements).toBe(1)
 
     persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
+    await transaction.when('settled').catch(() => undefined)
     await Promise.resolve()
     expect(settlements).toBe(1)
 
@@ -984,7 +984,7 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
       id: `optimistic`,
       value: `optimistic`,
     })
-    settlement = transaction.isPersisted.promise
+    settlement = transaction.when('settled')
     begin()
     write({ type: `insert`, value: { id: `synced`, value: `synced` } })
     commit()

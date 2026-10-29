@@ -258,7 +258,7 @@ function referenceRows(
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
-/** Row data fields only; collection virtual props such as `$synced` are not data. */
+/** Row data fields only; collection virtual props such as `$hasPendingWrites` are not data. */
 function rowData(row: Row): Row {
   return { id: row.id, name: row.name, seeded: row.seeded }
 }
@@ -863,7 +863,7 @@ describe(`DbClient hydration interleaving oracle`, () => {
           void Promise.resolve(receipt).catch(() => undefined)
         }
         release()
-        await mutation?.isPersisted.promise.catch(() => undefined)
+        await mutation?.when('settled').catch(() => undefined)
         expectInterleavedRows(
           observedRows(collection.values()).filter((row) => row.id !== `local`),
           history,

@@ -153,7 +153,7 @@ export function createPacedMutations<
     const completion = strategyCommit()
     onStarted?.(completion)
     completion.catch(() => {
-      // Persistence failures are reported by transaction.isPersisted.promise.
+      // Persistence failures are reported by transaction.when('settled').
     })
     return transaction
   }

@@ -273,7 +273,7 @@ async function runHistory(h: Scenario) {
     transaction.mutate(() =>
       source.insert({ id: `hold`, version: 0, value: 0, kind: `hold` }),
     )
-    held = { release: pending.resolve, done: transaction.isPersisted.promise }
+    held = { release: pending.resolve, done: transaction.when('settled') }
   }
   const release = async () => {
     if (!held) return

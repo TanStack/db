@@ -186,7 +186,7 @@ describe(`standalone descriptor query binding`, () => {
       ),
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
-      renderHook(() => useLiveQuery({ query: unboundQuery }, [])),
+      renderHook(() => useLiveQuery({ query: unboundQuery })),
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
       renderHook(() =>
@@ -197,7 +197,7 @@ describe(`standalone descriptor query binding`, () => {
       ),
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
-      renderHook(() => useLiveSuspenseQuery(() => unboundQuery, [])),
+      renderHook(() => useLiveSuspenseQuery(() => unboundQuery)),
     ).toThrow(/requires a DbClient.*DbProvider/)
   })
   it(`rejects a different source after a hook registered the same stream hash`, async () => {

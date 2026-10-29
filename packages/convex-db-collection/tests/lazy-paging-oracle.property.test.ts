@@ -568,7 +568,7 @@ it(`waits for applied receipts, respects abort and fences callbacks across resta
                 `lazy abort: accepted rows must apply first`,
               ).toBe(false)
               release()
-              await transaction.isPersisted.promise
+              await transaction.when('settled')
               await f.remote.pump()
               await expect(loading.result).rejects.toMatchObject({
                 name: `AbortError`,
@@ -808,7 +808,7 @@ it(`keeps the newer establishing receipt through publication reentry`, async () 
           await withTestCleanup(
             async () => {
               open1()
-              await firstBlock.isPersisted.promise
+              await firstBlock.when('settled')
               await f.remote.pump()
               expect(started).toBe(true)
               expect(
@@ -833,7 +833,7 @@ it(`keeps the newer establishing receipt through publication reentry`, async () 
               ).toBe(false)
               reach.reach(`cached-load-waits-for-latest`)
               open2()
-              await secondBlock!.isPersisted.promise
+              await secondBlock!.when('settled')
               await f.remote.pump()
               await first.complete()
               await second!.complete()

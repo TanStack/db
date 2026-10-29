@@ -85,10 +85,7 @@ describePowerSyncSchema(`PowerSync Schema Integration`, () => {
         const first = collection.insert({ id: randomUUID(), name: `aname` })
         const second = collection.insert({ id: randomUUID(), name: null })
         expect(collection.size).eq(2)
-        await Promise.all([
-          first.isPersisted.promise,
-          second.isPersisted.promise,
-        ])
+        await Promise.all([first.when(`settled`), second.when(`settled`)])
 
         expectInsertValidation(
           () => collection.insert({} as any),
@@ -206,7 +203,7 @@ describePowerSyncSchema(`PowerSync Schema Integration`, () => {
             ? item.created_at.getTime()
             : undefined,
         ).eq(1710381566535)
-        await result.isPersisted.promise
+        await result.when(`settled`)
         expect(
           await db.getAll(
             `SELECT id, name, author, created_at, archived FROM documents WHERE id = ?`,
@@ -306,7 +303,7 @@ describePowerSyncSchema(`PowerSync Schema Integration`, () => {
         expect(item?.created_at instanceof Date).true
         expect(item?.created_at?.getTime()).eq(1710381566535)
         expect(item?.archived).toBe(false)
-        await result.isPersisted.promise
+        await result.when(`settled`)
         expect(
           await db.getAll(
             `SELECT id, name, author, created_at, archived FROM documents WHERE id = ?`,
@@ -391,7 +388,7 @@ describePowerSyncSchema(`PowerSync Schema Integration`, () => {
           archived: 0,
         })
         const item = collection.get(id)
-        await result.isPersisted.promise
+        await result.when(`settled`)
         expect(item?.name instanceof MyDataClass).true
         expect(item?.name?.options.value).eq(`document`)
         expect(

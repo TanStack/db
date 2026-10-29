@@ -1411,7 +1411,7 @@ async function runOptimisticReplayScenario(
   const transaction = createTransaction({
     mutationFn: () => mutation.promise,
   })
-  void transaction.isPersisted.promise.catch(() => {})
+  void transaction.when(`settled`).catch(() => {})
   let unsubscribed = false
 
   try {
@@ -1454,7 +1454,7 @@ async function runOptimisticReplayScenario(
     else replay.reject(replayFailure)
     await flushPromises()
     mutation.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     await flushPromises()
     await flushPromises()
 

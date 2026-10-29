@@ -279,7 +279,7 @@ async function createPersistedDriver(
   let holdCount = 0
   // Signals of the outermost transactions committed during a read hold.
   let readCommits: Array<AbortController> = []
-  let blocker: { isPersisted: { promise: Promise<unknown> } } | undefined
+  let blocker: { when: (state: 'settled') => Promise<unknown> } | undefined
   const receipts: Array<Promise<void>> = []
   const rejections: Array<string> = []
   const receiptStates: Array<ReceiptState> = []
@@ -326,7 +326,7 @@ async function createPersistedDriver(
     blocker = undefined
     resolveMutation?.()
     resolveMutation = undefined
-    await pending?.isPersisted.promise
+    await pending?.when('settled')
   }
   const asMetadata = (value: unknown) =>
     value === undefined ? {} : { metadata: value as Record<string, unknown> }

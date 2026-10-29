@@ -74,7 +74,7 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
           await runWithCommitCompletion(run, onCommit)
         })
         .catch(() => {
-          // Errors are handled via transaction.isPersisted.promise and surfaced there.
+          // Errors are handled via transaction.when(`settled`) and surfaced there.
           // This catch prevents unhandled promise rejections from breaking the chain,
           // ensuring subsequent transactions can still execute even if one fails.
         })

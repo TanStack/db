@@ -206,20 +206,21 @@ return the fetched rows. `parseLoadSubsetOptions()` returns only `filters`,
 opaque backend cursor; translate or combine those expressions for your API.
 Return `unloadSubset` only when `loadSubset` creates an ongoing resource, such
 as a per-subset server subscription, that must be released.
-Ownership transfers to core only when `loadSubset` returns `true` or a promise.
-If it throws synchronously after partial setup, release that partial resource
-before throwing; core will not call `unloadSubset` for a request that never
-returned. A must-refetch can call `loadSubset` again with the same options. Each
-successful return is a fresh acquisition: core releases the previous
-acquisition when its replacement returns, then releases the current one when
-the demand ends.
+A Collection subscription installs its logical owner before calling
+`loadSubset`. A synchronous throw fails the load but keeps that owner; when
+the owner is released, core calls `unloadSubset` for the failed load too.
+Make `unloadSubset` safe after partial setup. A must-refetch can call
+`loadSubset` again with the same options. Replay first detaches and releases
+the old acquisition lease, then starts a fresh acquisition if the logical
+demand and replay are still current. Core releases the current acquisition
+when the demand ends.
 
 ### Managing optimistic state duration
 
 Mutation handlers must not resolve until server changes have synced back to the collection. Five strategies:
 
 1. **Refetch** (simplest): `await collection.utils.refetch()`
-2. **Transaction ID**: return `{ txid }` and track via sync stream
+2. **Transaction ID**: await a utility that observes the mutation's transaction ID in the sync stream, such as Electric's `await collection.utils.awaitTxId(txid)`
 3. **ID-based tracking**: await specific record ID appearing in sync stream
 4. **Version/timestamp**: wait until sync stream catches up to mutation time
 5. **Provider method**: `await backend.waitForPendingWrites()`
@@ -351,8 +352,8 @@ sync: ({ begin, write, commit, markReady }) => {
 If initial sync fails before it produces a usable snapshot and you stop
 retrying, call `fail(error)` instead. The status becomes `error`, readiness
 waits reject with the supplied cause, and dependent live queries move to
-`error`. Every later call in the sync run throws, including `markReady()`.
-Only `collection.reload()` starts a new sync run.
+`error`. A later `markReady()` in the same sync run does nothing; only a new
+sync run can reach `ready`. Use `collection.reload()` to start a new sync run.
 
 After the first `markReady()`, the rows stay. Report a sync problem with
 `reportError(error)` while you keep trying; it sets the node's

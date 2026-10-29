@@ -385,6 +385,25 @@ Relaxing cross-publication reference stability does not permit changing these
 internal matches. The public-container copy matrix crosses reference-key type,
 ordered and unordered subqueries, materialization form, and parent/child updates.
 
+Reserved public row fields have a separate callback-input law (maintainer
+decision, 2026-10-28). Direct source rows and structured whole-row source
+spreads expose genuine source `$key`, `$origin`, `$hasPendingWrites`, and
+`$collectionId`, including when a spread selects conflicting reserved names.
+A subquery projection that creates its own row shape, including a new
+functional object or functional spread, exposes none of those reserved fields
+before downstream `fn.select()` code runs. An inline include value keeps its
+authored selected shape. Sanitizing only the eventual Collection publication
+cannot satisfy this law, because user code may already have derived an
+ordinary field from a spoofed input.
+
+Known implementation gap for the first RC: correlated-child functional callback
+inputs can still expose reserved fields from a new shape or authored collisions
+from a structured source spread. The root callback receiving path passes its
+bounded checks. The callback-input law above remains accepted; final publication
+sanitization does not close this earlier boundary. The separate runtime/type
+owners and exact RED witnesses are preserved in the
+[deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
+
 D2 hashes enumerable symbol keys and uses exact local-symbol identity plus
 registry keys for registered symbols. D2 rejects structural cycles with a clear
 error, including cycles through arrays, Maps, Sets, and enumerable symbol keys.
@@ -642,6 +661,15 @@ layout.
 select throws `IncludeOperatorRequiredError`. The include exposes one stable
 public Collection facade per active bucket in that edge:
 
+Facade rows obey the Collection virtual-field boundary. Structured whole-row
+selections and source spreads retain the selected source's metadata. Other
+projections receive the facade Collection's metadata. A functional selection
+preserves source metadata only by returning that source row directly; a new
+object, including a spread, receives its output Collection's metadata
+(maintainer decision). Selected `$hasPendingWrites`, `$origin`, `$key`, and
+`$collectionId` fields cannot change this attribution. Inline include values keep their selected
+shape because they are not published as Collection rows.
+
 ```text
 ActiveBucket + BucketRow -> ActiveBucketRow -> BucketFacade(bucket, Collection)
 Route + BucketFacade -> CellValue(cell, Collection)
@@ -855,8 +883,8 @@ query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
 the adapter has installed a loader. The error is final for its sync run:
-`markReady()` in the same sync run is a contract violation and throws, and
-only a restart, which begins a new sync run, acquires that demand. Releasing it
+`markReady()` in the same sync run does nothing, and only a restart, which
+begins a new sync run, acquires that demand. Releasing it
 before the restart creates no physical acquisition or unload. Queued
 reacquisition must not retry a failed attempt merely because both loading and
 ready notifications scheduled it.

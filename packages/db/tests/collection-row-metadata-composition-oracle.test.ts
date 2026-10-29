@@ -460,7 +460,7 @@ async function observeMetadata(
     if (lane === `rebuilt`) {
       expect(earlierReceipt).not.toBe(true)
       release()
-      await blocker!.isPersisted.promise
+      await blocker!.when(`settled`)
       await earlierReceipt
     }
     const receipt = sync.commit()
@@ -471,7 +471,7 @@ async function observeMetadata(
         expect(receipt).toBe(true)
       else expect(receipt).not.toBe(true)
       release()
-      await blocker!.isPersisted.promise
+      await blocker!.when(`settled`)
     }
     await receipt
     return sync.metadata!.row.get(1)
@@ -636,7 +636,7 @@ async function observeHeldReads(
     await expect(sync.commit(abort.signal)).rejects.toThrow()
 
     release()
-    await blocker.isPersisted.promise
+    await blocker.when('settled')
     await firstReceipt
     await laterReceipt
     return { committed, open: openReads, applied: readHeld(sync) }
@@ -734,7 +734,7 @@ async function observeNested(
     const receipt = sync.commit()
     if (blocker) {
       release()
-      await blocker.isPersisted.promise
+      await blocker.when('settled')
     }
     await nestedReceipt
     await receipt

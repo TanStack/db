@@ -844,25 +844,6 @@ export class CollectionInputNotFoundError extends QueryCompilationError {
   }
 }
 
-/**
- * Retained for callers that imported this formerly thrown error.
- *
- * @deprecated Nested queries may now shadow ancestor aliases. Duplicate aliases
- * are rejected only within one lexical scope or union branch namespace.
- */
-export class DuplicateAliasInSubqueryError extends QueryCompilationError {
-  constructor(alias: string, parentAliases: Array<string>) {
-    super(
-      devBuild() && process.env.NODE_ENV !== `production`
-        ? `Subquery uses alias "${alias}" which is already used in the parent query. ` +
-            `Each alias must be unique across parent and subquery contexts. ` +
-            `Parent query aliases: ${parentAliases.join(`, `)}. ` +
-            `Please rename "${alias}" in either the parent query or subquery to avoid conflicts.`
-        : codedMessage(57, { alias, parentAliases }),
-    )
-  }
-}
-
 export class UnsupportedFromTypeError extends QueryCompilationError {
   constructor(type: string) {
     super(

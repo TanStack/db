@@ -57,6 +57,23 @@ export function recordOracleReplay<T>(
   if (channel !== undefined) appendWitness(channel, property, details)
 }
 
+/** A completed finite-history comparison has no fast-check RunDetails. */
+export function recordOracleFiniteReplay(
+  property: string,
+  { seed, path, failed }: { seed: number; path: string; failed: boolean },
+): void {
+  const channel = witnessChannel(property, seed, path)
+  if (channel === undefined) return
+  const witness: OracleReplayWitness = {
+    property,
+    seed,
+    path,
+    numRuns: 1,
+    failed,
+  }
+  appendFileSync(channel, `${JSON.stringify(witness)}\n`)
+}
+
 /**
  * Attach a witness only when the guarded runner's property, seed, and path all
  * match. Constructing fast-check options is not evidence that a property ran.

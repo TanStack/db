@@ -24,7 +24,7 @@ export type ConvexCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1<TItem, TItem> = never,
 > = Omit<
-  BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils, unknown>,
+  BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils>,
   `syncMode` | `utils` | `schema`
 > & {
   /** Share the client used for mutations, authentication, and reconnects. */

@@ -308,7 +308,7 @@ async function receive(h: History, kind: `javascript` | `react`) {
         text: `hold`,
       }),
     )
-    persisted = transaction.isPersisted.promise
+    persisted = transaction.when('settled')
   }
   const drain = async () => {
     release()

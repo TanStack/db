@@ -421,7 +421,6 @@ describe(`standalone descriptor query binding`, () => {
                   `$hasPendingWrites`,
                   `$key`,
                   `$origin`,
-                  `$synced`,
                   `id`,
                   `value`,
                 ].sort(),

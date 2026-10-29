@@ -6,7 +6,6 @@ import {
   createLiveQuerySourceIdClaims,
   fetchNextLiveQueryWindowPage,
   getLiveQueryKey,
-  identifyLiveQuery,
   isCollection,
   readLiveQueryWindowPageShape,
   rejectLiveQueryInput,
@@ -18,7 +17,6 @@ import {
   getIdentityScope,
   prepareDerivedQuery,
   prepareQueryValue,
-  warnDeprecatedDepsArray,
 } from './useLiveQuery'
 import type {
   DerivedIdentityProfiler,
@@ -111,7 +109,6 @@ type InfiniteQueryRender = {
  *
  * @param queryFn - Query function that defines what data to fetch. Must include `.orderBy()` for setWindow to work.
  * @param config - Configuration including pageSize and an optional initial page label
- * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with pages, data, and pagination controls
  */
 
@@ -129,14 +126,12 @@ export function useLiveInfiniteQuery<
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
 // Implementation
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext> {
   const pageShape = readLiveQueryWindowPageShape(config)
   const contextDbClient = useOptionalDbClient()
@@ -169,8 +164,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     )
 
   const queryKey = getLiveQueryKey(config)
-  const usesLegacyDeps =
-    !inputIsCollection && queryKey === undefined && deps !== undefined
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
     unpreparedQueryValue
   let dependencies: ReadonlyArray<unknown> | undefined
@@ -185,9 +178,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (!inputIsCollection) {
       if (queryKey !== undefined) {
         dependencies = queryKey
-      } else if (usesLegacyDeps) {
-        dependencies = deps
-        warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
       } else if (
         committed !== null &&
         committed.derivedQuery === queryFnOrCollection &&
@@ -217,11 +207,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           dbClient,
           deferredCollections,
         )
-        if (usesLegacyDeps) {
-          // A dependency list decides reuse, so check the query when it
-          // compiles: it needs a stable identity and keeps its sources' IDs.
-          identifyLiveQuery(preparedQueryValue, identityScope())
-        }
       }
       return preparedQueryValue
     }
@@ -238,7 +223,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         scope: dbClient,
         client: dbClient,
         queryKey,
-        recompile: usesLegacyDeps ? `dependencies` : `identity`,
+        recompile: `identity`,
       },
       rendered?.binding,
     )

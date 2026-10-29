@@ -93,7 +93,7 @@ async function runOptimisticWrite(): Promise<OptimisticObservation> {
       rank: 9,
       value: `local`,
     })
-    void transaction.isPersisted.promise.catch(() => undefined)
+    void transaction.when('settled').catch(() => undefined)
     await drain()
     readyThroughout &&= query.status === `ready`
     const duringWrite = ids()

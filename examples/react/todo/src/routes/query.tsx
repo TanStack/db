@@ -32,7 +32,7 @@ function QueryPage() {
     query: (q) => q.from({ config: queryConfigCollection }),
   })
 
-  // Query collections automatically refetch after handler completes
+  // Custom mutation functions also explicitly refresh confirmed server state
   const configMutationFn = async ({
     transaction,
   }: {

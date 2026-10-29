@@ -33,7 +33,7 @@ export type ConvexPaginatedCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1<TItem, TItem> = never,
 > = Omit<
-  BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils, unknown>,
+  BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils>,
   `syncMode` | `utils` | `schema`
 > & {
   client: ConvexCollectionClient

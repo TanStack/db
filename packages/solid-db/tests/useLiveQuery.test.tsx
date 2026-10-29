@@ -731,7 +731,7 @@ describe(`Query Collections`, () => {
 
       expect(rendered.result.state.has(`stale`)).toBe(false)
       expect(rendered.result.state.has(`1`)).toBe(true)
-      expect(rendered.result.data.map((p: any) => p.id)).toEqual([`1`])
+      expect(rendered.result().map((p: any) => p.id)).toEqual([`1`])
       expect(rendered.result.status).toBe(`ready`)
 
       dispose()
@@ -963,7 +963,7 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     await waitFor(() => {
       // Wait for the permanent key to appear
@@ -2002,7 +2002,7 @@ describe(`Query Collections`, () => {
 
         // When callback returns undefined, should return disabled state
         expect(rendered.result.state.size).toBe(0)
-        expect(rendered.result.data).toEqual([])
+        expect(rendered.result()).toEqual([])
         expect(rendered.result.collection).toBeNull()
         expect(rendered.result.status).toBe(`disabled`)
         expect(rendered.result.isLoading).toBe(false)
@@ -2015,7 +2015,7 @@ describe(`Query Collections`, () => {
         await waitFor(() => {
           expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
         })
-        expect(rendered.result.data).toHaveLength(1)
+        expect(rendered.result()).toHaveLength(1)
         expect(rendered.result.isReady).toBe(true)
 
         // Disable the query again
@@ -2059,7 +2059,7 @@ describe(`Query Collections`, () => {
 
         // When callback returns null, should return disabled state
         expect(rendered.result.state.size).toBe(0)
-        expect(rendered.result.data).toEqual([])
+        expect(rendered.result()).toEqual([])
         expect(rendered.result.collection).toBeNull()
         expect(rendered.result.status).toBe(`disabled`)
         expect(rendered.result.isLoading).toBe(false)
@@ -2072,7 +2072,7 @@ describe(`Query Collections`, () => {
         await waitFor(() => {
           expect(rendered.result.state.size).toBe(1)
         })
-        expect(rendered.result.data).toHaveLength(1)
+        expect(rendered.result()).toHaveLength(1)
         expect(rendered.result.isReady).toBe(true)
 
         dispose()
@@ -2845,7 +2845,7 @@ describe(`Query Collections`, () => {
 
       // Resolve the pending sync to complete the transaction
       collection.utils.resolveSync()
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // After sync, should still have 4 items (no duplicates)
       await waitFor(() => {
@@ -2918,7 +2918,7 @@ describe(`Query Collections`, () => {
 
       // Resolve the pending sync
       collection.utils.resolveSync()
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // After sync, should still have 3 items with the update persisted
       await waitFor(() => {
@@ -2987,7 +2987,7 @@ describe(`Query Collections`, () => {
 
       // Resolve the pending sync
       collection.utils.resolveSync()
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // After sync, should still have 2 items
       await waitFor(() => {
@@ -3083,8 +3083,8 @@ describe(`Query Collections`, () => {
 
       // Resolve the shared sync promise — both onInsert and onUpdate complete
       collection.utils.resolveSync()
-      await txInsert.isPersisted.promise
-      await txUpdate.isPersisted.promise
+      await txInsert.when(`settled`)
+      await txUpdate.when(`settled`)
 
       // After sync complete, should have 4 items with correct data
       await waitFor(() => {

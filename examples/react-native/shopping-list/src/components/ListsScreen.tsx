@@ -26,7 +26,7 @@ function ListCard({
     totalItems: any
     checkedItems: any
     uncheckedPreview: any
-    $synced?: boolean
+    hasPendingWrites?: boolean
   }
   onPress: () => void
   onDelete: () => void
@@ -48,7 +48,7 @@ function ListCard({
   const [showSavingBadge, setShowSavingBadge] = useState(false)
 
   useEffect(() => {
-    if (list.$synced !== false) {
+    if (!list.hasPendingWrites) {
       setShowSavingBadge(false)
       return
     }
@@ -60,7 +60,7 @@ function ListCard({
     return () => {
       clearTimeout(timer)
     }
-  }, [list.id, list.$synced])
+  }, [list.id, list.hasPendingWrites])
 
   return (
     <TouchableOpacity
@@ -115,7 +115,7 @@ export function ListsScreen() {
           id: list.id,
           name: list.name,
           createdAt: list.createdAt,
-          $synced: list.$synced,
+          hasPendingWrites: list.$hasPendingWrites,
           totalItems: include(
             q
               .from({ item: itemsCollection })
@@ -149,7 +149,7 @@ export function ListsScreen() {
     id: string
     name: string
     createdAt: string
-    $synced?: boolean
+    hasPendingWrites?: boolean
     totalItems: any
     uncheckedPreview: any
     checkedItems: any

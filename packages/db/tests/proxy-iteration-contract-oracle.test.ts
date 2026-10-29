@@ -272,7 +272,7 @@ it.each(
         expected,
       )
       expectMembers(collection.get(1)!.values, expected)
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
       expectMembers(collection.get(1)!.values, expected)
     } finally {
       await collection.cleanup()

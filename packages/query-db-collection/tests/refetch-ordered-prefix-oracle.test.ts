@@ -576,11 +576,9 @@ async function startRun(testCase: Case): Promise<Run> {
       // backend does not change.
       onUpdate: async () => {
         await heldWrite
-        return { refetch: false }
       },
       onDelete: async () => {
         await heldWrite
-        return { refetch: false }
       },
     }),
   )
@@ -601,7 +599,7 @@ async function startRun(testCase: Case): Promise<Run> {
         : items.delete(rowId)
     return async () => {
       release()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await settle()
     }
   }

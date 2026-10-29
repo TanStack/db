@@ -65,7 +65,7 @@ function ElectricPage() {
 
     // Wait for all txids to sync back to the collection
     await Promise.all(
-      txids.map((txid) => electricConfigCollection.utils.awaitTxid(txid)),
+      txids.map((txid) => electricConfigCollection.utils.awaitTxId(txid)),
     )
   }
 

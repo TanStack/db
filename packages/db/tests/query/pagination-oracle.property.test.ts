@@ -1901,7 +1901,6 @@ async function runPendingMutationScenario(
             `$collectionId`,
             `$origin`,
             `$hasPendingWrites`,
-            `$synced`,
           ].includes(key),
       ),
     )
@@ -2475,13 +2474,9 @@ async function runPendingHistoryScenario(
     Object.fromEntries(
       Object.entries(row).filter(
         ([key]) =>
-          ![
-            `$key`,
-            `$collectionId`,
-            `$origin`,
-            `$hasPendingWrites`,
-            `$synced`,
-          ].includes(key),
+          ![`$key`, `$collectionId`, `$origin`, `$hasPendingWrites`].includes(
+            key,
+          ),
       ),
     )
   const capture = (
@@ -5595,7 +5590,7 @@ describe(`pagination recomputation oracle`, () => {
         }
         const receipt = sourceOps.commit()
         heldMutation.resolve()
-        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+        await Promise.all(transactions.map((tx) => tx.when(`settled`)))
         await receipt
         await flushPromises()
         expect([...live.values()].map(({ id }) => id)).toEqual(expected)
@@ -5750,7 +5745,7 @@ describe(`pagination recomputation oracle`, () => {
         }
         const receipt = sourceOps.commit()
         heldMutation.resolve()
-        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+        await Promise.all(transactions.map((tx) => tx.when(`settled`)))
         await receipt
         await windowResult
         await flushPromises()

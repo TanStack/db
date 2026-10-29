@@ -240,7 +240,7 @@ async function receive(
         `revalidation settled before accepted application`,
       ).toBe(0)
       release()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
       await turns()
       checkpoint()
       await Promise.allSettled([equal.result, newer.result, reuse.result])

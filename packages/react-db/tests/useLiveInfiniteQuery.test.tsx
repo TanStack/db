@@ -159,7 +159,7 @@ describe(`useLiveInfiniteQuery`, () => {
     rendered.unmount()
   })
 
-  it(`preserves committed pages across an abandoned dependency update`, async () => {
+  it(`preserves committed pages across an abandoned queryKey update`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         autoIndex: `eager`,
@@ -185,8 +185,7 @@ describe(`useLiveInfiniteQuery`, () => {
             .from({ post: source })
             .where(({ post }) => gt(post.createdAt, minimum))
             .orderBy(({ post }) => post.createdAt, `desc`),
-        { pageSize: 3 },
-        [minimum],
+        { ...{ pageSize: 3 }, queryKey: [minimum] },
       )
       if (shouldSuspend) throw never
       return null
@@ -422,7 +421,7 @@ describe(`useLiveInfiniteQuery`, () => {
     })
   })
 
-  it(`compares dependencies by identity instead of serialization`, async () => {
+  it(`uses a serializable query key for values read from a Map`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `infinite-query-map-deps`,
@@ -438,8 +437,7 @@ describe(`useLiveInfiniteQuery`, () => {
               .from({ post: source })
               .where(({ post }) => eq(post.category, filter.get(`category`)))
               .orderBy(({ post }) => post.createdAt, `desc`),
-          { pageSize: 3 },
-          [filter],
+          { pageSize: 3, queryKey: [filter.get(`category`)] },
         ),
       {
         initialProps: {
@@ -466,7 +464,7 @@ describe(`useLiveInfiniteQuery`, () => {
     })
   })
 
-  it(`preserves loaded pages when dependencies are structurally unchanged`, async () => {
+  it(`preserves loaded pages when query keys are structurally unchanged`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `infinite-query-structurally-equal-deps`,
@@ -482,8 +480,7 @@ describe(`useLiveInfiniteQuery`, () => {
               .from({ post: source })
               .where(({ post }) => eq(post.category, filter.category))
               .orderBy(({ post }) => post.createdAt, `desc`),
-          { pageSize: 2 },
-          [filter],
+          { ...{ pageSize: 2 }, queryKey: [filter] },
         ),
       { initialProps: { filter: { category: `tech` } } },
     )
@@ -498,7 +495,7 @@ describe(`useLiveInfiniteQuery`, () => {
     rerender({ filter: { category: `tech` } })
 
     await waitFor(() => {
-      expect(result.current.collection).not.toBe(firstCollection)
+      expect(result.current.collection).toBe(firstCollection)
       expect(result.current.isReady).toBe(true)
     })
     expect(result.current.pages).toHaveLength(2)

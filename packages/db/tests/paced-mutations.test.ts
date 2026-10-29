@@ -260,7 +260,7 @@ describe(`createPacedMutations`, () => {
 
       // Now trailing edge should have executed
       expect(mutationFn).toHaveBeenCalledTimes(1)
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
       expect(tx1.state).toBe(`completed`)
     })
   })
@@ -299,7 +299,7 @@ describe(`createPacedMutations`, () => {
       expect(mutationFn).toHaveBeenCalledTimes(1)
 
       // Wait for first transaction to complete
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
       expect(tx1.state).toBe(`completed`)
 
       // Each mutation should be in its own transaction
@@ -348,9 +348,9 @@ describe(`createPacedMutations`, () => {
 
       // Wait for all to complete
       await Promise.all([
-        tx1.isPersisted.promise,
-        tx2.isPersisted.promise,
-        tx3.isPersisted.promise,
+        tx1.when(`settled`),
+        tx2.when(`settled`),
+        tx3.when(`settled`),
       ])
 
       // Should have executed in order
@@ -390,9 +390,9 @@ describe(`createPacedMutations`, () => {
       expect(tx1).not.toBe(tx3)
 
       await Promise.all([
-        tx1.isPersisted.promise,
-        tx2.isPersisted.promise,
-        tx3.isPersisted.promise,
+        tx1.when(`settled`),
+        tx2.when(`settled`),
+        tx3.when(`settled`),
       ])
 
       // All mutations should have been executed
@@ -427,7 +427,7 @@ describe(`createPacedMutations`, () => {
       const tx2 = mutateExplicitZero({ id: 2, value: 2 })
 
       // Should still process sequentially even with zero wait
-      await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+      await Promise.all([tx1.when(`settled`), tx2.when(`settled`)])
 
       expect(mutationFn).toHaveBeenCalledTimes(2)
       expect(tx1.state).toBe(`completed`)
@@ -447,7 +447,7 @@ describe(`createPacedMutations`, () => {
       const tx3 = mutateNoWait({ id: 3, value: 3 })
       const tx4 = mutateNoWait({ id: 4, value: 4 })
 
-      await Promise.all([tx3.isPersisted.promise, tx4.isPersisted.promise])
+      await Promise.all([tx3.when(`settled`), tx4.when(`settled`)])
 
       expect(mutationFn).toHaveBeenCalledTimes(2)
       expect(tx3.state).toBe(`completed`)
@@ -482,7 +482,7 @@ describe(`createPacedMutations`, () => {
 
       // Transaction should be in failed state
       expect(tx.state).toBe(`failed`)
-      await expect(tx.isPersisted.promise).rejects.toThrow(`Mutation failed`)
+      await expect(tx.when(`settled`)).rejects.toThrow(`Mutation failed`)
     })
 
     it(`should continue processing queue after an error`, async () => {
@@ -511,9 +511,9 @@ describe(`createPacedMutations`, () => {
 
       // Wait for all to settle
       await Promise.allSettled([
-        tx1.isPersisted.promise,
-        tx2.isPersisted.promise,
-        tx3.isPersisted.promise,
+        tx1.when(`settled`),
+        tx2.when(`settled`),
+        tx3.when(`settled`),
       ])
 
       // First should fail, rest should succeed

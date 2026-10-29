@@ -44,7 +44,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * settlement, even if a peer supplied it. Every same-key write in that atomic
  * transaction keeps that attribution. A later transaction is `'remote'`
  * without another local owner. A failed mutation gives queued source writes no
- * local attribution. `isPersisted` settles after that publication.
+ * local attribution. `when('settled')` settles after that publication.
  * A truncate applies at once, with every queued sync transaction before it.
  * Its same-key source row can receive local attribution while a mutation still
  * persists, even if that mutation later fails. Still-persisting transactions
@@ -74,11 +74,17 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * writes are `'remote'` unless another active local transaction touches their
  * key; if it aborts, its writes never apply, and both its receipt and its acceptance
  * moment (`whenSyncAccepted`) reject.
+ * External completion, used when work was applied outside commit, admits only
+ * pending transactions. A completion attempt in persisting, completed or failed
+ * state rejects and preserves the state, settlement verdict and visible rows.
+ * Authority: commit admission and terminal request outcomes in the public
+ * transaction contract; the internal completion path cannot revoke them.
+ *
  * A manual local transaction can remain pending before its mutation function
  * starts. Source writes on its key apply at once and receive local attribution;
  * rolling it back exposes that source row with the same origin. A pending
  * manual transaction starts its mutation function at commit. If that function
- * rejects, the transaction rolls back and `isPersisted` rejects with its
+ * rejects, the transaction rolls back and `when('settled')` rejects with its
  * reason. A later edit cannot determine the earlier manual request's outcome.
  * The model keeps pending distinct from persisting because the same source
  * commit publishes immediately in the former state and waits in the latter.
@@ -125,7 +131,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * each optimistic mutation call, before any await, the driver checks that the
  * row is already visible. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, the rows visible
- * when `isPersisted` fulfills, downstream query state, and complete
+ * when the settlement waiter fulfills, downstream query state, and complete
  * publication cuts. A second subscriber starts without initial state, so no
  * sent-key filter can hide an invalid message. Each of its batches must be
  * valid for its replica: an insert names an absent key, and an update or
@@ -188,6 +194,8 @@ export type OptimisticStep =
       cascade: boolean
       failure?: `rollback` | `reject`
     }
+  // External completion never runs a handler and admits only pending work.
+  | { type: `complete`; slot: number }
   | SourceBatch
   // A sync transaction that begins and writes now but commits or aborts at its
   // `close` step. While it is open, other sync batches are skipped, because the
@@ -221,7 +229,6 @@ type ModelTransaction = {
 type ObservedRow = HistoryRow & {
   $origin: `local` | `remote`
   $hasPendingWrites: boolean
-  $synced: boolean
 }
 
 /** Pure event-history model. It never reads production caches or callbacks. */
@@ -286,7 +293,6 @@ class HistoryModel {
           ...row,
           $origin: this.origins.get(key)!,
           $hasPendingWrites: false,
-          $synced: true,
         },
       ]),
     )
@@ -306,7 +312,6 @@ class HistoryModel {
         ...transaction.row,
         $origin: `local`,
         $hasPendingWrites: true,
-        $synced: false,
       })
     }
     return result
@@ -512,7 +517,6 @@ const observed = (
   row: HistoryRow & {
     $origin: `local` | `remote`
     $hasPendingWrites: boolean
-    $synced: boolean
   },
 ): ObservedRow => ({
   ...Object.fromEntries(
@@ -526,7 +530,6 @@ const observed = (
   c: row.c,
   $origin: row.$origin,
   $hasPendingWrites: row.$hasPendingWrites,
-  $synced: row.$synced,
 })
 const sorted = <T extends HistoryRow>(rows: Iterable<T>) =>
   [...rows].sort((a, b) => a.id - b.id)
@@ -970,7 +973,7 @@ export async function runOptimisticHistory(
       | ReturnType<typeof createTransaction<HistoryRow>>
     done: ReturnType<typeof createDeferred<void>>
     outcome: ReturnType<typeof observeHistoryPromise<unknown>>
-    // Rows visible when `isPersisted` fulfilled or rejected.
+    // Rows visible when `when('settled')` fulfilled or rejected.
     settledRows?: Array<ObservedRow>
     expected: HistoryOutcome<unknown>
     changes: object
@@ -985,6 +988,8 @@ export async function runOptimisticHistory(
     edits: 0,
     deletes: 0,
     settlements: 0,
+    completionAttempts: 0,
+    completionRejections: 0,
     replacements: 0,
     queued: 0,
     failures: 0,
@@ -1309,6 +1314,10 @@ export async function runOptimisticHistory(
                 : `rejected`,
           )
           expect(
+            operation.tx.state,
+            `${label}: transaction state ${index}`,
+          ).toBe(model.transactions[index]!.state)
+          expect(
             operation.tx.mutations[0]!.modified,
             `${label}: immutable request ${index}`,
           ).toMatchObject(plain(model.transactions[index]!.row))
@@ -1451,7 +1460,7 @@ export async function runOptimisticHistory(
             tx,
             done,
             outcome: observeHistoryPromise<unknown>(
-              tx.isPersisted.promise.finally(() => {
+              tx.when(`settled`).finally(() => {
                 operation.settledRows = sorted(
                   [...collection.values()].map(observed),
                 )
@@ -1487,6 +1496,30 @@ export async function runOptimisticHistory(
           expect(handlerBatch, `handler wrote its source batch`).toBeUndefined()
           counts.edits++
           if (step.type === `delete`) counts.deletes++
+        } else if (step.type === `complete`) {
+          if (!operations.length) continue
+          const index = step.slot % operations.length
+          const op = operations[index]!
+          const admitted = model.transactions[index]!.state === `pending`
+          counts.completionAttempts++
+          if (admitted) {
+            model.settle(index, true, false)
+            cuts = [sorted(model.visible().values())]
+            op.expected = { status: `fulfilled`, value: op.tx }
+            op.tx.completeWithoutCommit()
+            op.tx.touchCollection()
+            await op.outcome.settled
+            expect(
+              op.settledRows,
+              `${position}: rows visible when external completion settled`,
+            ).toEqual(cuts[0])
+          } else {
+            counts.completionRejections++
+            expect(
+              () => op.tx.completeWithoutCommit(),
+              `external completion rejects ${model.transactions[index]!.state}`,
+            ).toThrow()
+          }
         } else if (step.type === `settle`) {
           const active = model.transactions.flatMap((entry, index) =>
             entry.state === `persisting` || entry.state === `pending`
@@ -1528,7 +1561,7 @@ export async function runOptimisticHistory(
           await Promise.resolve()
           expect(
             op.settledRows,
-            `${position}: rows visible when isPersisted settled`,
+            `${position}: rows visible when settlement completed`,
           ).toEqual(cuts[0])
           counts.settlements++
           if (!step.success) counts.failures++

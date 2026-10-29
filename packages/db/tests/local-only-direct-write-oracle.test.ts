@@ -43,7 +43,7 @@ async function observe(handlers: Handlers, writes: Array<Write>) {
         changes
           .map(
             ({ type, key, value }) =>
-              `${type}:${key}:${value.value}:${String(value.$synced)}`,
+              `${type}:${key}:${value.value}:${String(value.$hasPendingWrites)}`,
           )
           .sort(),
       ),
@@ -58,7 +58,7 @@ async function observe(handlers: Handlers, writes: Array<Write>) {
       errors.push(`${(error as Error).name}: ${(error as Error).message}`)
     }
   }
-  await Promise.all(transactions.map((t) => t.isPersisted.promise))
+  await Promise.all(transactions.map((t) => t.when(`settled`)))
   return {
     rows: orders.toArray.map(({ id, value }) => ({ id, value })),
     batches,

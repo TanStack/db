@@ -86,7 +86,7 @@ async function createCoreDriver(fullRows = false): Promise<SessionDriver> {
 
   let depth = 0
   let holdCount = 0
-  let blocker: { isPersisted: { promise: Promise<unknown> } } | undefined
+  let blocker: { when: (state: 'settled') => Promise<unknown> } | undefined
   const receipts: Array<Promise<void>> = []
   const rejections: Array<string> = []
   const receiptStates: Array<ReceiptState> = []
@@ -125,7 +125,7 @@ async function createCoreDriver(fullRows = false): Promise<SessionDriver> {
     blocker = undefined
     resolveMutation?.()
     resolveMutation = undefined
-    await pending?.isPersisted.promise
+    await pending?.when('settled')
   }
 
   return {

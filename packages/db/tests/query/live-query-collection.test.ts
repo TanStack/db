@@ -1281,7 +1281,7 @@ describe(`createLiveQueryCollection`, () => {
         const tx2 = base.insert({ id: `2`, created_at: Date.now() + 1 })
 
         await vi.advanceTimersByTimeAsync(2000)
-        await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+        await Promise.all([tx1.when(`settled`), tx2.when(`settled`)])
 
         expect(base.size).toBe(2)
         expect(live.size).toBe(2)
@@ -1342,7 +1342,7 @@ describe(`createLiveQueryCollection`, () => {
         )
 
         await vi.advanceTimersByTimeAsync(5000)
-        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+        await Promise.all(transactions.map((tx) => tx.when(`settled`)))
 
         expect(base.size).toBe(5)
         expect(live.size).toBe(5)
@@ -1465,8 +1465,8 @@ describe(`createLiveQueryCollection`, () => {
                 draft.completed = !draft.completed
               })
               // Observe each real receipt before any assertion can abandon it.
-              void tx.isPersisted.promise.catch(() => {})
-              receipts.push(tx.isPersisted.promise)
+              void tx.when(`settled`).catch(() => {})
+              receipts.push(tx.when(`settled`))
               const previous = expected.get(id)!
               expected.set(id, {
                 ...previous,

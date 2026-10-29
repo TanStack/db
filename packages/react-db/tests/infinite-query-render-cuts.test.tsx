@@ -169,7 +169,6 @@ describe(`retries after GC`, () => {
             .where(({ items }) => gt(items.rank, minimum))
             .orderBy(({ items }) => items.rank, `desc`),
         { pageSize: 3 },
-        [minimum],
       )
       useLayoutEffect(() => {
         commits.push({

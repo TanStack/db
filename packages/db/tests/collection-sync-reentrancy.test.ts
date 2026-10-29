@@ -320,7 +320,7 @@ describe(`sync publication reentrancy`, () => {
       expect([...collection.keys()]).toEqual([1, 2])
 
       updatePersistence.resolve()
-      await update.isPersisted.promise
+      await update.when('settled')
       if (receipt !== true) await receipt
 
       expect([...collection.keys()]).toEqual([2, 1])
@@ -348,7 +348,7 @@ describe(`sync publication reentrancy`, () => {
       expect(markedReceiptSettled).toBe(true)
     } finally {
       updatePersistence.resolve()
-      await update.isPersisted.promise.catch(() => undefined)
+      await update.when('settled').catch(() => undefined)
       subscription.unsubscribe()
       await collection.cleanup()
     }
@@ -453,8 +453,8 @@ describe(`sync publication reentrancy`, () => {
       subscription.unsubscribe()
       updatePersistence.resolve()
       insertPersistence.resolve()
-      await update.isPersisted.promise.catch(() => undefined)
-      await insert?.isPersisted.promise.catch(() => undefined)
+      await update.when('settled').catch(() => undefined)
+      await insert?.when('settled').catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -536,7 +536,7 @@ describe(`sync publication reentrancy`, () => {
       } finally {
         subscription?.unsubscribe()
         persistence.resolve()
-        await blocker.isPersisted.promise.catch(() => undefined)
+        await blocker.when('settled').catch(() => undefined)
         await collection.cleanup()
       }
     },

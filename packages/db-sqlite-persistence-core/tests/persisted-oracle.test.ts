@@ -4940,7 +4940,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         )
 
         const mutation = collection.insert({ id: `local`, title: `Pending` })
-        mutationPersisted = mutation.isPersisted.promise
+        mutationPersisted = mutation.when(`settled`)
         void mutationPersisted.catch(() => undefined)
         const bufferedCommit = await atPersistedOracleCheckpoint(
           bufferedCommitReturned.promise,

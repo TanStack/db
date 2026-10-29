@@ -985,7 +985,7 @@ it(`keeps commit pending until successful outbox deletion`, async () => {
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when('settled').then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -1079,7 +1079,7 @@ it.each([`removeFromOutbox`, `clearOutbox`] as const)(
           updatedAt: new Date(0),
         }),
       )
-      observedPersistence = localTransaction.isPersisted.promise.then(
+      observedPersistence = localTransaction.when('settled').then(
         () => {
           persistedStatus = `fulfilled`
         },
@@ -1204,7 +1204,7 @@ it.each([
           updatedAt: new Date(0),
         }),
       )
-      headPersistence = localHead.isPersisted.promise.then(
+      headPersistence = localHead.when('settled').then(
         () => {
           headPersistenceResult = `fulfilled`
         },
@@ -1346,7 +1346,7 @@ it(`stops successful provider work when outbox deletion fails`, async () => {
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when('settled').then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -1519,7 +1519,7 @@ it(`stops after a failed deletion-pending write and holds its queued peer`, asyn
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when('settled').then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -1680,7 +1680,7 @@ it(`restarts a fulfilled provider transaction after a stopped deletion failure`,
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when('settled').then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -1802,7 +1802,7 @@ it(`replays an admitted row with no fulfilled-provider checkpoint`, async () => 
     autoCommit: false,
     mutationFn: () => Promise.resolve(),
   })
-  void seedTransaction.isPersisted.promise.catch(() => {})
+  void seedTransaction.when('settled').catch(() => {})
   try {
     seedTransaction.mutate(() =>
       seed.insert({

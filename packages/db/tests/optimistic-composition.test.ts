@@ -27,7 +27,7 @@ describe(`optimistic snapshot ownership`, () => {
       const tx = fixture.collection.update(1, { optimistic }, (row) => {
         row.a = `failed`
       })
-      const settled = tx.isPersisted.promise.catch(() => {})
+      const settled = tx.when('settled').catch(() => {})
       try {
         done.reject(new Error(`failed update`))
         await settled
@@ -62,7 +62,7 @@ describe(`optimistic snapshot ownership`, () => {
         const tx = fixture.collection.update(1, { optimistic }, (row) => {
           row.a = `accepted`
         })
-        await tx.isPersisted.promise
+        await tx.when('settled')
         expect(fixture.collection.get(1)?.$origin).toBe(`local`)
         expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
           ...initial,
@@ -91,17 +91,17 @@ describe(`optimistic snapshot ownership`, () => {
       const second = fixture.collection.update(1, (row) => {
         row.b = `rejected`
       })
-      const secondSettled = second.isPersisted.promise.catch(() => {})
+      const secondSettled = second.when('settled').catch(() => {})
       try {
         if (completedFirst) {
           done[0]!.resolve()
-          await first.isPersisted.promise
+          await first.when('settled')
         }
         done[1]!.reject(new Error(`sibling failure`))
         await secondSettled
         if (!completedFirst) {
           done[0]!.resolve()
-          await first.isPersisted.promise
+          await first.when('settled')
         }
         fixture.sync.begin()
         fixture.sync.write({
@@ -118,8 +118,8 @@ describe(`optimistic snapshot ownership`, () => {
       } finally {
         done.forEach((entry) => entry.resolve())
         await Promise.allSettled([
-          first.isPersisted.promise,
-          second.isPersisted.promise,
+          first.when('settled'),
+          second.when('settled'),
         ])
         await fixture.collection.cleanup()
       }
@@ -165,7 +165,7 @@ describe(`optimistic snapshot ownership`, () => {
           expect(applied).not.toBe(true)
         }
         done.resolve()
-        await tx.isPersisted.promise
+        await tx.when('settled')
         await held
         await applied
         // The optimistic row drops, and the held sync rows publish with it.
@@ -227,7 +227,7 @@ describe(`optimistic snapshot ownership`, () => {
       const settled = fixture.collection.update(1, (row) => {
         row.b = `settled`
       })
-      await settled.isPersisted.promise
+      await settled.when('settled')
       fixture.sync.begin()
       fixture.sync.write({ type: `insert`, value: { ...initial, id: 2 } })
       expect(fixture.sync.commit()).not.toBe(true)

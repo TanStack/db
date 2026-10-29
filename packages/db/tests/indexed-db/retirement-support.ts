@@ -52,12 +52,15 @@ export function start(c: Subject, kind: Kind, owner: number): Promise<unknown> {
   if (kind === 'import')
     return c.utils.importData([{ id: owner, name: `after-${owner}` }])
   if (kind === 'insert')
-    return c.insert({ id: `new-${owner}`, name: `after-${owner}` }).isPersisted
-      .promise
-  if (kind === 'delete') return c.delete(owner).isPersisted.promise
-  return c.update(owner, (row) => {
-    row.name = `after-${owner}`
-  }).isPersisted.promise
+    return c
+      .insert({ id: `new-${owner}`, name: `after-${owner}` })
+      .when('settled')
+  if (kind === 'delete') return c.delete(owner).when('settled')
+  return c
+    .update(owner, (row) => {
+      row.name = `after-${owner}`
+    })
+    .when('settled')
 }
 export function recordStatus(c: Subject) {
   const statuses: Array<string> = []

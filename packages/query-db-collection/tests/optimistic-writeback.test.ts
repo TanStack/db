@@ -55,12 +55,12 @@ it.each([`insert`, `upsert`] as const)(
     })
     try {
       await live.preload()
-      await insert({ id: `one`, text: `created` }).isPersisted.promise
+      await insert({ id: `one`, text: `created` }).when(`settled`)
       for (const text of [`renamed`, `renamed again`]) {
-        await rename({ id: `one`, text }).isPersisted.promise
+        await rename({ id: `one`, text }).when(`settled`)
         expect([...live.values()].map((row) => row.text)).toEqual([text])
       }
-      await insert({ id: `two`, text: `second` }).isPersisted.promise
+      await insert({ id: `two`, text: `second` }).when(`settled`)
       expect([...live.values()].map((row) => row.text).sort()).toEqual([
         `renamed again`,
         `second`,
@@ -103,7 +103,7 @@ it(`keeps repeated optimistic updates valid after direct upsert acknowledgement`
           draft.position += 1
         }),
       )
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
       expect([...live.values()].map((row) => row.position)).toEqual([next])
     }
   } finally {

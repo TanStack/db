@@ -182,7 +182,7 @@ describe(`persistedCollectionOptions`, () => {
       expect(receipt).toBeInstanceOf(Promise)
 
       releaseMutation()
-      await transaction.isPersisted.promise
+      await transaction.when('settled')
       await receipt
       subscription.unsubscribe()
 
@@ -195,7 +195,7 @@ describe(`persistedCollectionOptions`, () => {
       expect(adapter.applyCommittedTxCalls).toHaveLength(1)
     } finally {
       releaseMutation()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when('settled').catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -268,7 +268,7 @@ describe(`persistedCollectionOptions`, () => {
       aborted.abort()
       expect(collection.get(`dependent`)).toBeUndefined()
       localPersistence.resolve()
-      await localTransaction.isPersisted.promise
+      await localTransaction.when('settled')
       const abortedOutcome = await atPersistedOracleCheckpoint(
         abortedReceipt.then(
           () => ({ status: `fulfilled` as const }),
@@ -305,7 +305,7 @@ describe(`persistedCollectionOptions`, () => {
       localPersistence.resolve()
       await cleanupPersistedOracle(
         [
-          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => localTransaction.when('settled').catch(() => undefined),
           () => abortedReceipt?.catch(() => undefined),
           () => dependentReceipt?.catch(() => undefined),
           () => collection.cleanup(),

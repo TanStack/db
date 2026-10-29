@@ -683,9 +683,14 @@ sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) =>
 When mutations fail, TanStack DB automatically rolls back optimistic updates:
 
 ```ts
-const todoCollection = createCollection({
+const todoCollection = createCollection(
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
+  queryKey: ["todos"],
+  queryClient,
+  queryFn: fetchTodos,
+  getKey: (todo) => todo.id,
   id: "todos",
-  onInsert: async ({ transaction }) => {
+  onInsert: async ({ transaction, collection }) => {
     const response = await fetch("/api/todos", {
       method: "POST",
       body: JSON.stringify(transaction.mutations[0].modified),
@@ -695,10 +700,10 @@ const todoCollection = createCollection({
       // Throwing an error will rollback the optimistic state
       throw new Error(`HTTP Error: ${response.status}`)
     }
-    
-    return response.json()
+
+    await collection.utils.refetch()
   },
-})
+}))
 
 // Usage - optimistic update will be rolled back if the mutation fails
 try {
@@ -947,10 +952,11 @@ try {
 Query collections distinguish an initial load failure from a later refetch failure:
 
 ```ts
+import { createCollection } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 const todoCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
     queryKey: ["todos"],
     queryFn: async () => {
       const response = await fetch("/api/todos")
@@ -1264,7 +1270,6 @@ const todoCollection = createCollection({
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
     }
 
-    return response.json()
   },
   sync: {
     sync: ({ begin, write, commit, markReady }) => {

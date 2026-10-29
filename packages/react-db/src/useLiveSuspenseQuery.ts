@@ -13,7 +13,6 @@ import type {
   HealthNode,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -62,7 +61,6 @@ function rememberInitialRenderError(
 /**
  * Create a live query with React Suspense support
  * @param queryFn - Query function that defines what data to fetch
- * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data and state - data is guaranteed to be defined
  * @throws Promise when data is loading (caught by Suspense boundary)
  * @throws Error when the first load fails or the Collection crashes (caught by
@@ -155,7 +153,6 @@ function rememberInitialRenderError(
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -166,17 +163,6 @@ export function useLiveSuspenseQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveSuspenseQuery<TContext extends Context>(
   config: UseLiveQueryConfig<TContext>,
-): {
-  state: Map<string | number, GetResult<TContext>>
-  data: InferResultType<TContext>
-  collection: Collection<GetResult<TContext>, string | number, {}>
-  health: HealthNode | undefined
-}
-
-// Overload 3: Accept legacy config object
-export function useLiveSuspenseQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -213,19 +199,13 @@ export function useLiveSuspenseQuery<
 }
 
 // Implementation - uses useLiveQuery internally and adds Suspense logic
-export function useLiveSuspenseQuery(
-  configOrQueryOrCollection: any,
-  deps?: Array<unknown>,
-) {
+export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
 
   // Use useLiveQuery to handle collection management and reactivity
-  const result =
-    deps === undefined
-      ? useLiveQueryForSuspense(configOrQueryOrCollection, undefined)
-      : useLiveQueryForSuspense(configOrQueryOrCollection, deps)
+  const result = useLiveQueryForSuspense(configOrQueryOrCollection)
 
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior

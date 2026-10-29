@@ -297,7 +297,7 @@ async function setup() {
             else draft.optional = row.optional
           })
         : collection.insert(structuredClone(row))
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
     },
     // Low-level writers own invalidation: wrapper writes do not broadcast for
     // them. This native provider fixture writes without version metadata and
@@ -327,7 +327,7 @@ async function setup() {
         }
       }),
     remove: async (key: string | number) => {
-      await collection.delete(key).isPersisted.promise
+      await collection.delete(key).when(`settled`)
     },
     omit: (row: OracleRow) => {
       // Manual acceptance admits both native transactions before the first
@@ -357,13 +357,14 @@ async function setup() {
           : kind === 'import'
             ? collection.utils.importData([{ id: 2, name: 'replacement' }])
             : kind === 'insert'
-              ? collection.insert({ id: 2, name: 'inserted' }).isPersisted
-                  .promise
+              ? collection.insert({ id: 2, name: 'inserted' }).when(`settled`)
               : kind === 'delete'
-                ? collection.delete(1).isPersisted.promise
-                : collection.update(1, (row) => {
-                    row.name = 'updated'
-                  }).isPersisted.promise
+                ? collection.delete(1).when(`settled`)
+                : collection
+                    .update(1, (row) => {
+                      row.name = 'updated'
+                    })
+                    .when(`settled`)
       retirementDone = operation.then(
         () => {
           retirement.outcome = 'fulfilled'
@@ -497,7 +498,7 @@ async function setup() {
         id: 'held',
         name: 'unaccepted local intent',
       })
-      void transaction.isPersisted.promise.then(
+      void transaction.when(`settled`).then(
         () => {
           handlerStatus = 'fulfilled'
         },

@@ -30,7 +30,7 @@ import type { Row } from './optimistic-composition-fixture.js'
  * Production path and observation: public `update`, `createTransaction`, sync
  * `begin`/`write`/`commit`, and `get`. The publication case also compares a
  * subscriber replica and a downstream live query. Each check runs at the named
- * cut, after the mutation or rollback returns, or after `isPersisted` and the
+ * cut, after the mutation or rollback returns, or after `when('settled')` and the
  * held receipts settle.
  *
  * Limits: this file owns one key and simple row snapshots. Generated

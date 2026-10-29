@@ -1,7 +1,7 @@
 /**
  * LocalStorage automatic writes preserve mutation order within one Collection.
  * The public LocalStorage guide promises direct mutations that persist, while
- * Collection settlement promises that a fulfilled `isPersisted` reflects the
+ * Collection settlement promises that a fulfilled `when('settled')` reflects the
  * accepted mutation. A later authored update must not be replaced by an older
  * handler that happens to finish later. This law says nothing about concurrent
  * writers in different Collections or browser tabs.
@@ -91,8 +91,9 @@ it('persists a nested fire-and-forget mutation after its handler returns', async
       getKey: (row) => row.id,
       onInsert: async ({ transaction }) => {
         if (transaction.mutations[0].modified.id === 'outer') {
-          nestedReceipt = collection.insert({ id: 'inner', value: 2 })
-            .isPersisted.promise
+          nestedReceipt = collection
+            .insert({ id: 'inner', value: 2 })
+            .when(`settled`)
           entered.resolve()
           await release.promise
         }
@@ -107,7 +108,7 @@ it('persists a nested fire-and-forget mutation after its handler returns', async
       expect(nestedReceipt, 'nested mutation was admitted').toBeDefined()
       expect(snapshots, 'no write before the outer handler returns').toEqual([])
       release.resolve()
-      await Promise.all([outer.isPersisted.promise, nestedReceipt])
+      await Promise.all([outer.when(`settled`), nestedReceipt])
       expect(snapshots).toEqual([
         expectedRows([{ id: 'outer', value: 1 }], [true]),
         expectedRows(
@@ -169,7 +170,7 @@ it('orders module-level manual acceptance with a DbClient Collection', async () 
           draft.value = 2
         })
       })
-      const receipt = observeHistoryPromise(manual.isPersisted.promise)
+      const receipt = observeHistoryPromise(manual.when(`settled`))
       const commit = observeHistoryPromise(manual.commit())
       await manualEntered.promise
       // The receipt check must occur after mutationFn registers its write.
@@ -181,7 +182,7 @@ it('orders module-level manual acceptance with a DbClient Collection', async () 
       expect(receipt.read().status, 'held manual receipt').toBe('pending')
       release.resolve()
       await Promise.all([
-        automatic.isPersisted.promise,
+        automatic.when(`settled`),
         receipt.settled,
         commit.settled,
       ])
@@ -246,15 +247,15 @@ it('persists a direct write at return after a synchronous handler failure', asyn
       const rejected = collection.update('a', (draft) => {
         draft.value = 1
       })
-      void rejected.isPersisted.promise.catch(() => undefined)
+      void rejected.when(`settled`).catch(() => undefined)
       const next = collection.insert({ id: 'next', value: 2 })
       const expected = expectedRows([{ id: 'next', value: 2 }], [true])
       expect(
         storedRows(storage.getItem('rows')),
         'direct return after decided failure',
       ).toEqual(expected)
-      await expect(rejected.isPersisted.promise).rejects.toBe(failure)
-      await next.isPersisted.promise
+      await expect(rejected.when(`settled`)).rejects.toBe(failure)
+      await next.when(`settled`)
       expect(storedRows(storage.getItem('rows')), 'settled durable').toEqual(
         expected,
       )
@@ -271,7 +272,7 @@ it('persists a direct write at return after a synchronous handler failure', asyn
           [true, true],
         ),
       )
-      await after.isPersisted.promise
+      await after.when(`settled`)
     },
     () => [() => collection.cleanup()],
   )
@@ -335,7 +336,7 @@ for (const secondId of ['a', 'b']) {
               )
               const settled = [false, false]
               const outcomes = transactions.map((tx, index) =>
-                tx.isPersisted.promise.then(
+                tx.when(`settled`).then(
                   () => {
                     settled[index] = true
                     return true
@@ -421,7 +422,7 @@ for (const accepted of [
         })
         const deletion = collection.delete('a')
         const outcomes = [update, deletion].map((tx) =>
-          tx.isPersisted.promise.then(
+          tx.when(`settled`).then(
             () => true,
             () => false,
           ),

@@ -211,13 +211,14 @@ describePowerSync(`PowerSync Integration`, () => {
       expect(newDoc!.name).toBe(`new`)
       expect(newDoc!.author).toBe(`somebody`)
 
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
       // The item should now be present in PowerSync
       // We should also have patched it back in to Tanstack DB (removing the optimistic state)
 
       // Now do an update
-      await collection.update(id, (d) => (d.name = `updatedNew`)).isPersisted
-        .promise
+      await collection
+        .update(id, (d) => (d.name = `updatedNew`))
+        .when(`settled`)
 
       const updatedDoc = collection.get(id)
       expect(updatedDoc).toBeDefined()
@@ -225,7 +226,7 @@ describePowerSync(`PowerSync Integration`, () => {
       // Only the updated field should be updated
       expect(updatedDoc!.author).toBe(`somebody`)
 
-      await collection.delete(id).isPersisted.promise
+      await collection.delete(id).when(`settled`)
 
       // There should be a crud entries for this
       const crudEntries = await db.getAll<{ op: string }>(`
@@ -282,7 +283,7 @@ describePowerSync(`PowerSync Integration`, () => {
         })
 
         await addTx.commit()
-        await addTx.isPersisted.promise
+        await addTx.when(`settled`)
 
         expect(collection.size).toBe(8)
 
@@ -362,7 +363,7 @@ describePowerSync(`PowerSync Integration`, () => {
       await collection.stateWhenReady()
 
       // Seed the row which will be deleted in the transaction
-      await collection.insert({ id: `a`, name: `row a` }).isPersisted.promise
+      await collection.insert({ id: `a`, name: `row a` }).when(`settled`)
 
       const { trackedTableName } = options.utils.getMeta()
 
@@ -473,7 +474,7 @@ describePowerSync(`PowerSync Integration`, () => {
         })
 
         await addTx.commit()
-        await addTx.isPersisted.promise
+        await addTx.when(`settled`)
 
         expect(documentsCollection.size).toBe(8)
         expect(usersCollection.size).toBe(5)
@@ -582,25 +583,25 @@ describePowerSync(`PowerSync Integration`, () => {
         boolean: true,
       }
       const id = randomUUID()
-      await collection.insert(
-        {
-          id,
-          name: `new`,
-          author: `somebody`,
-        },
-        {
-          metadata,
-        },
-      ).isPersisted.promise
+      await collection
+        .insert(
+          {
+            id,
+            name: `new`,
+            author: `somebody`,
+          },
+          {
+            metadata,
+          },
+        )
+        .when(`settled`)
 
       // Now do an update
-      await collection.update(
-        id,
-        { metadata: metadata },
-        (d) => (d.name = `updatedNew`),
-      ).isPersisted.promise
+      await collection
+        .update(id, { metadata: metadata }, (d) => (d.name = `updatedNew`))
+        .when(`settled`)
 
-      await collection.delete(id, { metadata }).isPersisted.promise
+      await collection.delete(id, { metadata }).when(`settled`)
 
       // There should be a crud entries for this
       const crudBatch = await db.getCrudBatch(100)
@@ -666,7 +667,7 @@ describePowerSync(`PowerSync Integration`, () => {
 
       try {
         await addTx.commit()
-        await addTx.isPersisted.promise
+        await addTx.when(`settled`)
         expect.fail(`Should have thrown an error`)
       } catch (error) {
         expect(error).toBeDefined()
@@ -707,14 +708,18 @@ describePowerSync(`PowerSync Integration`, () => {
           .forEach((change) => bookNames.add(change))
       })
 
-      await collection.insert({
-        id: randomUUID(),
-        name: `notabook`,
-      }).isPersisted.promise
-      await collection.insert({
-        id: randomUUID(),
-        name: `book`,
-      }).isPersisted.promise
+      await collection
+        .insert({
+          id: randomUUID(),
+          name: `notabook`,
+        })
+        .when(`settled`)
+      await collection
+        .insert({
+          id: randomUUID(),
+          name: `book`,
+        })
+        .when(`settled`)
 
       expect(collection.size).eq(2)
       await vi.waitFor(

@@ -56,9 +56,11 @@ for (const timestamp of [undefined, -1, Number.MAX_SAFE_INTEGER]) {
       const source = await h.open()
       const peer = await h.open('items', { db: await h.connect() })
       assertRows(source.values(), initial, 'legacy restore')
-      await source.update(1, (row) => {
-        row.name = 'after'
-      }).isPersisted.promise
+      await source
+        .update(1, (row) => {
+          row.name = 'after'
+        })
+        .when('settled')
       await Channel.deliver()
       const after = [{ id: 1, name: 'after' }, initial[1]!]
       assertRows(

@@ -387,7 +387,7 @@ it.each([`Map`, `Set`] as const)(
       expect([...collection.get(1)!.values.values()]).toEqual([{ x: 2 }])
       item.x = 3
       expect([...collection.get(1)!.values.values()]).toEqual([{ x: 2 }])
-      await tx.isPersisted.promise
+      await tx.when('settled')
     } finally {
       await collection.cleanup()
     }

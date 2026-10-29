@@ -38,7 +38,6 @@ export async function checkWithCleanup(
 export const virtualFieldNames = [
   `$key`,
   `$hasPendingWrites`,
-  `$synced`,
   `$origin`,
   `$collectionId`,
 ] as const

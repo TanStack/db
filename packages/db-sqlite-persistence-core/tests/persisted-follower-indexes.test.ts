@@ -1083,7 +1083,7 @@ describe(`persistedCollectionOptions`, () => {
       title: `Ack mismatch`,
     })
 
-    await expect(tx.isPersisted.promise).rejects.toThrow(
+    await expect(tx.when('settled')).rejects.toThrow(
       /partial acceptance is not supported/,
     )
     expect(collection.get(`ack-mismatch`)).toBeUndefined()
@@ -1161,7 +1161,7 @@ describe(`persistedCollectionOptions`, () => {
           id: `local-failure`,
           title: `Must not persist`,
         })
-        const rejection = await tx.isPersisted.promise.then(
+        const rejection = await tx.when('settled').then(
           () => undefined,
           (error: unknown) => error,
         )
@@ -1286,7 +1286,7 @@ describe(`persistedCollectionOptions`, () => {
         id: `primary-local`,
         title: `must install terminal state`,
       })
-      const primaryOutcome = await primary.isPersisted.promise.then(
+      const primaryOutcome = await primary.when('settled').then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -1351,7 +1351,7 @@ describe(`persistedCollectionOptions`, () => {
         id: `old-local`,
         title: `durable only in the replaced lifecycle`,
       })
-      const settlement = transaction.isPersisted.promise.then(
+      const settlement = transaction.when('settled').then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )

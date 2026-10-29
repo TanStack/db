@@ -305,12 +305,10 @@ export function rxdbCollectionOptions(
     onInsert: async (params) => {
       debug(`insert`, params)
       const newItems = params.transaction.mutations.map((m) => m.modified)
-      return rxCollection.bulkUpsert(newItems).then((result) => {
-        if (result.error.length > 0) {
-          throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
-        }
-        return result.success
-      })
+      const result = await rxCollection.bulkUpsert(newItems)
+      if (result.error.length > 0) {
+        throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
+      }
     },
     onUpdate: async (params) => {
       debug(`update`, params)
@@ -336,12 +334,10 @@ export function rxdbCollectionOptions(
         (m) => m.type === `delete`,
       )
       const ids = mutations.map((mutation) => getKey(mutation.original))
-      return rxCollection.bulkRemove(ids).then((result) => {
-        if (result.error.length > 0) {
-          throw result.error
-        }
-        return result.success
-      })
+      const result = await rxCollection.bulkRemove(ids)
+      if (result.error.length > 0) {
+        throw result.error
+      }
     },
   }
   return withCollectionConfigFactory(collectionConfig, () =>

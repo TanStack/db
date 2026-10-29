@@ -54,7 +54,7 @@ describe(`persistedCollectionOptions`, () => {
         unexpectedThird = createCollection(options)
       }).toThrow(InvalidPersistedCollectionConfigError)
       const receipt = collection.insert({ id: `owned`, title: `Retried owner` })
-      await receipt.isPersisted.promise
+      await receipt.when('settled')
       expect(stripVirtualProps(collection.get(`owned`))).toEqual({
         id: `owned`,
         title: `Retried owner`,
@@ -156,7 +156,7 @@ describe(`persistedCollectionOptions`, () => {
           source.write({ type: `insert`, value: row })
           await source.commit()
         } else {
-          await collection.insert(row).isPersisted.promise
+          await collection.insert(row).when('settled')
         }
         expect(stripVirtualProps(collection.get(`owned`))).toEqual({
           id: `owned`,
@@ -212,7 +212,7 @@ describe(`persistedCollectionOptions`, () => {
         }).toThrow(InvalidPersistedCollectionConfigError)
 
         const receipt = first.insert({ id: `owned`, title: `First owner` })
-        await receipt.isPersisted.promise
+        await receipt.when('settled')
         expect(stripVirtualProps(first.get(`owned`))).toEqual({
           id: `owned`,
           title: `First owner`,
@@ -347,8 +347,9 @@ describe(`persistedCollectionOptions`, () => {
         if (mode === `sync-present`) {
           await Promise.resolve(source.commit())
         } else {
-          await first.insert({ id: `owned`, title: `First owner` }).isPersisted
-            .promise
+          await first
+            .insert({ id: `owned`, title: `First owner` })
+            .when('settled')
         }
         expect(first.has(`owned`)).toBe(true)
         expect(second.has(`owned`)).toBe(false)
@@ -509,8 +510,9 @@ describe(`persistedCollectionOptions`, () => {
           })
           await Promise.resolve(source.commit())
         } else {
-          await first.insert({ id: `after-restart`, title: `First owner` })
-            .isPersisted.promise
+          await first
+            .insert({ id: `after-restart`, title: `First owner` })
+            .when('settled')
         }
         expect(first.has(`after-restart`)).toBe(true)
         expect(second.has(`after-restart`)).toBe(false)
@@ -608,7 +610,7 @@ describe(`persistedCollectionOptions`, () => {
       title: `Phase 0`,
     })
 
-    await insertTx.isPersisted.promise
+    await insertTx.when('settled')
 
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
@@ -664,7 +666,7 @@ describe(`persistedCollectionOptions`, () => {
         title: `Managed during startup`,
       })
       releaseInitialSnapshot()
-      await insert.isPersisted.promise
+      await insert.when('settled')
       await collection.stateWhenReady()
       await vi.waitFor(() => expect(snapshotCalls).toBeGreaterThanOrEqual(2))
 
