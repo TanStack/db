@@ -976,16 +976,14 @@ describe(`multi-tab Electric over one persisted database`, () => {
       return {
         tabCount,
         steps: [
-          ...stopOrder.flatMap(
-            (pick): Array<HistoryStep> => [
-              { kind: `server change`, key, pick: 0 },
-              { kind: `advance`, tab, pick: 0 },
-              { kind: `stop`, tab, pick },
-              { kind: `catch up`, tab: peer, pick: 0 },
-              { kind: `recover`, tab, pick: recovery },
-              { kind: `catch up`, tab, pick: 0 },
-            ],
-          ),
+          ...stopOrder.flatMap((pick): Array<HistoryStep> => [
+            { kind: `server change`, key, pick: 0 },
+            { kind: `advance`, tab, pick: 0 },
+            { kind: `stop`, tab, pick },
+            { kind: `catch up`, tab: peer, pick: 0 },
+            { kind: `recover`, tab, pick: recovery },
+            { kind: `catch up`, tab, pick: 0 },
+          ]),
           ...steps,
         ],
       }
