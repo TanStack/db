@@ -16,11 +16,17 @@
  *   budget, so they never displace a random history. A replay keeps its seed,
  *   and a path replay keeps its path and still runs one history.
  *
+ * The first n histories are the examples only when the reach belongs to one
+ * property and that property's callback begins every history. A driver calls
+ * `reach(state)` inside a history: a call before the first `beginHistory()`
+ * is a driver error, so it throws and counts nothing.
+ *
  * `runOracleCampaign` follows the first rule for its own replay prefix: a
  * seed-only run of its campaign checks reach, and only a path replay skips it.
  *
- * The model below states both rules over a generated ledger: a run kind, a
- * minimum, a number of fixed histories, and the states each history enters.
+ * The model below states these rules over a generated ledger: a run kind, a
+ * minimum, a number of fixed histories, the states each history enters, and
+ * the states reached before the first history.
  * The drivers run `createOracleReach`, `runOracleCampaign`, and
  * `oracleRandomParameters` under that run kind's environment, and the checks
  * compare counts, the failure, and the states the failure names with the
@@ -44,6 +50,8 @@ type Ledger = {
   states: ReadonlyArray<string>
   minimum: number
   fixedHistories: number
+  // The indices of the states reached before the first history.
+  early: ReadonlyArray<number>
   // The indices of the states each history enters, with repeats.
   histories: ReadonlyArray<ReadonlyArray<number>>
 }
@@ -54,11 +62,14 @@ type Failure = {
   unfixed: ReadonlyArray<string>
 }
 type Verdict = {
+  // The states whose reach before the first history threw, in call order.
+  rejected: ReadonlyArray<string>
   counts: ReadonlyMap<string, number>
   failure: Failure | undefined
 }
 
-// The grammar: two to four states, and up to six histories over them.
+// The grammar: two to four states, and up to six histories over them. A
+// quarter of the ledgers first reach a state or two before any history.
 const ledgerArbitrary: fc.Arbitrary<Ledger> = fc
   .integer({ min: 2, max: 4 })
   .chain((stateCount) =>
@@ -69,6 +80,16 @@ const ledgerArbitrary: fc.Arbitrary<Ledger> = fc
       ),
       minimum: fc.integer({ min: 1, max: 3 }),
       fixedHistories: fc.integer({ min: 0, max: 4 }),
+      early: fc.oneof(
+        { arbitrary: fc.constant([]), weight: 3 },
+        {
+          arbitrary: fc.array(fc.integer({ min: 0, max: stateCount - 1 }), {
+            minLength: 1,
+            maxLength: 2,
+          }),
+          weight: 1,
+        },
+      ),
       histories: fc.array(
         fc.array(fc.integer({ min: 0, max: stateCount - 1 }), {
           maxLength: 4,
@@ -78,8 +99,9 @@ const ledgerArbitrary: fc.Arbitrary<Ledger> = fc
     }),
   )
 
-// The model. A history counts once per state it enters, in every run kind. A
-// path replay checks nothing. Otherwise a state fails below the minimum, and,
+// The model. Every reach before the first history throws and counts nothing.
+// A history counts once per state it enters, in every run kind. A path replay
+// checks nothing. Otherwise a state fails below the minimum, and,
 // when fixed histories are declared, a state the first ones did not enter
 // fails too.
 function expectedVerdict(ledger: Ledger): Verdict {
@@ -104,6 +126,7 @@ function expectedVerdict(ledger: Ledger): Verdict {
         )
   const fails = belowMinimum.size > 0 || unfixed.length > 0
   return {
+    rejected: ledger.early.map((index) => ledger.states[index]!),
     counts,
     failure:
       ledger.run !== `path` && fails ? { belowMinimum, unfixed } : undefined,
@@ -152,6 +175,14 @@ async function observeLedger(ledger: Ledger): Promise<Verdict> {
         fixedHistories: ledger.fixedHistories,
       }),
   )
+  const rejected: Array<string> = []
+  for (const index of ledger.early) {
+    try {
+      reach.reach(ledger.states[index]!)
+    } catch {
+      rejected.push(ledger.states[index]!)
+    }
+  }
   for (const history of ledger.histories) {
     reach.beginHistory()
     for (const index of history) reach.reach(ledger.states[index]!)
@@ -162,7 +193,11 @@ async function observeLedger(ledger: Ledger): Promise<Verdict> {
   } catch (error) {
     failure = (error as Error).message
   }
-  return { counts: new Map(reach.counts()), failure: namedStates(failure) }
+  return {
+    rejected,
+    counts: new Map(reach.counts()),
+    failure: namedStates(failure),
+  }
 }
 
 // The states a failure names: `name (count)` below the minimum, and a list of
@@ -291,6 +326,7 @@ const reachStates = [
   `a fixed history miss that a later history enters`,
   `a state below a minimum above one`,
   `a ledger that passes`,
+  `a reach before the first history`,
 ] as const
 // One fixed ledger enters each reach state, first in every run, so this
 // property's own reach cannot miss by chance.
@@ -299,9 +335,17 @@ function fixedLedger(
   minimum: number,
   fixedHistories: number,
   histories: Ledger[`histories`],
+  early: Ledger[`early`] = [],
 ): [Ledger, number, Array<number>] {
   return [
-    { run, states: [`state 0`, `state 1`], minimum, fixedHistories, histories },
+    {
+      run,
+      states: [`state 0`, `state 1`],
+      minimum,
+      fixedHistories,
+      early,
+      histories,
+    },
     60,
     [1],
   ]
@@ -312,6 +356,7 @@ const ledgerExamples = [
   fixedLedger(`ordinary`, 1, 1, [[0], [1]]),
   fixedLedger(`ordinary`, 2, 0, [[0, 1]]),
   fixedLedger(`ordinary`, 1, 0, [[0, 1]]),
+  fixedLedger(`ordinary`, 1, 0, [[0, 1]], [0]),
 ]
 const ledgerReach = createOracleReach(`oracle.declared-reach`, reachStates, {
   fixedHistories: ledgerExamples.length,
@@ -347,5 +392,7 @@ fcTest.prop(
       ledgerReach.reach(`a state below a minimum above one`)
     if (ledger.run !== `path` && failure === undefined)
       ledgerReach.reach(`a ledger that passes`)
+    if (ledger.early.length > 0)
+      ledgerReach.reach(`a reach before the first history`)
   },
 )

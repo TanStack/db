@@ -3412,18 +3412,23 @@ it. A property can run fixed examples first in every run, through
 `oraclePropertyOptions(…, { examples })`. The examples come on top of the base
 run budget, so they never displace a random history. With `fixedHistories`,
 the check also fails for each declared state that the examples did not enter.
-The `source-health.history`, `source-health.on-demand`, and
+The examples are the first histories, so such a reach belongs to one property,
+and only that property's callback begins its histories. A `reach()` call before
+the first history throws and counts nothing. A replay keeps its seed, and a
+path replay keeps its path. The `source-health.history`, `source-health.on-demand`, and
 `source-health.lazy-demand` properties run each reach prefix, and each driver
 option that a declared state needs, as examples, so their reach does not depend
 on the seed (#2287). The oracle generates ledgers over two to four states, up to
-six histories, minimums up to three, and up to four fixed histories, under the
-three run kinds. It also drives `runOracleCampaign` in
+six histories, minimums up to three, up to four fixed histories, and reaches
+before the first history, under the three run kinds. It also drives `runOracleCampaign` in
 `packages/db/tests/oracle-campaign.ts`, whose seed-only run of its own replay
 prefix checks reach in the same way. A declared state of another property that
 only random histories reach can still miss by chance at the normal budget.
 Those properties have not been measured. Destination: #2289. Needed witness:
 per property, the declared states that no fixed example enters, and how often a
-normal-budget run misses each one.
+normal-budget run misses each one. The oracle does not judge reporter keys,
+which only a replay witness channel adds, or a reach shared across properties,
+which the precondition above rules out but no check detects.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest

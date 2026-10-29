@@ -9,7 +9,8 @@ import { readOracleRunConfig } from './oracle-config.js'
  * produces that state. Counting passing runs does not show reach.
  *
  * A property declares the states its laws depend on. Its driver calls
- * `reach(state)` when a history enters one. After the property ran,
+ * `reach(state)` when a history enters one. A call before the first
+ * `beginHistory()` throws: it is a driver error, not a history. After the property ran,
  * `assertReached()` fails for every declared state that fewer than `minimum`
  * histories entered. A history counts once per state, however often it
  * enters it.
@@ -17,7 +18,9 @@ import { readOracleRunConfig } from './oracle-config.js'
  * A property that runs fixed examples first, through `oraclePropertyOptions`'
  * `examples`, passes their number as `fixedHistories`. The check then also
  * fails for every declared state that those first histories did not enter:
- * that state's reach would depend on the seed (#2287).
+ * that state's reach would depend on the seed (#2287). The first histories
+ * are the examples only when the reach belongs to that one property and its
+ * callback begins every history, so such a reach is not shared.
  *
  * A path replay checks one recorded history, not reach, so the check does
  * nothing then. A seed alone reseeds the whole campaign, which runs its full
@@ -52,8 +55,12 @@ export function createOracleReach<TState extends string>(
       if (!counts.has(state)) {
         throw new Error(`${property}: undeclared reach state ${state}`)
       }
-      if (histories > 0 && histories <= fixedHistories)
-        enteredByFixed.add(state)
+      if (histories === 0) {
+        throw new Error(
+          `${property}: reach(${state}) came before the first beginHistory()`,
+        )
+      }
+      if (histories <= fixedHistories) enteredByFixed.add(state)
       if (current.has(state)) return
       current.add(state)
       counts.set(state, counts.get(state)! + 1)
