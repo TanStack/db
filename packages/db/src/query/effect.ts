@@ -1347,9 +1347,10 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    (!publishedRows || !deepEquals(previousValue, insertValue))
+    !deepEquals(previousValue, insertValue)
   ) {
-    // Row updated within the query result
+    // Equal insert/delete values can cancel an intermediate LEFT-join row
+    // within this graph run. Only a changed final value is an update.
     return {
       type: `update`,
       key,

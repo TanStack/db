@@ -5759,9 +5759,10 @@ Held mutations, independent confirmations/outcomes, both settlement orders,
 remote updates, peer exit/reentry and next-use reach 5,512 lane/channel/cut cells
 exactly once. No implicit Effect-root metadata or output Collection ID is claimed.
 
-Open P09: all 64 LEFT-join histories emit a startup update for a never-entered
-unmatched occurrence after its load finished. Those initial comparisons remain
-RED on unchanged `858b174a6`; histories continue and all later comparisons pass.
+Original P09 evidence: all 64 LEFT-join histories emitted a startup update for
+a never-entered unmatched occurrence after its load finished. Those initial
+comparisons were RED on unchanged `858b174a6`; histories continued and all later
+comparisons passed.
 The other 136 native histories and 16 controls pass. Independent hostile
 overlays reject dispatch, previous-value, duplication, colliding-key and extra
 undefined defects; lawful key renaming, fresh reentry and empty partitions retain
@@ -5773,12 +5774,20 @@ in the RC chunk record for exact fingerprints, evidence and review.
 Limits: eager controlled core sources, scalar rows, one mutation per source,
 and these named paths. No real provider/framework, arbitrary scheduling,
 ordered repair, same-source overlap, callback-input sanitization or exact
-internal graph-run callback-count guarantee follows. P09 requires production
-repair. The focused Effect follow-up restores the exact accepted owner and its
-`test:oracles` entry before production changes; current-main RED, GREEN and
-mutant results remain pending. See
-[the Effect startup follow-up](oracle-reviews/effect-startup-delta.md). This entry
-makes no closure claim.
+internal graph-run callback-count guarantee follows.
+
+P09 is repaired in PR #2301 within this finite controlled-core boundary.
+The exact owner and `test:oracles` entry were restored before production edits.
+On baseline `9b03e639f`, the fresh RED reproduced 64 startup failures with every
+reach cell at count 1. Repaired production passes all 216 owner tests and all
+2,756 checkpoint comparisons. Restoring the original classifier reproduces the
+same 64 assertion failures; suppressing all unordered updates fails all 200
+native histories. Each of the 5,512 reach cells remains at count 1 in both
+mutants and GREEN. All 1,690 neighboring tests pass before and after the edit.
+See [the Effect startup follow-up](oracle-reviews/effect-startup-delta.md) for
+commands, fingerprints and limits. Arbitrary scheduling, join multiplicity,
+ordered repair, same-source overlap and callback-input sanitization remain
+outside this bounded closure. Other deferred findings remain open.
 
 ### RC bound schema mutation receivers (2026-10-28)
 
