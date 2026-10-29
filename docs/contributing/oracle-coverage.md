@@ -3988,7 +3988,14 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
       (fixed seed 952051961 and a random seed, 80 runs each; the shared
       `TANSTACK_DB_ORACLE_SEED`, `_PATH`, and `_PROPERTY=
       browser.multi-tab-reserved-history` replay one). The
-      model folds committed batches into the expected durable rows. After
+      grammar constructs a 24-step prefix before its unchanged 8–24 arbitrary
+      steps. Every stop kind occurs in a generated order: a source opens a
+      transaction, stops, lets a distinct peer commit, then recovers and catches
+      up. Source tab, initially absent key, and recovery method vary. Four
+      membership toggles restore the original rows before the arbitrary tail.
+      This makes stop/peer reach structural; an earlier CI random campaign
+      missed the SDK-give-up boundary with the unconstrained shuffle.
+      The model folds committed batches into the expected durable rows. After
       every step it judges the durable rows, every Collection status, and
       the rows of each tab with no open transaction; after every tab catches
       up it judges them again. A Collection status changes only through its

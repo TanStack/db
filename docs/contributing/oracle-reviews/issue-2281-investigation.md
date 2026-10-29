@@ -1126,3 +1126,94 @@ finding is fixed with its generated dimension and receiving evidence. The
 summary's claim that the reported #2283 trace is outside this repair is stale:
 that exact row-loss replay already passes here. The #2267 safety/composition
 qualification remains separate. Raw reviews and dispositions remain local.
+
+### Construct stop/peer reach before arbitrary interleavings
+
+CI on `124ce667c61a9e247ea1628991bc72db91d6041e`, workflow `40927860887`,
+SQLite-adapters job `123638080436`, found an instrumentation failure. The random
+reserved-history campaign reached `peer commit after SDK gives up
+mid-transaction` zero times. It reported no incorrect row comparison. The
+unconstrained shuffle made the required four-action ordering too rare.
+
+Every generated history now begins with four six-action stop blocks in a
+generated permutation. Each block toggles an initially absent key, opens a
+source transaction, stops the source, commits from a distinct peer, recovers the
+source, and catches it up. The source tab, key (3 or 4), recovery method, and
+stop order vary. Four toggles restore the original membership before the
+unchanged 8–24 arbitrary actions. Histories therefore contain 32–48 actions;
+both campaigns still accept 80 histories, with fixed seed `952051961` and the
+same replay interface. Every pinned history retains its unchanged direct path.
+
+This grammar excludes a peer equal to the stopped source and does not recover
+that source before its peer commits. Removing partial delivery, the stop, or
+the peer commit loses the premise. Removing recovery makes the later blocks
+act on a stopped source. The arbitrary tail preserves deploys, resets,
+interleavings, and the hostile witness below. The independent model, production
+driver, comparison checkpoints, exclusions, and all reach requirements remain.
+
+- **Law:** Browser Laws 1 and 3 require a stopped source to end its reservation
+  so peer durable rows can apply. Authority: `reserveCommitTurn` and the
+  maintainer decision on PR #2265. Laws 2, 4, and 5 retain their earlier bounds.
+- **Reach:** Fixed/random counts below include histories that later encounter
+  the documented #2267 discard: 81/80 executed for 80/80 accepted histories.
+  The constructed stop premises occur before any such discard.
+- **RED:** The CI run above rejects the old grammar's missing SDK-give-up reach.
+  This is coverage RED, not a production row defect.
+- **GREEN:** The focused owner command below passes both campaigns and its
+  associated type checks: three reported tests pass, no type errors.
+- **Mutant:** Removing only Electric's SDK-give-up `abandonOpenTransaction`
+  rejects both campaigns. The fixed campaign shrinks to seed `952051961`, path
+  `1:0:0:0:0:0:0:0:1:1:0:0`: at step 31, the stopped tab still shows row 1
+  while its peer and SQLite have deleted it. The random campaign also rejects
+  a stale peer row at final delivery (seed `-1481171989`, path
+  `15:0:0:1:0:1:1:1:1:1:1:1:2:2:2:2`). These are row assertion failures.
+  The first one-history diagnostic (seed `952051961`, path `0`) survived the
+  mutant, despite reaching the give-up callback with an open transaction.
+  It is not a kill. The retained arbitrary tail supplies the distinguishing
+  stale-row witnesses. Exact source restoration uses SHA-256
+  `df8a918e736ca073619a693316c475040db46e2e30fc20fdbcc566934be695e6`.
+- **Limits:** This constructs the controlled SDK stop boundary on the Node
+  Browser coordinator. It adds no real-provider claim or new product behavior.
+  Existing partial-update, permanent-close, receipt, and teardown limits remain.
+
+| Declared state | Fixed/random histories |
+| --- | --- |
+| must-refetch delivered | 55/43 |
+| peer commit during an open reserved transaction | 17/10 |
+| source stopped with an open transaction | 81/80 |
+| tab recovered | 81/80 |
+| durable rows behind the server | 81/80 |
+| peer commit while a tab was not ready | 81/80 |
+| peer commit after error without retry mid-transaction | 81/80 |
+| peer commit after SDK gives up mid-transaction | 81/80 |
+| peer commit after signal aborted mid-transaction | 81/80 |
+| peer reset abandoned an open transaction | 12/13 |
+| reset-abandoned commit put the Collection in error | 6/11 |
+| reset-abandoned source recovered during final catch-up | 4/3 |
+
+```sh
+pnpm_config_verify_deps_before_run=false pnpm \
+  --filter @tanstack/browser-db-sqlite-persistence exec vitest run \
+  tests/multi-tab-electric-oracle.test.ts --maxWorkers=2 \
+  --disableConsoleIntercept -t 'keeps reserved commits lawful across generated'
+```
+
+Replay uses `TANSTACK_DB_ORACLE_PROPERTY=browser.multi-tab-reserved-history`,
+`TANSTACK_DB_ORACLE_SEED=952051961`, and
+`TANSTACK_DB_ORACLE_PATH=1:0:0:0:0:0:0:0:1:1:0:0` with that command.
+Logs remain local as `ci-reach-green.log`, `ci-reach-abandon-mutant{,-campaign}.log`,
+`ci-reach-abandon-path.log`, and `ci-reach-restored-replay.log`.
+
+The grammar change retains ORC-001–003's authority, independent judgment, and
+literate boundaries. The construction and ablations above address ORC-004;
+measured production reach and unchanged public comparisons address ORC-005.
+The mutant supplies ORC-006/013 sensitivity, and both normal campaigns and direct
+replay retain ORC-007. No model state changes (ORC-008), new abstraction
+(ORC-009), or named shared semantic fault requiring another formulation
+(ORC-011) arise. Existing cleanup and failure preservation retain ORC-010.
+This versioned append supplies ORC-012 evidence; the controlled boundary limits
+ORC-014's claim. All declared reaches remain enforced (ORC-015), and the file
+continues to run shared judgments without example-specific answers (ORC-016).
+
+The restored shrunk replay passes with no type errors (two reported tests).
+No production file remains changed by this calibration.

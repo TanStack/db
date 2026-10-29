@@ -948,10 +948,48 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }),
     },
   )
-  const generatedHistory = fc.record({
-    tabCount: fc.integer({ min: 2, max: 3 }),
-    steps: fc.array(historyStep, { minLength: 8, maxLength: 24 }),
-  })
+  // Construct stop/peer boundaries before the arbitrary interleavings. A
+  // partial delivery opens the source's reservation; its stop must abandon
+  // that reservation so the peer's next commit can apply (Laws 1 and 3).
+  // Every stop kind occurs in a generated order, with a distinct running
+  // peer. Recovery and catch-up separate the blocks. Four membership toggles
+  // of an initially absent key restore the original rows before the tail.
+  // This adds 24 steps to the unchanged 8–24-step arbitrary tail. Removing
+  // the open delivery, stop, or peer commit loses the law's premise; recovering
+  // before the peer commit would test a different boundary. Existing pinned
+  // histories still use the same driver without this prefix.
+  const generatedHistory = fc
+    .record({
+      tabCount: fc.integer({ min: 2, max: 3 }),
+      source: fc.nat(2),
+      key: fc.constantFrom(3, 4),
+      recovery: fc.nat(1),
+      stopOrder: fc.shuffledSubarray([0, 1, 2, 3], {
+        minLength: 4,
+        maxLength: 4,
+      }),
+      steps: fc.array(historyStep, { minLength: 8, maxLength: 24 }),
+    })
+    .map(({ tabCount, source, key, recovery, stopOrder, steps }) => {
+      const tab = source % tabCount
+      const peer = (tab + 1) % tabCount
+      return {
+        tabCount,
+        steps: [
+          ...stopOrder.flatMap(
+            (pick): Array<HistoryStep> => [
+              { kind: `server change`, key, pick: 0 },
+              { kind: `advance`, tab, pick: 0 },
+              { kind: `stop`, tab, pick },
+              { kind: `catch up`, tab: peer, pick: 0 },
+              { kind: `recover`, tab, pick: recovery },
+              { kind: `catch up`, tab, pick: 0 },
+            ],
+          ),
+          ...steps,
+        ],
+      }
+    })
   type GeneratedHistory = { tabCount: number; steps: Array<HistoryStep> }
 
   type ServerLog = {
