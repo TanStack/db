@@ -27,6 +27,7 @@ import {
   withFixtureCleanup,
 } from './electric-recovery-support'
 import type { Message } from '@electric-sql/client'
+import type { PersistedTx } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Item,
@@ -186,7 +187,7 @@ async function observePersistedRestart(
       scenario,
       modelCanonicalRows,
     )
-    const resumeState =
+    const resumeState: NonNullable<PersistedTx['collectionMetadataMutations']> =
       scenario.resumeKind === `none`
         ? []
         : [
@@ -210,6 +211,20 @@ async function observePersistedRestart(
       driver,
       schemaVersion: 1,
     })
+    // A compatible warm baseline includes the source's complete-position token.
+    // Legacy/missing tokens are a separate full-snapshot recovery regime in the
+    // Browser source-prefix owner, not a compatible-reopen premise here.
+    if (scenario.resumeKind === `resume`) {
+      resumeState.push({
+        type: `set`,
+        key: `electric:source-progress`,
+        value: JSON.stringify([
+          `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+          `shape-old`,
+          `10_0`,
+        ]),
+      })
+    }
     await originalAdapter.applyCommittedTx(
       { kind: `eager`, collectionId: collectionId },
       {

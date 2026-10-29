@@ -639,6 +639,21 @@ export type SyncPersistenceCapabilityV1<
     readonly certify: () => Promise<void>
     readonly getKeySetEvidence: () => SyncPersistenceKeySetEvidence | undefined
     readonly expectCurrentCommit: () => void
+    /**
+     * Atomically compare the durable source token with this transaction's
+     * predecessor. The source stages its next opaque string token in collection
+     * metadata at `key`. A discontinuity invalidates source progress evidence
+     * until an authoritative truncate; rows and receipts still apply normally.
+     * Re-delivering the same complete source position must be idempotent; it
+     * preserves existing evidence, including an earlier incompatibility.
+     * Only adapters that implement the durable comparison expose this method.
+     */
+    readonly expectSourceProgress?: (progress: {
+      key: string
+      previous: string | undefined
+    }) => void
+    /** Source progress evidence from the atomic persisted resume snapshot. */
+    readonly getSourceProgressCompatible?: () => boolean | undefined
   }
 }
 

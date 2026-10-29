@@ -81,6 +81,7 @@ const tasks = createCollection(
   }),
 )
 
+const taskId: string = selectedTask._id
 const transaction = tasks.update(taskId, (task) => {
   task.completed = true
 })
