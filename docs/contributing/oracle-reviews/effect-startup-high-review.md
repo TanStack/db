@@ -191,3 +191,11 @@ These SHA256 values identify the repaired executable subject against parent
 c84a3d24f2ed2cbb251c5ea758c36a36234fef18e09d82a608929d696e1d6816  packages/db/tests/utils-oracle.property.test.ts
 043e546f9a2bf3ba52395c8c9d203456bf63f4fa481b0b4883fe4a56b24f448e  packages/db/tests/oracle-config.ts
 ```
+
+## Exact reviewed repair commit
+
+The executable subject is `375e9b26ca93b19cc266dd1ccdfcd10e97e820fc`.
+The source fingerprints above match that commit after the pre-commit hooks.
+This appended entry binds the 647-test GREEN, 22 diagnostic passes, targeted
+type/lint checks and eight-item audit to that exact subject. The following
+documentation commit adds only this binding, without changing executable code.
