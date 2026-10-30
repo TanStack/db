@@ -24,6 +24,7 @@ type SelectOp =
       source: (row: NamespacedRow) => any
     }
   | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
+  | { kind: `object`; targetPath: Array<string> }
 
 /**
  * Unwraps any Value expressions
@@ -45,19 +46,55 @@ function assertSafeAliasSegments(segments: ReadonlyArray<string>): void {
 
 // A source spread copies enumerable own data, including user symbols. Defining
 // fields avoids invoking inherited setters for ordinary source property names.
-function mergeSourceFields(
-  target: Record<PropertyKey, unknown>,
-  source: object,
-): void {
+function mergeSourceFields(target: object, source: object): void {
   for (const key of Reflect.ownKeys(source)) {
     if (!Object.prototype.propertyIsEnumerable.call(source, key)) continue
-    Object.defineProperty(target, key, {
-      value: unwrapVal(Reflect.get(source, key)),
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    })
+    defineSelectField(target, key, unwrapVal(Reflect.get(source, key)))
   }
+}
+
+// Only containers created by this evaluation may be modified. A spread or ref
+// can borrow a source object, so copy each borrowed destination at most once.
+function ownedDestination(
+  result: object,
+  path: ReadonlyArray<string>,
+  owned: WeakSet<object>,
+): object {
+  let cursor = result
+  for (const segment of path) {
+    const next = Object.hasOwn(cursor, segment)
+      ? Reflect.get(cursor, segment)
+      : undefined
+    if (next != null && typeof next === `object` && owned.has(next)) {
+      cursor = next
+      continue
+    }
+    const destination = Array.isArray(next)
+      ? new Array<unknown>(next.length)
+      : {}
+    if (Array.isArray(next)) {
+      Object.setPrototypeOf(destination, Object.getPrototypeOf(next))
+    }
+    if (next != null && typeof next === `object`) {
+      mergeSourceFields(destination, next)
+    }
+    owned.add(destination)
+    defineSelectField(cursor, segment, destination)
+    cursor = destination
+  }
+  return cursor
+}
+
+function defineSelectField(target: object, key: PropertyKey, value: unknown): void {
+  // Owned fields are normalized data. Preserve intrinsic array-length attributes
+  // when replacing its value; only newly created fields need ordinary defaults.
+  Object.defineProperty(
+    target,
+    key,
+    Object.hasOwn(target, key)
+      ? { value }
+      : { value, enumerable: true, configurable: true, writable: true },
+  )
 }
 
 /**
@@ -67,35 +104,15 @@ function processMerge(
   op: Extract<SelectOp, { kind: `merge` }>,
   namespacedRow: NamespacedRow,
   selectResults: Record<string, any>,
+  owned: WeakSet<object>,
 ): void {
   assertSafeAliasSegments(op.targetPath)
   const value = op.source(namespacedRow)
   if (value && typeof value === `object`) {
-    // Ensure target object exists
-    let cursor: any = selectResults
-    const path = op.targetPath
-    if (path.length === 0) {
-      // Top-level merge
-      mergeSourceFields(selectResults, value)
-    } else {
-      for (let i = 0; i < path.length; i++) {
-        const seg = path[i]!
-        // An accepted destination is an own field, even when its name is inherited.
-        if (!Object.hasOwn(cursor, seg)) cursor[seg] = {}
-        if (i === path.length - 1) {
-          const dest = (cursor[seg] ??= {})
-          if (typeof dest === `object`) {
-            mergeSourceFields(dest, value)
-          }
-        } else {
-          const next = cursor[seg]
-          if (next == null || typeof next !== `object`) {
-            cursor[seg] = {}
-          }
-          cursor = cursor[seg]
-        }
-      }
-    }
+    mergeSourceFields(
+      ownedDestination(selectResults, op.targetPath, owned),
+      value,
+    )
   }
 }
 
@@ -106,24 +123,47 @@ function processNonMergeOp(
   op: Extract<SelectOp, { kind: `field` }>,
   namespacedRow: NamespacedRow,
   selectResults: Record<string, any>,
+  owned: WeakSet<object>,
 ): void {
   // Support nested alias paths like "meta.author.name"
   const path = op.alias.split(`.`)
   assertSafeAliasSegments(path)
-  if (path.length === 1) {
-    selectResults[op.alias] = op.compiled(namespacedRow)
-  } else {
-    let cursor: any = selectResults
-    for (let i = 0; i < path.length - 1; i++) {
-      const seg = path[i]!
-      const next = cursor[seg]
-      if (next == null || typeof next !== `object`) {
-        cursor[seg] = {}
-      }
-      cursor = cursor[seg]
+  const target = ownedDestination(selectResults, path.slice(0, -1), owned)
+  defineSelectField(
+    target,
+    path[path.length - 1]!,
+    unwrapVal(op.compiled(namespacedRow)),
+  )
+}
+
+function evaluateSelectObject(
+  namespacedRow: NamespacedRow,
+  ops: Array<SelectOp>,
+): Record<string, unknown> {
+  const selectResults: Record<string, unknown> = {}
+  const owned = new WeakSet<object>([selectResults])
+  for (const op of ops) {
+    if (op.kind === `merge`) {
+      processMerge(op, namespacedRow, selectResults, owned)
+    } else if (op.kind === `field`) {
+      processNonMergeOp(op, namespacedRow, selectResults, owned)
+    } else {
+      assertSafeAliasSegments(op.targetPath)
+      const target = ownedDestination(
+        selectResults,
+        op.targetPath.slice(0, -1),
+        owned,
+      )
+      const destination = {}
+      owned.add(destination)
+      defineSelectField(
+        target,
+        op.targetPath[op.targetPath.length - 1]!,
+        destination,
+      )
     }
-    cursor[path[path.length - 1]!] = unwrapVal(op.compiled(namespacedRow))
   }
+  return selectResults
 }
 
 /**
@@ -133,15 +173,7 @@ function processRow(
   [key, namespacedRow]: [unknown, NamespacedRow],
   ops: Array<SelectOp>,
 ): [unknown, typeof namespacedRow & { $selected: any }] {
-  const selectResults: Record<string, any> = {}
-
-  for (const op of ops) {
-    if (op.kind === `merge`) {
-      processMerge(op, namespacedRow, selectResults)
-    } else {
-      processNonMergeOp(op, namespacedRow, selectResults)
-    }
-  }
+  const selectResults = evaluateSelectObject(namespacedRow, ops)
 
   // Return the namespaced row with $selected added
   return [
@@ -186,17 +218,7 @@ function compileSelectObject(
   const ops: Array<SelectOp> = []
   addFromObject([], obj, ops)
 
-  return (row) => {
-    const selectResults: Record<string, any> = {}
-    for (const op of ops) {
-      if (op.kind === `merge`) {
-        processMerge(op, row, selectResults)
-      } else {
-        processNonMergeOp(op, row, selectResults)
-      }
-    }
-    return selectResults
-  }
+  return (row) => evaluateSelectObject(row, ops)
 }
 
 function compileSelectValue(
@@ -330,8 +352,10 @@ function addFromObject(
       continue
     }
     if (isNestedSelectObject(expression)) {
-      // Nested selection object
-      addFromObject([...prefixPath, key], expression, ops)
+      // An authored object replaces any value supplied by an earlier spread.
+      const targetPath = [...prefixPath, ...key.split(`.`)]
+      ops.push({ kind: `object`, targetPath })
+      addFromObject(targetPath, expression, ops)
       continue
     }
 

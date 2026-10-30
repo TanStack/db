@@ -6223,16 +6223,20 @@ own-undefined/omission. The grammar contains 828 history slots across 45 group t
 duplicate React API registration.
 
 Every receiving group asserts its own reach. The shared comparison checks
-complete current values and retained `get()`, `previousValue`, and actual
-transaction `original` references after each update. Optimistic handlers also
-have a held cut. The local-only driver returns actual mutation receipts.
+complete current framework and source values, retained initial `get()` and
+admitted `change.value` references, `previousValue`, and actual transaction
+`original` references at every existing cut. Optimistic handlers also have a
+held cut. Three isolated source-corruption controls reject damage limited to
+current, initial, or newly admitted values. A real Solid fault injection is
+rejected at the current-source comparison, even when its detached output is
+correct. The local-only driver returns actual mutation receipts.
 Alternative legal source-shape policy is accepted. Original-only corruption and
 cross-row caching mutants distinguish the extended owner from its predecessor.
 
 Solid's separate receiving owner,
 `packages/solid-db/tests/row-materialization-oracle.test.tsx`, judges nested
 identity, binding lifetime, current array membership, live nested getters, and
-bounded shared-graph work. Its 85 finite histories include real `For` and effect
+bounded shared-graph work. Its original 85 finite histories include real `For` and effect
 consumers, native-store-only writes, reorder, growth/shrink/empty arrays, getter
 admission/replacement/omission/readmission, and crossed old/new graph sharing.
 The maintainer chose live getters and efficient shared acyclic graphs on
@@ -6275,6 +6279,42 @@ supply 168 histories / 840 comparisons. Core creates own enumerable data fields
 and own destination containers; unsafe authored alias paths retain rejection.
 The final [review record](oracle-reviews/2026-10-30-solid-native-store-review.md)
 records RED, GREEN, mutant classifications, reviewer outcomes, and exact code.
+
+The second independent review extends the same public-field owner with thirty
+overlap cells. Twenty-four legal expression cells reach every framework input;
+six functional controls supply a second Core formulation. A prior outer spread
+borrows the destination before a nested spread, literal field, or dotted alias
+writes it. Ordinary, inherited-name, and deeper destinations cross writable
+configurable/nonconfigurable source data. Authored nested objects replace their
+field; dotted aliases preserve siblings without writing through source objects.
+The four Core paths supply 120 path histories and 360 result cuts. Fourteen real
+framework groups supply another 336 histories and 1,008 result cuts. All compare
+current and retained source rows and require the actual source descriptor at
+all three stages. Existing 819 and 1,200 observations and the earlier receiving
+histories remain. Unkeyed functional projections are not legal derived-identity
+framework inputs, so they receive no framework handoff credit. Legal fresh-object
+expression controls provide those neighboring receiving comparisons instead.
+See the [second review record](oracle-reviews/2026-10-30-solid-oracle-review-round-two.md)
+for complete intake, RED gates, GREEN, hostile variants, and bounded closure.
+
+The same review adds six ordinary/subclass-array overlap cells. Dotted writes
+select lengths zero, one, and two while current and retained source arrays keep
+length three. Core now has 36 overlap cells / 144 path histories / 432 selected
+cuts. The fourteen real receiving groups each run thirty cells: 420 histories
+and 1,260 selected cuts. Each history independently requires all twelve declared
+checkpoints. Post-admission mount errors are recorded and later stages retry
+mounting; they cannot escape the shared comparison or supply false reach.
+
+Solid adds 93 actual receiving histories to its original 85: 24 native-parent
+identity transitions, 33 tracked callable data/getter histories, eighteen
+reserved-field histories, and eighteen inherited array-method histories. All
+three public inputs supply their own source admission and tracked consumers.
+The reorder comparison now checks complete current/rendered values and every
+element identity. A canonical backing-node memo preserves unchanged children
+across ordinary/native parent changes; a read facade retains live accessors and
+prototype methods while native nodes/setters supply updates. Original-code,
+missing-node, accessor/method, and reordered-tail mutants distinguish these
+repairs. No output alias topology or public elapsed-time budget is imposed.
 
 The local-only draft driver does not claim top-level symbol-write admission.
 Its shared preservation comparison still checks every field actually admitted,

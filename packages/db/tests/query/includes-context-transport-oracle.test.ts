@@ -4,12 +4,20 @@ import { createOracleReach } from '../oracle-reach.js'
 import { expectRowSnapshot } from '../conformance/row-snapshot-oracle.js'
 import {
   expectedPublicField,
+  expectedPublicFieldOverlapSource,
   expectedSelectedPublicField,
+  expectedSelectedPublicFieldOverlap,
   fieldStages,
+  overlapStages,
   publicFieldCells,
   publicFieldGrammar,
+  publicFieldOverlapCells,
+  publicFieldOverlapFunctionalCells,
   publicFieldSymbol,
+  runPublicFieldOverlapCell,
 } from '../conformance/public-field-oracle.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import {
   add,
   and,
@@ -37,6 +45,9 @@ import {
 } from './includes-context-transport-helpers.js'
 import type {
   PublicFieldCell,
+  PublicFieldOverlapCell,
+  PublicFieldOverlapHost,
+  PublicFieldOverlapRow,
   PublicFieldRow,
 } from '../conformance/public-field-oracle.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
@@ -243,6 +254,7 @@ type GrammarCell =
   | NamespaceCollisionCell
   | PublicSurfaceCell
   | PublicFieldCell
+  | PublicFieldOverlapCell
 
 // Expand every declared product once. The calibration test below rejects both
 // missing cells and duplicate cells.
@@ -319,6 +331,8 @@ const grammarCells: Array<GrammarCell> = [
     ),
   ),
   ...publicFieldCells,
+  ...publicFieldOverlapCells,
+  ...publicFieldOverlapFunctionalCells,
   ...routeContextGrammar.publicSurface.shapes.map(
     (shape): PublicSurfaceCell => ({ family: `public-surface`, shape }),
   ),
@@ -346,6 +360,8 @@ function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${cell.location} / ${cell.boundary} / ${cell.name}`
     case `public-field`:
       return `${cell.family} / ${String(cell.key)} / ${cell.location} / ${cell.selection} / ${cell.destination}`
+    case `public-field-overlap`:
+      return `${cell.family} / ${cell.destination} / ${cell.operation} / ${cell.descriptor}`
     case `public-surface`:
       return `${cell.family} / ${cell.shape}`
   }
@@ -2326,6 +2342,84 @@ async function runPublicFieldCell(cell: PublicFieldCell): Promise<void> {
   reach.assertReached()
 }
 
+// Each receiving path gets a fresh source. Sharing one source across four
+// queries could let one corrupting projection supply another query's premise.
+// The common history/checker owns scalar expectations and retained references;
+// this driver supplies only real Core source writes and the selected public form.
+async function runPublicFieldOverlapPaths(cell: PublicFieldOverlapCell) {
+  const failures: Array<Error> = []
+  for (const path of [`root`, ...materializationForms] as const) {
+    const parents = createGrammarCollection(`overlap-parent`, [
+      { id: 1, group: 1 },
+    ])
+    const host: PublicFieldOverlapHost = {
+      name: `core.${path}`,
+      makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
+        const options = mockSyncCollectionOptions<T>({
+          id: `overlap-${grammarCellName(cell)}-${path}`,
+          getKey: (row) => row.id,
+          initialData: [...initialData],
+          rowUpdateMode: `full`,
+        })
+        const collection = createCollection(options)
+        const write = (type: `insert` | `update` | `delete`, value: T) => {
+          options.utils.begin()
+          options.utils.write({ type, value })
+          options.utils.commit()
+        }
+        return {
+          collection,
+          insert: (row) => write(`insert`, row),
+          update: (row) => write(`update`, row),
+          remove: (row) => write(`delete`, row),
+        }
+      },
+      mount(build) {
+        const live =
+          path === `root`
+            ? createLiveQueryCollection(build)
+            : createLiveQueryCollection((q) =>
+                q.from({ parent: parents.collection }).select(({ parent }) => ({
+                  id: parent.id,
+                  ...includeInEveryForm(
+                    build(q).where(({ row }: { row: PublicFieldOverlapRow }) =>
+                      eq(row.parentGroup, parent.group),
+                    ),
+                  ),
+                })),
+              )
+        return {
+          apply: (write) => {
+            write()
+            return Promise.resolve()
+          },
+          flush: () => live.preload(),
+          unmount: () => {},
+          collection: () => live,
+          read: () =>
+            path === `root` ? live.toArray : [...live.get(1)![path].values()],
+        }
+      },
+    }
+    try {
+      await runPublicFieldOverlapCell(host, cell)
+    } catch (cause) {
+      failures.push(new Error(`${path}: overlapping projection`, { cause }))
+    } finally {
+      try {
+        await parents.collection.cleanup()
+      } catch (cause) {
+        failures.push(new Error(`${path}: parent cleanup failed`, { cause }))
+      }
+    }
+  }
+  if (failures.length)
+    throw new AggregateError(
+      failures,
+      `Overlapping source paths changed borrowed data or failed`,
+    )
+}
+
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
     case `parent-projection`:
@@ -2348,6 +2442,8 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runNamespaceCollisionCell(cell)
     case `public-field`:
       return runPublicFieldCell(cell)
+    case `public-field-overlap`:
+      return runPublicFieldOverlapPaths(cell)
     case `public-surface`:
       return runPublicSurfaceCell(cell)
   }
@@ -2371,6 +2467,8 @@ declareOracle({
     expectedCollisionRows,
     expectedPublicField,
     expectedSelectedPublicField,
+    expectedPublicFieldOverlapSource,
+    expectedSelectedPublicFieldOverlap,
   ],
   grammar: [grammarCells],
 })
@@ -2395,13 +2493,19 @@ describe(`correlated include route-context transport grammar`, () => {
         routeContextGrammar.namespaceCollision.boundaries.length *
         routeContextGrammar.namespaceCollision.names.length +
       routeContextGrammar.publicSurface.shapes.length +
-      publicFieldCells.length
+      publicFieldCells.length +
+      publicFieldOverlapCells.length +
+      publicFieldOverlapFunctionalCells.length
     const names = grammarCells.map(grammarCellName)
 
     expect(grammarCells).toHaveLength(expectedCellCount)
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
-      grammarCells.filter((cell) => cell.family !== `public-field`).length *
+      grammarCells.filter(
+        (cell) =>
+          cell.family !== `public-field` &&
+          cell.family !== `public-field-overlap`,
+      ).length *
         materializationForms.length *
         checkpoints.length,
     ).toBe(819)
@@ -2410,11 +2514,17 @@ describe(`correlated include route-context transport grammar`, () => {
         fieldStages.length *
         4,
     ).toBe(1200)
+    expect(
+      (publicFieldOverlapCells.length +
+        publicFieldOverlapFunctionalCells.length) *
+        overlapStages.length *
+        4,
+    ).toBe(432)
   })
 
   for (const cell of grammarCells) {
     const observations =
-      cell.family === `public-field`
+      cell.family === `public-field` || cell.family === `public-field-overlap`
         ? `root and correlated forms × field admission stages`
         : `every materialization form × parent/child updates`
     test(`${grammarCellName(cell)} × ${observations}`, () =>

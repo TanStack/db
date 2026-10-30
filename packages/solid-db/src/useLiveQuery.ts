@@ -18,7 +18,7 @@ import {
   toBoundaryError,
 } from '@tanstack/db'
 import { createStore, reconcile } from 'solid-js/store'
-import { createRowStore } from './store-materialization'
+import { createRowStore, createStoreReadView } from './store-materialization'
 import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
@@ -302,6 +302,8 @@ export function useLiveQuery(
     name: `TanstackDBData`,
   })
 
+  const readData = createStoreReadView(data)
+
   // Track collection status reactively
   const [status, setStatus] = createSignal(
     collection() ? collection()!.status : (`disabled` as const),
@@ -519,10 +521,11 @@ export function useLiveQuery(
       if (isSingleResultCollection(currentCollection)) {
         // Force resource tracking so Suspense works
         getDataResource()
-        return data[0]
+        return readData[0]
       }
     }
-    return getDataResource()
+    const result = getDataResource()
+    return result === data ? readData : result
   }
 
   Object.defineProperties(getData, {

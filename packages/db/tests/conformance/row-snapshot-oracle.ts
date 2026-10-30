@@ -2,8 +2,9 @@
  * Framework materialization borrows Collection rows; it cannot edit them.
  * Authority: mutations.md's immutable updates and PendingMutation.original,
  * ChangeMessage.previousValue's previous row, and contract.ts's result law.
- * Retained source rows, mutation originals and previous values keep their
- * complete user values. Current results follow the current source row.
+ * Current and retained source rows, admitted change values, mutation originals
+ * and previous values keep their complete user values. Current results follow
+ * the current source row.
  *
  * Source facts are captured before framework admission. Aliases and accessors
  * describe production inputs, not additional identity promises for hook output.
@@ -18,7 +19,12 @@ import { declareOracle } from '../oracle-declaration'
 import { createOracleReach } from '../oracle-reach'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { selectedRow } from './result-laws'
-import type { LiveQueryDriver, LiveQueryHandle, QueryBuild } from './contract'
+import type {
+  LiveQueryDriver,
+  LiveQueryHandle,
+  QueryBuild,
+  SourceHandle,
+} from './contract'
 
 type Shape =
   | `object`
@@ -271,6 +277,7 @@ export function expectRowSnapshot(
 
 function expectSnapshots(
   handle: LiveQueryHandle,
+  source: SourceHandle<SnapshotRow>,
   expected: ReadonlyMap<string, Fact>,
   retained: ReadonlyArray<Retained>,
 ): void {
@@ -284,6 +291,15 @@ function expectSnapshots(
       rowFacts(row),
       expected.get(row.id)!,
       `current framework row ${row.id}`,
+    )
+  // A correct detached framework result cannot excuse damage to the value it
+  // borrowed. Check the current source at this cut, including the final update
+  // that has no later get or previousValue to reveal the damage.
+  for (const [id, wanted] of expected)
+    expectFact(
+      rowFacts(source.collection.get(id)),
+      wanted,
+      `current source row ${id}`,
     )
   for (const saved of retained)
     expectFact(rowFacts(saved.actual), saved.expected, saved.label)
@@ -300,6 +316,9 @@ export async function runRowSnapshotHistories(
     writes,
     ...new Set(cases.map(({ shape }) => shape)),
     `cross-row-alias`,
+    `current-source-row`,
+    `retained-initial-row`,
+    `retained-change-value`,
     `retained-previousValue`,
     ...(writes === `optimistic` || driver.snapshotSourceUsesDraft
       ? [`retained-original`]
@@ -323,8 +342,10 @@ export async function runRowSnapshotHistories(
     try {
       await resources.run(async () => {
         const expected = new Map<string, Fact>()
-        const check = (retained: ReadonlyArray<Retained>) =>
-          expectSnapshots(handle!, expected, retained)
+        const check = (retained: ReadonlyArray<Retained>) => {
+          expectSnapshots(handle!, source, expected, retained)
+          reach.reach(`current-source-row`)
+        }
         const initial = sourceRow(driver, history.shape, 0)
         const rows = history.peers
           ? [initial, { ...initial, id: `b` }]
@@ -334,9 +355,18 @@ export async function runRowSnapshotHistories(
         })
         let handle: LiveQueryHandle | undefined
         try {
-          for (const row of rows)
-            expected.set(row.id, rowFacts(source.collection.get(row.id)))
           const retained: Array<Retained> = []
+          for (const { id } of rows) {
+            const actual = source.collection.get(id)
+            const wanted = rowFacts(actual)
+            expected.set(id, wanted)
+            retained.push({
+              label: `initial Collection.get ${id}`,
+              actual,
+              expected: wanted,
+            })
+            reach.reach(`retained-initial-row`)
+          }
           // Register before the hook so the source facts are recorded before
           // framework materialization can mutate any borrowed container.
           const subscription = source.collection.subscribeChanges(
@@ -352,7 +382,19 @@ export async function runRowSnapshotHistories(
                   reach.reach(`retained-previousValue`)
                 }
                 if (change.type === `delete`) expected.delete(id)
-                else expected.set(id, rowFacts(change.value))
+                else {
+                  const wanted = rowFacts(change.value)
+                  expected.set(id, wanted)
+                  // Record facts and the actual borrowed value before the hook
+                  // sees this admission. Keep checking it even if get() later
+                  // returns another object or the framework output is correct.
+                  retained.push({
+                    label: `change.value ${id}`,
+                    actual: change.value,
+                    expected: wanted,
+                  })
+                  reach.reach(`retained-change-value`)
+                }
               }
             },
             { includeInitialState: false },
@@ -518,6 +560,9 @@ export async function runRowSnapshotHistories(
     [writes]: cases.length,
     ...Object.fromEntries(cases.map(({ shape }) => [shape, 2])),
     'cross-row-alias': cases.length / 2 - 1,
+    'current-source-row': cases.length,
+    'retained-initial-row': cases.length,
+    'retained-change-value': cases.length,
     'retained-previousValue': cases.length,
     ...(writes === `optimistic` || driver.snapshotSourceUsesDraft
       ? { 'retained-original': cases.length }

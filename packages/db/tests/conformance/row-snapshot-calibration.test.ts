@@ -77,12 +77,14 @@ function cleanupDriver(
     corruptOriginal?: boolean
     omitOriginals?: boolean
     failCleanup?: boolean
+    corruptSource?: `current` | `admitted` | `initial`
   } = {},
 ) {
   const projectionFailure = new Error(`projection cleanup rejected`)
   let sourceCleanups = 0
   let projectionCleanups = 0
   let rows = new Map<string, CalibrationRow>()
+  let published = new Map<string, CalibrationRow>()
   let notify: ((changes: Changes) => void) | undefined
   const source = {
     get: (id: string) => rows.get(id),
@@ -108,7 +110,7 @@ function cleanupDriver(
     },
   }
   const handle = {
-    current: () => ({ data: [...rows.values()] }),
+    current: () => ({ data: [...published.values()] }),
     collection: () => projection,
     flush() {
       return options.primaryFailure
@@ -128,14 +130,26 @@ function cleanupDriver(
     snapshotSourceUsesDraft: true,
     makeSource(initial: ReadonlyArray<CalibrationRow>) {
       rows = new Map(initial.map((row) => [row.id, row]))
+      published = new Map(rows)
       return {
         collection: source,
         update(next: CalibrationRow) {
           const previousValue = rows.get(next.id)!
           rows.set(next.id, next)
+          published.set(next.id, next)
           notify?.([
             { key: next.id, type: `update`, value: next, previousValue },
           ])
+          if (options.corruptSource && next.value === 3) {
+            const correct = { ...next }
+            published.set(next.id, correct)
+            if (options.corruptSource === `current`)
+              rows.set(next.id, { ...next, corrupted: true })
+            if (options.corruptSource === `admitted`) {
+              rows.set(next.id, correct)
+              next.corrupted = true
+            }
+          }
           return {
             mutations: options.omitOriginals
               ? []
@@ -150,7 +164,16 @@ function cleanupDriver(
         },
       }
     },
-    mount: () => handle,
+    mount: () => {
+      if (options.corruptSource === `initial`)
+        for (const [id, row] of rows) {
+          const correct = { ...row }
+          rows.set(id, correct)
+          published.set(id, correct)
+          row.corrupted = true
+        }
+      return handle
+    },
   } as unknown as LiveQueryDriver
   return {
     driver,
@@ -278,3 +301,23 @@ it(`rejects a draft-source receipt without any actual original`, async () => {
   ).catch((error: unknown) => error)
   expect(String(failure)).toContain(`actual local originals`)
 })
+
+// Each fault leaves the framework result and the other source observations
+// correct. Final admission has no following update that could expose it later.
+it.each([
+  [`current`, `current source row`],
+  [`admitted`, `change.value`],
+  [`initial`, `initial Collection.get`],
+] as const)(
+  `rejects corruption confined to the %s source row`,
+  async (kind, label) => {
+    const subject = cleanupDriver({ corruptSource: kind, failCleanup: false })
+    const failure: unknown = await runRowSnapshotHistories(
+      subject.driver,
+      `callback`,
+      `sync`,
+    ).catch((error: unknown) => error)
+    expect(String(failure)).toContain(label)
+    expect(containsFailure(failure, subject.projectionFailure)).toBe(false)
+  },
+)

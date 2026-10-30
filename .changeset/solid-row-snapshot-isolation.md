@@ -3,6 +3,6 @@
 '@tanstack/db': patch
 ---
 
-Preserve Collection rows and mutation originals while `useLiveQuery` updates, including nested values and explicit undefined fields. Keep unchanged nested elements stable, preserve live nested getters and array notifications, and avoid repeated expansion of shared acyclic values.
+Preserve Collection rows and mutation originals while Solid `useLiveQuery` updates, including nested values, live getters, callable fields, and explicit undefined fields. Keep unchanged nested elements stable and avoid repeated expansion of shared acyclic values.
 
-Preserve enumerable own source fields, including user symbols and inherited-name shadows, through query selection. Keep accepted nested selection destinations such as `toString` as own output fields.
+Preserve enumerable own source fields through Core query selection, including user symbols and inherited-name shadows. Build nested projections without changing borrowed source data or retaining fields the authored object replaces.
