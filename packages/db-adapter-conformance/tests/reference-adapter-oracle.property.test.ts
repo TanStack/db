@@ -119,6 +119,8 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`bigints-as-numbers`, `FID-1 (values)`],
     [`drops-nulls`, `FID-1 (values)`],
     [`loses-negative-zero`, `FID-1 (values)`],
+    [`commits-malformed-prefix`, `PUB-4`],
+    [`ignores-malformed`, `PUB-4`],
     [`relabels-inserts`, `PUB-2`],
   ]
   oracleReplayTest(it).each(mutants)(

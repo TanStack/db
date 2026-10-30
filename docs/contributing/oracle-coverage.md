@@ -6007,8 +6007,10 @@ READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
 on-demand loading, mutation handlers, or reload; publications are observed
 through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
 that rejects before its timeout; FID-1 covers ten value kinds, not Temporal,
-Map, Set, typed arrays, class instances, or field identity; the FID-3 and
-PUB-4 rejection lane is not built; the Neon and TrailBase claims cover
+Map, Set, typed arrays, class instances, or field identity; PUB-4 covers a
+complete delivery with two rows for one key, under each driver's
+`duplicateInsert` (TrailBase `replace`, reference `error`), not malformed
+keys, undecodable rows, or FID-3 out-of-domain values; the Neon and TrailBase claims cover
 controlled providers, not real clients. Owner:
 `packages/db-adapter-conformance`. Evidence: the package README.
 Migration goal (maintainer, 2026-10-29): every collection adapter gets a

@@ -31,6 +31,7 @@ comment states the laws and their limits. In short:
 | READY-8, READY-10          | With `listen-before-fetch`: no fetch before the listener is live; batches committed during the fetch apply after its result, before ready                                                                                                                                                                                                                                    |
 | PUB-5, PUB-9               | With `listen-before-fetch`: the cut publishes only backend states at or after the read point, in order; no replay regresses a row                                                                                                                                                                                                                                            |
 | READY-3, READY-10          | When status becomes `ready`, the rows already equal the initial cut                                                                                                                                                                                                                                                                                                          |
+| PUB-4, PUB-3               | With `duplicate-key-delivery`: a complete delivery holding two rows with one key follows the driver's `duplicateInsert` policy. Under `error` it is rejected: no row written, nothing published, earlier rows kept, a sync failure reported. Under `replace` the later row wins                                                                                              |
 
 The law IDs come from the adapter conformance law set, version 18.
 
@@ -44,6 +45,7 @@ Implement `EagerLiveSourceDriver`:
 - **`changeCommits`:** `per-batch` if your adapter commits a provider batch as one transaction, `per-change` if it commits each change alone.
 - **`declaredDiagnostic`:** optional; accepts console diagnostics your adapter documents, so HEALTH-5 does not reject them.
 - **`seed` and `fetchesBeforeListening`:** with `listen-before-fetch`, the provider holds backend rows set by `seed`, treats a batch before the first ready as a backend commit during the fetch, and counts fetches issued while its listener was not live (READY-8).
+- **`duplicateInsert`:** with `duplicate-key-delivery`, the law set's policy for an insert of a held key, `error` or `replace`.
 - **`valueKinds`:** the kinds of FID-1's `valueDomain` your backend represents; `jsonValueKinds` for a JSON backend. The driver delivers each value in the backend's own form and the Collection must show it decoded.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
@@ -128,7 +130,7 @@ reach counter, so the run fails when histories miss a state the laws need.
   20 other seeds, the lowest count for any state was 12 (`field-removed`), across 12 seeds.
 
 - **GREEN:** `pnpm exec vitest run tests/reference-adapter-oracle.property.test.ts`:
-  65 tests pass (both campaigns, the per-change pair, 30 calibrations, and the
+  67 tests pass (both campaigns, the per-change pair, 32 calibrations, and the
   grammar controls). TrailBase: its full suite, 151 tests, passes.
 - **Mutants:** the fixed campaign rejects each with the law it breaks:
 
@@ -164,6 +166,8 @@ reach counter, so the run fails when histories miss a state the laws need.
   | `bigints-as-numbers` (initial load only) | FID-1 (values)             |
   | `drops-nulls`                            | FID-1 (values)             |
   | `loses-negative-zero`                    | FID-1 (values)             |
+  | `commits-malformed-prefix`               | PUB-4                      |
+  | `ignores-malformed`                      | PUB-4                      |
   | `shows-buffered`                         | READY-10/PUB-9             |
 
   `reverses-batch` reverses only batches of distinct keys, so its final rows
@@ -210,8 +214,11 @@ reach counter, so the run fails when histories miss a state the laws need.
     `null`, Date, bigint, array, plain object). Temporal values, Map, Set,
     typed arrays, and class instances are not generated, and a stored
     field's reference identity is not checked.
-  - The rejection side, FID-3 and PUB-4 (an out-of-domain value fails its
-    delivery and writes no row), has no lane yet.
+  - PUB-4 covers one malformed shape, two rows with one key in a complete
+    delivery. A malformed key, a row the adapter cannot decode, and an
+    out-of-domain value (FID-3) are not generated: a driver needs a backend
+    form for each. Whether an adapter releases its provider subscription
+    when it rejects a delivery is not checked; no law fixes it.
   - READY-8's fetch order is checked only by a provider that implements
     `fetchesBeforeListening`. Commit receipts resolve at once in every
     driver, so a live commit whose receipt is still pending at the cut

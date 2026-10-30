@@ -157,8 +157,13 @@ class TrailBaseProvider implements ControlledProvider {
 export function trailBaseConformanceDriver(): EagerLiveSourceDriver {
   return {
     adapter: `@tanstack/trailbase-db-collection (eager)`,
-    capabilities: new Set(),
+    // A paged list can return one record twice, for example when a write
+    // moves it between pages (PUB-4).
+    capabilities: new Set([`duplicate-key-delivery`]),
     changeCommits: `per-change`,
+    // The law set declares `duplicateInsert: replace` for TrailBase: page
+    // rows and stream events are complete rows, and the later one wins.
+    duplicateInsert: `replace`,
     valueKinds: jsonValueKinds,
     create(): EagerLiveSourceFixture {
       const provider = new TrailBaseProvider()

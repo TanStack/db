@@ -203,3 +203,20 @@ document update removes`) failed the same way.
     `Object.is`. `createStateDiff` is rejected by generated histories;
     `reconcileStalePublishedChanges` only by a pinned replay, since
     generated histories never reach retained rows (coverage map).
+- **2026-10-29, eager live source, rejected deliveries (PUB-4).** A driver
+  whose provider can deliver two rows with one key declares
+  `duplicate-key-delivery` and the law set's `duplicateInsert` policy. A
+  `malformed` step delivers such a complete result. Under `error` the
+  model expects PUB-4: no row written, nothing published, earlier rows
+  kept, and a sync failure with the adapter's own error. Under `replace` it
+  expects PUB-3: the later row wins.
+  - **Reference:** `error`; mutants `commits-malformed-prefix` and
+    `ignores-malformed` fail PUB-4.
+  - **TrailBase:** `replace` (law set); GREEN. A first-row-wins edit of its
+    eager load was rejected with PUB-3 (duplicateInsert: replace) by both
+    campaigns, then reverted. The first run assumed `error` for every
+    driver and failed TrailBase; the law set's policy parameter settled it.
+  - **Neon:** the law set declares no `duplicateInsert` for Neon, so its
+    driver does not declare the capability.
+  - **RxDB:** its storage cannot hold two documents with one key, so the
+    capability does not apply.

@@ -83,6 +83,10 @@ export type ReferenceMutant =
   | `drops-nulls`
   /** FID-1: `-0` is stored as `0`. */
   | `loses-negative-zero`
+  /** PUB-4: a rejected delivery commits the rows written before the failure. */
+  | `commits-malformed-prefix`
+  /** PUB-4: a duplicate key is skipped and the delivery applies. */
+  | `ignores-malformed`
   /**
    * PUB-2, checker calibration: the observed view relabels insert events as
    * updates. The adapter is unchanged; the comparison must see the events.
@@ -330,12 +334,25 @@ function referenceCollection(
                 }
                 void commit()
               } else {
+                // PUB-4: a delivery that cannot apply, such as one holding two
+                // rows with one key, writes nothing and fails the sync run.
                 begin({ snapshot: true })
-                for (const row of event.rows)
-                  write({
-                    type: `insert`,
-                    value: storedRow(row, `load`, mutant),
-                  })
+                const written = new Set<number>()
+                try {
+                  for (const row of event.rows) {
+                    if (mutant === `ignores-malformed` && written.has(row.id))
+                      continue
+                    write({
+                      type: `insert`,
+                      value: storedRow(row, `load`, mutant),
+                    })
+                    written.add(row.id)
+                  }
+                } catch (error) {
+                  if (mutant === `commits-malformed-prefix`) void commit()
+                  stop(subscription, error as Error)
+                  return
+                }
                 void commit()
                 keys = new Set(event.rows.map((row) => row.id))
               }
@@ -475,6 +492,7 @@ export function referenceDriver(
       `transport-reconnect`,
       `capability-renewal`,
       `listen-before-fetch`,
+      `duplicate-key-delivery`,
     ]),
     valueKinds: [
       `string`,
@@ -489,6 +507,8 @@ export function referenceDriver(
       `object`,
     ],
     changeCommits: perChange ? `per-change` : `per-batch`,
+    // A delivery holding two rows with one key fails the run (PUB-4).
+    duplicateInsert: `error`,
     create(): EagerLiveSourceFixture {
       const provider = new ControlledPushProvider()
       const { collection, awaitTxId } = referenceCollection(

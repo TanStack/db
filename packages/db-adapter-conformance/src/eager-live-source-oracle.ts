@@ -74,6 +74,17 @@
  *   publication is a backend state at or after the read point, in order.
  * - **READY-3, READY-10.** When status becomes `ready`, the rows already
  *   equal the initial cut. A `status:ready` listener never sees fewer rows.
+ * - **PUB-4, PUB-3** (capability `duplicate-key-delivery`, parameter
+ *   `duplicateInsert`). A complete delivery can hold two rows with one key.
+ *   Under `replace`, the later row wins (PUB-3) and the delivery otherwise
+ *   applies as a complete delivery. Under `error`, the adapter rejects it
+ *   (PUB-4): no row of it is written and nothing publishes; rows accepted
+ *   earlier stay. The failure
+ *   is reported as a sync failure: before the first ready, status `error`
+ *   and `preload()` rejects; after it, status stays `ready` with a health
+ *   `error`. The error is the adapter's own, so its value is not fixed.
+ *   Whether the adapter releases its provider subscription at that point is
+ *   not fixed either; cleanup still releases each one exactly once.
  *
  * Authority: the sync callback contract in `packages/db/src/types.ts`
  * (`begin`, `commit`, `markReady`, `fail`, `reportError`, `reportHealthy`),
@@ -154,6 +165,7 @@ export type EagerLiveSourceCapability =
   | `capability-renewal`
   | `retry-policy`
   | `listen-before-fetch`
+  | `duplicate-key-delivery`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -244,6 +256,11 @@ export interface EagerLiveSourceDriver {
    */
   readonly valueKinds?: ReadonlyArray<ValueKind>
   /**
+   * The law set's `duplicateInsert` policy for an insert of a key the run
+   * holds; required with `duplicate-key-delivery`.
+   */
+  readonly duplicateInsert?: `error` | `replace`
+  /**
    * Console diagnostics the adapter declares (HEALTH-5). Any other
    * `console.error` or `console.warn` call is a violation.
    */
@@ -276,6 +293,8 @@ export interface EagerLiveSourceDriver {
  *   an applied batch (`ahead` 0) or a future one. With `timeout`, the wait
  *   carries a short timeout.
  * - `fail`: the provider stops.
+ * - `malformed`: a complete delivery holding two rows with one key, legal
+ *   where a complete delivery is (PUB-4).
  * - `transient-failure`: a failure the adapter keeps retrying.
  * - `disconnect`, `reconnect`: transport loss and return.
  * - `renew`: the adapter's renewal of an expiring capability completes. Legal
@@ -305,6 +324,16 @@ export type EagerLiveSourceStep =
       readonly timeout?: boolean
     }
   | { readonly kind: `fail` }
+  | {
+      /**
+       * A complete delivery of `rows` plus a second row for the key of
+       * `rows[duplicate % rows.length]` with another title (capability
+       * `duplicate-key-delivery`).
+       */
+      readonly kind: `malformed`
+      readonly rows: ReadonlyArray<ConformanceRow>
+      readonly duplicate: number
+    }
   | { readonly kind: `transient-failure` }
   | { readonly kind: `disconnect` }
   | { readonly kind: `reconnect` }
@@ -438,6 +467,25 @@ export function eagerLiveSourceHistoryArb(
     { weight: 2, arbitrary: fc.constant({ kind: `fail` as const }) },
     { weight: 1, arbitrary: fc.constant({ kind: `restart` as const }) },
   ]
+  if (capabilities.has(`duplicate-key-delivery`)) {
+    steps.push({
+      weight: 1,
+      arbitrary: fc
+        .record({
+          rows: fc.uniqueArray(rowArb(kinds), {
+            selector: (row) => row.id,
+            minLength: 1,
+            maxLength: 3,
+          }),
+          duplicate: fc.nat(2),
+        })
+        .map(({ rows, duplicate }) => ({
+          kind: `malformed` as const,
+          rows,
+          duplicate,
+        })),
+    })
+  }
   if (capabilities.has(`await-evidence`)) {
     // One wait in four is timed. A timed wait settles at its own step, so
     // only untimed waits can be fulfilled by a later batch.
@@ -534,7 +582,8 @@ interface ModelState {
   lastTxid: number
   committed: Set<number>
   renewed: boolean
-  failure: number | undefined
+  /** A provider failure's index, or `adapter` for the adapter's own error. */
+  failure: number | `adapter` | undefined
   transient: Array<number>
   waits: Array<{ run: number; txid: number; expected: WaitExpectation }>
 }
@@ -544,13 +593,14 @@ export interface ExpectedObservation {
   status: `loading` | `ready` | `error`
   rows: RowState
   /** Index of the failure the health node's `error` must carry, or none. */
-  healthError: number | null
+  healthError: number | `adapter` | null
   /** Indices of the failures `failureReason.errors` must list, in order. */
   failureReason: ReadonlyArray<number>
-  preload: `pending` | `fulfilled` | { rejectedWith: number }
+  preload: `pending` | `fulfilled` | { rejectedWith: number | `adapter` }
   waits: ReadonlyArray<WaitExpectation>
   /** Unreleased provider subscriptions: one while the provider runs. */
-  openSubscriptions: number
+  /** Undefined when no law fixes it: after the adapter rejected a delivery. */
+  openSubscriptions: number | undefined
   /** Subscriptions opened in total: one per sync run, renewal included. */
   openedSubscriptions: number
   renewalsThisRun: number
@@ -718,10 +768,7 @@ function flipZeros(value: unknown): unknown {
     Object.getPrototypeOf(value) === Object.prototype
   ) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        flipZeros(item),
-      ]),
+      Object.entries(value).map(([key, item]) => [key, flipZeros(item)]),
     )
   }
   return value
@@ -817,6 +864,13 @@ type AcceptedStep =
     }
   | { kind: `wait`; txid: number; timeout: boolean }
   | { kind: `fail`; failure: number }
+  | {
+      kind: `malformed`
+      rows: ReadonlyArray<ConformanceRow>
+      afterReady: boolean
+      /** `duplicateInsert: replace` applied the later row. */
+      replaced: boolean
+    }
   | { kind: `transient-failure`; failure: number }
   | { kind: `disconnect` }
   | { kind: `reconnect` }
@@ -834,6 +888,7 @@ interface ModelOptions {
   listenBeforeFetch: boolean
   /** The value kinds include `negative-zero`, so a retouch flips zeros. */
   flipZeros: boolean
+  duplicateInsert: `error` | `replace`
 }
 
 /** EVID-1: a wait for `txid` fulfills once its batch applied. */
@@ -1042,6 +1097,42 @@ function stepModel(
       }
       return { done: { kind: `fail`, failure }, publishable: [] }
     }
+    case `malformed`: {
+      if (!canDeliver(state)) return undefined
+      // PUB-4: the adapter rejects the delivery. No row of it is written,
+      // so the rows stay; the sync run fails with the adapter's own error.
+      const base = step.rows[step.duplicate % step.rows.length]!
+      const titles = [`a`, `b`, `c`].filter((title) => title !== base.title)
+      const rows = [...step.rows, { ...base, title: titles[0]! }]
+      const afterReady = state.phase === `ready`
+      if (options.duplicateInsert === `replace`) {
+        // PUB-3: the later row wins; the delivery applies as a complete one.
+        // Before the first ready of a listen-before-fetch run, the cut's
+        // read point would need its own rule, so the step is not legal there.
+        if (options.listenBeforeFetch && !afterReady) return undefined
+        state.rows = rowMap(rows)
+        state.backend = rowMap(rows)
+        state.phase = `ready`
+        state.transient = []
+        return {
+          done: { kind: `malformed`, rows, afterReady, replaced: true },
+          publishable: [rowState(state.rows)],
+        }
+      }
+      state.failure = `adapter`
+      state.phase = afterReady ? `stopped` : `loading-error`
+      state.transient = []
+      state.buffered = []
+      for (const wait of state.waits) {
+        if (wait.run === state.run && wait.expected === `pending`) {
+          wait.expected = `unchecked`
+        }
+      }
+      return {
+        done: { kind: `malformed`, rows, afterReady, replaced: false },
+        publishable: [],
+      }
+    }
     case `transient-failure`: {
       if (!canDeliver(state)) return undefined
       const failure = failures.next++
@@ -1110,7 +1201,11 @@ function expectedObservation(state: ModelState): ExpectedObservation {
           : `fulfilled`,
     waits: state.waits.map((wait) => wait.expected),
     // LIFE-10: a failed provider's source is released at its end.
-    openSubscriptions: running ? 1 : 0,
+    openSubscriptions: running
+      ? 1
+      : state.failure === `adapter`
+        ? undefined
+        : 0,
     openedSubscriptions: state.run,
     renewalsThisRun: state.renewed ? 1 : 0,
   }
@@ -1140,6 +1235,8 @@ export const eagerLiveSourceReachStates = [
   `read-missed-change`,
   `seen-change-superseded`,
   `field-removed`,
+  `malformed-before-ready`,
+  `malformed-after-ready`,
 ] as const
 
 /**
@@ -1167,6 +1264,8 @@ const capabilityOfState: Partial<
   'change-before-ready': `listen-before-fetch`,
   'read-missed-change': `listen-before-fetch`,
   'seen-change-superseded': `listen-before-fetch`,
+  'malformed-before-ready': `duplicate-key-delivery`,
+  'malformed-after-ready': `duplicate-key-delivery`,
 }
 
 /** The declared states a driver's declarations let histories reach. */
@@ -1178,6 +1277,12 @@ export function reachStatesFor(
       const capability = capabilityOfState[state]
       return capability === undefined || domain.capabilities.has(capability)
     })
+  // A malformed delivery after ready also needs `complete-snapshot`.
+  const reachable = fixed.filter(
+    (state) =>
+      state !== `malformed-after-ready` ||
+      domain.capabilities.has(`complete-snapshot`),
+  )
   const values = (domain.valueKinds ?? []).flatMap(
     (kind): Array<ValueReachState> => [
       `value:${kind}:load`,
@@ -1189,7 +1294,7 @@ export function reachStatesFor(
   )
     ? [`zero-sign-flipped`]
     : []
-  return [...fixed, ...values, ...zeros]
+  return [...reachable, ...values, ...zeros]
 }
 
 /** JSON for a message; a bigint shows as `<digits>n`, `-0` as `-0`. */
@@ -1265,6 +1370,8 @@ function lawFor(done: AcceptedStep, wasReady: boolean): string {
       return done.timeout ? `EVID-3` : `EVID-1`
     case `fail`:
       return wasReady ? `HEALTH-1` : `READY-4`
+    case `malformed`:
+      return done.replaced ? `PUB-3 (duplicateInsert: replace)` : `PUB-4`
     case `transient-failure`:
       return wasReady ? `HEALTH-1` : `RETRY-1`
     case `disconnect`:
@@ -1328,6 +1435,13 @@ export async function checkEagerLiveSourceHistory(
     changeCommits: driver.changeCommits,
     listenBeforeFetch,
     flipZeros: driver.valueKinds?.includes(`negative-zero`) === true,
+    duplicateInsert: driver.duplicateInsert ?? `error`,
+  }
+  if (
+    driver.capabilities.has(`duplicate-key-delivery`) &&
+    driver.duplicateInsert === undefined
+  ) {
+    throw new Error(`duplicate-key-delivery needs a duplicateInsert policy`)
   }
   // With `listen-before-fetch`, a sync run's backend starts with the rows of
   // its first complete delivery, committed before the adapter subscribes.
@@ -1472,6 +1586,8 @@ export async function checkEagerLiveSourceHistory(
     const health = collection.health
     if (expected.healthError === null) {
       check(`health error`, health.error === null, null, health.error?.message)
+    } else if (expected.healthError === `adapter`) {
+      check(`health error`, health.error !== null, `an error`, null)
     } else {
       check(
         `health error cause`,
@@ -1508,7 +1624,8 @@ export async function checkEagerLiveSourceHistory(
       typeof want === `string`
         ? got === want
         : typeof got === `object` &&
-            got.rejected === failure(want.rejectedWith),
+            (want.rejectedWith === `adapter` ||
+              got.rejected === failure(want.rejectedWith)),
       want,
       typeof got === `object` ? { rejected: String(got.rejected) } : got,
     )
@@ -1542,7 +1659,10 @@ export async function checkEagerLiveSourceHistory(
     const releases = provider.releases()
     const open = releases.filter((count) => count === 0).length
     const failed = state.phase === `loading-error` || state.phase === `stopped`
-    if (open !== expected.openSubscriptions) {
+    if (
+      expected.openSubscriptions !== undefined &&
+      open !== expected.openSubscriptions
+    ) {
       throw violation(
         `${failed ? `LIFE-10` : law} (open provider subscriptions)`,
         stepIndex,
@@ -1662,6 +1782,14 @@ export async function checkEagerLiveSourceHistory(
           reach(wasReady ? `failure-after-ready` : `failure-before-ready`)
           break
         }
+        case `malformed`:
+          provider.deliverSnapshot(structuredClone(done.rows))
+          reach(
+            done.afterReady
+              ? `malformed-after-ready`
+              : `malformed-before-ready`,
+          )
+          break
         case `transient-failure`: {
           const error = new Error(
             `conformance transient failure ${done.failure}`,
@@ -1713,7 +1841,9 @@ export async function checkEagerLiveSourceHistory(
             ? `PUB-5/PUB-9`
             : done.kind === `changes` && done.beforeReady
               ? `READY-10/PUB-9`
-              : `PUB-1`,
+              : done.kind === `malformed` && !done.replaced
+                ? `PUB-4`
+                : `PUB-1`,
         )
       } else {
         events.take()
@@ -1813,6 +1943,11 @@ function supports(
   switch (step.kind) {
     case `snapshot`:
       return !ready || driver.capabilities.has(`complete-snapshot`)
+    case `malformed`:
+      return (
+        driver.capabilities.has(`duplicate-key-delivery`) &&
+        (!ready || driver.capabilities.has(`complete-snapshot`))
+      )
     case `wait`:
       return driver.capabilities.has(`await-evidence`) && !!fixture.awaitTxId
     case `transient-failure`:
