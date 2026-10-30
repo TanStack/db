@@ -106,6 +106,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`detached-rejection`, `HEALTH-5`],
     [`logs-failure`, `HEALTH-5`],
     [`wait-off-by-one`, `EVID-1`],
+    [`keeps-retired-evidence`, `EVID-2`],
     [`wait-ignores-timeout`, `EVID-3`],
     [`disconnect-fails`, `RECON-1`],
     [`renew-resubscribes`, `RENEW-1`],

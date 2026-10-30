@@ -53,12 +53,20 @@
  *   applied, also when the batch came first, and stays pending before. A
  *   wait with a timeout and no evidence rejects after the timeout, and later
  *   evidence does not change that. A wait still pending when its sync run
- *   retires rejects.
+ *   retires rejects. Evidence from a retired sync run does not fulfill a
+ *   wait in a later one (EVID-2).
  * - **HEALTH-1, HEALTH-2, RETRY-1** (capability `retry-policy`). A transient
  *   failure that the adapter keeps retrying shows nothing before the first
  *   ready. After it, the failure joins the node's `failureReason`, oldest
  *   first, with `cause` the newest and no `error`. The next successful
- *   delivery clears it.
+ *   delivery clears it. With `retryReportAfter: k` (maintainer decision
+ *   2026-10-30: a retrying source must not flap its health), only an
+ *   extended outage shows: an attempt joins `failureReason` from the `k`th
+ *   consecutive failed attempt after ready on, and fewer show nothing. Under
+ *   `failureValue: any` the reported values are
+ *   the client library's, so the node lists at least one failure and at
+ *   most one per retried attempt, with `cause` its newest; a later attempt
+ *   does not replace the failure first listed for the outage (RETRY-1).
  * - **RECON-1** (capability `transport-reconnect`). A transport disconnect and
  *   reconnect keep status and rows, and later deliveries still apply.
  * - **RENEW-1** (capability `capability-renewal`). While the source's
@@ -292,6 +300,27 @@ export interface EagerLiveSourceDriver {
    */
   readonly duplicateInsert?: `error` | `replace`
   /**
+   * `any` when the Collection reports a provider failure with a value the
+   * adapter's client library creates, such as an HTTP client's error for a
+   * failed response, rather than the provider's own value. The check then
+   * owes some error, not that value, also for a retried failure's
+   * `failureReason`. Default `provider`.
+   */
+  readonly failureValue?: `provider` | `any`
+  /**
+   * What carries a batch's txid (`await-evidence`): the batch itself
+   * (`batch`, the default), or each change in it (`change`), as Electric's
+   * row messages do. Under `change`, a batch with no delivered change
+   * carries no txid, so it is no evidence.
+   */
+  readonly txidEvidence?: `batch` | `change`
+  /**
+   * The consecutive failed attempts after ready from which a retried
+   * failure shows in `failureReason` (`retry-policy`); fewer show nothing.
+   * Default 1: every retried failure shows.
+   */
+  readonly retryReportAfter?: number
+  /**
    * Console diagnostics the adapter declares (HEALTH-5). Any other
    * `console.error` or `console.warn` call is a violation.
    */
@@ -496,7 +525,11 @@ function changeArb(
 /** What the grammar needs from a driver: its capabilities and value kinds. */
 export type GrammarDomain = Pick<
   EagerLiveSourceDriver,
-  `capabilities` | `valueKinds` | `fieldKinds` | `excludesValue`
+  | `capabilities`
+  | `valueKinds`
+  | `fieldKinds`
+  | `excludesValue`
+  | `retryReportAfter`
 >
 
 /** Generates histories whose steps use only the driver's declarations. */
@@ -599,7 +632,60 @@ export function eagerLiveSourceHistoryArb(
       arbitrary: fc.constant({ kind: `renew` as const }),
     })
   }
-  const history = fc.array(fc.oneof(...steps), { minLength: 1, maxLength: 12 })
+  const generated = fc.array(fc.oneof(...steps), {
+    minLength: 1,
+    maxLength: 12,
+  })
+  // Some laws need a short sequence that random steps rarely produce, so a
+  // history can start with one; one in six does per declared scenario.
+  const snapshot = steps[0]!.arbitrary
+  const scenarios: Array<fc.Arbitrary<Array<EagerLiveSourceStep>>> = []
+  if (capabilities.has(`await-evidence`)) {
+    // EVID-2: a txid that a retired run committed and the current run has
+    // not: a batch with a change, a restart, and a wait for it.
+    scenarios.push(
+      fc
+        .tuple(
+          snapshot,
+          fc.array(changeArb(kinds, fieldKinds, domain.excludesValue), {
+            minLength: 1,
+            maxLength: 3,
+          }),
+          fc.boolean(),
+        )
+        .map(([first, changes, timeout]): Array<EagerLiveSourceStep> => [
+          first,
+          { kind: `changes`, changes },
+          { kind: `restart` },
+          { kind: `wait`, ahead: 0, timeout },
+        ]),
+    )
+  }
+  if (capabilities.has(`retry-policy`)) {
+    // RETRY-1: an outage after ready one attempt longer than
+    // `retryReportAfter`, so its first report and a later attempt show.
+    const attempts = (domain.retryReportAfter ?? 1) + 1
+    scenarios.push(
+      snapshot.map((first): Array<EagerLiveSourceStep> => [
+        first,
+        ...Array.from({ length: attempts }, () => ({
+          kind: `transient-failure` as const,
+        })),
+      ]),
+    )
+  }
+  const history =
+    scenarios.length === 0
+      ? generated
+      : fc
+          .tuple(
+            fc.oneof(
+              { weight: 5, arbitrary: fc.constant([]) },
+              ...scenarios.map((arbitrary) => ({ weight: 1, arbitrary })),
+            ),
+            generated,
+          )
+          .map(([prefix, rest]) => [...prefix, ...rest])
   if (!capabilities.has(`listen-before-fetch`)) return history
   // A startup burst: batches the backend commits while the first fetch is
   // outstanding. Without it, two buffered batches that touch one key before
@@ -660,10 +746,17 @@ interface ModelState {
   connected: boolean
   lastTxid: number
   committed: Set<number>
+  /** Txids committed in retired sync runs; they name EVID-2. */
+  retiredEvidence: Set<number>
   renewed: boolean
-  /** A provider failure's index, or `adapter` for the adapter's own error. */
-  failure: number | `adapter` | undefined
+  /**
+   * A provider failure's index; `any` for one whose reported value the
+   * client library creates; `adapter` for the adapter's own error.
+   */
+  failure: number | `any` | `adapter` | undefined
   transient: Array<number>
+  /** Consecutive failed attempts after ready in the current outage. */
+  outage: number
   waits: Array<{ run: number; txid: number; expected: WaitExpectation }>
 }
 
@@ -812,9 +905,11 @@ function initialModel(seed: ReadonlyArray<ConformanceRow> = []): ModelState {
     connected: true,
     lastTxid: 0,
     committed: new Set(),
+    retiredEvidence: new Set(),
     renewed: false,
     failure: undefined,
     transient: [],
+    outage: 0,
     waits: [],
   }
 }
@@ -827,6 +922,12 @@ function canDeliver(state: ModelState): boolean {
 }
 
 /** Retiring a sync run rejects its pending waits (EVID-2). */
+/** HEALTH-2: a delivery, failure, or restart ends the outage. */
+function endOutage(state: ModelState): void {
+  state.transient = []
+  state.outage = 0
+}
+
 function retireWaits(state: ModelState): void {
   for (const wait of state.waits) {
     if (wait.run === state.run && wait.expected === `pending`) {
@@ -972,6 +1073,9 @@ interface ModelOptions {
   /** The value kinds include `negative-zero`, so a retouch flips zeros. */
   flipZeros: boolean
   duplicateInsert: `error` | `replace`
+  failureValue: `provider` | `any`
+  txidEvidence: `batch` | `change`
+  retryReportAfter: number
 }
 
 /** EVID-1: a wait for `txid` fulfills once its batch applied. */
@@ -1040,7 +1144,7 @@ function stepModel(
     case `snapshot`: {
       if (!canDeliver(state)) return undefined
       // HEALTH-2: a successful delivery clears the open transient failures.
-      state.transient = []
+      endOutage(state)
       if (options.listenBeforeFetch && state.phase === `loading`) {
         const buffered = state.buffered.length
         const seen = Math.min(step.seen ?? buffered, buffered)
@@ -1048,7 +1152,11 @@ function stepModel(
         state.rows = cut.backend
         state.backend = new Map(cut.backend)
         state.phase = `ready`
-        for (const batch of state.buffered) applyEvidence(state, batch.txid)
+        for (const batch of state.buffered) {
+          if (options.txidEvidence === `batch` || batch.changes.length > 0) {
+            applyEvidence(state, batch.txid)
+          }
+        }
         state.buffered = []
         return {
           done: {
@@ -1129,8 +1237,11 @@ function stepModel(
       }
       foldBatch(state.backend, delivered)
       state.lastTxid += 1
-      state.transient = []
-      applyEvidence(state, state.lastTxid)
+      endOutage(state)
+      // EVID-1: under `change`, only a batch with a change carries its txid.
+      if (options.txidEvidence === `batch` || delivered.length > 0) {
+        applyEvidence(state, state.lastTxid)
+      }
       return {
         done: {
           kind: `changes`,
@@ -1167,11 +1278,11 @@ function stepModel(
     case `fail`: {
       if (!canDeliver(state)) return undefined
       const failure = failures.next++
-      state.failure = failure
+      state.failure = options.failureValue === `any` ? `any` : failure
       // READY-4 before the first ready; HEALTH-1 after it. LIFE-10: the
       // source ends here.
       state.phase = state.phase === `loading` ? `loading-error` : `stopped`
-      state.transient = []
+      endOutage(state)
       // No law fixes what a pending txid wait does after its source failed.
       for (const wait of state.waits) {
         if (wait.run === state.run && wait.expected === `pending`) {
@@ -1196,7 +1307,7 @@ function stepModel(
         state.rows = rowMap(rows)
         state.backend = rowMap(rows)
         state.phase = `ready`
-        state.transient = []
+        endOutage(state)
         return {
           done: { kind: `malformed`, rows, afterReady, replaced: true },
           publishable: [rowState(state.rows)],
@@ -1204,7 +1315,7 @@ function stepModel(
       }
       state.failure = `adapter`
       state.phase = afterReady ? `stopped` : `loading-error`
-      state.transient = []
+      endOutage(state)
       state.buffered = []
       for (const wait of state.waits) {
         if (wait.run === state.run && wait.expected === `pending`) {
@@ -1220,8 +1331,14 @@ function stepModel(
       if (!canDeliver(state)) return undefined
       const failure = failures.next++
       // RETRY-1: before the first ready a retried failure shows nothing.
-      // HEALTH-1: after it, the failure joins `failureReason`.
-      if (state.phase === `ready`) state.transient.push(failure)
+      // HEALTH-1: after it, the failure joins `failureReason` once the
+      // outage reached `retryReportAfter` attempts.
+      if (state.phase === `ready`) {
+        state.outage += 1
+        if (state.outage >= options.retryReportAfter) {
+          state.transient.push(failure)
+        }
+      }
       return { done: { kind: `transient-failure`, failure }, publishable: [] }
     }
     case `disconnect`: {
@@ -1254,10 +1371,12 @@ function stepModel(
       state.buffered = []
       state.connected = true
       state.lastTxid = 0
+      // EVID-2: the retired run's evidence does not fulfill a later wait.
+      for (const txid of state.committed) state.retiredEvidence.add(txid)
       state.committed = new Set()
       state.renewed = false
       state.failure = undefined
-      state.transient = []
+      endOutage(state)
       return { done: { kind: `restart` }, publishable: [] }
     }
   }
@@ -1274,13 +1393,20 @@ function expectedObservation(state: ModelState): ExpectedObservation {
           ? `error`
           : `ready`,
     rows: rowState(state.rows),
-    healthError: running ? null : state.failure!,
+    healthError: running
+      ? null
+      : state.failure === `any`
+        ? `adapter`
+        : state.failure!,
     failureReason: state.transient,
     preload:
       state.phase === `loading`
         ? `pending`
         : state.phase === `loading-error`
-          ? { rejectedWith: state.failure! }
+          ? {
+              rejectedWith:
+                state.failure === `any` ? `adapter` : state.failure!,
+            }
           : `fulfilled`,
     waits: state.waits.map((wait) => wait.expected),
     // LIFE-10: a failed provider's source is released at its end.
@@ -1310,7 +1436,10 @@ export const eagerLiveSourceReachStates = [
   `wait-before-evidence-fulfilled`,
   `wait-timed-out`,
   `wait-rejected-at-retirement`,
+  `wait-on-retired-evidence`,
   `transient-failure-reported`,
+  `transient-failure-below-threshold`,
+  `transient-failure-repeated`,
   `transient-failure-recovered`,
   `reconnect`,
   `renewal`,
@@ -1342,7 +1471,10 @@ const capabilityOfState: Partial<
   'wait-before-evidence-fulfilled': `await-evidence`,
   'wait-timed-out': `await-evidence`,
   'wait-rejected-at-retirement': `await-evidence`,
+  'wait-on-retired-evidence': `await-evidence`,
   'transient-failure-reported': `retry-policy`,
+  'transient-failure-below-threshold': `retry-policy`,
+  'transient-failure-repeated': `retry-policy`,
   'transient-failure-recovered': `retry-policy`,
   reconnect: `transport-reconnect`,
   renewal: `capability-renewal`,
@@ -1363,11 +1495,14 @@ export function reachStatesFor(
       const capability = capabilityOfState[state]
       return capability === undefined || domain.capabilities.has(capability)
     })
-  // A malformed delivery after ready also needs `complete-snapshot`.
+  // A malformed delivery after ready also needs `complete-snapshot`; an
+  // unreported attempt needs `retryReportAfter` above 1.
   const reachable = fixed.filter(
     (state) =>
-      state !== `malformed-after-ready` ||
-      domain.capabilities.has(`complete-snapshot`),
+      (state !== `malformed-after-ready` ||
+        domain.capabilities.has(`complete-snapshot`)) &&
+      (state !== `transient-failure-below-threshold` ||
+        (domain.retryReportAfter ?? 1) > 1),
   )
   const values = (domain.valueKinds ?? []).flatMap(
     (kind): Array<ValueReachState> => [
@@ -1528,6 +1663,9 @@ export async function checkEagerLiveSourceHistory(
     listenBeforeFetch,
     flipZeros: driver.valueKinds?.includes(`negative-zero`) === true,
     duplicateInsert: driver.duplicateInsert ?? `error`,
+    failureValue: driver.failureValue ?? `provider`,
+    txidEvidence: driver.txidEvidence ?? `batch`,
+    retryReportAfter: driver.retryReportAfter ?? 1,
   }
   if (
     driver.capabilities.has(`duplicate-key-delivery`) &&
@@ -1616,9 +1754,13 @@ export async function checkEagerLiveSourceHistory(
   // `law` names the step's law. Observations whose law does not depend on
   // the step name their own: HEALTH-2 when a delivery should have cleared a
   // retried failure, EVID-1 for a wait that fulfilled without evidence
-  // (READY-10/PUB-9 when its batch should still be buffered),
+  // (also READY-10/PUB-9 when its batch should still be buffered; EVID-2
+  // when a retired run committed it),
   // EVID-3 for a timed wait that did not reject, and LIFE-10 for a failed
   // provider's subscription that stays open or is released twice.
+  // Under `failureValue: any`, the model's first open transient failure
+  // names the outage, and `cause` is the failure first reported for it.
+  let firstReported: { outage: number; cause: unknown } | undefined
   const compare = async (
     stepIndex: number,
     law: string,
@@ -1702,14 +1844,43 @@ export async function checkEagerLiveSourceHistory(
           got,
         )
     }
-    checkReason(
-      reasons.length === wantReasons.length &&
-        reasons.every((cause, index) => cause === wantReasons[index]) &&
-        (wantReasons.length === 0 ||
-          health.failureReason?.cause === wantReasons.at(-1)),
-      wantReasons.map((error) => error.message),
-      reasons.map(String),
-    )
+    if (modelOptions.failureValue === `provider`) {
+      checkReason(
+        reasons.length === wantReasons.length &&
+          reasons.every((cause, index) => cause === wantReasons[index]) &&
+          (wantReasons.length === 0 ||
+            health.failureReason?.cause === wantReasons.at(-1)),
+        wantReasons.map((error) => error.message),
+        reasons.map(String),
+      )
+    } else {
+      // The client library's values: one to one per attempt, newest as
+      // `cause`, and the outage's first failure kept until it recovers.
+      checkReason(
+        wantReasons.length === 0
+          ? reasons.length === 0
+          : reasons.length >= 1 &&
+              reasons.length <= wantReasons.length &&
+              health.failureReason?.cause === reasons.at(-1),
+        wantReasons.length === 0 ? [] : `1 to ${wantReasons.length} failures`,
+        reasons.map(String),
+      )
+      const outage = expected.failureReason[0]
+      if (
+        outage !== undefined &&
+        outage === firstReported?.outage &&
+        reasons[0] !== firstReported.cause
+      ) {
+        throw violation(
+          `RETRY-1 (health failureReason)`,
+          stepIndex,
+          `the outage's first failure kept`,
+          `a replaced failure`,
+        )
+      }
+      firstReported =
+        outage === undefined ? undefined : { outage, cause: reasons[0] }
+    }
     const want = expected.preload
     const got = preload.current
     check(
@@ -1727,8 +1898,8 @@ export async function checkEagerLiveSourceHistory(
       const gotWait = waits[index]!.current
       const gotKind = typeof gotWait === `object` ? `rejected` : gotWait
       if (gotKind === wantWait) return
-      // A wait for a batch still buffered before the cut fulfilled because
-      // the adapter applied that batch early.
+      // A wait for a batch still buffered before the cut fulfilled: the
+      // adapter applied that batch early, or fulfilled the wait without it.
       const buffered = state.buffered.some(
         (batch) =>
           batch.txid === state.waits[index]!.txid &&
@@ -1737,8 +1908,10 @@ export async function checkEagerLiveSourceHistory(
       const waitLaw =
         gotKind === `fulfilled`
           ? buffered
-            ? `READY-10/PUB-9`
-            : `EVID-1`
+            ? `EVID-1/READY-10/PUB-9`
+            : state.retiredEvidence.has(state.waits[index]!.txid)
+              ? `EVID-2`
+              : `EVID-1`
           : wantWait === `rejected` && state.waits[index]!.run === state.run
             ? `EVID-3`
             : law
@@ -1867,6 +2040,13 @@ export async function checkEagerLiveSourceHistory(
             done.timeout ? waitTimeoutMs : undefined,
           )
           waits.push(recordSettlement(pending))
+          // EVID-2: a retired run committed this txid; this run has not.
+          if (
+            state.retiredEvidence.has(done.txid) &&
+            !state.committed.has(done.txid)
+          ) {
+            reach(`wait-on-retired-evidence`)
+          }
           if (done.timeout) {
             await sleep(timeoutSettleMs)
             if (state.waits.at(-1)!.expected === `rejected`)
@@ -1897,7 +2077,11 @@ export async function checkEagerLiveSourceHistory(
           )
           failures[done.failure] = error
           await provider.transientFailure!(error)
-          if (wasReady) reach(`transient-failure-reported`)
+          if (state.transient.at(-1) === done.failure) {
+            reach(`transient-failure-reported`)
+          } else if (wasReady) reach(`transient-failure-below-threshold`)
+          // RETRY-1: a later attempt in the same outage.
+          if (transientBefore > 0) reach(`transient-failure-repeated`)
           break
         }
         case `disconnect`:

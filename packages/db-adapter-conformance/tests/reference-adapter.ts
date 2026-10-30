@@ -55,6 +55,8 @@ export type ReferenceMutant =
   | `logs-failure`
   /** EVID-1: a wait for the next txid fulfills before that batch arrives. */
   | `wait-off-by-one`
+  /** EVID-2: a retired sync run's evidence fulfills a later wait. */
+  | `keeps-retired-evidence`
   /** EVID-3: a wait ignores its timeout. */
   | `wait-ignores-timeout`
   /** RECON-1: a transport drop is reported as a failure. */
@@ -267,7 +269,7 @@ function referenceCollection(
         }> = []
         let keys = new Set<number>()
         const opened: Array<ProviderSubscription> = []
-        applied = new Set()
+        if (mutant !== `keeps-retired-evidence`) applied = new Set()
         waiters = new Map()
         highestTxid = 0
 
