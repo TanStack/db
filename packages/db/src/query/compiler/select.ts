@@ -85,7 +85,11 @@ function ownedDestination(
   return cursor
 }
 
-function defineSelectField(target: object, key: PropertyKey, value: unknown): void {
+function defineSelectField(
+  target: object,
+  key: PropertyKey,
+  value: unknown,
+): void {
   // Owned fields are normalized data. Preserve intrinsic array-length attributes
   // when replacing its value; only newly created fields need ordinary defaults.
   Object.defineProperty(
