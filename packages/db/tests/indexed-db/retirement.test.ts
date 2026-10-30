@@ -93,19 +93,15 @@ for (const reason of reasons) {
         h.disposers.push(() => native.restore())
         const loading = read === 'initial' ? observe(c.preload()) : undefined
         while (Channel.pending.length) Channel.dispatch()
-        await vi.waitFor(() =>
-          expect(
-            native.entries.some((entry) => entry.mode === 'readonly'),
-          ).toBe(true),
+        await native.until(() =>
+          native.entries.some((entry) => entry.mode === 'readonly'),
         )
         await close(h, reason)
         closed(c, statuses)
         await gate.release()
         await Channel.drain()
-        await vi.waitFor(() =>
-          expect(
-            native.entries.every((entry) => entry.status === 'complete'),
-          ).toBe(true),
+        await native.until(() =>
+          native.entries.every((entry) => entry.status === 'complete'),
         )
         await loading?.done
         if (loading) expect(loading.result.state).toBe('rejected')
@@ -196,10 +192,8 @@ for (const reason of reasons)
       const caller = observe(c.insert(row).when('settled'), () =>
         sorted(c.base.values()),
       )
-      await vi.waitFor(() =>
-        expect(native.entries.some((entry) => entry.mode === 'readwrite')).toBe(
-          true,
-        ),
+      await native.until(() =>
+        native.entries.some((entry) => entry.mode === 'readwrite'),
       )
       const inspector = await close(h, reason)
       await gate.release()
@@ -303,8 +297,7 @@ for (const phase of ['idle', 'ready', 'loading', ...kinds] as const) {
           : phase === 'idle' || phase === 'ready'
             ? undefined
             : observe(start(c, phase, 1))
-      if (pending)
-        await vi.waitFor(() => expect(native.entries.length).toBeGreaterThan(0))
+      if (pending) await native.until(() => native.entries.length > 0)
       const terminated = new Promise<void>((resolve) =>
         h.db.db.addEventListener('close', () => resolve(), { once: true }),
       )
