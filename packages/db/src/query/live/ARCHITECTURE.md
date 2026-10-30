@@ -386,22 +386,52 @@ internal matches. The public-container copy matrix crosses reference-key type,
 ordered and unordered subqueries, materialization form, and parent/child updates.
 
 Reserved public row fields have a separate callback-input law (maintainer
-decision, 2026-10-28). Direct source rows and structured whole-row source
+decisions, 2026-10-28 and 2026-10-30). Direct source rows and structured whole-row source
 spreads expose genuine source `$key`, `$origin`, `$hasPendingWrites`, and
 `$collectionId`, including when a spread selects conflicting reserved names.
 A subquery projection that creates its own row shape, including a new
 functional object or functional spread, exposes none of those reserved fields
-before downstream `fn.select()` code runs. An inline include value keeps its
+before downstream `fn.select()`, `fn.where()`, or `fn.having()` code runs.
+The October 30 decision extends the original selection-only promise to both
+functional predicates. An inline include value keeps its
 authored selected shape. Sanitizing only the eventual Collection publication
 cannot satisfy this law, because user code may already have derived an
 ordinary field from a spoofed input.
 
-Known implementation gap for the first RC: correlated-child functional callback
-inputs can still expose reserved fields from a new shape or authored collisions
-from a structured source spread. The root callback receiving path passes its
-bounded checks. The callback-input law above remains accepted; final publication
-sanitization does not close this earlier boundary. The separate runtime/type
-owners and exact RED witnesses are preserved in the
+The compiler carries a callback view beside each authored selected-row
+occurrence. FROM, joined-source and union adapters transport that view.
+Functional callbacks read it without rewriting the query's authored row.
+Private callback state never crosses the callback or result boundary.
+An inline-only QueryRef and an inline child's final authored value retain
+that authored shape, including when a predicate runs without a selection.
+The selected-row normalization flag describes the output metadata view and
+is independent of callback-view transport. A two-slot cache retains authored
+and normalized compilations separately. Each ordered top-K retains its own
+window; the source loader's registered plan covers every window that shares
+that source, including subsequent moves.
+
+Ordered plan aggregation also retains every joined source whose pending demand
+gates a retained plan. An outer ordered QueryRef without a join cannot erase
+its child's joined dependency. A second ordered join adds its dependency to
+the first. Ordered continuation and Collection/Effect publication wait for all
+of them. The ordered-work owner checks this composition through actual
+Collection and Effect receivers while either joined acquisition is held.
+
+The runtime owner checks select, where and having source inputs through root,
+wrapped child, direct child and real Effect receivers. Predicate-with-select
+controls distinguish callback syntax from placement. Collection receivers
+observe initial readiness, held mutation, settlement and remote next use.
+Effects additionally observe every delivered value and previousValue,
+exit/reentry and post-disposal silence. Its bounded evidence is in
+[the callback metadata record](../../../../../docs/contributing/oracle-reviews/callback-metadata.md).
+Reusing a compilation cache on one graph with the same input streams must retain
+the callback inputs and authored selected output that separate compilations
+produce. The exported `compileQuery` receiver checks both compilation orders
+through FROM, JOIN and union placement at initial graph drain. Its raw output
+comparison is differential and supplies no independent Effect-root attribution
+policy. Optimizer cloning can prevent an original raw-key cache hit in union
+placement; that path checks propagation and transparency instead.
+Separate static receiving-type gaps remain in the
 [deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
 
 D2 hashes enumerable symbol keys and uses exact local-symbol identity plus
@@ -1532,10 +1562,11 @@ A live query's subscriptions to one collection, such as a join and an include
 of the same source, share one publication barrier. None of their replays
 publishes, and none whose last demand retired closes, while another of them
 still has replay work, so demand that any of them starts meanwhile joins its
-own open replay. While a failed replay of any of them holds publication, a
+own open replay. While a replay of any of them still holds publication, a
 lazy demand of any of them that fails after initial-query readiness fails its
-own subscription's replacement too, so retiring the other replay's failed
-demand cannot publish the window without this demand's rows. It holds until
+own subscription's replacement too. This includes a subscription that held no
+demand at truncate. Settling a sibling's replay or retiring its failed demand
+cannot publish the window without this demand's rows. It holds until
 every demand load that joins it loads, a later replay of the source succeeds,
 or the subscription's last demand retires. The query retries the failed demand
 at once and the retry joins the hold, so the hold ends only after the failed

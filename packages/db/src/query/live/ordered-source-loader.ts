@@ -161,7 +161,7 @@ export class OrderedSourceLoader {
       info.sourceHoldsAllRows &&
       info.index !== undefined &&
       info.orderBy.length === 1 &&
-      info.joinedFilterSourceId === undefined
+      !info.joinedFilterSourceIds?.length
   }
 
   private get needsOrderingRepair(): boolean {
@@ -295,7 +295,10 @@ export class OrderedSourceLoader {
       this.blockedLoadMore?.windowOperationGeneration
     continuesOrderedPrefixRepair ||=
       this.blockedLoadMore?.continuesOrderedPrefixRepair ?? false
-    if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+    if (
+      this.info.joinedFilterSourceIds?.length &&
+      this.hasPendingJoinedWork()
+    ) {
       if (
         windowOperationGeneration !== undefined ||
         continuesOrderedPrefixRepair
@@ -879,7 +882,10 @@ export class OrderedSourceLoader {
         continuation.continuesOrderedPrefixRepair,
       )
     } else {
-      if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+      if (
+        this.info.joinedFilterSourceIds?.length &&
+        this.hasPendingJoinedWork()
+      ) {
         this.stagedContinuation = continuation
         return
       }

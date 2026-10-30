@@ -17,6 +17,7 @@ import {
   supportsOrderedRange,
 } from '../../utils/index-optimization.js'
 import { hasVirtualPropPath } from '../../virtual-props.js'
+import { deepEquals } from '../../utils.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
@@ -66,8 +67,8 @@ export type OrderByOptimizationInfo = {
   requiresFullSource: boolean
   /** Whether the ordered source's installed rows are the whole source. */
   sourceHoldsAllRows: boolean
-  /** Source whose lazy demand must settle before a joined-filter page. */
-  joinedFilterSourceId?: string
+  /** Sources whose lazy demand must settle before a joined-filter page. */
+  joinedFilterSourceIds?: ReadonlyArray<string>
 }
 
 function warnOrderIndexFallback(
@@ -146,7 +147,7 @@ export function processOrderBy(
 
     return {
       compiledExpression: compileExpression(clauseWithoutAggregates),
-      compareOptions: buildCompareOptions(clause, collection),
+      compare: makeComparator(buildCompareOptions(clause, collection)),
     }
   })
   // The row holds source aliases and any projected aggregate under $selected.
@@ -159,30 +160,19 @@ export function processOrderBy(
       : null
   }
 
-  // Compare order terms in declaration order, stopping at the first difference.
-  const compare = (a: unknown, b: unknown) => {
-    if (orderByClause.length > 1) {
-      const arrayA = a as Array<unknown>
-      const arrayB = b as Array<unknown>
-      for (let i = 0; i < orderByClause.length; i++) {
-        const clause = compiledOrderBy[i]!
-        const compareFn = makeComparator(clause.compareOptions)
-        const result = compareFn(arrayA[i], arrayB[i])
-        if (result !== 0) {
-          return result
+  // Compile comparators once; each row comparison reads the same options.
+  const compare =
+    compiledOrderBy.length <= 1
+      ? (compiledOrderBy[0]?.compare ?? defaultComparator)
+      : (a: unknown, b: unknown) => {
+          const arrayA = a as Array<unknown>
+          const arrayB = b as Array<unknown>
+          for (let i = 0; i < compiledOrderBy.length; i++) {
+            const result = compiledOrderBy[i]!.compare(arrayA[i], arrayB[i])
+            if (result !== 0) return result
+          }
+          return arrayA.length - arrayB.length
         }
-      }
-      return arrayA.length - arrayB.length
-    }
-
-    if (orderByClause.length === 1) {
-      const clause = compiledOrderBy[0]!
-      const compareFn = makeComparator(clause.compareOptions)
-      return compareFn(a, b)
-    }
-
-    return defaultComparator(a, b)
-  }
 
   let setSizeCallback: SetSizeCallback | undefined
 
@@ -304,7 +294,9 @@ export function processOrderBy(
         valueExtractorForRawRow: extract,
         index,
         orderBy: sourceOrderBy,
-        joinedFilterSourceId,
+        joinedFilterSourceIds: joinedFilterSourceId
+          ? [joinedFilterSourceId]
+          : undefined,
         sourceHoldsAllRows:
           followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
@@ -332,12 +324,48 @@ export function processOrderBy(
       // Ordered loading is owned by one lexical source. A collection can occur
       // more than once in a query tree, so collection ID and alias are not
       // sufficient identities here.
-      optimizableOrderByCollections[orderBySourceId] = info
+      const previous = optimizableOrderByCollections[orderBySourceId]
+      // One lexical source can feed separate authored/source metadata views.
+      // Each top-K owns its own window. Acquisition must cover all windows,
+      // including moves made through a previously compiled root's callback.
+      // Keep these reads live: setWindowFn updates the individual info objects.
+      optimizableOrderByCollections[orderBySourceId] = previous
+        ? {
+            ...info,
+            joinedFilterSourceIds: [
+              ...new Set([
+                ...(previous.joinedFilterSourceIds ?? []),
+                ...(info.joinedFilterSourceIds ?? []),
+              ]),
+            ],
+            get offset() {
+              return Math.min(previous.offset, info.offset)
+            },
+            get limit() {
+              return (
+                Math.max(
+                  previous.offset + previous.limit,
+                  info.offset + info.limit,
+                ) - this.offset
+              )
+            },
+            // Plan shape is fixed at compilation; only window bounds move.
+            requiresFullSource:
+              !deepEquals(previous.orderBy, info.orderBy) ||
+              previous.requiresFullSource ||
+              info.requiresFullSource,
+            dataNeeded: (boundary) =>
+              Math.max(
+                previous.dataNeeded?.(boundary) ?? 0,
+                info.dataNeeded?.(boundary) ?? 0,
+              ),
+          }
+        : info
 
       // loadMoreIfNeeded reads how many rows the window needs. Without an
       // index, only an on-demand joined filter can leave the window short.
       const needsCount =
-        info.joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
+        joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
       if (index || needsCount) {
         setSizeCallback = (getSize) => {
           info.dataNeeded = (boundary) => {
@@ -358,59 +386,31 @@ export function processOrderBy(
     }
   }
 
-  // Use grouped ordering when a groupKeyFn is provided (includes with limit/offset),
-  // otherwise use the standard global ordering operator.
-  if (groupKeyFn) {
-    return pipeline.pipe(
-      groupedOrderByWithFractionalIndex(valueExtractor, {
-        limit,
-        offset,
-        comparator: compare,
-        setSizeCallback,
-        groupKeyFn,
-        setWindowFn: (
-          windowFn: (options: { offset?: number; limit?: number }) => void,
-        ) => {
-          setWindowFn((options) => {
-            windowFn(options)
-            if (orderByOptimizationInfo) {
-              orderByOptimizationInfo.offset =
-                options.offset ?? orderByOptimizationInfo.offset
-              orderByOptimizationInfo.limit =
-                options.limit ?? orderByOptimizationInfo.limit
-            }
-          })
-        },
-      }),
-    )
+  const options = {
+    limit,
+    offset,
+    comparator: compare,
+    setSizeCallback,
+    setWindowFn: (windowFn: (options: WindowOptions) => void) => {
+      // Keep demand calculations aligned with the operator's current window.
+      setWindowFn((window) => {
+        windowFn(window)
+        if (orderByOptimizationInfo) {
+          orderByOptimizationInfo.offset =
+            window.offset ?? orderByOptimizationInfo.offset
+          orderByOptimizationInfo.limit =
+            window.limit ?? orderByOptimizationInfo.limit
+        }
+      })
+    },
   }
-
-  // Use fractional indexing and return the tuple [value, index]
   return pipeline.pipe(
-    orderByWithFractionalIndex(valueExtractor, {
-      limit,
-      offset,
-      comparator: compare,
-      setSizeCallback,
-      setWindowFn: (
-        windowFn: (options: { offset?: number; limit?: number }) => void,
-      ) => {
-        setWindowFn(
-          // We wrap the move function such that we update the orderByOptimizationInfo
-          // because that is used by the `dataNeeded` callback to determine if we need to load more data
-          (options) => {
-            windowFn(options)
-            if (orderByOptimizationInfo) {
-              orderByOptimizationInfo.offset =
-                options.offset ?? orderByOptimizationInfo.offset
-              orderByOptimizationInfo.limit =
-                options.limit ?? orderByOptimizationInfo.limit
-            }
-          },
-        )
-      },
-    }),
-    // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
+    groupKeyFn
+      ? groupedOrderByWithFractionalIndex(valueExtractor, {
+          ...options,
+          groupKeyFn,
+        })
+      : orderByWithFractionalIndex(valueExtractor, options),
   )
 }
 

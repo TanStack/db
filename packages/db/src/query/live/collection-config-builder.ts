@@ -450,12 +450,12 @@ export class CollectionConfigBuilder<
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     for (const info of Object.values(this.optimizableOrderByCollections)) {
-      if (!info.joinedFilterSourceId) continue
-      for (const plan of this.lazySourcesCallbacks[info.joinedFilterSourceId]
-        ?.plans ?? []) {
-        const participant = this.activeDemands.get(plan.id)?.participant
-        if (participant?.isPending()) {
-          this.trackSubsetLoadOperationPromise(participant.promise)
+      for (const sourceId of info.joinedFilterSourceIds ?? []) {
+        for (const plan of this.lazySourcesCallbacks[sourceId]?.plans ?? []) {
+          const participant = this.activeDemands.get(plan.id)?.participant
+          if (participant?.isPending()) {
+            this.trackSubsetLoadOperationPromise(participant.promise)
+          }
         }
       }
     }
@@ -596,8 +596,8 @@ export class CollectionConfigBuilder<
     if (this.liveQueryCollection?._lifecycle.status === `ready`) {
       // The failure settles the demand: the request errors of its keys show
       // it, and ordered work must not wait for a load that already ended.
-      // Output held for this demand publishes now, unless a failed replay of
-      // this source holds publication: the failure then holds this
+      // Output held for this demand publishes now, unless a replay of this
+      // source still holds publication: the failure then holds this
       // subscription's publication too, so retiring the other replay's
       // failed demand cannot publish without this demand's rows.
       demand.settled = true
@@ -605,7 +605,7 @@ export class CollectionConfigBuilder<
         this.collectionSources.some(
           (source) =>
             source.collection === collection &&
-            this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+            this.subscriptions[source.sourceId]?.hasPendingTruncateReplacement,
         )
       )
         subscription.failReplacement(normalized)
@@ -1209,10 +1209,10 @@ export class CollectionConfigBuilder<
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
         this.pendingOrderedLoads.size > 0 ||
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) =>
-            info.joinedFilterSourceId !== undefined &&
-            this.hasPendingJoinedWork(info.joinedFilterSourceId),
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.some((sourceId) =>
+            this.hasPendingJoinedWork(sourceId),
+          ),
         )
       ) {
         return
@@ -1409,8 +1409,8 @@ export class CollectionConfigBuilder<
 
     if (status === `ready`) {
       if (
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) => info.joinedFilterSourceId === sourceId,
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.includes(sourceId),
         )
       ) {
         this.maybeRunGraphFn?.()
