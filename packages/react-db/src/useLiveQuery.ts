@@ -82,7 +82,9 @@ function getSourceQualifiedSuspenseKey(
     `autoIndex` | `defaultIndexType`
   >
   // Output resource policy qualifies local sharing, not query identity.
-  const indexType = defaultIndexType ? getSourceObjectToken(defaultIndexType) : 0
+  const indexType = defaultIndexType
+    ? getSourceObjectToken(defaultIndexType)
+    : 0
   return `${sourceIds.join(`,`)}:${autoIndex ?? `off`}:${indexType}:${queryHash}`
 }
 
