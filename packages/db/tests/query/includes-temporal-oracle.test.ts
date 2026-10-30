@@ -773,11 +773,12 @@ function expectedEffectObservation(
   }
 }
 
-// Without `skipInitial`, initial-query readiness holds the Effect's gate but
-// no callback: ordinary initial requests keep their callback timing. So the
-// callback-visible result is the shape's current result at every checkpoint,
-// before readiness too. A left-join parent always shows one row, matched or
-// unmatched.
+/**
+ * Predicts row count and selected post IDs from authored matching rows.
+ * Without `skipInitial`, ordinary initial callbacks keep their timing before
+ * readiness too. A left-join parent always shows one row, matched or unmatched.
+ * During truncate replay, only the metamorphic twin judges the row projection.
+ */
 function expectedInitialRowsEffectObservation(
   shape: LaggingSourceShape,
   facts: LaggingSourceFacts,
@@ -1017,6 +1018,11 @@ type LaggingSourceContext = {
   twin: LaggingSourceConsumerState | undefined
 }
 
+/**
+ * Starts a real live query, one-shot read, or Effect for the controlled history.
+ * The initial-row Effect rebuilds callback-visible membership and counts
+ * events that contradict that membership.
+ */
 function startLaggingSourceConsumer(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
@@ -1246,6 +1252,12 @@ function observedAcquisitions(
   return shape === `ordered` || facts.disturbed ? Math.min(count, 1) : count
 }
 
+/**
+ * Captures the consumer's public projection at a trace checkpoint.
+ * The initial-row Effect compares row count, selected post IDs, event
+ * consistency, and acquisition evidence. Other fields and timing within the
+ * step are outside this projection.
+ */
 function observeLaggingSourceConsumer(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
@@ -1309,6 +1321,10 @@ type InitialRowsEffectReach = ReturnType<
   typeof createOracleReach<(typeof INITIAL_ROWS_EFFECT_REACH_STATES)[number]>
 >
 
+/**
+ * Records reached states from the checkpoint projection and independent facts.
+ * The reach counter counts each state at most once per history.
+ */
 function recordInitialRowsEffectReach(
   reach: InitialRowsEffectReach,
   shape: LaggingSourceShape,
@@ -1326,6 +1342,11 @@ function recordInitialRowsEffectReach(
     reach.reach(`row written after initial-query readiness is visible`)
 }
 
+/**
+ * Compares checkpoint projections with the independent model and ready twin.
+ * During truncate replay, the twin judges live-query and initial-row Effect
+ * row projections while acquisition and event-consistency checks continue.
+ */
 function laggingSourceProjection(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,

@@ -409,3 +409,24 @@ Upstream #2278 moved that assertion into `op-sqlite-driver.test.ts`; its
 literal `numRuns: 1` describes a replay option, not a generated campaign that
 was removed. This PR changes neither that package nor its budgets. The oracle
 lint rules themselves pass.
+
+## PR #2277 coverage-map clarification (2026-10-30)
+
+Reviewed parent: `9eabde30fe8854c0a9069553444c96f128fe0d94`. The
+[coverage-map review](https://github.com/TanStack/db/pull/2277#discussion_r4419844325)
+identified a broader description than the recorder checks. The map now names
+row count, selected post IDs, inconsistent-event count, and acquisition
+observations at trace checkpoints. Histories with a truncate or rekey record
+only acquisition presence. Other row fields, including joined parent IDs,
+and callback timing within a step remain unchecked. The map also names the
+open ordered, include, single-result, framework-hook, and real-provider Effect
+boundaries already recorded above. This clarifies evidence; it changes no law
+or comparison.
+
+Five functions now have JSDoc describing their model, driver, observation,
+reach, and comparison responsibilities. Compiling the oracle before and after
+this documentation change with comments removed produces identical JavaScript.
+ESLint, Prettier, and targeted oracle lint pass. The default lint notification
+is the same upstream replay-options report explained above. The earlier
+1,084-test, reach, and mutant receipts remain the execution evidence; no test
+or production behavior changed in this follow-up.
