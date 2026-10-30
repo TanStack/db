@@ -308,3 +308,98 @@ pnpm --filter @tanstack/db exec node --import tsx tests/oracle-replay.ts \
 The guarded replay now passes both delivery paths and reports two successful
 witnesses with the requested property, seed and path. This supplements the
 earlier direct replay and closes the missing portfolio-discovery boundary.
+
+## Production-weight refactor
+
+The maintainer requested broader refactoring after PR #2313 reached
+`e453634da7339e79d892a2bf198f0e5556828b12`. This follow-up preserves behavior:
+
+- Update `publishedRows` and `sentKeys` in one pass before calling the consumer.
+  Delete the two single-use tracking methods and the callback alias.
+- Keep the three source listener removal callbacks in one ordered array.
+  Registration and removal retain their order. Unsubscription detaches the
+  array before invoking callbacks through `runAllCallbacks`, which still attempts
+  every callback and rethrows the first exact failure value.
+- Initialize that array at registration, removing an unused initial allocation.
+  Cleanup-start registration can call synchronously, but the initial subscription
+  has no demands, rows or replay, and that path does not read the listener array
+  or expose the subscription to a consumer.
+
+The equal-row production predicate remains intact. No contract, model, grammar,
+comparison, exclusion, replay registration or run budget changed. The existing
+owners exercise the unchanged contract, so this internal refactor needs no new
+oracle law or examples. The final production file's SHA-256 is
+`f2ee13496359611fa5fe22066df96d80dec88a77fa18693af2fcfeff4ce29bc4`.
+
+### Measured shipped bytes
+
+`pnpm size:compare --files` compares the complete PR with merge-base
+`bfd1da1a7e752d66fd667adfd3cdf54f60732b22`, after fetching `origin/main`.
+Negative values mean fewer shipped bytes. Test and documentation additions
+remain outside these production bundles.
+
+| Build | Gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| Full DB package | -28 | -43 |
+| Typical app | -32 | -8 |
+| App with Effect | -33 | +4 |
+| App with groupBy | -38 | +22 |
+| App with includes | -33 | +92 |
+| App with join | -33 | +76 |
+| App with local storage | -32 | -110 |
+| App with optimistic action | -33 | +54 |
+| App with paced mutations | -33 | +26 |
+
+The subscription module shrinks **73 minified bytes** against the base. Other
+package bundles remain unchanged. Every measured app shrinks under gzip.
+Brotli results vary across feature scenarios, so the claim is negative weight
+for the typical app and full DB bundle, not for every compressed app.
+
+The original PR grew 24 minified bytes, 5 DB gzip bytes and 7 typical-app gzip
+bytes. Fusing the loops while retaining a single helper reduced the module but
+still grew both gzip bundles by 2 bytes. A generic Map-fold helper also left
+the DB gzip bundle 2 bytes larger and hid simple bookkeeping behind an
+abstraction. Inlining the loop reduced DB gzip by 5 bytes but grew DB Brotli
+by 88 bytes. The ordered listener array removes parallel optional fields and
+wrapper callbacks, paying for the fix with simpler existing machinery. A
+redundant callback alias and initial array allocation were then removed for
+clarity and fewer allocations, without tuning names, comments or formatting.
+
+### Review and verification
+
+Independent correctness review found no defect or optional suggestion. It
+checked tracking before reentry, repeated keys, callback throws, listener handle
+ownership, synchronous cleanup registration, idempotence, cleanup order and
+exact first-error propagation. Its selected final-wrapper checks passed 20 tests.
+The simplification reviewer proposed one P3 item: remove the unused initial
+listener array. That proposal was accepted under the maintainer's refactoring
+request and verified with TypeScript and the surrounding suites.
+
+Lossless evaluation: **one raw suggestion = one fixed-now item**. No
+confirmed-open, deferred, refuted, stale, design-decision or duplicate item
+remains. Both reviews receive a hire recommendation for this scope: accurate
+boundary analysis, useful validation and no unsupported contract changes.
+The raw reports and item ledger remain in local scratch. The source-order
+suggestion and its full rationale are preserved above.
+
+The exact eight-suite command recorded earlier passes **646 tests** on the
+final refactor, with no type errors. `pnpm --filter @tanstack/db exec tsc --noEmit`,
+ESLint, Prettier, `pnpm lint:changed`, and `git diff --check` pass. The latter
+reports no lowered or removed oracle budget.
+
+The final-head sensitivity check temporarily restored the original equality
+suppression while retaining the refactor. All four restart campaigns failed
+at the shared publication comparison. Restoring the exact production file
+made all four campaigns pass (139 unrelated owner tests deselected):
+
+```sh
+pnpm --filter @tanstack/db exec vitest run \
+  tests/collection-subscription-lifecycle-publication-oracle.property.test.ts \
+  -t 'matches restarted row publication' \
+  --maxWorkers=2 --coverage.enabled=false
+```
+
+This is renewed sensitivity evidence after an internal refactor. The earlier
+oracle-first RED, two distinguishing mutants and direct-subscription limits
+still govern the original repair. No temporary mutant remains. Local review
+and implementation work are complete; final pushed-head CI is checked separately.

@@ -225,10 +225,8 @@ export class CollectionSubscription
     promise: Promise<unknown>
   }>()
 
-  // Cleanup function for truncate event listener
-  private truncateCleanup: (() => void) | undefined
-  private collectionCleanup: (() => void) | undefined
-  private collectionRestartCleanup: (() => void) | undefined
+  // Source listeners retire together on unsubscription.
+  private sourceListenerCleanups: Array<() => void>
 
   // One replay state owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
@@ -273,15 +271,19 @@ export class CollectionSubscription
       ensureIndexForExpression(options.whereExpression, this.collection)
     }
 
-    const callbackWithSentKeysTracking = (
-      changes: Array<ChangeMessage<any, any>>,
-    ) => {
-      this.trackPublishedRows(changes)
-      this.trackSentKeys(changes)
+    this.callback = (changes) => {
+      // Complete both publication records before a callback can reenter.
+      for (const change of changes) {
+        if (change.type === `delete`) {
+          this.publishedRows.delete(change.key)
+          this.sentKeys.delete(change.key)
+        } else {
+          this.publishedRows.set(change.key, change.value)
+          this.sentKeys.add(change.key)
+        }
+      }
       callback(changes)
     }
-
-    this.callback = callbackWithSentKeysTracking
 
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
@@ -295,15 +297,10 @@ export class CollectionSubscription
     // row, so every one re-requests the loaded subsets, also one that a
     // reload's new run sends after the reload's replay began or settled: the
     // replacement deleted what that replay loaded.
-    this.truncateCleanup = this.collection.on(`truncate`, () =>
-      this.handleTruncate(),
-    )
-    this.collectionCleanup = this.collection._onCleanupStart(() => {
-      this.handleCollectionCleanup()
-    })
-    this.collectionRestartCleanup = this.collection.on(
-      `status:change`,
-      ({ status }) => {
+    this.sourceListenerCleanups = [
+      this.collection.on(`truncate`, () => this.handleTruncate()),
+      this.collection._onCleanupStart(() => this.handleCollectionCleanup()),
+      this.collection.on(`status:change`, ({ status }) => {
         if (status !== `loading` && status !== `ready`) return
         const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
         const replayState = this.truncateReplayState
@@ -319,8 +316,8 @@ export class CollectionSubscription
             this.restartDetachedDemands(syncRunGeneration)
           }
         })
-      },
-    )
+      }),
+    ]
   }
 
   /** Whether this subscription still defers provider work. */
@@ -1934,28 +1931,6 @@ export class CollectionSubscription
     return reconciled
   }
 
-  private trackPublishedRows(
-    changes: Array<ChangeMessage<any, string | number>>,
-  ): void {
-    for (const change of changes) {
-      if (change.type === `delete`) {
-        this.publishedRows.delete(change.key)
-      } else {
-        this.publishedRows.set(change.key, change.value)
-      }
-    }
-  }
-
-  private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
-    for (const change of changes) {
-      if (change.type === `delete`) {
-        this.sentKeys.delete(change.key)
-      } else {
-        this.sentKeys.add(change.key)
-      }
-    }
-  }
-
   /**
    * Mark that the subscription should not filter any changes.
    * This is used when includeInitialState is explicitly set to false,
@@ -1971,17 +1946,11 @@ export class CollectionSubscription
     // Stop any status listener set already being iterated. Clearing the
     // emitter's map cannot invalidate that captured Set by itself.
     this.statusRevision++
-    const sourceListenerCleanups = [
-      this.truncateCleanup,
-      this.collectionCleanup,
-      this.collectionRestartCleanup,
-    ]
-    this.truncateCleanup = undefined
-    this.collectionCleanup = undefined
-    this.collectionRestartCleanup = undefined
+    const sourceListenerCleanups = this.sourceListenerCleanups
+    this.sourceListenerCleanups = []
 
     runAllCallbacks([
-      ...sourceListenerCleanups.map((cleanup) => () => cleanup?.()),
+      ...sourceListenerCleanups,
       () => {
         // Stop any buffered replay from publishing after unsubscription.
         this.discardTruncateReplay()
