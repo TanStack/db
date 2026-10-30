@@ -269,3 +269,21 @@ document update removes`) failed the same way.
     release; `onLoad` takes no abort signal and cleanup waits for it, so a
     hook that never settles leaves cleanup pending; after ready, an error in
     the eager change handler is only logged.
+- **2026-10-30, eager live source, typed fields (FID-1).** A driver declares
+  `fieldKinds`, the kinds its backend stores in typed columns; each row then
+  carries `typed`, one field per kind, with reach per kind on the load and
+  change paths. A driver may declare `excludesValue` for values its backend
+  itself cannot store as given. Reference mutant: `typed-booleans-as-numbers`
+  (FID-1 values).
+  - **PowerSync:** typed columns for string, integer, float, boolean (INTEGER
+    0/1), and Date (ISO TEXT), decoded by user `deserializationSchema` and
+    validated by `schema`, as an app writes them. GREEN; mutants that skip
+    `deserializeSyncRow` on the diff path or on the initial load fail FID-1
+    (values) at a change and at the load. No adapter defect.
+  - **PowerSync platform limit (excluded, recorded):** its storage keeps a
+    number at 15 significant digits. Through its table views
+    9007199254740991 reads back as 9007199254740990 and 0.30000000000000004
+    as 0.3, and Number.MAX_VALUE is rejected (`powersync_diff: number out of
+range`). The Collection shows what the database stored, so this is not
+    the adapter's FID-1; the driver excludes such numbers. Worth reporting
+    to PowerSync.

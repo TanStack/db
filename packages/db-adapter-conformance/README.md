@@ -13,25 +13,25 @@ The package is private while its first oracle settles.
 pushes a complete result and then committed change batches. Its opening
 comment states the laws and their limits. In short:
 
-| Law                        | Checked behavior                                                                                                                                                                                                                                                                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| READY-2, READY-3           | `loading` until the first complete delivery; then `ready` with exactly its rows                                                                                                                                                                                                                                                                                              |
-| READY-4                    | A failure before ready: status `error`, `preload()` rejects with the value, `health.error.cause` is the value                                                                                                                                                                                                                                                                |
-| HEALTH-1                   | A failure after ready: status stays `ready`, rows kept, `health.error.cause` is the value                                                                                                                                                                                                                                                                                    |
-| PUB-1                      | Every change publication during a step is one whole committed state, in commit order; per batch or per change, as the driver declares                                                                                                                                                                                                                                        |
-| PUB-2, PUB-3, PUB-7, FID-4 | Change events fold to the rows, with no insert of a held key and no update or delete of a missing one; batches fold onto rows; a complete delivery replaces (PUB-7 with `complete-snapshot`)                                                                                                                                                                                 |
-| FID-1                      | A delivered row is the whole backend row: a row without the optional `note` removes a `note` the Collection held. With declared `valueKinds`, each `value` strictly equals the delivered one on the initial load and on a live change: same type and prototype, `Object.is` for numbers (`-0` is not `0`), Dates by time, nested arrays and plain objects element by element |
-| LIFE-2, LIFE-5             | Cleanup releases the provider subscription; a restart is a fresh, empty sync run                                                                                                                                                                                                                                                                                             |
-| LIFE-10                    | A failed provider's subscription is released at the failure, and no subscription is released twice                                                                                                                                                                                                                                                                           |
-| HEALTH-5                   | No unhandled rejection and no undeclared `console.error` or `console.warn`                                                                                                                                                                                                                                                                                                   |
-| EVID-1, EVID-2, EVID-3     | `awaitTxId` fulfills after its batch applies, stays pending before, rejects after its timeout, and rejects at retirement                                                                                                                                                                                                                                                     |
-| HEALTH-2, RETRY-1          | A retried failure stays hidden before ready, joins `failureReason` after it, and clears on the next delivery (`retry-policy`)                                                                                                                                                                                                                                                |
-| RECON-1                    | Disconnect and reconnect keep status and rows                                                                                                                                                                                                                                                                                                                                |
-| RENEW-1                    | Capability renewal reuses the provider subscription and changes nothing visible                                                                                                                                                                                                                                                                                              |
-| READY-8, READY-10          | With `listen-before-fetch`: no fetch before the listener is live; batches committed during the fetch apply after its result, before ready                                                                                                                                                                                                                                    |
-| PUB-5, PUB-9               | With `listen-before-fetch`: the cut publishes only backend states at or after the read point, in order; no replay regresses a row                                                                                                                                                                                                                                            |
-| READY-3, READY-10          | When status becomes `ready`, the rows already equal the initial cut                                                                                                                                                                                                                                                                                                          |
-| PUB-4, PUB-3               | With `duplicate-key-delivery`: a complete delivery holding two rows with one key follows the driver's `duplicateInsert` policy. Under `error` it is rejected: no row written, nothing published, earlier rows kept, a sync failure reported. Under `replace` the later row wins                                                                                              |
+| Law                        | Checked behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| READY-2, READY-3           | `loading` until the first complete delivery; then `ready` with exactly its rows                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| READY-4                    | A failure before ready: status `error`, `preload()` rejects with the value, `health.error.cause` is the value                                                                                                                                                                                                                                                                                                                                                                                           |
+| HEALTH-1                   | A failure after ready: status stays `ready`, rows kept, `health.error.cause` is the value                                                                                                                                                                                                                                                                                                                                                                                                               |
+| PUB-1                      | Every change publication during a step is one whole committed state, in commit order; per batch or per change, as the driver declares                                                                                                                                                                                                                                                                                                                                                                   |
+| PUB-2, PUB-3, PUB-7, FID-4 | Change events fold to the rows, with no insert of a held key and no update or delete of a missing one; batches fold onto rows; a complete delivery replaces (PUB-7 with `complete-snapshot`)                                                                                                                                                                                                                                                                                                            |
+| FID-1                      | A delivered row is the whole backend row: a row without the optional `note` removes a `note` the Collection held. With declared `valueKinds`, each `value` strictly equals the delivered one on the initial load and on a live change: same type and prototype, `Object.is` for numbers (`-0` is not `0`), Dates by time, nested arrays and plain objects element by element. With declared `fieldKinds`, each row's `typed` record holds one field per kind, as typed columns do, checked the same way |
+| LIFE-2, LIFE-5             | Cleanup releases the provider subscription; a restart is a fresh, empty sync run                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| LIFE-10                    | A failed provider's subscription is released at the failure, and no subscription is released twice                                                                                                                                                                                                                                                                                                                                                                                                      |
+| HEALTH-5                   | No unhandled rejection and no undeclared `console.error` or `console.warn`                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| EVID-1, EVID-2, EVID-3     | `awaitTxId` fulfills after its batch applies, stays pending before, rejects after its timeout, and rejects at retirement                                                                                                                                                                                                                                                                                                                                                                                |
+| HEALTH-2, RETRY-1          | A retried failure stays hidden before ready, joins `failureReason` after it, and clears on the next delivery (`retry-policy`)                                                                                                                                                                                                                                                                                                                                                                           |
+| RECON-1                    | Disconnect and reconnect keep status and rows                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| RENEW-1                    | Capability renewal reuses the provider subscription and changes nothing visible                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| READY-8, READY-10          | With `listen-before-fetch`: no fetch before the listener is live; batches committed during the fetch apply after its result, before ready                                                                                                                                                                                                                                                                                                                                                               |
+| PUB-5, PUB-9               | With `listen-before-fetch`: the cut publishes only backend states at or after the read point, in order; no replay regresses a row                                                                                                                                                                                                                                                                                                                                                                       |
+| READY-3, READY-10          | When status becomes `ready`, the rows already equal the initial cut                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| PUB-4, PUB-3               | With `duplicate-key-delivery`: a complete delivery holding two rows with one key follows the driver's `duplicateInsert` policy. Under `error` it is rejected: no row written, nothing published, earlier rows kept, a sync failure reported. Under `replace` the later row wins                                                                                                                                                                                                                         |
 
 The law IDs come from the adapter conformance law set, version 18.
 
@@ -45,6 +45,7 @@ Implement `EagerLiveSourceDriver`:
 - **`changeCommits`:** `per-batch` if your adapter commits a provider batch as one transaction, `per-change` if it commits each change alone.
 - **`declaredDiagnostic`:** optional; accepts console diagnostics your adapter documents, so HEALTH-5 does not reject them.
 - **`seed` and `fetchesBeforeListening`:** with `listen-before-fetch`, the provider holds backend rows set by `seed`, treats a batch before the first ready as a backend commit during the fetch, and counts fetches issued while its listener was not live (READY-8).
+- **`fieldKinds` and `excludesValue`:** `fieldKinds` are the kinds your backend stores in typed columns; rows then carry `typed`, one field per kind, which the driver writes in the column's form. `excludesValue` names generated values the backend itself cannot store as given (a platform limit, not adapter behavior); record each use in the coverage map.
 - **`duplicateInsert`:** with `duplicate-key-delivery`, the law set's policy for an insert of a held key, `error` or `replace`.
 - **`valueKinds`:** the kinds of FID-1's `valueDomain` your backend represents; `jsonValueKinds` for a JSON backend. The driver delivers each value in the backend's own form and the Collection must show it decoded.
 - **Asynchronous steps and `settle`:** provider methods may return a promise, which the check awaits. A fixture whose deliveries reach the Collection later than a few event-loop turns supplies `settle()`, its law-set `propagationStep`, which the check awaits before every comparison.
@@ -136,45 +137,46 @@ reach counter, so the run fails when histories miss a state the laws need.
   20 other seeds, the lowest count for any state was 12 (`field-removed`), across 12 seeds.
 
 - **GREEN:** `pnpm exec vitest run tests/reference-adapter-oracle.property.test.ts`:
-  67 tests pass (both campaigns, the per-change pair, 32 calibrations, and the
+  68 tests pass (both campaigns, the per-change pair, 32 calibrations, and the
   grammar controls). TrailBase: its full suite, 151 tests, passes.
 - **Mutants:** the fixed campaign rejects each with the law it breaks:
 
-  | Mutant                                   | Law                        |
-  | ---------------------------------------- | -------------------------- |
-  | `ready-before-delivery`                  | READY-2                    |
-  | `wraps-loading-failure`                  | READY-4                    |
-  | `failure-clears-rows`                    | HEALTH-1                   |
-  | `transient-is-fatal`                     | HEALTH-1                   |
-  | `never-recovers`                         | HEALTH-2                   |
-  | `transient-fails-loading`                | RETRY-1                    |
-  | `splits-batch`                           | PUB-1                      |
-  | `reverses-batch` (per-change)            | PUB-1                      |
-  | `drops-deletes`                          | PUB-3                      |
-  | `snapshot-merges`                        | PUB-7                      |
-  | `leaks-subscription`                     | LIFE-2                     |
-  | `restart-replays-rows`                   | LIFE-5                     |
-  | `keeps-failed-source`                    | LIFE-10                    |
-  | `double-release`                         | LIFE-10                    |
-  | `detached-rejection`                     | HEALTH-5                   |
-  | `logs-failure`                           | HEALTH-5                   |
-  | `wait-off-by-one`                        | EVID-1                     |
-  | `wait-ignores-timeout`                   | EVID-3                     |
-  | `disconnect-fails`                       | RECON-1                    |
-  | `renew-resubscribes`                     | RENEW-1                    |
-  | `drops-buffered`                         | READY-10                   |
-  | `buffer-before-rows`                     | READY-10                   |
-  | `replays-per-batch`                      | PUB-5                      |
-  | `ready-before-buffer`                    | READY-10 (rows when ready) |
-  | `merges-updates`                         | FID-1                      |
-  | `relabels-inserts` (checker calibration) | PUB-2                      |
-  | `dates-as-strings` (live changes only)   | FID-1 (values)             |
-  | `bigints-as-numbers` (initial load only) | FID-1 (values)             |
-  | `drops-nulls`                            | FID-1 (values)             |
-  | `loses-negative-zero`                    | FID-1 (values)             |
-  | `commits-malformed-prefix`               | PUB-4                      |
-  | `ignores-malformed`                      | PUB-4                      |
-  | `shows-buffered`                         | READY-10/PUB-9             |
+  | Mutant                                          | Law                        |
+  | ----------------------------------------------- | -------------------------- |
+  | `ready-before-delivery`                         | READY-2                    |
+  | `wraps-loading-failure`                         | READY-4                    |
+  | `failure-clears-rows`                           | HEALTH-1                   |
+  | `transient-is-fatal`                            | HEALTH-1                   |
+  | `never-recovers`                                | HEALTH-2                   |
+  | `transient-fails-loading`                       | RETRY-1                    |
+  | `splits-batch`                                  | PUB-1                      |
+  | `reverses-batch` (per-change)                   | PUB-1                      |
+  | `drops-deletes`                                 | PUB-3                      |
+  | `snapshot-merges`                               | PUB-7                      |
+  | `leaks-subscription`                            | LIFE-2                     |
+  | `restart-replays-rows`                          | LIFE-5                     |
+  | `keeps-failed-source`                           | LIFE-10                    |
+  | `double-release`                                | LIFE-10                    |
+  | `detached-rejection`                            | HEALTH-5                   |
+  | `logs-failure`                                  | HEALTH-5                   |
+  | `wait-off-by-one`                               | EVID-1                     |
+  | `wait-ignores-timeout`                          | EVID-3                     |
+  | `disconnect-fails`                              | RECON-1                    |
+  | `renew-resubscribes`                            | RENEW-1                    |
+  | `drops-buffered`                                | READY-10                   |
+  | `buffer-before-rows`                            | READY-10                   |
+  | `replays-per-batch`                             | PUB-5                      |
+  | `ready-before-buffer`                           | READY-10 (rows when ready) |
+  | `merges-updates`                                | FID-1                      |
+  | `relabels-inserts` (checker calibration)        | PUB-2                      |
+  | `dates-as-strings` (live changes only)          | FID-1 (values)             |
+  | `bigints-as-numbers` (initial load only)        | FID-1 (values)             |
+  | `drops-nulls`                                   | FID-1 (values)             |
+  | `loses-negative-zero`                           | FID-1 (values)             |
+  | `typed-booleans-as-numbers` (live changes only) | FID-1 (values)             |
+  | `commits-malformed-prefix`                      | PUB-4                      |
+  | `ignores-malformed`                             | PUB-4                      |
+  | `shows-buffered`                                | READY-10/PUB-9             |
 
   `reverses-batch` reverses only batches of distinct keys, so its final rows
   are right and only the intermediate publications are wrong. An earlier

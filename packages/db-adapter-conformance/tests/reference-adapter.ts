@@ -83,6 +83,8 @@ export type ReferenceMutant =
   | `drops-nulls`
   /** FID-1: `-0` is stored as `0`. */
   | `loses-negative-zero`
+  /** FID-1: a live change stores a typed boolean field as a number. */
+  | `typed-booleans-as-numbers`
   /** PUB-4: a rejected delivery commits the rows written before the failure. */
   | `commits-malformed-prefix`
   /** PUB-4: a duplicate key is skipped and the delivery applies. */
@@ -204,6 +206,16 @@ function storedRow(
   }
   if (mutant === `loses-negative-zero` && Object.is(value, -0)) {
     return { ...row, value: 0 }
+  }
+  if (
+    mutant === `typed-booleans-as-numbers` &&
+    path === `change` &&
+    typeof row.typed?.boolean === `boolean`
+  ) {
+    return {
+      ...row,
+      typed: { ...row.typed, boolean: Number(row.typed.boolean) },
+    }
   }
   return row
 }
@@ -495,6 +507,19 @@ export function referenceDriver(
       `duplicate-key-delivery`,
       `source-failure-after-ready`,
     ]),
+    // The same ten kinds as typed fields, one per row field.
+    fieldKinds: [
+      `string`,
+      `integer`,
+      `float`,
+      `negative-zero`,
+      `boolean`,
+      `null`,
+      `date`,
+      `bigint`,
+      `array`,
+      `object`,
+    ],
     valueKinds: [
       `string`,
       `integer`,

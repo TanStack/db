@@ -119,6 +119,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`bigints-as-numbers`, `FID-1 (values)`],
     [`drops-nulls`, `FID-1 (values)`],
     [`loses-negative-zero`, `FID-1 (values)`],
+    [`typed-booleans-as-numbers`, `FID-1 (values)`],
     [`commits-malformed-prefix`, `PUB-4`],
     [`ignores-malformed`, `PUB-4`],
     [`relabels-inserts`, `PUB-2`],
@@ -313,12 +314,14 @@ function withinGrammar(
 ): boolean {
   // With value kinds every row carries a value; without them none does.
   const valued = (domain.valueKinds ?? []).length > 0
+  const typed = (domain.fieldKinds ?? []).length > 0
   const row = (r: ConformanceRow) =>
     r.id >= 1 &&
     r.id <= 5 &&
     [`a`, `b`, `c`].includes(r.title) &&
     (!Object.hasOwn(r, `note`) || [`x`, `y`].includes(r.note!)) &&
-    Object.hasOwn(r, `value`) === valued
+    Object.hasOwn(r, `value`) === valued &&
+    Object.hasOwn(r, `typed`) === typed
   return (
     history.length >= 1 &&
     history.length <= 15 &&
@@ -351,7 +354,13 @@ function withinGrammar(
 
 // The witnesses above carry no values, so they reconstruct in the grammar
 // of the same driver without value kinds. Value witnesses use the full one.
-const withoutValues = { ...driver, valueKinds: undefined }
+const withoutValues = {
+  ...driver,
+  valueKinds: undefined,
+  fieldKinds: undefined,
+}
+// The value witnesses carry values but no typed fields.
+const withoutFields = { ...driver, fieldKinds: undefined }
 
 const valueWitnesses: Array<[string, EagerLiveSourceHistory]> = [
   [
@@ -415,8 +424,11 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(valueWitnesses)(
     `reconstructs %s`,
     async (_name, history) => {
-      expect(withinGrammar(history, driver)).toBe(true)
-      const { skipped } = await checkEagerLiveSourceHistory(driver, history)
+      expect(withinGrammar(history, withoutFields)).toBe(true)
+      const { skipped } = await checkEagerLiveSourceHistory(
+        withoutFields,
+        history,
+      )
       expect(skipped).toBe(0)
     },
   )

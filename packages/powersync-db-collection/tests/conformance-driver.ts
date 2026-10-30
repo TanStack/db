@@ -32,7 +32,10 @@
  * PowerSync keys are strings, so row `n` is id `"n"`, and the shared
  * `observedView` maps each key back with `conformanceKey`. `note` is a
  * nullable text column, so an absent `note` is SQL `NULL` (`toSqlRow`,
- * `fromSqlRow`). The driver never reads the Collection.
+ * `fromSqlRow`). Typed fields (FID-1) are typed columns: the driver writes
+ * a boolean as 0 or 1 and a Date as ISO text, the user schemas an app would
+ * write decode them, and the view only renames the columns into `typed`.
+ * The driver never reads the Collection.
  */
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
@@ -40,6 +43,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import { createCollection } from '@tanstack/db'
+import { z } from 'zod'
 import { powerSyncCollectionOptions } from '../src'
 import {
   conformanceKey,
@@ -56,9 +60,67 @@ import type {
   ProviderChange,
 } from '../../db-adapter-conformance/src'
 
+// Typed fields (FID-1) live in typed columns: SQLite stores a boolean as
+// INTEGER 0 or 1 and a Date as ISO-8601 TEXT, as PowerSync does by default.
 const SCHEMA = new Schema({
-  rows: new Table({ title: column.text, note: column.text }),
+  rows: new Table({
+    title: column.text,
+    note: column.text,
+    t_string: column.text,
+    t_integer: column.integer,
+    t_float: column.real,
+    t_boolean: column.integer,
+    t_date: column.text,
+  }),
 })
+
+/** The kinds PowerSync's typed columns hold; bigint, -0, and JSON do not fit. */
+const FIELD_KINDS = [`string`, `integer`, `float`, `boolean`, `date`] as const
+
+/**
+ * The user schemas an app writes for this table: `deserializationSchema`
+ * turns SQLite values into the Collection's types, and `schema` validates
+ * them. The adapter must apply them on the initial load and every change.
+ */
+const outputSchema = z.object({
+  id: z.string(),
+  title: z.string().nullable(),
+  note: z.string().nullable(),
+  t_string: z.string(),
+  t_integer: z.number(),
+  t_float: z.number(),
+  t_boolean: z.boolean(),
+  t_date: z.date(),
+})
+const deserializationSchema = z.object({
+  id: z.string(),
+  title: z.string().nullable(),
+  note: z.string().nullable(),
+  t_string: z.string(),
+  t_integer: z.number(),
+  t_float: z.number(),
+  t_boolean: z.number().transform((value) => value === 1),
+  t_date: z.string().transform((value) => new Date(value)),
+})
+
+/** A conformance row as the SQL columns the provider writes. */
+function sqlColumns(row: ConformanceRow): Array<string | number | null> {
+  const sql = toSqlRow(row)
+  const typed = row.typed ?? {}
+  return [
+    String(sql.id),
+    sql.title,
+    sql.note,
+    typed.string as string,
+    typed.integer as number,
+    typed.float as number,
+    typed.boolean === true ? 1 : 0,
+    (typed.date as Date).toISOString(),
+  ]
+}
+
+const insertRow = `INSERT INTO rows (id, title, note, t_string, t_integer, t_float, t_boolean, t_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+const updateRow = `UPDATE rows SET title = ?, note = ?, t_string = ?, t_integer = ?, t_float = ?, t_boolean = ?, t_date = ? WHERE id = ?`
 
 type Registration = {
   signal: AbortSignal | undefined
@@ -173,16 +235,16 @@ class PowerSyncProvider implements ControlledProvider {
 
   deliverSnapshot = async (rows: ReadonlyArray<ConformanceRow>) => {
     const pending = await this.takePendingLoad()
-    await this.database.writeTransaction(async (tx) => {
-      await tx.execute(`DELETE FROM rows`)
-      for (const row of rows) {
-        const sql = toSqlRow(row)
-        await tx.execute(
-          `INSERT INTO rows (id, title, note) VALUES (?, ?, ?)`,
-          [String(sql.id), sql.title, sql.note],
-        )
-      }
-    })
+    try {
+      await this.database.writeTransaction(async (tx) => {
+        await tx.execute(`DELETE FROM rows`)
+        for (const row of rows) await tx.execute(insertRow, sqlColumns(row))
+      })
+    } catch (error) {
+      // The database refused the rows: the load fails rather than wait.
+      pending.reject(error)
+      throw error
+    }
     this.rows = new Map(rows.map((row) => [row.id, row]))
     this.triggerTarget = this.triggersCreated + 1
     pending.resolve()
@@ -197,17 +259,11 @@ class PowerSyncProvider implements ControlledProvider {
     await this.database.writeTransaction(async (tx) => {
       for (const change of changes) {
         if (change.type === `upsert`) {
-          const sql = toSqlRow(change.row)
+          const [id, ...columns] = sqlColumns(change.row)
           if (this.rows.has(change.row.id)) {
-            await tx.execute(
-              `UPDATE rows SET title = ?, note = ? WHERE id = ?`,
-              [sql.title, sql.note, String(sql.id)],
-            )
+            await tx.execute(updateRow, [...columns, id!])
           } else {
-            await tx.execute(
-              `INSERT INTO rows (id, title, note) VALUES (?, ?, ?)`,
-              [String(sql.id), sql.title, sql.note],
-            )
+            await tx.execute(insertRow, [id!, ...columns])
           }
           this.rows.set(change.row.id, change.row)
         } else {
@@ -223,7 +279,10 @@ class PowerSyncProvider implements ControlledProvider {
       before.size !== this.rows.size ||
       [...this.rows].some(([id, row]) => {
         const held = before.get(id)
-        return held?.title !== row.title || held.note !== row.note
+        return (
+          held === undefined ||
+          JSON.stringify(sqlColumns(held)) !== JSON.stringify(sqlColumns(row))
+        )
       })
     if (registration && changed) this.drainTarget = registration.drained + 1
   }
@@ -275,10 +334,28 @@ class PowerSyncProvider implements ControlledProvider {
   }
 }
 
-type PowerSyncRow = {
-  id: string
-  title?: string | null
-  note?: string | null
+type PowerSyncRow = z.infer<typeof outputSchema>
+
+/** A Collection row as a conformance row: typed columns become `typed`. */
+function conformanceRow({
+  t_string,
+  t_integer,
+  t_float,
+  t_boolean,
+  t_date,
+  ...row
+}: PowerSyncRow): ConformanceRow {
+  return fromSqlRow({
+    ...row,
+    id: conformanceKey(row.id),
+    typed: {
+      string: t_string,
+      integer: t_integer,
+      float: t_float,
+      boolean: t_boolean,
+      date: t_date,
+    },
+  })
 }
 
 export function powerSyncConformanceDriver(): EagerLiveSourceDriver {
@@ -286,6 +363,14 @@ export function powerSyncConformanceDriver(): EagerLiveSourceDriver {
     adapter: `@tanstack/powersync-db-collection (eager)`,
     capabilities: new Set(),
     changeCommits: `per-batch`,
+    fieldKinds: FIELD_KINDS,
+    // PowerSync's storage keeps a number at 15 significant digits: through
+    // its table views, 9007199254740991 reads back as 9007199254740990 and
+    // 0.30000000000000004 as 0.3, and Number.MAX_VALUE is rejected
+    // ("powersync_diff: number out of range"). A platform limit, not the
+    // adapter's: the Collection shows what the database stored.
+    excludesValue: (_kind, value) =>
+      typeof value === `number` && Number(value.toPrecision(15)) !== value,
     // PowerSync reports a failed start through its logger (law set
     // capability `logger`).
     declaredDiagnostic: (_level, args) =>
@@ -296,13 +381,15 @@ export function powerSyncConformanceDriver(): EagerLiveSourceDriver {
         powerSyncCollectionOptions({
           database: provider.database,
           table: SCHEMA.props.rows,
+          schema: outputSchema,
+          deserializationSchema,
+          onDeserializationError: () => {},
           onLoad: provider.load,
         }),
       )
       return {
         collection: observedView(collection, {
-          row: (row: PowerSyncRow) =>
-            fromSqlRow({ ...row, id: conformanceKey(row.id) }),
+          row: conformanceRow,
           key: conformanceKey,
         }),
         provider,

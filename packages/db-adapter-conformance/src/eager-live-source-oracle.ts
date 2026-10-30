@@ -33,7 +33,9 @@
  *   each row's `value` strictly equals the delivered value, on the initial
  *   load and on a live change: same type and prototype, `Object.is` for
  *   numbers, Dates by time, and arrays and plain objects element by element
- *   with no extra own keys. The law set parameterizes FID-1 by each
+ *   with no extra own keys. With declared `fieldKinds`, each row's `typed`
+ *   record holds one field per kind, as typed columns do, and each field
+ *   must round-trip the same way on both paths. The law set parameterizes FID-1 by each
  *   adapter's `valueDomain`; a driver declares the kinds of it this oracle
  *   generates.
  * - **PUB-7** (capability `complete-snapshot`). A later complete delivery
@@ -124,6 +126,11 @@ export interface ConformanceRow {
   readonly note?: string
   /** A value of a declared kind (FID-1); present only with `valueKinds`. */
   readonly value?: unknown
+  /**
+   * One field per declared `fieldKinds` kind, each holding a value of that
+   * kind, as a typed column does (FID-1); present only with `fieldKinds`.
+   */
+  readonly typed?: Readonly<Partial<Record<ValueKind, unknown>>>
 }
 
 /**
@@ -267,6 +274,19 @@ export interface EagerLiveSourceDriver {
    */
   readonly valueKinds?: ReadonlyArray<ValueKind>
   /**
+   * Kinds the backend stores in typed columns (FID-1). Rows then carry
+   * `typed`, one field per kind; the driver stores each in the backend's form
+   * for its column, and the Collection must show it decoded.
+   */
+  readonly fieldKinds?: ReadonlyArray<ValueKind>
+  /**
+   * Generated values the backend itself cannot store as given, such as a
+   * number its storage rounds: a platform limit, not adapter behavior. The
+   * grammar avoids them. Every use needs a coverage-map entry naming the
+   * limit and its evidence.
+   */
+  readonly excludesValue?: (kind: ValueKind, value: unknown) => boolean
+  /**
    * The law set's `duplicateInsert` policy for an insert of a key the run
    * holds; required with `duplicate-key-delivery`.
    */
@@ -397,41 +417,73 @@ const valueExamples: Record<ValueKind, ReadonlyArray<() => unknown>> = {
   ],
 }
 
-function valueArb(kinds: ReadonlyArray<ValueKind>): fc.Arbitrary<unknown> {
+/** A value the driver's backend cannot store as given; see `excludesValue`. */
+type ValueExclusion = (kind: ValueKind, value: unknown) => boolean
+
+function valueArb(
+  kinds: ReadonlyArray<ValueKind>,
+  excludes: ValueExclusion = () => false,
+): fc.Arbitrary<unknown> {
   return fc.oneof(
-    ...kinds.map((kind) =>
-      fc
-        .integer({ min: 0, max: valueExamples[kind].length - 1 })
-        .map((index) => valueExamples[kind][index]!()),
-    ),
+    ...kinds.map((kind) => {
+      const examples = valueExamples[kind].filter(
+        (example) => !excludes(kind, example()),
+      )
+      if (examples.length === 0) {
+        throw new Error(`every ${kind} example is excluded`)
+      }
+      return fc
+        .integer({ min: 0, max: examples.length - 1 })
+        .map((index) => examples[index]!())
+    }),
   )
 }
 
-function rowArb(kinds: ReadonlyArray<ValueKind>): fc.Arbitrary<ConformanceRow> {
+function rowArb(
+  kinds: ReadonlyArray<ValueKind>,
+  fieldKinds: ReadonlyArray<ValueKind> = [],
+  excludes?: ValueExclusion,
+): fc.Arbitrary<ConformanceRow> {
   const fields = {
     id: fc.integer({ min: 1, max: 5 }),
     title: fc.constantFrom(`a`, `b`, `c`),
     note: fc.constantFrom(`x`, `y`),
+    ...(kinds.length > 0 ? { value: valueArb(kinds, excludes) } : {}),
+    ...(fieldKinds.length > 0
+      ? {
+          typed: fc.record(
+            Object.fromEntries(
+              fieldKinds.map((kind) => [kind, valueArb([kind], excludes)]),
+            ) as Record<ValueKind, fc.Arbitrary<unknown>>,
+          ),
+        }
+      : {}),
   }
-  if (kinds.length === 0) {
-    return fc.record(fields, { requiredKeys: [`id`, `title`] })
-  }
-  return fc.record(
-    { ...fields, value: valueArb(kinds) },
-    { requiredKeys: [`id`, `title`, `value`] },
-  )
+  return fc.record(fields, {
+    requiredKeys: [
+      `id`,
+      `title`,
+      ...(kinds.length > 0 ? [`value` as const] : []),
+      ...(fieldKinds.length > 0 ? [`typed` as const] : []),
+    ],
+  }) as fc.Arbitrary<ConformanceRow>
 }
 
 function changeArb(
   kinds: ReadonlyArray<ValueKind>,
+  fieldKinds: ReadonlyArray<ValueKind> = [],
+  excludes?: ValueExclusion,
 ): fc.Arbitrary<HistoryChange> {
   const changes: Array<fc.Arbitrary<HistoryChange>> = [
-    rowArb(kinds).map((row) => ({ type: `upsert` as const, row })),
+    rowArb(kinds, fieldKinds, excludes).map((row) => ({
+      type: `upsert` as const,
+      row,
+    })),
     fc
       .integer({ min: 1, max: 5 })
       .map((id) => ({ type: `delete` as const, id })),
   ]
-  if (kinds.length > 0) {
+  if (kinds.length > 0 || fieldKinds.length > 0) {
     changes.push(
       fc
         .integer({ min: 1, max: 5 })
@@ -444,7 +496,7 @@ function changeArb(
 /** What the grammar needs from a driver: its capabilities and value kinds. */
 export type GrammarDomain = Pick<
   EagerLiveSourceDriver,
-  `capabilities` | `valueKinds`
+  `capabilities` | `valueKinds` | `fieldKinds` | `excludesValue`
 >
 
 /** Generates histories whose steps use only the driver's declarations. */
@@ -453,6 +505,7 @@ export function eagerLiveSourceHistoryArb(
 ): fc.Arbitrary<EagerLiveSourceHistory> {
   const { capabilities } = domain
   const kinds = domain.valueKinds ?? []
+  const fieldKinds = domain.fieldKinds ?? []
   const steps: Array<{
     weight: number
     arbitrary: fc.Arbitrary<EagerLiveSourceStep>
@@ -461,10 +514,13 @@ export function eagerLiveSourceHistoryArb(
       weight: 4,
       arbitrary: fc
         .record({
-          rows: fc.uniqueArray(rowArb(kinds), {
-            selector: (row) => row.id,
-            maxLength: 4,
-          }),
+          rows: fc.uniqueArray(
+            rowArb(kinds, fieldKinds, domain.excludesValue),
+            {
+              selector: (row) => row.id,
+              maxLength: 4,
+            },
+          ),
           seen: fc.integer({ min: 0, max: 3 }),
         })
         .map(({ rows, seen }) =>
@@ -476,7 +532,9 @@ export function eagerLiveSourceHistoryArb(
     {
       weight: 6,
       arbitrary: fc
-        .array(changeArb(kinds), { maxLength: 3 })
+        .array(changeArb(kinds, fieldKinds, domain.excludesValue), {
+          maxLength: 3,
+        })
         .map((changes) => ({ kind: `changes` as const, changes })),
     },
     { weight: 2, arbitrary: fc.constant({ kind: `fail` as const }) },
@@ -487,11 +545,14 @@ export function eagerLiveSourceHistoryArb(
       weight: 1,
       arbitrary: fc
         .record({
-          rows: fc.uniqueArray(rowArb(kinds), {
-            selector: (row) => row.id,
-            minLength: 1,
-            maxLength: 3,
-          }),
+          rows: fc.uniqueArray(
+            rowArb(kinds, fieldKinds, domain.excludesValue),
+            {
+              selector: (row) => row.id,
+              minLength: 1,
+              maxLength: 3,
+            },
+          ),
           duplicate: fc.nat(2),
         })
         .map(({ rows, duplicate }) => ({
@@ -544,7 +605,10 @@ export function eagerLiveSourceHistoryArb(
   // outstanding. Without it, two buffered batches that touch one key before
   // the read point are too rare for PUB-5 to be checked.
   const startup = fc
-    .array(changeArb(kinds), { minLength: 1, maxLength: 3 })
+    .array(changeArb(kinds, fieldKinds, domain.excludesValue), {
+      minLength: 1,
+      maxLength: 3,
+    })
     .map((changes) => ({ kind: `changes` as const, changes }))
   return fc
     .tuple(fc.array(startup, { maxLength: 3 }), history)
@@ -691,14 +755,18 @@ function rowValue(row: RowFields): string {
   const head = Object.hasOwn(row, `note`)
     ? `${row.title}/${String(row.note)}`
     : row.title
-  return Object.hasOwn(row, `value`)
-    ? `${head}#${describeValue(row.value)}`
-    : head
+  const value = Object.hasOwn(row, `value`)
+    ? `#${describeValue(row.value)}`
+    : ``
+  const typed = Object.hasOwn(row, `typed`)
+    ? `$${describeValue(row.typed)}`
+    : ``
+  return `${head}${value}${typed}`
 }
 
 /** Title and note, without the value. */
 function rowHead(value: string): string {
-  const mark = value.indexOf(`#`)
+  const mark = value.search(/[#$]/)
   return mark === -1 ? value : value.slice(0, mark)
 }
 
@@ -1258,7 +1326,9 @@ export const eagerLiveSourceReachStates = [
  * Per value kind, a value delivered on the initial load and one delivered by
  * a live change: a decoder can differ between the two paths.
  */
-export type ValueReachState = `value:${ValueKind}:${`load` | `change`}`
+export type ValueReachState =
+  | `value:${ValueKind}:${`load` | `change`}`
+  | `field:${ValueKind}:${`load` | `change`}`
 
 export type EagerLiveSourceReachState =
   | (typeof eagerLiveSourceReachStates)[number]
@@ -1305,12 +1375,18 @@ export function reachStatesFor(
       `value:${kind}:change`,
     ],
   )
+  const fields = (domain.fieldKinds ?? []).flatMap(
+    (kind): Array<ValueReachState> => [
+      `field:${kind}:load`,
+      `field:${kind}:change`,
+    ],
+  )
   const zeros: Array<EagerLiveSourceReachState> = domain.valueKinds?.includes(
     `negative-zero`,
   )
     ? [`zero-sign-flipped`]
     : []
-  return [...reachable, ...values, ...zeros]
+  return [...reachable, ...values, ...fields, ...zeros]
 }
 
 /** JSON for a message; a bigint shows as `<digits>n`, `-0` as `-0`. */
@@ -1741,6 +1817,9 @@ export async function checkEagerLiveSourceHistory(
             if (Object.hasOwn(row, `value`)) {
               reach(`value:${kindOf(row.value)}:load`)
             }
+            for (const kind of Object.keys(row.typed ?? {})) {
+              reach(`field:${kind as ValueKind}:load`)
+            }
           }
           reach(wasReady ? `replacing-snapshot` : `first-ready`)
           if (done.missed > 0) reach(`read-missed-change`)
@@ -1759,6 +1838,11 @@ export async function checkEagerLiveSourceHistory(
               Object.hasOwn(change.row, `value`)
             ) {
               reach(`value:${kindOf(change.row.value)}:change`)
+            }
+            if (change.type === `upsert`) {
+              for (const kind of Object.keys(change.row.typed ?? {})) {
+                reach(`field:${kind as ValueKind}:change`)
+              }
             }
           }
           reach(done.beforeReady ? `change-before-ready` : `change-batch`)

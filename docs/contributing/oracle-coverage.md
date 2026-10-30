@@ -6037,4 +6037,11 @@ database-side propagation step) is GREEN after a fix: a failed first load now
 releases the run's change watcher (LIFE-10). Its startup failures in
 on-demand mode, cleanup waiting on an unsettled `onLoad`, and post-ready
 change-handler errors are logged only; they belong to the on-demand and
-lifecycle families, which are not built.
+lifecycle families, which are not built. PowerSync also runs typed fields (string, integer, float,
+boolean as INTEGER 0/1, Date as ISO TEXT) through user deserialization and
+output schemas. Excluded by `excludesValue` (platform limit, not adapter
+behavior): numbers PowerSync's storage does not keep at full precision. Its
+table views keep 15 significant digits (9007199254740991 reads back as
+9007199254740990, 0.30000000000000004 as 0.3) and reject Number.MAX_VALUE
+(`powersync_diff: number out of range`); owner: the PowerSync driver;
+evidence: a direct write and read through `@powersync/node` 0.20.0.
