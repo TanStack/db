@@ -108,6 +108,37 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 | `schema` | `Schema` (optional) | Optional schema for validation |
 | `startSync` | `boolean` (optional) | Whether to start the live query's sync run immediately. Defaults to `false`. A live query reads local memory: until it has a subscriber or a preload, it shows only rows its source collections already hold and starts no network work for them. |
 | `gcTime` | `number` (optional) | Garbage collection time in milliseconds. Defaults to `5000` (5 seconds). |
+| `autoIndex` | `'off' \| 'eager'` (optional) | Automatic indexing for this live-query collection's output. Defaults to `'off'`. Eager indexing requires `defaultIndexType`. |
+| `defaultIndexType` | `IndexConstructor` (optional) | Index implementation used for automatic indexes and `createIndex` calls that omit `indexType`, such as `BasicIndex` or `BTreeIndex`. |
+
+### Indexing Intermediate Results
+
+When another query reads a live-query collection, indexes on that collection
+can speed up downstream filters and ordered pages. Set the indexing options on
+the collection that holds the intermediate results:
+
+```ts
+import { BasicIndex, createLiveQueryCollection } from '@tanstack/db'
+
+const cachedUsers = createLiveQueryCollection({
+  query: (q) => q.from({ user: usersCollection })
+    .select(({ user }) => ({ id: user.id, name: user.name })),
+  autoIndex: 'eager',
+  defaultIndexType: BasicIndex,
+})
+
+const firstUsers = createLiveQueryCollection((q) =>
+  q.from({ user: cachedUsers })
+    .orderBy(({ user }) => user.name)
+    .limit(20)
+)
+```
+
+The downstream query creates a matching index on `cachedUsers` when needed.
+These options also work inside `liveQueryCollectionOptions` and framework hook
+config objects. Each live-query collection controls its own indexing policy;
+the options do not change its source collections. Setting `defaultIndexType`
+alone leaves automatic indexing off and supplies the type for manual indexes.
 
 ### Convenience Function
 

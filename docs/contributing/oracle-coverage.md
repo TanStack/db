@@ -1938,6 +1938,27 @@ ineligible index. The first-matching-index mutant fails at that reader check.
 Provider paging from an incomplete on-demand source and later updates remain
 outside this witness.
 
+The same owner now exhausts output-indexing configurations through
+`createLiveQueryCollection` and `createCollection(liveQueryCollectionOptions)`:
+omitted/off/eager modes, omitted/BasicIndex/BTreeIndex constructors, and eager
+admission without a constructor. It compares output config, constructor use,
+optimized snapshots, and independent sorted windows over two projected fields
+with both null placements, repeated consumers, and one source update. Each
+configuration requires declared reach; source settings remain unchanged.
+The [hook indexing handoff owner](https://github.com/TanStack/db/blob/main/packages/db/tests/conformance/indexing-config-oracle.ts)
+receives the nine configurations through the real React, Preact, Vue, Solid,
+Svelte, and Angular drivers after their settled flush cuts. It judges output
+config and downstream automatic/manual index creation. It does not judge
+changed indexing options after mount or rendering before flush. Its
+[React Suspense receiver](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-indexing-config-oracle.test.tsx)
+exhausts two initial bindings across config pairs, derived/same/different keys,
+unscoped/client caches, and distinct same-name constructor references. It checks
+both admissions, each admitted output's settings, retained first settings, and
+compatible sharing. This protects local cache qualification without changing
+portable query identity or the first-options rule for a mounted binding. The
+[evidence record](oracle-reviews/2026-10-30-live-query-indexing.md) gives each
+receiving path's pre-repair RED, repaired GREEN, calibration, and finite bounds.
+
 The PR #2196 follow-up adds a direct `optimizedOnly` snapshot to the
 first-ineligible/second-eligible history. An eager-auto history starts with
 only an ineligible custom index and requires an eligible ordered reader after

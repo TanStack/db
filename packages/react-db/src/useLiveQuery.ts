@@ -26,6 +26,7 @@ import {
 } from './source-id-bindings'
 import type {
   Collection,
+  CollectionConfig,
   CollectionImpl,
   CollectionStatus,
   Context,
@@ -76,8 +77,13 @@ function getSourceQualifiedSuspenseKey(
     client,
     `useLiveSuspenseQuery`,
   ).map(getSourceObjectToken)
-  if (sourceIds.length === 0) return queryHash
-  return `${sourceIds.join(`,`)}:${queryHash}`
+  const { autoIndex, defaultIndexType } = (preparedValue ?? {}) as Pick<
+    CollectionConfig<object>,
+    `autoIndex` | `defaultIndexType`
+  >
+  // Output resource policy qualifies local sharing, not query identity.
+  const indexType = defaultIndexType ? getSourceObjectToken(defaultIndexType) : 0
+  return `${sourceIds.join(`,`)}:${autoIndex ?? `off`}:${indexType}:${queryHash}`
 }
 
 function getSuspenseCollections(
