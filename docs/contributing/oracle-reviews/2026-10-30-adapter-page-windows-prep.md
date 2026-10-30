@@ -469,7 +469,7 @@ changed-file lint, formatting, and whitespace checks pass. The root test
 command was not run. These checks preserve the existing bounded evidence;
 they do not extend its closure claim.
 
-The follow-up removes 217 net production lines from the published version;
+The follow-up removes 215 net production lines from the published version;
 the complete branch removes 82 net production lines relative to main.
 Shipped-byte measurements above, rather than these line counts, determine
 production weight.
@@ -488,3 +488,9 @@ production weight.
 | `reduction-svelte-windows.log` | `abd368f953a4d7a73fb9b4456f2c4beff5dcea8cc6c693c87dc53e477cd59227` |
 | `reduction-eslint-verified.log` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `reduction-changed-lint-verified.log` | `89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168` |
+
+The final full Angular suite passes 92 tests with one existing TODO.
+Its log SHA256 is `ad8d6187d3d88ad25d11ad9cf1c2321a55114b10902d99b52bdd72c3f7dd5fb5`.
+
+A post-commit size measurement confirms the same figures.
+`reduction-size-final.log` SHA256: `88277584aca7eae332dced945bf7f94d2001990eb11c6f984c4384242058dde0`.
