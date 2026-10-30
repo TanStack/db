@@ -6304,3 +6304,37 @@ useful extension: the hash identity oracle owns those semantic distinctions,
 but its helper-level evidence does not by itself exercise distinct storage.
 The separate Index structural-collision obligation above remains open.
 See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
+
+## Loading sibling replay and final catch-up reach (2026-10-30)
+
+The primary load-subset replay owner now constructs 48 finite histories where
+an include with no demand at truncate starts under its sibling's loading replay.
+It measures held failure (44 histories), failure retirement (33), and later own
+coverage (12), through the existing public retention and recovery comparisons.
+The original guard fails the quiet retention check. Subscription-scoped verdict
+and successful-coverage calibrations remain in that primary owner.
+
+The browser multi-tab Electric owner preserves its stop prefix and arbitrary
+tail and constructs an abandoned reservation immediately before final catch-up.
+This removes dependence on sampling that boundary without changing its model,
+80-run budgets, comparisons or reach minima.
+
+See [the versioned experiment record](oracle-reviews/2026-10-30-release-replay-retention.md)
+for authority, RED, reach, mutant, grammar controls, historical gate limits and
+receiving-path limits. This is core Collection publication evidence and a Node
+SQLite/coordinator receiving witness with controlled Electric streams. It does
+not claim Effect, provider, framework, deeper include, or browser-process closure.
+
+
+### Subscription-scoped request-error assertion (2026-10-30)
+
+The primary load-subset replay owner now retains subscription identity in its
+later-request and successful-coverage account. A sibling requesting overlapping
+source keys cannot exempt the failed demand's public health error. Its existing
+96-history sibling-success grammar measures the actual owed-error assertion in
+four histories, alongside four successful-sibling-coverage histories. A targeted
+omitted-error observation passes the former source-wide account and fails the
+scoped health comparison. All existing comparisons, histories, budgets and
+reach minima remain. The controlled core, one-level include and peer limits
+remain those of this owner; no provider or framework claim follows. See the
+[versioned repair record](oracle-reviews/2026-10-30-release-replay-retention.md#subscription-scoped-request-error-checker-repair).
