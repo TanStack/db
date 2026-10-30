@@ -5,6 +5,8 @@
  * This finite receiver exhausts 231 root histories, 231 wrapped child histories
  * and 165 direct child histories. Another 198 inline-value/rejection histories
  * and three direct-source controls exercise the neighboring boundaries.
+ * Another 132 histories use the exported compiler with exact shared QueryIR,
+ * both compilation orders and shared/separate caches at initial graph drain.
  * It invokes real query callbacks and compares their copied input and ordinary derived output at
  * initial readiness, held mutation, settlement and later remote use. The
  * materializer receiver uses the same judgment, not a competing child model.
@@ -31,6 +33,7 @@ import {
   expectedSourceVirtualFields,
   metadataCallbackHistories,
   metadataCallbackReceiverHistories,
+  metadataCompilerCacheHistories,
   metadataInlineHistories,
   metadataInputViolations,
   metadataOutputViolations,
@@ -39,6 +42,7 @@ import {
   captureMetadataInput,
   runInlineMetadataCallbackHistory,
   runMetadataCallbackHistory,
+  runMetadataCompilerCacheHistory,
 } from './virtual-row-fields-input-driver.js'
 import type { MetadataSourceFact } from './virtual-row-fields-input-oracle.js'
 
@@ -64,6 +68,28 @@ const inlineCases = metadataInlineHistories.map((history) => ({
     `field:`,
   ),
 }))
+const compilerCases = metadataCompilerCacheHistories.map((history) => ({
+  ...history,
+  label: `${history.order}/${history.cache}/${key(history)}`.replaceAll(
+    `$`,
+    `field:`,
+  ),
+}))
+const compilerObservations = [
+  `callback`,
+  `derived-output`,
+  `authored-output`,
+] as const
+const compilerReach = createOracleReach(
+  `compiler cache metadata`,
+  metadataCompilerCacheHistories.flatMap((history) =>
+    compilerObservations.map(
+      (observation) =>
+        `${history.order}/${history.cache}/${key(history)}/${observation}`,
+    ),
+  ),
+  { replaying: false },
+)
 const callbackReach = createOracleReach(
   `functional metadata callback`,
   [
@@ -91,13 +117,16 @@ const inlineReach = createOracleReach(
 )
 let callbackEntered = false
 let inlineEntered = false
+let compilerEntered = false
 afterAll(() => {
   if (callbackEntered) callbackReach.assertReached()
   if (inlineEntered) inlineReach.assertReached()
+  if (compilerEntered) compilerReach.assertReached()
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
     for (const [name, reach] of [
       [`callback`, callbackReach],
       [`inline`, inlineReach],
+      [`compiler`, compilerReach],
     ] as const) {
       const counts = [...reach.counts().values()]
       console.info(`${name} metadata reach`, {
@@ -115,6 +144,7 @@ declareOracle({
     metadataCallbackHistories,
     metadataCallbackReceiverHistories,
     metadataInlineHistories,
+    metadataCompilerCacheHistories,
   ],
 })
 
@@ -169,6 +199,30 @@ test.each(inlineCases)(
           `${history.path}/${history.form}/${key(history)}/${cut}`,
         ),
       history.path,
+    )
+    expect(
+      report.violations,
+      JSON.stringify(report.violations[0]),
+    ).toStrictEqual([])
+  },
+)
+
+// The initial compiler graph-drain cut is distinct from the Collection
+// lifecycle cuts above. Both compilation orders must retain authored output
+// while source/projection metadata is judged before downstream JavaScript.
+test.each(compilerCases)(
+  `preserves metadata across compiler cache modes: $label`,
+  async (history) => {
+    compilerEntered = true
+    compilerReach.beginHistory()
+    const report = await runMetadataCompilerCacheHistory(
+      history,
+      history.order,
+      history.cache,
+      (observation) =>
+        compilerReach.reach(
+          `${history.order}/${history.cache}/${key(history)}/${observation}`,
+        ),
     )
     expect(
       report.violations,

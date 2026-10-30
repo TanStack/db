@@ -816,17 +816,32 @@ callback and 594 inline/rejection
 states reach once; 19 controls calibrate the same judgments. Partial receiving
 selections still owe the selected campaign's full reach matrix.
 
+Another 132 histories use the exported `compileQuery` receiver with the exact
+same QueryIR and D2 input streams across two compilations. Both compilation
+orders cross shared/separate caches and the 33 source/projection descriptions.
+At initial graph drain, 396 states compare every callback capture, complete
+derived output and authored selected output. Actual source Collection rows
+supply genuine metadata. This receiver establishes the low-level compiler
+boundary, not another inline include or optimistic lifecycle witness.
+
 The restored owner reproduced 203 correlated-child REDs on unchanged main.
 Adding the direct receiving paths before production repair raised that to 348
 REDs with 398 passes. The expanded 845-test owner also rejects the first repair in 58 inline QueryRef
 histories before the corrected production edit. The compiler now requests
 source/projection metadata at FROM and joined-source boundaries when a functional
 callback consumes the rows. Inline-only QueryRefs preserve authored shape.
-All 847 owner tests pass, including two controls that reject extra named own
+All 979 owner tests pass, including two controls that reject extra named own
 fields on inline arrays. The recorder preserves those fields without changing
 the model or either judgment. A QueryRef-only mutant leaves 58 joined-source
 violations; sanitizing every inline child breaks 116 authored-value histories.
 Restoring unconditional source sanitization breaks 58 inline QueryRef histories.
+The extended compiler receiver reproduced 26 shared-comparison failures on
+unchanged `9bd623cd5`, with the original 847 tests still passing and all 3,510
+states reached. The cache now keeps results separate by publication mode.
+The original raw-query-only cache is the rejected wrong design: authored-first
+leaks reserved fields to callbacks, while callback-first loses authored output.
+All eight existing compiler-cache controls and the neighboring metadata and
+include suites also pass after repair.
 The [runtime repair record](oracle-reviews/callback-metadata.md) retains the
 commands, distinguishing traces, source fingerprints and limits. Historical
 instrument acceptance remains in

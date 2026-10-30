@@ -88,6 +88,20 @@ export const metadataInlineHistories = metadataInputDescriptions.flatMap(
       })),
     ),
 )
+// The exported compiler also accepts an exact QueryIR and an optional cache.
+// Reusing one selected query across two roots must preserve both its authored
+// output and the source/projection judgment before a downstream callback.
+// Separate caches distinguish that promise from an ordinary projection defect.
+export const metadataCompilerCacheHistories = metadataInputDescriptions.flatMap(
+  (description) =>
+    ([`authored-first`, `callback-first`] as const).flatMap((order) =>
+      ([`shared`, `separate`] as const).map((cache) => ({
+        ...description,
+        order,
+        cache,
+      })),
+    ),
+)
 export type MetadataInputSnapshot = {
   present: boolean
   ordinary: Record<string, unknown>
@@ -266,5 +280,6 @@ declareOracle({
     metadataCallbackHistories,
     metadataCallbackReceiverHistories,
     metadataInlineHistories,
+    metadataCompilerCacheHistories,
   ],
 })

@@ -30,12 +30,14 @@ Five paths also run directly as the correlated child: 165 histories. Flat union
 children have no named source reference for include correlation, so their
 supported forms use the wrapper or union-query-ref path. They remain covered.
 Three direct-source controls, 132 inline array/materialized histories, 66 compiled
-Collection rejections and 19 checker/recorder controls complete 847 tests. Inline
+Collection rejections and 19 checker/recorder controls form 847 tests. Inline
 values cross direct and QueryRef paths. The QueryRef path correlates each parent
 with one typed-key child, so it preserves authored child fields without a child
-functional callback.
+functional callback. A later low-level compiler receiver adds 132 histories,
+bringing the owner to 979 tests. Its separate initial graph-drain cut is
+described below.
 
-Every receiving history observes initial readiness, a held optimistic update,
+Each Collection receiving history observes initial readiness, a held optimistic update,
 settlement without confirmation, and a later remote update. Source rows have
 numeric `1` and string `"1"` keys and distinct labels. Each callback copies its
 input immediately, then returns that capture as ordinary output. The comparison
@@ -101,8 +103,9 @@ The corrected repair requests source/projection metadata mode when the local
 query has a functional selection, or when the enclosing query already requires
 Collection publication mode. It passes that mode into FROM and joined-source
 compilation. An inline-only QueryRef retains its authored selected shape.
-Existing mode parameters and propagation remain. The production diff changes
-two call sites. It adds no metadata registry, state, traversal or public API.
+Existing mode parameters and propagation remain. That repair changes two
+call sites. The later cache repair below separates their compiled results by
+mode. Neither adds a metadata registry, traversal or public API.
 
 The pre-review head passed all 845 tests. Every one of the 2,520 callback and 594 inline/rejection
 states reaches once. Seven neighboring suites pass 1,883 tests: root metadata,
@@ -243,39 +246,102 @@ The full local snippet scan reports 12 failures in unchanged examples and one
 stale baseline entry under the reused dependency tree. The earlier CI scan
 reported only this record's example as a new failure. No dependency install or
 baseline exclusion was used to mask that local environment difference. Full
-final-head snippet verification remains for CI; the changed example passes its
-focused local check.
+final-head snippet verification then remained for CI. CI on `9bd623cd5`
+subsequently passed its full scan: 805 examples, zero new failures, with the
+existing baseline unchanged.
+
+## Shared compiler-cache receiving boundary
+
+CodeRabbit review `5715750975` on `9bd623cd5` identified a missing cache premise.
+The exported `compileQuery` accepts raw QueryIR and an optional cache. Existing
+`compiler/subquery-caching.test.ts` controls reuse that cache across calls on
+one graph. Cache reuse must preserve the accepted callback-input law and the
+authored selected output that separate compilations produce.
+
+Reusing a QueryBuilder alone did not reach this premise. Ten Effect/Collection
+builder probes and two single-root raw-IR probes passed; placement clones or
+optimizer lineage gave them distinct effective raw queries. Two compilations
+on the same graph/input streams and exact selected QueryIR do reach it:
+
+| Compilation order with one cache | Wrong public observation | Required observation |
+| --- | --- | --- |
+| Authored selected root, then downstream callback root | The callback reads `$key: "spoof-$key"` from a structured projection | Reserved fields are absent before the callback |
+| Downstream callback root, then authored selected root | The selected output loses authored `$key` | The selected output retains `"spoof-$key"` |
+
+Separate-cache neighbors pass both orders. The defect was reproduced again
+without compiler instrumentation. Earlier scratch shape/literal fixture
+mistakes and a diagnostic setup error supply no defect evidence.
+
+Before production edits, the primary owner added 132 histories: the existing
+33 source/projection/collision descriptions, both compilation orders, and
+shared/separate caches. Actual public source rows retain numeric `1` and string
+`"1"` peers. The existing independent model judges immutable callback captures,
+ordinary derived output and raw authored selected output. Signed-bag recording
+retains duplicate contributions and retractions. No expected answer comes from
+the separate-cache implementation. All three comparisons run before failure.
+
+Unchanged `9bd623cd5` production gives 953 passes and 26
+`MetadataCallbackOracleFailure` comparisons out of 979 tests. All original
+847 tests pass. All 396 new compiler states and all 3,114 prior states reach
+once. The driver checks initial graph drain only: its authored-output judgment
+is a low-level compiler boundary, not a new real inline include or optimistic
+lifecycle witness. Two independent source reviews found no additional defect
+in the grammar, recorder, comparisons or proposed cache key.
+
+The repair retains a result per publication mode under each raw QueryIR key.
+Uncorrelated-only admission and same-mode reuse remain. The graph's shared
+value-identity scope remains the same. All 979 owner tests pass afterward,
+with every one of the 3,510 reach states reached. The original cache is the
+hostile wrong design rejected by the 26 REDs. It can be reconstructed by
+restoring `QueryCache = WeakMap<QueryIR, CompilationResult>`, lookup with
+`cache.get(rawQuery)`, and storage with `cache.set(rawQuery, compilationResult)`.
+No model rule or comparison changes between RED and GREEN.
+
+Normal package configuration passes all 3,170 targeted tests across ten files,
+including this owner, the eight compiler-cache controls, the Effect metadata
+owner and the seven neighboring suites named above. Focused no-emit TypeScript,
+ESLint, formatting and whitespace checks pass. A temporary RED configuration
+only redirects Vite's cache around the reused dependency symlink permissions.
+Its jsdom setup, source aliases and shared comparisons are unchanged. The
+package-configuration setup failure ran no tests and is excluded.
+
+This closes the recorded cache-mode violation within the 132 histories and
+their initial cut. Arbitrary raw-IR shapes, independent graphs, later input
+updates and construction failure need separate evidence. The historical
+initial receiving-inventory miss remains documented above.
 
 ## Rubric accounting and limits
 
 ORC-001–005: accepted authority, independent source facts, literate layers,
 finite legal grammar, real callback captures and exact derived output cuts.
-Removing receiver, callback path, inline path, collision, pending boolean or checkpoint loses a
+Removing receiver, callback path, inline path, cache sharing/order, collision, pending boolean or checkpoint loses a
 named source/projection/inline distinction. Both populated union positions and
 both typed keys remain represented. Direct-source controls distinguish a
 blanket stripping rule. The rejected flat-union form bounds admission.
 
 ORC-006: 19 hostile observation/recorder controls, the three recorded production
-mutants and the independent FROM-only mutant.
+mutants, the independent FROM-only mutant and the original wrong cache.
 ORC-007: exhaustive finite enumeration, so random campaigns and seed replay do
-not apply. A valid unrelated `utils.1` seed/path run passes all 845 tests with
+not apply. At the pre-review head, a valid unrelated `utils.1` seed/path run passes all 845 tests with
 all reach intact. A calibration-only selection passes 17 controls without
 entering a receiver. Selecting only the three direct-source controls fails the
 missing-matrix reach assertion. An omitted replay property was a configuration
 error with zero tests, not product evidence. ORC-008–009:
 source facts distinguish coherent retractions; callback input is distinct from
 published row, with that abstraction stated beside the model. ORC-010: all-cut
-failure reports and failure-preserving cleanup. ORC-011: the concrete shared-cache
-hypothesis has six same-path probes; no remaining shared-model hypothesis was
-identified. ORC-012: this versioned record and source fingerprints below.
+failure reports and failure-preserving cleanup. ORC-011: builder probes missed
+the exact raw-query/cache identity premise. The low-level receiver now reaches
+that premise in both orders and rejects the wrong cache. ORC-012: this
+versioned record and source fingerprints below.
 ORC-013: single/all/no collisions, typed peers, source/new/inline forms and the
 three mutants distinguish plausible shortcut repairs. ORC-014: the declared
 boundary is core runtime compilation, with no real-provider/framework timing
-claim. ORC-015: every named callback and inline/rejection state reaches once.
+claim. ORC-015: every named callback, inline/rejection and compiler state reaches once.
 ORC-016: all histories and controls use the shared independent judgments.
 
 The runtime evidence is finite: flat inline children, at most two QueryRefs,
 one LEFT join, two typed-key peers, one held successful mutation, and four cuts.
+The separate low-level cache receiver uses one graph and initial graph drain.
 Arbitrary descriptors/prototypes, deeper recursion, same-key overlapping writes,
 other join kinds, truncate, framework/provider scheduling and construction-failure
 cleanup remain outside it. The deferred static metadata receivers and literal
@@ -299,7 +365,8 @@ original failures without temporary log files.
 
 | Source | SHA256 |
 | --- | --- |
-| `packages/db/src/query/compiler/index.ts` | `07c93e178ddf176af57f85b86479a3f2a762fd96b726f31755e7ed13eafc2fa3` |
-| `packages/db/tests/query/virtual-row-fields-input-oracle.ts` | `25f729a6444f7e35526a499aefd7c624acba06348d18f4c31b9d3c2f5d7259a6` |
-| `packages/db/tests/query/virtual-row-fields-input-driver.ts` | `c84cf4330e17590b3f9fc55bb449b489a3160e975966823f9ebb4fb4675f18ff` |
-| `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `948e84d4f3400ebf8b4e867252580a613dc98e3ebb7eef0811e95727f3624337` |
+| `packages/db/src/query/compiler/index.ts` | `a00931f51624d31b4ee749a741fdea30289344a63309b5e2b48b44ee00b913c2` |
+| `packages/db/src/query/compiler/types.ts` | `7a8244358fea67f64dac84215adcc079aba4188977b2eb628673632b15c40be6` |
+| `packages/db/tests/query/virtual-row-fields-input-oracle.ts` | `d0d526479dda63a01906bcb377675120386e02fe26720ebc7b2c3b7b6e57e658` |
+| `packages/db/tests/query/virtual-row-fields-input-driver.ts` | `b24f421e3f5126078d7103ba6ba6a9d7bdd90251c1b4b69ca55e57c020e10292` |
+| `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `22f075260e1ff8be769409a12b39ce51436c19936d47324d9f866260ab40cfcc` |

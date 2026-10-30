@@ -437,9 +437,12 @@ function compileQueryInternal(
   scopeValidated: boolean,
   publishCollectionRoot = false,
 ): CompilationResult {
-  // Check if the original raw query has already been compiled
+  // Publication modes have different selected-row metadata. Reuse a raw
+  // query's compilation only within the same mode.
   const cachedResult =
-    parentKeyStream === undefined ? cache.get(rawQuery) : undefined
+    parentKeyStream === undefined
+      ? cache.get(rawQuery)?.get(publishCollectionRoot)
+      : undefined
   if (cachedResult) {
     return cachedResult
   }
@@ -1329,7 +1332,7 @@ function compileQueryInternal(
     ) as ResultStream
   }
 
-  // Cache the result before returning (use original query as key)
+  // Cache the result by the original query and publication mode.
   const compilationResult: CompilationResult = {
     collectionId: mainCollectionId,
     pipeline: resultPipeline,
@@ -1339,7 +1342,12 @@ function compileQueryInternal(
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,
   }
-  if (parentKeyStream === undefined) cache.set(rawQuery, compilationResult)
+  if (parentKeyStream === undefined) {
+    getOrCreate(cache, rawQuery, () => new Map()).set(
+      publishCollectionRoot,
+      compilationResult,
+    )
+  }
 
   return compilationResult
 }

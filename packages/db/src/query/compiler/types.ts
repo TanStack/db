@@ -4,7 +4,7 @@ import type { CompilationResult } from './index.js'
 /**
  * Cache for compiled subqueries to avoid duplicate compilation
  */
-export type QueryCache = WeakMap<QueryIR, CompilationResult>
+export type QueryCache = WeakMap<QueryIR, Map<boolean, CompilationResult>>
 
 /**
  * Lineage from optimized queries back to their user-defined queries.

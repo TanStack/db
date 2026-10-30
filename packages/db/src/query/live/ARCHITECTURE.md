@@ -403,6 +403,10 @@ retain their separate inline shape. The runtime
 owner checks root, wrapped child and direct child callbacks at initial readiness,
 held mutation, settlement and remote next use. Its bounded repair evidence is in
 [the callback metadata record](../../../../../docs/contributing/oracle-reviews/callback-metadata.md).
+Reusing a compilation cache on one graph with the same input streams must retain
+the callback inputs and authored selected output that separate compilations
+produce. The exported `compileQuery` receiver checks both compilation orders
+at initial graph drain, separately from the Collection lifecycle receivers.
 Separate static receiving-type gaps remain in the
 [deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
 

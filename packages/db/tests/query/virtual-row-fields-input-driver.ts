@@ -6,16 +6,20 @@
  * may expose an absent joined side. Established output cuts require both rows.
  * No callback count, ordering, or fully matched startup snapshot is promised.
  */
-import { inspect } from 'node:util'
+import { inspect, isDeepStrictEqual } from 'node:util'
+import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { createCollection } from '../../src/collection/index.js'
 import {
   Query,
+  compileQuery,
   createLiveQueryCollection,
   eq,
   include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { getQueryIR } from '../../src/query/builder/index.js'
+import { QueryRef } from '../../src/query/ir.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import { virtualFieldNames } from './virtual-row-fields-support.js'
 import {
@@ -28,6 +32,8 @@ import {
 import type { Collection } from '../../src/collection/index.js'
 import type { QueryBuilder } from '../../src/query/builder/index.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
+import type { QueryCache } from '../../src/query/compiler/types.js'
+import type { QueryIR } from '../../src/query/ir.js'
 import type {
   MetadataCallbackPath,
   MetadataInputDescription,
@@ -687,5 +693,181 @@ export async function runInlineMetadataCallbackHistory(
     () => parents.cleanup(),
     () => children.cleanup(),
   ])
+  return report
+}
+
+/** The low-level compiler receives the exact same selected QueryIR twice on
+ * one D2 graph. Unlike builder placement, this public entry point need not
+ * clone that query. Each history crosses compilation order and cache sharing.
+ *
+ * Only the initial graph-drain cut is claimed here. Public source Collection
+ * rows supply genuine metadata; independent authored facts predict callback
+ * input and both outputs. The raw selected output uses the same authored-shape
+ * judgment as an inline value, without claiming an actual include lifecycle. */
+export async function runMetadataCompilerCacheHistory(
+  description: MetadataInputDescription,
+  order: `authored-first` | `callback-first`,
+  cache: `shared` | `separate`,
+  reached: (
+    observation: `callback` | `derived-output` | `authored-output`,
+  ) => void,
+): Promise<CallbackInputReport> {
+  const initial = freshRows()
+  const first = source(`callback-compiler-cache`, initial)
+  const facts: Array<MetadataSourceFact> = initial.map((row) => ({
+    row: { ...row },
+    sourceId: first.id,
+    pending: false,
+  }))
+  const report: CallbackInputReport = {
+    violations: [],
+    callbackCounts: { initial: 0, held: 0, settled: 0, 'remote-next-use': 0 },
+  }
+  await withOracleCleanup(async () => {
+    await first.preload()
+    const captures: Array<MetadataInputSnapshot> = []
+    const selected = getQueryIR(projectInput(first, `chosen`, description))
+    const consumed: QueryIR = {
+      from: new QueryRef(selected, `nested`),
+      fnSelect: ({ nested }) => {
+        const observed = captureMetadataInput(nested)
+        captures.push(observed)
+        return { id: (nested as MetadataInputRow).id, observed }
+      },
+    }
+    const graph = new D2()
+    const input = graph.newInput<[string | number, MetadataInputRow]>()
+    const sharedCache: QueryCache = new WeakMap()
+    const compile = (query: QueryIR) =>
+      compileQuery(
+        query,
+        { chosen: input },
+        { [first.id]: first },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {},
+        cache === `shared` ? sharedCache : new WeakMap(),
+      )
+    const [authored, callback] =
+      order === `authored-first`
+        ? [compile(selected), compile(consumed)]
+        : (() => {
+            const compiledCallback = compile(consumed)
+            return [compile(selected), compiledCallback]
+          })()
+    const authoredDeltas: Array<{ row: Output; weight: number }> = []
+    const derivedDeltas: Array<{ row: Output; weight: number }> = []
+    authored.pipeline.pipe(
+      output((message) => {
+        for (const [[, [value]], weight] of message.getInner())
+          authoredDeltas.push({
+            row: {
+              id: (value as MetadataInputRow).id,
+              observed: captureMetadataInput(value),
+            },
+            weight,
+          })
+      }),
+    )
+    callback.pipeline.pipe(
+      output((message) => {
+        for (const [[, [value]], weight] of message.getInner()) {
+          const row = value as Output
+          derivedDeltas.push({
+            row: {
+              id: row.id,
+              // Copy the selected ordinary capture at output delivery too.
+              observed: copyData(row.observed) as MetadataInputSnapshot,
+            },
+            weight,
+          })
+        }
+      }),
+    )
+    graph.finalize()
+    input.sendData(new MultiSet(first.toArray.map((row) => [[row.id, row], 1])))
+    graph.run()
+
+    // Independent signed-bag bookkeeping preserves duplicate contributions and
+    // retractions. It does not replace the source/projection judgment.
+    const accumulate = (
+      deltas: ReadonlyArray<{ row: Output; weight: number }>,
+    ) => {
+      const counts: Array<{ row: Output; weight: number }> = []
+      for (const delta of deltas) {
+        const existing = counts.find((entry) =>
+          isDeepStrictEqual(entry.row, delta.row),
+        )
+        if (existing) existing.weight += delta.weight
+        else counts.push({ ...delta })
+      }
+      const rows: Array<Output> = []
+      for (const entry of counts) {
+        if (!Number.isSafeInteger(entry.weight) || entry.weight < 0) {
+          report.violations.push({
+            cut: `initial`,
+            kind: `invalid compiled output multiplicity`,
+            actual: entry,
+            expected: `a nonnegative integer at graph drain`,
+          })
+          continue
+        }
+        for (let occurrence = 0; occurrence < entry.weight; occurrence++)
+          rows.push(entry.row)
+      }
+      return rows
+    }
+    const actualAuthored = accumulate(authoredDeltas)
+    const actualDerived = accumulate(derivedDeltas)
+    const expectedInput = facts.map((fact) =>
+      expectedMetadataInput(fact, description),
+    )
+    const expectedDerived = facts.map((fact, index) => ({
+      id: fact.row.id,
+      observed: expectedInput[index]!,
+    }))
+    const expectedAuthored = facts.map((fact) => ({
+      id: fact.row.id,
+      observed: expectedMetadataInput(fact, description, true),
+    }))
+    report.callbackCounts.initial = captures.length
+    if (!captures.length)
+      report.violations.push({
+        cut: `initial`,
+        kind: `compiler callback not entered`,
+        actual: captures,
+        expected: `one or more`,
+      })
+    for (const capture of captures)
+      for (const kind of metadataInputViolations(capture, expectedInput))
+        report.violations.push({
+          cut: `initial`,
+          kind,
+          actual: capture,
+          expected: expectedInput,
+        })
+    for (const [name, actual, expected] of [
+      [`derived`, actualDerived, expectedDerived],
+      [`authored`, actualAuthored, expectedAuthored],
+    ] as const)
+      for (const kind of metadataOutputViolations(actual, expected))
+        report.violations.push({
+          cut: `initial`,
+          kind: `${name}: ${kind}`,
+          actual,
+          expected,
+        })
+    // Reach records executed comparisons, including RED comparisons, after the
+    // real source and both compiled roots reach the named graph-drain cut.
+    if (first.isReady() && captures.length) reached(`callback`)
+    if (first.isReady() && actualDerived.length === facts.length)
+      reached(`derived-output`)
+    if (first.isReady() && actualAuthored.length === facts.length)
+      reached(`authored-output`)
+    if (report.violations.length)
+      throw new MetadataCallbackOracleFailure(report)
+  }, [() => first.cleanup()])
   return report
 }
