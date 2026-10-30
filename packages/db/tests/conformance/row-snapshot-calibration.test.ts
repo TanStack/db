@@ -75,6 +75,7 @@ function cleanupDriver(
   options: {
     primaryFailure?: Error
     corruptOriginal?: boolean
+    omitOriginals?: boolean
     failCleanup?: boolean
   } = {},
 ) {
@@ -136,13 +137,15 @@ function cleanupDriver(
             { key: next.id, type: `update`, value: next, previousValue },
           ])
           return {
-            mutations: [
-              {
-                original: options.corruptOriginal
-                  ? { ...previousValue, config: `corrupted original` }
-                  : previousValue,
-              },
-            ],
+            mutations: options.omitOriginals
+              ? []
+              : [
+                  {
+                    original: options.corruptOriginal
+                      ? { ...previousValue, config: `corrupted original` }
+                      : previousValue,
+                  },
+                ],
           }
         },
       }
@@ -227,4 +230,51 @@ it(`accepts admitted source shapes without assuming draft normalization`, async 
     `callback`,
     `sync`,
   )
+})
+
+class CalibrationValues extends Array<number> {
+  total(): number {
+    return this.reduce((sum, value) => sum + value, 0)
+  }
+}
+
+it(`accepts private subclass wrapper prototypes and rejects lost methods`, () => {
+  const source = new CalibrationValues(1, 2)
+  const wrapper = new CalibrationValues(1, 2)
+  Object.setPrototypeOf(wrapper, Object.create(CalibrationValues.prototype))
+  expectRowSnapshot(
+    { id: `a`, config: wrapper },
+    { id: `a`, config: source },
+    `private wrapper`,
+  )
+  expect(() =>
+    expectRowSnapshot(
+      { id: `a`, config: [1, 2] },
+      { id: `a`, config: source },
+      `lost method`,
+    ),
+  ).toThrow()
+  Object.setPrototypeOf(
+    wrapper,
+    Object.assign(Object.create(CalibrationValues.prototype), {
+      total: () => 99,
+    }),
+  )
+  expect(() =>
+    expectRowSnapshot(
+      { id: `a`, config: wrapper },
+      { id: `a`, config: source },
+      `wrong method`,
+    ),
+  ).toThrow()
+})
+
+it(`rejects a draft-source receipt without any actual original`, async () => {
+  const subject = cleanupDriver({ omitOriginals: true, failCleanup: false })
+  const failure: unknown = await runRowSnapshotHistories(
+    subject.driver,
+    `callback`,
+    `sync`,
+  ).catch((error: unknown) => error)
+  expect(String(failure)).toContain(`actual local originals`)
 })

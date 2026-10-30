@@ -43,6 +43,23 @@ function assertSafeAliasSegments(segments: ReadonlyArray<string>): void {
   }
 }
 
+// A source spread copies enumerable own data, including user symbols. Defining
+// fields avoids invoking inherited setters for ordinary source property names.
+function mergeSourceFields(
+  target: Record<PropertyKey, unknown>,
+  source: object,
+): void {
+  for (const key of Reflect.ownKeys(source)) {
+    if (!Object.prototype.propertyIsEnumerable.call(source, key)) continue
+    Object.defineProperty(target, key, {
+      value: unwrapVal(Reflect.get(source, key)),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+  }
+}
+
 /**
  * Processes a merge operation by merging source values into the target path
  */
@@ -59,18 +76,16 @@ function processMerge(
     const path = op.targetPath
     if (path.length === 0) {
       // Top-level merge
-      for (const [k, v] of Object.entries(value)) {
-        selectResults[k] = unwrapVal(v)
-      }
+      mergeSourceFields(selectResults, value)
     } else {
       for (let i = 0; i < path.length; i++) {
         const seg = path[i]!
+        // An accepted destination is an own field, even when its name is inherited.
+        if (!Object.hasOwn(cursor, seg)) cursor[seg] = {}
         if (i === path.length - 1) {
           const dest = (cursor[seg] ??= {})
           if (typeof dest === `object`) {
-            for (const [k, v] of Object.entries(value)) {
-              dest[k] = unwrapVal(v)
-            }
+            mergeSourceFields(dest, value)
           }
         } else {
           const next = cursor[seg]

@@ -62,6 +62,7 @@ import { scenarioRegistry } from './registration'
 import { expectDisabledResult } from './disabled-laws'
 import { expectPublishedRows } from './publication-laws-oracle'
 import { runRowSnapshotHistories } from './row-snapshot-oracle'
+import { runPublicFieldHistories } from './public-field-oracle'
 import {
   expectKeyedRows,
   expectOrderedRows,
@@ -238,6 +239,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           () => runRowSnapshotHistories(rawDriver, input, writes),
           30000,
         )
+    for (const input of [`callback`, `config`] as const)
+      scenario(
+        `public-field-destination-${input}`,
+        `nested source spreads preserve accepted inherited-name destinations`,
+        () => runPublicFieldHistories(rawDriver, input),
+        30000,
+      )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -2198,7 +2206,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(55)
+      expect(registry.size).toBe(57)
     })
   })
 }

@@ -34,16 +34,18 @@ it.each([`root`, `nested`] as const)(
         })
         await waitFor(() => expect(query()).toHaveLength(1))
         const row = query()[0]!
-        const container = location === `root` ? row : row.config
+        // The current path is reactive. A replaced source container does not
+        // promise that a separately captured old proxy becomes the new path.
+        const container = () => (location === `root` ? row : row.config)
         const enumerated: Array<boolean> = []
         const memberships: Array<boolean> = []
         createRoot((dispose) => {
           resources.defer(dispose)
           createRenderEffect(() => {
-            enumerated.push(Object.keys(container).includes(`optional`))
+            enumerated.push(Object.keys(container()).includes(`optional`))
           })
           createRenderEffect(() => {
-            memberships.push(`optional` in container)
+            memberships.push(`optional` in container())
           })
         })
         let publications = 0
@@ -70,8 +72,8 @@ it.each([`root`, `nested`] as const)(
           expect(enumerated).toEqual([false, true])
           expect(memberships).toEqual([false, true])
         })
-        expect(Object.hasOwn(container, `optional`)).toBe(true)
-        expect(container.optional).toBeUndefined()
+        expect(Object.hasOwn(container(), `optional`)).toBe(true)
+        expect(container().optional).toBeUndefined()
 
         write({ id: `a`, config: {} })
         expect(publications).toBe(2)
@@ -79,7 +81,7 @@ it.each([`root`, `nested`] as const)(
           expect(enumerated).toEqual([false, true, false])
           expect(memberships).toEqual([false, true, false])
         })
-        expect(Object.hasOwn(container, `optional`)).toBe(false)
+        expect(Object.hasOwn(container(), `optional`)).toBe(false)
         expect(query()[0]).toBe(row)
       } finally {
         resources.defer(() => collection.cleanup())

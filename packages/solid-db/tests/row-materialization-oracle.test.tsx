@@ -41,11 +41,9 @@ type History = {
   law: `identity` | `lifetime` | `reorder` | `resize`
 }
 
-// An admitted replacement element may mount once. Scalar edits do not admit
-// one. This rule comes from unchanged input identity, not Solid's reconciler.
-function expectedAdmissions(replaced: boolean): number {
-  return replaced ? 2 : 1
-}
+// Unchanged source elements retain the identity and admission counts observed
+// at their admission cut. Changed sources may reuse or replace an owned element.
+type Admission = { element: Element; mounts: number; reads: number }
 
 function* histories(): Generator<History> {
   for (const input of [`callback`, `config`, `collection`] as const)
@@ -67,24 +65,20 @@ function elements(row: Row): Array<Element> {
 function compare(
   current: Row,
   expectedValue: number,
-  initial: Element,
+  admitted: Admission,
   mounts: number,
   reads: number,
-  replaced: boolean,
 ) {
   expect(elements(current)[0]!.value, `current element value`).toBe(
     expectedValue,
   )
-  expect(mounts, `unchanged elements do not remount`).toBe(
-    expectedAdmissions(replaced),
-  )
+  expect(mounts, `unchanged elements do not remount`).toBe(admitted.mounts)
   expect(reads, `unchanged element references do not invalidate effects`).toBe(
-    expectedAdmissions(replaced),
+    admitted.reads,
   )
-  if (!replaced)
-    expect(elements(current)[0], `unchanged nested element identity`).toBe(
-      initial,
-    )
+  expect(elements(current)[0], `unchanged nested element identity`).toBe(
+    admitted.element,
+  )
 }
 
 // The resize model is the admitted scalar sequence. Both the reactive map
@@ -222,6 +216,7 @@ async function runHistory(history: History) {
       const initial = elements(current())[0]!
       let mounts = 0
       let reads = 0
+      let admitted: Admission = { element: initial, mounts: 1, reads: 1 }
       if (history.law === `identity`) {
         view = render(() => (
           <For each={elements(current())}>
@@ -238,14 +233,16 @@ async function runHistory(history: History) {
             reads++
           })
         })
-        compare(current(), 0, initial, mounts, reads, false)
+        compare(current(), 0, admitted, mounts, reads)
       }
       const write = (index: number, replacement: boolean) => {
         const previous = rows[index]!
         const next = { ...previous, value: previous.value + 1 }
         if (replacement) {
-          const admitted = [{ value: 1 }]
-          next.tags = history.nested ? { items: admitted } : admitted
+          const replacementItems = [{ value: 1 }]
+          next.tags = history.nested
+            ? { items: replacementItems }
+            : replacementItems
         }
         rows[index] = next
         source.utils.begin()
@@ -265,8 +262,15 @@ async function runHistory(history: History) {
           ),
         )
         const replaced = rows[0]!.value >= 2
-        if (history.law === `identity`)
-          compare(current(), replaced ? 1 : 0, initial, mounts, reads, replaced)
+        if (history.law === `identity`) {
+          if (replacement) {
+            // Only current values are promised at a changed-source cut. The
+            // next peer edit must preserve whichever identity was admitted.
+            expect(elements(current())[0]!.value).toBe(1)
+            expect(view!.container.textContent).toBe(`1`)
+            admitted = { element: elements(current())[0]!, mounts, reads }
+          } else compare(current(), replaced ? 1 : 0, admitted, mounts, reads)
+        }
         reach.reach(
           replacement
             ? `element-replacement`
@@ -298,7 +302,6 @@ it.each([...histories()])(
 )
 
 declareOracle({
-  model: [expectedAdmissions],
   grammar: [histories],
   check: [compare, compareArray],
 })
@@ -511,23 +514,74 @@ function* graphHistories() {
 function enumerationBudget(containers: number): number {
   return containers * 32
 }
-function leaf(graph: Graph, side: `left` | `right`): number {
-  return `value` in graph ? graph.value : leaf(graph[side], side)
+// The model forgets sharing identity but retains every public value path.
+function semanticGraph(
+  level: number,
+  value: number,
+  shared: boolean,
+  crossed: boolean,
+): Graph {
+  if (crossed) return semanticGraph(level * 2, value, true, false)
+  if (!level) return { value }
+  const child = semanticGraph(level - 1, value, shared, false)
+  return { left: child, right: shared ? child : { value } }
 }
+
+export function compareGraphValues(
+  actual: unknown,
+  expected: Graph,
+  seen = new WeakMap<object, Set<object>>(),
+): void {
+  expect(actual).not.toBeNull()
+  expect(typeof actual).toBe(`object`)
+  expect(Array.isArray(actual)).toBe(false)
+  const record = actual as Record<string, unknown>
+  const pairs = seen.get(record) ?? new Set<object>()
+  if (pairs.has(expected)) return
+  pairs.add(expected)
+  seen.set(record, pairs)
+  if (`value` in expected) {
+    expect(Object.keys(record)).toEqual([`value`])
+    expect(record.value, `complete graph leaf`).toBe(expected.value)
+  } else {
+    expect(new Set(Object.keys(record))).toEqual(new Set([`left`, `right`]))
+    compareGraphValues(record.left, expected.left, seen)
+    compareGraphValues(record.right, expected.right, seen)
+  }
+}
+
 function compareGraph(
   actual: Graph,
-  left: number,
-  right: number,
+  expected: Graph,
   visits: number,
   containers: number,
 ) {
-  expect(leaf(actual, `left`), `left graph value`).toBe(left)
-  expect(leaf(actual, `right`), `right graph value`).toBe(right)
+  // Counts enter by value before the checker traverses any observation.
   expect(
     visits,
     `source enumeration scales with distinct containers`,
   ).toBeLessThanOrEqual(enumerationBudget(containers))
+  compareGraphValues(actual, expected)
 }
+
+// A wrong observation changes one interior path while keeping the two extreme
+// paths intact. The same complete comparison must reject it at every crossed
+// depth; a checker of only all-left/all-right leaves would accept it.
+it.each([...graphHistories()].filter((history) => history.crossed))(
+  `rejects mixed-path corruption at crossed depth=$depth`,
+  ({ depth, shared, crossed }) => {
+    const expected = semanticGraph(depth, 0, shared, crossed)
+    function corrupted(graph: Graph, remaining: number): Graph {
+      if (`value` in graph) return { value: 99 }
+      const side = remaining === depth * 2 - 1 ? `right` : `left`
+      return { ...graph, [side]: corrupted(graph[side], remaining - 1) }
+    }
+    expect(() =>
+      compareGraphValues(corrupted(expected, depth * 2), expected),
+    ).toThrow()
+  },
+)
+
 async function runGraphHistory({
   depth,
   shared,
@@ -636,7 +690,12 @@ async function runGraphHistory({
       })
       resources.defer(() => query.collection.cleanup())
       await waitFor(() => expect(query()).toHaveLength(1))
-      compareGraph(query()[0]!.config, 0, 0, visits, containers)
+      compareGraph(
+        query()[0]!.config,
+        semanticGraph(depth, 0, shared, crossed),
+        visits,
+        containers,
+      )
       reach.reach(`graph-admission`)
       for (const value of [1, 2]) {
         const config =
@@ -652,7 +711,17 @@ async function runGraphHistory({
         })
         source.utils.commit()
         await waitFor(() => expect(query()[0]!.value).toBe(value))
-        compareGraph(query()[0]!.config, value, 1, visits, containers)
+        compareGraph(
+          query()[0]!.config,
+          value === 1
+            ? semanticGraph(depth, value, shared, crossed)
+            : {
+                left: semanticGraph(depth, value, shared, crossed),
+                right: semanticGraph(depth, 1, shared, crossed),
+              },
+          visits,
+          containers,
+        )
         reach.reach(value === 1 ? `graph-replacement` : `branch-divergence`)
         if (crossed && value === 1) reach.reach(`crossed-sharing`)
       }
@@ -667,7 +736,7 @@ it.each([...graphHistories()])(
   runGraphHistory,
 )
 declareOracle({
-  model: [enumerationBudget],
+  model: [enumerationBudget, semanticGraph],
   grammar: [graphHistories],
-  check: [compareGraph],
+  check: [compareGraph, compareGraphValues],
 })

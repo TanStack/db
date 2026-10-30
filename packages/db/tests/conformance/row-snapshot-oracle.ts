@@ -23,6 +23,7 @@ import type { LiveQueryDriver, LiveQueryHandle, QueryBuild } from './contract'
 type Shape =
   | `object`
   | `hidden-data`
+  | `shadowed`
   | `array`
   | `introduced`
   | `null-prototype`
@@ -45,6 +46,7 @@ type SnapshotRow = {
   extra?: Payload
 }
 const format = () => `row`
+const userField = Symbol(`selected user field`)
 
 class SnapshotValues extends Array<number> {
   total(): number {
@@ -68,6 +70,19 @@ function snapshot(shape: Shape, value: number): SnapshotRow {
       writable: true,
       configurable: true,
     })
+  if (shape === `shadowed` && value > 0 && value < 3)
+    for (const [key, supplied] of [
+      [`toString`, Object.prototype.toString],
+      [`constructor`, Object],
+      [`__proto__`, `ordinary user data ${value}`],
+      [userField, `user symbol ${value}`],
+    ] as const)
+      Object.defineProperty(payload, key, {
+        value: value === 2 ? undefined : supplied,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
   if (shape === `array`)
     config = Array.from({ length: value % 3 }, (_, index) => ({
       value: value + index,
@@ -88,7 +103,7 @@ function snapshot(shape: Shape, value: number): SnapshotRow {
     values.push(value, value + 1)
     config = values
   }
-  return {
+  const row: SnapshotRow = {
     id: `a`,
     value,
     config,
@@ -97,6 +112,14 @@ function snapshot(shape: Shape, value: number): SnapshotRow {
       ? { extra: { value, optional: undefined } }
       : {}),
   }
+  // The same names cross root admission and nested admission. A root-only or
+  // nested-only ownership fix must not satisfy the full selected-value law.
+  if (shape === `shadowed`)
+    for (const key of [`toString`, `constructor`, `__proto__`, userField]) {
+      const descriptor = Object.getOwnPropertyDescriptor(payload, key)
+      if (descriptor) Object.defineProperty(row, key, descriptor)
+    }
+  return row
 }
 
 // Bounded exhaustive grammar: every shape crosses the three input forms and
@@ -111,6 +134,7 @@ function* histories(
   const shapes: Array<Shape> = [
     `object`,
     `hidden-data`,
+    `shadowed`,
     `array`,
     `introduced`,
     `null-prototype`,
@@ -167,6 +191,7 @@ type Fact =
       kind: `container`
       array: boolean
       arrayPrototype: unknown
+      arrayTotal: unknown
       fields: Map<PropertyKey, Fact>
     }
 
@@ -181,6 +206,12 @@ function facts(value: unknown): Fact {
     kind: `container`,
     array,
     arrayPrototype: array ? prototype : undefined,
+    // The grammar's subclass supplies a zero-argument total method. Preserve
+    // that observable capability while permitting private wrapper prototypes.
+    arrayTotal:
+      array && typeof Reflect.get(value, `total`) === `function`
+        ? Reflect.apply(Reflect.get(value, `total`) as () => unknown, value, [])
+        : undefined,
     fields: new Map(
       Reflect.ownKeys(value)
         .filter(
@@ -208,11 +239,21 @@ function expectFact(actual: Fact, expected: Fact, label: string): void {
     return
   }
   expect(actual.array, label).toBe(expected.array)
-  if (expected.arrayPrototype && expected.arrayPrototype !== Array.prototype)
+  if (expected.arrayPrototype && expected.arrayPrototype !== Array.prototype) {
     expect(
-      actual.arrayPrototype,
+      actual.arrayPrototype === expected.arrayPrototype ||
+        (actual.arrayPrototype !== null &&
+          typeof actual.arrayPrototype === `object` &&
+          Object.prototype.isPrototypeOf.call(
+            expected.arrayPrototype,
+            actual.arrayPrototype,
+          )),
       `${label}: source-supplied array methods`,
-    ).toBe(expected.arrayPrototype)
+    ).toBe(true)
+    expect(actual.arrayTotal, `${label}: source-supplied array total`).toBe(
+      expected.arrayTotal,
+    )
+  }
   expect(new Set(actual.fields.keys()), label).toEqual(
     new Set(expected.fields.keys()),
   )
@@ -266,6 +307,7 @@ export async function runRowSnapshotHistories(
     `later-object-admission`,
     `root-delete-representation`,
     `nested-own-undefined`,
+    ...(!driver.snapshotSourceUsesDraft ? [`enumerable-user-symbol`] : []),
     ...(!driver.snapshotSourceUsesDraft && writes === `sync`
       ? [`source-reference-reuse`]
       : []),
@@ -333,7 +375,14 @@ export async function runRowSnapshotHistories(
           reach.reach(input)
           reach.reach(history.shape)
           check(retained)
-          if (history.peers) reach.reach(`cross-row-alias`)
+          if (history.peers && history.shape !== `introduced`) {
+            const first = source.collection.get(`a`).config
+            const second = source.collection.get(`b`).config
+            expect(first, `admitted shared container`).not.toBeNull()
+            expect(typeof first, `admitted shared container`).toBe(`object`)
+            expect(second, `admitted shared container identity`).toBe(first)
+            reach.reach(`cross-row-alias`)
+          }
           for (let value = 1; value <= 3; value++)
             for (const { id } of rows) {
               retained.push({
@@ -392,7 +441,12 @@ export async function runRowSnapshotHistories(
               } else {
                 await handle.apply(() => {
                   const mutation = source.update(next)
-                  if (mutation) {
+                  if (driver.snapshotSourceUsesDraft)
+                    expect(
+                      mutation?.mutations.length,
+                      `actual local originals`,
+                    ).toBeGreaterThan(0)
+                  if (mutation && mutation.mutations.length > 0) {
                     for (const item of mutation.mutations)
                       retained.push({
                         label: `local mutation.original ${id}`,
@@ -420,6 +474,23 @@ export async function runRowSnapshotHistories(
               if (value >= 2) reach.reach(`later-object-admission`)
               if (value === 3) reach.reach(`root-delete-representation`)
               if (value === 1) reach.reach(`nested-own-undefined`)
+              // Only the controlled sync source promises this admission. The
+              // local-only draft boundary owns its normalization policy; every
+              // path still compares all user fields that it actually admits.
+              if (
+                history.shape === `shadowed` &&
+                value === 1 &&
+                !driver.snapshotSourceUsesDraft
+              ) {
+                expect(
+                  Object.getOwnPropertyDescriptor(
+                    source.collection.get(id),
+                    userField,
+                  )?.enumerable,
+                  `source admitted enumerable user symbol`,
+                ).toBe(true)
+                reach.reach(`enumerable-user-symbol`)
+              }
               check(retained)
             }
         } finally {
@@ -446,7 +517,7 @@ export async function runRowSnapshotHistories(
     [input]: cases.length,
     [writes]: cases.length,
     ...Object.fromEntries(cases.map(({ shape }) => [shape, 2])),
-    'cross-row-alias': cases.length / 2,
+    'cross-row-alias': cases.length / 2 - 1,
     'retained-previousValue': cases.length,
     ...(writes === `optimistic` || driver.snapshotSourceUsesDraft
       ? { 'retained-original': cases.length }
@@ -454,6 +525,7 @@ export async function runRowSnapshotHistories(
     'later-object-admission': cases.length,
     'root-delete-representation': cases.length,
     'nested-own-undefined': cases.length,
+    ...(!driver.snapshotSourceUsesDraft ? { 'enumerable-user-symbol': 2 } : {}),
     ...(!driver.snapshotSourceUsesDraft && writes === `sync`
       ? { 'source-reference-reuse': 2 }
       : {}),
