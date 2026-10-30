@@ -56,6 +56,7 @@
 import { describe, expect, it } from 'vitest'
 import { include, pooledLiveQueries } from '@tanstack/db'
 import { createOracleReach } from '../oracle-reach'
+import { registerWindowHistoryOracle } from './window-history-oracle'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
@@ -160,6 +161,7 @@ const ISSUES: Array<Issue> = [
 ]
 
 export function runSuite(rawDriver: LiveQueryDriver) {
+  registerWindowHistoryOracle(rawDriver)
   const { ops } = rawDriver
   const registry = scenarioRegistry(rawDriver.knownGaps)
 

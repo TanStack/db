@@ -50,6 +50,7 @@ export function makeLaggingSource<T extends { id: string }>(
     emit: (rows) => writeRows(`insert`, rows),
     markReady: () => controls!.markReady(),
     loadStarted: () => pendingLoads.length > 0,
+    settleNext: () => pendingLoads.shift()?.(),
     settle: () => pendingLoads.splice(0).forEach((resolve) => resolve()),
   }
 }

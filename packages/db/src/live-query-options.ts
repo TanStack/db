@@ -9,12 +9,13 @@ import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { LIVE_QUERY_INTERNAL } from './query/live/internal.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
+  getQueryIdentity,
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
 import { codedMessage, devBuild } from './error-message.js'
-import { InvalidPoolOptionError } from './errors.js'
+import { InvalidPoolOptionError, UnhashableQueryIRError } from './errors.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
@@ -353,6 +354,106 @@ function poolConfig(
   })
 }
 
+// Only adapter-owned Collections enter this table. Cache- and Suspense-owned
+// Collections retain their result identity and are never movable by a peer.
+const resolvedQueryValues = new WeakMap<
+  object,
+  { collection: object; value: unknown }
+>()
+
+function windowConfig(
+  value: unknown,
+): (Record<string, unknown> & { query: unknown }) | undefined {
+  return value instanceof BaseQueryBuilder
+    ? { query: value }
+    : value && typeof value === `object` && `query` in value
+      ? (value as Record<string, unknown> & { query: unknown })
+      : undefined
+}
+
+function moveExistingWindow(
+  value: unknown,
+  previous: Collection<object, string | number, {}> | null,
+  owner: object | undefined,
+) {
+  if (!previous || ![`ready`, `loading`].includes(previous.status)) return
+  const retained = owner && resolvedQueryValues.get(owner)
+  if (!retained || retained.collection !== previous) return
+  const before = windowConfig(retained.value)
+  const after = windowConfig(value)
+  if (
+    !(before?.query instanceof BaseQueryBuilder) ||
+    !(after?.query instanceof BaseQueryBuilder)
+  )
+    return
+  const oldQuery = before.query._getQuery()
+  const query = after.query._getQuery()
+  // Adding/removing the outer limit, findOne, and opaque plans keep their
+  // ordinary compilation path. A move needs a finite ordered target window.
+  if (
+    before.singleResult === true ||
+    after.singleResult === true ||
+    oldQuery.singleResult ||
+    query.singleResult ||
+    !oldQuery.orderBy?.length ||
+    !query.orderBy?.length ||
+    oldQuery.limit === undefined ||
+    query.limit === undefined ||
+    !Number.isSafeInteger(query.limit) ||
+    query.limit < 0 ||
+    !Number.isSafeInteger(query.offset ?? 0) ||
+    (query.offset ?? 0) < 0
+  )
+    return
+  const keys = Object.keys(before).filter((key) => key !== `query`)
+  if (
+    keys.length !==
+      Object.keys(after).filter((key) => key !== `query`).length ||
+    keys.some((key) => before[key] !== after[key])
+  )
+    return
+  // IR source IDs establish semantic identity, but a keyed query may legally
+  // swap the object under an ID. Reuse must preserve the exact source objects.
+  const sources = getPreparedLiveQuerySources(before)
+  const nextSources = getPreparedLiveQuerySources(after)
+  if (
+    sources.length !== nextSources.length ||
+    sources.some((source, index) => source !== nextSources[index])
+  )
+    return
+  try {
+    if (
+      getQueryIdentity({ ...oldQuery, limit: undefined, offset: undefined }) !==
+      getQueryIdentity({ ...query, limit: undefined, offset: undefined })
+    )
+      return
+  } catch (error) {
+    if (error instanceof UnhashableQueryIRError) return
+    throw error
+  }
+  const builder = getBuilderFromConfig(previous.config)
+  if (!builder) return
+  return () => {
+    // A framework can commit synchronously from a Collection publication
+    // callback. Move after that publication, while this remains the binding's
+    // last resolved result and a consumer still asks for it.
+    queueMicrotask(() => {
+      if (
+        resolvedQueryValues.get(owner)?.collection !== previous ||
+        previous.subscriberCount === 0
+      )
+        return
+      const result = builder.setWindow({
+        offset: query.offset ?? 0,
+        limit: query.limit!,
+      })
+      // The Collection reports request failures through its health tree. A
+      // superseded move or unmount can reject its waiter without a hook caller.
+      if (result !== true) void result.catch(() => {})
+    })
+  }
+}
+
 /**
  * Resolve an adapter's query value to what its observer watches: `null` for a
  * disabled query, an existing Collection with sync started, or a live query.
@@ -365,6 +466,9 @@ export function resolveLiveQueryValue(
     gcTime,
     pool,
     startSync = true,
+    previousCollection,
+    windowOwner,
+    onWindowChange,
   }: {
     gcTime?: number
     // `false` keeps a hook that cannot pool, such as a Suspense or DbClient
@@ -372,17 +476,37 @@ export function resolveLiveQueryValue(
     // A pool here has passed `configPool`.
     pool?: PooledLiveQueries | false
     startSync?: boolean
+    /** @internal Previous adapter-owned result; absent for shared results. */
+    previousCollection?: Collection<object, string | number, {}> | null
+    /** @internal Identity of one framework binding; never shared by peers. */
+    windowOwner?: object
+    /** @internal React/Preact defer mutation until their render commits. */
+    onWindowChange?: (move: () => void) => void
   } = {},
 ): Collection<any, any, any> | null {
+  if (previousCollection !== undefined) {
+    value = prepareLiveQueryValue(value, undefined)
+    const move = moveExistingWindow(value, previousCollection, windowOwner)
+    if (move) {
+      if (onWindowChange) onWindowChange(move)
+      else move()
+      return previousCollection!
+    }
+  }
+  const remember = (collection: Collection) => {
+    if (previousCollection !== undefined && windowOwner)
+      resolvedQueryValues.set(windowOwner, { collection, value })
+    return collection
+  }
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
     value.startSyncImmediate()
     return value
   }
   if (value instanceof BaseQueryBuilder) {
-    return (
+    return remember(
       (pool ? pool.createPooledLiveQuery(value, { gcTime }) : undefined) ??
-      createLiveQueryCollection({ query: value, startSync, gcTime })
+        createLiveQueryCollection({ query: value, startSync, gcTime }),
     )
   }
   if (typeof value === `object`) {
@@ -397,13 +521,13 @@ export function resolveLiveQueryValue(
         : undefined
     const config =
       built instanceof BaseQueryBuilder ? { ...given, query: built } : given
-    return (
+    return remember(
       (pooling ? poolConfig(config, gcTime, pooling) : undefined) ??
-      createLiveQueryCollection({
-        ...config,
-        startSync: config.startSync ?? startSync,
-        gcTime: config.gcTime ?? gcTime,
-      })
+        createLiveQueryCollection({
+          ...config,
+          startSync: config.startSync ?? startSync,
+          gcTime: config.gcTime ?? gcTime,
+        }),
     )
   }
   throw new Error(

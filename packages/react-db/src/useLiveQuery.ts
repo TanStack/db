@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import {
   UnhashableQueryIRError,
   createLiveQueryObserver,
@@ -44,6 +44,11 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+// Use the client layout commit to schedule window moves. Server rendering has
+// no commit; React18 diagnoses a layout effect there even when it is empty.
+const useWindowCommitEffect =
+  typeof window === `undefined` ? useEffect : useLayoutEffect
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 // Suspense renders can be abandoned before React subscribes. Keep their
@@ -697,11 +702,13 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       !deepEquals(instance.identityDeps, identityDeps)
 
     // Check if we need to create/recreate the collection
-    const needsNewCollection =
+    let needsNewCollection =
       !instance.collection ||
       (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
       (!inputIsCollection && (instance.client !== dbClient || identityChanged))
 
+    let commitWindow: (() => void) | undefined
+    const previousCollection = instance.collection
     if (needsNewCollection) {
       if (inputIsCollection) {
         // Warn when passing a collection directly with on-demand sync mode
@@ -753,6 +760,12 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
             // Hydration and Suspense key the live-query Collection by identity,
             // so they never pool, even when the config passes a pool.
             pool: forSuspense || dbClient ? false : undefined,
+            previousCollection:
+              forSuspense || dbClient ? undefined : previousCollection,
+            windowOwner: instance,
+            onWindowChange: (move) => {
+              commitWindow = move
+            },
             // Without a DbClient, Suspense starts it through a preload below.
             startSync: !forSuspense || dbClient !== undefined,
           }) as SuspenseCollection | null
@@ -810,13 +823,24 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
           }
         }
         instance.config = configOrQueryOrCollection
-        instance.identityDeps = [...identityDeps]
+        // An abandoned render must leave invalidation pending. Its retry or
+        // urgent replacement still prepares and commits the requested move.
+        if (!commitWindow) instance.identityDeps = [...identityDeps]
       }
       instance.client = dbClient
       instance.queryHash = queryHash
       instance.suspenseKey = suspenseKey
       instance.identityError = identityError
     }
+
+    if (commitWindow && instance.collection === previousCollection)
+      needsNewCollection = false
+    useWindowCommitEffect(() => {
+      if (commitWindow) {
+        instance.identityDeps = [...identityDeps]
+        commitWindow()
+      }
+    })
 
     // Recreate the observer when the underlying collection changes. The observer
     // is not disposed explicitly here or on unmount: `useSyncExternalStore`

@@ -251,6 +251,14 @@ export function useLiveQuery<
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
+  const windowOwner = {}
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection,
+      windowOwner,
+    }))
   const collection = createMemo(
     () => {
       if (configOrQueryOrCollection.length === 1) {
@@ -259,28 +267,27 @@ export function useLiveQuery(
         const result = configOrQueryOrCollection(queryBuilder)
 
         if (result === undefined || result === null) {
-          // Disabled query - return null
-          return null
+          // Disabled queries end the previous binding.
+          return (previousCollection = null)
         }
 
-        return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
+        return resolveNext(result)
       }
 
       const innerCollection = configOrQueryOrCollection()
 
       if (innerCollection === undefined || innerCollection === null) {
-        // Disabled query - return null
-        return null
+        // Disabled queries end the previous binding.
+        return (previousCollection = null)
       }
 
       if (isCollection(innerCollection)) {
         innerCollection.startSyncImmediate()
+        previousCollection = null
         return innerCollection as Collection
       }
 
-      return resolveLiveQueryValue(innerCollection, {
-        gcTime: DEFAULT_GC_TIME_MS,
-      })
+      return resolveNext(innerCollection)
     },
     undefined,
     { name: `TanstackDBCollectionMemo` },

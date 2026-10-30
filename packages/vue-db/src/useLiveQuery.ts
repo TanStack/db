@@ -275,6 +275,14 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
+  const windowOwner = {}
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection,
+      windowOwner,
+    }))
   const resolveInput = () => {
     // First check if the original parameter might be a ref/getter
     // by seeing if toValue returns something different than the original
@@ -315,6 +323,7 @@ export function useLiveQuery(
       if (unwrappedParam.status === `idle`) {
         unwrappedParam.startSyncImmediate()
       }
+      previousCollection = null
       return unwrappedParam
     }
 
@@ -324,14 +333,11 @@ export function useLiveQuery(
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
       // A query function returning null or undefined disables the query.
-      return resolveLiveQueryValue(
+      return resolveNext(
         unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
-        { gcTime: DEFAULT_GC_TIME_MS },
       )
     } else {
-      return resolveLiveQueryValue(unwrappedParam, {
-        gcTime: DEFAULT_GC_TIME_MS,
-      })
+      return resolveNext(unwrappedParam)
     }
   }
   // The input's live-query Collection, or the error resolving it threw. A

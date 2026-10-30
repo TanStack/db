@@ -1393,6 +1393,21 @@ is not browser evidence. `hydration.svelte.test.ts` separately receives
 normalized transport and normal warm-browser initialization through its native
 scheduler.
 
+The [React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
+extends that preparation grammar and judgment with real matched React/ReactDOM
+18.3.1 and 19.2.4 development server renderers. Separate paths cover provider
+and explicit-client ordinary hooks, completed non-streaming Suspense through
+both client forms, standalone builders and supplied Collections. A disabled
+input replays the same diagnostic comparison. Each checks return and the raw
+React client-layout diagnostic after server render and cleanup; ordinary
+descriptor paths also compare admission, selected rows and status, while
+prepared Suspense compares rows. Standalone/supplied paths make no hydration
+claim. Fixed/fresh campaigns retain per-runtime/path reach and direct replay;
+this does not establish streaming Suspense, actual browser hydration, arbitrary
+provider delivery or every React version. Client commit and abandonment remain
+with the window receiving owner. [SSR effect evidence](oracle-reviews/2026-10-30-react-ssr-effects.md)
+records pre-edit RED, repaired GREEN and hostile rejection.
+
 The shared admission owner also defines runtime ready/error outcomes, browser
 explicit preparation and defined/undefined causes. Its receiving drivers are
 `packages/react-db/tests/ssr-runtime-error-handoff-oracle.test.tsx` and
@@ -6273,3 +6288,16 @@ useful extension: the hash identity oracle owns those semantic distinctions,
 but its helper-level evidence does not by itself exercise distinct storage.
 The separate Index structural-collision obligation above remains open.
 See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
+
+
+### Adapter-owned page windows
+
+The framework owner includes [window-history-oracle.ts](../../packages/db/tests/conformance/window-history-oracle.ts), registered through the shared conformance suite in React, Preact, Vue, Solid, Angular and Svelte. Maintainer decision 2026-10-30 for #2291: changing only `.limit()`/`.offset()` moves the existing outer window; it adds no hook option. The independent sort/filter/slice model checks ordered selected rows and keyed-map values after each framework flush, Collection retention for page moves, replacement for source/filter/order/projection/nested-window changes, and retained upstream ownership. Direct and nested paths have separate reach, as do changing/stable/opaque keys where the driver supports keys. Keyed source swaps include distinct source objects under one Collection ID. Generated source updates check liveness after reuse. The bare-callback lanes also vary a Collection option together with a page change and check its applied value. The pending lane observes a move during initial loading, oldest settlement while the latest remains pending, initial readiness, overlapping held acquisitions, final latest rows, and unmount before settlement. The publication-callback lane changes offset, limit or both from a public change callback, then checks the retained Collection after the host settles. It controls demand settlement over already installed source rows; the core pagination owner continues to own source delivery, failures and ordered repair.
+
+The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. DbClient/hydration and Suspense shared-result caches, supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts and paths; this fix does not retarget their shared Collections. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
+
+Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes are recorded in [the page-window review](oracle-reviews/2026-10-30-adapter-page-windows.md).
+
+The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.
+
+The existing [top-K support-window owner](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts) also has a numeric-window lane for safe-integer maximum offsets and widths, exact omitted-bound inheritance on partial moves, and required demand messages when installed ranges are empty. It permits additional messages. It observes one-group settled operator rows, size and demand signals; real framework source growth belongs to the shared receiving owner above. [Numeric evidence](oracle-reviews/2026-10-30-topk-numeric-windows.md) records RED, GREEN, reach, replay and mutants.

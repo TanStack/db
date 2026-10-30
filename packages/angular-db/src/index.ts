@@ -5,6 +5,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core'
 import {
   BaseQueryBuilder,
@@ -152,9 +153,25 @@ export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
   const destroyRef = inject(DestroyRef)
 
-  const collection = computed(() => {
+  let pendingWindow: (() => void) | undefined
+  const windowOwner = {}
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (
+    value: unknown,
+    options: Parameters<typeof resolveLiveQueryValue>[1],
+  ) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      ...options,
+      previousCollection,
+      windowOwner,
+      onWindowChange: (move) => {
+        pendingWindow = move
+      },
+    }))
+  const resolveInput = () => {
     // Check if it's an existing collection
     if (isCollection(opts)) {
+      previousCollection = null
       return opts
     }
 
@@ -164,11 +181,11 @@ export function injectLiveQuery(opts: any) {
       const result = opts(queryBuilder)
 
       if (result === undefined || result === null) {
-        // Disabled query - return null
-        return null
+        // Disabled queries end the previous binding.
+        return (previousCollection = null)
       }
 
-      return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
+      return resolveNext(result, { gcTime: DEFAULT_GC_TIME_MS })
     }
 
     // Check if it's reactive query options
@@ -186,7 +203,7 @@ export function injectLiveQuery(opts: any) {
         params: opts.params(),
         q: new BaseQueryBuilder() as InitialQueryBuilder,
       })
-      return resolveLiveQueryValue(result, {
+      return resolveNext(result, {
         gcTime: DEFAULT_GC_TIME_MS,
         pool,
       })
@@ -196,10 +213,23 @@ export function injectLiveQuery(opts: any) {
     // match the query-fn and reactive-options paths, but let an explicit value
     // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return resolveLiveQueryValue(opts, { gcTime: DEFAULT_GC_TIME_MS })
+      return resolveNext(opts, { gcTime: DEFAULT_GC_TIME_MS })
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)
+  }
+  const resolved = computed<{
+    collection: ReturnType<typeof resolveLiveQueryValue>
+    move: (() => void) | undefined
+  }>(() => {
+    pendingWindow = undefined
+    const collection = resolveInput()
+    return { collection, move: pendingWindow }
+  })
+  const collection = computed(() => resolved().collection)
+  effect(() => {
+    const { move } = resolved()
+    untracked(() => move?.())
   })
 
   const state = signal(new Map<string | number, any>())

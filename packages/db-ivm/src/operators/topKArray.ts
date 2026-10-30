@@ -81,7 +81,11 @@ export class TopKArray<V> implements TopK<V> {
   #sortedValues: Array<IndexedValue<V>> = []
   #comparator: (a: V, b: V) => number
   #topKStart: number
-  #topKEnd: number
+  #topKLimit: number
+
+  get #topKEnd(): number {
+    return this.#topKStart + this.#topKLimit
+  }
 
   constructor(
     offset: number,
@@ -89,13 +93,13 @@ export class TopKArray<V> implements TopK<V> {
     comparator: (a: V, b: V) => number,
   ) {
     this.#topKStart = offset
-    this.#topKEnd = offset + limit
+    this.#topKLimit = limit
     this.#comparator = comparator
   }
 
   get size(): number {
     const offset = this.#topKStart
-    const limit = this.#topKEnd - this.#topKStart
+    const limit = this.#topKLimit
     const available = this.#sortedValues.length - offset
     return Math.max(0, Math.min(limit, available))
   }
@@ -121,25 +125,21 @@ export class TopKArray<V> implements TopK<V> {
     limit?: number
   }): TopKMoveChanges<V> {
     const oldOffset = this.#topKStart
-    const oldLimit = this.#topKEnd - this.#topKStart
-
-    // `this.#topKEnd` can be `Infinity` if it has no limit
-    // but `diffHalfOpen` expects a finite range
-    // so we restrict it to the size of the topK if topKEnd is infinite
+    const oldLimit = this.#topKLimit
+    const installed = this.#sortedValues.length
+    // Only installed ranks can emit deltas. Keep the authored bounds separately
+    // so future inserts and partial moves still use the exact requested window.
     const oldRange: HRange = [
-      this.#topKStart,
-      this.#topKEnd === Infinity ? this.#topKStart + this.size : this.#topKEnd,
+      Math.min(oldOffset, installed),
+      Math.min(this.#topKEnd, installed),
     ]
 
     this.#topKStart = offset ?? oldOffset
-    this.#topKEnd = this.#topKStart + (limit ?? oldLimit) // can be `Infinity` if limit is `Infinity`
+    this.#topKLimit = limit ?? oldLimit
 
-    // Also handle `Infinity` in the newRange
     const newRange: HRange = [
-      this.#topKStart,
-      this.#topKEnd === Infinity
-        ? Math.max(this.#topKStart + this.size, oldRange[1]) // since the new limit is Infinity we need to take everything (so we need to take the biggest (finite) topKEnd)
-        : this.#topKEnd,
+      Math.min(this.#topKStart, installed),
+      Math.min(this.#topKEnd, installed),
     ]
     const { onlyInA, onlyInB } = diffHalfOpen(oldRange, newRange)
 
@@ -163,7 +163,10 @@ export class TopKArray<V> implements TopK<V> {
     // but that the collection is lazy so we don't have the data yet that needs to move in/out
     // so `moveIns` and `moveOuts` will be empty but `changes` will be true
     // this will tell the caller that it needs to run the graph to load more data
-    return { moveIns, moveOuts, changes: onlyInA.length + onlyInB.length > 0 }
+    const changes =
+      (oldLimit > 0 || this.#topKLimit > 0) &&
+      (oldOffset !== this.#topKStart || oldLimit !== this.#topKLimit)
+    return { moveIns, moveOuts, changes }
   }
 
   insert(value: V): TopKChanges<V> {
