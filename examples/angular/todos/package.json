@@ -27,8 +27,8 @@
     "@angular/forms": "^20.3.34",
     "@angular/platform-browser": "^20.3.34",
     "@angular/router": "^20.3.34",
-    "@tanstack/angular-db": "^1.0.0-rc.1",
-    "@tanstack/db": "^1.0.0-rc.1",
+    "@tanstack/angular-db": "^1.0.0-rc.1.1",
+    "@tanstack/db": "^1.0.0-rc.1.1",
     "rxjs": "^7.8.2",
     "tslib": "^2.8.1",
     "zone.js": "~0.15.0"

@@ -1,5 +1,12 @@
 # @tanstack/node-db-sqlite-persistence
 
+## 1.0.0-rc.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`9cfa11f`](https://github.com/TanStack/db/commit/9cfa11fc712866f8f276e85762865ebb8bd49cbe)]:
+  - @tanstack/db-sqlite-persistence-core@1.0.0-rc.1.1
+
 ## 1.0.0-rc.1
 
 ### Major Changes
