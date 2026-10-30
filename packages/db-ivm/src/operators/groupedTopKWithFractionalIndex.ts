@@ -1,5 +1,5 @@
-import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
+import { UnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
 import { MultiSet } from '../multiset.js'
 import {
   TopKState,
@@ -9,8 +9,11 @@ import {
 } from './topKState.js'
 import { TopKArray, createKeyedComparator } from './topKArray.js'
 import type { IndexedValue } from './topKArray.js'
-import type { DifferenceStreamReader } from '../graph.js'
-import type { IStreamBuilder, PipedOperator } from '../types.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
+import type { PipedOperator } from '../types.js'
 
 export interface GroupedTopKWithFractionalIndexOptions<K, T> {
   limit?: number
@@ -69,23 +72,6 @@ export class GroupedTopKWithFractionalIndexOperator<
     return size
   }
 
-  #getOrCreateGroupState(groupKey: unknown): TopKState<K, T> {
-    let state = this.#groupStates.get(groupKey)
-    if (!state) {
-      state = new TopKState(
-        new TopKArray(this.#offset, this.#limit, this.#comparator),
-      )
-      this.#groupStates.set(groupKey, state)
-    }
-    return state
-  }
-
-  #cleanupGroupIfEmpty(groupKey: unknown, state: TopKState<K, T>): void {
-    if (state.isEmpty) {
-      this.#groupStates.delete(groupKey)
-    }
-  }
-
   /**
    * Moves the topK window for all groups based on the provided offset and limit.
    * Any changes to the topK are sent to the output.
@@ -122,29 +108,26 @@ export class GroupedTopKWithFractionalIndexOperator<
     for (const [[key, value], multiplicity] of topKBatch(
       this.inputMessages(),
     )) {
-      this.#processElement(key, value, multiplicity, result)
+      const groupKey = this.#groupKeyFn(key, value)
+      let state = this.#groupStates.get(groupKey)
+      if (!state) {
+        state = new TopKState(
+          new TopKArray(this.#offset, this.#limit, this.#comparator),
+        )
+        this.#groupStates.set(groupKey, state)
+      }
+
+      const changes = state.processElement(key, value, multiplicity)
+      handleMoveIn(changes.moveIn, result)
+      handleMoveOut(changes.moveOut, result)
+
+      // Cleanup empty groups to prevent memory leaks
+      if (state.isEmpty) this.#groupStates.delete(groupKey)
     }
 
     if (result.length > 0) {
       this.output.sendData(new MultiSet(result))
     }
-  }
-
-  #processElement(
-    key: K,
-    value: T,
-    multiplicity: number,
-    result: Array<[[K, IndexedValue<T>], number]>,
-  ): void {
-    const groupKey = this.#groupKeyFn(key, value)
-    const state = this.#getOrCreateGroupState(groupKey)
-
-    const changes = state.processElement(key, value, multiplicity)
-    handleMoveIn(changes.moveIn, result)
-    handleMoveOut(changes.moveOut, result)
-
-    // Cleanup empty groups to prevent memory leaks
-    this.#cleanupGroupIfEmpty(groupKey, state)
   }
 }
 
@@ -165,21 +148,9 @@ export function groupedTopKWithFractionalIndex<K extends string | number, T>(
   comparator: (a: T, b: T) => number,
   options: GroupedTopKWithFractionalIndexOptions<K, T>,
 ): PipedOperator<[K, T], [K, IndexedValue<T>]> {
-  return (
-    stream: IStreamBuilder<[K, T]>,
-  ): IStreamBuilder<[K, IndexedValue<T>]> => {
-    const output = new StreamBuilder<[K, IndexedValue<T>]>(
-      stream.graph,
-      new DifferenceStreamWriter<[K, IndexedValue<T>]>(),
-    )
-    const operator = new GroupedTopKWithFractionalIndexOperator<K, T>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader(),
-      output.writer,
-      comparator,
-      options,
-    )
-    stream.graph.addOperator(operator)
-    return output
-  }
+  return unaryOperator(
+    GroupedTopKWithFractionalIndexOperator<K, T>,
+    comparator,
+    options,
+  )
 }

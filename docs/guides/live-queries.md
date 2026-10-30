@@ -1844,6 +1844,8 @@ const user = createLiveQueryCollection((q) =>
 
 Use `distinct` to remove duplicate rows from your query results based on the selected columns. The `distinct` operator ensures that each unique combination of selected values appears only once in the result set.
 
+Implicit result keys are not guaranteed to stay the same across query rebuilds. Configure `getKey` from the selected values when your application needs stable keys.
+
 > [!IMPORTANT]
 > The `distinct` operator requires a `select` clause. You cannot use `distinct` without specifying which columns to select.
 
