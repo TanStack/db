@@ -1147,6 +1147,23 @@ that fails one receiver's current request while comparing another receiver's
 status at the same checkpoint. This is a stated observation limit, not a
 retirement of the per-demand error-ownership law.
 
+The replay error-identity comparison keeps subscription ownership separate
+from the source-wide publication barrier. CI seed `1926301329`, path
+`251:2:1:4:2:2`, exposed a false failure: an include replay rejected while a
+join replay still loaded, and the comparison required the join's earlier
+failure instead. Adapter request data now identifies each load's subscription.
+Only failures and covering replacements within that subscription compete for
+its replay error. A 96-history finite grammar crosses root/marker replay,
+oldest/newest failure order, four join forms, both directions and three window
+widths. It measures 52 histories with multiple failures of one subscription
+and six with sibling failures; both require at least five. The old source-wide
+comparison and a production mutant that returns the last replay failure each
+fail the intended identity assertion. Publication, request-error, retirement,
+readiness and convergence comparisons and campaign budgets remain. This is a
+controlled Collection/live-query witness, with no provider or framework claim.
+Evidence and the oracle self-review are in
+[the callback metadata record](oracle-reviews/callback-metadata.md#replay-error-identity-ci-follow-up-2026-10-30).
+
 The ordered replay owner distinguishes replay renewal from an ordinary lazy
 demand created during another subscription's replay. Its adapter records the
 leases held at truncate, then matches subscription identity and independently

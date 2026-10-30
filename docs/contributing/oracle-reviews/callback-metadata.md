@@ -601,3 +601,98 @@ the report hash itself refer to its own contents:
 | `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `58ae2e54947145220a8b78a28cadc37456e3d11d507ce36846843f002d79550d` |
 | `packages/db/tests/query/ordered-compiler-cache-driver.ts` | `ba7b244250754d9a5d8480847562c26907edf192c8a028973dca0de32e6c43e6` |
 | `packages/db/tests/query/ordered-work-oracle.property.test.ts` | `a8e2f5884570f0659764ad0b7be7398c432b411fcf796dd007ddd3f4bb9d5e68` |
+
+
+## Replay error identity CI follow-up (2026-10-30)
+
+The parent is `86510968691e0080a7484881ed7f54ba58f110af`.
+This follow-up repairs an oracle scope error, with no production changes.
+The earlier production and metadata-oracle fingerprints above remain intact.
+
+**Law and authority.** ARCHITECTURE.md, “Atomic window publication” and
+“Replay participants and failure”, assign each subscription its replay's
+normalized Error, the earliest failure that still decides it. Subscriptions
+share a publication barrier. Their failures do not acquire a common error
+order: one replay can fail while a sibling still loads.
+
+**Experiment.** CI failed `replay.ordered-failed-replay` with seed
+`1926301329`, path `251:2:1:4:2:2`. Exact replay on unchanged production
+failed the identity comparison. The trace holds loads, truncates markers,
+requests window 0/1, then fails newest and oldest held loads. It uses an
+ascending anti-joined window with inline includes and on-demand markers.
+Adapter diagnostics identify failure load 10 with subscription 1 and the
+move's rejected load 8 with subscription 2; load 9 of subscription 1 is still
+pending. The source-wide comparison incorrectly made load 10 decide the
+other subscription's error. This is evidence against the comparison, not a
+production error or a new law decision.
+
+The corrected model records subscription identity from adapter request data.
+Competing failures and covering replacements belong to the same subscription.
+The source-wide retention model stays shared. The exact replay passes.
+A 96-history finite grammar crosses two directions, four join forms, three
+window widths, root/marker replay and oldest/newest failure order. Each uses
+the existing real Collection/live-query driver and every shared comparison.
+Declared reach records 52 histories with multiple own-subscription failures
+and six with sibling failures, each with minimum five. The normal package
+owner run passes all 43 tests, including unchanged fixed/random budgets.
+Type checking reports no errors.
+
+**Calibration.** Restoring the source-wide error order fails the finite grammar
+at the same marker Error identity assertion. A temporary production mutant
+that returns the last replay failure instead of the first fails its root
+Error identity assertion. Both reach their intended comparisons, with no type
+errors. The original production source is restored byte-for-byte.
+These controls distinguish an ownership correction from an unconditional
+waiver of replay error order.
+
+**Inference and limits.** The repair preserves the accepted per-subscription
+error law and freedom between sibling replay verdicts. Existing retention,
+request-error, demand-retirement, readiness, window and convergence checks and
+all campaign budgets remain. This bounds evidence to one query, one-level
+includes, the existing finite source domain and a controlled adapter in the
+real Collection/live-query path. Existing peer exclusions and receiving-provider
+and framework limits remain; this is not universal replay closure.
+
+The evidence directory is
+`/private/tmp/callback-metadata/ci-monitor/20261030T205752Z`:
+`replay-red.*`, `replay-diagnostic.log`, `replay-scope-green.*`,
+`replay-matrix-green.*`, `replay-package-green.*`, `source-wide-check.*`,
+`last-replay-error.*`, and `replay-control-summary.json`.
+The exact replay command is:
+
+```sh
+TANSTACK_DB_ORACLE_SEED=1926301329 \
+TANSTACK_DB_ORACLE_PATH=251:2:1:4:2:2 \
+TANSTACK_DB_ORACLE_PROPERTY=replay.ordered-failed-replay \
+pnpm_config_verify_deps_before_run=false pnpm --filter @tanstack/db exec \
+  vitest run tests/query/load-subset-replay-refinement-oracle.test.ts \
+  -t 'keeps the last publication through a failed replay' \
+  --coverage.enabled=false --maxWorkers=1
+```
+
+This is an oracle self-review, not independent review. ORC conformance:
+
+| Requirement | Outcome |
+| --- | --- |
+| 001, 002 | Existing architecture authority; identity from adapter input, no production verdict helper computes expectations. |
+| 003 | Contract, model distinction, finite grammar and observation remain explained beside executable code. |
+| 004 | Matrix reconstructs the CI trace; removing sibling ownership reproduces the false failure. Finite domains are stated; failure of a load outside a waited replay remains outside the identity premise. |
+| 005 | Real Collections and `setWindow` rejection at replay settlement; no missing source-fact hypothesis is needed for this error-identity comparison. |
+| 006 | Source-wide comparison control and last-error production mutant fail intended assertions. |
+| 007 | Existing fixed/random properties, direct seed/path replay and budgets remain unchanged; finite matrix is bounded enumeration. |
+| 008, 009 | Subscription identity distinguishes a sibling failure from one's own; both can share the publication barrier. Mapping is beside the model. |
+| 010 | Original and diagnostic traces retained; existing finally cleanup and failure propagation remain. |
+| 011 | Shared production/model scope fault was disproved by independent adapter identities and the architecture rule; a second runtime model is unnecessary for this comparison correction. |
+| 012 | Parent and source binding, evidence chronology and all applicable outcomes recorded here. |
+| 013 | Sibling and same-subscription neighbors distinguish global error order from per-replay order. |
+| 014 | Controlled adapter claim only; no real-provider or framework transfer claimed. |
+| 015 | Both declared states exceed minimum five, with 52 and six histories respectively. |
+| 016 | Matrix supplies histories to the same driver and comparison, with no separate expected error. |
+
+Final SHA-256 binding (the report itself is excluded):
+
+| Source | SHA-256 |
+| --- | --- |
+| `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `119f75c35a0b5c472d211997a9f677fa0a92e605d99c8bde46aeda8c14a04560` |
+| `packages/db/src/collection/subscription.ts` | `315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b` |
+| `packages/db/src/query/live/collection-config-builder.ts` | `0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d` |

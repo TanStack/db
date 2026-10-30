@@ -165,7 +165,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * node may list a failure, and the replay-error identity law skips peer
  * histories. The replay-error identity law judges only rejections with a failure of a replay
  * the move waited on; a move that resumes into another failed replay is not
- * judged.
+ * judged. Each subscription owns its replay verdict, even when publication
+ * is shared with a sibling. Error-order comparisons keep that distinction.
  */
 type OrderedFailureState =
   `initiating-keyed-request-failed` | `keyed-reacquisition-failed`
@@ -316,6 +317,8 @@ type OrderedReach = {
   // Deferred window moves that rejected with a failure of a replay they
   // waited on.
   deferredMoveRejections: number
+  ownReplayFailureComparisons: number
+  siblingReplayFailureComparisons: number
   replayLoads: number
   abortRejections: number
   preloadChecks: number
@@ -463,6 +466,8 @@ async function checkOrderedReplay(
     error?: Error
     // Its source, the keys it asked for, and whether it is an ordered read.
     source?: BarrierSource
+    // Publication is shared, but each subscription owns its replay verdict.
+    subscription: LoadSubsetOptions[`subscription`]
     keys?: Set<number>
     ordered?: boolean
   }
@@ -890,6 +895,8 @@ async function checkOrderedReplay(
     requestErrorChecks: 0,
     successWhileSubscriptionOwes: 0,
     deferredMoveRejections: 0,
+    ownReplayFailureComparisons: 0,
+    siblingReplayFailureComparisons: 0,
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
@@ -942,6 +949,7 @@ async function checkOrderedReplay(
               // owner, whose release unloads it.
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
               const load: Load = {
+                subscription: options.subscription,
                 epoch: truncates,
                 outcome: `failed`,
                 source: `markers`,
@@ -990,6 +998,7 @@ async function checkOrderedReplay(
               const startedReady = allReady()
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
               const load: Load = {
+                subscription: options.subscription,
                 epoch: truncates,
                 outcome: `pending`,
                 source: `markers`,
@@ -1146,6 +1155,7 @@ async function checkOrderedReplay(
             const startedReady = allReady()
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = {
+              subscription: options.subscription,
               epoch: truncates,
               outcome: `pending`,
               source: `rows`,
@@ -1367,7 +1377,12 @@ async function checkOrderedReplay(
   // failing, as a demand's replacement does, no longer count. A failure of a
   // load in no waited replay is the move's own window failure after it
   // resumed, which this law does not judge.
+  // The source-wide barrier combines subscriptions only for publication.
+  // Their verdicts remain separate: a sibling can fail while another replay
+  // still loads. Only failures of the rejecting subscription compete for its
+  // earliest error. Subscription identity comes from adapter request data.
   const covers = (later: Load, earlier: Load) =>
+    later.subscription === earlier.subscription &&
     later.ordered === earlier.ordered &&
     later.keys !== undefined &&
     earlier.keys !== undefined &&
@@ -1392,13 +1407,32 @@ async function checkOrderedReplay(
     )
     if (candidates.length === 0) return
     reach.deferredMoveRejections++
+    const rejected = loads.find((load) => load.error === error)!
+    for (const barrier of candidates) {
+      if (
+        barrier.history.filter(
+          (load) => load.subscription === rejected.subscription,
+        ).length > 1
+      )
+        reach.ownReplayFailureComparisons++
+      if (
+        barrier.history.some(
+          (load) => load.subscription !== rejected.subscription,
+        )
+      )
+        reach.siblingReplayFailureComparisons++
+    }
     const earliest = candidates.some((barrier) =>
       barrier.history
         .slice(
           0,
           barrier.history.findIndex((load) => load.error === error),
         )
-        .every((earlier, at) => !stillDecides(barrier, earlier, at)),
+        .every(
+          (earlier, at) =>
+            earlier.subscription !== rejected.subscription ||
+            !stillDecides(barrier, earlier, at),
+        ),
     )
     if (!earliest)
       moveErrorViolation ??= `move ${move} rejected with "${error.message}", not its replay's earliest failure that still decides it`
@@ -2429,6 +2463,68 @@ describe(`Ordered windows across truncate replays`, () => {
     )
   })
 
+  // This finite history grammar varies which source replays, the order of
+  // two load failures, join form, direction and window width. Join plus include
+  // gives sibling subscriptions; the root replay gives same-subscription
+  // failures. The same comparison checks both, without an expected error
+  // copied from production or a source-wide error order.
+  it(`keeps replay error order within each subscription`, async () => {
+    const declared = createOracleReach(
+      `replay.subscription-error-order`,
+      [
+        `ownReplayFailureComparisons`,
+        `siblingReplayFailureComparisons`,
+      ] as const,
+      { minimum: 5 },
+    )
+    for (const direction of [`asc`, `desc`] as const) {
+      for (const joined of [false, `some`, `none`, `inner`] as const) {
+        for (const limit of [1, 2, 3] as const) {
+          for (const markers of [false, true]) {
+            for (const newest of [false, true]) {
+              declared.beginHistory()
+              const observed = await checkOrderedReplay(
+                [
+                  { type: `hold` },
+                  markers
+                    ? { type: `truncateMarkers` }
+                    : { type: `truncate`, armAfterStart: false },
+                  { type: `window`, offset: 0, limit },
+                  { type: `settle`, ok: false, newest },
+                  {
+                    type: `settle`,
+                    ok: false,
+                    newest: !newest,
+                    keepHolding: false,
+                  },
+                ],
+                {
+                  ...ordinaryOrderedScenario,
+                  direction,
+                  joined,
+                  limit,
+                  markerMode: `on-demand`,
+                  includes: true,
+                },
+              )
+              for (const state of [
+                `ownReplayFailureComparisons`,
+                `siblingReplayFailureComparisons`,
+              ] as const) {
+                if (observed[state] > 0) declared.reach(state)
+              }
+            }
+          }
+        }
+      }
+    }
+    console.info(
+      `replay.subscription-error-order`,
+      Object.fromEntries(declared.counts()),
+    )
+    declared.assertReached()
+  }, 120_000)
+
   it.each(orderedReplayCampaigns)(
     `keeps the ordered window under load and release faults (%s campaign)`,
     async (campaign) => {
@@ -2455,6 +2551,8 @@ describe(`Ordered windows across truncate replays`, () => {
         requestErrorChecks: 0,
         successWhileSubscriptionOwes: 0,
         deferredMoveRejections: 0,
+        ownReplayFailureComparisons: 0,
+        siblingReplayFailureComparisons: 0,
         replayLoads: 0,
         abortRejections: 0,
         preloadChecks: 0,
@@ -2493,6 +2591,8 @@ describe(`Ordered windows across truncate replays`, () => {
         `discardedReplayMoves`,
         `requestErrorChecks`,
         `deferredMoveRejections`,
+        `ownReplayFailureComparisons`,
+        `siblingReplayFailureComparisons`,
         `successWhileSubscriptionOwes`,
       ])
       // Counts are histories, rather than repeated events in one trace.
