@@ -320,6 +320,8 @@ type OrderedReach = {
   ownReplayFailureComparisons: number
   siblingReplayFailureComparisons: number
   siblingSuccessfulCoverage: number
+  // Owed request-error comparisons after another subscription asked for its keys.
+  siblingRequestErrorChecks: number
   newSiblingReplayFailures: number
   newSiblingReplayRetirements: number
   newSiblingReplayRecoveries: number
@@ -749,18 +751,19 @@ async function checkOrderedReplay(
   // request error on the query's own node. The error stays until one of these
   // meets it:
   // - its demand retires, which aborts its request and unloads it;
-  // - a later load of the source asks for some of its keys: that newer
+  // - a later load of the same subscription asks for some of its keys: that newer
   //   request of the demand decides them, and keys it no longer asks for
   //   left the demand (ARCHITECTURE.md law 16: a lazy demand's error clears
   //   when that demand settles or is released; a key's latest load decides
   //   it);
-  // - a later load of the same source covers its keys;
+  // - a later load of the same subscription covers its keys;
   // - a replay of its source that rose after the failure completes, since a
   //   replay asks again for every held demand.
   // A failure that joins a replay waits for its subscription's verdict,
   // which comes once that subscription's participants settled, so it owes
   // no error before then. The barrier that holds publication stays shared
-  // across the query's subscriptions to the source. Keys come from evaluating the request's
+  // across the query's subscriptions to the source. A sibling's successful
+  // load cannot decide this demand's error. Keys come from evaluating the request's
   // `where` over a small key domain, independent of production's bookkeeping.
   // The account combines the production concepts of a failed request and the
   // replay verdict that decides it; it names no production structure.
@@ -790,6 +793,7 @@ async function checkOrderedReplay(
   const requestFailures: Array<RequestFailure> = []
   const loadedKeys: Array<{
     source: BarrierSource
+    subscription: LoadSubsetOptions[`subscription`]
     keys: Set<number>
     at: number
   }> = []
@@ -827,7 +831,12 @@ async function checkOrderedReplay(
       )
     )
       reach.newSiblingReplayRecoveries++
-    loadedKeys.push({ source, keys, at: ++requestClock })
+    loadedKeys.push({
+      source,
+      subscription: options.subscription,
+      keys,
+      at: ++requestClock,
+    })
   }
   const recordRequestFailure = (
     load: Load,
@@ -868,6 +877,7 @@ async function checkOrderedReplay(
       (later, index) =>
         index > at &&
         later.source === failure.source &&
+        later.subscription === failure.options.subscription &&
         !later.ordered &&
         [...failure.keys].some((key) => later.keys?.has(key)),
     )
@@ -875,6 +885,7 @@ async function checkOrderedReplay(
     const covered = loadedKeys.some(
       (loaded) =>
         loaded.source === failure.source &&
+        loaded.subscription === failure.options.subscription &&
         loaded.at > failure.at &&
         [...failure.keys].every((key) => loaded.keys.has(key)),
     )
@@ -962,6 +973,7 @@ async function checkOrderedReplay(
     ownReplayFailureComparisons: 0,
     siblingReplayFailureComparisons: 0,
     siblingSuccessfulCoverage: 0,
+    siblingRequestErrorChecks: 0,
     newSiblingReplayFailures: 0,
     newSiblingReplayRetirements: 0,
     newSiblingReplayRecoveries: 0,
@@ -1442,6 +1454,19 @@ async function checkOrderedReplay(
     if (owed.length === 0) return
     reach.requestErrorChecks++
     for (const failure of owed) {
+      // Reach is measured at the health assertion, after a sibling asked
+      // for overlapping keys that cannot decide this subscription's error.
+      if (
+        loads.some(
+          (later, index) =>
+            index > loads.indexOf(failure.load) &&
+            later.source === failure.source &&
+            later.subscription !== failure.options.subscription &&
+            !later.ordered &&
+            [...failure.keys].some((key) => later.keys?.has(key)),
+        )
+      )
+        reach.siblingRequestErrorChecks++
       expect(
         [live, peer].some((query) =>
           query?.health.error?.errors.some(
@@ -2687,7 +2712,7 @@ describe(`Ordered windows across truncate replays`, () => {
   it(`retains sibling replay failures through successful coverage`, async () => {
     const declared = createOracleReach(
       `replay.subscription-success-scope`,
-      [`siblingSuccessfulCoverage`] as const,
+      [`siblingSuccessfulCoverage`, `siblingRequestErrorChecks`] as const,
       { minimum: 1 },
     )
     for (const direction of [`asc`, `desc`] as const) {
@@ -2720,8 +2745,12 @@ describe(`Ordered windows across truncate replays`, () => {
                   includes: true,
                 },
               )
-              if (observed.siblingSuccessfulCoverage > 0)
-                declared.reach(`siblingSuccessfulCoverage`)
+              for (const state of [
+                `siblingSuccessfulCoverage`,
+                `siblingRequestErrorChecks`,
+              ] as const) {
+                if (observed[state] > 0) declared.reach(state)
+              }
             }
           }
         }
@@ -2763,6 +2792,7 @@ describe(`Ordered windows across truncate replays`, () => {
         ownReplayFailureComparisons: 0,
         siblingReplayFailureComparisons: 0,
         siblingSuccessfulCoverage: 0,
+        siblingRequestErrorChecks: 0,
         newSiblingReplayFailures: 0,
         newSiblingReplayRetirements: 0,
         newSiblingReplayRecoveries: 0,
@@ -2807,6 +2837,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `ownReplayFailureComparisons`,
         `siblingReplayFailureComparisons`,
         `siblingSuccessfulCoverage`,
+        `siblingRequestErrorChecks`,
         // The constructive new-sibling grammar declares these rare premises.
         `newSiblingReplayFailures`,
         `newSiblingReplayRetirements`,
