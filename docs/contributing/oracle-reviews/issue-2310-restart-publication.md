@@ -2,9 +2,14 @@
 
 Reviewed source: [issue #2310](https://github.com/TanStack/db/issues/2310),
 including its complete body and no comments, retrieved 2026-10-30.
-Base and current HEAD: `c351fc04d7f70dc59bf92ecbed310f899b9511cd`.
-The repair is an uncommitted diff on `codex/issue-2310-publication`.
+Original investigation base: `c351fc04d7f70dc59bf92ecbed310f899b9511cd`.
+At that checkpoint, the repair was an uncommitted diff on `codex/issue-2310-publication`.
 Production and oracle repairs were made. No product-law change is needed.
+
+This document is a chronology. Later sections supersede earlier branch and
+measurement claims. PR [#2313](https://github.com/TanStack/db/pull/2313) published
+the repair. The [external review evaluation](2026-10-30-pr-2313-review.md)
+supersedes the original 72-state reach claim and records the current evidence.
 
 ## Law, experiment, and inference
 
@@ -33,7 +38,7 @@ needs a changed expectation. The actual source write supplies membership before
 the disputed publication cut, so there is no missing-provider-information
 hypothesis at this controlled boundary.
 
-## Reach and grammar
+## Original reach and grammar (superseded)
 
 The original general grammar already generated the counterexample; the defect
 was not a false-green model. Its finite random budget did not reliably exercise
@@ -163,9 +168,8 @@ law remains; generated passing histories are not a universal proof.
 ## Lossless finding ledger
 
 Source-order IDs preserve the issue's separate claims and requirements. No
-comments, footnotes or capped findings were present. Raw source and append-only
-working evidence are retained locally in `.review-2310/`; that scratch directory
-is not part of the proposed change.
+comments, footnotes or capped findings were present. The linked issue supplies the source. This versioned record preserves the
+decisive traces, commands, results, and limits without requiring local scratch.
 
 | ID | Original claim or action | Evidence / verdict | Action | Durable value and destination |
 | --- | --- | --- | --- | --- |
@@ -177,13 +181,6 @@ is not part of the proposed change.
 Sibling S1: ordinary source delivery of an equal independent retained row also
 vanishes. This is confirmed and fixed under the same law, with its own generated
 receiving path and pre-edit RED. It is separate from the four raw items.
-
-Reviewer assessment: high accuracy and signal, strong replay evidence and clear
-prioritization. The report correctly distinguished a mismatch from a diagnosed
-production bug and required the authority/neighbor audit. It proposed no
-premature implementation cure. Hire recommendation: positive for diagnostic
-work demonstrated by this report; a single issue does not establish broader
-review performance.
 
 Loss audit: **4 raw items = 3 fixed-now + 1 accepted-design**. No confirmed-open,
 deferred, stale, refuted, design-decision or duplicate items remain. S1 is also
@@ -220,7 +217,7 @@ Worktree setup: `.worktrees/codex-issue-2310-publication`, branch
 `codex/issue-2310-publication`, based on freshly fetched `origin/main` at the
 recorded HEAD. Initial publication to
 `origin/codex/issue-2310-publication` succeeded. `pnpm install` succeeded without
-local overrides. The repair and evidence remain uncommitted; no PR was created.
+local overrides. At that original checkpoint, the repair and evidence were uncommitted and no PR existed.
 
 Exact surrounding verification command:
 
@@ -251,7 +248,7 @@ preserved. The code/test diff SHA-256 remains
 `2544ec5a5e5e2727a22be470ae53d3ca4ef4e6d31900cc326501cea60b877e27`.
 No source or oracle repair was added during quality review.
 
-At this current HEAD, the same eight-suite verification command above passes
+At that prep-pr checkpoint, the same eight-suite verification command above passes
 **646 tests** and `pnpm --filter @tanstack/db exec tsc --noEmit` is clean.
 An independent reviewer additionally ran the shared issue replay and four new
 campaigns (**5 passed**) and the original exact seed/path replay (**1 passed**).
@@ -261,8 +258,7 @@ in the private replacement and the final diff owns redundant-update suppression.
 The simplifier considered delivery-parameter and typed-owner-metadata alternatives
 but declined them because the existing bounded grammar remains clear and small.
 
-The complete review outputs and lossless evaluation are retained in local
-`.review-2310/` scratch. There are no behavioral findings or law decisions to
+The preceding paragraphs record the review conclusions and validation. There are no behavioral findings or law decisions to
 resolve. Two declined style alternatives were evaluated, and the duplicated
 request for current-head evidence is closed by this append. The review did not
 change any law, exclusion, comparison, generator or run budget. This supplements
@@ -377,10 +373,7 @@ request and verified with TypeScript and the surrounding suites.
 
 Lossless evaluation: **one raw suggestion = one fixed-now item**. No
 confirmed-open, deferred, refuted, stale, design-decision or duplicate item
-remains. Both reviews receive a hire recommendation for this scope: accurate
-boundary analysis, useful validation and no unsupported contract changes.
-The raw reports and item ledger remain in local scratch. The source-order
-suggestion and its full rationale are preserved above.
+remains. The source-order suggestion and its rationale appear above.
 
 The exact eight-suite command recorded earlier passes **646 tests** on the
 final refactor, with no type errors. `pnpm --filter @tanstack/db exec tsc --noEmit`,
@@ -442,3 +435,16 @@ against the base. Tests and documentation grow separately. The final claim is
 negative minified production weight and negative gzip across every measured
 app. Brotli remains mixed, including +20 bytes for the typical app and +5 bytes
 for DB. No names or formatting were tuned to change compression results.
+
+
+## External review correction
+
+The external review evaluated published head `ef6316a91`. Its
+[versioned evaluation](2026-10-30-pr-2313-review.md) records all ten findings.
+The original 72 labels were constructed history categories, not 72 measured
+production states. Fixture-dependent equality made that claim too strong.
+The updated owner measures actual retained and delivered values, executed
+settlement and owner lifetime, and replacement acquisition counts. It uses
+51 distinct structural cases plus four three-relation receiving paths.
+The production repair and the final shipped-byte measurements above remain
+unchanged.

@@ -2356,14 +2356,30 @@ The following related oracles own distinct production paths or observation cuts:
   delivery paths (acquisition writes and independent source writes), six demand
   lifetimes (pending, settled, two live demands, aborted, released, absent),
   three prior-row relationships (absent, equal, changed), and resolve/reject
-  commands. Canceled or absent current attempts are explicitly measured as no-ops.
-  Fixed and random campaigns each reach all 72 declared history states 12 times;
-  both current outcomes are structural, while keys, values, and obsolete outcomes
-  vary. The exact issue #2310 history remains a shared replay. Original suppression,
-  an acquisition-only repair, and retention of omitted rows fail publication
-  assertions. [Evidence and limits](oracle-reviews/issue-2310-restart-publication.md).
-  This crossing concerns direct subscriptions under the controlled sync boundary;
-  it does not establish delegated includes or external-provider behavior.
+  commands for live acquisitions. Acquisition histories without a live attempt
+  distinguish absent from retained rows and measure the settlement as a no-op;
+  they do not claim restored equality. The single scenario grammar has 24
+  acquisition and 27 source cases. Each case reaches its measured owner lifetime,
+  prior/delivered row relation, current outcome, and restarted acquisition count
+  12 times in each fixed/random campaign. Explicit generated row values and
+  zero to three prior retired acquisitions remove the fixture-attempt-ID premise.
+  Additional direct, filtered, ordered-snapshot and snapshot-before-source-events
+  drivers each measure absent/equal/changed rows 12 times per campaign and reuse
+  the owner's Map diff at held and settled publication cuts. The predicate
+  excludes a real nonmatching row; ordered selection covers the complete bounded
+  two-row replacement, not arbitrary windows. The exact issue #2310 history
+  remains a shared replay. Original suppression fails every restart campaign;
+  the earlier acquisition-only and retention-of-omitted-rows mutants remain
+  recorded. [Evidence and limits](oracle-reviews/2026-10-30-pr-2313-review.md).
+  This crossing concerns direct subscriptions under the controlled sync boundary.
+  Eager sources follow a separate accepted first-public-batch reconciliation law
+  in ARCHITECTURE's cleanup/restart section. The supplemental
+  `collection-restart-publication-boundaries.test.ts` observes its before-ready
+  deletion and later reinsertion, and checks actual compiled-query cleanup and
+  restart in eager/on-demand modes. Public cleanup refuses active dependents;
+  internal cleanup crashes them; restarting the query builds a fresh result.
+  This evidence does not claim source-only restart revives a query, nor does it
+  establish delegated includes, arbitrary ordered windows, or external providers.
   Bounded three-row histories now compare a subscription's selected keys with
   callback key/type batches across full, explicit, filtered, and empty snapshots,
   two later ordered selections, both initial-state modes, and callback reentry.
