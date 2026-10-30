@@ -116,8 +116,11 @@ function withFlippedZero(
     : command
 }
 
-// Reach: source writes that change a public row only by the sign of a zero.
+// Reach: source writes that change a public row only by the sign of a zero,
+// and source writes over a row a failed replay or cleanup retained.
 let zeroSignWrites = 0
+let retainedWrites = 0
+let zeroSignRetainedWrites = 0
 
 type PublicationCommand =
   | Exclude<LifecycleCommand, { type: `truncate` }>
@@ -208,9 +211,19 @@ function recordSourceWrite(publication: PublicationModel, row: Row): void {
   // Retained public rows take precedence when reconciling a stale snapshot.
   const previous =
     publication.visible.get(row.id) ?? publication.source.get(row.id)
-  if (previous?.value === row.value && !Object.is(previous.value, row.value)) {
-    zeroSignWrites++
+  const zeroSign =
+    previous?.value === row.value && !Object.is(previous.value, row.value)
+  if (zeroSign) zeroSignWrites++
+  if (publication.retainedKeys.has(row.id)) {
+    retainedWrites++
+    if (zeroSign) zeroSignRetainedWrites++
   }
+  // A write of the value the source already holds changes nothing in the
+  // Collection, so it publishes nothing (PUB-6), even to a subscriber that
+  // still shows a retained older value. That subscriber is updated by a
+  // later change or request, as this file's law states.
+  const installed = publication.source.get(row.id)
+  if (installed !== undefined && Object.is(installed.value, row.value)) return
   publication.source.set(row.id, cloneRow(row))
   publication.retainedKeys.delete(row.id)
   // The same value publishes nothing; -0 and 0 are distinct row values
@@ -576,7 +589,7 @@ const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.oneof(
 // Truncate-with-replacement rows are outside this random grammar and have
 // separate fixed cases. A malformed sync transaction with an unmatched begin
 // is excluded: each generated source mutation commits as one transaction.
-const publicationCommandHistoryArbitrary: fc.Arbitrary<
+const randomPublicationHistoryArbitrary: fc.Arbitrary<
   Array<PublicationCommand>
 > = greenLifecycleHistoryArbitrary.chain((history) =>
   fc
@@ -596,6 +609,51 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
       }
       return commands
     }),
+)
+
+/**
+ * A failed replay that leaves public rows retained, then source writes over
+ * them: rows the source wrote, a demand that loads, a truncate, a rejected
+ * replay, and the final owner's release, with generated source writes
+ * before, during, and after. A random lifecycle history rarely puts these
+ * in this order, and only this order reaches the stale reconcile of a
+ * retained row.
+ */
+const failedReplayHistoryArbitrary: fc.Arbitrary<Array<PublicationCommand>> = fc
+  .record({
+    before: fc.array(sourceMutationArbitrary, { minLength: 1, maxLength: 3 }),
+    during: fc.array(sourceMutationArbitrary, { maxLength: 2 }),
+    after: fc.array(sourceMutationArbitrary, { minLength: 1, maxLength: 3 }),
+    demand: fc.constantFrom<DemandName>(`a`, `b`),
+  })
+  .map(({ before, during, after, demand }): Array<PublicationCommand> => [
+    ...before,
+    { type: `request`, demand },
+    {
+      type: `settle`,
+      demand,
+      scope: `current`,
+      age: `oldest`,
+      outcome: `resolve`,
+    },
+    { type: `truncate` },
+    ...during,
+    {
+      type: `settle`,
+      demand,
+      scope: `current`,
+      age: `oldest`,
+      outcome: `reject`,
+    },
+    { type: `release`, demand },
+    ...after,
+  ])
+
+const publicationCommandHistoryArbitrary: fc.Arbitrary<
+  Array<PublicationCommand>
+> = fc.oneof(
+  { weight: 3, arbitrary: randomPublicationHistoryArbitrary },
+  { weight: 1, arbitrary: failedReplayHistoryArbitrary },
 )
 
 async function runPublicationHistory(
@@ -2464,11 +2522,10 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   })
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 60 * multiplier
-  // Generated histories never write over a retained row (a failed replay's
-  // carried row): the random grammar inserts source writes into green
-  // lifecycle histories. The pinned zero-sign history below covers that path.
-  it(`reaches a zero-sign source write in the fixed campaign`, async () => {
+  it(`reaches zero-sign and retained-row source writes in the fixed campaign`, async () => {
     zeroSignWrites = 0
+    retainedWrites = 0
+    zeroSignRetainedWrites = 0
     for (const history of fc.sample(publicationCommandHistoryArbitrary, {
       seed: 1_657_005,
       numRuns: runs,
@@ -2476,6 +2533,8 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       await runPublicationHistory(history)
     }
     expect(zeroSignWrites).toBeGreaterThan(0)
+    expect(retainedWrites).toBeGreaterThanOrEqual(5)
+    expect(zeroSignRetainedWrites).toBeGreaterThan(0)
   }, 120_000)
   fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,

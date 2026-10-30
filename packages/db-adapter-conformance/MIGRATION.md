@@ -220,3 +220,13 @@ document update removes`) failed the same way.
     driver does not declare the capability.
   - **RxDB:** its storage cannot hold two documents with one key, so the
     capability does not apply.
+- **2026-10-30, retained rows in core's publication oracle.** The lifecycle
+  publication oracle gained a generated failed-replay history, drawn one
+  time in four, and declared reach for source writes over retained rows (at
+  least five) and zero-sign ones. Its generated campaigns now reject
+  `reconcileStalePublishedChanges` with deepEquals, which only a pinned
+  replay rejected before. The new histories exposed one model rule no
+  history had reached: the model published a write equal to the installed
+  source row to a subscriber that still showed a retained older value.
+  Production publishes nothing, as PUB-6 and the oracle's own law (a later
+  request updates that row) require; the model now agrees.
