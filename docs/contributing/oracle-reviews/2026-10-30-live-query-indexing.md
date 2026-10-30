@@ -212,3 +212,68 @@ Reviewed content fingerprint: `36e3373439814c25f940c96c79a6f294344b2d2d049d12c54
 changed package/test path, NUL, byte length, NUL, and contents, followed by the
 guide and coverage-map changes in the same sorted path list; excludes this
 record and local research notes). Base remains the commit named above.
+
+
+## Production-size follow-up, 2026-10-30
+
+The maintainer requested a net-negative production change after publication of
+`dbcf34a15f766b25765aa109b7f243710fef40a2`. This follow-up changes only React's
+existing hook implementation and this record. The indexing contract, oracle
+models, history budgets, and observation checkpoints remain unchanged.
+
+The refactor consolidates Suspense eligibility into one block, removes the
+unreachable unassigned-stream-identity branch and redundant null comparison,
+and creates each observer and its stable subscription together. Cache teardown
+captures its dependencies once and stores the three listener removers directly.
+It keeps the same specific cleanup, error, and crash events, removal order,
+collection-identity guard, and deferred error/crash retirement. Client lookup
+uses one optional property read, and query preparation uses the existing core
+function directly instead of a pass-through wrapper.
+
+Two broader candidates were discarded: aliasing the builder configuration grew
+compressed size, and replacing its join traversal with a switch and array
+predicates did not reduce it. The final follow-up leaves DB production code
+unchanged from the published implementation. Consolidating all three cache
+listeners through a mapped event list also cost more than a direct list of
+removers. The measurements do not depend on renaming identifiers or deleting
+comments. Tests and contracts remain intact.
+
+`pnpm size:compare --packages db,react-db`, after a fresh `origin/main` fetch,
+compares with the same merge-base `bfd1da1a7`:
+
+| Production bundle | Gzip delta, bytes | Brotli delta, bytes |
+| --- | ---: | ---: |
+| DB exports | +26 | -42 |
+| React exports | -33 | -35 |
+| Two-package total | -7 | -77 |
+| Typical app | -14 | -54 |
+
+The typical app changed from +63 gzip/+31 brotli bytes before this follow-up
+to -14 gzip/-54 brotli bytes: a reduction of 77 gzip and 85 brotli bytes. A
+second run after formatting reproduced these totals. Feature-specific scenarios
+vary: gzip deltas range from -28 to +1 bytes, while brotli deltas range from
+-34 to +43 bytes. These are bundle-size observations, not runtime benchmarks
+or a claim that every feature combination becomes smaller. Test and contract
+source growth remains separate from the production bundle measurements. The
+PR adds 25,388 bytes of uncompressed test source and about 18.6 kB of guides,
+contracts, and evidence documentation. Neither contributes to the shipped
+bundles above.
+
+Final verification:
+
+```sh
+pnpm --filter @tanstack/react-db exec vitest run --coverage.enabled=false --maxWorkers=2
+pnpm --filter @tanstack/react-db exec tsc --noEmit --pretty false
+pnpm lint:changed
+git diff --check
+```
+
+All 35 React test files pass, with 3,568 tests and no type errors. This includes
+the indexing receiver, standard conformance, disabled and conditional inputs,
+source-ID ownership, bound options, Suspense cache/recovery, hydration, pooling,
+uncommitted renders, and StrictMode. The standalone TypeScript check also
+passes. `pnpm lint:changed` and `git diff --check` pass. Existing oracles exercise the unchanged contract, so this refactor
+adds no new model rule or coverage exclusion. The earlier RED and mutant
+results remain historical evidence for the indexing behavior.
+
+React source SHA-256 after the refactor: `7b9c1233ee22c2c0451a19bc068a402b580f423e23b3c01a4e2da71476f4ce07`.
