@@ -6412,3 +6412,17 @@ for authority, RED, reach, mutant, grammar controls, historical gate limits and
 receiving-path limits. This is core Collection publication evidence and a Node
 SQLite/coordinator receiving witness with controlled Electric streams. It does
 not claim Effect, provider, framework, deeper include, or browser-process closure.
+
+
+### Subscription-scoped request-error assertion (2026-10-30)
+
+The primary load-subset replay owner now retains subscription identity in its
+later-request and successful-coverage account. A sibling requesting overlapping
+source keys cannot exempt the failed demand's public health error. Its existing
+96-history sibling-success grammar measures the actual owed-error assertion in
+four histories, alongside four successful-sibling-coverage histories. A targeted
+omitted-error observation passes the former source-wide account and fails the
+scoped health comparison. All existing comparisons, histories, budgets and
+reach minima remain. The controlled core, one-level include and peer limits
+remain those of this owner; no provider or framework claim follows. See the
+[versioned repair record](oracle-reviews/2026-10-30-release-replay-retention.md#subscription-scoped-request-error-checker-repair).

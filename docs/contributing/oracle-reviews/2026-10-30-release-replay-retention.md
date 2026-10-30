@@ -152,3 +152,66 @@ The following SHA256 fingerprints bind the main-based executable evidence to PR 
 | `packages/browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts` | `67c16d284522417f1a77e0a36efcc552b718f858ea8ec00771f001f001160782` |
 
 Focused ESLint reports zero errors and two existing `no-shadow` warnings. Prettier, whitespace, and `pnpm lint:changed` pass. No run budget decreased or disappeared.
+
+## Subscription-scoped request-error checker repair
+
+CodeRabbit review 5719714297 covered repair head
+`0e5a5234b9fe4a26244a0e52d3862916a7f4ce7e`. Its one behavioral
+finding identified a false-green request-error classification. Architecture
+law 16 and the glossary's request-error rule already scope a lazy demand's
+error to that demand. A sibling subscription asking for or loading the same
+source keys cannot decide it. Shared publication does not merge verdicts.
+The existing complete authoritative source-recovery control still decides the
+held demands together; an individual sibling verdict does not supply it.
+
+The old account stored successful keys by source alone. Both its later-request
+and later-coverage exemptions omitted subscription identity. The repair keeps
+that identity in the recorded successful acquisition and requires it in both
+exemptions. This is an oracle enforcement repair. Production is unchanged.
+
+The existing 96-history sibling-success grammar varies direction, join form,
+width, replay source and settlement order. A receipt probe found four histories
+with eight observation cuts where the old account exempted an error the scoped
+account owed. Production listed the exact injected error at all eight cuts.
+The cut concerns a later sibling request; the experiment did not establish a
+later successful sibling-coverage cut with an otherwise owed request error.
+An initial reach counter for that stronger premise correctly failed at zero.
+It remains in the scratch evidence. The final declared reach names the actual
+sibling-request error comparison and reaches four histories. The existing
+successful-sibling-coverage reach also remains four.
+
+Calibration supplies a wrong public observation to the same health comparison:
+omit the injected error only at those distinguishing cuts. The old account
+accepts it. The scoped account rejects it at `after settle: request error`,
+with expected true and actual false. A broader temporary production mutant
+that suppressed every ready-query replay error already failed the old checker;
+it is not evidence for this newly repaired gap. Both temporary sources were
+restored. The real production owner passes all 45 tests, including fixed and
+random campaigns, with the stronger classifier. The reported seeds and paths
+from issues 2294 and 2315 each pass the direct replay interface as well. These
+are bounded replay results, not closure of either whole issue or provider
+adapter conformance from issue 2118.
+
+ORC review (author self-review): 001/002/003 use the accepted demand-scoped
+law, independently evaluated request keys and explanatory local prose.
+004/013 retain all 96 legal histories and their direction/join/width/source/
+settlement neighbors; collapsing subscription identity is the wrong rule.
+005/006/015 exercise the real Collection sync path and public health error
+identity after each command, measure four distinguishing histories and reject
+the targeted omission. 007 retains all fixed/random campaigns, budgets and
+seed/path replays. 008/009 retain subscription identity because equal source
+keys can have different demand verdicts. 010 retains primary mismatch and
+cleanup separation. 011 has no new shared production/model semantic-fault
+hypothesis: the defect was an exemption before the assertion. 012 is this
+versioned bounded record. 014 keeps the controlled core boundary and makes no
+provider/framework handoff claim. 016 adds no unit expectation or standalone
+fixture. No law, comparison, budget or prior reach minimum was weakened.
+
+The checker evidence is stored under
+`/private/tmp/callback-metadata/release-replay-repair/review-5719714297`.
+Commands use the saved `vitest.config.mjs` for the full primary owner and
+`-t 'retains sibling replay failures through successful coverage'` for the
+finite calibration, with one worker and dependency verification disabled.
+The amended primary owner SHA256 is `a2ab454ff5a77aa47bf57cbd590b67a2a5602d3dd6897af051fb1819b9482ce7` on both branches. The earlier
+table binds the original repair evidence. Its runtime and browser hashes remain
+unchanged; callback runtime hashes remain bound by its separate port record.

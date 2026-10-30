@@ -1036,3 +1036,16 @@ Scratch evidence is under `/private/tmp/callback-metadata/release-replay-repair`
 | `packages/db/src/collection/subscription.ts` | `bd171bdc97b38a79ebbc81d7fb605267787308559ad4c0646dff1e072a43798a` |
 | `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `e5ce4a77fe8d16f4b0d26f4c71fdadb53b2779c8e7e8313a7eb32d2de3ebdd38` |
 | `packages/browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts` | `67c16d284522417f1a77e0a36efcc552b718f858ea8ec00771f001f001160782` |
+
+
+### Subscription-scoped request-error checker port (2026-10-30)
+
+Review 5719714297 on repair PR 2318 identified a primary-oracle exemption that
+combined sibling subscriptions by source keys. The same unchanged classifier
+was present here. The oracle-only repair retains subscription identity for
+later requests and coverage, and measures the owed public health comparison in
+the existing 96-history grammar. The shared
+[versioned amendment](2026-10-30-release-replay-retention.md#subscription-scoped-request-error-checker-repair)
+records the accepted law, old/new distinguishing probe, targeted omitted-error
+calibration, intermediate zero-reach result and limits. This port changes no
+runtime source, browser grammar, shipped-size result or compiler fingerprint.
