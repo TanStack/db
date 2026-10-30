@@ -410,6 +410,13 @@ and normalized compilations separately. Each ordered top-K retains its own
 window; the source loader's registered plan covers every window that shares
 that source, including subsequent moves.
 
+Ordered plan aggregation also retains every joined source whose pending demand
+gates a retained plan. An outer ordered QueryRef without a join cannot erase
+its child's joined dependency. A second ordered join adds its dependency to
+the first. Ordered continuation and Collection/Effect publication wait for all
+of them. The ordered-work owner checks this composition through actual
+Collection and Effect receivers while either joined acquisition is held.
+
 The runtime owner checks select, where and having source inputs through root,
 wrapped child, direct child and real Effect receivers. Predicate-with-select
 controls distinguish callback syntax from placement. Collection receivers

@@ -696,3 +696,166 @@ Final SHA-256 binding (the report itself is excluded):
 | `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `119f75c35a0b5c472d211997a9f677fa0a92e605d99c8bde46aeda8c14a04560` |
 | `packages/db/src/collection/subscription.ts` | `315a043966bf03ae7671e1e34338692d93eb91f04223a7c079a7585c4a54860b` |
 | `packages/db/src/query/live/collection-config-builder.ts` | `0c00f76f05ecdea1c842e47e7749ed5dafbbb32f5c9f8a0937faf2776b4f474d` |
+
+
+## Ordered joined dependency review (2026-10-30)
+
+This entry evaluates CodeRabbit review `5718630084`, run
+`bbef8b96-93c0-425c-ac82-76ae3c71abec`, reviewed commit
+`86510968691e0080a7484881ed7f54ba58f110af`. Its selected file was
+`compiler/basic.test.ts`; the behavioral finding was outside that diff and
+survived unchanged at repair parent `8464ec97725a14c9df103e170d9367737c9ef41a`.
+The earlier metadata, compiler and replay evidence remains historical evidence
+for its named source bindings. This entry supersedes the earlier fingerprints
+of the files changed here. The final source binding below identifies this
+repair without claiming that the external review covered it.
+
+**Law and authority.** The architecture's “Ordered requests, continuation,
+and recovery” and “Atomic window publication” require ordered continuation
+and publication to wait for required joined demand. Retaining two ordered
+plans over one source retains both plans' joined dependencies. An outer
+QueryRef that has no join cannot remove its child's dependency. A second join
+cannot substitute its own source for the child's. This is enforcement of the
+existing complete-window law, with no new product decision.
+
+**Experiment.** The primary `ordered-work-oracle.property.test.ts` owner had
+compiler/cache composition coverage and joined receiving coverage separately.
+It lacked their intersection: nested ordered plans while joined acquisition
+is held. Its new independent judgment filters complete source rows, sorts
+and slices using `expectedInstalledWindow`. It never reads the compiler plan
+or production publication classifier to compute an expected result.
+The supporting `ordered-joined-plan-driver.ts` uses actual live-query
+Collections and Effects with controlled source adapters. Adapter request data
+selects the marker rows independently through the reference expression judge.
+The model's held/partial state abstracts pending acquisition and the preceding
+complete public snapshot. The settled state adds the new row and recomputes
+membership. Source facts for that row are deliberately unavailable until the
+held adapter answers, so the promised early observation is retention, not a
+speculative result that needs those missing facts.
+
+Before production edits, 128 finite histories crossed Collection/Effect,
+ascending/descending, matched/anti-joined filters, direct/wrapped/two-filter
+nested ordering, widths one/two, source answer order and the source that vetoes
+new row 4. Each compares initial settled rows and every recorded change-callback
+snapshot or Effect `onBatch` snapshot plus the public read at held, partial
+and settled cuts. All 256 declared held/settled states reached once, minimum
+one, including both receivers separately. Unchanged parent production failed
+24 intended publication comparisons (12 Collection and 12 Effect), with 104
+passes and no type errors. In a wrapped anti-join, row 4 became visible while
+its marker acquisition remained held, then disappeared after settlement.
+Direct-query controls retained the preceding result correctly.
+
+The first draft also asserted atomic ordinary Effect startup callbacks. The
+architecture explicitly permits progressive startup, so that assertion was
+incorrect. It produced two additional failures. Before production edits, the
+comparison was corrected to establish the initial settled baseline and begin
+its new publication claim afterward. Both earlier logs remain; they do not
+supply the authoritative RED result. The final 128-history RED is
+`joined-plan-red-final.{json,log}` in the evidence directory below.
+
+**Repair and calibration.** The compiler stores the union of joined source
+IDs when registering ordered plans. Loader continuation, Collection publication
+and operation tracking, and Effect publication inspect every dependency.
+The new matrix passes all 128 histories. The normal package run passes all
+647 tests across the ordered owner and three affected loader/work suites,
+including the original 424 owner tests and unchanged fixed/random budgets.
+After final type/API-overload and local-name corrections, the same 128-history
+matrix passes again. Focused no-emit TypeScript, ESLint (zero errors, five
+existing warnings), Prettier, whitespace and changed-file enforcement pass.
+
+Restoring overwrite semantics fails 24 intended comparisons. A last-only
+fallback, equivalent to retaining the new dependency when present, fails eight.
+A first-only fallback fails eight. Each narrow control loses the source that
+vetoes row 4 in the opposite answer-order cell. All failures are the intended
+`ordered joined plan publication mismatch`, not timeouts or setup failures.
+All temporary mutants were restored. This rejects both the original defect
+and plausible repairs that preserve only one source.
+
+**Inference and limits.** The finite evidence closes the reported loss of
+joined dependencies and its two-source sibling within these legal histories,
+actual core receivers and publication cuts. It preserves direct controls,
+settled membership, direction and width, and does not add speculative callbacks.
+It covers one inserted head row, at most two joined dependencies, one QueryRef
+level, widths one/two and controlled successful acquisition. It does not claim
+arbitrary nesting, provider/framework timing, new rejection/cleanup laws,
+public window-promise integration or atomic ordinary Effect startup. Other
+ordered-work limits and existing static metadata/P11/P12 gaps remain recorded
+with their prior owners. No known counterexample remains in this new matrix.
+
+Evidence directory:
+`/private/tmp/callback-metadata/ci-monitor/20261030T210918Z`.
+It contains the complete raw review/conversation bodies, append-only ledger
+references, pre-edit source copies and fingerprints, diagnostic probe,
+`joined-plan-red-final.*`, `joined-plan-green.*`, `joined-plan-package-green.*`,
+`joined-plan-final-green.*`, three `joined-plan-mutant-*` runs and summary,
+`joined-plan-types-final.log`, `joined-plan-eslint-final.log`, formatting and
+changed-file enforcement logs. The matrix command is:
+
+```sh
+pnpm_config_verify_deps_before_run=false pnpm --filter @tanstack/db exec \
+  vitest run tests/query/ordered-work-oracle.property.test.ts \
+  -t 'retains every joined dependency' --coverage.enabled=false --maxWorkers=1
+```
+
+### Lossless review ledger and reviewer assessment
+
+The raw review, repeated prompt, run metadata, mutable risk prose and footnotes
+were rechecked against the final diff. Six source-order items remain distinct.
+The two-source sibling is calibration and repair work under item 1.
+
+| ID | Technical verdict and PR action | Durable value and destination |
+| --- | --- | --- |
+| CR5718630084-1 | **fixed-now**. Dependency loss is real. The review calls it minor; observed transient public membership makes it a correctness defect. Its nullish fallback preserves only one source and fails the wider law. | Nested held-dependency histories in the primary ordered owner, production union and this evidence record. |
+| CR5718630084-2 | **duplicate** of 1. The repeated agent prompt proposes the same nullish fallback. | Preserve its exact proposal in the scratch ledger and reject it with the last-only mutant. |
+| CR5718630084-3 | **accepted-design**. Optional local CLI review supplies no product requirement and needs no installation. | Existing no-install constraint and explicit oracle calibration remain the authorized verification method. |
+| CR5718630084-4 | **accepted-design**. API review commit is 865; one selected test file does not establish fresh review of every production file. The outside-diff finding survives at parent 846. | Keep reviewed commit separate from repair source binding and later CI head. |
+| CR5718630084-5 | **duplicate** of 1. Mutable merge-risk prose says to retain the joined dependency. | The receiving oracle now observes the transient public result described by that prose. |
+| CR5718630084-6 | **duplicate** of prior review items 5–6. The unchanged 47.37% docstring threshold and optional generated tests do not identify another contract gap. | Preserve repository literate-oracle requirements and review limitations without adding unrelated generated examples. |
+
+Totals: one fixed-now, two accepted-design, three duplicates, zero
+confirmed-open, deferred or design-decision items in this review. The final
+loss audit includes prose outside the finding list, optional CLI/tests,
+coverage qualification and the mutable summary. No item was removed by a
+severity cap. Reviewer recommendation: **hire, with a proposed-fix qualification**.
+The review found a real outside-diff composition defect with a precise cause
+and useful receiving-test direction. Its priority understated public transient
+behavior, and its patch missed two-source composition. The generated policy
+footnotes add little new signal. Oracle experiments supply the wider closure.
+This assessment does not establish whole-PR readiness or review of the repair.
+
+### Oracle self-review
+
+This is a self-review, not an independent external audit.
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001 | Existing ordered/atomic-publication authority, bounded histories and explicit startup/provider limits above. |
+| ORC-002 | Complete source truth, ordinary membership and independent sorting/slicing; no plan or gate helper computes expectations. |
+| ORC-003 | Law and limits precede the finite grammar; model, named driver and shared comparison stay distinguishable beside executable prose. |
+| ORC-004 | Wrapped anti-join reconstructs the finding. Direct placement removes composition and stays green. Two-filter/blocker/answer-order dimensions distinguish first-only and last-only. Directions, widths and polarities preserve rank/membership neighbors. Bounds are finite; the grammar excludes a second blocker for a plan that has only one joined source. |
+| ORC-005 | Real Collection reads/change callbacks and Effect onBatch reconstruction at held, partial and settled cuts; held adapters explain missing source facts without excusing speculative publication. |
+| ORC-006 | Overwrite, first-only and last-only controls fail intended public comparisons, with counts 24/eight/eight. |
+| ORC-007 | New matrix is bounded enumeration, not a random campaign. Existing owner fixed/random campaigns and budgets remain and pass in the 647-test run. |
+| ORC-008, ORC-009 | Pending adapter acquisition maps to held/partial cuts; retained public snapshot and settled source truth are separate model observations. No production continuation machine is copied. |
+| ORC-010 | Comparison errors retain observation/history traces in AggregateError and cleanup uses withOracleCleanup. Earlier recorder-assumption failures and all mutant diagnostics remain separately available. |
+| ORC-011 | No new shared semantic-fault hypothesis requires a second runtime model. Source-complete membership differs structurally from compiler dependency union and publication scheduling. |
+| ORC-012 | Parent, chronology, boundaries, source bindings, loss audit and every applicable outcome are recorded here. |
+| ORC-013 | No-join outer plan and two distinct joins distinguish absence preservation from union; both blocker sources and answer orders reject narrow fixes. |
+| ORC-014 | Actual core receivers supply the receiving boundary; controlled adapters alone supply acquisition timing. No external provider/framework transfer is claimed. |
+| ORC-015 | Every one of 128 histories reaches held and settled once: 256 cells, minimum one, per-receiver identity included in each key. |
+| ORC-016 | All new cases use the same independent model, named production driver and refinement comparison; no ordinary expected-answer examples are added to the oracle. |
+
+Final SHA-256 binding for this repair (this report is excluded):
+
+| Source | SHA-256 |
+| --- | --- |
+| `packages/db/src/query/compiler/order-by.ts` | `265c1a8102865e8d0be70bab3b6853e757530800098c8b166545988445b4fab9` |
+| `packages/db/src/query/effect.ts` | `a17ed6693a48de79a45b8602bd7803b6a577174d6d796db7038e10c964986220` |
+| `packages/db/src/query/live/collection-config-builder.ts` | `fb584c9a49a68faa7775b572ec6d5e0d2ce9f968904d18000c269734c735ab76` |
+| `packages/db/src/query/live/collection-subscriber.ts` | `d2e7864f197eaced0323453eda3c70c6967080b956e1ef6df266f1b73234e527` |
+| `packages/db/src/query/live/ordered-source-loader.ts` | `3baf426831e184b88656c475be2e6362cd670e6f5fa6e300ea9ec2ed82bf10db` |
+| `packages/db/tests/query/ordered-work-oracle.property.test.ts` | `652a1a2378ab882a3e4b0619889020f0581212653507f25051a684b60e8b1d71` |
+| `packages/db/tests/query/ordered-joined-plan-driver.ts` | `3a3bb38caef14e649df17ac7cd0eaae312aa483b4801c4d874888b4112c753f9` |
+| `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts` | `679449468e358d51469bffe18d159ec62b8557b1c63aeaa3ea4cee2e05628b49` |
+| `packages/db/tests/query/ordered-source-loader-state.test.ts` | `23e30afddbfbd5db5979a44f580ac3fc777e5c5ae216584dd7073964080c2925` |
+| `packages/db/tests/query/ordered-work.test.ts` | `df0bb6faf5d81f70c1229511dd38180c206d2df0560593550a6220a8e2a2941f` |

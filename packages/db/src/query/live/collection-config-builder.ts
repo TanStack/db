@@ -450,12 +450,12 @@ export class CollectionConfigBuilder<
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     for (const info of Object.values(this.optimizableOrderByCollections)) {
-      if (!info.joinedFilterSourceId) continue
-      for (const plan of this.lazySourcesCallbacks[info.joinedFilterSourceId]
-        ?.plans ?? []) {
-        const participant = this.activeDemands.get(plan.id)?.participant
-        if (participant?.isPending()) {
-          this.trackSubsetLoadOperationPromise(participant.promise)
+      for (const sourceId of info.joinedFilterSourceIds ?? []) {
+        for (const plan of this.lazySourcesCallbacks[sourceId]?.plans ?? []) {
+          const participant = this.activeDemands.get(plan.id)?.participant
+          if (participant?.isPending()) {
+            this.trackSubsetLoadOperationPromise(participant.promise)
+          }
         }
       }
     }
@@ -1209,10 +1209,10 @@ export class CollectionConfigBuilder<
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
         this.pendingOrderedLoads.size > 0 ||
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) =>
-            info.joinedFilterSourceId !== undefined &&
-            this.hasPendingJoinedWork(info.joinedFilterSourceId),
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.some((sourceId) =>
+            this.hasPendingJoinedWork(sourceId),
+          ),
         )
       ) {
         return
@@ -1409,8 +1409,8 @@ export class CollectionConfigBuilder<
 
     if (status === `ready`) {
       if (
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) => info.joinedFilterSourceId === sourceId,
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.includes(sourceId),
         )
       ) {
         this.maybeRunGraphFn?.()

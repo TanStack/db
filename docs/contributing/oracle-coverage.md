@@ -5964,6 +5964,27 @@ path from a later run. Until then, this entry cannot tell an operator
 regression from an older defect. A later failure of that campaign must record
 its seed here before anyone calls it pre-existing.
 
+### Ordered joined dependency composition, October 30
+
+October 30 receiving extension: the same ordered-work owner now checks joined
+dependency composition across direct, wrapped QueryRef and two-filter nested
+ordered plans. Its 128 finite histories cross actual Collection and Effect
+receivers, two directions, matched/anti-joined membership, widths one/two,
+joined answer order and which of two joined sources vetoes a new head row.
+Each history checks settled initial rows, then every recorded publication and
+public read at held, partial and settled cuts. All 256 declared held/settled
+states reach their minimum once. Unchanged `8464ec977` fails 24 publication
+comparisons (12 per receiver); the repair passes all 128 histories. Overwrite,
+last-only and first-only dependency mutants fail 24, eight and eight intended
+comparisons respectively. The original 424 owner tests and their budgets stay.
+This is a controlled adapter witness through real core receivers: one inserted
+head row, two joined sources, one QueryRef level and windows of one/two rows.
+Ordinary progressive Effect startup callbacks remain outside this new atomicity
+claim. No provider/framework, arbitrary nesting, rejection, cleanup or public
+window-promise integration claim follows. See the versioned
+[joined dependency review](oracle-reviews/callback-metadata.md#ordered-joined-dependency-review-2026-10-30)
+for the pre-edit gate, experiments, source binding and loss audit.
+
 ### Ordered signalling-refetch work scope, October 27
 
 Owner: `packages/db/tests/query/ordered-work-oracle.property.test.ts`. The

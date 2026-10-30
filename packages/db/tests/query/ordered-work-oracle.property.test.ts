@@ -21,6 +21,7 @@ import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { receiveOrderedCompilerCacheHistory } from './ordered-compiler-cache-driver.js'
+import { receiveOrderedJoinedPlanHistory } from './ordered-joined-plan-driver.js'
 import {
   compareRows,
   expectDistinctRequests,
@@ -8017,6 +8018,126 @@ it.each(compilerCacheWindows)(
       throw new AggregateError(
         failures,
         `ordered compiler cache window mismatch: ${JSON.stringify(traces)}`,
+        { cause: failures[0] },
+      )
+  },
+)
+
+/** Ordered publication waits for every joined dependency that any retained
+ * source plan requires (ARCHITECTURE.md, atomic window publication). A QueryRef
+ * adds ordering without removing its child's lazy join. Another ordered join
+ * adds a dependency rather than replacing it. The model filters complete source
+ * rows, then sorts and slices. While required adapter loads are held, every
+ * public read and callback retains the preceding complete result.
+ *
+ * This finite history grammar varies receiving host, join polarity, nested
+ * plan composition, window width, direction and which joined source answers
+ * first. Direct plans are controls. It uses actual Collection/Effect receivers
+ * with controlled adapters, not a provider or framework timing claim.
+ */
+const joinedPlanHistories = ([`collection`, `effect`] as const).flatMap(
+  (receiver) =>
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`some`, `none`] as const).flatMap((filter) =>
+        ([`direct`, `wrapped`, `two-filters`] as const).flatMap((placement) =>
+          ([1, 2] as const).flatMap((width) =>
+            ([`first`, `second`] as const).flatMap((releaseFirst) =>
+              (placement === `two-filters`
+                ? ([`first`, `second`] as const)
+                : ([`first`] as const)
+              ).map((blocker) => ({
+                receiver,
+                direction,
+                filter,
+                placement,
+                width,
+                releaseFirst,
+                blocker,
+              })),
+            ),
+          ),
+        ),
+      ),
+    ),
+)
+function expectedJoinedPlanWindow(
+  history: (typeof joinedPlanHistories)[number],
+  added: boolean,
+) {
+  const rows = [1, 2, 3].map((id) => ({ id, rank: id }))
+  if (added) rows.push({ id: 4, rank: history.direction === `asc` ? 0 : 4 })
+  const markers =
+    history.placement === `two-filters`
+      ? [
+          history.blocker === `first` ? [1, 4] : [1],
+          history.blocker === `second` ? [1, 4] : [1],
+        ]
+      : [[1, 4]]
+  const accepted = rows.filter(({ id }) =>
+    markers.every((marked) =>
+      history.filter === `some` ? marked.includes(id) : !marked.includes(id),
+    ),
+  )
+  return expectedInstalledWindow(accepted, {
+    direction: history.direction,
+    offset: 0,
+    limit: history.width,
+  })
+}
+declareOracle({
+  model: [expectedJoinedPlanWindow],
+  grammar: [joinedPlanHistories],
+})
+const joinedPlanReach = createOracleReach(
+  `ordered joined plan publication`,
+  joinedPlanHistories.flatMap((history) => [
+    `${JSON.stringify(history)}/held`,
+    `${JSON.stringify(history)}/settled`,
+  ]),
+  { replaying: false },
+)
+let joinedPlanEntered = false
+afterAll(() => {
+  if (joinedPlanEntered) joinedPlanReach.assertReached()
+})
+it.each(joinedPlanHistories)(
+  `retains every joined dependency through ordered plans: %j`,
+  async (history) => {
+    joinedPlanEntered = true
+    joinedPlanReach.beginHistory()
+    const failures: Array<unknown> = []
+    const traces: Array<unknown> = []
+    await receiveOrderedJoinedPlanHistory(history, (observation) => {
+      const added = observation.cut !== `initial` && observation.pending === 0
+      const expected = expectedJoinedPlanWindow(history, added)
+      try {
+        expect(
+          observation.rows,
+          `${JSON.stringify(history)}/${observation.cut}`,
+        ).toEqual(expected)
+        // Ordinary Effect startup may deliver progressive callbacks
+        // (ARCHITECTURE.md, atomic window publication). This history starts its
+        // publication claim after readiness; the initial settled rows establish
+        // the preceding complete result.
+        if (observation.cut !== `initial`)
+          for (const publication of observation.publications)
+            expect(
+              publication,
+              `complete ${observation.cut} publication`,
+            ).toEqual(expected)
+      } catch (error) {
+        failures.push(error)
+        traces.push({ ...observation, expected })
+      }
+      if (observation.cut === `held` && observation.pending > 0)
+        joinedPlanReach.reach(`${JSON.stringify(history)}/held`)
+      if (observation.cut === `settled` && observation.pending === 0)
+        joinedPlanReach.reach(`${JSON.stringify(history)}/settled`)
+    })
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        `ordered joined plan publication mismatch: ${JSON.stringify(traces)}`,
         { cause: failures[0] },
       )
   },

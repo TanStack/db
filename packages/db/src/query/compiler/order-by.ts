@@ -67,8 +67,8 @@ export type OrderByOptimizationInfo = {
   requiresFullSource: boolean
   /** Whether the ordered source's installed rows are the whole source. */
   sourceHoldsAllRows: boolean
-  /** Source whose lazy demand must settle before a joined-filter page. */
-  joinedFilterSourceId?: string
+  /** Sources whose lazy demand must settle before a joined-filter page. */
+  joinedFilterSourceIds?: ReadonlyArray<string>
 }
 
 function warnOrderIndexFallback(
@@ -305,7 +305,9 @@ export function processOrderBy(
         valueExtractorForRawRow: extract,
         index,
         orderBy: sourceOrderBy,
-        joinedFilterSourceId,
+        joinedFilterSourceIds: joinedFilterSourceId
+          ? [joinedFilterSourceId]
+          : undefined,
         sourceHoldsAllRows:
           followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
@@ -342,6 +344,12 @@ export function processOrderBy(
       optimizableOrderByCollections[orderBySourceId] = previous
         ? {
             ...info,
+            joinedFilterSourceIds: [
+              ...new Set([
+                ...(previous.joinedFilterSourceIds ?? []),
+                ...(info.joinedFilterSourceIds ?? []),
+              ]),
+            ],
             get offset() {
               return Math.min(previous.offset, info.offset)
             },
@@ -371,7 +379,7 @@ export function processOrderBy(
       // loadMoreIfNeeded reads how many rows the window needs. Without an
       // index, only an on-demand joined filter can leave the window short.
       const needsCount =
-        info.joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
+        joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
       if (index || needsCount) {
         setSizeCallback = (getSize) => {
           info.dataNeeded = (boundary) => {
