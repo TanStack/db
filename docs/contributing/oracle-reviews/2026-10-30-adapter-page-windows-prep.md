@@ -305,3 +305,103 @@ separate unchanged-source measurement remains 110 gzip bytes.
 | `publish-hook-types.log` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `publish-hook-window.log` | `46b22d5f974616b8b271ca236491ee19a96377787e17e90dc66c161109eac5a2` |
 | `publish-committed-size.log` | `930c14c6a11d60a4e74d1d098b29933d7ee98db2ebfe939c951ae403532f53cf` |
+
+
+## Published CI repairs, 2026-10-30
+
+PR #2316 initially published implementation `38422ac61` and changeset
+`9b09f1e7`. CI's IVM tests and test-source types passed; its final dependency
+check failed because the two React 18 development aliases were not sorted.
+`pnpm test:sherif` reproduced that metadata error. Commit `3ef2e5fe7` sorts the
+aliases, and the same command passes. Dependency versions and the lockfile did
+not change. CI then passed the IVM/offline job.
+
+The DB replay job exposed a second integration omission: all eighteen new
+property names were registered but lacked manifest owners. On unchanged
+`3ef2e5fe7`, the full replay suite returned one intended manifest assertion
+failure and forty passes. This is a replay-routing defect, not a product row
+mismatch. The existing guard correctly rejected the incomplete registry.
+
+The repair maps the shared framework properties to the React conformance
+receiving file and names the shared model module as their source. React and
+Preact render, twelve SSR runtime/path cells and numeric TopK have their own
+owners. Direct selectors choose fresh/random campaigns. The source checker
+recognizes SSR's computed property template and independently checks its
+runtime and path literals. It keeps every prior manifest assertion.
+
+The full replay suite now passes all forty-one tests:
+
+```sh
+pnpm --filter @tanstack/db exec vitest run tests/oracle-replay.test.ts \
+  --maxWorkers=2 --fileParallelism=false --coverage.enabled=false \
+  --typecheck.enabled=false
+```
+
+Every new entry's manifest command was also run from its declared directory
+with `TANSTACK_DB_ORACLE_PROPERTY`, seed `2291` and shrink path `0`, one worker
+and coverage/typecheck disabled. The guarded runner reported these exact,
+nonfailed executions. Each witness reported `numRuns: 1`:
+
+| Property | Completed executions | Log SHA256 |
+| --- | --- | --- |
+| `framework.window-history` | 16 | `baeab34ac392593a1eac89f1eda36b9d8bb321f3e1ab4d1bee96897d9adbd7eb` |
+| `framework.pending-window-history` | 2 | `0d580e6b6dcb23dabfee3a4dd355062bd101c7c9e71a8cdfea49bc769cc81eb1` |
+| `framework.publication-window-history` | 2 | `80b14b353c2b0af0a1bbebe129ba6fc764907aba94d1694d86e1af450bec6096` |
+| `react.window-render` | 12 | `53483a4300727b16a0a4fec7dd64cff9c75183ff748520c460d580472f7ace13` |
+| `preact.window-render` | 12 | `3f7c4ed0cab91398e4db3ab41b72322ab2b8e7c9b1b5ae4f48b601e3aefbbad1` |
+| `react.ssr-effects-react18-ordinary-provider` | 1 | `6502a2f6ed5d2b61ae93f88acbab3c222eac8dd083a925069553842dacf0a2c5` |
+| `react.ssr-effects-react18-ordinary-explicit` | 1 | `ea264bf8907dc8ab1d3273850e7f0b6a145f78bf819f3148b2e7ef63626272ed` |
+| `react.ssr-effects-react18-suspense-provider` | 1 | `7b01b01f59d1fa55a4ea1dfa2c7affbc61d2ad35e50c3be5b2147bdc9cc5e288` |
+| `react.ssr-effects-react18-suspense-explicit` | 1 | `a2f60529df6cc88d4ae5182cd2a6516f502a264368ba924d80005522c5977655` |
+| `react.ssr-effects-react18-standalone` | 1 | `d5173740c1d3eaee46e659c51835f82bb8efebe908e99956c3e64c382c2d2d2e` |
+| `react.ssr-effects-react18-supplied` | 1 | `e07e0d08e5f001180dc2d1b76392e616aac84ed7eed1fc744028b0cb52c07616` |
+| `react.ssr-effects-current-ordinary-provider` | 1 | `d186447a8d714d5ac5ff019f1960c91fc020058a8af502212ab67e9293366dbc` |
+| `react.ssr-effects-current-ordinary-explicit` | 1 | `0b017317df2e0dd9b7b5fee1f00fa1e59caa22ef7fa3cc0d11156fef15f063c9` |
+| `react.ssr-effects-current-suspense-provider` | 1 | `61beea4e2906b3d6ab82df42b4eb519f90cb37dbac4b9a62bb425483d2acf993` |
+| `react.ssr-effects-current-suspense-explicit` | 1 | `e8657a5e80ffcae9d46e28c9704f3557b7b7eb22214b40e63212c929f19b52a3` |
+| `react.ssr-effects-current-standalone` | 1 | `7df3090ad98872dd46cb56f5d42c96bd1810fa9c35f475d50d3e5d88563a9935` |
+| `react.ssr-effects-current-supplied` | 1 | `2de45c888925e0f9a5b0340dc5763c75dac9ae00bc2b03d914f65cd12e0da763` |
+| `ivm.topk-numeric-window` | 8 | `f3021933e75830ccf2089b027515701615a373d78dac45c8cf2d9940729c4e77` |
+
+The numeric owner's guarded runner first attempts asynchronous instrumentation,
+then uses its established synchronous retry. Its final eight comparisons and
+witnesses pass; the earlier mode failures are not product evidence.
+A focused independent oracle review checked all mappings, source overrides,
+selectors and eighteen raw witness summaries and found no actionable issue.
+It made no edits and ran no tests concurrently with these checks.
+
+**Law:** ORC-007 and the existing guarded-replay protocol require a registered
+property to route to its executing owner with the requested seed/path.
+**Reach:** Eighteen requested property routes completed the counts above.
+**RED:** The original missing-owner manifest failed its existing assertion,
+with forty neighboring replay checks passing.
+**GREEN:** All forty-one replay checks and all eighteen guarded commands pass.
+**Mutant:** The original registry is the rejected wrong routing; the unchanged
+suite also rejects wrong files, filters, skipped/zero runs and changed replay
+coordinates. No new product mutant or product-law change is claimed.
+**Limits:** These commands establish replay routing, not universal product
+correctness. React is the canonical shared-framework guarded route; the other
+framework drivers keep native seed/path replay. Existing model, grammar,
+comparison, receiving and budget limits remain. No production source or oracle
+run budget changed in this repair.
+
+Explicit ESLint, core TypeScript, changed-file lint and whitespace checks pass.
+The original production chronology qualification remains unchanged.
+
+| Verification log | SHA256 |
+| --- | --- |
+| `ci-sherif-red.log` | `e7f30af9fc951e95404e2ceace024d177943170ca31075d012057a69b4120996` |
+| `ci-sherif-green.log` | `3bf3b69d6ee18726ce8a3b964c7ad3c5593ca5e2391888ea440b909377c1b988` |
+| `ci-db-replay-local.log` | `557f5c576a66994f2f75e89c6be187fce6e97f7e18b7953ef0bfc0fe9e00f1e1` |
+| `ci-db-replay-green.log` | `1dd8ea18fa377e28889c300c0a5a15e62a570b38249feaf5106425c28703c513` |
+| `ci-replay-manifest-green.log` | `4e791ad197488e5a8a454fb97f4d50aa9d6b6973d74e5d64d36b277daf8a3841` |
+| `ci-replay-eslint.log` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `ci-replay-types.log` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `ci-replay-changed-lint.log` | `89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168` |
+
+Final routing source hashes:
+
+| Source | SHA256 |
+| --- | --- |
+| `packages/db/tests/oracle-replay-manifest.ts` | `936a42065fb4031e67410dbb530e3d566a3c7ce75c7e739c199d69aa3d375901` |
+| `packages/db/tests/oracle-replay.test.ts` | `c624c7cd6e58fff27e9e488af270887fc1bdf9de36913f3303005291b855dfd0` |

@@ -430,6 +430,14 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(
           family?.[1] ?? `includes.matrix.flat-materialization`,
         )
+      } else if (entry.property.startsWith(`react.ssr-effects-`)) {
+        const [runtime, ...parts] = entry.property
+          .slice(`react.ssr-effects-`.length)
+          .split(`-`)
+        expect([`react18`, `current`]).toContain(runtime)
+        expect(source).toContain(`react.ssr-effects-\${runtime.name}-\${path}`)
+        expect(source).toContain(`\`${runtime}\``)
+        expect(source).toContain(`\`${parts.join(`-`)}\``)
       } else if (/^(utils|comparison)\.\d+$/.test(entry.property)) {
         // These oracles number their properties in file order.
         const [family] = entry.property.split(`.`)

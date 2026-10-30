@@ -14,6 +14,26 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `react-db/tests/conformance.test.tsx`,
+    `framework`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [`react-db/tests/window-render-oracle.test.tsx`, `react`, `window-render`],
+  [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
+  [
+    `react-db/tests/ssr-effects-oracle.test.ts`,
+    `react`,
+    [
+      `ssr-effects-react18-ordinary-provider ssr-effects-react18-ordinary-explicit`,
+      `ssr-effects-react18-suspense-provider ssr-effects-react18-suspense-explicit`,
+      `ssr-effects-react18-standalone ssr-effects-react18-supplied`,
+      `ssr-effects-current-ordinary-provider ssr-effects-current-ordinary-explicit`,
+      `ssr-effects-current-suspense-provider ssr-effects-current-suspense-explicit`,
+      `ssr-effects-current-standalone ssr-effects-current-supplied`,
+    ].join(` `),
+  ],
+  [
     `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
     `lint`,
     `part-reach`,
@@ -626,7 +646,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
-    `topk-support-window`,
+    `topk-support-window topk-numeric-window`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,
@@ -744,6 +764,15 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`framework.window-history`, `(?:direct|nested) window histories \\(fresh\\)`],
+  [`framework.pending-window-history`, `pending window histories \\(fresh\\)`],
+  [
+    `framework.publication-window-history`,
+    `publication callback window histories \\(fresh\\)`,
+  ],
+  [`react.window-render`, `window changes at React commit.*fresh`],
+  [`preact.window-render`, `window changes at Preact commit.*fresh`],
+  [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
   [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
   [
     `ivm.distinct-representatives`,
@@ -883,6 +912,10 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`react.ssr-effects-`)) {
+    const [runtime, ...path] = property.slice(`react.ssr-effects-`.length).split(`-`)
+    return `${runtime} ${path.join(`-`)} renders without client layout diagnostics \\(random\\)`
+  }
   if (property === `replay.ordered-window-faults`)
     return `keeps the ordered window under load and release faults \\(replay campaign\\)`
   if (property === `replay.ordered-failed-replay`)
