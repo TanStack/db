@@ -150,3 +150,76 @@ Review `5717923866`, run `21f44a11-4a65-466f-a493-12f311bfd0b5`, covers the impl
 Loss audit: three distinct suggestions = two documentation fixes and one refuted repository requirement. The raw review, complete mutable summary and generic test-generation/autofix controls are preserved in the uncommitted task ledger. The controls supply no concrete test gap or additional finding. No behavioral claim, runtime repair or oracle budget change is introduced by this follow-up. Production measurements and oracle calibration therefore remain applicable.
 
 Reviewer assessment: no hire on this sample alone. The two wording observations are useful but unverified; the generic metric adds no code-level evidence. This conclusion is separate from the high-effort reviewer's assessment above. CI completion remains a separate final-head check.
+
+## Production size follow-up
+
+This internal refactor follows `a0d2c4e3780307a770ef7734b64a2d4adf5bd3ce`.
+The measurements below supersede the earlier size figures in this record.
+The indexing, admission, sharing, mounted retention, error and lifecycle laws
+are unchanged. No model, history grammar, comparison or oracle budget changes.
+
+- Pass render-local metadata directly from the shared hook implementation to
+  Suspense. Delete the private WeakMap module, its setter/getter round trip,
+  and its missing-metadata guard. Only that private wrapper could read it;
+  an ordinary hook still returns the observer's stable snapshot directly.
+  Capture the current client and observer per render, rather than exposing
+  the mutable hook instance.
+- Consult the shared Suspense cache only when a binding needs a Collection.
+  This removes the stored cache key, a reuse branch and duplicate preparation.
+  Mounted bindings already hold their Collection and retain its first options.
+- Share profiler initialization between ordinary and infinite hooks. Literal
+  production guards at initialization and both timing sites let the bundler
+  erase the timing state, timer and warning formatter. The warning policy still
+  handles unbundled browsers without `process`. Indexing validation and its
+  production error remain enabled.
+
+`pnpm size:compare --packages db,react-db --files`, against merge-base
+`bfd1da1a7e752d66fd667adfd3cdf54f60732b22`, reports these compressed byte deltas:
+
+| Bundle | gzip | brotli |
+| --- | ---: | ---: |
+| DB package | +47 | -3 |
+| React package | -410 | -352 |
+| Package total | **-363** | **-355** |
+| Typical app | **-319** | **-186** |
+| App with Effect | -309 | -310 |
+| App with grouping | -314 | -219 |
+| App with includes | -306 | -133 |
+| App with join | -334 | -276 |
+| App with LocalStorage | -302 | -357 |
+| App with optimistic action | -314 | -299 |
+| App with paced mutations | -288 | -252 |
+
+All eight measured app scenarios shrink under both compressors. DB alone still
+adds 47 gzip bytes for the shared eager-admission check and output options;
+the React simplifications more than offset that cost in the package total
+and receiving apps. These finite scenarios do not establish the size of every
+consumer bundle. Tests and contract documentation are separate from shipped
+production bytes; this follow-up changes no tests and only adds this evidence.
+
+Two structural experiments were discarded: consolidating Suspense's three
+refs increased package compression cost, and replacing separate unscoped/client
+caches with a sentinel scope also grew both compressed package measurements.
+A pure annotation on the warning predicate produced no measured improvement
+and was removed. No comments or names were shortened to change a size number.
+
+Final verification passes the complete React suite (4,039 tests in 34 files)
+with `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=3`, plus React typechecking,
+changed-file ESLint, `pnpm lint:changed`, Prettier and whitespace checks.
+The preceding default-budget run passed 4,038 tests but failed the streaming
+campaign's reach gate: its 40 random histories included zero
+`held-suspense-first` histories. That is missing generated reach, not a
+production refinement mismatch. The larger campaign preserves every budget
+and requires that same reach gate; it does not waive the missing state.
+A production bundle inspection confirms that `renderCount`,
+`totalMs`, `maxMs` and the removed metadata error are absent. An earlier bundle
+probe found the timing loop retained despite the erased initializer; the
+literal guards at both timing sites resolve that failed probe. Existing
+development timing-warning tests remain in the full React run. This is
+behavior-preserving internal work under existing receiving coverage, not a new
+bug-class closure claim or a replacement for the original RED/GREEN/mutants.
+
+The separately reported SQLite metadata failure remains outside this refactor:
+[#2317](https://github.com/TanStack/db/issues/2317) preserves the replay that
+fails identically on the PR and its merge-base. A new pushed head still needs
+its own CI results; local verification does not establish whole-PR readiness.
