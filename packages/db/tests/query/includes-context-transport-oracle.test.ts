@@ -2369,9 +2369,9 @@ async function runPublicFieldOverlapPaths(cell: PublicFieldOverlapCell) {
         }
         return {
           collection,
-          insert: (row) => write(`insert`, row),
-          update: (row) => write(`update`, row),
-          remove: (row) => write(`delete`, row),
+          insert: (row: T) => write(`insert`, row),
+          update: (row: T) => write(`update`, row),
+          remove: (row: T) => write(`delete`, row),
         }
       },
       mount(build) {

@@ -252,3 +252,21 @@ six new primary-oracle cells without type errors. It finds no further supported
 defect or overconstraint in the bounded final repair. Local review accounting
 and implementation are complete within the stated limits. Final pushed-head CI
 status is a separate PR observation, not supplied by local test results.
+
+### CI integration follow-up
+
+The formatter advanced the branch to
+`0937a17ec9e53b32d828714a9ce374a2c149c5bf`; its only change wrapped the
+`defineSelectField` signature. CI run `41137359075` passed all 24,661 runtime
+and type tests across both Core shards, but each shard reported the same three
+source type errors in the new overlap driver. Contextual inference introduced a
+different generic `T` for the returned mutation callbacks. The targeted runtime
+selection above had not started Vitest's type-test worker, so its clean output
+did not establish a complete source typecheck.
+
+`pnpm exec tsc -p packages/db/tsconfig.json --noEmit` reproduced all three
+errors at lines 2372–2374 before the correction. Explicit `row: T` annotations
+bind the callbacks to their enclosing source's row type. This changes no runtime
+code, law, history, observation, or comparison. The same complete source
+typecheck now passes, and the context-transport owner passes all 192 tests.
+The earlier behavioral RED, GREEN, reach, and mutant evidence remains applicable.
