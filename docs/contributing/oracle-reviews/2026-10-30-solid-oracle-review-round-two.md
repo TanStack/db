@@ -197,6 +197,13 @@ owner passes 145 tests with the previously failing seed `-1439698414`, path
 `1:22`, selected for replay. Main's #2313 fixes the separately reported #2310;
 that issue is closed. This PR does not alter its lifecycle model or expectations.
 
+Final integrated snapshot/destination replay also passes on React (sixteen
+groups), Preact/Vue/Svelte/Angular (eight groups each), and the full Solid run
+above, without type errors. These retain all 45 snapshot groups and fourteen
+destination groups, including actual local-only Solid histories. The lifecycle
+random/replay property additionally passes alone with the same seed and shrink
+path. Core and Solid builds, `pnpm lint:changed`, and whitespace checks pass.
+
 Reproduction commands from the repository root:
 
 ```sh
