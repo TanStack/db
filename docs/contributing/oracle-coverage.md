@@ -1895,7 +1895,7 @@ The production matcher and the existing `utils.1`–`utils.40` campaigns and
 budgets remain unchanged. The synthetic duplicate-valued object-Set family
 exposes factorial assignment work, and an 8,192-member flat assignment chain
 exposes recursive stack depth. No application incident was established.
-The [historical experiments](https://github.com/TanStack/db/blob/0b47ee825aaa0c36b199a3c42652cab8d9672ec9/docs/contributing/oracle-reviews/effect-startup-high-review.md)
+The [versioned replay inputs](oracle-reviews/effect-startup-delta.md#deferred-set-replay-inputs)
 retain the descriptors, observations and limits. The primary owner remains
 `packages/db/tests/utils-oracle.property.test.ts`; resume optimization when the
 maintainer requests it or an application workload requires it. The new
@@ -5789,7 +5789,7 @@ and these named paths. No real provider/framework, arbitrary scheduling,
 ordered repair, same-source overlap, callback-input sanitization or exact
 internal graph-run callback-count guarantee follows.
 
-P09 is repaired in PR #2301 within this finite controlled-core boundary.
+Historical initial P09 repair evidence for PR #2301:
 The exact owner and `test:oracles` entry were restored before production edits.
 On baseline `9b03e639f`, the fresh RED reproduced 64 startup failures with every
 reach cell at count 1. Repaired production passes all 216 owner tests and all
@@ -5806,7 +5806,8 @@ Subsequent checker calibration keeps both callback channels coherent when
 injecting a bad update key. The `key-collision` and `key-change` controls now
 reject deletion of the interval-continuity judgment itself: the full checker
 mutant passes 214 controls/histories and fails those two controls. Repaired
-production passes all 216 owner tests and the combined 619 targeted tests.
+production passed all 216 owner tests and the combined 619 targeted tests at
+that historical subject, including subsequently removed Set work.
 Native histories and all 5,512 reach cells are unchanged. See the follow-up's
 [calibration evidence](oracle-reviews/effect-startup-delta.md#key-interval-checker-calibration)
 for the new owner fingerprint and the limits of the continuity claim.
@@ -5824,6 +5825,24 @@ comparisons. This finite extension does not claim exact rich-payload instance
 identity, arbitrary nondeterministic projections, changing join keys, provider
 schedules or framework behavior. The earlier scalar and ordered-repair limits
 remain. See the [Effect membership evidence](oracle-reviews/effect-startup-delta.md#membership-and-coalesced-source-writes).
+
+Current key-only repair: the metadata owner has **300 tests**, including 60
+callback-profile histories from `query/effect-callback-oracle.ts`. The actual
+React driver `packages/react-db/tests/effect-callback-oracle.test.tsx` runs the
+same 60 histories, model and comparison. Six payload representations cross
+five callback profiles and `skipInitial`. Source-version updates, handler
+replacement, exit, reentry, next use and disposal reach 480 cells on each path,
+each at count 1. The original 5,512 cells and 120 membership cells remain.
+On unchanged `2b3dd8c2d`, 56 core and 40 React histories fail. The repair passes
+all **708 targeted tests**. The stale-value mutant survives the original 314
+tests and fails the extended histories at exit; gross-count membership fails
+79 comparisons. Unordered Effects now retain keys only and never compare
+projected values. Ordered repairs retain their preceding coherent values.
+The maintainer explicitly chose preservation of unordered update notifications,
+including equal projections, on 2026-10-30. The new histories cover eager core
+sources and actual React hook commits; other providers/frameworks, arbitrary
+schedules and ordered repair semantics retain their existing limits. See the
+[key-only review evidence](oracle-reviews/effect-startup-delta.md#review-of-2b3dd8c2d-key-only-unordered-results).
 
 ### RC bound schema mutation receivers (2026-10-28)
 

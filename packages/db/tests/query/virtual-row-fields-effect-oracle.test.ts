@@ -42,6 +42,11 @@
  * Exact typed source identity is checked through ordinary observedKey instead.
  * The four unclaimed Effect-root virtual names are excluded from the ordinary
  * field projection, not interpreted as an output-row attribution policy.
+ *
+ * The callback-profile companion below also checks equal-projection graph
+ * updates under the maintainer's preservation decision. The original metadata
+ * histories change selected source facts and retain their array-difference
+ * judgment; they do not specify every unordered graph notification.
  */
 import { isDeepStrictEqual } from 'node:util'
 import { afterAll, expect, test } from 'vitest'
@@ -57,8 +62,14 @@ import {
   checkWithCleanup,
   virtualFieldNames,
 } from './virtual-row-fields-support.js'
-import type { DeltaEvent } from '../../src/query/effect.js'
+import {
+  callbackHistories,
+  callbackReach,
+  runCallbackHistory,
+} from './effect-callback-oracle.js'
+import type { DeltaEvent, EffectConfig } from '../../src/query/effect.js'
 import type { Transaction } from '../../src/transactions.js'
+import type { CallbackOutput, CallbackRow } from './effect-callback-oracle.js'
 
 type Key = string | number
 type Side = `left` | `right`
@@ -277,6 +288,72 @@ const effectMetadataHistories: Array<History> = (
       ),
     ),
   ),
+)
+
+// Handler profiles and readable opaque values share their model/comparison
+// with the real React receiver. This driver supplies only the core boundary.
+const deliveryReach = callbackReach(`core`)
+let ranDelivery = false
+afterAll(() => {
+  if (ranDelivery) deliveryReach.assertReached()
+  if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+    console.info(
+      `Effect core callback reach`,
+      Object.fromEntries(deliveryReach.counts()),
+    )
+})
+test.each(callbackHistories)(
+  `delivers current values across callback profiles: %j`,
+  async (history) => {
+    ranDelivery = true
+    await runCallbackHistory(
+      history,
+      {
+        mount: async ({ skipInitial, project, handlers }) => {
+          const source = createCollection(
+            mockSyncCollectionOptions<CallbackRow>({
+              id: `callback-core`,
+              getKey: (row) => row.id,
+              initialData: [{ id: 1, version: 0 }],
+            }),
+          )
+          await source.preload()
+          const config: EffectConfig<CallbackOutput> = {
+            query: () =>
+              new Query()
+                .from({ row: source })
+                .fn.select(({ row }) => project(row)),
+            skipInitial,
+            ...handlers,
+          }
+          const effect = createEffect(config)
+          await flushPromises()
+          return {
+            write: async (type, version) => {
+              source.utils.begin()
+              source.utils.write({ type, value: { id: 1, version } })
+              source.utils.commit()
+              await flushPromises()
+            },
+            replaceHandlers: async (replacement) => {
+              Object.assign(config, replacement)
+              await flushPromises()
+            },
+            dispose: () => effect.dispose(),
+            cleanup: () =>
+              checkWithCleanup(async () => {
+                await effect.dispose()
+              }, [
+                async () => {
+                  await source.cleanup()
+                },
+              ]),
+          }
+        },
+      },
+      deliveryReach,
+    )
+  },
 )
 function pathOf(history: Pick<History, `kind` | `projection` | `reverse`>) {
   return `${history.kind}${history.kind === `union` ? (history.reverse ? `-right-first` : `-left-first`) : ``}/${history.projection}`

@@ -337,7 +337,6 @@ export function createEffect<
     effect,
     query: config.query,
     skipInitial: config.skipInitial ?? false,
-    observesUpdates: Boolean(config.onUpdate || config.onBatch),
     onBatchProcessed,
     onHealthChange: config.onHealthChange,
     onSourceError: (error: Error) => {
@@ -402,7 +401,6 @@ interface EffectPipelineRunnerConfig<
 > {
   query: EffectQueryInput<any>
   skipInitial: boolean
-  observesUpdates: boolean
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
@@ -485,13 +483,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
-  // The preceding coherent result, including the skipped initial baseline.
-  // Multiplicity and value equality alone cannot determine prior membership.
-  private readonly publishedRows = new Map<unknown, TRow>()
+  // Unordered deltas need prior membership, not retained values. Ordered
+  // repairs additionally need the preceding coherent values across graph runs.
+  private publishedRows: Set<unknown> | Map<unknown, TRow> = new Set()
 
   // skipInitial state
   private readonly skipInitial: boolean
-  private readonly observesUpdates: boolean
   private initialLoadComplete = false
   // The Effect's initial gate: latched when every
   // initial load has settled, with or without skipInitial. After it,
@@ -517,7 +514,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   constructor(config: EffectPipelineRunnerConfig<TRow, TKey>) {
     this.skipInitial = config.skipInitial
-    this.observesUpdates = config.observesUpdates
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
     this.onHealthChange = config.onHealthChange
@@ -746,6 +742,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
+        this.publishedRows = new Map()
         const loader = new OrderedSourceLoader(
           orderByInfo,
           subscription,
@@ -1071,13 +1068,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         key as TKey,
         changes,
         this.publishedRows,
-        shouldPublish && this.observesUpdates,
       )
       if (event) {
         if (event.type === `exit`) this.publishedRows.delete(key)
-        else this.publishedRows.set(key, event.value)
-        if (shouldPublish && (event.type !== `update` || this.observesUpdates))
-          events.push(event)
+        else if (this.publishedRows instanceof Map)
+          this.publishedRows.set(key, event.value)
+        else this.publishedRows.add(key)
+        if (shouldPublish) events.push(event)
       }
     }
 
@@ -1326,12 +1323,12 @@ function accumulateEffectChanges<T>(
 function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
-  publishedRows: ReadonlyMap<unknown, TRow>,
-  observesUpdates: boolean,
+  publishedRows: ReadonlySet<unknown> | ReadonlyMap<unknown, TRow>,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
   const wasPresent = publishedRows.has(key)
-  const previousValue = publishedRows.get(key) ?? deleteValue
+  const previousValue =
+    publishedRows instanceof Map ? publishedRows.get(key) : deleteValue
   const isPresent = Number(wasPresent) + inserts - deletes > 0
 
   if (!wasPresent && isPresent) {
@@ -1342,17 +1339,17 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
   if (wasPresent && !isPresent) {
     // Row exited the query result — value is the exiting value,
     // previousValue is omitted (it would be identical to value)
-    return { type: `exit`, key, value: previousValue ?? deleteValue! }
+    return { type: `exit`, key, value: previousValue! }
   }
 
   if (
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    (!observesUpdates || !deepEquals(previousValue, insertValue))
+    (publishedRows instanceof Set || !deepEquals(previousValue, insertValue))
   ) {
-    // Presence is already established. Compare values only for a consumer that
-    // observes updates; otherwise refresh the retained value for a later exit.
+    // Unordered Effects preserve all graph updates without comparing values.
+    // Ordered repairs compare with the preceding coherent publication.
     return {
       type: `update`,
       key,
@@ -1361,8 +1358,7 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     }
   }
 
-  // The row was absent both before and after the held delta, or its final
-  // value is equal to the last callback-visible value.
+  // The row was absent at both cuts, or an ordered repair kept an equal value.
   return undefined
 }
 

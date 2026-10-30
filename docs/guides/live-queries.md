@@ -2450,6 +2450,8 @@ interface DeltaEvent<TRow, TKey> {
 | `exit` | Row left the query result | The exiting row | — |
 | `update` | Row changed but stayed in the result | The new row | The row before the change |
 
+Unordered Effects classify graph deltas using result membership. They keep result keys without retaining projected rows or comparing projected values. A graph update can therefore notify handlers even when the projected fields compare equal. Ordered Effects retain the last coherent result for repair across graph runs and suppress equal-value updates. Callback presence does not change the delta values.
+
 ### Named Callbacks
 
 Use the callback that matches the query-result transition you care about:

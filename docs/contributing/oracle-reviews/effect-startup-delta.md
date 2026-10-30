@@ -1,5 +1,10 @@
 # Effect startup delta follow-up
 
+Current implementation: unordered Effects track keys only and preserve graph
+update notifications. The [key-only review repair](#review-of-2b3dd8c2d-key-only-unordered-results)
+supersedes the earlier retained-value/comparison designs below. Earlier counts,
+fingerprints, commands and design claims apply only to their named subjects.
+
 ## Baseline restoration
 
 This follow-up restores the accepted Effect metadata owner from
@@ -93,11 +98,11 @@ The update's previous and current values were identical, with all right fields
 undefined. The independent before/after model rejected the extra event and the
 absence of its prior enter in both callback channels.
 
-The repair applies the existing `deepEquals` update condition to unordered
-Effects too. Ordered Effects already use this condition. It preserves genuine
-changed-value updates without retaining every unordered result row. Equality
-uses the existing change-event equality domain, not D2 hash identity.
-This evidence checks scalar projections, not every value in either domain.
+The initial repair applied the existing `deepEquals` update condition to
+unordered Effects. That design used no retained unordered result rows and
+checked only scalar projections. The later membership repair retained values,
+and the final key-only repair removes both unordered value retention and
+comparison. These historical designs are not current implementation claims.
 
 The earlier Effect examples lacked this exact startup delta comparison. The
 restored owner checks the complete emitted delta and active key intervals,
@@ -365,3 +370,200 @@ The Effect source and owner fingerprints above still identify the verified
 implementation. Set production, its former `utils.1`–`utils.40` owner and its
 registry are byte-identical to the merge base. No full repository test or build
 ran beyond the separately authorized size comparison's normal package builds.
+
+## Review of 2b3dd8c2d: key-only unordered results
+
+The ten-item review targets `2b3dd8c2d0a0f98a858dc1d08182f6673c9a7836`.
+It supplied no executed tests or builds. This evaluation is a self-review.
+The maintainer explicitly chose: "Preserve existing notifications; use keys."
+That decision supersedes the earlier general equal-projection suppression
+policy recorded above. No oracle expectation changed to match production.
+The new model ran RED before production changed.
+
+### Law, experiment and inference
+
+`EffectConfig`, `DeltaEvent` and the live-query guide promise complete delta
+values at each callback cut. Handler subsets do not change an exit's current
+value or an update's pre-batch value. React promises current callbacks without
+remounting. The maintainer's decision preserves unordered graph notifications,
+including equal projections, without adding value comparison or retention.
+
+The primary owner adds a shared companion, `effect-callback-oracle.ts`, and an
+actual React receiving driver. Sixty finite histories on each path cross:
+
+- Scalar, keyless opaque class, keyed private-field class, prototype method over
+  non-enumerable state, object Set and equal scalar projection.
+- All callbacks, enter only, exit only, late update and late batch callbacks.
+- Initial delivery and `skipInitial`.
+
+Authored scalar source versions determine expected public readable payloads.
+Classes and Sets are constructed only in the actual functional projection,
+so source-Collection comparison cannot mask or create the reported output cost.
+The model never imports production equality or its delta classifier. Both paths
+compare initial delivery, an unobserved update, callback replacement, another
+update, exit, reentry, next use and disposal. Source updates while absent are
+excluded. Removing any profile loses its callback premise; removing any payload
+loses its specific comparison boundary. All combinations run, and every one of
+480 declared cells on each receiving path reaches once. Original 200/24
+histories and their 5,512/120 cells remain unchanged.
+
+The recorder reads actual public payloads, including private-state accessors,
+and retains event multiplicity and previous values. Synthesized Set getters
+count reads outside the recorder. The restored unordered path traverses no
+payload leaves, for any callback profile. This bounds added traversal in these
+histories, not Set runtime or arbitrary graphs. The original metadata histories
+still check opaque-key intervals and both channels independently.
+
+| Experiment | Result |
+| --- | --- |
+| Expanded tests on unchanged reviewed production | 264 pass, 96 intended failures: 56 core and 40 React. Original 240 tests pass. |
+| Repaired core owner and React receiver | 360 pass, zero failures/skips. |
+| Final eight targeted suites | 708 pass, zero failures/skips. |
+| Reviewed classifier with refresh skipped for unobserved updates, older tests only | 314 pass; the 120 new histories are deliberately unselected for this diagnostic. The mutant survives. |
+| Same stale-value mutant, expanded tests | 338 pass, 96 failures. An exit reports version 0 instead of current version 2. |
+| Gross-count prior-membership mutant (`wasPresent = deletes > 0`) | 355 pass, 79 intended callback/membership failures. |
+
+All ordinary runs and full mutant runs preserve per-path reach. The diagnostic
+old-test selection is not a normal GREEN claim. Initial React module resolution
+failed before collection; explicit aliases to the already-installed React 19.2.4
+fixed that setup before the valid pre-production RED. No setup failure counts
+as a product or mutant result.
+
+The final repair retains only keys for unordered Effects. The first deletion
+in a batch supplies its previous/exiting value. Ordered Effects still retain
+coherent values across held graph runs and use their existing comparison.
+`observesUpdates` and its creation-time snapshot are removed. Dynamic callback
+lookup remains live. The redundant value fallbacks are removed; `deleteValue`
+is now necessary for unordered delivery rather than dead state.
+
+A deterministic cardinality probe at 8 and 64 rows confirms that reviewed
+unordered Effects added one Map entry per result, holding the same row objects
+as callbacks. It did not clone the rows. Disposal cleared that Map. The repaired
+path retains no output values in a Map. No total-memory multiplier was measured.
+
+### Lossless disposition
+
+| ID | Technical verdict | PR action and durable value |
+| --- | --- | --- |
+| R2-01 | Extra per-row Map retention confirmed. "Full copy" and roughly double total memory are unsupported: rows are shared references. | Fixed now with key-only unordered tracking for every handler profile, rather than conditional retained values. |
+| R2-02 | Confirmed new comparison path. Scalar sources that synthesize object Sets isolate it from source comparison. | Fixed now: unordered Effects never call the comparator. The removed Set rewrite stays removed. |
+| R2-03 | Confirmed: React always supplies wrappers. The claimed unordered comparison bypass did not apply there. | Fixed now through the core repair and real React receiving witness. Existing ordered comparison is unchanged. |
+| R2-04 | Confirmed test gap and mutant survival. | Fixed now with callback profiles, replacement, current exit values and a demonstrated stale-value mutant rejection. The obsolete optimization branch is removed. |
+| R2-05 | Partially confirmed. Keyless private instances already compare by identity and notify. Keyed instances with constant enumerable fields can hide changed private/non-enumerable state and retain stale values. | Fixed now on the introduced unordered path. The grammar keeps both failing and non-failing representations. No new general class-equality contract is imposed on other callers. |
+| R2-06 | Confirmed: the initial observer snapshot prevents later core update/batch installation. | Fixed now by removing the snapshot; actual core config mutation and React replacement both run through the shared comparison. |
+| R2-07 | Dead fallbacks are confirmed at the reviewed Map-only subject. Deleting the accumulator field after the key-only repair would instead lose previous/exiting values. | Fixed now by removing redundant fallbacks and restoring the field's required role. No field removal is claimed. |
+| R2-08 | Duplicate retention remedy of R2-01. "Wrong layer" is a design opinion, not a demonstrated contract violation. Prior membership is needed beyond a raw gross-count classification. | Duplicate of R2-01; keep this separate ID and its key-only suggestion. The maintainer selected the narrower design in the Effect boundary. |
+| R2-09 | Confirmed ambiguous/stale evidence. | Fixed now: historical subjects are explicit, and current owner/receiver counts and implementation are separate. |
+| R2-10 | Local-only traces are a durability limit. Squash does not automatically remove GitHub commit blobs: both this PR's earlier blob and merged #2299's pre-squash blob remain accessible. Future retention is not guaranteed by that observation. | Fixed now by retaining essential replay inputs below and finite histories in current versioned sources. Historical blob links are supplementary, and local logs are convenience artifacts. |
+
+Accounting: **10 = 9 fixed-now + 1 duplicate**. Each technical qualification
+above survives its action verdict. No new item is deferred. Previously removed
+Set engineering work retains the maintainer's explicit scope decision and its
+primary equality owner; resumption requires a maintainer request or an actual
+workload. Removing the new unordered comparator caller resolves the new
+interaction without reopening that optimization project.
+
+Reviewer assessment: **lean hire for static defect discovery, with verification
+required before approval**. Callback profiles, live replacement and React
+wrappers expose important missing cases. The memory multiplier, blanket private
+class claim, unconditional link-loss claim and field-deletion suggestion needed
+qualification. The proposed membership-only direction was useful. Severity and
+closure require executed evidence.
+
+### Oracle review and remaining limits
+
+This is bounded enforcement of unordered membership, notification compatibility
+and callback-visible values for the declared eager source histories and actual
+React commits. No known violation remains within these cells. It does not prove
+arbitrary scheduling, provider delivery, changing join multiplicity, other
+frameworks, ordered opaque-value semantics or exact rich-instance identity.
+Other comparator callers retain their previously documented domains and limits.
+
+| Requirement | Current evidence |
+| --- | --- |
+| ORC-001 | Public delta contracts and explicit maintainer notification decision above. |
+| ORC-002 | Authored source-version model; no production comparator/classifier import. |
+| ORC-003 | Companion explains contract, model, grammar, drivers and comparisons beside code. |
+| ORC-004 | Full finite crossing reconstructs the reports, states axis ablations and bounds, and excludes updates of absent sources. |
+| ORC-005 | Core callbacks and actual React hook; current readable values checked after each host/act cut. Scalar source facts arrive before projection. |
+| ORC-006 | Stale-value and gross-count mutants fail intended exit/value/membership comparisons. The former survives the old tests. |
+| ORC-007 | Not triggered: bounded finite histories, no random property or new run budget. |
+| ORC-008 | No stateful reference-state expansion; one authored prior source version suffices for public delta values. |
+| ORC-009 | Source version abstracts readable selected payload, with the mapping stated beside model and projection. |
+| ORC-010 | Per-cut mismatches accumulate; shared cleanup preserves primary failure and separate cleanup diagnostics. Disposal has its own cut. |
+| ORC-011 | No unresolved shared semantic fault is identified for this version-to-readable-payload relation. Other formulations remain outside the bounded claim. |
+| ORC-012 | Reviewed head, exact fingerprints, experiments, all IDs and every rubric requirement are versioned here. |
+| ORC-013 | Equal versus changed output, keyless versus keyed opaque state, callback presence/replacement and exit after unobserved updates distinguish neighboring wrong designs. |
+| ORC-014 | Actual React renderHook/act supplies the callback-replacement premise; each path has separate reach. No other framework/provider claim. |
+| ORC-015 | 480 cells per new path, each 1; original 5,512 and added membership 120 remain each 1. |
+| ORC-016 | Finite histories use shared model/driver/comparison without per-case expected answers. Scratch retention probes are separate diagnostics. |
+
+The final run selects utils oracle, utils, proxy revert, Effect, Effect disposal,
+Effect metadata, React Effect callbacks and ordinary React Effect tests. It uses
+jsdom, existing test setup, source aliases for DB/IVM, installed React 19.2.4,
+Vitest 3.2.4, no coverage, and at most two workers. Standard selectors are:
+
+```sh
+pnpm --filter @tanstack/db exec vitest run --coverage.enabled=false --maxWorkers=2 \
+  tests/utils-oracle.property.test.ts tests/utils.test.ts \
+  tests/proxy-revert-oracle.property.test.ts tests/effect.test.ts \
+  tests/effect-disposal-oracle.test.ts tests/query/virtual-row-fields-effect-oracle.test.ts
+pnpm --filter @tanstack/react-db exec vitest run --coverage.enabled=false --maxWorkers=2 \
+  tests/effect-callback-oracle.test.tsx tests/useLiveQueryEffect.test.tsx
+```
+
+Local execution uses the same selectors in the source-alias config
+`/private/tmp/effect-startup-delta/review-2b3dd8c/final.config.mjs`. Reports,
+commands, original/mutant snapshots and the append-only raw review ledger remain
+in that directory. These local files are supplementary to the versioned
+histories, recipe and comparison. Targeted TypeScript and ESLint pass.
+The authorized `pnpm size:compare` reports typical app 96,732→96,732 bytes gzip,
+Effects app 99,303→99,309 (+6), and DB bundle 109,667→109,668 (+1), against merge
+base `bea84cd45`. Other app scenarios are unchanged. No full test/build ran
+beyond the size script's normal package builds.
+
+Exact subject: reviewed parent plus the following final source fingerprints.
+Documentation-only changes do not alter these executable subjects.
+
+```text
+354bbbcf9683c91047c61da1ea2323ed89623628eb6059dacfbb79bd56b85ce4  packages/db/src/query/effect.ts
+47e862b092e643309bd804acab7c61c036ed7a345c873ca480f63b807aa4f24d  packages/db/tests/query/virtual-row-fields-effect-oracle.test.ts
+ca9e1336e7ceeb243a8e32a49ad2c3c881deaa38334540e85f848122cbaf2d38  packages/db/tests/query/effect-callback-oracle.ts
+9ed573ae14bf9bd87058c9136ef1de57f33422da235f6253a9c97f90599cf98e  packages/react-db/tests/effect-callback-oracle.test.tsx
+```
+
+### Deferred Set replay inputs
+
+These inputs preserve the earlier synthetic findings without reinstating the
+Set rewrite, test campaigns or work budgets. No application incident or new
+latency guarantee follows. The existing `utils-oracle.property.test.ts` owner
+remains responsible for change-event equality; the maintainer controls whether
+to resume the excluded engineering work.
+
+The factorial-work witness uses distinct object members. For size `n`, compare
+`new Set(Array.from({length:n}, () => ({value:0})))` with a Set of `n-1` such
+objects followed by `{value:1}`. The equality judgment is false. Instrument an
+enumerable `value` getter to count reads. The earlier direct `n=4` experiment
+observed 128 reads, against its proposed bound of 32. The eight-member Effect
+receiver observed 219,200 reads against 1,296 while still returning the correct
+equality result. Those engineering bounds are historical and retired.
+
+The stack witness uses `n=2**13` words of 13 coordinates. Let `g(j)=j^(j>>1)`.
+For right word `j`, coordinate `k` is a distinct instance of class First or
+Second according to bit `k` of `g(j)`, with one enumerable `value:0` field.
+Two different classes differ; a plain `{value:0}` can match either class.
+Left word `i<n-1` follows right word `i`, replacing the coordinate that differs
+from right word `i+1` with a plain record. The last left word copies right word
+zero. Each outer Set member is its word array. The complete assignment is
+`i -> (i+1)%n`, so equality is true. To create the false neighbor, change every
+coordinate value in the last right word to 1, leaving an isolated unmatched
+word. The earlier recursive matcher overflowed on both witnesses after setup.
+This is a runtime failure, not an equality-assertion rejection. Smaller generated
+versions used 2–6 bits and optional one-place right rotation. A recorded greedy
+mutant replay used `utils.42`, seed `-75265719`, shrink path `1`; that retired
+selector alone does not run on the current registry. The structural recipe
+above supplies the inputs independently of the removed generator.
+
+Historical reports at `0b47ee825aaa0c36b199a3c42652cab8d9672ec9` retain broader
+experiments. Their links are supplementary; the current source tree now holds
+these essential distinguishing inputs, observations and limits.
