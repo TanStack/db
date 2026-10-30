@@ -403,3 +403,42 @@ This is renewed sensitivity evidence after an internal refactor. The earlier
 oracle-first RED, two distinguishing mutants and direct-subscription limits
 still govern the original repair. No temporary mutant remains. Local review
 and implementation work are complete; final pushed-head CI is checked separately.
+
+## Private-member build-cache follow-up
+
+CI at `1aadaaedc1a2159fc4000a36867bd023896b409a` rejected five obsolete
+private-member cache entries before the minified consumer test ran. Local
+`pnpm run check:mangle` reproduced the same RED. Running
+`node scripts/mangle-private-members.mjs --write` removes those five entries
+and adds `sourceListenerCleanups`. Every surviving assignment stays unchanged.
+The generated cache now passes its safety check with 437 names.
+
+`pnpm --filter @tanstack/db run build:minified` and
+`pnpm run test:minified-db` then pass: 113 error names, index metadata,
+query rows and live updates. This repairs build metadata, with no source,
+contract, oracle or budget change. The source hash and 646-test result above
+remain current. The earlier failed local consumer-test invocation rejected
+stale dist output after temporary mutant restoration, before testing behavior.
+The explicit fresh build resolves that setup condition.
+
+The corrected cache changes shipped bytes. These `pnpm size:compare --files`
+results **supersede the provisional weight table above** at the same base:
+
+| Build | Gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| Full DB package | -44 | +5 |
+| Typical app | -45 | +20 |
+| App with Effect | -45 | +37 |
+| App with groupBy | -49 | -30 |
+| App with includes | -45 | +64 |
+| App with join | -45 | +37 |
+| App with local storage | -44 | -14 |
+| App with optimistic action | -46 | -65 |
+| App with paced mutations | -46 | +47 |
+
+The subscription module shrinks **133 minified bytes**. Other package bundles
+remain unchanged. The production source diff is 28 additions and 54 deletions
+against the base. Tests and documentation grow separately. The final claim is
+negative minified production weight and negative gzip across every measured
+app. Brotli remains mixed, including +20 bytes for the typical app and +5 bytes
+for DB. No names or formatting were tuned to change compression results.
