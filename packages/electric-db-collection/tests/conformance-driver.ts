@@ -19,16 +19,18 @@
  *   for one it does, `delete` otherwise. The adapter commits at
  *   `up-to-date`, so the driver declares `per-batch` commits;
  * - a failure answers with HTTP 400, which the client gives to the shape's
- *   `onError`. The handler gives up, alternately by returning nothing and by
- *   throwing, and the adapter reports the client's or the handler's error,
- *   so the driver declares `failureValue: any`.
+ *   `onError`. The handler gives up by returning nothing, or for an odd
+ *   failure index by throwing. Every failed response carries the injected failure's index in
+ *   a header, so `matchesFailure` names the value owed: the client's
+ *   FetchError for that response, or the error the handler threw.
  *   The law set gives Electric a give-up after retries (`retryBound`), so the
  *   driver declares `source-failure-after-ready`;
- * - a retried failure (`retry-policy`) is one failed attempt; health shows
- *   an outage from its fifth consecutive attempt (`retryReportAfter`). It
- *   answers with HTTP 503, which the
- *   client retries (its backoff is set short), or, every other time, with
- *   HTTP 400, which the shape's `onError` retries;
+ * - a retried failure (`retry-policy`) is one failed attempt of a generated
+ *   kind (`transientVariants`): an HTTP 503 or a 429 with `Retry-After`,
+ *   which the client retries (its backoff is set short), a rejected fetch
+ *   (a network failure, also retried by the client), or an HTTP 400 that
+ *   the shape's `onError` retries. Health shows an outage from its fifth
+ *   attempt in a row (`retryReportAfter`);
  * - a provider subscription is one sync run's request chain; its release is
  *   the abort of the chain's pending request (LIFE-2, LIFE-10);
  * - the propagation step (`settle`) waits until the client asks again after
@@ -42,6 +44,7 @@
  * `note` is a nullable text column (`toSqlRow`, `fromSqlRow`). The driver
  * never reads the Collection.
  */
+import { FetchError } from '@electric-sql/client'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import {
@@ -117,7 +120,20 @@ type Request = {
   url: URL
   signal: AbortSignal | undefined
   respond: (response: Response) => void
+  /** Rejects the fetch, as a network failure does. */
+  reject: (error: Error) => void
 }
+
+/** The oracle's index of an injected failure, from its message. */
+const failureIndex = (error: Error) => error.message.split(` `).at(-1)!
+
+/** The kinds of failed attempt the provider makes (`retry-policy`). */
+const TRANSIENT_VARIANTS = [
+  `http-503`,
+  `http-429`,
+  `network`,
+  `http-400-retried`,
+] as const
 
 type Session = {
   handle: string
@@ -131,6 +147,20 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 /** How long the driver waits for the client before letting the check decide. */
 const clientTimeoutMs = 2_000
 
+/** The response header that carries an injected failure's index. */
+const FAILURE_HEADER = `x-conformance-failure`
+
+/** A failed response that carries the failure's index; a 429 asks for 1 ms. */
+function failureResponse(error: Error, status: number): Response {
+  return new Response(error.message, {
+    status,
+    headers: {
+      [FAILURE_HEADER]: failureIndex(error),
+      ...(status === 429 ? { 'retry-after': `0.001` } : {}),
+    },
+  })
+}
+
 class ElectricProvider implements ControlledProvider {
   private readonly queued: Array<Request> = []
   private readonly sessions: Array<Session> = []
@@ -140,21 +170,30 @@ class ElectricProvider implements ControlledProvider {
   // Give-ups so far, and the count the latest failure must reach.
   private gaveUp = 0
   private giveUpTarget = 0
-  private transientFailures = 0
   private retryNextError = false
+  /** The error `onError` threw to give up, by failure index. */
+  readonly thrown = new Map<string, Error>()
 
   /**
    * An app's `onError`. It retries the HTTP 400 of a retried failure by
-   * returning an empty retry. It gives up on any other error, alternately
-   * by returning nothing and by throwing; both stop the stream (RETRY-1),
-   * and the adapter fails.
+   * returning an empty retry. It gives up on any other error by returning
+   * nothing, or, for an odd failure index, by throwing; both stop the
+   * stream (RETRY-1), and the adapter fails.
    */
-  readonly onError = () => {
+  readonly onError = (error: Error) => {
     if (this.retryNextError) {
       this.retryNextError = false
       return {}
     }
-    if (this.gaveUp++ % 2 === 1) throw new Error(`conformance give-up`)
+    this.gaveUp++
+    const index = (error as { headers?: Record<string, string> }).headers?.[
+      FAILURE_HEADER
+    ]
+    if (Number(index) % 2 === 1) {
+      const thrown = new Error(`conformance give-up ${index}`)
+      this.thrown.set(index!, thrown)
+      throw thrown
+    }
     return undefined
   }
 
@@ -168,6 +207,10 @@ class ElectricProvider implements ControlledProvider {
         respond: (response) => {
           signal?.removeEventListener(`abort`, abort)
           resolve(response)
+        },
+        reject: (error) => {
+          signal?.removeEventListener(`abort`, abort)
+          reject(error)
         },
       }
       const abort = () => {
@@ -316,23 +359,29 @@ class ElectricProvider implements ControlledProvider {
     this.respondRows(request, messages)
   }
 
-  fail = async () => {
+  fail = async (error: Error) => {
     const request = await this.take()
     this.session(request).stopped = true
     this.giveUpTarget = this.gaveUp + 1
-    request.respond(new Response(`conformance failure`, { status: 400 }))
+    request.respond(failureResponse(error, 400))
   }
 
-  // Retried failures alternate: the client retries an HTTP 503 itself, and
-  // the app's `onError` retries an HTTP 400.
-  transientFailure = async () => {
+  // One failed attempt: an HTTP 503 or 429 the client retries, a network
+  // failure the client retries, or an HTTP 400 the shape's `onError`
+  // retries.
+  transientFailure = async (error: Error, variant: number) => {
     const request = await this.take()
-    const byApp = this.transientFailures++ % 2 === 1
-    this.retryNextError = byApp
+    const kind = TRANSIENT_VARIANTS[variant]
+    if (kind === `network`) {
+      request.reject(new TypeError(error.message))
+      return
+    }
+    this.retryNextError = kind === `http-400-retried`
     request.respond(
-      new Response(`conformance transient failure`, {
-        status: byApp ? 400 : 503,
-      }),
+      failureResponse(
+        error,
+        kind === `http-503` ? 503 : kind === `http-429` ? 429 : 400,
+      ),
     )
   }
 
@@ -379,6 +428,8 @@ function conformanceRow(row: ElectricRow): ConformanceRow {
 let sequence = 0
 
 export function electricConformanceDriver(): EagerLiveSourceDriver {
+  // The provider of the history being checked.
+  let current: ElectricProvider | undefined
   return {
     adapter: `@tanstack/electric-db-collection (eager)`,
     capabilities: new Set([
@@ -388,8 +439,22 @@ export function electricConformanceDriver(): EagerLiveSourceDriver {
       `source-failure-after-ready`,
     ]),
     changeCommits: `per-batch`,
-    // The Collection reports the client's error for the failed response.
-    failureValue: `any`,
+    // The Collection reports the client's error for a failed response, the
+    // error a network failure rejected with, or the error `onError` threw to
+    // give up. Each carries the injected failure's index.
+    matchesFailure: (reported, failure) => {
+      const index = String(failure)
+      const thrown = current?.thrown.get(index)
+      if (thrown) return reported === thrown
+      if (reported instanceof FetchError) {
+        return reported.headers[FAILURE_HEADER] === index
+      }
+      return (
+        reported instanceof TypeError &&
+        reported.message.endsWith(` failure ${index}`)
+      )
+    },
+    transientVariants: TRANSIENT_VARIANTS,
     // Electric carries txids on row messages; an empty batch sends none.
     txidEvidence: `change`,
     // Only an extended outage shows (maintainer decision 2026-10-30).
@@ -405,6 +470,7 @@ export function electricConformanceDriver(): EagerLiveSourceDriver {
       (kind === `negative-zero` && typeof value !== `number`),
     create(): EagerLiveSourceFixture {
       const provider = new ElectricProvider()
+      current = provider
       const collection = createCollection(
         electricCollectionOptions<ElectricRow>({
           id: `electric-conformance-${++sequence}`,

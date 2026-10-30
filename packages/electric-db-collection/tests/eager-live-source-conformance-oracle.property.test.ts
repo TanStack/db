@@ -36,10 +36,10 @@ import { electricConformanceDriver } from './conformance-driver'
 const property = `adapter-conformance.eager-live-source.electric`
 const driver = electricConformanceDriver()
 const historyArb = eagerLiveSourceHistoryArb(driver)
-// The rarest state is `field-removed`: at 400 histories, six seeds reached
-// it 19 to 31 times.
+// At 400 histories, four seeds reached every declared state at least 15
+// times; the rarest is a reported outage in a later sync run.
 const runs = 400
-// A campaign takes about 20 seconds.
+// A campaign takes about 35 seconds.
 const campaignTimeoutMs = 120_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {

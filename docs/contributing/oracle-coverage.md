@@ -6003,8 +6003,9 @@ commit per batch or per change. PUB-1 checks every change publication during
 a step, not only the settled checkpoint. The reference push adapter
 (`tests/reference-adapter-oracle.property.test.ts`,
 `adapter-conformance.eager-live-source.reference`) runs fixed and random
-campaigns of 600 histories with declared reach, a per-change variant, and 35
-law-named hostile mutants, with ORC-004 reconstruction, exclusion, and
+campaigns of 600 histories with declared reach, a per-change variant, an
+outage-threshold variant with client-created values, and 41 law-named
+hostile mutants, with ORC-004 reconstruction, exclusion, and
 ablation controls. The Neon Realtime receiving driver
 (`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
 `@neon/realtime-tanstack` 0.1.1 vendored at neon-pkgs `7ac55e3e` and is RED on
@@ -6048,24 +6049,37 @@ evidence: a direct write and read through `@powersync/node` 0.20.0.
 Electric (`adapter-conformance.eager-live-source.electric`, eager mode over
 the installed `@electric-sql/client` and a controlled `fetchClient` that
 answers the HTTP protocol, per-batch commits, typed Postgres columns for
-nine kinds) is GREEN after three fixes. After ready, an outage of five
-consecutive failed attempts that the client retries (network error, 429,
-5xx) or the shape's `onError` retries is now reported in `failureReason`,
-once, and the next applied commit point clears it; shorter outages show
-nothing (HEALTH-1, HEALTH-2, RETRY-1, driver parameter
-`retryReportAfter: 5`; maintainer decision 2026-10-30: a retrying source
-must not flap its health, so only an extended outage reports). A restarted run no
-longer settles `awaitTxId` from the retired run's txids (EVID-2). An
-`onError` that throws now gives up without a detached rejection (HEALTH-5,
-RETRY-1); the driver gives up alternately by returning nothing and by
-throwing. Electric's
-failures are values its client creates (`failureValue: any`), so the check
-owes some error, at most one per attempt, and the outage's first failure
-kept; it does not check identity. Its empty batches carry no txid
-(`txidEvidence: change`). Excluded by `excludesValue` (column domains, not
+nine kinds) is GREEN after fixes from two rounds. Maintainer decisions
+(2026-10-30) that the shared model and Electric's driver encode: only an
+extended outage reports, five shape-log attempts in a row for Electric
+(`retryReportAfter: 5`; a threshold is each adapter's choice: a
+connection-aware source can report at once), with the attempt that crossed
+it as the failure, any accepted response restarting the count, and an
+applied up-to-date clearing it at once; a sync run retires when it fails,
+so its pending waits reject then and later unmet waits reject; a retired
+run's evidence fulfills a wait once the current run is ready (revising law
+set v18 EVID-2, which said never); and a throwing `onError` gives up with
+its own error. Attempt kinds are generated (`transientVariants`: HTTP 503,
+HTTP 429 with `Retry-After`, a rejected fetch, an HTTP 400 that `onError`
+retries), and outages land anywhere in a history, also a second time in a
+run, after a live batch, and in a later run. Failure values are compared
+through the driver's `matchesFailure`: each failed response carries the
+injected failure's index in a header, and a thrown give-up is compared by
+identity. The on-demand subset lane of `electric-sdk-delivery-oracle`
+(`electric.sdk-snapshot-delivery`) adds retried subset attempts (0..7 per
+request), up to six live pauses, and a live outage after the first load,
+and checks that the source node shows a problem exactly when the live
+stream had an outage. Excluded by `excludesValue` (column domains, not
 adapter behavior): int4 values outside 32 bits, and a `-0` nested in an
-array or object for the float8 column. Limits: no on-demand or progressive
-mode, no persisted resume (so a held commit receipt that clears an outage
-late is not exercised), and no real Electric server. Two generated scenario
-prefixes reach EVID-2 (a batch, a restart, a wait for its txid) and the
-second retried failure of one outage.
+array or object for the float8 column. Limits: the eager grammar has no
+accepted response that commits nothing, so restarting the count on one is
+enforced only by source inspection (a mutant that never restarts it
+survives); snapshot-visibility evidence (`snapshot-end`) across a restart is
+not generated, so the retired-evidence rule is witnessed for txids only;
+`awaitMatch` after a failure is not generated; a held commit receipt and
+persisted resume are not exercised; there is no real Electric server; the
+default configuration without `onError` and a give-up after `maxRetries`
+are not generated. The on-demand lane runs 12 histories without declared
+reach. The shared check refuses `retryReportAfter` above 1 with
+`transport-reconnect` or `capability-renewal`: no law fixes whether a
+reconnect or a renewal ends an outage a threshold is counting.

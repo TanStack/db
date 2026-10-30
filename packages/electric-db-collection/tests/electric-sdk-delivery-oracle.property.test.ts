@@ -221,12 +221,25 @@ function resetResumeMetadata(): SyncMetadataApi<string | number> {
   }
 }
 
+/**
+ * Retried subset attempts: how many HTTP 503 responses each subset request
+ * gets before its snapshot, and how many empty loads follow the three
+ * ordered ones, each pausing the live request.
+ */
+type SubsetRetries = {
+  failures: ReadonlyArray<number>
+  extraLoads: number
+  /** HTTP 503 responses to the live request after the first load. */
+  liveFailures?: number
+}
+
 async function checkSnapshots(
   width: number,
   name: string,
   dropRows = false,
   cleanupFailure?: Error,
   setupFault?: { primary: Error; cleanup?: Error },
+  retries: SubsetRetries = { failures: [], extraLoads: 0 },
 ) {
   const http = controlledHttp()
   const batches: Array<Array<Message<Item>>> = []
@@ -273,6 +286,7 @@ async function checkSnapshots(
           url: `http://test-url/snapshot-${sequence}`,
           params: { table: `rows` },
           fetchClient: http.fetchClient,
+          backoffOptions: { initialDelay: 1, maxDelay: 2, multiplier: 1 },
         },
         syncMode: `on-demand`,
         startSync: true,
@@ -306,7 +320,22 @@ async function checkSnapshots(
     // poll is still pending; requestSnapshot owns pausing that poll.
     await atCheckpoint(http.take(), `initial live request`)
     expect(rows()).toEqual([])
-    for (const [index, lowerBound] of [1, 2, width + 1].entries()) {
+    // After ready, five live attempts in a row that the client retries are
+    // a source outage (Electric's threshold, maintainer decision
+    // 2026-10-30). Only the live stream's up-to-date ends it; a subset's
+    // end does not.
+    let outage = false
+    const sourceHealth = (label: string) =>
+      expect(collection.health.failureReason !== null, label).toBe(outage)
+    const lowerBounds = [
+      1,
+      2,
+      ...Array.from(
+        { length: retries.extraLoads + 1 },
+        (_, i) => width + 1 + i,
+      ),
+    ]
+    for (const [index, lowerBound] of lowerBounds.entries()) {
       // Distinct predicates prevent request deduplication; the second response
       // overlaps prior rows and changes their payload, and the last is empty.
       if (index === 1) for (const item of source) item.name += `-changed`
@@ -326,7 +355,22 @@ async function checkSnapshots(
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error }),
       )
-      const request = await atCheckpoint(http.take(true), `snapshot request`)
+      let request = await atCheckpoint(http.take(true), `snapshot request`)
+      // A subset request's attempts that the client retries belong to that
+      // request, not to the source: the source node shows no problem
+      // (glossary, request error), however many fail in a row.
+      for (
+        let attempt = 0;
+        attempt < (retries.failures[index] ?? 0);
+        attempt++
+      ) {
+        request.respond(new Response(`transient`, { status: 503 }))
+        request = await atCheckpoint(
+          http.take(true),
+          `retried snapshot request`,
+        )
+        sourceHealth(`snapshot ${index} attempt ${attempt} source health`)
+      }
       expect(
         request.url.searchParams.get(`subset__where`),
         `snapshot ${index} request predicate`,
@@ -368,11 +412,21 @@ async function checkSnapshots(
       expect(rows(), `snapshot ${index} applied rows`).toEqual(
         [...expected.values()].sort((a, b) => a.id - b.id),
       )
+      sourceHealth(`snapshot ${index} source health`)
       const outcome = await atCheckpoint(
         completion,
         `snapshot request completion`,
       )
       if (!outcome.ok) throw outcome.error
+      if (index === 0 && (retries.liveFailures ?? 0) > 0) {
+        let live = await atCheckpoint(http.take(), `resumed live request`)
+        for (let attempt = 0; attempt < retries.liveFailures!; attempt++) {
+          live.respond(new Response(`transient`, { status: 503 }))
+          live = await atCheckpoint(http.take(), `retried live request`)
+        }
+        outage = retries.liveFailures! >= 5
+        sourceHealth(`source health after live attempts`)
+      }
     }
     await atCheckpoint(http.take(), `resumed live request`)
   }, [
@@ -410,13 +464,33 @@ async function checkSnapshots(
 // requested lower bound is excluded by construction. This bounded grammar
 // does not claim arbitrary predicate orders or provider snapshots. The row at
 // id=2 distinguishes id>=2 from a misplaced exclusive boundary at snapshot 1.
+// Retries: each subset request gets 0..7 HTTP 503 responses that the client
+// retries before its snapshot, so five or more in a row are common; 0..3
+// extra empty loads (id>=width+2 on) pause the live request up to six times
+// between its responses. After the first load, the live request gets 0..6
+// HTTP 503 responses the client retries; five or more are a source outage.
+// The source node shows a problem exactly when the live stream had that
+// outage: a subset request's retried attempts and a live pause are not
+// failures of the source, and a subset's end does not end its outage.
 const snapshotViolation = sameViolation()
 const snapshotProperty = fc.asyncProperty(
   fc.integer({ min: 2, max: 4 }),
   fc.string({ maxLength: 10 }),
-  (width, name) =>
-    snapshotViolation.check({ width, name }, () =>
-      checkSnapshots(width, name, replayFault === `snapshot-rows`),
+  fc.record({
+    failures: fc.array(fc.nat(7), { maxLength: 6 }),
+    extraLoads: fc.nat(3),
+    liveFailures: fc.nat(6),
+  }),
+  (width, name, retries) =>
+    snapshotViolation.check({ width, name, retries }, () =>
+      checkSnapshots(
+        width,
+        name,
+        replayFault === `snapshot-rows`,
+        undefined,
+        undefined,
+        retries,
+      ),
     ),
 )
 sdkCampaigns(

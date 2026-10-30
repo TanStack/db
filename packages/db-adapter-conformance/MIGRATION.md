@@ -352,3 +352,56 @@ range`). The Collection shows what the database stored, so this is not
     domains (`excludesValue`). Waiting out a deadline after each give-up
     made histories take 1 s each; the driver now counts the give-ups its
     own `onError` made.
+- **2026-10-30, Electric, review round (three oracle reviewers).** The
+  reviews found gaps in the previous round's oracle and three more Electric
+  defects; the maintainer decided the law questions they raised.
+  - **Decisions:** a sync run retires when it fails, so its pending waits
+    reject then; a retired run's evidence fulfills a wait once the current
+    run is ready (law set v18 EVID-2 said never); "five in a row" restarts
+    on any accepted response; a throwing `onError` reports its own error;
+    the outage shows the attempt that crossed the threshold; a threshold is
+    each adapter's choice (Electric syncs over HTTP, a connection-aware
+    source can report at once); recovery clears at once.
+  - **Oracle changes:** outages are generated anywhere in a history, with
+    lengths below and past the threshold and a recurring outage around a
+    live batch; attempt kinds are a generator dimension
+    (`transientVariants`); `failureValue: any` is replaced by the driver's
+    `matchesFailure` relation, so a stale or replaced value is rejected;
+    txids number batches across runs; waits are generated after a failure;
+    a field-only publication mismatch names FID-1. New reach states for
+    each attempt kind and for an outage reported again, after a batch, and
+    in a later run. A reference variant with an outage threshold of 3 and
+    client-created values conforms, and its mutants (stale value, replaced
+    value, early threshold, count kept across a delivery) are rejected;
+    new reference mutants for EVID-2 (retired evidence before ready, never,
+    and waits kept after a failure). The on-demand subset lane of
+    `electric-sdk-delivery-oracle` gains retried subset attempts, extra
+    pausing loads, a live outage, and a source-health check.
+  - **RED on 815854815:** EVID-2 at `[fail, wait, snapshot]` (a wait after
+    the failure stayed pending); in the on-demand lane, source health
+    showed a subset request's five retried 503s (`failures [0,5]`).
+    Mutants restoring each earlier behavior were rejected: retired txids
+    forgotten (EVID-2), the thrown error not reported (HEALTH-1, health
+    error cause), a subset's end ending a live outage (on-demand lane).
+  - **Fixes:** the lifecycle keeps retired evidence and counts it after the
+    run's ready; a failure rejects pending txid and match waits and later
+    unmet ones; the `fetchClient` wrapper skips subset snapshot requests
+    (they carry no abort signal), counts every failed shape-log attempt,
+    and restarts the count on an accepted response; only an applied
+    up-to-date ends an outage; a throwing `onError` fails the run with its
+    error.
+  - **GREEN:** Electric suite 1242 passed (4 skipped); SDK delivery oracle
+    34/34; eager campaigns pass with every declared state reached at least
+    15 times across four seeds; reference suite 77/77; TrailBase, RxDB,
+    PowerSync pass.
+  - **Mutants of `src/electric.ts`, rejected:** retired txids forgotten,
+    waits kept after a failure, retired evidence before ready (EVID-2);
+    429 or network attempts not counted, threshold 6, thrown error not
+    reported (HEALTH-1); subset attempts counted, a subset's end ending the
+    outage, aborted requests counted (on-demand lane). Survives: never
+    restarting the count on an accepted response, because every accepted
+    eager response is also an up-to-date (recorded limit).
+  - **Size:** Electric +415 gzip bytes over the merge base (+4.2%), +192
+    over the previous round, for the retired-evidence set, failure-time
+    wait rejection, and the merged export. The `app` scenario does not
+    include Electric.

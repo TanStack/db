@@ -121,6 +121,15 @@ type ElectricLifecycleEvidence = {
   hydratedResumeState?: ElectricResumeState
 }
 
+function hasEvidence(evidence: ElectricLifecycleEvidence, txId: Txid): boolean {
+  return (
+    evidence.seenTxids.has(txId) ||
+    evidence.seenSnapshots.some((snapshot) =>
+      isVisibleInSnapshot(txId, snapshot),
+    )
+  )
+}
+
 type ElectricPendingMatch<T extends Row<unknown>> = {
   matchFn: (message: Message<T>) => boolean
   resolve: (value: boolean) => void
@@ -917,6 +926,15 @@ class ElectricLifecycle<T extends Row<unknown>> {
   private nextWaiterId = 0
   private epoch = 0
   private active = false
+  // Evidence of retired runs. It counts once the current run is ready,
+  // because that run's rows are read after it (EVID-2).
+  private readonly retired: ElectricLifecycleEvidence = {
+    seenTxids: new Set(),
+    seenSnapshots: [],
+  }
+  private runReady = false
+  // The current run's failure: no evidence can arrive after it (EVID-2).
+  private failure: { error: unknown } | undefined
 
   constructor(private readonly collectionId?: string) {}
 
@@ -928,6 +946,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
   start(): number {
     if (this.active) this.retire()
     this.active = true
+    this.runReady = false
+    this.failure = undefined
     this.epoch++
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     return this.epoch
@@ -941,31 +961,57 @@ class ElectricLifecycle<T extends Row<unknown>> {
     if (epoch !== undefined && !this.isActive(epoch)) return
     this.active = false
     this.epoch++
-
-    for (const match of this.pendingMatches.values()) {
-      clearTimeout(match.timeoutId)
-      match.reject(new StreamAbortedError(this.collectionId))
-    }
-    this.pendingMatches.clear()
-
-    for (const waiter of this.pendingTxidWaits.values()) {
-      clearTimeout(waiter.timeoutId)
-      waiter.reject(new StreamAbortedError(this.collectionId))
-    }
-    this.pendingTxidWaits.clear()
+    this.rejectWaits(new StreamAbortedError(this.collectionId))
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
-    // A retired run's evidence does not settle a later run's waits (EVID-2).
-    this.forgetEvidence()
-  }
-
-  forgetEvidence(): void {
+    for (const txid of this.evidence.seenTxids) this.retired.seenTxids.add(txid)
+    this.retired.seenSnapshots.push(...this.evidence.seenSnapshots)
     this.evidence.seenTxids.clear()
     this.evidence.seenSnapshots.length = 0
     this.evidence.hydratedResumeState = undefined
   }
 
+  /** The run's first ready: retired evidence now counts (EVID-2). */
+  markReady(epoch: number): void {
+    if (!this.isActive(epoch)) return
+    this.runReady = true
+    this.resolveTxidWaiters()
+  }
+
+  /** The run failed: its pending waits reject, as later unmet ones do. */
+  fail(epoch: number, error: unknown): void {
+    if (!this.isActive(epoch)) return
+    this.failure ??= { error }
+    this.rejectWaits(error)
+  }
+
+  private rejectWaits(error: unknown): void {
+    for (const waiter of [
+      ...this.pendingMatches.values(),
+      ...this.pendingTxidWaits.values(),
+    ]) {
+      clearTimeout(waiter.timeoutId)
+      waiter.reject(error as Error)
+    }
+    this.pendingMatches.clear()
+    this.pendingTxidWaits.clear()
+  }
+
+  forgetEvidence(): void {
+    for (const evidence of [this.evidence, this.retired]) {
+      evidence.seenTxids.clear()
+      evidence.seenSnapshots.length = 0
+    }
+    this.evidence.hydratedResumeState = undefined
+  }
+
   exportMeta(): ElectricSyncMeta {
-    return exportElectricSyncMeta(this.evidence)
+    return exportElectricSyncMeta({
+      ...this.evidence,
+      seenTxids: new Set([
+        ...this.retired.seenTxids,
+        ...this.evidence.seenTxids,
+      ]),
+    })
   }
 
   importMeta(meta: unknown): void {
@@ -992,10 +1038,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
 
   private hasTxid(txId: Txid): boolean {
     return (
-      this.evidence.seenTxids.has(txId) ||
-      this.evidence.seenSnapshots.some((snapshot) =>
-        isVisibleInSnapshot(txId, snapshot),
-      )
+      hasEvidence(this.evidence, txId) ||
+      (this.runReady && hasEvidence(this.retired, txId))
     )
   }
 
@@ -1020,6 +1064,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       throw new ExpectedNumberInAwaitTxIdError(typeof txId, this.collectionId)
     }
     if (this.hasTxid(txId)) return true
+    if (this.failure) throw this.failure.error
 
     return new Promise((resolve, reject) => {
       const waitId = this.nextWaiterId++
@@ -1048,6 +1093,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       if (!matchFn(message)) continue
       return true
     }
+    if (this.failure) throw this.failure.error
     for (const message of this.matchBuffer.pendingMessages) {
       if (matchFn(message)) return this.registerMatch(matchFn, timeout, true)
     }
@@ -1639,7 +1685,6 @@ function createElectricSync<T extends Row<unknown>>(
       begin,
       write,
       commit: commitSyncTransaction,
-      fail,
       truncate,
       collection,
       metadata,
@@ -1650,14 +1695,21 @@ function createElectricSync<T extends Row<unknown>>(
     let ready = false
     const markReady = () => {
       ready = true
+      lifecycle.markReady(lifecycleEpoch)
       params.markReady()
     }
-    // After the first ready, a retried outage shows only once it lasted
-    // five failed attempts in a row, so health does not flap on a blip
-    // (maintainer decision). It is reported once: later attempts keep its
-    // failure. A commit point ends the outage, and its failure clears once
-    // that commit applies (HEALTH-1, HEALTH-2, RETRY-1). A give-up after
-    // ready ends health reports; the other failures abort the run.
+    // A failure ends the run's waits (EVID-2).
+    const fail = (error: unknown) => {
+      lifecycle.fail(lifecycleEpoch, error)
+      params.fail(error)
+    }
+    // After the first ready, a retried outage shows only once five
+    // shape-log attempts in a row failed, so health does not flap on a blip
+    // (maintainer decision). The attempt that crossed the threshold reports
+    // it once; later attempts keep its failure. A response the client
+    // accepts ends the run of failures, and an applied up-to-date ends the
+    // outage, clearing its failure (HEALTH-1, HEALTH-2, RETRY-1). A give-up
+    // after ready ends health reports; the other failures abort the run.
     let failedAttempts = 0
     let retrying: unknown
     let gaveUp = false
@@ -1924,15 +1976,17 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.handle ??
         (canUsePersistedResume ? persistedResumeState.handle : undefined),
       signal: abortController.signal,
-      // The client retries a network error, 429, and 5xx without calling
-      // onError; onError decides the other failures.
+      // The client retries a failed network attempt, 429, or 5xx itself, and
+      // onError decides another 4xx; each is a failed attempt. A subset
+      // snapshot request carries no abort signal: its attempts belong to its
+      // demand, not to the source (glossary, request error).
       fetchClient: async (input, init) => {
+        const request = (shapeOptions.fetchClient ?? fetch)(input, init)
+        if (!init?.signal) return request
         try {
-          const response = await (shapeOptions.fetchClient ?? fetch)(
-            input,
-            init,
-          )
-          if (response.status === 429 || response.status >= 500) {
+          const response = await request
+          if (response.ok || response.status === 409) failedAttempts = 0
+          else {
             reportRetry(
               new FetchError(
                 response.status,
@@ -1945,7 +1999,7 @@ function createElectricSync<T extends Row<unknown>>(
           }
           return response
         } catch (error) {
-          if (!init?.signal?.aborted) reportRetry(error)
+          if (!init.signal.aborted) reportRetry(error)
           throw error
         }
       },
@@ -1972,14 +2026,17 @@ function createElectricSync<T extends Row<unknown>>(
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
-            // A throwing handler gives up. Rethrown, its error would reject
-            // the client's own start unobserved; returning nothing stops the
-            // stream, and the client reports its error to the subscriber.
+            // A throwing handler gives up with its error. Rethrown, it would
+            // reject the client's own start unobserved, so the run fails
+            // here and returning nothing stops the stream.
             failWaits(error)
+            if (ready) {
+              gaveUp = true
+              fail(error)
+            }
             return
           }
           if (!retry || typeof retry !== `object`) failWaits(errorParams)
-          else reportRetry(errorParams)
           return retry
         } else {
           const initialSyncFailed = !ready
@@ -2611,18 +2668,23 @@ function createElectricSync<T extends Row<unknown>>(
             () => undefined,
           )
         }
-        const recover = endOutage()
-        if (applied === true) recover()
+        // Only the shape log's up-to-date shows the source recovered; a
+        // subset's end belongs to its demand.
+        const recover = commitPoint === `up-to-date` ? endOutage() : undefined
+        if (applied === true) recover?.()
         else {
-          void applied.then(recover, (error: unknown) => {
-            if (!isActiveLifecycle() || abortController.signal.aborted) {
-              return
-            }
-            streamErrorVersion++
-            stream.unsubscribeAll()
-            abortController.abort()
-            fail(error)
-          })
+          void applied.then(
+            () => recover?.(),
+            (error: unknown) => {
+              if (!isActiveLifecycle() || abortController.signal.aborted) {
+                return
+              }
+              streamErrorVersion++
+              stream.unsubscribeAll()
+              abortController.abort()
+              fail(error)
+            },
+          )
         }
 
         if (finishesReset) {
