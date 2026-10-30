@@ -249,3 +249,14 @@ settlement and after it. The original oracle remains active and unchanged;
 there is no skip, narrowed comparison, retry-away, GREEN, or bug-class closure
 claim. Its CI RED remains an open baseline defect under this explicit release
 scope deferral.
+
+## P09 follow-up (2026-10-29)
+
+[PR #2301](https://github.com/TanStack/db/pull/2301) restores the exact accepted
+Effect owner and repairs its LEFT-join startup delta. Fresh unchanged-production
+RED precedes the production edit. The owner passes all 216 tests after repair,
+with every one of its 5,512 reach cells at count 1. Original and overcorrection
+mutants fail the shared comparisons. The
+[versioned follow-up](effect-startup-delta.md) records commands, fingerprints,
+neighboring guarantees and the bounded closure. This updates P09 only. All
+other deferrals and limits in this release record remain open.
