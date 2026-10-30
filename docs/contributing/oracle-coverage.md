@@ -6274,3 +6274,14 @@ controls are separate files. The [chunk 26 record](oracle-reviews/2026-10-28-pr-
 retains exact source/evidence hashes and all ORC outcomes. Actual production
 bundle erasure, Typedoc generation, tooling GREEN and restored-old-tooling
 mutants remain required receiving checks. Generated docs remain CI-owned.
+
+
+### Replay successful-retirement ownership, October 30
+
+The load-subset replay refinement owner scopes successful replacement to the
+same subscription as the failure. Its 96-history failure/success matrix reaches
+four sibling-success coverage histories and calibrates that another subscription's
+failure survives the account action. The original account fails that comparison;
+all 44 normal owner tests pass after repair, with existing budgets intact.
+No production change or new provider/framework claim follows. See the
+[versioned retirement review](oracle-reviews/callback-metadata.md#replay-retirement-scope-review-2026-10-30).

@@ -319,6 +319,7 @@ type OrderedReach = {
   deferredMoveRejections: number
   ownReplayFailureComparisons: number
   siblingReplayFailureComparisons: number
+  siblingSuccessfulCoverage: number
   replayLoads: number
   abortRejections: number
   preloadChecks: number
@@ -545,6 +546,7 @@ async function checkOrderedReplay(
     barrier.own.add(load)
     return true
   }
+  let replayScopeViolation: string | undefined
   const settleParticipant = (
     source: BarrierSource,
     load: Load,
@@ -574,15 +576,32 @@ async function checkOrderedReplay(
     // failure no longer fails the replay (ARCHITECTURE.md law 17: a failure
     // counts for a key no later held load loaded).
     if (ok && barrier?.pending.has(load) && !options.signal?.aborted) {
+      // Calibration of the replay account: a successful sibling can supply the
+      // same source keys without deciding another subscription's verdict.
+      // Preserve those failure identities independently of the mutation below.
+      const siblingFailures = [...barrier.failures.keys()].filter(
+        (failed) => failed.subscription !== load.subscription,
+      )
       for (const failed of barrier.failures.keys()) {
         if (
+          failed.subscription !== load.subscription &&
           loads.indexOf(failed) < loads.indexOf(load) &&
+          failed.ordered === load.ordered &&
+          failed.keys !== undefined &&
+          [...failed.keys].every((key) => load.keys?.has(key))
+        )
+          reach.siblingSuccessfulCoverage++
+        if (
+          loads.indexOf(failed) < loads.indexOf(load) &&
+          failed.subscription === load.subscription &&
           failed.ordered === load.ordered &&
           failed.keys !== undefined &&
           [...failed.keys].every((key) => load.keys?.has(key))
         )
           barrier.failures.delete(failed)
       }
+      if (siblingFailures.some((failed) => !barrier.failures.has(failed)))
+        replayScopeViolation ??= `successful sibling removed another subscription's replay failure`
     }
     barrier?.pending.delete(load)
     // A replay completes when its last participant settles, so demand that
@@ -897,6 +916,7 @@ async function checkOrderedReplay(
     deferredMoveRejections: 0,
     ownReplayFailureComparisons: 0,
     siblingReplayFailureComparisons: 0,
+    siblingSuccessfulCoverage: 0,
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
@@ -1731,6 +1751,8 @@ async function checkOrderedReplay(
     if (moveOrderViolation) {
       throw new Error(`newest move wins: ${moveOrderViolation}`)
     }
+    if (replayScopeViolation)
+      throw new Error(`replay account scope: ${replayScopeViolation}`)
     if (moveErrorViolation) {
       throw new Error(`replay error identity: ${moveErrorViolation}`)
     }
@@ -2525,6 +2547,59 @@ describe(`Ordered windows across truncate replays`, () => {
     declared.assertReached()
   }, 120_000)
 
+  // Failure followed by successful coverage is the neighboring regime of
+  // the two-failure grammar above. Real adapter subscriptions supply identity;
+  // the shared account comparison requires a sibling's failure to survive.
+  it(`retains sibling replay failures through successful coverage`, async () => {
+    const declared = createOracleReach(
+      `replay.subscription-success-scope`,
+      [`siblingSuccessfulCoverage`] as const,
+      { minimum: 1 },
+    )
+    for (const direction of [`asc`, `desc`] as const) {
+      for (const joined of [false, `some`, `none`, `inner`] as const) {
+        for (const limit of [1, 2, 3] as const) {
+          for (const markers of [false, true]) {
+            for (const newest of [false, true]) {
+              declared.beginHistory()
+              const observed = await checkOrderedReplay(
+                [
+                  { type: `hold` },
+                  markers
+                    ? { type: `truncateMarkers` }
+                    : { type: `truncate`, armAfterStart: false },
+                  { type: `window`, offset: 0, limit },
+                  { type: `settle`, ok: false, newest, keepHolding: true },
+                  {
+                    type: `settle`,
+                    ok: true,
+                    newest: !newest,
+                    keepHolding: false,
+                  },
+                ],
+                {
+                  ...ordinaryOrderedScenario,
+                  direction,
+                  joined,
+                  limit,
+                  markerMode: `on-demand`,
+                  includes: true,
+                },
+              )
+              if (observed.siblingSuccessfulCoverage > 0)
+                declared.reach(`siblingSuccessfulCoverage`)
+            }
+          }
+        }
+      }
+    }
+    console.info(
+      `replay.subscription-success-scope`,
+      Object.fromEntries(declared.counts()),
+    )
+    declared.assertReached()
+  }, 120_000)
+
   it.each(orderedReplayCampaigns)(
     `keeps the ordered window under load and release faults (%s campaign)`,
     async (campaign) => {
@@ -2553,6 +2628,7 @@ describe(`Ordered windows across truncate replays`, () => {
         deferredMoveRejections: 0,
         ownReplayFailureComparisons: 0,
         siblingReplayFailureComparisons: 0,
+        siblingSuccessfulCoverage: 0,
         replayLoads: 0,
         abortRejections: 0,
         preloadChecks: 0,
@@ -2593,6 +2669,7 @@ describe(`Ordered windows across truncate replays`, () => {
         `deferredMoveRejections`,
         `ownReplayFailureComparisons`,
         `siblingReplayFailureComparisons`,
+        `siblingSuccessfulCoverage`,
         `successWhileSubscriptionOwes`,
       ])
       // Counts are histories, rather than repeated events in one trace.

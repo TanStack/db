@@ -859,3 +859,67 @@ Final SHA-256 binding for this repair (this report is excluded):
 | `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts` | `679449468e358d51469bffe18d159ec62b8557b1c63aeaa3ea4cee2e05628b49` |
 | `packages/db/tests/query/ordered-source-loader-state.test.ts` | `23e30afddbfbd5db5979a44f580ac3fc777e5c5ae216584dd7073964080c2925` |
 | `packages/db/tests/query/ordered-work.test.ts` | `df0bb6faf5d81f70c1229511dd38180c206d2df0560593550a6220a8e2a2941f` |
+
+
+## Replay retirement scope review (2026-10-30)
+
+CodeRabbit review `5718757637`, run `f8b20e61-196f-44d2-86fa-d7648cfa8d08`,
+covered `8464ec977`. Three files were selected, two similar documentation files
+were skipped, and the replay oracle was processed. The current production
+repair `c33e18fd5` was not reviewed. Automatic reviews are now paused.
+
+**Law.** Each subscription owns its replay verdict (architecture, “Atomic
+window publication” and “Replay participants and failure”). A successful
+sibling acquisition cannot decide another subscription's replay failure,
+even when both request the same source keys. Publication can remain shared.
+
+**Experiment.** The prior oracle repair scoped error comparison and covering
+failures, but missed successful retirement in `settleParticipant`. The primary
+owner now varies failure followed by successful coverage over 96 histories:
+two directions, four join forms, three widths, root/marker replay and both
+settlement orders. It uses the existing actual Collection driver and every
+shared public comparison. A calibration comparison also requires every sibling
+failure identity to survive that account action. Before repairing the account,
+it fails with `replay account scope: successful sibling removed another
+subscription's replay failure`, with no type errors. The repair adds the same
+subscription premise to successful failure retirement. No production code
+changes for this finding. The complete normal owner run passes all 44 tests,
+including unchanged fixed/random budgets. Four histories reach successful
+sibling coverage, minimum one. The prior two-failure matrix retains 52 own
+and six sibling error-order histories. The original retirement behavior is
+the rejected hostile control. This establishes account sensitivity, not a
+new production defect or universal error-order proof.
+
+Evidence: `ci-monitor/20261030T212023Z/replay-retirement-{red,package-green}.*`
+under `/private/tmp/callback-metadata`, original oracle copy, source ledger,
+ESLint and changed-file enforcement logs. Existing controlled-adapter, peer,
+provider and framework limits remain. The publication, convergence and
+request-error comparisons remain, without a new waiver.
+
+The six-item raw-body loss audit yields one **fixed-now** (successful retirement
+scope), two **accepted-design** (coverage qualification and paused review),
+and three **duplicates** (repeated fix prompt, mutable risk prose, docstring
+policy and optional generated docs/tests). The docstring percentage changes to
+45%, but names no separate missing contract explanation. Optional review
+commands supply no coverage and are not executed. No item is deferred or open.
+Reviewer recommendation: **hire**. The finding correctly identifies a remaining
+oracle-integrity gap and proposes the missing ownership premise. Its scope is
+test correctness. It does not establish review of the later production repair.
+
+ORC self-review, not independent audit: 001–003 use the established ownership
+law, input identities and literate shared comparison. 004 reconstructs the
+failure/success neighbor of the prior failure/failure grammar, with finite
+bounds and no peer claim. 005 exercises actual Collections at the existing
+cuts and calibrates the oracle account separately. 006 rejects the original
+retirement action at its intended assertion. 007 preserves all campaigns and
+budgets. 008–009 retain per-subscription failure identities within the shared
+publication abstraction. 010 retains the original trace and existing cleanup.
+011 names no new shared semantic-fault hypothesis requiring a second runtime
+model. 012 records chronology, source and limits here. 013 crosses failure with
+success and own with sibling coverage. 014 claims controlled adapters through
+real core receivers only. 015 reaches four successful sibling histories against
+minimum one. 016 supplies histories to the shared driver and judgments, with
+no separate expected Error examples.
+
+Final SHA-256 of `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts`:
+`e03f3cee17413016f59c299eb25896fd9098ea3cde88fffbe35f4de58fba366f`. This supersedes that owner's earlier binding only.
