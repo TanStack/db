@@ -6082,7 +6082,11 @@ before readiness, external abort, a prepared participant that resets while its
 sibling waits, and retirement of a prepared participant. Three receiving paths
 cross the real persistence wrapper with controlled managed storage: held startup
 metadata followed by success, rejection with the same storage error, and cleanup
-before the source enters. Every history reaches all eleven declared paths.
+before the source enters. A twelfth path retires the run from its readiness
+callback after an active batch was accepted: its transaction evidence remains
+available, but its optimistic write is never dispatched. This is distinct from
+a callback entering after retirement, which has no publication authority.
+Every history reaches all twelve declared paths.
 At each held baseline the mutation handler has not run; after all live source
 positions are established it runs once and stays persisting until its txid echo.
 The payload and release order vary in equal fixed/random campaigns. This owner

@@ -86,3 +86,29 @@ write retry queue or GC ownership layer. Waiting for Collection readiness was
 rejected because publication can wait on the same optimistic transaction;
 preloading rows would also defeat on-demand behavior. The added bytes implement
 stream-position preparation and its invalidation, plus wrapper composition.
+
+
+## Review follow-up: accepted evidence across readiness cleanup
+
+Review base: `006b65bac772c020de657c872a49922743986697`.
+CodeRabbit comment4421557210 identified that the added late lifecycle fence
+also discarded transaction evidence from a batch admitted while active. The
+parent adapter published that evidence after the ready callback. The correction
+preserves that behavior while fencing mutation readiness and match publication
+against a retired run. Callbacks entering after retirement remain rejected by
+the existing entry fence.
+
+Before the source edit, the generated startup checker was extended with
+`ready-cleanup`: insert an optimistic row, hold the first HTTP response, then
+supply a source batch containing txid100 whose ready callback cleans up the
+Collection. The admitted batch's txid must remain queryable after cleanup;
+the pending optimistic mutation must reject without dispatch. Both campaigns
+failed with `TimeoutWaitingForTxIdError` for100 on the review base. This is the
+specific acknowledgement timeout under test, not a generic harness timeout.
+
+The repair guards only `resolveMutationReady` and `commitMatches`. It publishes
+and clears the accepted batch's evidence regardless of callback retirement.
+The existing shared checker now runs twelve paths in each of8 fixed and8 random
+histories, with declared reach. Payload and participant-release order remain the
+same generated dimensions. The contract and evidence limits above remain;
+this adds one synchronous reentry boundary, not arbitrary stale callbacks.

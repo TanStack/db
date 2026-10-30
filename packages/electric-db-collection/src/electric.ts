@@ -2676,12 +2676,12 @@ function createElectricSync<T extends Row<unknown>>(
             snapshot,
           ),
         )
-        if (!isActiveLifecycle()) return
-        if (commitPoint === `up-to-date`) lifecycle.resolveMutationReady()
+        if (commitPoint === `up-to-date` && isActiveLifecycle())
+          lifecycle.resolveMutationReady()
         lifecycle.publishEvidence(newTxids, newSnapshots)
         newTxids.clear()
         newSnapshots.length = 0
-        lifecycle.commitMatches()
+        if (isActiveLifecycle()) lifecycle.commitMatches()
       }
     }
 

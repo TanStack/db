@@ -1652,6 +1652,7 @@ sdkCampaigns(
 // retry, persisted cache rotation, and missing update/delete target admission.
 const mutationStartupStates = [
   `direct`,
+  `ready-cleanup`,
   `manual`,
   `materialized`,
   `persisted`,
@@ -1715,7 +1716,16 @@ async function checkMutationStartup(
                 })
               : options,
         )
+        const retiredFromReady = createDeferred<void>()
+        if (mode === `ready-cleanup`) {
+          collection.onFirstReady(() => {
+            void collection
+              .cleanup()
+              .then(retiredFromReady.resolve, retiredFromReady.reject)
+          })
+        }
         return {
+          retiredFromReady,
           original,
           metadataEntered,
           releaseMetadata,
@@ -1793,6 +1803,36 @@ async function checkMutationStartup(
         calls + sources.reduce((count, source) => count + source.writes(), 0)
       reach.reach(mode)
       expect(writeCount(), `no write before baseline: ${mode}`).toBe(0)
+      // A batch admitted while active keeps its transaction evidence even if
+      // its ready callback retires the run. A callback arriving after retirement
+      // is different: the existing processMessages entry fence rejects it.
+      // This receives the parent adapter's evidence-retention behavior while
+      // still requiring the new admission gate to reject a retired source.
+      if (mode === `ready-cleanup`) {
+        first[0]!.respond(
+          new Response(
+            JSON.stringify([
+              {
+                key: `99`,
+                value: { id: 99, name },
+                headers: { operation: `insert`, txids: [100] },
+              },
+              { headers: { control: `up-to-date` } },
+            ]),
+            { headers: headers(1) },
+          ),
+        )
+        await atCheckpoint(
+          sources[0]!.retiredFromReady.promise,
+          `cleanup from ready`,
+        )
+        expect(await atCheckpoint(settled, `retired admission`)).toBeInstanceOf(
+          Error,
+        )
+        expect(writeCount()).toBe(0)
+        expect(await sources[0]!.collection.utils.awaitTxId(100, 50)).toBe(true)
+        return
+      }
       if (mode === `abort`) {
         sources[0]!.signal.abort()
         expect(await atCheckpoint(settled, `aborted startup`)).toBeInstanceOf(
