@@ -650,3 +650,209 @@ fa9eb3f861837027563417f31e97f3a0aa49f182b414660de3f656f531559a1a  packages/db/te
 74c6d4e1d1b8076c6d1e5ee06baf7d5e71731e968594388d933858504de39cea  packages/db/tests/oracle-config.ts
 d1c0849f46b471cce367516b431c549ff2e50d26efa58ca384d7a4b8337ca2d8  packages/db/tests/oracle-replay-manifest.ts
 ```
+
+
+## Follow-up: oracle challenge and broader byte reduction
+
+Starting head: `f115d5f38b11dc5b62a0ce0b4e5b694c1d1aedac`.
+This is a self-review. The source fingerprints and final checks below pin the
+executable tree committed with this record. No product-law decision changed.
+
+### Law, experiment and inference
+
+The same positive-support and exact-contribution laws apply. An output that
+removes duplicate inputs still carries a source payload; it cannot invent an
+unselected value. Representative choice remains free. The reference records
+historically introduced (member, variant) pairs, separately from the production
+objects. It does not require a live source slot or promise first/last selection.
+
+Two one-decision mutants passed all five prior wider-owner tests:
+
+1. Replace an emitted row with `{ ...value[1], variant: 999 }`.
+2. Replace structural matching with `candidate === identity`.
+
+The first survived because the checker only constrained selected membership
+and contribution counts. The second survived because the selector returned
+the same fixture objects repeatedly. The repaired owner constructs fresh equal
+selections, gives production copies separate from the model, and checks output
+payload provenance. It passed unchanged production before the shipped-code
+refactors. Both mutants then failed at the intended contribution comparison:
+fabrication at checkpoint 1, reference-only matching by checkpoint 2 or a split
+removal. Final-tree reruns fail five production-driver tests for each mutant;
+the independent wrong-observation calibration passes. Neither result is a setup
+failure. Every temporary source edit was restored.
+
+All five declared reaches, including fresh equal selections, occur in 100
+histories in each atomic/split fixed/random campaign. The prior budgets are
+unchanged. The history domain, reconstruction, ablation, range and exclusion
+remain those of the preceding review; removing fresh realization makes the
+reference-only mutant equivalent on this driver, and removing provenance lets
+the fabricated-payload mutant survive. The model uses scalar copies, not
+production hash/equality helpers. The keys retain only simultaneous uniqueness.
+Limits: four immutable nested collision selections and an anchor, historical
+rather than support-epoch provenance, and graph-drain/applied-transaction cuts.
+
+### What would have caught every review item?
+
+No one correctness oracle judges all ten candidates. A design cost or an
+unspecified policy must not become a failing product law just to fill a table.
+The following portfolio would have exposed each question before review:
+
+| Item | Necessary instrument | Current state |
+| --- | --- | --- |
+| U1 | Signed full-row accumulation with unequal unselected payloads; last-input retraction mutant | Enforced by the wider distinct owner; provenance now also rejects invented payloads. |
+| U2 | Assert the native-collision premise before the real query, including altered initialization | Retained in the public seeded regression. |
+| U3 | Three or more colliders, removal followed by a new arrival, measured per-path reach, and generator ablation | Four colliders and reused-key calibration remain; fresh equal selections are now measured too. |
+| U4 | A public receiving driver at every distinct call site, with a real collision premise | Top-level query and Collection includes paths retain their witnesses; inline includes supplies an unaffected control. |
+| U5 | Retained-state cardinality relative to supported identities, plus a heap probe for byte claims | The extra references remain an accepted design cost. No measured heap-byte claim or universal memory budget is made. |
+| U6 | Independent value-identity model plus receiving histories over its rich domain; deterministic comparison/allocation counters | Hash identity covers rich semantics; the fresh-object distinct receiving gap is repaired. Broader rich-value distinct receiving histories remain explicitly open. The shared comparator now avoids memo allocation for references and primitives. |
+| U7 | A repeated-support work probe that counts filter allocations and bucket Map writes | Earlier 100→0 filter and 101→1 write measurements remain. These are diagnostic work counts, not a new public latency promise. |
+| U8 | The Index multiset model extended with structural collisions, then reduce/join receiving drivers | Known sibling defect and exact trace remain assigned to the Index primary owner in the coverage map. It is outside this distinct repair. |
+| U9 | Contract review followed by only the promised key assertions | Your decision leaves cross-build implicit keys unspecified; simultaneous uniqueness remains checked and `getKey` supplies stability. |
+| U10 | Exported-constructor and subclass-dispatch compatibility tests | The retained OutputOperator regression would reject the alias, and its public class/base remain unchanged. |
+
+Thus the behavioral gaps need histories, observations and receiving drivers;
+fixture integrity needs premise assertions; public API refactors need
+compatibility evidence; resource judgments need measurements and a declared
+budget. More arbitrary runs cannot replace any missing distinction.
+
+### Shipped-code refactors
+
+Nine unary factories now share graph wiring in `src/unary-operator.ts`:
+map, filter, tap, output, consolidate, distinct, reduce, top-K and grouped top-K.
+Every exported class keeps its constructor, inheritance and dispatch. The
+helper is internal to the package's public exports. Writer creation, operator
+IDs, reader connection, constructor arguments and registration order are the
+same. Existing operator, API and incrementalization tests judge this unchanged
+contract; no oracle expectation was relaxed.
+
+TopKState computes support before/after directly instead of allocating a
+return object from a private one-use helper. Grouped top-K similarly inlines
+its one-use state lookup, processing and empty-group cleanup. No retained
+relation state or empty-window signal is removed.
+
+Equality keeps its public two-argument function and all value rules, but uses
+a module-level recursive worker and creates pair memoization only when object
+bodies need comparison. This removes per-call worker/key-helper closures and
+moves the reference shortcut out of distinct into the shared comparator.
+A deterministic probe replaces the Map constructor after module loading:
+100 same-reference calls allocate **100→0** Maps, 100 unequal primitive calls
+allocate **100→0**, and 100 fresh structural-equality calls allocate **100→100**
+(the positive control). Cyclic equality, rich value identity and top-K receiving
+comparisons pass. This measures constructor calls, not heap bytes or latency.
+
+An additional reduce helper extraction was tried and rejected: it added
+per-output method dispatch and did not give a useful compressed-byte improvement.
+The original reduce phases and accumulation remain. Combining those phases was
+also rejected on inspection: Index's structural merging can make their order
+observable in the retained representative. No such rewrite was made. The
+unsafe OutputOperator alias and structuralIdentity-only design remain rejected.
+
+`pnpm size:compare --packages db-ivm,db --files`, against merge-base
+`c351fc04d`, now reports:
+
+| Target | Gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| Typical app | -144 bytes | -55 bytes |
+| db-ivm | -94 bytes | -70 bytes |
+| db | 0 bytes | 0 bytes |
+
+Every app scenario shrinks in gzip. Two feature scenarios still grow in brotli:
+includes **+65 bytes**, paced mutations **+72 bytes**. This supersedes the prior
++42/+124 typical-app result; it is not a claim that every bundle shrinks in both
+formats. Tests and documentation grow separately from shipped code.
+
+### Evidence and remaining work
+
+- **Law:** preserve supported selected identities, exact emitted contributions
+  and source payload provenance, under the existing distinct and weighted-
+  relation contracts. Public operator API and value identity remain unchanged.
+- **Reach:** all five wider-owner states, 100 histories per normal delivery/
+  campaign combination. Existing receiving budgets are retained.
+- **RED:** fabricated-payload and reference-only mutants passed the old owner
+  and fail the new owner at the contribution comparison. No baseline product
+  defect was found here; these are false-green oracle repairs.
+- **GREEN:** the extended owner passed before production refactors. Final
+  validation and source fingerprints are recorded below.
+- **Mutant:** the two exact edits above, with raw logs in
+  `/tmp/db-2309-old-*.log`, `/tmp/db-2309-new-*.log`, and
+  `/tmp/db-2309-final-*.log`.
+- **Limits:** finite immutable fixture histories and stated checkpoints; rich
+  value distinct receiving histories and the known Index collision remain
+  separately tracked. No new representative policy, memory cap, latency,
+  arbitrary mutation, framework or intermediate-publication promise.
+
+ORC audit: 001–007 and 009–010, 012–016 retain the prior contract/grammar/
+receiving/replay evidence, with the two new calibration results and fresh reach
+above. ORC-008 retains only introduced scalar payloads because membership alone
+cannot distinguish genuine and invented representatives; removing that history
+makes the fabrication mutant pass. This is historical provenance, not a model
+of production storage. ORC-011's named masking hypothesis is the member-only
+observation; a provenance comparison supplies the additional independent
+judgment without adding a copied engine. No excluded history, lowered budget,
+or revised expected product answer was used to obtain GREEN.
+
+
+### Final follow-up validation
+
+The final executable tree passed **643 IVM tests in 49 files** and **310 tests
+in four includes/public-distinct/replay files**. Both package TypeScript checks
+passed. Explicit ESLint on each changed source/test file, source Prettier,
+`pnpm lint:changed`, and `git diff --check` passed. The complete root test suite
+was not run. The source parent remains `f115d5f38b11dc5b62a0ce0b4e5b694c1d1aedac`;
+fetched main still shares merge-base `c351fc04d7f70dc59bf92ecbed310f899b9511cd`.
+
+Reproducible GREEN commands from the worktree root:
+
+```sh
+pnpm --filter @tanstack/db-ivm exec vitest run --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/db exec vitest run tests/query/includes-oracle.property.test.ts tests/query/distinct-collision-oracle.test.ts tests/query/distinct-reported-collision.test.ts tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/db-ivm typecheck
+pnpm --filter @tanstack/db exec tsc --noEmit -p tsconfig.test.json
+pnpm lint:changed
+pnpm size:compare --packages db-ivm,db --files
+git diff --check
+```
+
+The production-mutant command selects the representative owner:
+
+```sh
+pnpm --filter @tanstack/db-ivm exec vitest run tests/distinct-representative-oracle.property.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+With either exact mutant above, the old owner passed five tests. With final
+source and the extended owner, each mutant fails five production-driver tests
+with `distinct representative contribution diverged`; the checker calibration
+passes. Unchanged production passed the extended owner before refactoring.
+
+Guarded replay from `packages/db-ivm`:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=ivm.distinct-representatives TANSTACK_DB_ORACLE_SEED=2309 TANSTACK_DB_ORACLE_PATH=0:0:0 node --import tsx ../db/tests/oracle-replay.ts tests/distinct-representative-oracle.property.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+It completed two synchronous executions, each with positive witnesses for both
+random delivery tests, 63 passing histories per test and all reaches at 63.
+Replay reconstruction does not lower the normal 100-history campaign budgets.
+No install override was needed. Remote CI must judge the new commit separately
+from the previously green parent.
+
+Final executable SHA-256 fingerprints follow. The commit containing this record
+pins these files and the associated evidence together:
+
+```text
+ad1cd3aa5f8d24e44283344d92999db5e2bf3c9a41313c72e48193d8bb0fc521  packages/db-ivm/src/hashing/hash.ts
+37498a3aebbbb873fba4edd43bb96e55c4c36cf02289f077596d8022b2def64b  packages/db-ivm/src/operators/consolidate.ts
+0ee97ed063dfee5fe8d6f19d8b906dd1e4319c1af1ddc45d0894118ef8e68aac  packages/db-ivm/src/operators/distinct.ts
+de3359cc4d4bced50b793949e07766a0dd348be74953c5f4dff14909e7b399ec  packages/db-ivm/src/operators/filter.ts
+1abf73d613a478f3aac6c6df64a0d4a3f5aad7ddb8f4feedbd4e174ea1151472  packages/db-ivm/src/operators/groupedTopKWithFractionalIndex.ts
+78c32b424fa143d3e6181a02ff020cbbacbd6d5abff1edac8468ccd75fe6d5b0  packages/db-ivm/src/operators/map.ts
+e931418d4fbbc063f069ae1f223eaf2c8c7c47cb9a649bed2cb9afa78c5423fb  packages/db-ivm/src/operators/output.ts
+8137fcbd9a7802115d8a402aefe491eba2425da093a090b451ba08a30815d671  packages/db-ivm/src/operators/reduce.ts
+2c7958b6ce81dadd00dfec62a04c2546f838d03e7650b25d8556a310067b492c  packages/db-ivm/src/operators/tap.ts
+657cda03b0081656f4d22883bc5f1bd9ad3689e6361ff22e5138f7b427ceef6a  packages/db-ivm/src/operators/topKState.ts
+00aa1aa0a0a9c9a073562ed931b81dd6145be322388874cc2d9c3be506156f52  packages/db-ivm/src/operators/topKWithFractionalIndex.ts
+c8bef95bd62ff9bb8fc0c445adc6df7749af4d59d43121549b94fe7f398d7682  packages/db-ivm/src/unary-operator.ts
+3d89f1397f5df85afcc96223584039e60e60fe8773088a3edc512e9f72297cee  packages/db-ivm/tests/distinct-incrementalization-oracle.ts
+dd09682e882d09148af8d2e791136e15e5ef0383d445f2d4047dc7791dac8381  packages/db-ivm/tests/distinct-representative-oracle.property.test.ts
+```

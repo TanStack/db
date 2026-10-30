@@ -166,6 +166,9 @@ declareOracle({
  * relation must nevertheless contain one unit row per supported selection:
  * a negative row must cancel the actual positive contribution (ARCHITECTURE.md,
  * “Weighted relations and public keys”), not merely an equal selection.
+ * Removing duplicates also preserves a source payload: an emitted variant
+ * must have appeared in a positive input. This does not choose first/last or
+ * require a representative's source slot to remain live.
  */
 export type DistinctBucketRow = { member: number; variant: number }
 export type DistinctBucketHistory = Array<Array<DistinctBucketRow>>
@@ -283,11 +286,14 @@ export function distinctCollisionFamily(
 
 // Sum the raw full-row output, preserving negative residues and duplicate
 // representatives. The expected selections are recomputed solely from source
-// rows. Keys must distinguish simultaneous outputs; their numerical values and
-// cross-rebuild stability are deliberately unspecified by this law.
+// rows. Introduced rows are independent copies of positive source inputs;
+// they let this check reject fabricated payloads without selecting a preferred
+// representative. Keys must distinguish simultaneous outputs; their numerical
+// values and cross-rebuild stability are deliberately unspecified by this law.
 export function checkDistinctRepresentatives(
   output: Weighted<[number, DistinctBucketRow]>,
   input: Array<DistinctBucketRow>,
+  introduced: Array<DistinctBucketRow>,
   checkpoint: string,
 ): void {
   const relation = new Map<
@@ -307,6 +313,13 @@ export function checkDistinctRepresentatives(
   const observed = rows.map(({ row }) => row.member).sort()
   if (
     rows.some(({ count }) => count !== 1) ||
+    rows.some(
+      ({ row }) =>
+        !introduced.some(
+          (source) =>
+            source.member === row.member && source.variant === row.variant,
+        ),
+    ) ||
     new Set(rows.map(({ key }) => key)).size !== rows.length ||
     JSON.stringify(observed) !== JSON.stringify(expected)
   )

@@ -1,11 +1,14 @@
-import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
+import { UnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
 import { hash } from '../hashing/index.js'
 import { equalHashValues } from '../hashing/hash.js'
 import { MultiSet } from '../multiset.js'
 import type { Hash } from '../hashing/index.js'
-import type { DifferenceStreamReader } from '../graph.js'
-import type { IStreamBuilder, KeyValue } from '../types.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
+import type { KeyValue } from '../types.js'
 
 type GetValue<T> = T extends KeyValue<unknown, infer V> ? V : never
 
@@ -49,9 +52,8 @@ export class DistinctOperator<
         const hashedValue = hash(identity)
         let bucket = this.#values.get(hashedValue)
         if (!bucket) this.#values.set(hashedValue, (bucket = []))
-        let entry = bucket.find(
-          ([candidate]) =>
-            candidate === identity || equalHashValues(candidate, identity),
+        let entry = bucket.find(([candidate]) =>
+          equalHashValues(candidate, identity),
         )
         if (!entry) {
           entry = [
@@ -100,20 +102,5 @@ export class DistinctOperator<
 export function distinct<T extends KeyValue<unknown, unknown>>(
   by?: (value: T) => unknown,
 ) {
-  return (
-    stream: IStreamBuilder<T>,
-  ): IStreamBuilder<KeyValue<number, GetValue<T>>> => {
-    const output = new StreamBuilder<KeyValue<number, GetValue<T>>>(
-      stream.graph,
-      new DifferenceStreamWriter<KeyValue<number, GetValue<T>>>(),
-    )
-    const operator = new DistinctOperator<T>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader(),
-      output.writer,
-      by,
-    )
-    stream.graph.addOperator(operator)
-    return output
-  }
+  return unaryOperator(DistinctOperator<T>, by)
 }

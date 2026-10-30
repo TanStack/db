@@ -4,11 +4,13 @@
  * nonnegative source relations. Atomic deliveries and unit-split deliveries
  * check the full accumulated output after each graph drain; the shared checker
  * permits representative freedom while rejecting a wrong full-row retraction.
+ * Each selector call constructs a fresh equal selection. Independent model
+ * copies preserve input provenance even if production mutates a source row.
  * Limits: immutable fixture selections, four colliding members plus an anchor,
  * eight slots and twelve random tail worlds; no external source scheduling.
  */
 import { fc } from '@fast-check/vitest'
-import { it } from 'vitest'
+import { expect, it } from 'vitest'
 import { D2 } from '../src/d2.js'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
@@ -43,16 +45,32 @@ declareOracle({
 function drive(worlds: DistinctBucketHistory, split: boolean) {
   const graph = new D2()
   const input = graph.newInput<[number, DistinctBucketRow]>()
+  const selected = new Set<number>()
+  let freshEqualSelections = false
   const reader = input
-    .pipe(distinct(([, row]) => family[row.member]))
+    .pipe(
+      distinct(([, row]) => {
+        if (selected.has(row.member)) freshEqualSelections = true
+        selected.add(row.member)
+        // The fixture domain is immutable arrays of plain records. Rebuilding
+        // it preserves its model identity while changing every object reference.
+        return structuredClone(family[row.member])
+      }),
+    )
     .connectReader()
   graph.finalize()
   const output: Weighted<[number, DistinctBucketRow]> = []
   const source = new Map<number, DistinctBucketRow>()
+  const introduced: Array<DistinctBucketRow> = []
   let previous: Array<DistinctBucketRow> = []
   const check = (checkpoint: string) => {
     for (const message of reader.drain()) output.push(...message.getInner())
-    checkDistinctRepresentatives(output, [...source.values()], checkpoint)
+    checkDistinctRepresentatives(
+      output,
+      [...source.values()],
+      introduced,
+      checkpoint,
+    )
   }
   for (const [checkpoint, world] of worlds.entries()) {
     const changes: Weighted<[number, DistinctBucketRow]> = []
@@ -61,8 +79,11 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
     for (const [slot, row] of world.entries()) changes.push([[slot, row], 1])
     for (const [[slot, row], weight] of changes) {
       if (weight < 0) source.delete(slot)
-      else source.set(slot, row)
-      input.sendData([[[slot, row], weight]])
+      else {
+        source.set(slot, { ...row })
+        introduced.push({ ...row })
+      }
+      input.sendData([[[slot, { ...row }], weight]])
       if (split) {
         graph.run()
         check(`${checkpoint}/slot=${slot}/weight=${weight}`)
@@ -72,6 +93,7 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
     check(String(checkpoint))
     previous = world
   }
+  return freshEqualSelections
 }
 
 for (const split of [false, true])
@@ -79,11 +101,14 @@ for (const split of [false, true])
     oracleReplayTest(it, ...(campaign === `random` ? [PROPERTY] : []))(
       `conserves full representative contributions, split=${split} (${campaign})`,
       () => {
-        const reach = createOracleReach(PROPERTY, DISTINCT_BUCKET_REACH_STATES)
+        const reach = createOracleReach(PROPERTY, [
+          ...DISTINCT_BUCKET_REACH_STATES,
+          `fresh equal selections`,
+        ])
         fc.assert(
           fc.property(distinctBucketHistory, (worlds) => {
             reach.beginHistory()
-            drive(worlds, split)
+            if (drive(worlds, split)) reach.reach(`fresh equal selections`)
             for (const state of distinctBucketReachStates(worlds))
               reach.reach(state)
           }),
@@ -115,5 +140,22 @@ oracleReplayTest(it)(
       ],
       false,
     )
+  },
+)
+
+// Checker calibration supplies a wrong observation to the same refinement
+// check. Correct selected membership alone cannot authorize invented payloads.
+oracleReplayTest(it)(
+  `rejects a representative absent from source inputs`,
+  () => {
+    const source = [{ member: 0, variant: 0 }]
+    expect(() =>
+      checkDistinctRepresentatives(
+        [[[0, { member: 0, variant: 999 }], 1]],
+        source,
+        source,
+        `fabricated representative`,
+      ),
+    ).toThrow(/distinct representative contribution diverged/)
   },
 )

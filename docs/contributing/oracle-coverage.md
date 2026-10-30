@@ -6180,3 +6180,28 @@ collision dimension, per-addition multiplicity checks, storage repair, and
 reduce/join receiving witnesses before claiming collision-safe Index storage.
 The existing groupBy structural-identity bypass also means that repairing
 Index alone is not evidence for every groupBy path; #2192 remains open.
+
+
+### Distinct provenance and fresh-identity challenge (2026-10-30)
+
+The wider distinct owner now realizes a fresh equal selection on every selector
+call, and owns separate scalar copies of source rows. Each atomic/split,
+fixed/random 100-history campaign declares and reaches **fresh equal
+selections** in 100 histories, alongside its four earlier reaches. This rejects
+a reference-only matcher that the earlier shared-reference driver accepted.
+The shared full-row checker also requires every retained representative's
+(member, variant) payload to have appeared in a positive input. It rejects
+fabricated unselected payloads without choosing first/last or requiring the
+representative's source slot to remain live. A permanent wrong-observation
+calibration protects that assertion. This is historical input provenance; it
+does not establish representative freshness across a zero-support boundary.
+
+Both motivating mutants passed all five earlier wider-owner tests and now fail
+at the contribution comparison. The four-member immutable selection domain,
+public receiving paths and transaction checkpoints retain their previous
+limits. Rich value-identity receiving histories through distinct (functions,
+opaque references, binary, RegExp, Map/Set and special primitives) remain a
+useful extension: the hash identity oracle owns those semantic distinctions,
+but its helper-level evidence does not by itself exercise distinct storage.
+The separate Index structural-collision obligation above remains open.
+See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
