@@ -923,3 +923,51 @@ no separate expected Error examples.
 
 Final SHA-256 of `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts`:
 `e03f3cee17413016f59c299eb25896fd9098ea3cde88fffbe35f4de58fba366f`. This supersedes that owner's earlier binding only.
+
+
+## Shipped-size refactor (2026-10-30)
+
+The size request preserves the accepted metadata, cache, ordering and publication
+laws. The primary owners, history grammars, comparisons and run budgets do not
+change. This is a behavior-preserving refactor, with no new pre-edit RED claim.
+Shared FROM/JOIN source compilation and input wrapping replace duplicate paths.
+Container copying, include replacement, projection and ordering each use fewer
+implementations. Authored output and normalized callback views remain distinct.
+Every ordered window and joined dependency remains represented.
+
+`pnpm size:compare --packages db --files` measures production bundles against
+merge-base `bfd1da1a7e752d66fd667adfd3cdf54f60732b22`. The repository has no
+`size:check` script. Targeted builds use existing dependencies without an install.
+
+| Measurement | Base gzip | Refactor gzip | Gzip delta | Brotli delta |
+| --- | ---: | ---: | ---: | ---: |
+| Full `@tanstack/db` package | 109,702 B | 109,673 B | −29 B | −13 B |
+| Typical app | 96,777 B | 96,743 B | −34 B | −26 B |
+
+These totals do not establish that every feature scenario shrinks. LocalStorage
+adds 17 B gzip and 5 B Brotli. Some other scenarios shrink with gzip but grow
+with Brotli. The complete scenario table remains in `size-union-key.log`.
+
+The frozen source passes 6,322 normal-package tests across 11 suites, including
+both primary owners and the affected compiler, container and include neighbors.
+Focused no-emit TypeScript, ESLint (zero errors and warnings), Prettier,
+changed-file enforcement and whitespace checks pass. Seven source-bound hostile
+controls fail their intended comparisons: lost HAVING view 551, over-normalized
+predicates 696, raw-only cache 26, ordered-window overwrite 48, joined-dependency
+overwrite 24, joined last-only eight and joined first-only eight. These controls
+calibrate the existing laws after refactoring. They do not extend their limits.
+Union key encoding also matches the original for 24 representative inputs.
+
+Evidence directory:
+`/private/tmp/callback-metadata/ci-monitor/20261030T212503Z/size-reduction`.
+The final bindings are `final-green.*`, `final-eslint2.log`, `final-types2.log`,
+`final-format.log`, `final-lint-changed.log`, `size-mutant-summary.json` and
+`final-fingerprints.json`. Earlier attempts remain separate. The following
+bindings supersede earlier bindings for these four refactored files only.
+
+| Source | SHA-256 |
+| --- | --- |
+| `packages/db/src/query/compiler/index.ts` | `c6074cd82e6755b3d55c9307018fe368cd3e591a719eeb69ab6d7cb2109e75bf` |
+| `packages/db/src/query/compiler/joins.ts` | `a5618bb1da3bff18b91fc4d9bf155447712e0bb1b68cd0f66a1cda0662d80450` |
+| `packages/db/src/query/compiler/order-by.ts` | `a104d4f4829e9b4ea801fcc60914772c1d97a47d7d46dbfa5e24f49724b12267` |
+| `packages/db/src/query/compiler/route-metadata.ts` | `bc6313f715e84949d0a6f8f5b48511bb3bc05ba5fd13a0b5e8a1033f3ee8e4df` |

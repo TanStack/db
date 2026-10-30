@@ -1,4 +1,6 @@
 import { isPlainObject } from '../../utils/type-guards.js'
+import { getParentContextValue } from '../equality-value-identity.js'
+import type { NamespacedRow } from '../../types.js'
 
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
 export const CALLBACK_INPUT = Symbol(`tanstack_db_callback_input`)
@@ -23,9 +25,15 @@ type RoutedResult = {
   [INCLUDES_PUBLIC_KEY]: unknown
 }
 
-type PublicContainerProperty = {
-  descriptor: PropertyDescriptor
-  value?: { original: unknown; replacement: unknown }
+type PublicContainer = {
+  value: object
+  properties: Record<
+    PropertyKey,
+    PropertyDescriptor & { child?: PublicContainer }
+  >
+  parents: Array<PublicContainer>
+  dirty?: true
+  copy?: object
 }
 
 export type RouteMetadata = {
@@ -93,19 +101,13 @@ export function attachRouteMetadataToResult(
     return value
   }
 
-  if (isPlainObject(value)) {
-    return {
-      ...value,
+  return Object.assign(
+    isPlainObject(value) ? { ...value } : { [ROUTED_SCALAR_VALUE]: value },
+    {
       [ROUTE_METADATA]: { correlationKey, parentContext },
       [INCLUDES_PUBLIC_KEY]: publicKey,
-    }
-  }
-
-  return {
-    [ROUTED_SCALAR_VALUE]: value,
-    [ROUTE_METADATA]: { correlationKey, parentContext },
-    [INCLUDES_PUBLIC_KEY]: publicKey,
-  } satisfies RoutedResult
+    },
+  )
 }
 
 export function getRoutedScalarMetadata(
@@ -120,13 +122,36 @@ export function getRoutedScalarMetadata(
   }
 
   const routed = value as RoutedResult
-  const route = routed[ROUTE_METADATA]
   return {
     value: routed[ROUTED_SCALAR_VALUE],
-    correlationKey: route.correlationKey,
-    parentContext: route.parentContext,
+    ...routed[ROUTE_METADATA],
     publicKey: routed[INCLUDES_PUBLIC_KEY],
   }
+}
+
+/** Give FROM and JOIN rows the same route and callback namespace. */
+export function wrapInputRow(
+  alias: string,
+  row: unknown,
+  callbackValue?: unknown,
+): NamespacedRow {
+  const scalar = getRoutedScalarMetadata(row)
+  const route = scalar ?? getRouteMetadata(row)
+  const namespaced = {
+    ...getParentContextValue(route?.parentContext),
+    [alias]: scalar
+      ? scalar.value
+      : route
+        ? stripRouteMetadata(row as Record<PropertyKey, unknown>)
+        : row,
+  } as NamespacedRow
+  if (route)
+    attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
+  if (scalar)
+    Object.assign(namespaced, { [INCLUDES_PUBLIC_KEY]: scalar.publicKey })
+  if (callbackValue !== undefined && callbackValue !== row)
+    Object.assign(namespaced, { [CALLBACK_INPUT]: { [alias]: callbackValue } })
+  return namespaced
 }
 
 /** A namespace keeps authored values beside its callback source overrides.
@@ -167,80 +192,60 @@ export function transformPublicContainers(
   if (!Object.is(rootReplacement, value)) return rootReplacement
   if (!isPublicContainer(value)) return value
 
-  const parents = new WeakMap<object, Set<object>>()
-  const properties = new WeakMap<
-    object,
-    Map<PropertyKey, PublicContainerProperty>
-  >()
-  const dirty = new Set<object>()
-  const visit = (current: object): void => {
-    if (properties.has(current)) return
-    const currentProperties = new Map<PropertyKey, PublicContainerProperty>()
-    properties.set(current, currentProperties)
-    for (const key of Reflect.ownKeys(current)) {
+  const containers = new Map<object, PublicContainer>()
+  const queue: Array<PublicContainer> = []
+  const markDirty = (container: PublicContainer) => {
+    if (container.dirty) return
+    container.dirty = true
+    queue.push(container)
+  }
+  const visit = (current: object): PublicContainer => {
+    const existing = containers.get(current)
+    if (existing) return existing
+    const container: PublicContainer = {
+      value: current,
+      properties: Object.getOwnPropertyDescriptors(current),
+      parents: [],
+    }
+    containers.set(current, container)
+    for (const key of Reflect.ownKeys(container.properties)) {
       if (omittedKeys.has(key)) {
-        dirty.add(current)
+        delete container.properties[key]
+        markDirty(container)
         continue
       }
-      const descriptor = Object.getOwnPropertyDescriptor(current, key)
-      if (!descriptor) continue
-      const property: PublicContainerProperty = { descriptor }
-      currentProperties.set(key, property)
+      const descriptor = container.properties[key]!
       if (!descriptor.enumerable || !(`value` in descriptor)) continue
       const child = descriptor.value
-      const replacement = transformLeaf(child)
-      property.value = { original: child, replacement }
-      if (!Object.is(replacement, child)) {
-        dirty.add(current)
-        continue
+      descriptor.value = transformLeaf(child)
+      if (!Object.is(descriptor.value, child)) markDirty(container)
+      else if (isPublicContainer(child)) {
+        descriptor.child = visit(child)
+        descriptor.child.parents.push(container)
       }
-      if (!isPublicContainer(child)) continue
-      const childParents = parents.get(child) ?? new Set<object>()
-      childParents.add(current)
-      parents.set(child, childParents)
-      visit(child)
     }
+    return container
   }
-  visit(value)
-
-  const queue = [...dirty]
-  for (const current of queue) {
-    for (const parent of parents.get(current) ?? []) {
-      if (dirty.has(parent)) continue
-      dirty.add(parent)
-      queue.push(parent)
-    }
+  const root = visit(value)
+  for (const container of queue) {
+    for (const parent of container.parents) markDirty(parent)
   }
-  if (!dirty.has(value)) return value
-
-  const copies = new WeakMap<object, object>()
-  const copy = (current: object): object => {
-    if (!dirty.has(current)) return current
-    const existing = copies.get(current)
-    if (existing) return existing
-
-    const result = Array.isArray(current)
+  const copy = (container: PublicContainer): object => {
+    if (!container.dirty) return container.value
+    if (container.copy) return container.copy
+    const result = Array.isArray(container.value)
       ? []
-      : Object.create(Object.getPrototypeOf(current))
-    copies.set(current, result)
-    for (const [key, property] of properties.get(current) ?? []) {
-      const descriptor = { ...property.descriptor }
-      if (property.value) {
-        const { original, replacement } = property.value
-        descriptor.value = !Object.is(replacement, original)
-          ? replacement
-          : isPublicContainer(original)
-            ? copy(original)
-            : original
-      }
-      Object.defineProperty(result, key, descriptor)
+      : Object.create(Object.getPrototypeOf(container.value))
+    container.copy = result
+    for (const key of Reflect.ownKeys(container.properties)) {
+      const descriptor = container.properties[key]!
+      if (descriptor.child) descriptor.value = copy(descriptor.child)
     }
-    return result
+    return Object.defineProperties(result, container.properties)
   }
-
-  return copy(value)
+  return copy(root)
 }
 
-function isPublicContainer(value: unknown): value is object {
+export function isPublicContainer(value: unknown): value is object {
   return Array.isArray(value) || isPlainObject(value)
 }
