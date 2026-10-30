@@ -42,6 +42,7 @@ export function holdStore(db: IDBDatabase, stores = ['items', '_versions']) {
  * Records native transaction admission and outcome. `until` resumes a test at
  * the native event that makes its condition true, so a schedule cut depends on
  * provider events rather than on elapsed time or a polling interval.
+ * An unreachable cut rejects after one second so the harness can clean up.
  */
 export function observeTransactions(db: IDBDatabase) {
   const entries: Array<{
@@ -83,7 +84,22 @@ export function observeTransactions(db: IDBDatabase) {
     until: (ready: () => boolean) =>
       ready()
         ? Promise.resolve()
-        : new Promise<void>((resolve) => waiters.add({ ready, resolve })),
+        : new Promise<void>((resolve, reject) => {
+            const waiter = {
+              ready,
+              resolve: () => {
+                clearTimeout(timer)
+                resolve()
+              },
+            }
+            const timer = setTimeout(() => {
+              waiters.delete(waiter)
+              reject(
+                new Error('Timed out waiting for native transaction state'),
+              )
+            }, 1000)
+            waiters.add(waiter)
+          }),
     restore: () => {
       db.transaction = original
     },
