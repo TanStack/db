@@ -249,6 +249,10 @@ changes without revising their laws or the separate counterexample owners.
 
 ## Later CodeRabbit visibility finding
 
+This follow-up covers code commit `213a55f8b`. It leaves the Core compiler
+unchanged. The independent reactivity reviewer found no blocking issue in the
+new helper-only comparison or the one-line repair.
+
 Review `5718065479` covered `3ca65a6a1`; inline `4428014103` identified a
 raw/proxy comparison in the root descriptor-visibility branch. The same source
 was present after merge commit `11b42a11f`. The claim is correct for the internal
