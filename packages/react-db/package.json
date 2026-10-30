@@ -60,7 +60,7 @@
     "@vitest/coverage-istanbul": "^4.1.12",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react18": "npm:react@18.3.1",
-    "react-dom18": "npm:react-dom@18.3.1"
+    "react-dom18": "npm:react-dom@18.3.1",
+    "react18": "npm:react@18.3.1"
   }
 }
