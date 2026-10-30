@@ -14,7 +14,9 @@
  * - **HEALTH-1.** A provider failure after the first ready keeps status
  *   `ready` and the rows, and reports the value as the health node's `error`
  *   cause with no `failureReason`. Before any failure, the node shows no
- *   problem.
+ *   problem. A driver whose client library creates the reported value
+ *   declares `matchesFailure`, the relation that names the value owed for
+ *   each injected failure (HEALTH-4); the check then compares through it.
  * - **PUB-1.** Each change publication equals one whole committed state: the
  *   rows after one provider commit, never part of a commit, never an earlier
  *   state than one already published. A commit with no changes publishes
@@ -52,9 +54,15 @@
  *   `awaitTxId(txid)` fulfills once a committed batch carrying that id has
  *   applied, also when the batch came first, and stays pending before. A
  *   wait with a timeout and no evidence rejects after the timeout, and later
- *   evidence does not change that. A wait still pending when its sync run
- *   retires rejects. Evidence from a retired sync run does not fulfill a
- *   wait in a later one (EVID-2).
+ *   evidence does not change that. A sync run retires when it fails or is
+ *   cleaned up, and a wait still pending then rejects; a wait registered
+ *   after a failure rejects unless the shown rows already reflect its
+ *   evidence (EVID-2; maintainer decision 2026-10-30, the law set's "retired
+ *   ... when it fails"). A retired run's evidence fulfills a wait in a later
+ *   run once that run is ready, because its rows are read after that
+ *   evidence, and not before (EVID-2 as revised by maintainer decision
+ *   2026-10-30). Txids number batches across runs, as a backend's
+ *   transaction ids do.
  * - **HEALTH-1, HEALTH-2, RETRY-1** (capability `retry-policy`). A transient
  *   failure that the adapter keeps retrying shows nothing before the first
  *   ready. After it, the failure joins the node's `failureReason`, oldest
@@ -63,10 +71,10 @@
  *   2026-10-30: a retrying source must not flap its health), only an
  *   extended outage shows: an attempt joins `failureReason` from the `k`th
  *   consecutive failed attempt after ready on, and fewer show nothing. Under
- *   `failureValue: any` the reported values are
- *   the client library's, so the node lists at least one failure and at
- *   most one per retried attempt, with `cause` its newest; a later attempt
- *   does not replace the failure first listed for the outage (RETRY-1).
+ *   `matchesFailure` the node shows the attempt that crossed the threshold
+ *   (maintainer decision 2026-10-30) and may list later attempts after it,
+ *   in order; a later attempt does not replace it (RETRY-1). Attempts come
+ *   in each of the driver's `transientVariants` kinds.
  * - **RECON-1** (capability `transport-reconnect`). A transport disconnect and
  *   reconnect keep status and rows, and later deliveries still apply.
  * - **RENEW-1** (capability `capability-renewal`). While the source's
@@ -222,8 +230,11 @@ export interface ControlledProvider {
   ) => void | Promise<void>
   /** The provider stops with `error` and delivers nothing more. */
   fail: (error: Error) => void | Promise<void>
-  /** A failure the adapter keeps retrying (capability `retry-policy`). */
-  transientFailure?: (error: Error) => void | Promise<void>
+  /**
+   * One failed attempt the adapter keeps retrying (capability
+   * `retry-policy`), of the driver's `transientVariants` kind `variant`.
+   */
+  transientFailure?: (error: Error, variant: number) => void | Promise<void>
   /** Drops the transport (capability `transport-reconnect`). */
   disconnect?: () => void | Promise<void>
   /** Restores the transport (capability `transport-reconnect`). */
@@ -300,13 +311,21 @@ export interface EagerLiveSourceDriver {
    */
   readonly duplicateInsert?: `error` | `replace`
   /**
-   * `any` when the Collection reports a provider failure with a value the
-   * adapter's client library creates, such as an HTTP client's error for a
-   * failed response, rather than the provider's own value. The check then
-   * owes some error, not that value, also for a retried failure's
-   * `failureReason`. Default `provider`.
+   * For an adapter whose client library creates the reported failure value,
+   * such as an HTTP client's error for a failed response: whether `reported`
+   * is the value the adapter owes for the injected failure `failure`. The
+   * driver carries the failure's identity through its transport (for
+   * example in a response header), so a stale or replaced value does not
+   * match. Without it, the check compares the provider's value by identity.
    */
-  readonly failureValue?: `provider` | `any`
+  readonly matchesFailure?: (reported: unknown, failure: number) => boolean
+  /**
+   * Names of the kinds of failed attempt the driver's provider can make
+   * (`retry-policy`), such as an HTTP status the client retries or a
+   * network error. Each is generated and reached after ready. Default: one
+   * kind.
+   */
+  readonly transientVariants?: ReadonlyArray<string>
   /**
    * What carries a batch's txid (`await-evidence`): the batch itself
    * (`batch`, the default), or each change in it (`change`), as Electric's
@@ -359,7 +378,11 @@ export interface EagerLiveSourceDriver {
  *   failure after ready to deliver.
  * - `malformed`: a complete delivery holding two rows with one key, legal
  *   where a complete delivery is (PUB-4).
- * - `transient-failure`: a failure the adapter keeps retrying.
+ * - `transient-failure`: one failed attempt the adapter keeps retrying, of
+ *   one of the driver's kinds. Attempts come in outages: runs of one to two
+ *   more than `retryReportAfter` attempts, anywhere in a history, so an
+ *   outage can cross the threshold after a live batch, a second time in one
+ *   run, or in a later run.
  * - `disconnect`, `reconnect`: transport loss and return.
  * - `renew`: the adapter's renewal of an expiring capability completes. Legal
  *   once per sync run.
@@ -398,7 +421,11 @@ export type EagerLiveSourceStep =
       readonly rows: ReadonlyArray<ConformanceRow>
       readonly duplicate: number
     }
-  | { readonly kind: `transient-failure` }
+  | {
+      /** One failed attempt of the driver's kind `variant`. */
+      readonly kind: `transient-failure`
+      readonly variant?: number
+    }
   | { readonly kind: `disconnect` }
   | { readonly kind: `reconnect` }
   | { readonly kind: `renew` }
@@ -530,6 +557,7 @@ export type GrammarDomain = Pick<
   | `fieldKinds`
   | `excludesValue`
   | `retryReportAfter`
+  | `transientVariants`
 >
 
 /** Generates histories whose steps use only the driver's declarations. */
@@ -612,11 +640,44 @@ export function eagerLiveSourceHistoryArb(
         })),
     })
   }
+  // An outage is a run of failed attempts. It is one element of the
+  // history, so it lands anywhere; other steps are elements of one step.
+  const outages: Array<fc.Arbitrary<Array<EagerLiveSourceStep>>> = []
   if (capabilities.has(`retry-policy`)) {
-    steps.push({
-      weight: 3,
-      arbitrary: fc.constant({ kind: `transient-failure` as const }),
+    const variants = domain.transientVariants?.length ?? 1
+    const threshold = domain.retryReportAfter ?? 1
+    const attempt = fc
+      .nat(variants - 1)
+      .map((variant) => ({ kind: `transient-failure` as const, variant }))
+    // Half the outages stay below the threshold, half cross it by up to two
+    // attempts. A recurring outage crosses it, recovers on a live batch, and
+    // crosses it again, so a second report in one run is not rare.
+    const crossing = fc.array(attempt, {
+      minLength: threshold,
+      maxLength: threshold + 2,
     })
+    outages.push(
+      fc.oneof(
+        fc.array(attempt, {
+          minLength: 1,
+          maxLength: Math.max(1, threshold - 1),
+        }),
+        crossing,
+      ),
+      fc
+        .tuple(
+          crossing,
+          fc.array(changeArb(kinds, fieldKinds, domain.excludesValue), {
+            maxLength: 3,
+          }),
+          crossing,
+        )
+        .map(([first, changes, second]): Array<EagerLiveSourceStep> => [
+          ...first,
+          { kind: `changes`, changes },
+          ...second,
+        ]),
+    )
   }
   if (capabilities.has(`transport-reconnect`)) {
     steps.push(
@@ -632,12 +693,23 @@ export function eagerLiveSourceHistoryArb(
       arbitrary: fc.constant({ kind: `renew` as const }),
     })
   }
-  const generated = fc.array(fc.oneof(...steps), {
-    minLength: 1,
-    maxLength: 12,
-  })
-  // Some laws need a short sequence that random steps rarely produce, so a
-  // history can start with one; one in six does per declared scenario.
+  const generated = fc
+    .array(
+      fc.oneof(
+        ...steps.map(({ weight, arbitrary }) => ({
+          weight,
+          arbitrary: arbitrary.map((step) => [step]),
+        })),
+        ...outages.map((arbitrary, index) => ({
+          weight: index === 0 ? 3 : 1,
+          arbitrary,
+        })),
+      ),
+      { minLength: 1, maxLength: 12 },
+    )
+    .map((elements) => elements.flat())
+  // EVID-2 needs a sequence that random steps rarely produce, so one history
+  // in six starts with it.
   const snapshot = steps[0]!.arbitrary
   const scenarios: Array<fc.Arbitrary<Array<EagerLiveSourceStep>>> = []
   if (capabilities.has(`await-evidence`)) {
@@ -659,19 +731,6 @@ export function eagerLiveSourceHistoryArb(
           { kind: `restart` },
           { kind: `wait`, ahead: 0, timeout },
         ]),
-    )
-  }
-  if (capabilities.has(`retry-policy`)) {
-    // RETRY-1: an outage after ready one attempt longer than
-    // `retryReportAfter`, so its first report and a later attempt show.
-    const attempts = (domain.retryReportAfter ?? 1) + 1
-    scenarios.push(
-      snapshot.map((first): Array<EagerLiveSourceStep> => [
-        first,
-        ...Array.from({ length: attempts }, () => ({
-          kind: `transient-failure` as const,
-        })),
-      ]),
     )
   }
   const history =
@@ -721,7 +780,10 @@ export function eagerLiveSourceHistoryArb(
  *   initial cut folds them onto the fetch result.
  * - `lastTxid` numbers the sync run's batches. A wait targets it.
  * - `transient` lists the open transient failures, oldest first. Only a
- *   failure after the first ready is listed (RETRY-1).
+ *   failure after the first ready is listed (RETRY-1), from the
+ *   `retryReportAfter`th attempt of the outage on.
+ * - `outage` counts the current outage's failed attempts after ready.
+ * - `retiredEvidence` holds the txids that retired runs committed (EVID-2).
  * - `waits` records every `awaitTxId` call with the settlement the model
  *   expects, across sync runs, because a retired wait must reject.
  *
@@ -731,8 +793,8 @@ export function eagerLiveSourceHistoryArb(
  */
 type Phase = `loading` | `ready` | `loading-error` | `stopped`
 
-/** A wait's expected settlement. `unchecked` after its sync run failed. */
-type WaitExpectation = `pending` | `fulfilled` | `rejected` | `unchecked`
+/** A wait's expected settlement. */
+type WaitExpectation = `pending` | `fulfilled` | `rejected`
 
 type RowState = ReadonlyArray<[number, string]>
 
@@ -746,18 +808,26 @@ interface ModelState {
   connected: boolean
   lastTxid: number
   committed: Set<number>
-  /** Txids committed in retired sync runs; they name EVID-2. */
+  /**
+   * Txids committed in retired sync runs (EVID-2). Txids number batches
+   * across runs, as a backend's transaction ids do.
+   */
   retiredEvidence: Set<number>
   renewed: boolean
   /**
-   * A provider failure's index; `any` for one whose reported value the
-   * client library creates; `adapter` for the adapter's own error.
+   * A provider failure's index; `adapter` for the adapter's own error.
    */
-  failure: number | `any` | `adapter` | undefined
+  failure: number | `adapter` | undefined
   transient: Array<number>
   /** Consecutive failed attempts after ready in the current outage. */
   outage: number
-  waits: Array<{ run: number; txid: number; expected: WaitExpectation }>
+  /** Each wait, and the law that rejects it when it must reject. */
+  waits: Array<{
+    run: number
+    txid: number
+    expected: WaitExpectation
+    rejectLaw?: `EVID-2` | `EVID-3`
+  }>
 }
 
 /** What the model predicts at a checkpoint. */
@@ -921,17 +991,41 @@ function canDeliver(state: ModelState): boolean {
   )
 }
 
-/** Retiring a sync run rejects its pending waits (EVID-2). */
 /** HEALTH-2: a delivery, failure, or restart ends the outage. */
 function endOutage(state: ModelState): void {
   state.transient = []
   state.outage = 0
 }
 
+/**
+ * EVID-2: a sync run retires when it fails or is cleaned up, and its pending
+ * waits reject then; no evidence can arrive for them. Authority: the law
+ * set's "retired ... when it fails", confirmed by maintainer decision
+ * 2026-10-30 (a pending wait rejects at the failure).
+ */
 function retireWaits(state: ModelState): void {
   for (const wait of state.waits) {
     if (wait.run === state.run && wait.expected === `pending`) {
       wait.expected = `rejected`
+      wait.rejectLaw = `EVID-2`
+    }
+  }
+}
+
+/**
+ * READY-3: the first complete delivery opens the gate. EVID-2: a retired
+ * run's evidence fulfills a wait once the current run is ready, because its
+ * rows are read after that evidence (maintainer decision 2026-10-30).
+ */
+function openGate(state: ModelState): void {
+  state.phase = `ready`
+  for (const wait of state.waits) {
+    if (
+      wait.run === state.run &&
+      wait.expected === `pending` &&
+      state.retiredEvidence.has(wait.txid)
+    ) {
+      wait.expected = `fulfilled`
     }
   }
 }
@@ -1055,7 +1149,7 @@ type AcceptedStep =
       /** `duplicateInsert: replace` applied the later row. */
       replaced: boolean
     }
-  | { kind: `transient-failure`; failure: number }
+  | { kind: `transient-failure`; failure: number; variant: number }
   | { kind: `disconnect` }
   | { kind: `reconnect` }
   | { kind: `renew` }
@@ -1073,7 +1167,6 @@ interface ModelOptions {
   /** The value kinds include `negative-zero`, so a retouch flips zeros. */
   flipZeros: boolean
   duplicateInsert: `error` | `replace`
-  failureValue: `provider` | `any`
   txidEvidence: `batch` | `change`
   retryReportAfter: number
 }
@@ -1151,7 +1244,7 @@ function stepModel(
         const cut = initialCut(state, seen, options.changeCommits)
         state.rows = cut.backend
         state.backend = new Map(cut.backend)
-        state.phase = `ready`
+        openGate(state)
         for (const batch of state.buffered) {
           if (options.txidEvidence === `batch` || batch.changes.length > 0) {
             applyEvidence(state, batch.txid)
@@ -1175,7 +1268,7 @@ function stepModel(
       const removesField = lostField(state.rows, rowMap(step.rows))
       state.rows = rowMap(step.rows)
       state.backend = rowMap(step.rows)
-      state.phase = `ready`
+      openGate(state)
       return {
         done: {
           kind: `snapshot`,
@@ -1258,37 +1351,40 @@ function stepModel(
       }
     }
     case `wait`: {
-      if (state.phase !== `loading` && state.phase !== `ready`) return undefined
       const txid = Math.max(1, state.lastTxid + step.ahead)
-      // EVID-1: evidence already applied fulfills the wait. EVID-3: a wait
-      // with a timeout and no evidence rejects once the timeout passes, which
-      // is before the next checkpoint.
+      // EVID-1: evidence the shown rows reflect fulfills the wait: this
+      // run's, or a retired run's once the Collection is ready (EVID-2).
+      // EVID-3: a wait with a timeout and no evidence rejects once the
+      // timeout passes, which is before the next checkpoint. EVID-2: after
+      // a failure no evidence can arrive, so the wait rejects.
       const timeout = step.timeout === true
+      const running = state.phase === `loading` || state.phase === `ready`
+      const shown =
+        state.committed.has(txid) ||
+        (state.phase !== `loading` &&
+          state.phase !== `loading-error` &&
+          state.retiredEvidence.has(txid))
       state.waits.push({
         run: state.run,
         txid,
-        expected: state.committed.has(txid)
+        expected: shown
           ? `fulfilled`
-          : timeout
+          : !running || timeout
             ? `rejected`
             : `pending`,
+        rejectLaw: running ? `EVID-3` : `EVID-2`,
       })
       return { done: { kind: `wait`, txid, timeout }, publishable: [] }
     }
     case `fail`: {
       if (!canDeliver(state)) return undefined
       const failure = failures.next++
-      state.failure = options.failureValue === `any` ? `any` : failure
+      state.failure = failure
       // READY-4 before the first ready; HEALTH-1 after it. LIFE-10: the
       // source ends here.
       state.phase = state.phase === `loading` ? `loading-error` : `stopped`
       endOutage(state)
-      // No law fixes what a pending txid wait does after its source failed.
-      for (const wait of state.waits) {
-        if (wait.run === state.run && wait.expected === `pending`) {
-          wait.expected = `unchecked`
-        }
-      }
+      retireWaits(state)
       return { done: { kind: `fail`, failure }, publishable: [] }
     }
     case `malformed`: {
@@ -1306,7 +1402,7 @@ function stepModel(
         if (options.listenBeforeFetch && !afterReady) return undefined
         state.rows = rowMap(rows)
         state.backend = rowMap(rows)
-        state.phase = `ready`
+        openGate(state)
         endOutage(state)
         return {
           done: { kind: `malformed`, rows, afterReady, replaced: true },
@@ -1317,11 +1413,7 @@ function stepModel(
       state.phase = afterReady ? `stopped` : `loading-error`
       endOutage(state)
       state.buffered = []
-      for (const wait of state.waits) {
-        if (wait.run === state.run && wait.expected === `pending`) {
-          wait.expected = `unchecked`
-        }
-      }
+      retireWaits(state)
       return {
         done: { kind: `malformed`, rows, afterReady, replaced: false },
         publishable: [],
@@ -1339,7 +1431,14 @@ function stepModel(
           state.transient.push(failure)
         }
       }
-      return { done: { kind: `transient-failure`, failure }, publishable: [] }
+      return {
+        done: {
+          kind: `transient-failure`,
+          failure,
+          variant: step.variant ?? 0,
+        },
+        publishable: [],
+      }
     }
     case `disconnect`: {
       if (!canDeliver(state)) return undefined
@@ -1370,8 +1469,8 @@ function stepModel(
       state.seed = rowMap(nextSeed)
       state.buffered = []
       state.connected = true
-      state.lastTxid = 0
-      // EVID-2: the retired run's evidence does not fulfill a later wait.
+      // EVID-2: the retired run's evidence fulfills a later wait only once
+      // this run is ready (`openGate`).
       for (const txid of state.committed) state.retiredEvidence.add(txid)
       state.committed = new Set()
       state.renewed = false
@@ -1393,20 +1492,13 @@ function expectedObservation(state: ModelState): ExpectedObservation {
           ? `error`
           : `ready`,
     rows: rowState(state.rows),
-    healthError: running
-      ? null
-      : state.failure === `any`
-        ? `adapter`
-        : state.failure!,
+    healthError: running ? null : state.failure!,
     failureReason: state.transient,
     preload:
       state.phase === `loading`
         ? `pending`
         : state.phase === `loading-error`
-          ? {
-              rejectedWith:
-                state.failure === `any` ? `adapter` : state.failure!,
-            }
+          ? { rejectedWith: state.failure! }
           : `fulfilled`,
     waits: state.waits.map((wait) => wait.expected),
     // LIFE-10: a failed provider's source is released at its end.
@@ -1440,6 +1532,9 @@ export const eagerLiveSourceReachStates = [
   `transient-failure-reported`,
   `transient-failure-below-threshold`,
   `transient-failure-repeated`,
+  `outage-reported-again`,
+  `outage-reported-after-batch`,
+  `outage-reported-in-later-run`,
   `transient-failure-recovered`,
   `reconnect`,
   `renewal`,
@@ -1463,6 +1558,8 @@ export type EagerLiveSourceReachState =
   | (typeof eagerLiveSourceReachStates)[number]
   | ValueReachState
   | `zero-sign-flipped`
+  /** A failed attempt of each declared kind after ready. */
+  | `transient:${string}`
 
 const capabilityOfState: Partial<
   Record<(typeof eagerLiveSourceReachStates)[number], EagerLiveSourceCapability>
@@ -1474,6 +1571,9 @@ const capabilityOfState: Partial<
   'wait-on-retired-evidence': `await-evidence`,
   'transient-failure-reported': `retry-policy`,
   'transient-failure-below-threshold': `retry-policy`,
+  'outage-reported-again': `retry-policy`,
+  'outage-reported-after-batch': `retry-policy`,
+  'outage-reported-in-later-run': `retry-policy`,
   'transient-failure-repeated': `retry-policy`,
   'transient-failure-recovered': `retry-policy`,
   reconnect: `transport-reconnect`,
@@ -1521,7 +1621,14 @@ export function reachStatesFor(
   )
     ? [`zero-sign-flipped`]
     : []
-  return [...reachable, ...values, ...fields, ...zeros]
+  const variants: Array<EagerLiveSourceReachState> = domain.capabilities.has(
+    `retry-policy`,
+  )
+    ? (domain.transientVariants ?? []).map(
+        (name): EagerLiveSourceReachState => `transient:${name}`,
+      )
+    : []
+  return [...reachable, ...values, ...fields, ...zeros, ...variants]
 }
 
 /** JSON for a message; a bigint shows as `<digits>n`, `-0` as `-0`. */
@@ -1663,7 +1770,6 @@ export async function checkEagerLiveSourceHistory(
     listenBeforeFetch,
     flipZeros: driver.valueKinds?.includes(`negative-zero`) === true,
     duplicateInsert: driver.duplicateInsert ?? `error`,
-    failureValue: driver.failureValue ?? `provider`,
     txidEvidence: driver.txidEvidence ?? `batch`,
     retryReportAfter: driver.retryReportAfter ?? 1,
   }
@@ -1672,6 +1778,17 @@ export async function checkEagerLiveSourceHistory(
     driver.duplicateInsert === undefined
   ) {
     throw new Error(`duplicate-key-delivery needs a duplicateInsert policy`)
+  }
+  // No law fixes whether a reconnect or a renewal ends an outage that a
+  // threshold is still counting; a connection-aware source reports at once.
+  if (
+    (driver.retryReportAfter ?? 1) > 1 &&
+    (driver.capabilities.has(`transport-reconnect`) ||
+      driver.capabilities.has(`capability-renewal`))
+  ) {
+    throw new Error(
+      `retryReportAfter above 1 has no law with transport-reconnect or capability-renewal`,
+    )
   }
   // With `listen-before-fetch`, a sync run's backend starts with the rows of
   // its first complete delivery, committed before the adapter subscribes.
@@ -1740,8 +1857,18 @@ export async function checkEagerLiveSourceHistory(
         (rows, commit) => commit > last && sameRows(rows, publication),
       )
       if (index === -1) {
+        // FID-1: a publication with a committed state's keys and titles
+        // that differs only in a field names the field law.
+        const near = publishable.find((rows) => sameTitles(rows, publication))
+        const valuesOnly = near?.every(
+          ([, value], row) => rowHead(value) === rowHead(publication[row]![1]),
+        )
         throw violation(
-          `${law} (publication)`,
+          near === undefined
+            ? `${law} (publication)`
+            : valuesOnly
+              ? `FID-1 (values)`
+              : `FID-1 (fields)`,
           stepIndex,
           publishable,
           publication,
@@ -1758,9 +1885,12 @@ export async function checkEagerLiveSourceHistory(
   // when a retired run committed it),
   // EVID-3 for a timed wait that did not reject, and LIFE-10 for a failed
   // provider's subscription that stays open or is released twice.
-  // Under `failureValue: any`, the model's first open transient failure
-  // names the outage, and `cause` is the failure first reported for it.
-  let firstReported: { outage: number; cause: unknown } | undefined
+  // HEALTH-4: the reported value for an injected failure is the provider's
+  // value, or under `matchesFailure` the value the driver's relation names.
+  const matches = (reported: unknown, index: number) =>
+    driver.matchesFailure
+      ? driver.matchesFailure(reported, index)
+      : reported === failure(index)
   const compare = async (
     stepIndex: number,
     law: string,
@@ -1826,7 +1956,7 @@ export async function checkEagerLiveSourceHistory(
     } else {
       check(
         `health error cause`,
-        health.error?.cause === failure(expected.healthError),
+        matches(health.error?.cause, expected.healthError),
         failure(expected.healthError).message,
         health.error?.message ?? null,
       )
@@ -1844,7 +1974,7 @@ export async function checkEagerLiveSourceHistory(
           got,
         )
     }
-    if (modelOptions.failureValue === `provider`) {
+    if (!driver.matchesFailure) {
       checkReason(
         reasons.length === wantReasons.length &&
           reasons.every((cause, index) => cause === wantReasons[index]) &&
@@ -1854,32 +1984,32 @@ export async function checkEagerLiveSourceHistory(
         reasons.map(String),
       )
     } else {
-      // The client library's values: one to one per attempt, newest as
-      // `cause`, and the outage's first failure kept until it recovers.
-      checkReason(
-        wantReasons.length === 0
-          ? reasons.length === 0
-          : reasons.length >= 1 &&
-              reasons.length <= wantReasons.length &&
-              health.failureReason?.cause === reasons.at(-1),
-        wantReasons.length === 0 ? [] : `1 to ${wantReasons.length} failures`,
-        reasons.map(String),
-      )
-      const outage = expected.failureReason[0]
-      if (
-        outage !== undefined &&
-        outage === firstReported?.outage &&
-        reasons[0] !== firstReported.cause
-      ) {
+      // Client-created values: the outage shows the attempt that crossed
+      // the threshold (maintainer decision 2026-10-30), and may list later
+      // attempts after it, in order. RETRY-1: a later attempt does not
+      // replace that first failure.
+      const want = expected.failureReason
+      if (want.length > 0 && !matches(reasons[0], want[0]!)) {
         throw violation(
-          `RETRY-1 (health failureReason)`,
+          reasons.length > 0 &&
+            want.slice(1).some((i) => matches(reasons[0], i))
+            ? `RETRY-1 (health failureReason)`
+            : `${reasonLaw} (health failureReason)`,
           stepIndex,
-          `the outage's first failure kept`,
-          `a replaced failure`,
+          failure(want[0]!).message,
+          reasons.map(String),
         )
       }
-      firstReported =
-        outage === undefined ? undefined : { outage, cause: reasons[0] }
+      let next = 0
+      checkReason(
+        reasons.length <= want.length &&
+          reasons.every((cause) => {
+            while (next < want.length && !matches(cause, want[next]!)) next++
+            return next++ < want.length
+          }),
+        want.map((index) => failure(index).message),
+        reasons.map(String),
+      )
     }
     const want = expected.preload
     const got = preload.current
@@ -1889,12 +2019,11 @@ export async function checkEagerLiveSourceHistory(
         ? got === want
         : typeof got === `object` &&
             (want.rejectedWith === `adapter` ||
-              got.rejected === failure(want.rejectedWith)),
+              matches(got.rejected, want.rejectedWith)),
       want,
       typeof got === `object` ? { rejected: String(got.rejected) } : got,
     )
     expected.waits.forEach((wantWait, index) => {
-      if (wantWait === `unchecked`) return
       const gotWait = waits[index]!.current
       const gotKind = typeof gotWait === `object` ? `rejected` : gotWait
       if (gotKind === wantWait) return
@@ -1905,16 +2034,27 @@ export async function checkEagerLiveSourceHistory(
           batch.txid === state.waits[index]!.txid &&
           state.waits[index]!.run === state.run,
       )
+      const model = state.waits[index]!
+      const retired = state.retiredEvidence.has(model.txid)
+      const current = state.committed.has(model.txid)
+      // A fulfilled wait names the evidence it lacked; an unfulfilled one
+      // names why it should have settled.
       const waitLaw =
         gotKind === `fulfilled`
           ? buffered
             ? `EVID-1/READY-10/PUB-9`
-            : state.retiredEvidence.has(state.waits[index]!.txid)
+            : retired && !current
+              ? `EVID-2`
+              : !current
+                ? `EVID-1`
+                : (model.rejectLaw ?? law)
+          : wantWait === `fulfilled`
+            ? retired && !current
               ? `EVID-2`
               : `EVID-1`
-          : wantWait === `rejected` && state.waits[index]!.run === state.run
-            ? `EVID-3`
-            : law
+            : wantWait === `rejected`
+              ? (model.rejectLaw ?? law)
+              : law
       throw violation(
         `${waitLaw} (awaitTxId ${index})`,
         stepIndex,
@@ -1963,6 +2103,9 @@ export async function checkEagerLiveSourceHistory(
 
   try {
     await compare(-1, `READY-2`)
+    // Reported outages and applied live batches in the current run.
+    let outagesThisRun = 0
+    let batchesThisRun = 0
     for (const [index, step] of history.entries()) {
       const wasReady = state.phase === `ready`
       const transientBefore = state.transient.length
@@ -2019,6 +2162,7 @@ export async function checkEagerLiveSourceHistory(
             }
           }
           reach(done.beforeReady ? `change-before-ready` : `change-batch`)
+          if (!done.beforeReady) batchesThisRun++
           if (done.removesField) reach(`field-removed`)
           if (done.flipped) reach(`zero-sign-flipped`)
           if (done.changes.length > 1) reach(`multi-change-batch`)
@@ -2076,12 +2220,22 @@ export async function checkEagerLiveSourceHistory(
             `conformance transient failure ${done.failure}`,
           )
           failures[done.failure] = error
-          await provider.transientFailure!(error)
+          await provider.transientFailure!(error, done.variant)
+          const kind = driver.transientVariants?.[done.variant]
+          if (wasReady && kind !== undefined) reach(`transient:${kind}`)
           if (state.transient.at(-1) === done.failure) {
             reach(`transient-failure-reported`)
           } else if (wasReady) reach(`transient-failure-below-threshold`)
           // RETRY-1: a later attempt in the same outage.
           if (transientBefore > 0) reach(`transient-failure-repeated`)
+          if (transientBefore === 0 && state.transient.length > 0) {
+            // An outage crossed the threshold: after an earlier reported
+            // outage of this run, after a live batch, or in a later run.
+            if (outagesThisRun > 0) reach(`outage-reported-again`)
+            if (batchesThisRun > 0) reach(`outage-reported-after-batch`)
+            if (state.run > 1) reach(`outage-reported-in-later-run`)
+            outagesThisRun++
+          }
           break
         }
         case `disconnect`:
@@ -2108,6 +2262,8 @@ export async function checkEagerLiveSourceHistory(
           preload = recordSettlement(collection.preload())
           events = foldChanges(collection)
           reach(`restart`)
+          outagesThisRun = 0
+          batchesThisRun = 0
           if (pendingBefore) reach(`wait-rejected-at-retirement`)
           break
         }

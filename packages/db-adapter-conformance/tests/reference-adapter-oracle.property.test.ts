@@ -89,7 +89,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
   )
 
   // Each mutant breaks one law; the check must report that law.
-  const mutants: Array<[ReferenceMutant, string]> = [
+  const mutants: Array<[ReferenceMutant, string | RegExp]> = [
     [`ready-before-delivery`, `READY-2`],
     [`wraps-loading-failure`, `READY-4`],
     [`failure-clears-rows`, `HEALTH-1`],
@@ -106,12 +106,16 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`detached-rejection`, `HEALTH-5`],
     [`logs-failure`, `HEALTH-5`],
     [`wait-off-by-one`, `EVID-1`],
-    [`keeps-retired-evidence`, `EVID-2`],
+    [`retired-evidence-before-ready`, `EVID-2`],
+    [`forgets-retired-evidence`, `EVID-2`],
+    [`leaks-waits-after-fail`, `EVID-2`],
     [`wait-ignores-timeout`, `EVID-3`],
     [`disconnect-fails`, `RECON-1`],
     [`renew-resubscribes`, `RENEW-1`],
     [`drops-buffered`, `READY-10`],
-    [`buffer-before-rows`, `PUB-9`],
+    // It applies buffered batches before the rows, also before a delivery
+    // that must write nothing.
+    [`buffer-before-rows`, /PUB-9|PUB-4/],
     [`replays-per-batch`, `PUB-5`],
     [`ready-before-buffer`, `READY-10 (rows when ready)`],
     [`shows-buffered`, `READY-10/PUB-9`],
@@ -137,7 +141,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
       )
       expect(result.failed).toBe(true)
       expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(law)
+      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
     },
     campaignTimeoutMs,
   )
@@ -171,6 +175,53 @@ describe(`eager live-source conformance: per-change commits`, () => {
       expect((result.errorInstance as ConformanceViolation).law).toContain(
         `PUB-1`,
       )
+    },
+    campaignTimeoutMs,
+  )
+})
+
+// An outage threshold with client-created values (`retryReportAfter`,
+// `matchesFailure`), as Electric declares. The reference adapter with that
+// policy must conform, and each mutant of its outage reporting must be
+// rejected with its law.
+describe(`eager live-source conformance: outage threshold, client values`, () => {
+  const outage = { reportAfter: 3, clientValues: true }
+  const thresholdDriver = referenceDriver(undefined, { outage })
+
+  oracleReplayTest(it)(
+    `the reference adapter with an outage threshold conforms`,
+    async () => {
+      const reach = createOracleReach(
+        `${property}.outage`,
+        reachStatesFor(thresholdDriver),
+        { minimum: 5 },
+      )
+      await fc.assert(eagerLiveSourceProperty(thresholdDriver, reach), {
+        seed: 2118,
+        numRuns: runs,
+      })
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
+  const outageMutants: Array<[ReferenceMutant, string]> = [
+    [`stale-outage-value`, `HEALTH-`],
+    [`replaces-outage-value`, `RETRY-1`],
+    [`reports-outage-early`, `HEALTH-1`],
+    [`outage-count-survives-delivery`, `HEALTH-1`],
+    [`wraps-loading-failure`, `READY-4`],
+  ]
+  oracleReplayTest(it).each(outageMutants)(
+    `rejects the %s mutant with %s`,
+    async (mutant, law) => {
+      const result = await fc.check(
+        eagerLiveSourceProperty(referenceDriver(mutant, { outage })),
+        { seed: 2118, numRuns: runs },
+      )
+      expect(result.failed).toBe(true)
+      expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
+      expect((result.errorInstance as ConformanceViolation).law).toContain(law)
     },
     campaignTimeoutMs,
   )
