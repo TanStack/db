@@ -166,6 +166,7 @@ export type EagerLiveSourceCapability =
   | `retry-policy`
   | `listen-before-fetch`
   | `duplicate-key-delivery`
+  | `source-failure-after-ready`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -198,17 +199,20 @@ export interface ControlledProvider {
    */
   releases: () => ReadonlyArray<number>
   /** Delivers a complete result: every row the source holds. */
-  deliverSnapshot: (rows: ReadonlyArray<ConformanceRow>) => void
+  deliverSnapshot: (rows: ReadonlyArray<ConformanceRow>) => void | Promise<void>
   /** Delivers one committed change batch that carries `txid`. */
-  deliverChanges: (changes: ReadonlyArray<ProviderChange>, txid: string) => void
+  deliverChanges: (
+    changes: ReadonlyArray<ProviderChange>,
+    txid: string,
+  ) => void | Promise<void>
   /** The provider stops with `error` and delivers nothing more. */
-  fail: (error: Error) => void
+  fail: (error: Error) => void | Promise<void>
   /** A failure the adapter keeps retrying (capability `retry-policy`). */
-  transientFailure?: (error: Error) => void
+  transientFailure?: (error: Error) => void | Promise<void>
   /** Drops the transport (capability `transport-reconnect`). */
-  disconnect?: () => void
+  disconnect?: () => void | Promise<void>
   /** Restores the transport (capability `transport-reconnect`). */
-  reconnect?: () => void
+  reconnect?: () => void | Promise<void>
   /**
    * Supplies the replacement capability that the adapter requested and
    * resolves after the adapter renewed its provider subscription with it
@@ -224,7 +228,7 @@ export interface ControlledProvider {
    * is a backend commit on top of them; `deliverSnapshot` then delivers the
    * fetch result the oracle computed.
    */
-  seed?: (rows: ReadonlyArray<ConformanceRow>) => void
+  seed?: (rows: ReadonlyArray<ConformanceRow>) => void | Promise<void>
   /** Fetches the adapter issued while its change listener was not live. */
   fetchesBeforeListening?: () => number
 }
@@ -237,6 +241,13 @@ export interface EagerLiveSourceFixture {
   awaitTxId?: (txid: string, timeout?: number) => Promise<unknown>
   /** Releases fixture resources after the history's final cleanup. */
   dispose?: () => void | Promise<void>
+  /**
+   * The adapter's propagation step (the law set's `propagationStep`), when a
+   * delivery reaches the Collection later than a few event-loop turns, as
+   * through a throttled change watcher. The check awaits it before every
+   * comparison.
+   */
+  settle?: () => Promise<void>
 }
 
 /** A production driver: it builds a fresh fixture for each history. */
@@ -292,7 +303,11 @@ export interface EagerLiveSourceDriver {
  * - `wait`: `awaitTxId` for the last txid plus `ahead`, so a wait can target
  *   an applied batch (`ahead` 0) or a future one. With `timeout`, the wait
  *   carries a short timeout.
- * - `fail`: the provider stops.
+ * - `fail`: the provider stops. After the first ready only with
+ *   `source-failure-after-ready`: a provider that can end terminally then, as
+ *   the law set's `terminal-source-end` or an `errorMapping` that reports a
+ *   terminal failure describes. Without it, the adapter's provider has no
+ *   failure after ready to deliver.
  * - `malformed`: a complete delivery holding two rows with one key, legal
  *   where a complete delivery is (PUB-4).
  * - `transient-failure`: a failure the adapter keeps retrying.
@@ -1265,6 +1280,7 @@ const capabilityOfState: Partial<
   'read-missed-change': `listen-before-fetch`,
   'seen-change-superseded': `listen-before-fetch`,
   'malformed-before-ready': `duplicate-key-delivery`,
+  'failure-after-ready': `source-failure-after-ready`,
   'malformed-after-ready': `duplicate-key-delivery`,
 }
 
@@ -1344,7 +1360,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * The checkpoint premise: the adapters in scope apply a delivery within a few
- * event-loop turns. Three macrotask turns cover microtask receipts and one
+ * event-loop turns, or within the propagation step their fixture declares. Three macrotask turns cover microtask receipts and one
  * timer hop. A slower adapter shows as a mismatch at this cut, not as a pass.
  */
 async function settle(): Promise<void> {
@@ -1460,7 +1476,7 @@ export async function checkEagerLiveSourceHistory(
   const failures: Array<Error> = []
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
-  if (listenBeforeFetch) provider.seed?.(structuredClone(seedFrom(0)))
+  if (listenBeforeFetch) await provider.seed?.(structuredClone(seedFrom(0)))
   // READY-3, READY-10: the rows at the moment status becomes `ready`.
   let readyRows: RowState | undefined
   const watchReady = () =>
@@ -1533,6 +1549,7 @@ export async function checkEagerLiveSourceHistory(
     delivery: boolean = false,
   ) => {
     await settle()
+    await fixture.settle?.()
     const expected = expectedObservation(state)
     const rows = observedRows(collection)
     const check = (name: string, ok: boolean, want: unknown, got: unknown) => {
@@ -1719,7 +1736,7 @@ export async function checkEagerLiveSourceHistory(
       const { done, publishable } = result
       switch (done.kind) {
         case `snapshot`:
-          provider.deliverSnapshot(structuredClone(done.rows))
+          await provider.deliverSnapshot(structuredClone(done.rows))
           for (const row of done.rows) {
             if (Object.hasOwn(row, `value`)) {
               reach(`value:${kindOf(row.value)}:load`)
@@ -1732,7 +1749,7 @@ export async function checkEagerLiveSourceHistory(
           if (transientBefore > 0) reach(`transient-failure-recovered`)
           break
         case `changes`:
-          provider.deliverChanges(
+          await provider.deliverChanges(
             structuredClone(done.changes),
             String(done.txid),
           )
@@ -1778,12 +1795,12 @@ export async function checkEagerLiveSourceHistory(
             `conformance provider failure ${done.failure}`,
           )
           failures[done.failure] = error
-          provider.fail(error)
+          await provider.fail(error)
           reach(wasReady ? `failure-after-ready` : `failure-before-ready`)
           break
         }
         case `malformed`:
-          provider.deliverSnapshot(structuredClone(done.rows))
+          await provider.deliverSnapshot(structuredClone(done.rows))
           reach(
             done.afterReady
               ? `malformed-after-ready`
@@ -1795,15 +1812,15 @@ export async function checkEagerLiveSourceHistory(
             `conformance transient failure ${done.failure}`,
           )
           failures[done.failure] = error
-          provider.transientFailure!(error)
+          await provider.transientFailure!(error)
           if (wasReady) reach(`transient-failure-reported`)
           break
         }
         case `disconnect`:
-          provider.disconnect!()
+          await provider.disconnect!()
           break
         case `reconnect`:
-          provider.reconnect!()
+          await provider.reconnect!()
           reach(`reconnect`)
           break
         case `renew`:
@@ -1816,7 +1833,7 @@ export async function checkEagerLiveSourceHistory(
           await collection.cleanup()
           // The backend may change while no sync run listens.
           if (listenBeforeFetch) {
-            provider.seed?.(structuredClone(seedFrom(index + 1)))
+            await provider.seed?.(structuredClone(seedFrom(index + 1)))
           }
           readyRows = undefined
           watchReady()
@@ -1867,6 +1884,7 @@ export async function checkEagerLiveSourceHistory(
     events.stop()
     await collection.cleanup()
     await settle()
+    await fixture.settle?.()
     if (primary === undefined) {
       retireWaits(state)
       primary = retiredWaitViolation(state, waits, history)
@@ -1943,6 +1961,8 @@ function supports(
   switch (step.kind) {
     case `snapshot`:
       return !ready || driver.capabilities.has(`complete-snapshot`)
+    case `fail`:
+      return !ready || driver.capabilities.has(`source-failure-after-ready`)
     case `malformed`:
       return (
         driver.capabilities.has(`duplicate-key-delivery`) &&

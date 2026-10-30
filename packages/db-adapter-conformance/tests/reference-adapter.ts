@@ -493,6 +493,7 @@ export function referenceDriver(
       `capability-renewal`,
       `listen-before-fetch`,
       `duplicate-key-delivery`,
+      `source-failure-after-ready`,
     ]),
     valueKinds: [
       `string`,

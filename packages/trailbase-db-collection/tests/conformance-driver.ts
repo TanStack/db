@@ -159,7 +159,11 @@ export function trailBaseConformanceDriver(): EagerLiveSourceDriver {
     adapter: `@tanstack/trailbase-db-collection (eager)`,
     // A paged list can return one record twice, for example when a write
     // moves it between pages (PUB-4).
-    capabilities: new Set([`duplicate-key-delivery`]),
+    // The change stream can error after ready (terminal-source-end).
+    capabilities: new Set([
+      `duplicate-key-delivery`,
+      `source-failure-after-ready`,
+    ]),
     changeCommits: `per-change`,
     // The law set declares `duplicateInsert: replace` for TrailBase: page
     // rows and stream events are complete rows, and the later one wins.

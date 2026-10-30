@@ -284,7 +284,11 @@ function createRxdbCollection(provider: RxdbProvider) {
 export function rxdbConformanceDriver(): EagerLiveSourceDriver {
   return {
     adapter: `@tanstack/rxdb-db-collection`,
-    capabilities: new Set([`listen-before-fetch`]),
+    // `$` can error after ready (terminal-source-end).
+    capabilities: new Set([
+      `listen-before-fetch`,
+      `source-failure-after-ready`,
+    ]),
     changeCommits: `per-change`,
     valueKinds: jsonValueKinds,
     create(): EagerLiveSourceFixture {

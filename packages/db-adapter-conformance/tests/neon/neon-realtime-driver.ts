@@ -261,6 +261,8 @@ export function neonRealtimeDriver(): EagerLiveSourceDriver {
       `await-evidence`,
       `transport-reconnect`,
       `capability-renewal`,
+      // Its live query's `error` state ends the subscription (markError).
+      `source-failure-after-ready`,
     ]),
     create(): EagerLiveSourceFixture {
       const provider = new NeonProvider()
