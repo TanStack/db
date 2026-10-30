@@ -4,7 +4,8 @@
  * shared handoff owner's explicit-output law applies to each binding; cache
  * reuse cannot replace one binding's declaration with its peer's declaration.
  * Compatible declarations under the same query identity retain existing
- * Collection sharing. Mounted-option changes are not tested.
+ * Collection sharing. Mounted bindings retain their first options until query identity changes, as
+ * required by the approved first-options rule.
  *
  * The shared grammar exhausts both configurations and three identity relations:
  * derived identity, the same explicit queryKey, and different explicit keys.
@@ -101,7 +102,16 @@ test.each(histories)(
   async ({ first, second, identity, cell, scope, lane }) => {
     const reach = createOracleReach(
       `React Suspense indexing/${scope}/${lane}/${identity}/${cell}`,
-      [`first-admission`, `second-admission`, `retained-first`],
+      [
+        `first-admission`,
+        `second-admission`,
+        `retained-first`,
+        ...(!expectedIndexing(first).rejects ? [`retained-options`] : []),
+        ...(!expectedIndexing(first).rejects &&
+        !expectedIndexing(second).rejects
+          ? [`rebound-options`]
+          : []),
+      ],
     )
     reach.beginHistory()
     if (lane === `same-name`) {
@@ -132,6 +142,8 @@ test.each(histories)(
     }
     const query = (q: InitialQueryBuilder) => q.from({ row: source })
     const outputs = new Set<ObservedOutput>()
+    let reconfigureFirst:
+      ((settings: IndexSettings, rebind: boolean) => Promise<void>) | undefined
     // React reports an expected rejected render to console.error as well as
     // throwing it from renderHook. The admission observation keeps the error.
     const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
@@ -147,10 +159,29 @@ test.each(histories)(
         (() => { data: Array<Row>; collection: ObservedOutput }) | undefined
       try {
         const rendered = renderHook(
-          () => useLiveSuspenseQuery({ query, queryKey, ...settings }),
-          { wrapper: Wrapper },
+          ({ declaration, rebind }) =>
+            useLiveSuspenseQuery({
+              query,
+              queryKey: rebind ? [`rebound-indexing`, cell] : queryKey,
+              ...declaration,
+            }),
+          {
+            wrapper: Wrapper,
+            initialProps: { declaration: settings, rebind: false },
+          },
         )
         read = () => rendered.result.current
+        if (binding === 0)
+          reconfigureFirst = async (declaration, rebind) => {
+            rendered.rerender({ declaration, rebind })
+            await waitFor(() =>
+              expect(rendered.result.current.data).toHaveLength(rows.length),
+            )
+            const output = rendered.result.current.collection
+            outputs.add(output)
+            expectIndexingConfiguration(output, rebind ? declaration : settings)
+            if (!rebind) expect(output).toBe(result.collection)
+          }
       } catch (error) {
         admission.rejected = true
         admission.error = error
@@ -173,6 +204,14 @@ test.each(histories)(
       if (firstOutput) expectIndexingConfiguration(firstOutput, first)
       expectIndexingReuse(firstOutput, secondOutput, first, second, identity)
       reach.reach(`retained-first`)
+      if (firstOutput) {
+        await reconfigureFirst!(second, false)
+        reach.reach(`retained-options`)
+        if (!expectedIndexing(second).rejects) {
+          await reconfigureFirst!(second, true)
+          reach.reach(`rebound-options`)
+        }
+      }
       reach.assertReached()
     }, [
       () => cleanup(),

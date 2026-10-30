@@ -139,6 +139,12 @@ These options also work inside `liveQueryCollectionOptions` and framework hook
 config objects. Each live-query collection controls its own indexing policy;
 the options do not change its source collections. Setting `defaultIndexType`
 alone leaves automatic indexing off and supplies the type for manual indexes.
+React and Preact retain these options in a mounted binding until its query or
+nonempty `queryKey` changes. Independent React Suspense bindings share an
+output Collection only when their supplied Collection options agree; object
+and function options must use the same references. `DbClient.preloadLiveQuery`
+requires `defaultIndexType` for every eager declaration, even when rows are
+already cached.
 
 ### Convenience Function
 
@@ -2157,7 +2163,10 @@ function TodoRow({ listId }: { listId: string }) {
 
 Results are the same with or without pooling. Without `pool`, each query
 compiles its own live-query Collection, and the app does not bundle pooling.
-Suspense hooks and queries with a `DbClient` never pool.
+Suspense hooks and queries with a `DbClient` never pool. A pooled config can
+contain only `query`, `pool`, and `gcTime`. Any other option, including
+`autoIndex`, `defaultIndexType`, or an explicitly supplied `undefined` field,
+compiles its own Collection. Omit those fields when you want pooling.
 
 ## Composable Queries
 

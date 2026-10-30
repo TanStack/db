@@ -5,7 +5,7 @@ import type {
   UnhashableQueryIRError,
 } from '@tanstack/db'
 
-const liveQueryResultInfo = Symbol(`liveQueryResultInfo`)
+const liveQueryResultInfo = new WeakMap<object, LiveQueryResultInfo>()
 
 export type LiveQueryResultInfo = {
   client: DbClient | undefined
@@ -16,24 +16,17 @@ export type LiveQueryResultInfo = {
   deferredCollections: DeferredLiveQueryCollections
 }
 
-type ResultWithInfo = {
-  [liveQueryResultInfo]?: LiveQueryResultInfo
-}
-
 export function setLiveQueryResultInfo(
   result: object,
   info: LiveQueryResultInfo,
 ): void {
-  Object.defineProperty(result, liveQueryResultInfo, {
-    configurable: true,
-    value: info,
-  })
+  liveQueryResultInfo.set(result, info)
 }
 
 export function getLiveQueryResultInfo(result: object): LiveQueryResultInfo {
-  const info = (result as ResultWithInfo)[liveQueryResultInfo]
+  const info = liveQueryResultInfo.get(result)
   if (!info) {
-    throw new Error(`Missing internal live query result information.`)
+    throw new Error(`Missing live query metadata.`)
   }
   return info
 }

@@ -38,8 +38,16 @@ import { PropRef } from '../../src/query/ir.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
-import type { CollectionConfig, LoadSubsetOptions } from '../../src/types.js'
+import {
+  expectIndexingAdmission,
+  expectIndexingConfiguration,
+  expectedIndexing,
+  indexConfigurations,
+} from '../conformance/indexing-config-oracle.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
+
+import type { IndexSettings } from '../conformance/indexing-config-oracle.js'
 
 type Row = { id: number; rank: number }
 
@@ -64,8 +72,19 @@ function expectRankWindow(actualIds: unknown): void {
 }
 
 declareOracle({
-  check: [expectRankWindow, expectMaterializedWindow],
-  model: [expectedRankWindowIds, expectedMaterializedWindow],
+  check: [
+    expectRankWindow,
+    expectMaterializedWindow,
+    expectMaterializedIndexes,
+    expectIndexingAdmission,
+    expectIndexingConfiguration,
+  ],
+  model: [
+    expectedRankWindowIds,
+    expectedMaterializedWindow,
+    expectedMaterializedIndexes,
+    expectedIndexing,
+  ],
   grammar: [indexConfigurations],
 })
 
@@ -280,23 +299,33 @@ it(`eager indexing creates an ordered reader when only a custom reader exists`, 
  * comparators; the existing selection witnesses above cover reader admission.
  */
 type MaterializedRow = { id: number; rank: number | null; score: number | null }
-type IndexSettings = Pick<
-  CollectionConfig<MaterializedRow>,
-  `autoIndex` | `defaultIndexType`
->
+const configurations = indexConfigurations({
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
+}).flatMap((settings) =>
+  ([`direct`, `options`] as const).map((path) => ({ ...settings, path })),
+)
+const orderedReads = [
+  [`rank`, `first`],
+  [`rank`, `last`],
+  [`score`, `first`],
+  [`score`, `last`],
+  [`rank`, `first`],
+] as const
 
-function indexConfigurations(): Array<
-  IndexSettings & { path: `direct` | `options` }
-> {
-  return ([undefined, `off`, `eager`] as const).flatMap((autoIndex) =>
-    [undefined, BasicIndex, BTreeIndex].flatMap((defaultIndexType) =>
-      ([`direct`, `options`] as const).map((path) => ({
-        autoIndex,
-        defaultIndexType,
-        path,
-      })),
-    ),
-  )
+// One automatic index serves each distinct ordered specification. Repeating a
+// read or updating source rows must not allocate another index. Off admits no
+// optimized reader until a caller explicitly creates an index.
+function expectedMaterializedIndexes(settings: IndexSettings) {
+  const indexing = expectedIndexing(settings)
+  return {
+    optimized: indexing.mode === `eager`,
+    count:
+      indexing.automaticIndexes *
+      new Set(orderedReads.map(([field, nulls]) => `${field}/${nulls}`)).size,
+  }
+}
+function expectMaterializedIndexes(count: number, settings: IndexSettings) {
+  expect(count).toBe(expectedMaterializedIndexes(settings).count)
 }
 
 // Full recomputation uses only the projected values and the declared null
@@ -324,16 +353,20 @@ function expectMaterializedWindow(
   values: ReadonlyArray<MaterializedRow>,
   field: `rank` | `score`,
   nulls: `first` | `last`,
+  optimized = true,
 ) {
-  expect(actual).toEqual(expectedMaterializedWindow(values, field, nulls))
+  expect(actual).toEqual(
+    optimized ? expectedMaterializedWindow(values, field, nulls) : undefined,
+  )
 }
 
-it.each(indexConfigurations())(
+it.each(configurations)(
   `applies output indexing: $path, mode=$autoIndex, constructor=$defaultIndexType.name`,
   async (settings) => {
+    const expected = expectedIndexing(settings)
     const reach = createOracleReach(
       `live-query.output-indexing.${settings.path}`,
-      [`configured`],
+      [expected.rejects ? `rejected` : `output-read`],
     )
     reach.beginHistory()
     const sourceRows: Array<MaterializedRow> = [
@@ -366,17 +399,22 @@ it.each(indexConfigurations())(
     let cached: ReturnType<typeof create> | undefined
     await withOracleCleanup(async () => {
       await source.preload()
-      const invalid =
-        settings.autoIndex === `eager` && !settings.defaultIndexType
-      if (invalid) {
-        expect(() => {
-          cached = create()
-        }).toThrow(/requires defaultIndexType/)
-      } else {
+      const initialSourceIndexes = source.indexes.size
+      const admission: { rejected: boolean; error?: unknown } = {
+        rejected: false,
+      }
+      try {
         cached = create()
-        await cached.preload()
-        expect(cached.config.autoIndex).toBe(settings.autoIndex ?? `off`)
-        expect(cached.config.defaultIndexType).toBe(settings.defaultIndexType)
+      } catch (error) {
+        admission.rejected = true
+        admission.error = error
+      }
+      expectIndexingAdmission(admission, settings)
+      if (expected.rejects) {
+        reach.reach(`rejected`)
+      } else {
+        await cached!.preload()
+        expectIndexingConfiguration(cached!, settings)
         for (const updated of [false, true]) {
           if (updated) {
             sourceRows[0] = { id: 1, rank: 5, score: 5 }
@@ -388,13 +426,7 @@ it.each(indexConfigurations())(
             ...row,
             rank: row.rank === null ? null : -row.rank,
           }))
-          for (const [field, nulls] of [
-            [`rank`, `first`],
-            [`rank`, `last`],
-            [`score`, `first`],
-            [`score`, `last`],
-            [`rank`, `first`],
-          ] as const) {
+          for (const [field, nulls] of orderedReads) {
             const page = createLiveQueryCollection((q) =>
               q
                 .from({ row: cached! })
@@ -422,35 +454,59 @@ it.each(indexConfigurations())(
                 limit: 2,
                 optimizedOnly: true,
               })
-              if (settings.autoIndex === `eager`) {
-                expectMaterializedWindow(
-                  optimized?.map((change) => change.value.id),
-                  values,
-                  field,
-                  nulls,
-                )
-              } else {
-                expect(optimized).toBeUndefined()
-              }
+              expectMaterializedWindow(
+                optimized?.map((change) => change.value.id),
+                values,
+                field,
+                nulls,
+                expectedMaterializedIndexes(settings).optimized,
+              )
+              reach.reach(`output-read`)
             }, [() => page.cleanup()])
           }
         }
-        const eager = settings.autoIndex === `eager`
-        expect(cached.indexes.size).toBe(eager ? 4 : 0)
+        expectMaterializedIndexes(cached!.indexes.size, settings)
         // A constructor alone must remain useful for an explicit manual index.
-        if (!eager && settings.defaultIndexType) {
-          const index = cached.createIndex((row) => row.rank)
+        if (!expected.automaticIndexes && settings.defaultIndexType) {
+          const index = cached!.createIndex((row) => row.rank)
           expect(index).toBeInstanceOf(settings.defaultIndexType)
         }
-        for (const index of cached.indexes.values()) {
+        for (const index of cached!.indexes.values()) {
           expect(index).toBeInstanceOf(settings.defaultIndexType!)
         }
       }
       expect(source.config.autoIndex).toBe(`eager`)
       expect(source.config.defaultIndexType).toBe(BasicIndex)
-      expect(source.indexes.size).toBe(0)
-      reach.reach(`configured`)
+      expect(source.indexes.size).toBe(initialSourceIndexes)
     }, [() => cached?.cleanup(), () => source.cleanup()])
     reach.assertReached()
   },
 )
+
+// Calibrate the policy comparisons independently of a production path: an
+// extra index and the opposite optimized-read availability must be rejected.
+it.each(
+  configurations.filter((settings) => !expectedIndexing(settings).rejects),
+)(`rejects wrong output-indexing observations: %j`, (settings) => {
+  const expected = expectedMaterializedIndexes(settings)
+  expect(() =>
+    expectMaterializedIndexes(expected.count + 1, settings),
+  ).toThrow()
+  const values: Array<MaterializedRow> = [
+    { id: 1, rank: 3, score: 1 },
+    { id: 2, rank: null, score: 3 },
+    { id: 3, rank: 1, score: null },
+  ]
+  const wrong = expected.optimized
+    ? undefined
+    : expectedMaterializedWindow(values, `rank`, `first`)
+  expect(() =>
+    expectMaterializedWindow(
+      wrong,
+      values,
+      `rank`,
+      `first`,
+      expected.optimized,
+    ),
+  ).toThrow()
+})

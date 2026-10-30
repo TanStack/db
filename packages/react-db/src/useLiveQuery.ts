@@ -26,7 +26,6 @@ import {
 } from './source-id-bindings'
 import type {
   Collection,
-  CollectionConfig,
   CollectionImpl,
   CollectionStatus,
   Context,
@@ -77,15 +76,26 @@ function getSourceQualifiedSuspenseKey(
     client,
     `useLiveSuspenseQuery`,
   ).map(getSourceObjectToken)
-  const { autoIndex, defaultIndexType } = (preparedValue ?? {}) as Pick<
-    CollectionConfig<object>,
-    `autoIndex` | `defaultIndexType`
-  >
-  // Output resource policy qualifies local sharing, not query identity.
-  const indexType = defaultIndexType
-    ? getSourceObjectToken(defaultIndexType)
-    : 0
-  return `${sourceIds.join(`,`)}:${autoIndex ?? `off`}:${indexType}:${queryHash}`
+  const {
+    query: _query,
+    pool: _pool,
+    ...options
+  } = (preparedValue as { query?: unknown } | null | undefined)?.query
+    ? (preparedValue as Record<string, unknown>)
+    : {}
+  // Local output options qualify sharing; query identity still binds mounted
+  // options. Object/function declarations compare by exact runtime reference.
+  options.autoIndex ??= `off`
+  for (const key in options) {
+    const value = options[key]
+    if (value === undefined) delete options[key]
+    else if (
+      value &&
+      (typeof value === `object` || typeof value === `function`)
+    )
+      options[key] = getSourceObjectToken(value)
+  }
+  return getStableValueHash([sourceIds, options, queryHash])
 }
 
 function getSuspenseCollections(
@@ -653,12 +663,7 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
     let suspenseKey = queryHash
     let suspenseCollections: Map<string, SuspenseCollectionEntry> | undefined
     if (forSuspense && !inputIsCollection && queryHash) {
-      if (
-        instance.collection !== null &&
-        instance.client === dbClient &&
-        instance.queryHash === queryHash &&
-        instance.suspenseKey !== undefined
-      ) {
+      if (!needsNewCollection && instance.suspenseKey !== undefined) {
         suspenseKey = instance.suspenseKey
       } else {
         if (preparedQueryValue === unpreparedQueryValue) {
@@ -813,7 +818,7 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       () => observer.getSnapshot(),
       () => observer.getServerSnapshot(forSuspense),
     )
-    // Only useLiveSuspenseQuery reads this, and it costs a define per render.
+    // Only useLiveSuspenseQuery reads this internal metadata.
     if (forSuspense) {
       setLiveQueryResultInfo(returned, {
         client: dbClient,

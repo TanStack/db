@@ -37,6 +37,19 @@ export function indexConfigurations(
   )
 }
 
+export function indexConfigurationLabel(
+  settings: IndexSettings,
+  driver: Pick<LiveQueryDriver, `indexTypes`>,
+): string {
+  // Names are build artifacts. The grammar assigns roles by exact reference.
+  const constructor = !settings.defaultIndexType
+    ? `none`
+    : settings.defaultIndexType === driver.indexTypes.basic
+      ? `basic`
+      : `btree`
+  return `${settings.autoIndex ?? `default`}/${constructor}`
+}
+
 // Indexing is opt-in. Supplying only a constructor changes how explicit
 // indexes are built, but it does not authorize automatic index creation.
 export function expectedIndexing(settings: IndexSettings) {
@@ -119,6 +132,11 @@ export function expectIndexingReuse(
 ): void {
   if (expectedIndexingReuse(first, second, identity))
     expect(secondOutput).toBe(firstOutput)
+  else if (
+    !expectedIndexing(first).rejects &&
+    !expectedIndexing(second).rejects
+  )
+    expect(secondOutput).not.toBe(firstOutput)
 }
 
 function expectIndexing(
@@ -149,7 +167,7 @@ export function registerIndexingConfigScenarios(
   scenario: (key: string, name: string, run: () => Promise<void>) => void,
 ): void {
   for (const settings of indexConfigurations(driver)) {
-    const label = `${settings.autoIndex ?? `default`}/${settings.defaultIndexType?.name ?? `none`}`
+    const label = indexConfigurationLabel(settings, driver)
     scenario(
       `output-indexing-${label}`,
       `hook config applies output indexing ${label}`,
