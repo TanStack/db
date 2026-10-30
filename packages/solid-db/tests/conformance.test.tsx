@@ -11,6 +11,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -202,7 +204,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   // Solid accepts the config-object form via an accessor.
   const { getResult, dispose } = inRoot(() =>
@@ -259,6 +261,7 @@ const solidDriver: LiveQueryDriver = {
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

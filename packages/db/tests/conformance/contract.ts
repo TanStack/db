@@ -68,7 +68,12 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection, HealthNode, PooledLiveQueries } from '@tanstack/db'
+import type {
+  Collection,
+  CollectionConfig,
+  HealthNode,
+  PooledLiveQueries,
+} from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -263,6 +268,11 @@ export interface LiveQueryDriver {
   disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */
   ops: DbOps
+  /** Index constructors from the adapter's `@tanstack/db` realm. */
+  indexTypes: {
+    basic: NonNullable<CollectionConfig<Row>[`defaultIndexType`]>
+    btree: NonNullable<CollectionConfig<Row>[`defaultIndexType`]>
+  }
   /**
    * Create a realm-correct source collection + mutators, keyed by `id`. Pass
    * `collectionId` to create another source object under an existing ID.
@@ -328,7 +338,7 @@ export interface LiveQueryDriver {
       gcTime?: number
       pool?: PooledLiveQueries
       queryKey?: ReadonlyArray<unknown>
-    },
+    } & Pick<CollectionConfig<Row>, `autoIndex` | `defaultIndexType`>,
   ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle

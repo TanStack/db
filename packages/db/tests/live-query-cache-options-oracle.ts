@@ -185,3 +185,48 @@ export function checkCacheOptionPublications(
   for (const publication of publications)
     checkCacheOptionRows(publication, rows, key)
 }
+
+/** Independent Suspense callers share only compatible local output options.
+ * Authority: maintainer decision during PR #2314 review, 2026-10-30. Portable
+ * query identity and mounted first-options retention remain separate laws.
+ * Declaration names abstract absent or exact runtime references/scalar values.
+ * Each option varies alone, so a combined-option guard cannot hide a gap.
+ */
+export const localOptionHistories = [
+  `getKey`,
+  `schema`,
+  `onInsert`,
+  `onUpdate`,
+  `onDelete`,
+  `id`,
+  `startSync`,
+  `gcTime`,
+  `singleResult`,
+  `defaultStringCollation`,
+] as const
+export const localOptionPairs = localOptionHistories.flatMap((option) =>
+  declarations
+    .filter((pair) => option !== `singleResult` || !pair.includes(`other`))
+    .flatMap((pair) =>
+      ([`derived`, `same-key`, `different-key`] as const).map((identity) => ({
+        option,
+        declarations: pair,
+        identity,
+      })),
+    ),
+)
+export type LocalOptionHistory = (typeof localOptionPairs)[number]
+export function compatibleLocalOptions(history: LocalOptionHistory) {
+  return (
+    history.identity !== `different-key` &&
+    history.declarations[0] === history.declarations[1]
+  )
+}
+export function checkLocalOptionSharing(
+  left: object,
+  right: object,
+  history: LocalOptionHistory,
+) {
+  if (compatibleLocalOptions(history)) expect(right).toBe(left)
+  else expect(right).not.toBe(left)
+}

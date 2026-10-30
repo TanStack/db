@@ -10,6 +10,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -181,7 +183,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   const { result, scope } = runInScope(() =>
     useLiveQuery({ query: build, ...opts } as any),
@@ -245,6 +247,7 @@ const vueDriver: LiveQueryDriver = {
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

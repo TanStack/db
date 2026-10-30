@@ -24,6 +24,8 @@ import {
 } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -240,7 +242,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   const { result, destroy } = inCtx(() =>
     injectLiveQuery({ query: build, ...opts }),
@@ -294,6 +296,7 @@ const angularDriver: LiveQueryDriver = {
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
