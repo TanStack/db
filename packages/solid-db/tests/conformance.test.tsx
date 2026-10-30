@@ -41,7 +41,10 @@ import { expectPublishedRows } from '../../db/tests/conformance/publication-laws
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { makeSyncSource } from '../../db/tests/conformance/sync-source'
 import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
-import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import {
+  expectResultSurface,
+  selectedRowKeys,
+} from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type { PooledLiveQueries } from '@tanstack/db'
 import type {
@@ -366,18 +369,12 @@ it.each([`callback`, `config`, `collection`] as const)(
               collection.insert(row)
             },
             update: (row: T) => {
-              collection.update(row.id, (draft) => {
+              return collection.update(row.id, (draft) => {
                 // Local-only sync already replaces full rows. Remove omitted
                 // keys from the draft when the shared history requests it.
                 if (options?.rowUpdateMode === `full`)
-                  for (const key of Reflect.ownKeys(draft))
-                    if (
-                      key !== `$hasPendingWrites` &&
-                      key !== `$origin` &&
-                      key !== `$key` &&
-                      key !== `$collectionId` &&
-                      !Object.hasOwn(row, key)
-                    )
+                  for (const key of selectedRowKeys(draft))
+                    if (!Object.hasOwn(row, key))
                       Reflect.deleteProperty(draft, key)
                 Object.assign(draft, row)
               })

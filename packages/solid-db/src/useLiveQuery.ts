@@ -1,5 +1,4 @@
 import {
-  $PROXY,
   batch,
   createEffect,
   createMemo,
@@ -18,7 +17,8 @@ import {
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
-import { createStore, produce, reconcile, unwrap } from 'solid-js/store'
+import { createStore, reconcile } from 'solid-js/store'
+import { createRowStore } from './store-materialization'
 import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
@@ -38,91 +38,6 @@ import type {
 } from '@tanstack/db'
 
 const DEFAULT_GC_TIME_MS = 1
-
-// Solid reconciles plain records and arrays in place. Give it its own copies
-// at every admission, including nested objects first introduced by an update.
-// Other values are opaque to Solid stores; keep their methods and identity.
-function copyForStore<T>(
-  value: T,
-  ancestors = new WeakMap<object, object>(),
-): T {
-  if (value === null || typeof value !== `object`) return value
-  const prototype: object | null = Object.getPrototypeOf(value)
-  const array = Array.isArray(value)
-  if (!array && prototype !== Object.prototype && prototype !== null)
-    return value
-  const previous = ancestors.get(value)
-  if (previous) return previous as T
-  const copy: object = array
-    ? Object.setPrototypeOf(new Array(value.length), prototype)
-    : Object.create(prototype)
-  ancestors.set(value, copy)
-  const store = $PROXY in value
-  for (const key of Reflect.ownKeys(value)) {
-    if (array && key === `length`) continue
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    // Store bookkeeping belongs to its original wrapper. Enumerable user
-    // symbols remain data; hidden wrapper symbols are outside the value view.
-    if (store && typeof key === `symbol` && !descriptor.enumerable) continue
-    Object.defineProperty(
-      copy,
-      key,
-      `value` in descriptor || descriptor.enumerable
-        ? {
-            value: copyForStore(Reflect.get(value, key), ancestors),
-            enumerable: descriptor.enumerable,
-            writable: true,
-            configurable: true,
-          }
-        : { ...descriptor, configurable: true },
-    )
-  }
-  // Reconcile visits sibling paths independently. Sharing a mutable copy
-  // between them would let a later path overwrite an earlier path's update.
-  ancestors.delete(value)
-  return copy as T
-}
-
-// Solid treats an undefined assignment as deletion. Collection rows distinguish
-// those shapes. Restore explicit undefined fields after reconciliation, and
-// remove stale ones when a full row omits them. The null pulse uses Solid's
-// public setter traps to notify both membership and enumeration subscribers;
-// the surrounding store batch exposes only the final shape.
-function reconcileUndefined(
-  current: unknown,
-  next: unknown,
-  visited = new WeakSet<object>(),
-): void {
-  if (next === null || typeof next !== `object` || visited.has(next)) return
-  const prototype: object | null = Object.getPrototypeOf(next)
-  if (
-    !Array.isArray(next) &&
-    prototype !== Object.prototype &&
-    prototype !== null
-  )
-    return
-  visited.add(next)
-  const draft = current as Record<string, unknown>
-  for (const key of Object.keys(draft)) {
-    if (draft[key] === undefined && !Object.hasOwn(next, key)) {
-      draft[key] = null
-      delete draft[key]
-    }
-  }
-  for (const key of Object.keys(next)) {
-    const value: unknown = Reflect.get(next, key)
-    if (value === undefined && !Object.hasOwn(draft, key)) {
-      draft[key] = null
-      draft[key] = undefined
-      Object.defineProperty(unwrap(draft), key, {
-        value: undefined,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      })
-    } else reconcileUndefined(draft[key], value, visited)
-  }
-}
 
 type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
@@ -415,19 +330,9 @@ export function useLiveQuery(
         existing.update(value)
         nextRows.push(existing.value)
       } else {
-        const [row, setRow] = createStore(copyForStore(value))
-        rowsByKey.set(key, {
-          value: row,
-          update: (nextValue) =>
-            setRow((previous: Record<string, unknown>) => {
-              const next = copyForStore(nextValue)
-              const current = reconcile(next, { key: null })(previous)
-              return produce((draft) => reconcileUndefined(draft, next))(
-                current,
-              )
-            }),
-        })
-        nextRows.push(row)
+        const row = createRowStore(value)
+        rowsByKey.set(key, row)
+        nextRows.push(row.value)
       }
     }
 

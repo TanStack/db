@@ -64,16 +64,27 @@ describe(`row snapshot comparison calibration`, () => {
 })
 
 type CalibrationRow = { id: string } & Record<string, unknown>
-type Changes = ReadonlyArray<{ previousValue: CalibrationRow }>
+type Changes = ReadonlyArray<{
+  key: string
+  type: `update`
+  value: CalibrationRow
+  previousValue: CalibrationRow
+}>
 
-function cleanupDriver(primaryFailure?: Error) {
+function cleanupDriver(
+  options: {
+    primaryFailure?: Error
+    corruptOriginal?: boolean
+    failCleanup?: boolean
+  } = {},
+) {
   const projectionFailure = new Error(`projection cleanup rejected`)
   let sourceCleanups = 0
   let projectionCleanups = 0
-  let row: CalibrationRow
+  let rows = new Map<string, CalibrationRow>()
   let notify: ((changes: Changes) => void) | undefined
   const source = {
-    get: () => row,
+    get: (id: string) => rows.get(id),
     subscribeChanges(callback: (changes: Changes) => void) {
       notify = callback
       return {
@@ -90,14 +101,18 @@ function cleanupDriver(primaryFailure?: Error) {
   const projection = {
     cleanup() {
       projectionCleanups++
-      return Promise.reject(projectionFailure)
+      return options.failCleanup === false
+        ? Promise.resolve()
+        : Promise.reject(projectionFailure)
     },
   }
   const handle = {
-    current: () => ({ data: [row] }),
+    current: () => ({ data: [...rows.values()] }),
     collection: () => projection,
     flush() {
-      return primaryFailure ? Promise.reject(primaryFailure) : Promise.resolve()
+      return options.primaryFailure
+        ? Promise.reject(options.primaryFailure)
+        : Promise.resolve()
     },
     apply(write: () => void) {
       write()
@@ -109,14 +124,26 @@ function cleanupDriver(primaryFailure?: Error) {
   // at this boundary; it does not pretend to implement a real Collection.
   const driver = {
     name: `cleanup-calibration`,
+    snapshotSourceUsesDraft: true,
     makeSource(initial: ReadonlyArray<CalibrationRow>) {
-      row = initial[0]!
+      rows = new Map(initial.map((row) => [row.id, row]))
       return {
         collection: source,
         update(next: CalibrationRow) {
-          const previousValue = row
-          row = next
-          notify?.([{ previousValue }])
+          const previousValue = rows.get(next.id)!
+          rows.set(next.id, next)
+          notify?.([
+            { key: next.id, type: `update`, value: next, previousValue },
+          ])
+          return {
+            mutations: [
+              {
+                original: options.corruptOriginal
+                  ? { ...previousValue, config: `corrupted original` }
+                  : previousValue,
+              },
+            ],
+          }
         },
       }
     },
@@ -162,7 +189,7 @@ describe(`row snapshot history cleanup`, () => {
 
   it(`preserves a primary failure and the distinct cleanup failure`, async () => {
     const primaryFailure = new Error(`framework flush failed`)
-    const subject = cleanupDriver(primaryFailure)
+    const subject = cleanupDriver({ primaryFailure })
     const failure: unknown = await runRowSnapshotHistories(
       subject.driver,
       `callback`,
@@ -174,4 +201,30 @@ describe(`row snapshot history cleanup`, () => {
     expect(projectionCleanups).toBeGreaterThan(0)
     expect(sourceCleanups).toBe(projectionCleanups)
   })
+})
+
+// This driver changes only a returned local transaction original. Current
+// rows and event previousValue stay correct, so those observations cannot
+// substitute for retaining the local-only receipt itself.
+it(`rejects corruption confined to local mutation originals`, async () => {
+  const subject = cleanupDriver({ corruptOriginal: true, failCleanup: false })
+  const failure: unknown = await runRowSnapshotHistories(
+    subject.driver,
+    `callback`,
+    `sync`,
+  ).catch((error: unknown) => error)
+  expect(String(failure)).toContain(`local mutation.original`)
+  expect(containsFailure(failure, subject.projectionFailure)).toBe(false)
+})
+
+it(`accepts admitted source shapes without assuming draft normalization`, async () => {
+  const subject = cleanupDriver({ failCleanup: false })
+  // This legal source preserves input prototypes and actually removes omitted
+  // keys. The adapter boundary must accept it as well as today's local-only
+  // source, without a second expected-result profile for either source.
+  await runRowSnapshotHistories(
+    { ...subject.driver, snapshotSourceUsesDraft: true },
+    `callback`,
+    `sync`,
+  )
 })

@@ -5,12 +5,13 @@
  * Retained source rows, mutation originals and previous values keep their
  * complete user values. Current results follow the current source row.
  *
- * Scalar versions construct independent expected rows. Aliases and accessors
+ * Source facts are captured before framework admission. Aliases and accessors
  * describe production inputs, not additional identity promises for hook output.
  * A framework may expose live proxies while keeping borrowed snapshots intact.
  * The optimistic-history owner covers other settlement schedules. Limits here:
- * one key, three updates, the value grammar below, and settled or held-handler
- * cuts. Arbitrary cycles, hidden symbols and callback atomicity are not judged.
+ * one or two keys, three updates per key, the value grammar below, and settled
+ * or held-handler cuts. Core's normalization policy, arbitrary cycles, hidden
+ * symbols and callback atomicity are not judged.
  */
 import { expect } from 'vitest'
 import { declareOracle } from '../oracle-declaration'
@@ -21,6 +22,7 @@ import type { LiveQueryDriver, LiveQueryHandle, QueryBuild } from './contract'
 
 type Shape =
   | `object`
+  | `hidden-data`
   | `array`
   | `introduced`
   | `null-prototype`
@@ -50,26 +52,28 @@ class SnapshotValues extends Array<number> {
   }
 }
 
-// The model uses scalar history inputs, never a copy of an observed source row.
-// Root fields are admitted and removed as well as changed; subset comparisons
-// would let unexpected historical fields survive. Function leaves stay opaque.
-function snapshot(
-  shape: Shape,
-  value: number,
-  draftSource = false,
-): SnapshotRow {
+// Scalar versions construct source inputs, including alias splits and merges.
+// The preservation model below records what the source admitted separately.
+function snapshot(shape: Shape, value: number): SnapshotRow {
   const payload: Payload = { value }
   if (value === 1 || value === 2) {
     payload.added = { value }
     payload.optional = undefined
   }
   let config: unknown = payload
+  if (shape === `hidden-data` && value < 3)
+    Object.defineProperty(payload, `hidden`, {
+      value: value === 2 ? undefined : value,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    })
   if (shape === `array`)
     config = Array.from({ length: value % 3 }, (_, index) => ({
       value: value + index,
     }))
   if (shape === `introduced` && value === 0) config = null
-  if (shape === `null-prototype` && !(draftSource && value > 0))
+  if (shape === `null-prototype`)
     config = Object.assign(Object.create(null) as Payload, payload)
   if (shape === `aliases`) {
     const shared = { value }
@@ -80,8 +84,7 @@ function snapshot(
   }
   if (shape === `accessor`) config = { nested: payload }
   if (shape === `array-subclass`) {
-    const values: Array<number> =
-      draftSource && value > 0 ? [] : new SnapshotValues()
+    const values = new SnapshotValues()
     values.push(value, value + 1)
     config = values
   }
@@ -92,31 +95,8 @@ function snapshot(
     format,
     ...(value === 1 || value === 2
       ? { extra: { value, optional: undefined } }
-      : draftSource && value > 0
-        ? { extra: undefined }
-        : {}),
+      : {}),
   }
-}
-
-// The held edit and its confirming full sync need not carry identical fields.
-// Special container prototypes enter through sync: the draft copier owns the
-// representation of newly assigned values, outside this receiving law. Their
-// optimistic edits change only a scalar. Other shapes replace nested values and
-// add root fields; the confirming sync removes the final root field.
-function pendingSnapshot(
-  shape: Shape,
-  value: number,
-  draftSource = false,
-): SnapshotRow {
-  const previous = snapshot(shape, value - 1, draftSource)
-  if (
-    shape === `null-prototype` ||
-    shape === `array-subclass` ||
-    shape === `store-proxy`
-  )
-    return { ...previous, value }
-  const next = snapshot(shape, value)
-  return next.extra ? next : { ...next, extra: undefined }
 }
 
 // Bounded exhaustive grammar: every shape crosses the three input forms and
@@ -130,6 +110,7 @@ function* histories(
 ) {
   const shapes: Array<Shape> = [
     `object`,
+    `hidden-data`,
     `array`,
     `introduced`,
     `null-prototype`,
@@ -138,7 +119,8 @@ function* histories(
     `array-subclass`,
   ]
   if (driver.wrapSnapshotValue) shapes.push(`store-proxy`)
-  for (const shape of shapes) yield { shape, input, writes }
+  for (const shape of shapes)
+    for (const peers of [false, true]) yield { shape, input, writes, peers }
 }
 
 function sourceRow(
@@ -167,73 +149,103 @@ function sourceRow(
   return row
 }
 
-type Retained = { label: string; actual: SnapshotRow; expected: SnapshotRow }
+/**
+ * The adapter borrows the values the source actually admitted, regardless of
+ * which representation Core's draft boundary produces. Capture those facts
+ * before mounting, and in a source subscriber installed before the hook. This
+ * is a relational model of adapter preservation, not a second Core draft model.
+ * A future change to Core's own-key or prototype policy changes the premise;
+ * it must not require changing this adapter law to match Core's implementation.
+ *
+ * Facts are immutable trees of keys and scalar/opaque leaves, separate from
+ * production containers. Array prototypes retain the existing method premise.
+ * Hidden host symbols are outside the selected-value boundary at every level.
+ */
+type Fact =
+  | { kind: `leaf`; value: unknown }
+  | {
+      kind: `container`
+      array: boolean
+      arrayPrototype: unknown
+      fields: Map<PropertyKey, Fact>
+    }
 
-// Only the four documented virtual fields and hidden framework bookkeeping are
-// excluded by selectedRow. Unexpected ordinary fields, even undefined, must fail.
+function facts(value: unknown): Fact {
+  if (value === null || typeof value !== `object`)
+    return { kind: `leaf`, value }
+  const prototype: unknown = Object.getPrototypeOf(value)
+  const array = Array.isArray(value)
+  if (!array && prototype !== Object.prototype && prototype !== null)
+    return { kind: `leaf`, value }
+  return {
+    kind: `container`,
+    array,
+    arrayPrototype: array ? prototype : undefined,
+    fields: new Map(
+      Reflect.ownKeys(value)
+        .filter(
+          (key) =>
+            typeof key !== `symbol` ||
+            Object.prototype.propertyIsEnumerable.call(value, key),
+        )
+        .map((key) => [key, facts(Reflect.get(value, key))]),
+    ),
+  }
+}
+
+function rowFacts(value: unknown): Fact {
+  return facts(selectedRow(value))
+}
+
+type Retained = { label: string; actual: unknown; expected: Fact }
+
+// Preserve methods supplied by a source subclass. A plain source array does
+// not promise that a framework removes every additional inherited method.
+function expectFact(actual: Fact, expected: Fact, label: string): void {
+  expect(actual.kind, label).toBe(expected.kind)
+  if (actual.kind === `leaf` || expected.kind === `leaf`) {
+    expect(actual, label).toEqual(expected)
+    return
+  }
+  expect(actual.array, label).toBe(expected.array)
+  if (expected.arrayPrototype && expected.arrayPrototype !== Array.prototype)
+    expect(
+      actual.arrayPrototype,
+      `${label}: source-supplied array methods`,
+    ).toBe(expected.arrayPrototype)
+  expect(new Set(actual.fields.keys()), label).toEqual(
+    new Set(expected.fields.keys()),
+  )
+  for (const [key, wanted] of expected.fields)
+    expectFact(actual.fields.get(key)!, wanted, label)
+}
+
 export function expectRowSnapshot(
   actual: unknown,
   expected: unknown,
   label: string,
 ): void {
-  const observed = selectedRow(actual)
-  const wanted = selectedRow(expected)
-  expect(observed, label).toEqual(wanted)
-  expectSnapshotKeys(observed, wanted, label)
-}
-
-// Draft detachment owns container prototypes; this law judges complete values,
-// including own undefined fields, without imposing a new detachment policy.
-// A separate receiving comparison below preserves source-supplied methods.
-function expectSnapshotKeys(actual: unknown, expected: unknown, label: string) {
-  if (expected === null || typeof expected !== `object`) return
-  const keys = (value: object) =>
-    Reflect.ownKeys(value).filter(
-      (key) =>
-        typeof key !== `symbol` ||
-        Object.prototype.propertyIsEnumerable.call(value, key),
-    )
-  expect(new Set(keys(actual as object)), label).toEqual(
-    new Set(keys(expected)),
-  )
-  for (const key of keys(expected))
-    expectSnapshotKeys(
-      Reflect.get(actual as object, key),
-      Reflect.get(expected, key),
-      label,
-    )
+  expectFact(rowFacts(actual), rowFacts(expected), label)
 }
 
 function expectSnapshots(
   handle: LiveQueryHandle,
-  expected: SnapshotRow,
+  expected: ReadonlyMap<string, Fact>,
   retained: ReadonlyArray<Retained>,
 ): void {
   const data = handle.current().data as Array<SnapshotRow>
-  expect(data, `complete current result`).toHaveLength(1)
-  expectRowSnapshot(data[0], expected, `current framework row`)
-  if (expected.config instanceof SnapshotValues) {
-    const config = data[0]!.config as SnapshotValues
-    expect(config, `source-supplied array subclass`).toBeInstanceOf(
-      SnapshotValues,
+  expect(data, `complete current result`).toHaveLength(expected.size)
+  expect(new Set(data.map((row) => row.id)), `complete current keys`).toEqual(
+    new Set(expected.keys()),
+  )
+  for (const row of data)
+    expectFact(
+      rowFacts(row),
+      expected.get(row.id)!,
+      `current framework row ${row.id}`,
     )
-    expect(config.total(), `source-supplied array method`).toBe(
-      expected.config.reduce((sum, value) => sum + value, 0),
-    )
-  }
-  for (let index = retained.length - 1; index >= 0; index--) {
-    const saved = retained[index]!
-    expectRowSnapshot(saved.actual, saved.expected, saved.label)
-    if (saved.expected.config instanceof SnapshotValues) {
-      const config = saved.actual.config as SnapshotValues
-      expect(config, `${saved.label}: retained array subclass`).toBeInstanceOf(
-        SnapshotValues,
-      )
-      expect(config.total(), `${saved.label}: retained array method`).toBe(
-        saved.expected.config.total(),
-      )
-    }
-  }
+  for (const saved of retained)
+    expectFact(rowFacts(saved.actual), saved.expected, saved.label)
 }
 
 export async function runRowSnapshotHistories(
@@ -245,12 +257,18 @@ export async function runRowSnapshotHistories(
   const states = [
     input,
     writes,
-    ...cases.map(({ shape }) => shape),
+    ...new Set(cases.map(({ shape }) => shape)),
+    `cross-row-alias`,
     `retained-previousValue`,
-    ...(writes === `optimistic` ? [`retained-original`] : []),
+    ...(writes === `optimistic` || driver.snapshotSourceUsesDraft
+      ? [`retained-original`]
+      : []),
     `later-object-admission`,
     `root-delete-representation`,
     `nested-own-undefined`,
+    ...(!driver.snapshotSourceUsesDraft && writes === `sync`
+      ? [`source-reference-reuse`]
+      : []),
   ]
   const reach = createOracleReach(
     `framework.${driver.name}.${input}.${writes}.row-snapshots`,
@@ -262,16 +280,42 @@ export async function runRowSnapshotHistories(
     const resources = new ScenarioLifetime()
     try {
       await resources.run(async () => {
-        let expected = snapshot(history.shape, 0)
+        const expected = new Map<string, Fact>()
         const check = (retained: ReadonlyArray<Retained>) =>
           expectSnapshots(handle!, expected, retained)
-        const source = driver.makeSource(
-          [sourceRow(driver, history.shape, 0)],
-          undefined,
-          { rowUpdateMode: `full` },
-        )
+        const initial = sourceRow(driver, history.shape, 0)
+        const rows = history.peers
+          ? [initial, { ...initial, id: `b` }]
+          : [initial]
+        const source = driver.makeSource(rows, undefined, {
+          rowUpdateMode: `full`,
+        })
         let handle: LiveQueryHandle | undefined
         try {
+          for (const row of rows)
+            expected.set(row.id, rowFacts(source.collection.get(row.id)))
+          const retained: Array<Retained> = []
+          // Register before the hook so the source facts are recorded before
+          // framework materialization can mutate any borrowed container.
+          const subscription = source.collection.subscribeChanges(
+            (changes) => {
+              for (const change of changes) {
+                const id = String(change.key)
+                if (change.previousValue) {
+                  retained.push({
+                    label: `previousValue ${id}`,
+                    actual: change.previousValue,
+                    expected: expected.get(id)!,
+                  })
+                  reach.reach(`retained-previousValue`)
+                }
+                if (change.type === `delete`) expected.delete(id)
+                else expected.set(id, rowFacts(change.value))
+              }
+            },
+            { includeInitialState: false },
+          )
+          resources.defer(() => subscription.unsubscribe())
           if (input === `collection`)
             handle = driver.mountCollection(source.collection)
           else {
@@ -285,93 +329,99 @@ export async function runRowSnapshotHistories(
                 : driver.mount(build)
           }
           resources.defer(() => handle?.unmount())
-          const retained: Array<Retained> = []
-          const subscription = source.collection.subscribeChanges(
-            (changes) => {
-              for (const change of changes)
-                if (change.previousValue) {
-                  retained.push({
-                    label: `previousValue`,
-                    actual: change.previousValue as SnapshotRow,
-                    expected,
-                  })
-                  reach.reach(`retained-previousValue`)
-                }
-            },
-            { includeInitialState: false },
-          )
-          resources.defer(() => subscription.unsubscribe())
           await handle.flush()
           reach.reach(input)
           reach.reach(history.shape)
           check(retained)
-          for (let value = 1; value <= 3; value++) {
-            retained.push({
-              label: `Collection.get before ${value}`,
-              actual: source.collection.get(`a`) as SnapshotRow,
-              expected,
-            })
-            const nextExpected = snapshot(
-              history.shape,
-              value,
-              driver.snapshotSourceUsesDraft,
-            )
-            const next = sourceRow(driver, history.shape, value)
-            if (writes === `optimistic`) {
-              let release!: () => void
-              const gate = new Promise<void>((resolve) => {
-                release = resolve
-              })
-              resources.defer(release)
-              const edit = driver.ops.createOptimisticAction({
-                onMutate: () =>
-                  source.collection.update(`a`, (draft: SnapshotRow) => {
-                    draft.value = next.value
-                    if (
-                      history.shape !== `null-prototype` &&
-                      history.shape !== `array-subclass` &&
-                      history.shape !== `store-proxy`
-                    ) {
-                      draft.config = next.config
-                      if (next.extra) draft.extra = next.extra
-                      else delete draft.extra
-                    }
-                  }),
-                mutationFn: async () => {
-                  await gate
-                  source.update(next)
-                },
-              })
-              const tx = edit()
-              void tx.when(`settled`).catch(() => undefined)
-              resources.defer(() => tx.when(`settled`))
+          if (history.peers) reach.reach(`cross-row-alias`)
+          for (let value = 1; value <= 3; value++)
+            for (const { id } of rows) {
               retained.push({
-                label: `mutation.original before ${value}`,
-                actual: tx.mutations[0]!.original as SnapshotRow,
-                expected,
+                label: `Collection.get before ${value}`,
+                actual: source.collection.get(id),
+                expected: expected.get(id)!,
               })
-              reach.reach(`retained-original`)
-              expected = pendingSnapshot(
-                history.shape,
-                value,
-                driver.snapshotSourceUsesDraft,
-              )
+              const before = expected.get(id)!
+              const next = { ...sourceRow(driver, history.shape, value), id }
+              // Odd versions split a shared node while retaining the previous
+              // right input itself. Fresh-but-equal right objects cannot expose
+              // a materializer that mutates a copy still needed by that path.
+              const previousConfig = source.collection.get(id).config as {
+                right: unknown
+              }
+              if (history.shape === `aliases` && value % 2 === 1)
+                (next.config as { right: unknown }).right = previousConfig.right
+              if (writes === `optimistic`) {
+                let release!: () => void
+                const gate = new Promise<void>((resolve) => {
+                  release = resolve
+                })
+                resources.defer(release)
+                const edit = driver.ops.createOptimisticAction({
+                  onMutate: () =>
+                    source.collection.update(id, (draft: SnapshotRow) => {
+                      draft.value = next.value
+                      if (
+                        history.shape !== `null-prototype` &&
+                        history.shape !== `array-subclass` &&
+                        history.shape !== `store-proxy`
+                      ) {
+                        draft.config = next.config
+                        if (next.extra) draft.extra = next.extra
+                        else delete draft.extra
+                      }
+                    }),
+                  mutationFn: async () => {
+                    await gate
+                    source.update(next)
+                  },
+                })
+                const tx = edit()
+                void tx.when(`settled`).catch(() => undefined)
+                resources.defer(() => tx.when(`settled`))
+                retained.push({
+                  label: `mutation.original before ${value}`,
+                  actual: tx.mutations[0]!.original as SnapshotRow,
+                  expected: before,
+                })
+                reach.reach(`retained-original`)
+                await handle.flush()
+                check(retained)
+                release()
+                await tx.when(`settled`)
+              } else {
+                await handle.apply(() => {
+                  const mutation = source.update(next)
+                  if (mutation) {
+                    for (const item of mutation.mutations)
+                      retained.push({
+                        label: `local mutation.original ${id}`,
+                        actual: item.original,
+                        expected: before,
+                      })
+                    reach.reach(`retained-original`)
+                  }
+                })
+              }
               await handle.flush()
+              if (
+                history.shape === `aliases` &&
+                value % 2 === 1 &&
+                !driver.snapshotSourceUsesDraft &&
+                writes === `sync`
+              ) {
+                expect(
+                  (source.collection.get(id).config as { right: unknown })
+                    .right,
+                ).toBe(previousConfig.right)
+                reach.reach(`source-reference-reuse`)
+              }
+              reach.reach(writes)
+              if (value >= 2) reach.reach(`later-object-admission`)
+              if (value === 3) reach.reach(`root-delete-representation`)
+              if (value === 1) reach.reach(`nested-own-undefined`)
               check(retained)
-              release()
-              await tx.when(`settled`)
-              expected = nextExpected
-            } else {
-              await handle.apply(() => source.update(next))
-              expected = nextExpected
             }
-            await handle.flush()
-            reach.reach(writes)
-            if (value >= 2) reach.reach(`later-object-admission`)
-            if (value === 3) reach.reach(`root-delete-representation`)
-            if (value === 1) reach.reach(`nested-own-undefined`)
-            check(retained)
-          }
         } finally {
           resources.defer(() => handle?.collection()?.cleanup())
           resources.defer(() => source.collection.cleanup())
@@ -395,17 +445,23 @@ export async function runRowSnapshotHistories(
   expect(Object.fromEntries(reach.counts())).toEqual({
     [input]: cases.length,
     [writes]: cases.length,
-    ...Object.fromEntries(cases.map(({ shape }) => [shape, 1])),
+    ...Object.fromEntries(cases.map(({ shape }) => [shape, 2])),
+    'cross-row-alias': cases.length / 2,
     'retained-previousValue': cases.length,
-    ...(writes === `optimistic` ? { 'retained-original': cases.length } : {}),
+    ...(writes === `optimistic` || driver.snapshotSourceUsesDraft
+      ? { 'retained-original': cases.length }
+      : {}),
     'later-object-admission': cases.length,
     'root-delete-representation': cases.length,
     'nested-own-undefined': cases.length,
+    ...(!driver.snapshotSourceUsesDraft && writes === `sync`
+      ? { 'source-reference-reuse': 2 }
+      : {}),
   })
 }
 
 declareOracle({
-  model: [snapshot, pendingSnapshot],
+  model: [facts, rowFacts],
   grammar: [histories],
-  check: [expectRowSnapshot, expectSnapshots, expectSnapshotKeys],
+  check: [expectRowSnapshot, expectSnapshots, expectFact],
 })

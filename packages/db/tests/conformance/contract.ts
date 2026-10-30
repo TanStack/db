@@ -86,7 +86,10 @@ export interface Row {
 export interface SourceHandle<T extends { id: string } = Row> {
   collection: Collection<any, any, any>
   insert: (row: T) => void
-  update: (row: T) => void
+  /** Local mutation sources can return the transaction's borrowed originals. */
+  update: (row: T) => void | {
+    mutations: ReadonlyArray<{ original: unknown }>
+  }
   remove: (row: T) => void
 }
 
@@ -278,7 +281,7 @@ export interface LiveQueryDriver {
   ) => SourceHandle<T>
   /** Wrap a source value in the real host's observable container, when supported. */
   wrapSnapshotValue?: <T extends object>(value: T) => T
-  /** Local-only sources confirm draft patches, including own undefined deletes. */
+  /** Local-only sources return actual transactions; host proxies enter initially. */
   snapshotSourceUsesDraft?: boolean
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
