@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/preact-db",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.1.1",
   "description": "Preact integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",

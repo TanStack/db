@@ -1,5 +1,18 @@
 # @tanstack/db
 
+## 1.0.0-rc.1.1
+
+### Patch Changes
+
+- Classify Effect deltas from preceding result membership so LEFT-join startup and coalesced source writes emit the correct enter, update, or exit callback, including functional projections with callable or opaque values. Unordered Effects track only result keys and preserve their existing update notifications without comparing or retaining projected values. ([#2301](https://github.com/TanStack/db/pull/2301))
+
+- Preserve restored rows for direct `subscribeChanges()` consumers after Collection cleanup and restart, even when their values are unchanged. This prevents incorrect delete events when the new sync run restores the same rows. ([#2313](https://github.com/TanStack/db/pull/2313))
+
+- Recover eager Electric collections from a fresh snapshot when interleaved source commits leave persisted rows inconsistent with the resume cursor. Keep cached rows visible while recovery restores the source state. ([#2298](https://github.com/TanStack/db/pull/2298))
+
+- Updated dependencies [[`0531c50`](https://github.com/TanStack/db/commit/0531c50ad419a1b51ad3e27e3632e70be3c6bdb3)]:
+  - @tanstack/db-ivm@1.0.0-rc.1.1
+
 ## 1.0.0-rc.1
 
 ### Major Changes
