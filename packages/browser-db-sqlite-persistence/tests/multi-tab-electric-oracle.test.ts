@@ -989,24 +989,53 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }),
       steps: fc.array(historyStep, { minLength: 8, maxLength: 24 }),
     })
-    .map(({ tabCount, source, key, recovery, stopOrder, steps }) => {
-      const tab = source % tabCount
-      const peer = (tab + 1) % tabCount
-      return {
+    .map(
+      ({
         tabCount,
-        steps: [
-          ...stopOrder.flatMap((pick): Array<HistoryStep> => [
+        source,
+        key,
+        recovery,
+        stopOrder,
+        steps,
+      }): GeneratedHistory => {
+        const tab = source % tabCount
+        const peer = (tab + 1) % tabCount
+        return {
+          tabCount,
+          steps: [
+            ...stopOrder.flatMap((pick): Array<HistoryStep> => [
+              { kind: `server change`, key, pick: 0 },
+              { kind: `advance`, tab, pick: 0 },
+              { kind: `stop`, tab, pick },
+              { kind: `catch up`, tab: peer, pick: 0 },
+              { kind: `recover`, tab, pick: recovery },
+              { kind: `catch up`, tab, pick: 0 },
+            ]),
+            ...steps,
+            // Final catch-up must encounter an abandoned reservation in every
+            // generated history. Start a fresh handle, recover every tab, and
+            // deliver one new change without committing it. Reset then abandons
+            // that reservation. No later history step commits or recovers it;
+            // the existing final-delivery comparison must observe its failure
+            // before the existing recovery establishes convergence (Laws 2/5).
+            // The source tab, key and two/three-tab host vary with this grammar.
+            // Removing advance or reset loses that premise; catching up here
+            // would move the failure out of the final observation cut.
+            { kind: `deploy` },
+            ...Array.from(
+              { length: tabCount },
+              (_, index): Array<HistoryStep> => [
+                { kind: `recover`, tab: index, pick: recovery },
+                { kind: `catch up`, tab: index, pick: 0 },
+              ],
+            ).flat(),
             { kind: `server change`, key, pick: 0 },
             { kind: `advance`, tab, pick: 0 },
-            { kind: `stop`, tab, pick },
-            { kind: `catch up`, tab: peer, pick: 0 },
-            { kind: `recover`, tab, pick: recovery },
-            { kind: `catch up`, tab, pick: 0 },
-          ]),
-          ...steps,
-        ],
-      }
-    })
+            { kind: `peer reset` },
+          ],
+        }
+      },
+    )
   type GeneratedHistory = { tabCount: number; steps: Array<HistoryStep> }
 
   type ServerLog = {

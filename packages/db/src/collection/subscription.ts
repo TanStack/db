@@ -871,7 +871,7 @@ export class CollectionSubscription
 
   /**
    * A lazy demand that failed outside this subscription's replay, while a
-   * failed replay of another of the graph's subscriptions to this collection
+   * replay of another of the graph's subscriptions to this collection still
    * holds publication, fails this subscription's replacement too. It keeps
    * the last publication until every demand load that joins this replay
    * loads, a later replay succeeds, or this subscription's last demand

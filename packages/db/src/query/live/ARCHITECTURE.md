@@ -1562,10 +1562,11 @@ A live query's subscriptions to one collection, such as a join and an include
 of the same source, share one publication barrier. None of their replays
 publishes, and none whose last demand retired closes, while another of them
 still has replay work, so demand that any of them starts meanwhile joins its
-own open replay. While a failed replay of any of them holds publication, a
+own open replay. While a replay of any of them still holds publication, a
 lazy demand of any of them that fails after initial-query readiness fails its
-own subscription's replacement too, so retiring the other replay's failed
-demand cannot publish the window without this demand's rows. It holds until
+own subscription's replacement too. This includes a subscription that held no
+demand at truncate. Settling a sibling's replay or retiring its failed demand
+cannot publish the window without this demand's rows. It holds until
 every demand load that joins it loads, a later replay of the source succeeds,
 or the subscription's last demand retires. The query retries the failed demand
 at once and the retry joins the hold, so the hold ends only after the failed

@@ -1017,3 +1017,22 @@ source hashes. The missing-dependency setup attempt remains separately in
 `setup-failure-1`; it supplies no RED evidence. Existing dependency links
 resolved that copied-tree setup. No install or production mutation occurred.
 The isolated copies were restored and both trees match the frozen fingerprints.
+
+## Release-blocking loading sibling replay port (2026-10-30)
+
+The release workflow for main `e75f8455a78bc33c43376288218e9912dc2a3f4c` exposed a retention counterexample that also reproduces on callback head `5af7624937288cbe212f19ff23e8ba83caabb74e`. Independent adapter receipts show that a new include demand failed while a sibling replay was still loading. The include had no acquisition at truncate, and its failed demand remained held. This is an enforcement gap in architecture law 9, not evidence of a regression in the compiler removals.
+
+[PR 2318](https://github.com/TanStack/db/pull/2318) carries the main-based repair and its [versioned experiment record](2026-10-30-release-replay-retention.md). The same primary extension ran on unchanged callback production first: `callback-primary-red.json` fails at quiet retention with measured sibling failure 1. The one-condition guard then changed from failed replacement to pending replacement. `callback-primary-green.json` passes all 48 finite histories with reach 44/33/12. The full primary owner passes all 45 tests on this branch. The old guard's pre-edit RED and the main-based original-guard mutant preserve the intended violated comparison.
+
+The SQLite grammar port is byte-identical to the main-based fix. Its two 80-history campaigns and two existing final-delivery controls pass there. This branch's focused TypeScript, ESLint, formatting, whitespace and `pnpm lint:changed` pass. ESLint retains two existing warnings. All 14 compiler source fingerprints from the final size integration remain unchanged. The bounded core/controlled-host claims and historical recovery-reach gate limitation remain as stated in the experiment record.
+
+After the guard port, `pnpm_config_verify_deps_before_run=false pnpm size:compare --packages db --files` reports package gzip 109658 to 109595 bytes (-63), Brotli -47, against merge-base `a2f346596`. Typical app gzip changes from 96591 to 96527 (-64), with Brotli +21. Every measured gzip scenario shrinks. This does not claim every Brotli scenario shrinks. The later release merge changes versions and changelogs rather than these runtime sources.
+
+Scratch evidence is under `/private/tmp/callback-metadata/release-replay-repair`. These SHA256 fingerprints bind the callback port separately from the main-based repair:
+
+| File | SHA256 |
+| --- | --- |
+| `packages/db/src/query/live/collection-config-builder.ts` | `5ef5db6bde45a6a34aa54706772041653996bd1c3e974d0dcb7104884f12cfb0` |
+| `packages/db/src/collection/subscription.ts` | `bd171bdc97b38a79ebbc81d7fb605267787308559ad4c0646dff1e072a43798a` |
+| `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `e5ce4a77fe8d16f4b0d26f4c71fdadb53b2779c8e7e8313a7eb32d2de3ebdd38` |
+| `packages/browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts` | `67c16d284522417f1a77e0a36efcc552b718f858ea8ec00771f001f001160782` |

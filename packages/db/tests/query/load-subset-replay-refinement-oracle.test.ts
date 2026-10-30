@@ -320,6 +320,9 @@ type OrderedReach = {
   ownReplayFailureComparisons: number
   siblingReplayFailureComparisons: number
   siblingSuccessfulCoverage: number
+  newSiblingReplayFailures: number
+  newSiblingReplayRetirements: number
+  newSiblingReplayRecoveries: number
   replayLoads: number
   abortRejections: number
   preloadChecks: number
@@ -469,6 +472,9 @@ async function checkOrderedReplay(
     source?: BarrierSource
     // Publication is shared, but each subscription owns its replay verdict.
     subscription: LoadSubsetOptions[`subscription`]
+    // This subscription held no acquisition at truncate, then started demand
+    // during its sibling replay. Measured only from adapter receipts.
+    newSiblingReplay?: boolean
     keys?: Set<number>
     ordered?: boolean
   }
@@ -491,6 +497,8 @@ async function checkOrderedReplay(
     ambiguous: boolean
     pending: Map<Load, LoadSubsetOptions>
     own: Set<Load>
+    // Acquisition receipts held at truncate, used only for declared reach.
+    subscriptionsAtTruncate: Set<LoadSubsetOptions[`subscription`]>
   }
   const barriers = new Map<BarrierSource, Barrier>()
   // Every barrier this history raised, in raise order.
@@ -520,6 +528,18 @@ async function checkOrderedReplay(
       ambiguous: [...barriers.values()].some(({ ambiguous }) => ambiguous),
       pending: new Map(barriers.get(source)?.pending),
       own: new Set(),
+      subscriptionsAtTruncate: new Set(
+        [...acquired].flatMap(([options, count]) =>
+          count > 0 &&
+          loads.some(
+            (load) =>
+              load.source === source &&
+              load.subscription === options.subscription,
+          )
+            ? [options.subscription]
+            : [],
+        ),
+      ),
     }
     barriers.set(source, barrier)
     raisedBarriers.push(barrier)
@@ -568,6 +588,13 @@ async function checkOrderedReplay(
       barrier.own.has(load) &&
       !options.signal?.aborted
     ) {
+      if (
+        load.newSiblingReplay &&
+        [...barrier.pending.values()].some(
+          (pending) => pending.subscription !== options.subscription,
+        )
+      )
+        reach.newSiblingReplayFailures++
       barrier.failures.set(load, options)
       barrier.history.push(load)
     }
@@ -597,8 +624,9 @@ async function checkOrderedReplay(
           failed.ordered === load.ordered &&
           failed.keys !== undefined &&
           [...failed.keys].every((key) => load.keys?.has(key))
-        )
+        ) {
           barrier.failures.delete(failed)
+        }
       }
       if (siblingFailures.some((failed) => !barrier.failures.has(failed)))
         replayScopeViolation ??= `successful sibling removed another subscription's replay failure`
@@ -618,7 +646,11 @@ async function checkOrderedReplay(
     const failures = barrier.failures.size
     for (const owned of [barrier.pending, barrier.failures]) {
       for (const [load, held] of owned) {
-        if (held === options) owned.delete(load)
+        if (held === options) {
+          if (owned === barrier.failures && load.newSiblingReplay)
+            reach.newSiblingReplayRetirements++
+          owned.delete(load)
+        }
       }
     }
     // One failed demand retires while another still holds the barrier.
@@ -782,6 +814,19 @@ async function checkOrderedReplay(
       )
     )
       reach.successWhileSubscriptionOwes++
+    // Later successful coverage by this subscription is a recovery control.
+    // Coverage by a sibling cannot decide this subscription's failure.
+    if (
+      loads.some(
+        (earlier) =>
+          earlier.newSiblingReplay &&
+          earlier.outcome === `failed` &&
+          earlier.source === source &&
+          earlier.subscription === options.subscription &&
+          [...(earlier.keys ?? [])].every((key) => keys.has(key)),
+      )
+    )
+      reach.newSiblingReplayRecoveries++
     loadedKeys.push({ source, keys, at: ++requestClock })
   }
   const recordRequestFailure = (
@@ -917,6 +962,9 @@ async function checkOrderedReplay(
     ownReplayFailureComparisons: 0,
     siblingReplayFailureComparisons: 0,
     siblingSuccessfulCoverage: 0,
+    newSiblingReplayFailures: 0,
+    newSiblingReplayRetirements: 0,
+    newSiblingReplayRecoveries: 0,
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
@@ -975,6 +1023,14 @@ async function checkOrderedReplay(
                 source: `markers`,
                 keys: requestedKeys(`markers`, options),
               }
+              load.newSiblingReplay =
+                barriers.get(`markers`) !== undefined &&
+                !barriers
+                  .get(`markers`)!
+                  .subscriptionsAtTruncate.has(options.subscription) &&
+                [...(barriers.get(`markers`)?.pending.values() ?? [])].some(
+                  (pending) => pending.subscription !== options.subscription,
+                )
               loads.push(load)
               reach.markerLoads++
               // The throw happens while the subscription registers the
@@ -1024,6 +1080,14 @@ async function checkOrderedReplay(
                 source: `markers`,
                 keys: requestedKeys(`markers`, options),
               }
+              load.newSiblingReplay =
+                barriers.get(`markers`) !== undefined &&
+                !barriers
+                  .get(`markers`)!
+                  .subscriptionsAtTruncate.has(options.subscription) &&
+                [...(barriers.get(`markers`)?.pending.values() ?? [])].some(
+                  (pending) => pending.subscription !== options.subscription,
+                )
               loads.push(load)
               reach.markerLoads++
               const participant = joinBarrier(`markers`, load, options)
@@ -1495,9 +1559,10 @@ async function checkOrderedReplay(
     const raised = [...barriers.values()]
     if (raised.some(({ ambiguous }) => ambiguous)) return
     if (live.status === `error`) return
-    expect(JSON.parse(JSON.stringify(live.toArray)), label).toEqual(
-      JSON.parse(retainedRows),
-    )
+    expect(
+      JSON.parse(JSON.stringify(live.toArray)),
+      `${label}; new sibling replay failures: ${reach.newSiblingReplayFailures}`,
+    ).toEqual(JSON.parse(retainedRows))
     if (raised.some(({ failures }) => failures.size > 0)) {
       reach.retainedFailedReplays++
     } else reach.heldPublicationChecks++
@@ -2485,6 +2550,75 @@ describe(`Ordered windows across truncate replays`, () => {
     )
   })
 
+  // A window with no initial include demand can activate its first include
+  // acquisition while a sibling join replay is still loading. Failure of that
+  // demand belongs to the shared publication barrier (law 9), even though its
+  // subscription had no replay of its own at the truncate. Adapter receipts
+  // prove both premises. This bounded grammar varies order, width, prior
+  // settlements and later demand changes; it reuses every ordinary observation
+  // and the independent retention account above. A move can retire the failed
+  // demand; a later truncate can replace it with successful own coverage.
+  it(`keeps new include failures behind a loading sibling replay`, async () => {
+    const states = [
+      `newSiblingReplayFailures`,
+      `newSiblingReplayRetirements`,
+      `newSiblingReplayRecoveries`,
+    ] as const
+    const declared = createOracleReach(`replay.new-sibling-demand`, states)
+    for (const direction of [`desc`, `asc`] as const) {
+      for (const limit of [2, 1, 3] as const) {
+        for (const settles of [2, 1]) {
+          for (const change of [`mark`, `none`, `move`, `replay`] as const) {
+            declared.beginHistory()
+            const observed = await checkOrderedReplay(
+              [
+                { type: `hold` },
+                { type: `truncateMarkers` },
+                ...Array.from({ length: settles }, () => ({
+                  type: `settle` as const,
+                  ok: true,
+                  keepHolding: true,
+                  newest: false,
+                })),
+                { type: `settle`, ok: false, newest: true, keepHolding: true },
+                ...(change === `none`
+                  ? []
+                  : change === `replay`
+                    ? [{ type: `truncateMarkers` as const }]
+                    : change === `mark`
+                      ? [{ type: `mark` as const, id: 1, on: false }]
+                      : [
+                          {
+                            type: `move` as const,
+                            id: 1,
+                            rank: direction === `desc` ? 60 : 1,
+                          },
+                        ]),
+              ],
+              {
+                ...ordinaryOrderedScenario,
+                direction,
+                offset: 1,
+                limit,
+                joined: `none`,
+                includes: true,
+                markerMode: `on-demand`,
+              },
+            )
+            for (const state of states) {
+              if (observed[state] > 0) declared.reach(state)
+            }
+          }
+        }
+      }
+    }
+    console.info(
+      `replay.new-sibling-demand`,
+      Object.fromEntries(declared.counts()),
+    )
+    declared.assertReached()
+  }, 120_000)
+
   // This finite history grammar varies which source replays, the order of
   // two load failures, join form, direction and window width. Join plus include
   // gives sibling subscriptions; the root replay gives same-subscription
@@ -2629,6 +2763,9 @@ describe(`Ordered windows across truncate replays`, () => {
         ownReplayFailureComparisons: 0,
         siblingReplayFailureComparisons: 0,
         siblingSuccessfulCoverage: 0,
+        newSiblingReplayFailures: 0,
+        newSiblingReplayRetirements: 0,
+        newSiblingReplayRecoveries: 0,
         replayLoads: 0,
         abortRejections: 0,
         preloadChecks: 0,
@@ -2670,6 +2807,10 @@ describe(`Ordered windows across truncate replays`, () => {
         `ownReplayFailureComparisons`,
         `siblingReplayFailureComparisons`,
         `siblingSuccessfulCoverage`,
+        // The constructive new-sibling grammar declares these rare premises.
+        `newSiblingReplayFailures`,
+        `newSiblingReplayRetirements`,
+        `newSiblingReplayRecoveries`,
         `successWhileSubscriptionOwes`,
       ])
       // Counts are histories, rather than repeated events in one trace.

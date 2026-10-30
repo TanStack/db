@@ -596,8 +596,8 @@ export class CollectionConfigBuilder<
     if (this.liveQueryCollection?._lifecycle.status === `ready`) {
       // The failure settles the demand: the request errors of its keys show
       // it, and ordered work must not wait for a load that already ended.
-      // Output held for this demand publishes now, unless a failed replay of
-      // this source holds publication: the failure then holds this
+      // Output held for this demand publishes now, unless a replay of this
+      // source still holds publication: the failure then holds this
       // subscription's publication too, so retiring the other replay's
       // failed demand cannot publish without this demand's rows.
       demand.settled = true
@@ -605,7 +605,7 @@ export class CollectionConfigBuilder<
         this.collectionSources.some(
           (source) =>
             source.collection === collection &&
-            this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+            this.subscriptions[source.sourceId]?.hasPendingTruncateReplacement,
         )
       )
         subscription.failReplacement(normalized)
