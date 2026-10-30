@@ -5245,14 +5245,6 @@ describe(`on-demand demand grammar`, () => {
     `fail`,
     `crash`,
   )
-  const demandReach = createOracleReach(
-    `source-health.on-demand`,
-    demandReachStates,
-  )
-  let demandHistoriesRan = false
-  afterAll(() => {
-    if (demandHistoriesRan) demandReach.assertReached()
-  })
   // A prefix that enters a declared reach state that random steps alone
   // rarely reach at the base run count; random steps follow it.
   const demandReachPrefixes: ReadonlyArray<ReadonlyArray<WindowStep>> = [
@@ -5299,6 +5291,21 @@ describe(`on-demand demand grammar`, () => {
       `restart`,
     ],
   ]
+  // Each prefix also runs as a fixed example, first in every run and on top
+  // of the random histories, with a direct subscriber. The reach check fails
+  // for a declared state that these examples do not enter.
+  const demandExamples = demandReachPrefixes.map(
+    (prefix): [Array<WindowStep>, boolean] => [[...prefix], true],
+  )
+  const demandReach = createOracleReach(
+    `source-health.on-demand`,
+    demandReachStates,
+    { fixedHistories: demandExamples.length },
+  )
+  let demandHistoriesRan = false
+  afterAll(() => {
+    if (demandHistoriesRan) demandReach.assertReached()
+  })
   oracleReplayTest(fcTest, `source-health.on-demand`).prop(
     [
       fc
@@ -5312,12 +5319,17 @@ describe(`on-demand demand grammar`, () => {
         ]),
       fc.boolean(),
     ],
-    oraclePropertyOptions(60, `source-health.on-demand`),
+    oraclePropertyOptions(60, `source-health.on-demand`, {
+      examples: demandExamples,
+    }),
   )(
     `generated demand histories refine the model`,
     (steps, directSubscriber) => {
       demandHistoriesRan = true
-      demandReach.beginHistory()
+      // fast-check passes an example's input by reference.
+      demandReach.beginHistory({
+        fixed: demandExamples.some(([example]) => example === steps),
+      })
       return withDeadline(
         runDemandHistory(steps, directSubscriber, demandReach),
       )
@@ -7013,14 +7025,16 @@ describe(`lazy join demand grammar`, () => {
         ending: { at: `subscription-status`, dependents },
       }),
   )
-  const lazyReach = createOracleReach(
-    `source-health.lazy-demand`,
-    lazyReachStates,
-  )
-  let lazyHistoriesRan = false
-  afterAll(() => {
-    if (lazyHistoriesRan) lazyReach.assertReached()
-  })
+  // A load, then a reload whose load fails.
+  const failedReload: { steps: ReadonlyArray<LazyStep> } = {
+    steps: [{ kind: `settle-ok` }, { kind: `reload` }, { kind: `settle-fail` }],
+  }
+  const reloadNotices: ReadonlyArray<ReloadNotice> = [
+    `source-health`,
+    `query-health`,
+    `loading-subset`,
+    `subscription-status`,
+  ]
   // Prefixes that enter a declared reach state that random steps alone rarely
   // reach at the base run count, with the driver options the state needs.
   // Random steps follow each one.
@@ -7056,13 +7070,7 @@ describe(`lazy join demand grammar`, () => {
         { kind: `reload` },
       ],
     },
-    {
-      steps: [
-        { kind: `settle-ok` },
-        { kind: `reload` },
-        { kind: `settle-fail` },
-      ],
-    },
+    failedReload,
     { steps: [{ kind: `truncate` }, { kind: `truncate` }] },
     {
       steps: [{ kind: `settle-ok` }, { kind: `fail` }, { kind: `truncate` }],
@@ -7128,6 +7136,91 @@ describe(`lazy join demand grammar`, () => {
       holdChildReady: false,
     },
   ]
+  // The driver options a lazy history runs under, by name.
+  type LazyOptions = {
+    asyncChildReady: boolean
+    generatedHoldChildReady: boolean
+    directSubscriber: boolean
+    withEffect: boolean
+    windowed: boolean
+    deferredStart: `plain` | `reload-in-first-load` | undefined
+    ending: LazyEnding | undefined
+  }
+  const lazyOptions: fc.Arbitrary<LazyOptions> = fc.record({
+    asyncChildReady: fc.boolean(),
+    generatedHoldChildReady: fc.boolean(),
+    directSubscriber: fc.boolean(),
+    withEffect: fc.boolean(),
+    windowed: fc.boolean(),
+    deferredStart: fc.constantFrom(
+      undefined,
+      `plain` as const,
+      `reload-in-first-load` as const,
+    ),
+    ending: fc.option(
+      fc.record({
+        at: fc.constantFrom(...reloadNotices),
+        dependents: fc.boolean(),
+      }),
+      { freq: 2, nil: undefined },
+    ),
+  })
+  // A history's steps: an optional reach prefix, then generated steps.
+  type LazySteps = {
+    prefix: (typeof lazyReachPrefixes)[number] | null
+    rest: Array<LazyStep>
+  }
+  const lazyExample = (
+    prefix: LazySteps[`prefix`],
+    rest: LazySteps[`rest`],
+    options: Partial<LazyOptions> = {},
+  ): [LazySteps, LazyOptions] => [
+    { prefix, rest },
+    {
+      asyncChildReady: false,
+      generatedHoldChildReady: false,
+      directSubscriber: true,
+      withEffect: false,
+      windowed: false,
+      deferredStart: undefined,
+      ending: undefined,
+      ...options,
+    },
+  ]
+  // Each prefix also runs as a fixed example, first in every run and on top
+  // of the random histories, and so does each driver option that a declared
+  // state needs. Each example has a direct subscriber and no other option it
+  // does not name. The reach check fails for a declared state that these
+  // examples do not enter.
+  const lazyExamples = [
+    ...lazyReachPrefixes.map((prefix) => lazyExample(prefix, [])),
+    // The provider deletes a row after a reload's run ended.
+    lazyExample(failedReload, [{ kind: `remote-delete`, key: 1 }]),
+    lazyExample(null, [{ kind: `settle-ok` }], { withEffect: true }),
+    lazyExample(null, [{ kind: `settle-ok` }], {
+      deferredStart: `reload-in-first-load`,
+    }),
+    // A cleanup at each notice of a reload. A reload changes loadingSubset
+    // only while the first load is still open.
+    ...reloadNotices.map((at) =>
+      lazyExample(
+        null,
+        at === `loading-subset` ? [] : [{ kind: `settle-ok` }],
+        {
+          ending: { at, dependents: false },
+        },
+      ),
+    ),
+  ]
+  const lazyReach = createOracleReach(
+    `source-health.lazy-demand`,
+    lazyReachStates,
+    { fixedHistories: lazyExamples.length },
+  )
+  let lazyHistoriesRan = false
+  afterAll(() => {
+    if (lazyHistoriesRan) lazyReach.assertReached()
+  })
   oracleReplayTest(fcTest, `source-health.lazy-demand`).prop(
     [
       fc
@@ -7135,47 +7228,34 @@ describe(`lazy join demand grammar`, () => {
           fc.option(fc.constantFrom(...lazyReachPrefixes), { freq: 4 }),
           fc.array(step, { maxLength: 10 }),
         )
-        .map(([prefix, rest]) => ({ prefix, rest })),
-      fc.boolean(),
-      fc.boolean(),
-      fc.boolean(),
-      fc.boolean(),
-      fc.boolean(),
-      fc.constantFrom(
-        undefined,
-        `plain` as const,
-        `reload-in-first-load` as const,
-      ),
-      fc.option(
-        fc.record({
-          at: fc.constantFrom<ReloadNotice>(
-            `source-health`,
-            `query-health`,
-            `loading-subset`,
-            `subscription-status`,
-          ),
-          dependents: fc.boolean(),
-        }),
-        { freq: 2, nil: undefined },
-      ),
+        .map(([prefix, rest]): LazySteps => ({ prefix, rest })),
+      lazyOptions,
     ],
-    oraclePropertyOptions(100, `source-health.lazy-demand`),
+    oraclePropertyOptions(100, `source-health.lazy-demand`, {
+      examples: lazyExamples,
+    }),
   )(
     `generated lazy demand histories refine the model`,
     (
-      { prefix, rest },
-      asyncChildReady,
-      generatedHoldChildReady,
-      directSubscriber,
-      withEffect,
-      windowed,
-      deferredStart,
-      ending,
+      lazySteps,
+      {
+        asyncChildReady,
+        generatedHoldChildReady,
+        directSubscriber,
+        withEffect,
+        windowed,
+        deferredStart,
+        ending,
+      },
     ) => {
+      const { prefix, rest } = lazySteps
       const steps = [...(prefix?.steps ?? []), ...rest]
       const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady
       lazyHistoriesRan = true
-      lazyReach.beginHistory()
+      // fast-check passes an example's input by reference.
+      lazyReach.beginHistory({
+        fixed: lazyExamples.some(([example]) => example === lazySteps),
+      })
       return withDeadline(
         runLazyHistory(steps, {
           asyncChildReady,

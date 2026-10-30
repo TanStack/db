@@ -3787,6 +3787,66 @@ does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
 
+`packages/db/tests/declared-reach-oracle.property.test.ts`
+(`oracle.declared-reach`; [review record](oracle-reviews/pr-2290-declared-reach.md))
+owns what `createOracleReach` (ORC-015) counts, when
+it checks reach, and what fixed examples prove. It also owns the run
+parameters that `oracleRandomParameters` and `oraclePropertyOptions` return,
+and the campaigns that `runOracleCampaign` in
+`packages/db/tests/oracle-campaign.ts` runs.
+
+- A history counts once per declared state it enters. A `reach()` call for an
+  undeclared state, or before the first history, throws and counts nothing.
+  Options that cannot describe a reach (a minimum below one, a fractional or
+  negative number of fixed histories, a state declared twice) throw.
+- The check runs in an ordinary run and in a run with only
+  `TANSTACK_DB_ORACLE_SEED`, which reseeds the whole campaign at its full
+  budget. A path replay, which runs one recorded history, skips it in every
+  reach of its process: a reach need not carry its property's name, so it
+  cannot tell whose replay runs. An explicit `replaying` option overrides the
+  environment.
+- A property can run fixed examples first in every run, through
+  `oraclePropertyOptions(…, { examples })`, on top of the base run budget. It
+  declares their number as `fixedHistories` and begins each example's history
+  with `beginHistory({ fixed: true })`, which it can do because fast-check
+  passes an example's input by reference. The check then also fails for each
+  declared state that no fixed history entered. Fixedness belongs to the
+  history, so another test may share the reach. Shrinking can run an example
+  again, so an extra fixed history counts as fixed. When fewer fixed histories
+  ran than were declared, the check reports only that.
+- A replay keeps its seed, and a path replay of the property keeps its path
+  and runs one history. `runOracleCampaign` runs a fixed-seed and a random
+  campaign without a prefix seed, one replay campaign with one, passes each
+  its parameters, and reports each passing campaign on one `ORACLE_REACH`
+  line. An invalid prefix environment throws.
+
+The `source-health.on-demand` and `source-health.lazy-demand` properties run
+each reach prefix, and each driver option that a declared state needs, as
+examples, so their reach does not depend on the seed (#2287).
+`source-health.history` gets the same guarantee from
+`source-health.required-history`, which runs every reach prefix in each
+campaign and shares its reach without fixed histories. The oracle generates
+ledgers over two to four states, up to six histories with fixed marks,
+minimums up to three, up to four declared fixed histories, invalid options,
+undeclared and early reaches, an optional `replaying` option, a fixed campaign
+seed, and invalid campaign environments, under four run kinds: ordinary,
+seed-only, and path replays of the property and of another property.
+
+Limits. A declared state of another property that only random histories
+reach can still miss by chance at the normal budget. Those properties have not
+been measured, about twenty set fast-check's `examples` inside their base runs
+instead of through the option, and a `runOracleCampaign` reach cannot declare
+fixed histories. Destination: #2289. Needed witness: per property, the declared
+states that no fixed example enters, and how often a normal-budget run misses
+each one. A path replay also skips reach in a property that the replay does not
+name and that still runs its seeded budget. When a property fails after its
+examples, the check still reports the states that the stopped run missed. The
+oracle does not judge reporter keys, which only a replay witness channel adds,
+the rejection of an unregistered property, or the compile-time rule that a call
+without examples returns parameters without an `examples` key; type-aware
+lint in every package that infers from these parameters is that rule's only
+witness.
+
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
 config applies.
