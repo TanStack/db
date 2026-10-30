@@ -185,7 +185,7 @@ async function runInterleaving(
     transaction.mutate(() => source.insert({ id: `overlay-${actionNumber}` }))
     held = {
       release: pending.resolve,
-      persisted: transaction.isPersisted.promise,
+      persisted: transaction.when('settled'),
     }
   }
   const release = async () => {

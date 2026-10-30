@@ -556,71 +556,49 @@ const productsCollection = createCollection(
 
 ## Persistence Handlers
 
-You can define handlers that are called when mutations occur. These handlers persist changes to your backend:
+Handlers persist changes to your backend and explicitly synchronize the
+confirmed state before returning. They return `Promise<void>`:
 
 ```typescript
 const todosCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
     queryKey: ["todos"],
     queryFn: fetchTodos,
     queryClient,
     getKey: (item) => item.id,
-
-    onInsert: async ({ transaction }) => {
-      const newItems = transaction.mutations.map((m) => m.modified)
-      await api.createTodos(newItems)
-      // Auto-refetch happens after handler completes (pre-1.0 behavior)
+    onInsert: async ({ transaction, collection }) => {
+      await api.createTodos(transaction.mutations.map((m) => m.modified))
+      await collection.utils.refetch()
     },
-
-    onUpdate: async ({ transaction }) => {
-      const updates = transaction.mutations.map((m) => ({
+    onUpdate: async ({ transaction, collection }) => {
+      await api.updateTodos(transaction.mutations.map((m) => ({
         id: m.key,
         changes: m.changes,
-      }))
-      await api.updateTodos(updates)
+      })))
+      await collection.utils.refetch()
     },
-
-    onDelete: async ({ transaction }) => {
-      const ids = transaction.mutations.map((m) => m.key)
-      await api.deleteTodos(ids)
+    onDelete: async ({ transaction, collection }) => {
+      await api.deleteTodos(transaction.mutations.map((m) => m.key))
+      await collection.utils.refetch()
     },
   })
 )
 ```
 
-> **Note**: QueryCollection currently auto-refetches after handlers complete. See [Controlling Refetch Behavior](#controlling-refetch-behavior) for details on this transitional behavior.
-
 ### Controlling Refetch Behavior
 
-> **⚠️ Transitional API**: QueryCollection currently auto-refetches after handlers complete. This behavior is deprecated and will be removed in v1.0. See the migration notes below.
+Mutation handlers do not automatically refetch. Call and await
+`collection.utils.refetch()` to read back server state, or await the direct-write
+utilities to apply the confirmed server response without a request. If a handler
+does neither, its optimistic changes revert to the previous synced rows when the
+transaction settles. A successful server write alone does not update those rows.
 
-#### Current Behavior (Pre-1.0)
+The `{ refetch: false }` return value has been removed. Handlers return
+`Promise<void>` and do not control synchronization through their return value.
+Query's configured polling, focus, reconnect, and invalidation triggers still
+operate independently of mutation handlers.
 
-By default, QueryCollection automatically refetches after each handler completes. To **skip** auto-refetch, return `{ refetch: false }`:
-
-```typescript
-onInsert: async ({ transaction }) => {
-  await api.createTodos(transaction.mutations.map((m) => m.modified))
-
-  // Skip auto-refetch - use this when server doesn't modify the data
-  return { refetch: false }
-}
-```
-
-If you don't return `{ refetch: false }`, auto-refetch happens automatically.
-
-#### v1.0 Behavior (Future)
-
-In v1.0, auto-refetch will be **removed**. Handlers will need to explicitly call `collection.utils.refetch()` when refetching is needed:
-
-```typescript
-onInsert: async ({ transaction, collection }) => {
-  await api.createTodos(transaction.mutations.map((m) => m.modified))
-
-  // Explicitly trigger refetch when you need server state
-  await collection.utils.refetch()
-}
-```
+#### Explicit Refetch Inside a Handler
 
 When no user mutation is persisting and no mutation handler is active, the
 `refetch()` promise resolves after every accepted result from that call has been
@@ -636,7 +614,7 @@ the Query fetch boundary. This rule applies whether the mutation or the refetch
 starts first. It includes calls through the handler parameter, captured or
 external Collection references, manual transaction mutation functions, and
 `createOptimisticAction` mutation functions. Code can await the mutation's
-`isPersisted.promise` when it needs the complete transaction and its queued
+`when('settled')` when it needs the complete transaction and its queued
 Collection application. Utilities that refetch inherit the same phase
 boundary.
 
@@ -655,23 +633,17 @@ boundary, `throwOnError` applies only to the Query fetch because application
 happens after that call settles. A later application failure is recorded by the
 Collection's error utilities.
 
-To skip refetch in v1.0, simply don't call `refetch()`:
+#### Applying a Server Response Without Refetching
+
+Use direct-write utilities when the server returns the confirmed rows or another
+source delivers them. Await the write before the handler returns:
 
 ```typescript
-onInsert: async ({ transaction }) => {
-  await api.createTodos(transaction.mutations.map((m) => m.modified))
-
-  // No refetch call = no refetch (v1.0 behavior)
+onInsert: async ({ transaction, collection }) => {
+  const rows = await api.createTodos(transaction.mutations.map((m) => m.modified))
+  await collection.utils.writeUpsert(rows)
 }
 ```
-
-#### When to Skip Refetch
-
-Skip refetching when:
-
-- You're confident the server state exactly matches what you sent (no server-side processing)
-- You're handling state updates through other mechanisms (like WebSockets or direct writes)
-- You want to optimize for fewer network requests
 
 ## Utility Methods
 
@@ -845,7 +817,7 @@ When the server returns computed fields (like server-generated IDs or timestamps
 
 ```typescript
 const todosCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
     queryKey: ["todos"],
     queryFn: fetchTodos,
     queryClient,
@@ -867,7 +839,6 @@ const todosCollection = createCollection(
 
       // No need to refetch - we've already synced the server response via direct writes
       // (optimistic state is automatically replaced when handler completes)
-      return { refetch: false } // Transitional pre-1.0 opt-out
     },
 
     onUpdate: async ({ transaction, collection }) => {
@@ -885,13 +856,12 @@ const todosCollection = createCollection(
       })
 
       // No refetch needed since we used direct writes
-      return { refetch: false } // Transitional pre-1.0 opt-out
     },
   })
 )
 
 // Usage is just like a regular collection
-todosCollection.insert({ text: "Buy milk", completed: false })
+todosCollection.insert({ id: crypto.randomUUID(), text: "Buy milk", completed: false })
 ```
 
 ### Server pagination with live queries
@@ -901,8 +871,7 @@ window. It does not run TanStack Query's `InfiniteQueryObserver`. Query
 Collections use `QueryObserver`, so `queryFn` receives
 `meta.loadSubsetOptions`, not `pageParam`.
 
-The previously ignored `getNextPageParam` option has been removed. Delete it
-from your hook config; passing it at runtime now throws a clear error.
+`getNextPageParam` is not supported; passing it at runtime throws an error.
 `initialPageParam` labels result pages only. It does not set a remote offset
 or server cursor.
 
@@ -1285,7 +1254,7 @@ has a subset owner or not. It refetches that Query when the subset is acquired,
 then applies the new server result. The earlier direct write still starts no
 request by itself.
 
-To use direct writes with persistence handlers, return `{ refetch: false }` to avoid the handler's separate automatic refetch during the pre-1.0 transition. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
+Await direct writes inside persistence handlers to apply confirmed data before settlement. Handlers do not refetch automatically. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
 
 ## Complete Direct Write API Reference
 

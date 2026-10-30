@@ -1,0 +1,35 @@
+name: Nightly oracles
+
+# Longer oracle campaigns than PR CI can afford. The generated demand
+# coverage campaign runs with ten times its PR budget, and every hostile
+# mutant in scripts/demand-coverage-mutants.mjs must fail a named test.
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  demand-coverage:
+    name: Demand coverage campaigns and mutants
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Run the generated campaign with a larger budget
+        env:
+          TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: '10'
+        run: pnpm --filter @tanstack/db-sqlite-persistence-core exec vitest run --coverage.enabled=false tests/persisted-demand-coverage-campaign-oracle.test.ts
+      - name: Run the demand coverage mutants
+        run: node scripts/demand-coverage-mutants.mjs

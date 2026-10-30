@@ -233,7 +233,6 @@ const collection = createCollection(
         await api.todos.create(payload)
       }
       await collection.utils.refetch()
-      return { refetch: false }
     },
   })
 )
@@ -896,8 +895,8 @@ A complete todo application demonstrating validation, transformations, and defau
 
 ```typescript
 import { z } from 'zod'
-import { createCollection } from '@tanstack/react-db'
-import { not } from '@tanstack/db'
+import { createCollection, useLiveQuery } from '@tanstack/react-db'
+import { not, SchemaValidationError } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 // Schema with validation, transformations, and defaults
@@ -934,7 +933,7 @@ const todoCollection = createCollection(
     schema: todoSchema,
     queryClient,
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const todo = transaction.mutations[0].modified
 
       // Serialize dates for API
@@ -947,9 +946,10 @@ const todoCollection = createCollection(
           created_at: todo.created_at.toISOString()
         })
       })
+      await collection.utils.refetch()
     },
 
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
@@ -969,9 +969,10 @@ const todoCollection = createCollection(
           })
         })
       )
+      await collection.utils.refetch()
     },
 
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
           await fetch(`/api/todos/${mutation.original.id}`, {
@@ -979,6 +980,7 @@ const todoCollection = createCollection(
           })
         })
       )
+      await collection.utils.refetch()
     }
   })
 )
@@ -991,7 +993,7 @@ function TodoApp() {
       .orderBy(({ todo }) => todo.created_at, 'desc')
   )
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [errors, setErrors] = useState({} as Record<string, string>)
 
   const addTodo = (text: string, priority: 'low' | 'medium' | 'high') => {
     try {
@@ -1007,7 +1009,7 @@ function TodoApp() {
       if (error instanceof SchemaValidationError) {
         const newErrors: Record<string, string> = {}
         error.issues.forEach(issue => {
-          const field = issue.path?.[0] || 'form'
+          const field = String(issue.path?.[0] ?? 'form')
           newErrors[field] = issue.message
         })
         setErrors(newErrors)
@@ -1090,7 +1092,7 @@ const productCollection = createCollection(
     schema: productSchema,
     queryClient,
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const product = transaction.mutations[0].modified
 
       // API only needs base fields, not computed ones
@@ -1104,6 +1106,7 @@ const productCollection = createCollection(
         category: product.category,
         tags: product.tags
       })
+      await collection.utils.refetch()
     }
   })
 )

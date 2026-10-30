@@ -86,7 +86,7 @@ const transaction = offlineTx.mutate(() => {
 
 // Commit can remain pending while offline. Observe final failure.
 void offlineTx.commit().catch((error) => console.error(error))
-void transaction.isPersisted.promise.catch((error) => console.error(error))
+void transaction.when('settled').catch((error) => console.error(error))
 ```
 
 On React Native, pass a custom `storage` adapter to `startOfflineExecutor`.
@@ -291,7 +291,7 @@ await tx.commit()
 The `Transaction` returned by `mutate()` exposes local transaction state. Its
 `state` starts as `pending`, becomes `persisting` during commit, and settles as
 `completed` or `failed`. A rollback can move it to `failed` before or during
-persistence. `isPersisted.promise` settles at the same success or failure
+persistence. `when('settled')` settles at the same success or failure
 boundary.
 
 On the offline-execution path, successful settlement means the configured
@@ -302,7 +302,7 @@ sync observation before returning.
 
 After `mutationFn` returns, the executor records a `deletion-pending` outbox
 phase before removing the row. If recording that phase or removing the row
-fails, `commit()`, `isPersisted.promise`, and the per-ID completion waiter reject
+fails, `commit()`, `when('settled')`, and the per-ID completion waiter reject
 with the storage error. The executor stops: it does not retry the deletion,
 process queued peers, or admit new transactions. A fresh executor can remove a
 marked row without calling `mutationFn` again; `beforeRetry` only filters rows
@@ -333,7 +333,7 @@ const tx = offlineTx.mutate(() => {
 console.log(tx.state) // 'pending'
 
 try {
-  await Promise.all([offlineTx.commit(), tx.isPersisted.promise])
+  await Promise.all([offlineTx.commit(), tx.when('settled')])
   console.log(tx.state) // 'completed'
 } catch (error) {
   showSubmissionError(error)
@@ -365,7 +365,7 @@ function trackPending(itemId: string, tx: Transaction) {
 
   // Handle fulfillment and rejection so cleanup does not create another
   // rejected Promise chain.
-  void tx.isPersisted.promise.then(removeThisTransaction, removeThisTransaction)
+  void tx.when('settled').then(removeThisTransaction, removeThisTransaction)
 }
 
 function isPending(itemId: string): boolean {

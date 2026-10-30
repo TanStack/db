@@ -9,6 +9,7 @@ import {
   createCloudflareDOSQLitePersistence,
   persistedCollectionOptions,
 } from '../../dist/esm/index.js'
+import { runDemandCoverageSession } from './demand-coverage-session.mjs'
 
 const DEFAULT_COLLECTION_ID = `todos`
 const DEFAULT_SCHEMA_VERSION = 1
@@ -170,6 +171,13 @@ export class PersistenceObject extends DurableObject {
       const requestBody = await request.json()
       const collectionId = requestBody.collectionId ?? this.collectionId
 
+      if (request.method === `POST` && url.pathname === `/demand-session`) {
+        return jsonResponse(200, {
+          ok: true,
+          rows: await runDemandCoverageSession(this.ctx.storage, requestBody),
+        })
+      }
+
       if (request.method === `POST` && url.pathname === `/write-todo`) {
         if (collectionId !== this.collectionId) {
           throw createUnknownCollectionError(collectionId)
@@ -208,7 +216,7 @@ export class PersistenceObject extends DurableObject {
         }
         await this.collectionReady
         const tx = this.collection.insert(requestBody.todo)
-        await tx.isPersisted.promise
+        await tx.when(`settled`)
 
         return jsonResponse(200, {
           ok: true,

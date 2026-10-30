@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/trailbase-db-collection",
-  "version": "0.1.123",
+  "version": "1.0.0-rc.1",
   "description": "TrailBase collection for TanStack DB",
   "author": "Sebastian Jeltsch",
   "license": "MIT",
@@ -58,6 +58,6 @@
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^4.1.12"
   }
 }

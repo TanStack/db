@@ -174,7 +174,7 @@ it(`preserves the Convex mutation value domain across durable serialization`, as
             autoCommit: false,
             mutationFn: async () => {},
           })
-          const rollback = local.isPersisted.promise.catch(() => undefined)
+          const rollback = local.when('settled').catch(() => undefined)
           let hasPrimaryFailure = false
           try {
             local.mutate(() => {

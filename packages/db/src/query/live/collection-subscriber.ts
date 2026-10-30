@@ -255,7 +255,13 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
     if (update.ready instanceof Promise) {
       void update.ready.then(settle, (error) =>
-        this.collectionConfigBuilder.failDemand(plan.id, generation, error),
+        this.collectionConfigBuilder.failDemand(
+          subscription,
+          this.collection,
+          plan.id,
+          generation,
+          error,
+        ),
       )
     } else {
       settle()
@@ -482,6 +488,11 @@ export class CollectionSubscriber<
     }
     return {
       start: (retired) => onStart?.(retired),
+      siblingReplays: () =>
+        this.collectionConfigBuilder.siblingReplays(
+          this.collection,
+          this.sourceId,
+        ),
       succeed: () => {
         if (!isCurrent()) return
         this.orderedLoader?.settleFullSourceReplay()

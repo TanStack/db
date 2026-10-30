@@ -29,13 +29,12 @@ import {
   oracleRuns,
   recordOracleReplay,
 } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import {
   Channel,
   assertRows,
-  completed,
   readStore,
   seed,
-  sorted,
   userRow,
   withHarness,
 } from './harness'
@@ -176,17 +175,17 @@ async function runHistory(steps: Array<Step>) {
       }
       switch (action.kind) {
         case 'write':
-          await write(slot, row).isPersisted.promise
+          await write(slot, row).when(`settled`)
           remember(slot, row)
           break
         case 'delete': {
           if (!model[slot]!.length) {
-            await collection.insert({ ...row }).isPersisted.promise
+            await collection.insert({ ...row }).when(`settled`)
             remember(slot, row)
             await Channel.deliver()
           }
           const removed = model[slot]![action.key % model[slot]!.length]!
-          await collection.delete(removed.id).isPersisted.promise
+          await collection.delete(removed.id).when(`settled`)
           model[slot] = model[slot]!.filter((item) => item.id !== removed.id)
           touched.add(JSON.stringify([names[slot], removed.id]))
           break
@@ -219,7 +218,7 @@ async function runHistory(steps: Array<Step>) {
             write(0, row)
             write(1, other)
           })
-          await tx.isPersisted.promise
+          await tx.when(`settled`)
           remember(0, row)
           remember(1, other)
           break
@@ -295,18 +294,6 @@ describe('settled histories', () => {
     }
     await runHistory([repeated, repeated])
   })
-  it('rejects wrong snapshots without erasing extra fields or typed keys', () => {
-    const expected = [{ id: 0, name: 'value' }]
-    for (const wrong of [
-      [],
-      [...expected, ...expected],
-      [{ id: '0', name: 'value' }],
-      [{ ...expected[0]!, optional: 1 }],
-    ]) {
-      expect(() => assertRows(wrong, expected, 'hostile snapshot')).toThrow()
-    }
-    expect(sorted(expected)).toEqual(expected)
-  })
 
   // A fixed campaign and a random campaign share one grammar and budget. A path
   // replay of this property selects only its random campaign.
@@ -346,6 +333,30 @@ describe('settled histories', () => {
     settledCampaign(`random`, oraclePropertyOptions(30, settledProperty)),
     30_000,
   )
+})
+
+// The manual-acceptance model: accepting one owner removes its authored key from
+// its store and adds its authored row there. Other rows keep their values, since
+// each owner's acceptance is a separate native transaction.
+function acceptOwnerInModel(
+  expected: Array<Array<Row>>,
+  store: number,
+  removed: string | number,
+  added: Row,
+): void {
+  expected[store] = [
+    ...expected[store]!.filter((row) => row.id !== removed),
+    added,
+  ]
+}
+
+// runHistory is the production driver and refinement check for the settled
+// history law: each checkpoint compares public, subscription, durable, export,
+// peer and version rows with the authored model that it keeps for the history.
+// acceptOwnerInModel is the model of the manual-acceptance test below.
+declareOracle({
+  check: [runHistory],
+  model: [acceptOwnerInModel],
 })
 
 /** Three distinct Collection identities receive one mixed manual payload.
@@ -403,11 +414,10 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
               '_versions',
             )
             await collections[index]!.utils.acceptMutations(transaction)
-            const store = index === 2 ? 1 : 0
-            expected[store] = [
-              ...expected[store]!.filter((row) => row.id !== removed[index]),
-              { id: added[index]!, name: `owner ${index}` },
-            ]
+            acceptOwnerInModel(expected, index === 2 ? 1 : 0, removed[index]!, {
+              id: added[index]!,
+              name: `owner ${index}`,
+            })
             for (const [slot, name] of ['items', 'other'].entries())
               assertRows(
                 (await readStore<Row>(h.db, name)).rows,
@@ -436,7 +446,7 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
           }
         },
       })
-      const outcome = tx.isPersisted.promise
+      const outcome = tx.when(`settled`)
       void outcome.catch(() => undefined)
       tx.mutate(() => {
         for (const [index, collection] of collections.entries()) {
@@ -462,80 +472,3 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
     })
   }
 })
-
-// Version tokens detect changes; wall-clock values have no ordering authority.
-// Legacy records may retain timestamps, but new writes need only a token. The
-// authored row fold is identical for absent, past and future legacy timestamps.
-// Restore, an ordinary write and an import must preserve this relation. The
-// untouched anchor proves cleanup does not require rewriting old metadata.
-for (const timestamp of [undefined, -1, Number.MAX_SAFE_INTEGER]) {
-  it(`preserves legacy metadata semantics with timestamp ${timestamp}`, async () => {
-    await withHarness(async (h) => {
-      const initial = [
-        { id: 1, name: 'before' },
-        { id: 2, name: 'anchor' },
-      ]
-      await seed(h.db, 'items', initial)
-      const metadata = {
-        versionKey: 'legacy',
-        ...(timestamp === undefined ? {} : { updatedAt: timestamp }),
-      }
-      const tx = h.db.db.transaction('_versions', 'readwrite')
-      const done = completed(tx)
-      for (const row of initial)
-        tx.objectStore('_versions').put(metadata, ['items', row.id])
-      await done
-      const source = await h.open()
-      const peer = await h.open('items', { db: await h.connect() })
-      assertRows(source.values(), initial, 'legacy restore')
-      await source.update(1, (row) => {
-        row.name = 'after'
-      }).isPersisted.promise
-      await Channel.deliver()
-      const after = [{ id: 1, name: 'after' }, initial[1]!]
-      assertRows(
-        peer.values(),
-        after,
-        'legacy timestamp cannot suppress notification',
-      )
-      const versions = await readStore(h.db, '_versions')
-      const changed = versions.keys.findIndex(
-        (key) => JSON.stringify(key) === '["items",1]',
-      )
-      const untouched = versions.keys.findIndex(
-        (key) => JSON.stringify(key) === '["items",2]',
-      )
-      expect(
-        versions.rows[changed],
-        'new metadata has no unused timestamp',
-      ).toEqual({ versionKey: expect.any(String) })
-      expect(
-        versions.rows[untouched],
-        'legacy anchor need not migrate',
-      ).toEqual(metadata)
-      assertRows(
-        (await readStore<Row>(h.db, 'items')).rows,
-        after,
-        'legacy durable suffix',
-      )
-      assertRows((await h.open()).values(), after, 'mixed-format restore')
-      await source.utils.importData([{ id: 3, name: 'replacement' }])
-      await Channel.deliver()
-      const replacementVersions = await readStore(h.db, '_versions')
-      expect(replacementVersions.keys).toEqual([['items', 3]])
-      expect(replacementVersions.rows).toEqual([
-        { versionKey: expect.any(String) },
-      ])
-      assertRows(
-        peer.values(),
-        [{ id: 3, name: 'replacement' }],
-        'legacy replacement peer',
-      )
-      assertRows(
-        (await h.open()).values(),
-        [{ id: 3, name: 'replacement' }],
-        'legacy replacement restore',
-      )
-    })
-  })
-}

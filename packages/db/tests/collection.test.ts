@@ -85,11 +85,13 @@ describe(`Collection`, () => {
     const collection = createCollection(config)
     try {
       await collection.stateWhenReady()
-      await collection.insert({ id: 3, v: 0 }).isPersisted.promise
-      await collection.update(1, (draft) => {
-        draft.v = 1
-      }).isPersisted.promise
-      await collection.delete(2).isPersisted.promise
+      await collection.insert({ id: 3, v: 0 }).when(`settled`)
+      await collection
+        .update(1, (draft) => {
+          draft.v = 1
+        })
+        .when(`settled`)
+      await collection.delete(2).when(`settled`)
       expect(calls).toEqual([`insert:config`, `update:config`, `delete:config`])
     } finally {
       await collection.cleanup()
@@ -194,7 +196,7 @@ describe(`Collection`, () => {
       const failed = collection.update(1, (draft) => {
         draft.value = cycle + 1
       })
-      await expect(failed.isPersisted.promise).rejects.toThrow(`rejected`)
+      await expect(failed.when(`settled`)).rejects.toThrow(`rejected`)
 
       const rolledBack = createTransaction({
         autoCommit: false,
@@ -206,7 +208,7 @@ describe(`Collection`, () => {
         }),
       )
       rolledBack.rollback()
-      await rolledBack.isPersisted.promise.catch(() => undefined)
+      await rolledBack.when(`settled`).catch(() => undefined)
 
       expect(collection._state.transactions.size).toBe(0)
       expect(collection.get(1)).toMatchObject({ id: 1, value: 0 })
@@ -245,7 +247,7 @@ describe(`Collection`, () => {
           }),
         )
         transaction.rollback()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
       }
     }
     const walkedForOneMutation = async () => {
@@ -279,7 +281,7 @@ describe(`Collection`, () => {
         for (const name of methods) Reflect.deleteProperty(transactions, name)
       }
       transaction.rollback()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       return walked
     }
 
@@ -316,11 +318,9 @@ describe(`Collection`, () => {
       )
       return transaction
     })
-    // Settle all three before the Collection recomputes once.
+    // Mark all three failed before the Collection recomputes once.
     for (const transaction of settled) {
       transaction.setState(`failed`)
-      transaction.isPersisted.reject(new Error(`settled`))
-      transaction.isPersisted.promise.catch(() => undefined)
     }
     collection._state.recomputeOptimisticState(false)
 
@@ -367,7 +367,7 @@ describe(`Collection`, () => {
         draft.value = 2
       }),
     )
-    await first.isPersisted.promise.catch(() => undefined)
+    await first.when(`settled`).catch(() => undefined)
     collection._state.recomputeOptimisticState(false)
 
     expect(collection._state.transactions.get(`retry`)).toBe(successor)
@@ -403,7 +403,7 @@ describe(`Collection`, () => {
     )
     await collection.cleanup()
     expect(() => transaction.rollback()).not.toThrow()
-    await transaction.isPersisted.promise.catch(() => undefined)
+    await transaction.when(`settled`).catch(() => undefined)
 
     expect(transaction.collections.size).toBe(0)
     expect(collection._state.transactions.size).toBe(0)
@@ -443,7 +443,7 @@ describe(`Collection`, () => {
     })
 
     expect(() => transaction.rollback()).toThrow(`subscriber failed`)
-    await transaction.isPersisted.promise.catch(() => undefined)
+    await transaction.when(`settled`).catch(() => undefined)
 
     expect(second.get(1)).toMatchObject({ id: 1, value: 0 })
     expect(second._state.transactions.size).toBe(0)
@@ -516,14 +516,14 @@ describe(`Collection`, () => {
     // Without an explicit temp-key -> server-key mapping, core cannot know
     // whether key 24 is this optimistic insert's server echo or an unrelated
     // row, so it must not expose both rows at the same time.
-    expect(tx.isPersisted.isPending()).toBe(true)
+    expect(tx.state).toBe(`persisting`)
     expect(collection.has(24)).toBe(false)
     expect(getStateEntries(collection)).toEqual([
       [4733, { id: 4733, text: `two` }],
     ])
 
     options.utils.resolveSync()
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
     await flushPromises()
 
     expect(getStateEntries(collection)).toEqual([[24, { id: 24, text: `two` }]])
@@ -548,7 +548,7 @@ describe(`Collection`, () => {
           id: item.id,
           text: item.text,
           project_id: item.project_id,
-          $synced: item.$synced,
+          $hasPendingWrites: item.$hasPendingWrites,
           $origin: item.$origin,
           $key: item.$key,
         })),
@@ -569,17 +569,17 @@ describe(`Collection`, () => {
     options.utils.commit()
 
     options.utils.resolveSync()
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
     await flushPromises()
 
     expect(
       liveCollection.toArray.map((todo) => ({
         id: todo.id,
-        synced: todo.$synced,
+        hasPendingWrites: todo.$hasPendingWrites,
         origin: todo.$origin,
         key: todo.$key,
       })),
-    ).toEqual([{ id: 24, synced: true, origin: `remote`, key: 24 }])
+    ).toEqual([{ id: 24, hasPendingWrites: false, origin: `remote`, key: 24 }])
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {
@@ -817,7 +817,7 @@ describe(`Collection`, () => {
       value: `bar`,
     })
 
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     // @ts-expect-error possibly undefined is ok in test
     const syncData = syncMock.mock.calls[0][0]
@@ -846,7 +846,7 @@ describe(`Collection`, () => {
       id: 2,
       value: `baz`,
     })
-    await tx2.isPersisted.promise
+    await tx2.when(`settled`)
 
     // Test bulk insert
     const tx3 = createTransaction({ mutationFn })
@@ -864,7 +864,7 @@ describe(`Collection`, () => {
     expect(stripVirtualProps(collection.state.get(keys[3]))).toEqual(
       bulkData[1],
     )
-    await tx3.isPersisted.promise
+    await tx3.when(`settled`)
 
     const tx4 = createTransaction({ mutationFn })
     // Test update with callback
@@ -880,7 +880,7 @@ describe(`Collection`, () => {
       id: 1,
       value: `bar2`,
     })
-    await tx4.isPersisted.promise
+    await tx4.when(`settled`)
 
     const tx5 = createTransaction({ mutationFn })
     // Test update with config and callback
@@ -902,7 +902,7 @@ describe(`Collection`, () => {
       newProp: `new value`,
     })
 
-    await tx5.isPersisted.promise
+    await tx5.when(`settled`)
 
     // If there are two updates, the second should overwrite the first.
     const tx55 = createTransaction({ mutationFn })
@@ -934,7 +934,7 @@ describe(`Collection`, () => {
     })
     expect(tx55.mutations).toHaveLength(1)
 
-    await tx55.isPersisted.promise
+    await tx55.when(`settled`)
 
     const tx6 = createTransaction({ mutationFn })
     // Test bulk update
@@ -964,21 +964,21 @@ describe(`Collection`, () => {
       id: 4,
       value: `item2-updated`,
     })
-    await tx6.isPersisted.promise
+    await tx6.when(`settled`)
 
     const tx7 = createTransaction({ mutationFn })
     // Test delete single item
     tx7.mutate(() => collection.delete(insertedKey))
     expect(collection.state.has(insertedKey)).toBe(false)
     // objectKeyMap check removed as it no longer exists
-    await tx7.isPersisted.promise
+    await tx7.when(`settled`)
 
     // Test delete with metadata
     const tx8Insert = createTransaction({ mutationFn })
     tx8Insert.mutate(() => collection.insert({ id: 5, value: `foostyle` }))
     // @ts-expect-error possibly undefined is ok in test
     const tx8insertKey = tx8Insert.mutations[0].key
-    await tx8Insert.isPersisted.promise
+    await tx8Insert.when(`settled`)
     const tx8 = createTransaction({ mutationFn })
     tx8.mutate(() =>
       collection.delete(tx8insertKey, {
@@ -987,7 +987,7 @@ describe(`Collection`, () => {
     )
     expect(tx8.mutations[0]?.metadata).toEqual({ reason: `test delete` })
     expect(collection.state.has(tx8insertKey)).toBe(false)
-    await tx8.isPersisted.promise
+    await tx8.when(`settled`)
 
     // Test bulk delete
     const tx9 = createTransaction({ mutationFn })
@@ -996,7 +996,7 @@ describe(`Collection`, () => {
     expect(collection.state.has(keys[2])).toBe(false)
     // @ts-expect-error possibly undefined is ok in test
     expect(collection.state.has(keys[3])).toBe(false)
-    await tx9.isPersisted.promise
+    await tx9.when(`settled`)
   })
 
   it(`synced updates should *not* be applied while there's a persisting transaction`, async () => {
@@ -1076,7 +1076,7 @@ describe(`Collection`, () => {
       value: `bar`,
     })
 
-    await tx1.isPersisted.promise
+    await tx1.when(`settled`)
 
     expect(getStateEntries(collection)).toEqual([[1, { id: 1, value: `bar` }]])
   })
@@ -1496,9 +1496,9 @@ describe(`Collection`, () => {
 
     // Wait for all transactions to complete
     await Promise.all([
-      insertTx.isPersisted.promise,
-      updateTx.isPersisted.promise,
-      deleteTx.isPersisted.promise,
+      insertTx.when(`settled`),
+      updateTx.when(`settled`),
+      deleteTx.when(`settled`),
     ])
 
     // Verify the transactions were created with the correct configuration
@@ -1613,7 +1613,7 @@ describe(`Collection`, () => {
 
     // Now resolve the mutation and wait for completion
     pendingMutations[0]?.()
-    await nonOptimisticInsertTx.isPersisted.promise
+    await nonOptimisticInsertTx.when(`settled`)
 
     // Now the item should appear after server confirmation
     expect(collection.state.has(2)).toBe(true)
@@ -1637,7 +1637,7 @@ describe(`Collection`, () => {
 
     // Now resolve the update mutation and wait for completion
     pendingMutations[1]?.()
-    await nonOptimisticUpdateTx.isPersisted.promise
+    await nonOptimisticUpdateTx.when(`settled`)
 
     // Now the update should be reflected
     expect(getStateValue(collection, 1)?.value).toBe(`non-optimistic update`)
@@ -1651,7 +1651,7 @@ describe(`Collection`, () => {
 
     // Now resolve the delete mutation and wait for completion
     pendingMutations[2]?.()
-    await nonOptimisticDeleteTx.isPersisted.promise
+    await nonOptimisticDeleteTx.when(`settled`)
 
     // Now the item should be gone
     expect(collection.state.has(2)).toBe(false)
@@ -1715,7 +1715,7 @@ describe(`Collection`, () => {
       value: `default optimistic`,
     })
 
-    await defaultOptimisticTx.isPersisted.promise
+    await defaultOptimisticTx.when(`settled`)
 
     // Test explicit optimistic: true
     const explicitOptimisticTx = collection.insert(
@@ -1731,7 +1731,7 @@ describe(`Collection`, () => {
       value: `explicit optimistic`,
     })
 
-    await explicitOptimisticTx.isPersisted.promise
+    await explicitOptimisticTx.when(`settled`)
 
     // Test optimistic update
     const optimisticUpdateTx = collection.update(
@@ -1746,7 +1746,7 @@ describe(`Collection`, () => {
     expect(getStateValue(collection, 1)?.value).toBe(`optimistic update`)
     expect(collection._state.optimisticUpserts.has(1)).toBe(true)
 
-    await optimisticUpdateTx.isPersisted.promise
+    await optimisticUpdateTx.when(`settled`)
 
     // Test optimistic delete
     const optimisticDeleteTx = collection.delete(3, { optimistic: true })
@@ -1755,7 +1755,7 @@ describe(`Collection`, () => {
     expect(collection.state.has(3)).toBe(false)
     expect(collection._state.optimisticDeletes.has(3)).toBe(true)
 
-    await optimisticDeleteTx.isPersisted.promise
+    await optimisticDeleteTx.when(`settled`)
   })
 
   it(`should not block user actions when keys are recently synced`, async () => {
@@ -1846,7 +1846,7 @@ describe(`Collection`, () => {
 
     // Now complete the first transaction to trigger sync and batching
     txResolvers[0]?.()
-    await tx1.isPersisted.promise
+    await tx1.when(`settled`)
 
     // Step 4: More rapid clicks after sync starts (this is where the bug occurred)
     const eventCountBeforeRapidClicks = changeEvents.length
@@ -1867,10 +1867,10 @@ describe(`Collection`, () => {
       txResolvers[i]?.()
     }
     await Promise.all([
-      tx2.isPersisted.promise,
-      tx3.isPersisted.promise,
-      tx4.isPersisted.promise,
-      tx5.isPersisted.promise,
+      tx2.when(`settled`),
+      tx3.when(`settled`),
+      tx4.when(`settled`),
+      tx5.when(`settled`),
     ])
   })
 

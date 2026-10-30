@@ -6,6 +6,9 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { contentsOf } from './multiset-support.js'
+import type { Data } from './multiset-support.js'
 import type { MultiSetArray } from '../src/multiset.js'
 
 /**
@@ -49,7 +52,6 @@ import type { MultiSetArray } from '../src/multiset.js'
  *   structural histories; equal objects must merge whatever the order.
  */
 
-type Data = unknown
 type Spec =
   | { kind: `prim`; i: number }
   | { kind: `obj`; i: number }
@@ -399,30 +401,6 @@ function buildRecords(history: History): MultiSetArray<Data> {
 // ---------------------------------------------------------------------------
 // Production driver and refinement check.
 
-// A tagged encoding of every record's contents. Reusing identities across
-// snapshots exposes replacement by a distinct reference with equal contents.
-// Symbol and function identities remain distinct; tags keep `-0`, `NaN`, and
-// `undefined` distinct.
-function contentsOf(
-  records: MultiSetArray<Data>,
-  ids: Map<object | symbol, number>,
-): string {
-  const encode = (value: Data): Data => {
-    if (typeof value === `symbol` || typeof value === `function`) {
-      if (!ids.has(value)) ids.set(value, ids.size)
-      return [typeof value, ids.get(value)]
-    }
-    if (value === null || typeof value !== `object`)
-      return [typeof value, Object.is(value, -0) ? `-0` : String(value)]
-    if (!ids.has(value)) ids.set(value, ids.size)
-    return [
-      ids.get(value),
-      Object.entries(value).map(([key, item]) => [key, encode(item)]),
-    ]
-  }
-  return JSON.stringify(records.map(([data, m]) => [encode(data), m]))
-}
-
 function expectRecordsConsolidated(records: MultiSetArray<Data>): void {
   const inputSnapshot = records.map(([data, m]) => [data, m] as const)
   const contentIds = new Map<object | symbol, number>()
@@ -466,6 +444,12 @@ function expectConsolidation(history: History): void {
   expectRecordsConsolidated(buildRecords(history))
 }
 
+declareOracle({
+  check: [expectRecordsConsolidated],
+  model: [expectedConsolidation],
+  grammar: [historyArb],
+})
+
 // ---------------------------------------------------------------------------
 // Campaigns. The fixed and random campaigns run the same property, grammar,
 // check, and budget. A path replay of `ivm.multiset-consolidate` runs its
@@ -478,14 +462,6 @@ const CONSOLIDATE = `ivm.multiset-consolidate`
 const it = oracleReplayTest(vitestIt)
 
 describe(`MultiSet consolidation oracle`, () => {
-  it(`detects replacement of an input value with equal contents`, () => {
-    const records: MultiSetArray<Data> = [[[0, { v: 1 }], 1]]
-    const ids = new Map<object | symbol, number>()
-    const inputContents = contentsOf(records, ids)
-    ;(records[0]![0] as [number, Data])[1] = { v: 1 }
-    expect(contentsOf(records, ids)).not.toBe(inputContents)
-  })
-
   it.each(collisionCases)(`$name`, ({ records }) =>
     expectRecordsConsolidated(records),
   )

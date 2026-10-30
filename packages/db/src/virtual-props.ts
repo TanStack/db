@@ -38,16 +38,18 @@
 export type VirtualOrigin = 'local' | 'remote'
 
 /**
- * Virtual properties recognized on TanStack DB rows. The new
- * `$hasPendingWrites` field is optional here so legacy four-field rows accepted
- * by `hasVirtualProps` remain assignable. Rows returned by collections use
- * `WithVirtualProps`, which requires it.
+ * Virtual properties recognized on TanStack DB rows.
  *
  * These properties are:
  * - Computed (not stored in the data model)
  * - Read-only (cannot be mutated directly)
  * - Available in queries (WHERE, ORDER BY, SELECT)
  * - Included when spreading rows (`...user`)
+ *
+ * Structured whole-row selections and spreads retain source metadata.
+ * A functional selection retains it only when returning a source row directly.
+ * New functional objects and other projections receive the output Collection's
+ * metadata. Selected virtual names cannot change that attribution.
  *
  * @template TKey - The type of the row's key (string or number)
  *
@@ -80,30 +82,9 @@ export interface VirtualRowProps<
    * Whether this row currently has pending local optimistic writes.
    *
    * This describes the row's local optimistic state, not backend upload or
-   * acknowledgement. It is always `false` for local-only collections. It is
-   * optional only for compatibility with legacy rows; collection-published
-   * rows always provide it.
+   * acknowledgement. It is always `false` for local-only collections.
    */
-  readonly $hasPendingWrites?: boolean
-
-  /**
-   * Whether this row currently has no pending local optimistic writes.
-   *
-   * - `true`: No pending local optimistic mutation currently affects this row
-   * - `false`: One or more pending local optimistic mutations currently affect this row
-   *
-   * This is local mutation status. It does not prove that a backend has uploaded,
-   * confirmed, or read back the row. If you need backend-confirmed status, keep
-   * your mutation function pending until that backend observation has happened,
-   * or expose adapter-specific status.
-   *
-   * For local-only collections (no sync), this is always `true`.
-   * For live query collections, this is passed through from the source collection.
-   *
-   * @deprecated Use `!row.$hasPendingWrites` instead. This alias will be
-   * removed in the 1.0 RC.
-   */
-  readonly $synced: boolean
+  readonly $hasPendingWrites: boolean
 
   /**
    * Collection attribution for this row's current value. `'local'` covers
@@ -112,7 +93,8 @@ export interface VirtualRowProps<
    * key-and-timing rules, including truncate and overlapping mutations.
    *
    * For local-only collections, this is always `'local'`.
-   * For live query collections, this is passed through from the source collection.
+   * Whole-row live queries preserve source attribution. Projected row roots
+   * otherwise use the live-query Collection's attribution.
    */
   readonly $origin: VirtualOrigin
 
@@ -128,16 +110,10 @@ export interface VirtualRowProps<
    * The ID of the source collection this row originated from.
    *
    * In joins, this can help identify which collection each row came from.
-   * For live query collections, this is the ID of the upstream collection.
+   * Whole-row live queries preserve the upstream Collection's ID. Projected
+   * row roots otherwise use the live-query Collection's ID.
    */
   readonly $collectionId: string
-}
-
-/** Virtual properties guaranteed on rows published by this version. @internal */
-export interface PublishedVirtualRowProps<
-  TKey extends string | number = string | number,
-> extends VirtualRowProps<TKey> {
-  readonly $hasPendingWrites: boolean
 }
 
 /**
@@ -150,14 +126,13 @@ export interface PublishedVirtualRowProps<
  * ```typescript
  * type User = { id: string; name: string }
  * type UserWithVirtual = WithVirtualProps<User, string>
- * // { id: string; name: string; $hasPendingWrites: boolean; $synced: boolean; $origin: 'local' | 'remote'; $key: string; $collectionId: string }
- * // $synced is deprecated; use !$hasPendingWrites instead.
+ * // { id: string; name: string; $hasPendingWrites: boolean; $origin: 'local' | 'remote'; $key: string; $collectionId: string }
  * ```
  */
 export type WithVirtualProps<
   T extends object,
   TKey extends string | number = string | number,
-> = T & PublishedVirtualRowProps<TKey>
+> = T & VirtualRowProps<TKey>
 
 /**
  * Extracts the base type from a type that may have virtual properties.
@@ -177,16 +152,14 @@ export type WithoutVirtualProps<T> = T extends unknown
   : never
 
 /**
- * Checks if a value has virtual properties attached. Legacy rows with the
- * original four properties still match; only rows published by this version
- * are guaranteed to carry `$hasPendingWrites`.
+ * Checks if a value has all virtual properties attached.
  *
  * @param value - The value to check
  * @returns true if the value has virtual properties
  *
  * @example
  * ```typescript
- * if (hasVirtualProps(row) && row.$hasPendingWrites !== undefined) {
+ * if (hasVirtualProps(row)) {
  *   console.log('Pending local writes:', row.$hasPendingWrites)
  * }
  * ```
@@ -197,7 +170,7 @@ export function hasVirtualProps(
   return (
     typeof value === 'object' &&
     value !== null &&
-    ['$synced', '$origin', '$key', '$collectionId'].every(
+    ['$hasPendingWrites', '$origin', '$key', '$collectionId'].every(
       (name) => name in value,
     )
   )
@@ -215,7 +188,7 @@ export function hasVirtualProps(
  * @param row - The row to enrich
  * @param key - The row's key
  * @param collectionId - The collection's ID
- * @param computeSynced - Function to compute $synced if missing
+ * @param computePendingWrites - Function to compute $hasPendingWrites if missing
  * @param computeOrigin - Function to compute $origin if missing
  * @returns The row with virtual properties (possibly the same object if already present)
  *
@@ -228,18 +201,18 @@ export function enrichRowWithVirtualProps<
   row: T,
   key: TKey,
   collectionId: string,
-  computeSynced: () => boolean,
+  computePendingWrites: () => boolean,
   computeOrigin: () => VirtualOrigin,
 ): WithVirtualProps<T, TKey> {
   // Use nullish coalescing to preserve existing virtual properties (pass-through)
   // This is the "add-if-missing" pattern described in the RFC
   const existingRow = row as Partial<VirtualRowProps<TKey>>
-  const synced = existingRow.$synced ?? computeSynced()
+  const hasPendingWrites =
+    existingRow.$hasPendingWrites ?? computePendingWrites()
 
   return {
     ...row,
-    $hasPendingWrites: !synced,
-    $synced: synced,
+    $hasPendingWrites: hasPendingWrites,
     $origin: existingRow.$origin ?? computeOrigin(),
     $key: existingRow.$key ?? key,
     $collectionId: existingRow.$collectionId ?? collectionId,
@@ -252,7 +225,6 @@ export function enrichRowWithVirtualProps<
  */
 export const VIRTUAL_PROP_NAMES = [
   '$hasPendingWrites',
-  '$synced',
   '$origin',
   '$key',
   '$collectionId',

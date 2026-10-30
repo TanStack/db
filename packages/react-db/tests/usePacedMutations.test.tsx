@@ -123,7 +123,7 @@ describe(`usePacedMutations React hook`, () => {
       tx = result.current({ id: 1, value: 1 })
     })
 
-    await tx!.isPersisted.promise
+    await tx!.when(`settled`)
     expect(mutationFn).toHaveBeenCalledTimes(1)
     expect(tx!.state).toBe(`completed`)
   })

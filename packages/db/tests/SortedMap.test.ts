@@ -1,8 +1,17 @@
+/**
+ * Unit tests for SortedMap: ordering edge cases, bulk-sync movement bounds, and
+ * key iteration details that pin hand-written results. The law that every
+ * ordering observation must refine a full recomputation is owned by
+ * SortedMap-oracle.test.ts.
+ */
+
 import { describe, expect, it, vi } from 'vitest'
 import { SortedMap } from '../src/SortedMap'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
+import { expectMap, expectView } from './sorted-map-support'
 import type { SyncConfig } from '../src/types.js'
+import type { ModelKey, Row } from './sorted-map-support'
 
 // Supplemental examples for SortedMap. The generated law lives in
 // SortedMap-oracle.test.ts; these pin scale, scan reuse, and public
@@ -29,22 +38,6 @@ async function countDisplacedSlots(
     spy.mockRestore()
   }
   return displaced
-}
-
-type Order = `key` | `ascending` | `descending`
-
-function expectMap(
-  actual: SortedMap<number, number>,
-  model: Map<number, number>,
-  order: Order,
-) {
-  const expected = [...model].sort(
-    ([ka, va], [kb, vb]) =>
-      (order === `key` ? 0 : order === `ascending` ? va - vb : vb - va) ||
-      ka - kb,
-  )
-  expect([...actual]).toEqual(expected)
-  expect(actual.size).toBe(model.size)
 }
 
 describe(`SortedMap`, () => {
@@ -513,4 +506,61 @@ describe(`SortedMap`, () => {
     expect(map.size).toBe(0)
     expect(Array.from(map.entries())).toEqual([])
   })
+})
+
+it(`rejects wrong default ordering, missing tied entries, stale overwrites, and lost keys`, () => {
+  const byValue = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
+  byValue.set(1, { rank: 3 }).set(-1, { rank: 4 })
+  expect(() =>
+    expectMap(
+      byValue,
+      new Map([
+        [1, 3],
+        [-1, 4],
+      ]),
+      `key`,
+    ),
+  ).toThrow()
+  const missingTie = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
+  missingTie.set(1, { rank: 3 })
+  expect(() =>
+    expectMap(
+      missingTie,
+      new Map([
+        [1, 3],
+        [-1, 3],
+      ]),
+      `ascending`,
+    ),
+  ).toThrow()
+  const stale = new SortedMap<number, Row>()
+  stale.set(1, { rank: 3 })
+  expect(() => expectMap(stale, new Map([[1, 2]]), `key`)).toThrow()
+  // Without the order promise, a view may reorder keys but must hold each
+  // key once with its current value.
+  const expected: Array<[ModelKey, number]> = [
+    [1, 3],
+    [2, 3],
+  ]
+  expect(() =>
+    expectView(
+      [
+        [2, 3],
+        [1, 3],
+      ],
+      expected,
+      false,
+    ),
+  ).not.toThrow()
+  expect(() =>
+    expectView(
+      [
+        [1, 3],
+        [1, 3],
+      ],
+      expected,
+      false,
+    ),
+  ).toThrow()
+  expect(() => expectView([[1, 3]], expected, false)).toThrow()
 })

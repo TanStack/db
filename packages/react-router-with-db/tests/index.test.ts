@@ -33,7 +33,7 @@ describe(`routerWithDbClient`, () => {
     }
 
     expect(packageJson.peerDependencies).toMatchObject({
-      '@tanstack/react-db': `>=0.2.1`,
+      '@tanstack/react-db': `>=1.0.0-rc.1`,
       '@tanstack/router-core': `>=1.127.0`,
     })
   })

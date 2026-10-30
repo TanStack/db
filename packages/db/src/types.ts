@@ -382,9 +382,10 @@ export type LoadSubsetOptions = {
 export type LoadSubsetRequestResult = true | Promise<void>
 
 /**
- * Loads one subset and transfers its ongoing resource ownership only after
- * returning `true` or a promise. An implementation that throws synchronously
- * must release any partially acquired resource before throwing. A successful
+ * Loads one subset. A Collection subscription installs its logical owner
+ * before calling this function. A synchronous throw fails the load but keeps
+ * that owner; releasing the owner still calls `unloadSubset`, if provided,
+ * for the failed load. Make that handler safe after partial setup. A successful
  * implementation must await or return every receipt from the sync
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
@@ -614,8 +615,21 @@ export type SyncPersistenceCapabilityV1<
     value: unknown
   }) => Promise<void>
   /**
-   * Reserve the open sync transaction's FIFO turn, so a subset hydration
-   * that starts before it commits waits for that commit.
+   * Reserve the open sync transaction's FIFO turn. Every persisted hydration
+   * that would start before it commits waits for that commit: a subset load,
+   * a reload or reset from a peer notice, and sequence-gap recovery. A subset
+   * load admitted while the turn is reserved also runs after the commit's
+   * durable write. The source must end the transaction: commit it, or abandon
+   * it by committing with an aborted signal. An abandon releases the waiting
+   * hydrations as a commit does, so they run. A peer reset abandons a
+   * reserved transaction that began before the reset: its commit rejects
+   * with `SyncTransactionAbortedError`, and the reset does not wait.
+   * Sequence-gap recovery counts as a hydration only from the point where it
+   * changes rows. A source that stops for good
+   * abandons it, or every later hydration keeps waiting. The source must not
+   * await a `hydrateBaseline` that it started before reserving while the
+   * reservation is open: that baseline waits for the commit. Calling
+   * `hydrateBaseline` while the reservation is open rejects.
    */
   readonly reserveCommitTurn: () => void
   readonly scanPersistedRows: (
@@ -625,6 +639,21 @@ export type SyncPersistenceCapabilityV1<
     readonly certify: () => Promise<void>
     readonly getKeySetEvidence: () => SyncPersistenceKeySetEvidence | undefined
     readonly expectCurrentCommit: () => void
+    /**
+     * Atomically compare the durable source token with this transaction's
+     * predecessor. The source stages its next opaque string token in collection
+     * metadata at `key`. A discontinuity invalidates source progress evidence
+     * until an authoritative truncate; rows and receipts still apply normally.
+     * Re-delivering the same complete source position must be idempotent; it
+     * preserves existing evidence, including an earlier incompatibility.
+     * Only adapters that implement the durable comparison expose this method.
+     */
+    readonly expectSourceProgress?: (progress: {
+      key: string
+      previous: string | undefined
+    }) => void
+    /** Source progress evidence from the atomic persisted resume snapshot. */
+    readonly getSourceProgressCompatible?: () => boolean | undefined
   }
 }
 
@@ -730,35 +759,23 @@ export type DeleteMutationFnParams<
   collection: Collection<T, TKey, TUtils>
 }
 
-/**
- * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
- */
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
-> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
+> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<void>
 
-/**
- * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
- */
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
-> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
+> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<void>
 
-/**
- * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
- */
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
-> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
+> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<void>
 
 /**
  * Collection status values for lifecycle management
@@ -864,7 +881,6 @@ export interface BaseCollectionConfig<
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -955,7 +971,6 @@ export interface BaseCollectionConfig<
   syncMode?: SyncMode
   /**
    * Optional asynchronous handler function called before an insert operation
-   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
    *
    * @example
    * // Basic insert handler
@@ -971,8 +986,6 @@ export interface BaseCollectionConfig<
    *   await api.createTodo(newItem)
    *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
-   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
-   *   return { refetch: false }
    * }
    *
    * @example
@@ -991,7 +1004,6 @@ export interface BaseCollectionConfig<
    *   await api.createTodos(items)
    *   // Refetch to get updated data from server
    *   await collection.utils.refetch()
-   *   return { refetch: false }
    * }
    *
    * @example
@@ -1006,14 +1018,10 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onInsert?:
-    | InsertMutationFn<T, TKey, TUtils, void>
-    // Return-value compatibility will be removed in v1.0.
-    | InsertMutationFn<T, TKey, TUtils, TReturn>
+  onInsert?: InsertMutationFn<T, TKey, TUtils>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
    *
    * @example
    * // Basic update handler
@@ -1030,8 +1038,6 @@ export interface BaseCollectionConfig<
    *   await api.updateTodo(mutation.original.id, changes)
    *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
-   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
-   *   return { refetch: false }
    * }
    *
    * @example
@@ -1052,7 +1058,6 @@ export interface BaseCollectionConfig<
    *   }))
    *   await api.updateTodos(updates)
    *   await collection.utils.refetch()
-   *   return { refetch: false }
    * }
    *
    * @example
@@ -1068,13 +1073,9 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onUpdate?:
-    | UpdateMutationFn<T, TKey, TUtils, void>
-    // Return-value compatibility will be removed in v1.0.
-    | UpdateMutationFn<T, TKey, TUtils, TReturn>
+  onUpdate?: UpdateMutationFn<T, TKey, TUtils>
   /**
    * Optional asynchronous handler function called before a delete operation
-   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
    *
    * @example
    * // Basic delete handler
@@ -1090,8 +1091,6 @@ export interface BaseCollectionConfig<
    *   await api.deleteTodos(keysToDelete)
    *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
-   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
-   *   return { refetch: false }
    * }
    *
    * @example
@@ -1127,10 +1126,7 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onDelete?:
-    | DeleteMutationFn<T, TKey, TUtils, void>
-    // Return-value compatibility will be removed in v1.0.
-    | DeleteMutationFn<T, TKey, TUtils, TReturn>
+  onDelete?: DeleteMutationFn<T, TKey, TUtils>
 
   /**
    * Specifies how to compare data in the collection.
@@ -1308,6 +1304,11 @@ export interface SubscribeChangesOptions<
     readonly succeed: () => void
     /** The replay could not load every active demand again: its failures, in failure order. */
     readonly fail?: (errors: Array<Error>) => void
+    /**
+     * The replays of the graph's other subscriptions to this collection that
+     * still load. They share one barrier, so this replay waits for them.
+     */
+    readonly siblingReplays: () => Promise<unknown> | undefined
   }
 }
 

@@ -21,7 +21,7 @@ import { isPromiseLike } from '../utils/type-guards'
 import { reportUncaught } from '../utils/callbacks'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import { isFailedStatus } from '../live-query-primitives.js'
-import { automaticRowMetadataWrite } from './state'
+import { automaticRowMetadataWrite, truncatesSourceKey } from './state'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -40,6 +40,15 @@ import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
 import type { Deferred } from '../deferred'
+
+/**
+ * Internal marker on a sync write: an update that names the whole row, as an
+ * insert does. The persisted wrapper hands an insert it already judged this
+ * way. It is not part of the public sync API.
+ *
+ * @internal
+ */
+export const syncWriteNamesWholeRow: unique symbol = Symbol()
 
 type DeferredLoadSubset = {
   options: LoadSubsetOptions
@@ -306,10 +315,8 @@ export class CollectionSyncManager<
             >,
           ) => {
             if (!isCurrentSync()) return
-            const pendingTransaction = this.getActivePendingSyncTransaction()
-            // A replay can invalidate an open transaction between writes. Its
-            // commit receipt owns that failure; later writes cannot revive it.
-            if (pendingTransaction.invalidationError !== undefined) return
+            const pendingTransaction = this.getWritableSyncTransaction()
+            if (!pendingTransaction) return
 
             const key =
               `key` in messageWithOptionalKey
@@ -341,19 +348,31 @@ export class CollectionSyncManager<
               this.checkReusedRow(key, messageType, messageWithOptionalKey)
             }
 
+            // An insert names the whole row, so it replaces the row even as
+            // an update. A wrapping sync that judged its insert already marks
+            // it as such an update: its metadata then changes only through
+            // the wrapper's own writes.
             const message = {
               ...messageWithOptionalKey,
               type: messageType,
               key,
               originalSyncType:
-                messageWithOptionalKey.type === `insert`
+                messageWithOptionalKey.type === `insert` ||
+                (
+                  messageWithOptionalKey as {
+                    [syncWriteNamesWholeRow]?: true
+                  }
+                )[syncWriteNamesWholeRow]
                   ? (`insert` as const)
                   : undefined,
             } as OptimisticChangeMessage<TOutput, TKey> & {
               originalSyncType?: `insert`
             }
             pendingTransaction.operations.push(message)
-            this.state.stagePendingSyncOperation(message)
+            this.state.stagePendingSyncOperation(
+              message,
+              pendingTransaction.preserveHydrationSeedKeys?.has(key),
+            )
 
             const metadataWrite = automaticRowMetadataWrite(message)
             if (metadataWrite) {
@@ -389,7 +408,7 @@ export class CollectionSyncManager<
             // accepts it now; the receipt resolves when it is visible. One
             // held by a persisting optimistic transaction becomes visible when
             // that transaction settles.
-            this.state.commitPendingTransactions()
+            this.state.acceptSyncTransaction(pendingTransaction)
             if (!pendingTransaction.applied.isPending()) return true
             return withAcceptedReceipt(pendingTransaction.applied.promise, true)
           },
@@ -409,13 +428,13 @@ export class CollectionSyncManager<
           },
           truncate: (options) => {
             if (!isCurrentSync()) return
-            const pendingTransaction = this.getActivePendingSyncTransaction()
+            const pendingTransaction = this.getWritableSyncTransaction()
+            if (!pendingTransaction) return
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.rowMetadataWrites.clear()
             pendingTransaction.explicitRowMetadataWrites.clear()
-            pendingTransaction.invalidationError = undefined
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset
             // state) can be staged before truncate and should commit atomically
@@ -570,6 +589,20 @@ export class CollectionSyncManager<
     return pendingTransaction
   }
 
+  /**
+   * The open transaction that takes a row write or truncate. A replay can
+   * invalidate an open transaction between writes. Its commit receipt owns
+   * that failure; later writes, a truncate included, cannot revive it, so
+   * they are ignored. Its metadata writes need no check: no read includes an
+   * invalid transaction, and it never applies.
+   */
+  private getWritableSyncTransaction() {
+    const pendingTransaction = this.getActivePendingSyncTransaction()
+    return pendingTransaction.invalidationError === undefined
+      ? pendingTransaction
+      : undefined
+  }
+
   /** Record an explicit row metadata write and its place among the operations. */
   private writeExplicitRowMetadata(
     key: TKey,
@@ -591,15 +624,18 @@ export class CollectionSyncManager<
       row: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
-          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
-          const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
-          if (pendingWrite) {
-            return pendingWrite.type === `delete`
-              ? undefined
-              : pendingWrite.value
-          }
-          if (pendingTransaction?.truncate) {
-            return undefined
+          // A source reads its own session: every accepted or open sync
+          // transaction that no invalidation ended, newest first, then
+          // applied state. A truncate hides older row metadata, except a
+          // wrapping sync's storage read, which keeps it, and a schema reset's
+          // kept seeds (decision 20). The wrapper reads its own open reset.
+          const pending = this.state.pendingSyncedTransactions
+          for (let index = pending.length - 1; index >= 0; index--) {
+            const transaction = pending[index]!
+            if (transaction.invalidationError !== undefined) continue
+            const write = transaction.rowMetadataWrites.get(key)
+            if (write) return write.type === `delete` ? undefined : write.value
+            if (truncatesSourceKey(transaction, key)) return undefined
           }
           return this.state.syncedMetadata.get(key)
         },
@@ -615,45 +651,41 @@ export class CollectionSyncManager<
       collection: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
-          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
-          const pendingWrite =
-            pendingTransaction?.collectionMetadataWrites.get(key)
-          if (pendingWrite) {
-            return pendingWrite.type === `delete`
-              ? undefined
-              : pendingWrite.value
+          // Newest first, like row metadata. A truncate keeps collection
+          // metadata.
+          const pending = this.state.pendingSyncedTransactions
+          for (let index = pending.length - 1; index >= 0; index--) {
+            const transaction = pending[index]!
+            if (transaction.invalidationError !== undefined) continue
+            const write = transaction.collectionMetadataWrites.get(key)
+            if (write) return write.type === `delete` ? undefined : write.value
           }
           return this.state.syncedCollectionMetadata.get(key)
         },
         set: (key, value) => {
           if (!isCurrentSync()) return
-          const pendingTransaction = this.getActivePendingSyncTransaction()
-          pendingTransaction.collectionMetadataWrites.set(key, {
-            type: `set`,
-            value,
-          })
+          this.getActivePendingSyncTransaction().collectionMetadataWrites.set(
+            key,
+            { type: `set`, value },
+          )
         },
         delete: (key) => {
           if (!isCurrentSync()) return
-          const pendingTransaction = this.getActivePendingSyncTransaction()
-          pendingTransaction.collectionMetadataWrites.set(key, {
-            type: `delete`,
-          })
+          this.getActivePendingSyncTransaction().collectionMetadataWrites.set(
+            key,
+            { type: `delete` },
+          )
         },
         list: (prefix) => {
           if (!isCurrentSync()) return []
+          // Every pending transaction applies over applied state, oldest
+          // first, so the newest write for each key wins.
           const merged = new Map(this.state.syncedCollectionMetadata)
-          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
-          if (pendingTransaction) {
-            for (const [
-              key,
-              pendingWrite,
-            ] of pendingTransaction.collectionMetadataWrites) {
-              if (pendingWrite.type === `delete`) {
-                merged.delete(key)
-              } else {
-                merged.set(key, pendingWrite.value)
-              }
+          for (const transaction of this.state.pendingSyncedTransactions) {
+            if (transaction.invalidationError !== undefined) continue
+            for (const [key, write] of transaction.collectionMetadataWrites) {
+              if (write.type === `delete`) merged.delete(key)
+              else merged.set(key, write.value)
             }
           }
 

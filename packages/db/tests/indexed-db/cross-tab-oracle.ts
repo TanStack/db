@@ -1,3 +1,4 @@
+import { declareOracle } from '../oracle-declaration.js'
 /**
  * Independent cross-tab publication model.
  *
@@ -54,7 +55,6 @@ export function plain(row: OracleRow): OracleRow {
     $key: _key,
     $origin: _origin,
     $hasPendingWrites: _pending,
-    $synced: _synced,
     $collectionId: _id,
     ...value
   } = row as OracleRow & Record<string, unknown>
@@ -254,3 +254,13 @@ export function assertReplay(record: ReplayRecord) {
       record,
     )
 }
+
+declareOracle({
+  check: [
+    assertSnapshot,
+    assertStatuses,
+    assertPublicationHistory,
+    assertReplay,
+  ],
+  model: [CrossTabModel],
+})

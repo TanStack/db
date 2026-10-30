@@ -288,7 +288,7 @@ async function receiptHistory(
       // Accepted work is no longer cancelable; even the canceled caller owes
       // its visibility before settlement, while the shared peer must succeed.
       release()
-      await blocker.isPersisted.promise
+      await blocker.when('settled')
       await turns()
       if (errors.length) throw errors[0]
       expect(shared.outcome).toBe(`success`)
@@ -313,7 +313,7 @@ async function receiptHistory(
         `visible facts hid a held establishing receipt`,
       ).toBeUndefined()
       release()
-      await secondBlocker.isPersisted.promise
+      await secondBlocker.when('settled')
       await turns()
       if (errors.length) throw errors[0]
       expect(same.outcome).toBe(`success`)

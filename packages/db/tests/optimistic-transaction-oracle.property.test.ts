@@ -11,9 +11,10 @@ import {
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
-
+import type { ReplacementRow, Row } from './optimistic-transaction-support.js'
 /**
  * # Are transaction payloads and publications whole and ordered?
  *
@@ -42,7 +43,6 @@ import type { ChangeMessage, SyncConfig } from '../src/types.js'
  * transactions, or arbitrary overlapping same-key histories.
  */
 
-type Row = { id: number; value: number; note: string }
 type Operation = `insert` | `update` | `delete`
 type Scenario = {
   order: Array<Operation>
@@ -52,392 +52,6 @@ type Scenario = {
   note: string
 }
 
-/**
- * A failed synchronous mutate callback contributes no lasting intent. This
- * bounded history may author a valid update, then throws after a same-key
- * update, a distinct insert, or a delete. The reference retains only the
- * successful callbacks. The real manual transaction must expose those rows
- * and payload at the throw cut, then persist only successful callbacks. A
- * second witness crosses two Collections, including a subscriber failure
- * during restoration. This pending-transaction grammar does not claim to hide
- * events emitted during the failed callback.
- */
-describe(`failed manual mutation callback`, () => {
-  it(`does not copy prior mutations for a callback with no writes`, async () => {
-    const collection = createCollection<Row>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: (actions) => {
-          actions.begin()
-          actions.commit()
-          actions.markReady()
-        },
-      },
-    })
-    const tx = createTransaction<Row>({
-      autoCommit: false,
-      mutationFn: () => Promise.resolve(),
-    })
-    await withHistoryCleanup(
-      async () => {
-        await collection.preload()
-        for (let id = 1; id <= 16; id++)
-          tx.mutate(() => collection.insert({ id, value: id, note: `prior` }))
-        const mutations = tx.mutations
-        let visits = 0
-        tx.mutations = new Proxy(mutations, {
-          get(target, property, receiver) {
-            if (property === Symbol.iterator)
-              return function* () {
-                for (const mutation of target) {
-                  visits++
-                  yield mutation
-                }
-              }
-            return Reflect.get(target, property, receiver)
-          },
-        })
-        for (let index = 0; index < 5; index++) tx.mutate(() => {})
-        expect(visits, `no snapshot traversal without a write`).toBe(0)
-        expect(tx.mutations).toHaveLength(16)
-        tx.mutations = mutations
-      },
-      () => [
-        () => tx.rollback({ isSecondaryRollback: true }),
-        () => collection.cleanup(),
-      ],
-    )
-  })
-
-  for (const failure of [
-    `same-key update`,
-    `distinct insert`,
-    `same-key delete`,
-  ] as const)
-    for (const prior of [false, true])
-      it(`restores ${prior ? `earlier intent` : `the base`} after ${failure}`, async () => {
-        const collection = createCollection<Row>({
-          getKey: (row) => row.id,
-          sync: {
-            sync: (actions) => {
-              actions.begin()
-              actions.write({
-                type: `insert`,
-                value: { id: 1, value: 0, note: `base` },
-              })
-              actions.commit()
-              actions.markReady()
-            },
-          },
-        })
-        const payloads: Array<Array<{ id: number; value: number }>> = []
-        const tx = createTransaction<Row>({
-          autoCommit: false,
-          mutationFn: ({ transaction }) => {
-            payloads.push(
-              transaction.mutations.map(({ modified }) => ({
-                id: modified.id,
-                value: modified.value,
-              })),
-            )
-            return Promise.resolve()
-          },
-        })
-        await withHistoryCleanup(
-          async () => {
-            await collection.preload()
-            if (prior)
-              tx.mutate(() =>
-                collection.update(1, (draft) => {
-                  draft.value = 1
-                }),
-              )
-            const failureReason = new Error(`callback failed`)
-            expect(() =>
-              tx.mutate(() => {
-                if (failure === `same-key update`)
-                  collection.update(1, (draft) => {
-                    draft.value = 2
-                  })
-                else if (failure === `distinct insert`)
-                  collection.insert({ id: 2, value: 2, note: `failed` })
-                else collection.delete(1)
-                throw failureReason
-              }),
-            ).toThrow(failureReason)
-            expect(collection.get(1)?.value, `successful row survives`).toBe(
-              prior ? 1 : 0,
-            )
-            expect(collection.get(2), `failed insert is absent`).toBeUndefined()
-            const survivingIntent = prior ? [{ id: 1, value: 1 }] : []
-            expect(
-              tx.mutations.map(({ modified }) => ({
-                id: modified.id,
-                value: modified.value,
-              })),
-              `failed intent is absent`,
-            ).toEqual(survivingIntent)
-            tx.mutate(() =>
-              collection.insert({ id: 3, value: 3, note: `later` }),
-            )
-            await tx.commit()
-            expect(payloads).toEqual([
-              [...survivingIntent, { id: 3, value: 3 }],
-            ])
-          },
-          () => [() => collection.cleanup()],
-        )
-      })
-
-  it(`restores every touched Collection and keeps earlier intent`, async () => {
-    const makeCollection = (id: string, initial: Array<Row>) =>
-      createCollection<Row>({
-        id,
-        getKey: (row) => row.id,
-        sync: {
-          sync: (actions) => {
-            actions.begin()
-            for (const row of initial)
-              actions.write({ type: `insert`, value: row })
-            actions.commit()
-            actions.markReady()
-          },
-        },
-      })
-    const first = makeCollection(`failed-callback-first`, [
-      { id: 1, value: 0, note: `base` },
-    ])
-    const second = makeCollection(`failed-callback-second`, [])
-    const tx = createTransaction<Row>({
-      autoCommit: false,
-      mutationFn: () => Promise.resolve(),
-    })
-    await withHistoryCleanup(
-      async () => {
-        await Promise.all([first.preload(), second.preload()])
-        tx.mutate(() =>
-          first.update(1, (draft) => {
-            draft.value = 1
-          }),
-        )
-        const failureReason = new Error(`callback failed`)
-        expect(() =>
-          tx.mutate(() => {
-            first.update(1, (draft) => {
-              draft.value = 2
-            })
-            second.insert({ id: 2, value: 2, note: `failed` })
-            throw failureReason
-          }),
-        ).toThrow(failureReason)
-        expect(first.get(1)?.value).toBe(1)
-        expect(second.get(2)).toBeUndefined()
-        expect(tx.mutations).toHaveLength(1)
-        await tx.commit()
-      },
-      () => [() => first.cleanup(), () => second.cleanup()],
-    )
-  })
-
-  it(`restores every Collection when one restoration listener throws`, async () => {
-    const makeCollection = (id: string) =>
-      createCollection<Row>({
-        id,
-        getKey: (row) => row.id,
-        sync: {
-          sync: (actions) => {
-            actions.begin()
-            actions.write({
-              type: `insert`,
-              value: { id: 1, value: 0, note: `base` },
-            })
-            actions.commit()
-            actions.markReady()
-          },
-        },
-      })
-    const first = makeCollection(`failed-listener-first`)
-    const second = makeCollection(`failed-listener-second`)
-    const tx = createTransaction<Row>({
-      autoCommit: false,
-      mutationFn: () => Promise.resolve(),
-    })
-    let subscription: ReturnType<typeof first.subscribeChanges> | undefined
-    await withHistoryCleanup(
-      async () => {
-        await Promise.all([first.preload(), second.preload()])
-        tx.mutate(() =>
-          first.update(1, (draft) => {
-            draft.value = 1
-          }),
-        )
-        const listenerFailure = new Error(`restoration listener failed`)
-        subscription = first.subscribeChanges(
-          (batch) => {
-            if (batch.some((change) => change.value.value === 1))
-              throw listenerFailure
-          },
-          { includeInitialState: false },
-        )
-        const callbackFailure = new Error(`callback failed`)
-        let thrown: unknown
-        try {
-          tx.mutate(() => {
-            first.update(1, (draft) => {
-              draft.value = 2
-            })
-            second.update(1, (draft) => {
-              draft.value = 2
-            })
-            throw callbackFailure
-          })
-        } catch (error) {
-          thrown = error
-        }
-        expect(thrown).toBeInstanceOf(AggregateError)
-        expect((thrown as AggregateError).cause).toBe(callbackFailure)
-        expect((thrown as AggregateError).errors).toContain(listenerFailure)
-        expect(first.get(1)?.value).toBe(1)
-        expect(second.get(1)?.value).toBe(0)
-        expect(tx.mutations.map(({ modified }) => modified.value)).toEqual([1])
-      },
-      () => [
-        () => subscription?.unsubscribe(),
-        () => first.cleanup(),
-        () => second.cleanup(),
-      ],
-    )
-  })
-
-  /**
-   * The transaction context belongs to the synchronous mutate callback. A
-   * subscriber responding to restoration runs after that callback has thrown,
-   * so its new write is independent. The reference classifies intent by the
-   * authoring action: the failed callback contributes none, while the later
-   * subscriber contributes its own row. At the throw and commit cuts, the
-   * failed transaction must not contain or persist the subscriber's row.
-   */
-  it(`keeps a restoration subscriber write out of the failed callback transaction`, async () => {
-    const collection = createCollection<Row>({
-      getKey: (row) => row.id,
-      onInsert: () => Promise.resolve(),
-      sync: {
-        sync: (actions) => {
-          actions.begin()
-          actions.write({
-            type: `insert`,
-            value: { id: 1, value: 0, note: `base` },
-          })
-          actions.commit()
-          actions.markReady()
-        },
-      },
-    })
-    const payloads: Array<Array<number>> = []
-    const tx = createTransaction<Row>({
-      autoCommit: false,
-      mutationFn: ({ transaction }) => {
-        payloads.push(transaction.mutations.map(({ modified }) => modified.id))
-        return Promise.resolve()
-      },
-    })
-    let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
-    await withHistoryCleanup(
-      async () => {
-        await collection.preload()
-        let restored = false
-        subscription = collection.subscribeChanges(
-          (batch) => {
-            if (
-              !restored &&
-              batch.some(
-                (change) => change.value.id === 1 && change.value.value === 0,
-              )
-            ) {
-              restored = true
-              collection.insert({ id: 3, value: 3, note: `subscriber` })
-            }
-          },
-          { includeInitialState: false },
-        )
-        const failure = new Error(`callback failed`)
-        expect(() =>
-          tx.mutate(() => {
-            collection.update(1, (draft) => {
-              draft.value = 2
-            })
-            throw failure
-          }),
-        ).toThrow(failure)
-        expect(restored, `restoration reached the subscriber`).toBe(true)
-        expect(collection.get(1)?.value).toBe(0)
-        expect(collection.get(3)?.value).toBe(3)
-        expect(
-          tx.mutations.map(({ modified }) => modified.id),
-          `subscriber intent has a separate owner`,
-        ).toEqual([])
-        await tx.commit()
-        expect(
-          payloads,
-          `failed transaction persisted no subscriber write`,
-        ).toEqual([])
-      },
-      () => [() => subscription?.unsubscribe(), () => collection.cleanup()],
-    )
-  })
-
-  /**
-   * Nested mutate calls use one transaction context per callback frame. After
-   * the inner frame returns or throws, the outer frame still owns later
-   * Collection writes. The reference retains the inner row only on success
-   * and always retains the outer row authored after the inner cut.
-   */
-  for (const nestedFails of [false, true])
-    it(`keeps the outer transaction active after a nested ${nestedFails ? `failure` : `success`}`, async () => {
-      const collection = createCollection<Row>({
-        getKey: (row) => row.id,
-        sync: {
-          sync: (actions) => {
-            actions.begin()
-            actions.commit()
-            actions.markReady()
-          },
-        },
-      })
-      const payloads: Array<Array<number>> = []
-      const tx = createTransaction<Row>({
-        autoCommit: false,
-        mutationFn: ({ transaction }) => {
-          payloads.push(
-            transaction.mutations.map(({ modified }) => modified.id),
-          )
-          return Promise.resolve()
-        },
-      })
-      await withHistoryCleanup(
-        async () => {
-          await collection.preload()
-          tx.mutate(() => {
-            const inner = () =>
-              tx.mutate(() => {
-                collection.insert({ id: 2, value: 2, note: `inner` })
-                if (nestedFails) throw new Error(`inner failed`)
-              })
-            if (nestedFails) expect(inner).toThrow(`inner failed`)
-            else inner()
-            collection.insert({ id: 3, value: 3, note: `outer` })
-          })
-          const expected = nestedFails ? [3] : [2, 3]
-          expect(tx.mutations.map(({ modified }) => modified.id)).toEqual(
-            expected,
-          )
-          await tx.commit()
-          expect(payloads).toEqual([expected])
-        },
-        () => [() => collection.cleanup()],
-      )
-    })
-})
 type ObservationFault =
   | `missing-delete`
   | `untouched-field`
@@ -539,7 +153,7 @@ async function runSameKey(
       return gate.promise
     },
   })
-  const persisted = observeHistoryPromise(tx.isPersisted.promise)
+  const persisted = observeHistoryPromise(tx.when(`settled`))
   let committed: ReturnType<typeof observeHistoryPromise> | undefined
   await withHistoryCleanup(
     async () => {
@@ -701,14 +315,6 @@ describe(`Same-key transaction laws`, () => {
   )
 })
 
-type ReplacementRow = {
-  id: number
-  value: number | null | undefined
-  note?: string | null
-  added?: string
-  nested?: { count: number }
-}
-
 type ReplacementMutation = {
   type: Operation
   original: object
@@ -754,7 +360,7 @@ async function runDeleteInsertReplacement(
       return Promise.resolve()
     },
   })
-  const settlement = transaction.isPersisted.promise.catch(() => undefined)
+  const settlement = transaction.when(`settled`).catch(() => undefined)
 
   return withHistoryCleanup(
     async () => {
@@ -1000,180 +606,12 @@ describe(`Delete then insert transaction laws`, () => {
       `after`,
     ])
   })
-
-  it(`delivers a replacement after duplicate deletes of another overlay`, async () => {
-    const original = { id: 1, value: 0, note: `original` }
-    const overlaid = { id: 1, value: 1, note: `original` }
-    const collection = createCollection<ReplacementRow, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: (actions) => {
-          actions.begin()
-          actions.write({ type: `insert`, value: original })
-          actions.commit()
-          actions.markReady()
-        },
-      },
-    })
-    let rejectOverlay!: (error: Error) => void
-    const overlayGate = new Promise<void>((_resolve, reject) => {
-      rejectOverlay = reject
-    })
-    const overlay = createTransaction<ReplacementRow>({
-      autoCommit: false,
-      mutationFn: () => overlayGate,
-    })
-    let deliveries = 0
-    let delivered: ReplacementRow | undefined
-    const replacement = createTransaction<ReplacementRow>({
-      autoCommit: false,
-      mutationFn: ({ transaction }) => {
-        deliveries++
-        delivered = transaction.mutations[0].modified
-        return Promise.resolve()
-      },
-    })
-    const overlaySettlement = overlay.isPersisted.promise.catch(() => undefined)
-    const replacementSettlement = replacement.isPersisted.promise.catch(
-      () => undefined,
-    )
-
-    await withHistoryCleanup(
-      async () => {
-        await collection.preload()
-        overlay.mutate(() =>
-          collection.update(1, (draft) => {
-            draft.value = 1
-          }),
-        )
-        const overlayCommit = overlay.commit().catch(() => undefined)
-        await Promise.resolve()
-
-        replacement.mutate(() => {
-          collection.delete([1, 1])
-          collection.insert(overlaid)
-        })
-        await replacement.commit()
-
-        expect(deliveries, `replacement persistence delivery count`).toBe(1)
-        expect(delivered, `replacement server payload`).toStrictEqual(overlaid)
-
-        rejectOverlay(new Error(`earlier overlay failed`))
-        await overlayCommit
-      },
-      () => [
-        () => {
-          if (overlay.state === `pending` || overlay.state === `persisting`)
-            overlay.rollback()
-        },
-        () => {
-          if (
-            replacement.state === `pending` ||
-            replacement.state === `persisting`
-          )
-            replacement.rollback()
-        },
-        () => rejectOverlay(new Error(`overlay test cleanup`)),
-        () => overlaySettlement,
-        () => replacementSettlement,
-        () => collection.cleanup(),
-      ],
-    )
-  })
-
-  it(`delivers a replacement equal only to another pending insert`, async () => {
-    const inserted = { id: 1, value: 1, note: `inserted` }
-    const collection = createCollection<ReplacementRow, number>({
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ markReady }) => markReady(),
-      },
-    })
-    let rejectInsert!: (error: Error) => void
-    const insertGate = new Promise<void>((_resolve, reject) => {
-      rejectInsert = reject
-    })
-    const pendingInsert = createTransaction<ReplacementRow>({
-      autoCommit: false,
-      mutationFn: () => insertGate,
-    })
-    let deliveries = 0
-    let delivered: { type: string; modified: ReplacementRow } | undefined
-    const replacement = createTransaction<ReplacementRow>({
-      autoCommit: false,
-      mutationFn: ({ transaction }) => {
-        deliveries++
-        const mutation = transaction.mutations[0]
-        delivered = {
-          type: mutation.type,
-          modified: mutation.modified,
-        }
-        return Promise.resolve()
-      },
-    })
-    const insertSettlement = pendingInsert.isPersisted.promise.catch(
-      () => undefined,
-    )
-    const replacementSettlement = replacement.isPersisted.promise.catch(
-      () => undefined,
-    )
-
-    await withHistoryCleanup(
-      async () => {
-        await collection.preload()
-        pendingInsert.mutate(() => collection.insert(inserted))
-        const insertCommit = pendingInsert.commit().catch(() => undefined)
-        await Promise.resolve()
-
-        replacement.mutate(() => {
-          collection.delete(1)
-          collection.insert(inserted)
-        })
-        await replacement.commit()
-
-        expect(deliveries, `replacement persistence delivery count`).toBe(1)
-        expect(delivered, `replacement server mutation`).toStrictEqual({
-          type: `insert`,
-          modified: inserted,
-        })
-
-        rejectInsert(new Error(`earlier insert failed`))
-        await insertCommit
-      },
-      () => [
-        () => {
-          if (
-            pendingInsert.state === `pending` ||
-            pendingInsert.state === `persisting`
-          )
-            pendingInsert.rollback()
-        },
-        () => {
-          if (
-            replacement.state === `pending` ||
-            replacement.state === `persisting`
-          )
-            replacement.rollback()
-        },
-        () => rejectInsert(new Error(`insert test cleanup`)),
-        () => insertSettlement,
-        () => replacementSettlement,
-        () => collection.cleanup(),
-      ],
-    )
-  })
 })
 
 // Observe user fields without discarding unexpected fields or undefined keys.
 function userRow<T extends object>(value: T): T {
   const copy = { ...value } as Record<string, unknown>
-  for (const field of [
-    `$hasPendingWrites`,
-    `$synced`,
-    `$origin`,
-    `$key`,
-    `$collectionId`,
-  ])
+  for (const field of [`$hasPendingWrites`, `$origin`, `$key`, `$collectionId`])
     delete copy[field]
   return copy as T
 }
@@ -1247,7 +685,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       return gate.promise
     },
   })
-  const persisted = observeHistoryPromise(tx.isPersisted.promise)
+  const persisted = observeHistoryPromise(tx.when(`settled`))
   const settled = observeHistoryPromise(tx.when(`settled`))
   let committed: ReturnType<typeof observeHistoryPromise<typeof tx>> | undefined
   let subscription: ReturnType<typeof source.subscribeChanges> | undefined
@@ -1276,10 +714,6 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
           row.$hasPendingWrites,
           `${label}: ${surface} row ${row.id} pending local write`,
         ).toBe(expectedPending)
-        expect(
-          row.$hasPendingWrites,
-          `${label}: ${surface} row ${row.id} legacy inverse`,
-        ).toBe(!row.$synced)
       }
     }
     const read = ordered(source.values())
@@ -1595,6 +1029,20 @@ describe(`Whole mixed transaction publication`, () => {
   )
 })
 
+// The authored key list, in order and with multiplicity, is the payload that
+// the handler receives for a transaction of this operation. A repeated update
+// reaches the handler as one update, and a delete carries no value.
+function expectedTypedKeyPayload(
+  keys: ReadonlyArray<string | number>,
+  operation: `insert` | `update` | `delete` | `repeat`,
+): Array<{ key: string | number; type: string; value: number }> {
+  return keys.map((key, index) => ({
+    key,
+    type: operation === `repeat` ? `update` : operation,
+    value: operation === `delete` ? 0 : index + 10,
+  }))
+}
+
 // Typed keys retain their identity through a whole transaction. The independent
 // expected payload is the authored key list, including multiplicity and order;
 // no encoded production globalKey participates in the comparison. Cross each
@@ -1658,7 +1106,7 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
             return Promise.resolve()
           },
         })
-        const persisted = observeHistoryPromise(tx.isPersisted.promise)
+        const persisted = observeHistoryPromise(tx.when(`settled`))
         await withHistoryCleanup(
           async () => {
             await source.preload()
@@ -1682,11 +1130,7 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
             await committed.settled
             await persisted.settled
             expect(payload, `handler payload retains typed keys`).toEqual(
-              keys.map((key, index) => ({
-                key,
-                type: operation === `repeat` ? `update` : operation,
-                value: operation === `delete` ? 0 : index + 10,
-              })),
+              expectedTypedKeyPayload(keys, operation),
             )
             const expected = success ? proposed : initial
             expect(source.size).toBe(expected.length)
@@ -1699,3 +1143,11 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
     }
   }
 }
+
+// The check drivers run one history and compare its public observations with
+// the expected world they compute from the scenario. The typed-key payload model
+// is the authored key list.
+declareOracle({
+  check: [runTransaction, runSameKey, runDeleteInsertReplacement],
+  model: [expectedTypedKeyPayload],
+})

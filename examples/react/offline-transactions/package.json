@@ -8,18 +8,18 @@
     "build": "vite build && tsc --noEmit"
   },
   "dependencies": {
-    "@tanstack/browser-db-sqlite-persistence": "^0.2.37",
-    "@tanstack/db": "^0.15.2",
-    "@tanstack/offline-transactions": "^1.1.4",
-    "@tanstack/query-db-collection": "^1.4.8",
-    "@tanstack/react-db": "^0.5.12",
+    "@tanstack/browser-db-sqlite-persistence": "^1.0.0-rc.1",
+    "@tanstack/db": "^1.0.0-rc.1",
+    "@tanstack/offline-transactions": "^1.2.0",
+    "@tanstack/query-db-collection": "^1.5.0",
+    "@tanstack/react-db": "^1.0.0-rc.1",
     "@tanstack/react-query": "^5.90.20",
     "@tanstack/react-router": "^1.170.41",
     "@tanstack/react-router-devtools": "^1.159.5",
     "@tanstack/react-start": "^1.168.60",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -30,7 +30,7 @@
     "chokidar": "^5.0.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.2",
-    "vite": "^7.3.0",
+    "vite": "^7.3.7",
     "vite-tsconfig-paths": "^5.1.4"
   }
 }

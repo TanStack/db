@@ -583,7 +583,7 @@ describe(`Collection with schema validation`, () => {
         .array(z.string())
         .transform((val) => val.map((tag) => tag.toLowerCase())),
       metadata: z
-        .record(z.string())
+        .record(z.string(), z.string())
         .transform((val) => ({ ...val, processed: true })),
     })
 
@@ -655,9 +655,9 @@ describe(`Collection with schema validation`, () => {
         .transform((val) => val.map((tag) => tag.toLowerCase())),
       metadata: z
         .union([
-          z.record(z.string()),
+          z.record(z.string(), z.string()),
           z
-            .record(z.string())
+            .record(z.string(), z.string())
             .transform((val) => ({ ...val, processed: true })),
         ])
         .transform((val) => ({ ...val, processed: true })),

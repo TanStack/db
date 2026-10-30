@@ -20,7 +20,7 @@ import type { OfflineTransaction, TransactionSignaler } from '../src/types'
  *
  * - One offline transaction is one transaction: repeated `mutate()` calls
  *   add to it, so every written row stays visible and no id is reused.
- * - A restoration transaction that completes also settles `isPersisted`, as
+ * - A restoration transaction that completes also settles `when('settled')`, as
  *   every settled transaction does.
  * - A restoration that cannot track every Collection it wrote leaves no
  *   Collection tracking it, so no restored row outlives its owner.
@@ -89,7 +89,7 @@ it(`rejects a mutate() call after an auto-committed one`, async () => {
   expect(first.mutations.map((mutation) => mutation.key)).toEqual([`a`])
   expect(env.collection.get(`a`)?.value).toBe(`first`)
   expect(env.collection.get(`b`)).toBeUndefined()
-  await first.isPersisted.promise
+  await first.when(`settled`)
   env.executor.dispose()
 })
 
@@ -131,7 +131,7 @@ it(`settles a restoration transaction when its offline transaction completes`, a
   const restorationTx = tracked[0]!
 
   let settled = false
-  void restorationTx.isPersisted.promise.then(() => {
+  void restorationTx.when(`settled`).then(() => {
     settled = true
   })
   release()

@@ -81,10 +81,12 @@ async function valuePeer(name: string) {
         const pending =
           entry === 'import'
             ? c.utils.importData([row])
-            : c.update(1, (draft) => {
-                draft.name = row.name
-                draft.nested = row.nested
-              }).isPersisted.promise
+            : c
+                .update(1, (draft) => {
+                  draft.name = row.name
+                  draft.nested = row.nested
+                })
+                .when(`settled`)
         // Attach rejection immediately so failure cannot become an unhandled event
         // while the oracle records the deliberately held native boundary.
         const done = pending.then(
@@ -139,7 +141,7 @@ async function valuePeer(name: string) {
         })
         const immediate = c.get(1)!
         bytes.fill(99)
-        await tx.isPersisted.promise
+        await tx.when(`settled`)
         function observe(row: ValueRow) {
           const copy = row.nested.value as typeof value
           return {
@@ -167,16 +169,20 @@ async function valuePeer(name: string) {
       exported: await observeValueRows(await c.utils.exportData()),
     }),
     insert: async (kind: ValueKind) => {
-      await c.insert({
-        id: 1,
-        name: 'initial',
-        nested: { value: createValue(kind) },
-      }).isPersisted.promise
+      await c
+        .insert({
+          id: 1,
+          name: 'initial',
+          nested: { value: createValue(kind) },
+        })
+        .when(`settled`)
     },
     update: async () => {
-      await c.update(1, (draft) => {
-        draft.name = 'updated'
-      }).isPersisted.promise
+      await c
+        .update(1, (draft) => {
+          draft.name = 'updated'
+        })
+        .when(`settled`)
     },
     replace: async () => {
       const rows = await c.utils.exportData()
@@ -196,7 +202,7 @@ async function valuePeer(name: string) {
         },
       }))
       try {
-        if (entry === 'insert') await c.insert(rows).isPersisted.promise
+        if (entry === 'insert') await c.insert(rows).when(`settled`)
         else await c.utils.importData(rows)
         return 'fulfilled'
       } catch {
@@ -264,7 +270,7 @@ async function initialize(name: string, shared: boolean, store: string) {
     nested: { value: id },
   }))
   await Promise.all(
-    collections.map((c, index) => c.insert(rows[index]!).isPersisted.promise),
+    collections.map((c, index) => c.insert(rows[index]!).when(`settled`)),
   )
   return {
     evidence: { admission, schema, initialVersions, held, restored },

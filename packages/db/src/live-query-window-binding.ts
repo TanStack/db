@@ -67,12 +67,10 @@ export function readLiveQueryWindowPageShape(config: {
  *
  * - `identity`: when its identity dependencies change by structure, as for a
  *   derived query identity or a `queryKey`.
- * - `dependencies`: when a dependency changes by reference, as for a
- *   dependency list.
  * - `always`: on every update, as for a reactive rerun, which happens only
  *   when something the query reads changed.
  */
-export type LiveQueryWindowRecompile = `identity` | `dependencies` | `always`
+export type LiveQueryWindowRecompile = `identity` | `always`
 
 export interface LiveQueryWindowUpdate extends LiveQueryWindowPageShape {
   /**

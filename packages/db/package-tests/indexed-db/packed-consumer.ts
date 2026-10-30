@@ -42,8 +42,8 @@ export async function run(factory) {
   const collection = make(db)
   try {
     await collection.preload()
-    await collection.insert({ id: 1, name: 'inserted' }).isPersisted.promise
-    await collection.update(1, draft => { draft.name = 'updated' }).isPersisted.promise
+    await collection.insert({ id: 1, name: 'inserted' }).when('settled')
+    await collection.update(1, draft => { draft.name = 'updated' }).when('settled')
   } finally { await collection.cleanup(); db.close() }
   const reopened = await open()
   const restored = make(reopened)

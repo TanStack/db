@@ -208,7 +208,7 @@ try {
   insert = async (row) => {
     try {
       const transaction = collection.insert(row)
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       insertAcknowledged = true
     } catch (error) {
       failure = failureMessage(error)

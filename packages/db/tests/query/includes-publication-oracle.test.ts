@@ -12,6 +12,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
@@ -515,13 +516,13 @@ function createPublicationDriver(
         if (action.type === `optimisticConfirm`) {
           context.sources.parents.write(`update`, next)
           context.sources.parents.resolveSync()
-          await transaction.isPersisted.promise
+          await transaction.when(`settled`)
         } else {
           const beforeRollbackCallbacks = context.callbacks.length
           context.model.parents.set(previous.id, previous)
           await settleRollback(
             context.sources.parents.rejectSync,
-            transaction.isPersisted.promise,
+            transaction.when(`settled`),
           )
           checkpointWithCallbackReach(beforeRollbackCallbacks)
         }
@@ -562,6 +563,28 @@ async function expectPublicationMatches(
     projection: publicationProjection,
   })
 }
+
+/**
+ * The held include reference sorts the authoritative source rows by rank and
+ * attaches child 10 to root 1. Only the source publication after repair may
+ * change the public snapshot, so this reference has no optimistic overlay.
+ */
+function expectedHeldPublicationRows(
+  sourceRows: ReadonlyMap<number, { id: number; rank: number; value: string }>,
+): Array<{ id: number; value: string; children: Array<number> }> {
+  return [...sourceRows.values()]
+    .sort((left, right) => left.rank - right.rank)
+    .map(({ id, value }) => ({
+      id,
+      value,
+      children: id === 1 ? [10] : [],
+    }))
+}
+
+declareOracle({
+  check: [expectPublicationMatches],
+  model: [recomputeRows, expectedHeldPublicationRows],
+})
 
 const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
@@ -932,15 +955,6 @@ describe(`held include publication`, () => {
         [1, { id: 1, rank: 1, value: `A` }],
         [2, { id: 2, rank: 2, value: `X` }],
       ])
-      const expectedRows = () =>
-        [...sourceRows.values()]
-          .sort((left, right) => left.rank - right.rank)
-          .map(({ id, value }) => ({
-            id,
-            value,
-            children: id === 1 ? [10] : [],
-          }))
-
       let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       let holdRepair = false
       const held: Array<() => void> = []
@@ -1054,7 +1068,7 @@ describe(`held include publication`, () => {
           })
           await flushPromises()
           const before = snapshot()
-          expect(before).toEqual(expectedRows())
+          expect(before).toEqual(expectedHeldPublicationRows(sourceRows))
           const subscription = query.subscribeChanges(
             (changes) => {
               callbacks.push({
@@ -1093,7 +1107,7 @@ describe(`held include publication`, () => {
           holdRepair = false
           for (const release of held.splice(0)) release()
           await flushPromises()
-          const after = expectedRows()
+          const after = expectedHeldPublicationRows(sourceRows)
           expect(snapshot()).toEqual(after)
           expect(callbacks).toEqual([
             {

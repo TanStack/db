@@ -8,6 +8,7 @@
  */
 import { Temporal } from 'temporal-polyfill'
 import { IR } from '@tanstack/db'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 export { Temporal }
 
@@ -180,3 +181,5 @@ export function temporalQueryCases(family: TemporalFamily) {
     },
   ]
 }
+
+declareOracle({ model: [temporalQueryCases] })

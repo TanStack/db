@@ -10,7 +10,10 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { TopKRelation } from './topk-relation-oracle.js'
+
+declareOracle({ check: [TopKRelation] })
 
 /**
  * A top-K window selects support from a signed, typed-key relation.

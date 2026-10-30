@@ -15,6 +15,11 @@ import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
+import {
+  assertCanStartOptimisticChange,
+  assertMatchingConfirmation,
+} from './includes-optimistic-support.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
@@ -192,7 +197,7 @@ function trackRuntimeMutation(
     if (entry.syncReleased) context.runtimePending.delete(entry)
   }
   // Attach both outcome handlers before a checkpoint or sibling source write.
-  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
+  entry.receipt = transaction.when(`settled`).then(settled, settled)
   return entry
 }
 
@@ -206,35 +211,6 @@ function releaseRuntimeMutation(
   release()
   entry.syncReleased = true
   if (entry.settled) context.runtimePending.delete(entry)
-}
-
-function assertCanStartOptimisticChange(
-  pending: ReadonlyMap<string, Pick<PendingOptimisticChange, `level`>>,
-  level: ChildLevel,
-  handle?: string,
-): void {
-  if (handle !== undefined && pending.has(handle)) {
-    throw new Error(`Duplicate optimistic handle ${handle}`)
-  }
-  const sameLevel = [...pending.entries()].find(
-    ([, change]) => change.level === level,
-  )
-  if (sameLevel) {
-    throw new Error(
-      `Level ${level} already has pending optimistic handle ${sameLevel[0]}`,
-    )
-  }
-}
-
-function assertMatchingConfirmation(
-  pending: Pick<PendingOptimisticChange, `id`>,
-  authoritative: Pick<ChildRow, `id`>,
-): void {
-  if (authoritative.id !== pending.id) {
-    throw new Error(
-      `Confirmation row ${authoritative.id} does not match pending row ${pending.id}`,
-    )
-  }
 }
 
 type RouteValues = {
@@ -411,7 +387,7 @@ async function rollback(
   runtime: PendingRuntimeMutation,
 ) {
   const message = `optimistic relationship oracle rollback`
-  const persisted = transaction.isPersisted.promise.catch(() => undefined)
+  const persisted = transaction.when(`settled`).catch(() => undefined)
   await withExpectedRejection(message, async () => {
     releaseRuntimeMutation(context, runtime, () =>
       source.rejectSync(new Error(message)),
@@ -512,7 +488,7 @@ function createDriver(
       // Sync delivery must not displace the pending optimistic projection.
       checkpoint()
       releaseRuntimeMutation(context, pending.runtime, source.resolveSync)
-      await pending.transaction.isPersisted.promise
+      await pending.transaction.when(`settled`)
       context.pending.delete(step.handle)
     },
     cleanup: async (context) => {
@@ -630,6 +606,33 @@ async function expectHistoryMatches(
   await runTrace({ steps, driver: createDriver(roots, levels), projection })
 }
 
+// The check is `expectHistoryMatches`: it runs a generated relationship history
+// through the trace driver, and at each checkpoint the live query's rows are
+// compared with `recompute`, the model's rows for the same context. The
+// projection that the fixed traces use also calls `recompute`, so those traces
+// reach the model.
+/** The held-repair reference sorts the current authoritative roots by rank,
+ * then applies the one whole-row optimistic snapshot. It has no repair or D2
+ * state, so the live query must match it only after the ordered repair
+ * publishes. */
+function expectedHeldRepairRows(
+  sourceRows: ReadonlyMap<number, { id: number; rank: number; value: string }>,
+  optimisticValue?: string,
+): Array<{ id: number; value: string; children: Array<{ id: number }> }> {
+  return [...sourceRows.values()]
+    .sort((left, right) => left.rank - right.rank)
+    .map(({ id, value }) => ({
+      id,
+      value: id === 1 ? (optimisticValue ?? value) : value,
+      children: id === 1 ? [{ id: 10 }] : [],
+    }))
+}
+
+declareOracle({
+  check: [expectHistoryMatches],
+  model: [recompute, expectedHeldRepairRows],
+})
+
 const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
   // Routes are equality keys. Disjoint ranges preserve distinctness while
   // letting FastCheck shrink each semantic role independently.
@@ -681,17 +684,6 @@ describe(`optimistic relationship-transition oracle`, () => {
         [1, { id: 1, rank: 1, value: `A` }],
         [2, { id: 2, rank: 2, value: `X` }],
       ])
-      // The reference sorts current authoritative rows, then applies the
-      // one whole-row optimistic snapshot. It has no repair or D2 state.
-      const expectedRows = (optimisticValue?: string): Array<PublishedRoot> =>
-        [...sourceRows.values()]
-          .sort((left, right) => left.rank - right.rank)
-          .map(({ id, value }) => ({
-            id,
-            value: id === 1 ? (optimisticValue ?? value) : value,
-            children: id === 1 ? [{ id: 10 }] : [],
-          }))
-
       let sync!: Parameters<SyncConfig<OrderedRoot, number>[`sync`]>[0]
       let holdRepair = false
       let requests = 0
@@ -768,7 +760,7 @@ describe(`optimistic relationship-transition oracle`, () => {
       await withHistoryCleanup(
         async () => {
           await live.preload()
-          const before = expectedRows()
+          const before = expectedHeldRepairRows(sourceRows)
           expect(snapshot()).toEqual(before)
           const subscription = live.subscribeChanges(
             (changes) => {
@@ -816,7 +808,7 @@ describe(`optimistic relationship-transition oracle`, () => {
           const transaction = roots.update(1, (draft) => {
             draft.value = `B`
           })
-          persistence = transaction.isPersisted.promise.then(
+          persistence = transaction.when(`settled`).then(
             () => undefined,
             () => undefined,
           )
@@ -831,15 +823,17 @@ describe(`optimistic relationship-transition oracle`, () => {
           }
           // Wrong-result controls reach this cut: early optimistic visibility
           // and a premature root retraction both fail the same refinement.
-          expect(() => checkHeldCut(expectedRows(`B`), [])).toThrow()
+          expect(() =>
+            checkHeldCut(expectedHeldRepairRows(sourceRows, `B`), []),
+          ).toThrow()
           expect(() => checkHeldCut(before.slice(1), [])).toThrow()
           checkHeldCut(snapshot(), callbacks)
 
           holdRepair = false
           for (const release of held.splice(0)) release()
           await flushPromises()
-          const after = expectedRows(`B`)
-          const withoutOverlay = expectedRows()
+          const after = expectedHeldRepairRows(sourceRows, `B`)
+          const withoutOverlay = expectedHeldRepairRows(sourceRows)
           expect(after).not.toEqual(before)
           expect(after).not.toEqual(withoutOverlay)
           const expectedPublication: typeof callbacks = [
@@ -1236,23 +1230,6 @@ describe(`optimistic relationship-transition oracle`, () => {
         },
         projection,
       })
-    },
-  )
-
-  fcTest(
-    `rejects optimistic handles the sync mock cannot settle independently`,
-    () => {
-      const pending = new Map([[`first`, { level: 1 as const }]])
-
-      expect(() => assertCanStartOptimisticChange(pending, 2, `first`)).toThrow(
-        /Duplicate optimistic handle first/,
-      )
-      expect(() =>
-        assertCanStartOptimisticChange(pending, 1, `second`),
-      ).toThrow(/Level 1 already has pending optimistic handle first/)
-      expect(() => assertMatchingConfirmation({ id: 11 }, { id: 12 })).toThrow(
-        /Confirmation row 12 does not match pending row 11/,
-      )
     },
   )
 

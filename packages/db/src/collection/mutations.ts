@@ -217,8 +217,7 @@ export class CollectionMutationsManager<
     try {
       direct.write(mutations)
     } finally {
-      transaction.setState(`completed`)
-      transaction.isPersisted.resolve(transaction)
+      transaction.completeWithoutCommit()
     }
     return transaction
   }
@@ -282,7 +281,7 @@ export class CollectionMutationsManager<
       }
       throw error
     }
-    // Errors still reject `isPersisted.promise`. This catch only prevents an
+    // Errors still reject `when('settled')`. This catch only prevents an
     // unhandled rejection from the fire-and-forget commit.
     transaction.commit().catch(() => undefined)
     return transaction
@@ -524,7 +523,7 @@ export class CollectionMutationsManager<
       const emptyTransaction = this.createTransaction({
         mutationFn: async () => {},
       })
-      // Errors still propagate through tx.isPersisted.promise; suppress the background commit from warning
+      // Errors still propagate through tx.when(`settled`); suppress the background commit from warning
       emptyTransaction.commit().catch(() => undefined)
       return emptyTransaction
     }

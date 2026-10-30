@@ -54,7 +54,7 @@ describe(`createOptimisticAction`, () => {
     })
 
     // Wait for the mutation to complete
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     // Verify mutationFn was called with the correct arguments
     expect(mutationFnMock).toHaveBeenCalledTimes(1)
@@ -149,7 +149,7 @@ describe(`createOptimisticAction`, () => {
     expect(stripVirtualProps(collection.get(`2`))).toEqual(todoData)
 
     // Wait for the mutation to complete
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     // Verify mutationFn was called with the correct arguments
     expect(mutationFnMock).toHaveBeenCalledTimes(1)
@@ -246,7 +246,7 @@ describe(`createOptimisticAction`, () => {
 
     // Wait for the transaction to complete (it will fail)
     try {
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       // Should not reach here
       expect(true).toBe(false)
     } catch (error) {

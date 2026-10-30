@@ -370,7 +370,7 @@ it(`resumes persisted sync after cleanup and restart`, async () => {
     title: `Before cleanup`,
     score: 1,
   })
-  await initialInsert.isPersisted.promise
+  await initialInsert.when(`settled`)
   expect(collection.get(`1`)?.title).toBe(`Before cleanup`)
 
   await collection.cleanup()
@@ -382,7 +382,7 @@ it(`resumes persisted sync after cleanup and restart`, async () => {
     title: `After restart`,
     score: 2,
   })
-  await resumedInsert.isPersisted.promise
+  await resumedInsert.when(`settled`)
   expect(collection.get(`2`)?.title).toBe(`After restart`)
 
   const persistedRows = await persistence.adapter.loadSubset(

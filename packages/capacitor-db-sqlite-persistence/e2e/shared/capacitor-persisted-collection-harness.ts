@@ -23,9 +23,7 @@ type PersistedCollectionHarness<T extends PersistableRow> = {
 }
 
 type PersistedTransactionHandle = {
-  isPersisted: {
-    promise: Promise<unknown>
-  }
+  when: (state: 'settled') => Promise<unknown>
 }
 
 type PersistenceFactory<TDatabase> = (
@@ -89,7 +87,7 @@ function createPersistedCollection<T extends PersistableRow, TDatabase>(
 async function waitForPersisted(
   transaction: PersistedTransactionHandle,
 ): Promise<void> {
-  await transaction.isPersisted.promise
+  await transaction.when(`settled`)
 }
 
 async function seedCollection<T extends PersistableRow>(

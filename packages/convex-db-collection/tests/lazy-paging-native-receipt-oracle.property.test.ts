@@ -152,7 +152,7 @@ async function nativeHistory(
     tx.mutate(() => f.source.insert({ id, rank: 10000, text: `overlay` }))
     return async () => {
       resolve()
-      await tx.isPersisted.promise
+      await tx.when('settled')
       await turns()
     }
   }

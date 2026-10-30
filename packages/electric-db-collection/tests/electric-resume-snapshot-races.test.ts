@@ -31,16 +31,18 @@ const mockSubscribe = vi.fn((subscriber: Subscriber) => {
 
 vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
-  ShapeStream: vi.fn(() => ({
-    subscribe: mockSubscribe,
-    unsubscribeAll: vi.fn(),
-    requestSnapshot: vi.fn(() => snapshotRequest?.() ?? Promise.resolve()),
-    fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
-    forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-    isUpToDate: false,
-    shapeHandle: `shape-current`,
-    lastOffset: `20_0`,
-  })),
+  ShapeStream: vi.fn(function () {
+    return {
+      subscribe: mockSubscribe,
+      unsubscribeAll: vi.fn(),
+      requestSnapshot: vi.fn(() => snapshotRequest?.() ?? Promise.resolve()),
+      fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+      forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+      isUpToDate: false,
+      shapeHandle: `shape-current`,
+      lastOffset: `20_0`,
+    }
+  }),
 }))
 
 function toBinding(value: unknown): string | number | bigint | null {
@@ -196,6 +198,19 @@ async function runRace(
           { type: `insert`, key: 2, value: { id: 2, name: `two` } },
         ],
         collectionMetadataMutations: [
+          // Seed the current eager format so this driver still exercises
+          // certification of a resumed baseline, not legacy-token migration.
+          {
+            type: `set`,
+            key: `electric:source-progress`,
+            value: JSON.stringify([
+              startupReset === `shape-identity`
+                ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
+                : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              `shape-old`,
+              `10_0`,
+            ]),
+          },
           {
             type: `set`,
             key: `electric:resume`,

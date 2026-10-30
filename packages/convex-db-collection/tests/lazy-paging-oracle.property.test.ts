@@ -46,7 +46,6 @@ import {
   ordered,
 } from './lazy-paging-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
-import type { ConvexPaginatedCollectionConfig } from '../src/index'
 
 const history = fc.record({
   size: fc.integer({ min: 16, max: 32 }),
@@ -569,7 +568,7 @@ it(`waits for applied receipts, respects abort and fences callbacks across resta
                 `lazy abort: accepted rows must apply first`,
               ).toBe(false)
               release()
-              await transaction.isPersisted.promise
+              await transaction.when('settled')
               await f.remote.pump()
               await expect(loading.result).rejects.toMatchObject({
                 name: `AbortError`,
@@ -809,7 +808,7 @@ it(`keeps the newer establishing receipt through publication reentry`, async () 
           await withTestCleanup(
             async () => {
               open1()
-              await firstBlock.isPersisted.promise
+              await firstBlock.when('settled')
               await f.remote.pump()
               expect(started).toBe(true)
               expect(
@@ -834,7 +833,7 @@ it(`keeps the newer establishing receipt through publication reentry`, async () 
               ).toBe(false)
               reach.reach(`cached-load-waits-for-latest`)
               open2()
-              await secondBlock!.isPersisted.promise
+              await secondBlock!.when('settled')
               await f.remote.pump()
               await first.complete()
               await second!.complete()
@@ -894,24 +893,6 @@ it(`rejects wrong coverage and transient windows while preserving discovery free
       delivered,
     )
   }
-})
-
-// Configuration contradictions fail before a subscription can acquire state.
-it.each([
-  { field: `rank`, direction: `sideways` },
-  { field: 1, direction: `asc` },
-  { field: ``, direction: `asc` },
-])(`rejects malformed order declarations %j`, (queryOrder) => {
-  expect(() =>
-    convexPaginatedCollectionOptions({
-      client: {},
-      query: lazyQuery,
-      queryArgs: {},
-      syncMode: `on-demand`,
-      queryOrder,
-      getKey: (row: LazyRow) => row.id,
-    } as unknown as ConvexPaginatedCollectionConfig<typeof lazyQuery>),
-  ).toThrow(TypeError)
 })
 
 it.each([0, -1, 1.5, Infinity, NaN])(

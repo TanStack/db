@@ -11,7 +11,6 @@ import {
   SyncTransactionAbortedError,
   and,
   validateSyncPersistenceCapability,
-  warnOnce,
   whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigCleanup,
@@ -289,20 +288,6 @@ export type MatchFunction<T extends Row<unknown>> = (
 ) => boolean
 
 /**
- * Matching strategies for Electric synchronization
- * Handlers can return:
- * - Txid strategy: { txid: number | number[], timeout?: number } (deprecated compatibility behavior)
- * - Void (no return value) - mutation completes without waiting
- *
- * The optional timeout property specifies how long to wait for the txid(s) in milliseconds.
- * If not specified, defaults to 15000ms.
- */
-export type MatchingStrategy = {
-  txid: Txid | Array<Txid>
-  timeout?: number
-} | void
-
-/**
  * Type representing a snapshot end message
  */
 type SnapshotEndMessage = ControlMessage & {
@@ -374,9 +359,6 @@ export interface ElectricCollectionConfig<
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve after synchronization is complete
-   *
-   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
-   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -452,7 +434,7 @@ export interface ElectricCollectionConfig<
       string | number,
       ElectricCollectionUtils<T>
     >,
-  ) => Promise<MatchingStrategy>
+  ) => Promise<void>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -467,9 +449,6 @@ export interface ElectricCollectionConfig<
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve after synchronization is complete
-   *
-   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
-   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -502,7 +481,7 @@ export interface ElectricCollectionConfig<
       string | number,
       ElectricCollectionUtils<T>
     >,
-  ) => Promise<MatchingStrategy>
+  ) => Promise<void>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -517,9 +496,6 @@ export interface ElectricCollectionConfig<
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve after synchronization is complete
-   *
-   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
-   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -551,7 +527,7 @@ export interface ElectricCollectionConfig<
       string | number,
       ElectricCollectionUtils<T>
     >,
-  ) => Promise<MatchingStrategy>
+  ) => Promise<void>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -888,7 +864,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 }
 
 /**
- * Type for the awaitTxId utility function
+ * Type for the awaitTxId utility function. It resolves when the txid
+ * appears in the Electric stream (the server's confirmation), before this
+ * tab's persistence accepts the transaction. If that commit later rejects,
+ * the source fails instead, and the Collection's health node records it
+ * (maintainer decision on PR #2265).
  */
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
@@ -1231,107 +1211,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     })
   const sync = createSync()
 
-  /**
-   * Process matching strategy and wait for synchronization
-   */
-  const processMatchingStrategy = async (
-    result: unknown,
-    waitForTxId: AwaitTxIdFn,
-  ): Promise<void> => {
-    const canHaveProperties =
-      (typeof result === `object` && result !== null) ||
-      typeof result === `function`
-
-    // Only wait if result contains txid
-    if (canHaveProperties && `txid` in result) {
-      const strategy = result as Exclude<MatchingStrategy, void>
-      // Warn about deprecated return value pattern
-      warnOnce(
-        'electric-collection-txid-return',
-        '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
-          'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
-          'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',
-      )
-
-      const timeout = strategy.timeout
-      // Handle both single txid and array of txids
-      if (Array.isArray(strategy.txid)) {
-        await Promise.all(
-          strategy.txid.map((txid) => waitForTxId(txid, timeout)),
-        )
-      } else {
-        await waitForTxId(strategy.txid, timeout)
-      }
-    }
-    // If result is void/undefined, don't wait - mutation completes immediately
-  }
-  const getMutationAwaitTxId = (params: unknown): AwaitTxIdFn => {
-    const collection = (
-      params as {
-        collection?: { utils?: { awaitTxId?: AwaitTxIdFn } }
-      }
-    ).collection
-    return collection?.utils?.awaitTxId ?? awaitTxId
-  }
-
-  // Create wrapper handlers for direct persistence operations that handle different matching strategies
-  // These wrappers process deprecated return values but don't pass them through
-  const wrappedOnInsert = config.onInsert
-    ? async (
-        params: InsertMutationFnParams<
-          any,
-          string | number,
-          ElectricCollectionUtils<T>
-        >,
-      ): Promise<void> => {
-        const handlerResult = await config.onInsert!(params)
-        await processMatchingStrategy(
-          handlerResult,
-          getMutationAwaitTxId(params),
-        )
-      }
-    : undefined
-
-  const wrappedOnUpdate = config.onUpdate
-    ? async (
-        params: UpdateMutationFnParams<
-          any,
-          string | number,
-          ElectricCollectionUtils<T>
-        >,
-      ): Promise<void> => {
-        const handlerResult = await config.onUpdate!(params)
-        await processMatchingStrategy(
-          handlerResult,
-          getMutationAwaitTxId(params),
-        )
-      }
-    : undefined
-
-  const wrappedOnDelete = config.onDelete
-    ? async (
-        params: DeleteMutationFnParams<
-          any,
-          string | number,
-          ElectricCollectionUtils<T>
-        >,
-      ): Promise<void> => {
-        const handlerResult = await config.onDelete!(params)
-        await processMatchingStrategy(
-          handlerResult,
-          getMutationAwaitTxId(params),
-        )
-      }
-    : undefined
-
-  // Extract standard Collection config properties
-  const {
-    shapeOptions: _shapeOptions,
-    onInsert: _onInsert,
-    onUpdate: _onUpdate,
-    onDelete: _onDelete,
-    ...restConfig
-  } = config
+  const { shapeOptions: _shapeOptions, ...restConfig } = config
 
   const utilityTemplate: ElectricCollectionUtils<T> = {
     awaitTxId,
@@ -1383,11 +1263,11 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   )
   const options = {
     ...restConfig,
+    onInsert: config.onInsert,
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete,
     syncMode: finalSyncMode,
     sync: syncTemplate,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
     utils: utilityTemplate,
   }
   Object.defineProperty(options, `utils`, {
@@ -1803,6 +1683,8 @@ function createElectricSync<T extends Row<unknown>>(
     const certifyResumeSnapshot = resumeSnapshot?.certify
     const getKeySetEvidence = resumeSnapshot?.getKeySetEvidence
     const expectCurrentCommit = resumeSnapshot?.expectCurrentCommit
+    const expectSourceProgress =
+      syncMode === `eager` ? resumeSnapshot?.expectSourceProgress : undefined
     const persistedKeySetEvidence = getKeySetEvidence?.()
 
     const storedResumeRecord = freshScopedGeneration
@@ -1819,15 +1701,31 @@ function createElectricSync<T extends Row<unknown>>(
       url: shapeOptions.url,
       params: shapeOptions.params as Record<string, unknown> | undefined,
     })
+    // Handles are opaque. Equality of the complete source position is enough
+    // to detect a broken continuation; wall-clock timestamps are not progress.
+    const progressToken = (state: ElectricResumeState | undefined) =>
+      state?.kind === `resume`
+        ? JSON.stringify([state.shapeId, state.handle, state.offset])
+        : undefined
+    const progressKey = `electric:source-progress`
+    let sourceProgress = progressToken(persistedResumeState)
     const hasIncompatiblePersistedResume =
       persistedResumeState?.kind === `resume` &&
       persistedResumeState.shapeId !== shapeIdentity
+    const hasIncompatibleSourceProgress =
+      persistedResumeState?.kind === `resume` &&
+      expectSourceProgress !== undefined &&
+      (metadata?.collection.get(progressKey) !== sourceProgress ||
+        resumeSnapshot?.getSourceProgressCompatible?.() !== true)
+    const hasPersistedReset =
+      syncMode === `eager` && persistedResumeState?.kind === `reset`
     // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
     // One fresh replacement establishes consistent evidence for later resumes.
-    const lacksCompletePersistedKeySet =
+    const lacksCompletePersistedResume =
       persistedResumeState?.kind === `resume` &&
-      getKeySetEvidence !== undefined &&
-      persistedKeySetEvidence?.status !== `consistent`
+      ((getKeySetEvidence !== undefined &&
+        persistedKeySetEvidence?.status !== `consistent`) ||
+        hasIncompatibleSourceProgress)
     // Claim expiry can leave a partial managed cache without a resume record.
     // Its incompatible key set alone requires a fresh source snapshot.
     const hasIncompatibleManagedCache =
@@ -1836,13 +1734,15 @@ function createElectricSync<T extends Row<unknown>>(
     const requiresFreshSourceEvidence =
       !freshScopedGeneration &&
       (hasIncompatibleManagedCache ||
+        hasIncompatibleSourceProgress ||
+        hasPersistedReset ||
         (shapeOptions.offset === undefined &&
           shapeOptions.handle === undefined &&
           (persistedResumeState !== undefined || malformedPersistedResume) &&
           (malformedPersistedResume ||
             hasIncompatiblePersistedResume ||
             persistedResumeState?.kind === `reset` ||
-            lacksCompletePersistedKeySet ||
+            lacksCompletePersistedResume ||
             (!retainsTagState &&
               persistedResumeState?.kind === `resume` &&
               persistedResumeState.requiresTagState !== false))))
@@ -1851,6 +1751,14 @@ function createElectricSync<T extends Row<unknown>>(
       requiresFreshSourceEvidence &&
       persistence?.managedCacheGeneration === true &&
       persistence.startScopedRecovery !== undefined
+    // A provider position cannot certify incompatible source progress or
+    // finish an interrupted eager replacement recorded by a reset marker.
+    // Eager recovery overrides the caller's position and replaces its rows.
+    // Other sync modes keep their existing explicit-position behavior.
+    const requestedPosition =
+      hasIncompatibleSourceProgress || hasPersistedReset
+        ? {}
+        : { offset: shapeOptions.offset, handle: shapeOptions.handle }
     if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
     const usesChangesOnlyLog =
       syncMode === `on-demand` &&
@@ -1882,7 +1790,8 @@ function createElectricSync<T extends Row<unknown>>(
       // Only a complete adapter ledger can justify a persisted cursor.
       !requiresFreshSourceEvidence
     const hasExplicitResumeOffset =
-      shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
+      requestedPosition.offset !== undefined &&
+      requestedPosition.offset !== `-1`
     if (!canUsePersistedResume && !hasExplicitResumeOffset) {
       clearTagTrackingState()
     }
@@ -1939,6 +1848,17 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
+    let transactionStarted = false
+    // Commit with an aborted signal: the wrapper discards the transaction and
+    // its reserved commit turn ends.
+    const abandonOpenTransaction = () => {
+      if (!transactionStarted) return
+      transactionStarted = false
+      const cancellation = new AbortController()
+      cancellation.abort()
+      const abandoned = commit(cancellation.signal)
+      if (abandoned !== true) void abandoned.catch(() => undefined)
+    }
     // A final initial failure decides its waiting loads. A cleanup that a
     // status listener runs inside that failure must not relabel it.
     let initialSyncFailedFinally = false
@@ -1970,6 +1890,9 @@ function createElectricSync<T extends Row<unknown>>(
       const fails = isActiveLifecycle() && !ready
       abortController.abort()
       if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      // A source that stops must end its reserved transaction. The initial
+      // failure decides first: abandoning commits.
+      abandonOpenTransaction()
     }
 
     if (shapeOptions.signal) {
@@ -1992,14 +1915,14 @@ function createElectricSync<T extends Row<unknown>>(
       // In on-demand mode, we only need the changes from the point of time the collection was created
       // so we default to `now` when there is no saved offset.
       offset:
-        shapeOptions.offset ??
+        requestedPosition.offset ??
         (canUsePersistedResume
           ? (persistedResumeState.offset as Offset)
           : usesChangesOnlyLog
             ? `now`
             : undefined),
       handle:
-        shapeOptions.handle ??
+        requestedPosition.handle ??
         (canUsePersistedResume ? persistedResumeState.handle : undefined),
       signal: abortController.signal,
       onError: async (errorParams) => {
@@ -2015,6 +1938,9 @@ function createElectricSync<T extends Row<unknown>>(
         const failWaits = (cause: unknown) => {
           rejectFullSnapshot(cause)
           if (!ready) failInitialSync(cause)
+          // No retry follows, so the open transaction can never commit. A
+          // source that stops must end its reserved transaction.
+          abandonOpenTransaction()
         }
 
         if (shapeOptions.onError) {
@@ -2043,7 +1969,6 @@ function createElectricSync<T extends Row<unknown>>(
         return
       },
     })
-    let transactionStarted = false
     const newTxids = new Set<Txid>()
     const newSnapshots: Array<PostgresSnapshot> = []
     // Track if we've completed initial sync in progressive mode. A persisted
@@ -2092,8 +2017,10 @@ function createElectricSync<T extends Row<unknown>>(
       usesBaseline = false
     }
 
+    // The commit consumes the transaction even if it throws.
     const commitSourceTransaction = (): SyncAppliedReceipt => {
       const committedPresenceRevision = pendingPresenceRevision
+      transactionStarted = false
       const applied = commit()
       if (metadata?.persistence) {
         const retireAppliedPresence = () => {
@@ -2109,8 +2036,10 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     // Subset hydration must not split a stream transaction it overlaps.
+    // Every reserved transaction is marked open, so a stop can abandon it.
     const beginSourceTransaction = () => {
       begin()
+      transactionStarted = true
       metadata?.persistence?.reserveCommitTurn()
     }
 
@@ -2147,6 +2076,11 @@ function createElectricSync<T extends Row<unknown>>(
         shapeId: shapeIdentity,
         updatedAt: Date.now(),
         requiresTagState: tagState.hasTags(),
+      }
+      if (expectSourceProgress) {
+        expectSourceProgress({ key: progressKey, previous: sourceProgress })
+        sourceProgress = progressToken(resumeState)
+        metadata?.collection.set(progressKey, sourceProgress)
       }
       lifecycle.resumeState = resumeState
       metadata?.collection.set(`electric:resume`, resumeState)
@@ -2328,12 +2262,7 @@ function createElectricSync<T extends Row<unknown>>(
 
     const invalidateResume = () => {
       resumeInvalid = true
-      if (transactionStarted) {
-        const cancellation = new AbortController()
-        cancellation.abort()
-        commit(cancellation.signal)
-        transactionStarted = false
-      }
+      abandonOpenTransaction()
       syncedKeys.clear()
       newTxids.clear()
       newSnapshots.length = 0
@@ -2356,7 +2285,6 @@ function createElectricSync<T extends Row<unknown>>(
       if (freshSnapshotPending) {
         freshSnapshotPending = false
         beginSourceTransaction()
-        transactionStarted = true
         truncate()
         recordPendingTruncate()
         syncedKeys.clear()
@@ -2461,7 +2389,6 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal processing: write changes immediately
             if (!transactionStarted) {
               beginSourceTransaction()
-              transactionStarted = true
             }
 
             processChangeMessage(message)
@@ -2520,7 +2447,6 @@ function createElectricSync<T extends Row<unknown>>(
           // Start a transaction and truncate the collection
           if (!transactionStarted) {
             beginSourceTransaction()
-            transactionStarted = true
           }
 
           truncate()
@@ -2603,8 +2529,7 @@ function createElectricSync<T extends Row<unknown>>(
                 bufferedMsg.headers.patterns,
                 begin,
                 write,
-                // The swap already opened a transaction, even though the
-                // normal-stream transactionStarted flag is still false.
+                // The swap already opened a transaction.
                 true,
                 (rowId) => {
                   recordPendingPresence(rowId, false)
@@ -2637,7 +2562,6 @@ function createElectricSync<T extends Row<unknown>>(
               stageResumeMetadata()
             }
             applied = commitSourceTransaction()
-            transactionStarted = false
           } else if (commitPoint === `up-to-date` && metadata) {
             beginSourceTransaction()
             stageResumeMetadata()
@@ -2735,6 +2659,9 @@ function createElectricSync<T extends Row<unknown>>(
           if (!ready) failInitialSync(error)
           else fail(error)
         }
+        // A source that stops must end its reserved transaction. The initial
+        // failure decides first: abandoning commits.
+        abandonOpenTransaction()
       },
     )
 
@@ -2774,13 +2701,7 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
         stream.unsubscribeAll()
         abortController.abort()
-        if (transactionStarted) {
-          transactionStarted = false
-          const cancellation = new AbortController()
-          cancellation.abort()
-          const abandoned = commit(cancellation.signal)
-          if (abandoned !== true) void abandoned.catch(() => undefined)
-        }
+        abandonOpenTransaction()
         pendingResumeBatches.length = 0
         // Reset deduplication tracking so collection can load fresh data if restarted
         loadSubsetDedupe?.reset()

@@ -377,6 +377,13 @@ state, or incomplete key-set evidence also invalidates the saved cursor.
 Untagged shapes with complete resume evidence can still resume from their saved
 offset.
 
+An eager persisted resume also needs compatible source progress when its adapter
+supplies that capability. Missing or incompatible progress requires a fresh
+snapshot, even with an explicit offset or handle. Those options do not certify
+the cached rows.
+An interrupted eager recovery keeps its durable reset marker. The next start
+also requires a fresh snapshot, even with an explicit offset or handle.
+
 Eager and progressive recovery fetch a full snapshot. Cached rows remain visible
 until that replacement completes; a partial batch or subset completion cannot
 publish it early. An on-demand collection with the current SQLite persistence
@@ -405,6 +412,14 @@ subsets from the source when it resumes. Pre-upgrade on-demand storage is
 isolated but needs a separate cross-version cleanup policy while older tabs
 may still use it. Scoped recovery
 does not certify the new generation for offline reuse.
+
+With `initialRender: { strategy: 'network-first' }`, an on-demand or
+progressive Collection can render a demand offline from SQLite after that exact
+demand settled online in an earlier session. Each demand keeps its own
+coverage in the current persisted cache generation. Scoped recovery, cache-claim
+expiry, and a must-refetch end it, so after any of them a demand waits for the
+network again. A demand that loads during the rest of a scoped-recovery sync
+run records no coverage. See [On-demand Collections offline](../guides/sqlite-persistence.md#on-demand-collections-offline).
 
 During scoped recovery, coordinator notifications about SQLite changes do not
 hydrate, truncate, or replace public source rows. The Electric change stream
@@ -460,7 +475,7 @@ const matchFn = (message) => {
 
 ### Common Issue: awaitTxId Stalls or Times Out
 
-A frequent issue developers encounter is that `awaitTxId` (or the transaction's `isPersisted.promise`) stalls indefinitely, eventually timing out with no error messages. The data persists correctly to the database, but the optimistic mutation never resolves.
+A frequent issue developers encounter is that `awaitTxId` (or the transaction's `when('settled')`) stalls indefinitely, eventually timing out with no error messages. The data persists correctly to the database, but the optimistic mutation never resolves.
 
 **Root Cause:** This happens when the transaction ID (txid) returned from your API doesn't match the actual transaction ID of the mutation in Postgres. This mismatch occurs when you query `pg_current_xact_id()` **outside** the same transaction that performs the mutation.
 

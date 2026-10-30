@@ -250,7 +250,7 @@ it(`resumes persisted sync after simulated app lifecycle transitions`, async () 
     title: `Before background`,
     score: 1,
   })
-  await initialInsert.isPersisted.promise
+  await initialInsert.when(`settled`)
 
   await collection.cleanup()
   collection.startSyncImmediate()
@@ -261,7 +261,7 @@ it(`resumes persisted sync after simulated app lifecycle transitions`, async () 
     title: `Post resume write`,
     score: 2,
   })
-  await postResumeInsert.isPersisted.promise
+  await postResumeInsert.when(`settled`)
 
   const persistedRows = await persistence.adapter.loadSubset(
     { kind: `eager`, collectionId: collectionId },

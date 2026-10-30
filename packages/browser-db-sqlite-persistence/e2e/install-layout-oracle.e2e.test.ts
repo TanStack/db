@@ -48,6 +48,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { createServer, preview } from 'vite'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { buildForProduction } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { BrowserWASQLiteDatabase } from '../src'
@@ -169,6 +170,23 @@ const layoutCases: Array<LayoutCase> = [
   })),
 ]
 
+declareOracle({
+  check: [expectLayoutOutcome],
+  model: [expectedOutcome],
+  grammar: [layoutCases],
+})
+
+// The check: the installed copy's observed outcome equals the layout model's
+// prediction for the same case and install facts.
+async function expectLayoutOutcome(
+  layoutCase: LayoutCase,
+  install: InstallFacts,
+): Promise<void> {
+  expect(await openInLayout(install, layoutCase)).toEqual(
+    expectedOutcome(layoutCase, install),
+  )
+}
+
 let browser: Browser
 const coveredOutcomes = new Set<string>()
 beforeAll(async () => {
@@ -188,7 +206,7 @@ it.each(layoutCases)(
       const install = installLayout(temporaryDirectory, layoutCase.layout)
       const expected = expectedOutcome(layoutCase, install)
       coveredOutcomes.add(JSON.stringify(expected))
-      expect(await openInLayout(install, layoutCase)).toEqual(expected)
+      await expectLayoutOutcome(layoutCase, install)
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true })
     }

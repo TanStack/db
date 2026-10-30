@@ -7,19 +7,29 @@ import { createDeferred } from '../../src/deferred.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
-import { getCollectionBuilder } from '../../src/query/live/collection-registry.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
-import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import {
+  compareRows,
+  expectDistinctRequests,
+  expectInitialWindows,
+  expectNoProviderStart,
+  expectRawWindow,
+  requestFingerprint,
+  rowsForScenario,
+} from './ordered-work-support.js'
+import type { Marker, Row, Scenario } from './ordered-work-support.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { DeltaEvent } from '../../src/query/effect.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
@@ -77,26 +87,6 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 type JoinMarker = { key: number; rowId: number }
 // Result-row ids at or above this name a matched (root row, marker) pair.
 const PAIR_ID = 1_000_000
-
-type Row = {
-  id: number
-  rank: number
-  eligible: boolean
-  label: string
-  // The marker key a joined plan matches; the row's id unless eligibility is
-  // held on the join key (EagerCase.via).
-  link?: number
-}
-
-type Marker = { id: number; rowId: number }
-
-type Scenario = {
-  middleCount: number
-  middleEligible: boolean
-  lastEligible: boolean
-  tied: boolean
-  direction: `asc` | `desc`
-}
 
 type JoinFilter = `two-alias` | `joined-only` | `some` | `none` | `to-one`
 
@@ -160,151 +150,17 @@ const exhaustiveScenarios: ReadonlyArray<Scenario> = (
   ),
 )
 
-function compareRows(direction: Scenario[`direction`]) {
-  return (left: Row, right: Row): number => {
-    const rank = left.rank - right.rank
-    return (direction === `asc` ? rank : -rank) || left.id - right.id
-  }
-}
-
-function rowsForScenario(scenario: Scenario): Array<Row> {
-  return [
-    { id: 1, rank: 0, eligible: true, label: `first` },
-    ...Array.from({ length: scenario.middleCount }, (_, index) => ({
-      id: index + 3,
-      rank: scenario.tied ? 0 : index + 1,
-      eligible: scenario.middleEligible,
-      label: `middle-${index}`,
-    })),
-    {
-      id: 2,
-      rank: scenario.middleCount + 1,
-      eligible: scenario.lastEligible,
-      label: `last`,
-    },
-  ]
-}
-
 function matchesJoinFilter(row: Row, joinFilter: JoinFilter): boolean {
   return joinFilter === `none` ? !row.eligible : row.eligible
 }
 
 let harnessId = 0
 
-// A finite request recorder, not another production identity implementation.
-// Preserve fields and primitive kinds; reject opaque values rather than merging
-// them into an empty object. Signals/subscriptions are ownership, while
-// refetch controls the attempt; none of the three changes demand identity.
-function requestFingerprint(options: LoadSubsetOptions): string {
-  const semantic = new Set([`where`, `orderBy`, `limit`, `offset`, `cursor`])
-  for (const key of Reflect.ownKeys(options)) {
-    if (
-      !semantic.has(String(key)) &&
-      key !== `signal` &&
-      key !== `subscription` &&
-      key !== `refetch`
-    )
-      throw new Error(`Unsupported request field ${String(key)}`)
-  }
-  const encode = (value: unknown): unknown => {
-    if (value === undefined) return [`undefined`]
-    if (value === null) return [`null`]
-    if (typeof value === `number`) {
-      if (!Number.isFinite(value)) throw new Error(`Nonfinite request value`)
-      return [`number`, Object.is(value, -0) ? `-0` : value]
-    }
-    if (typeof value === `boolean` || typeof value === `string`)
-      return [typeof value, value]
-    if (Array.isArray(value)) return [`array`, value.map(encode)]
-    if (typeof value !== `object`) throw new Error(`Opaque request value`)
-    const prototype = Object.getPrototypeOf(value)
-    if (
-      prototype !== Object.prototype &&
-      prototype !== null &&
-      !(value instanceof Func) &&
-      !(value instanceof PropRef) &&
-      !(value instanceof Value)
-    )
-      throw new Error(`Opaque request object`)
-    if (Reflect.ownKeys(value).some((key) => typeof key !== `string`))
-      throw new Error(`Symbol request field`)
-    // Absent optional compare fields and explicit undefined mean the same option.
-    return [
-      `object`,
-      Object.entries(value)
-        .filter(([, field]) => field !== undefined)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([key, field]) => [key, encode(field)]),
-    ]
-  }
-  return JSON.stringify(
-    encode(
-      Object.fromEntries(
-        [...semantic].map((key) => [
-          key,
-          options[key as keyof LoadSubsetOptions],
-        ]),
-      ),
-    ),
-  )
-}
-
 function copiedRow(row: Row): Row {
   const copy: Record<string, unknown> = { ...row }
-  for (const field of [
-    `$key`,
-    `$collectionId`,
-    `$origin`,
-    `$hasPendingWrites`,
-    `$synced`,
-  ])
+  for (const field of [`$key`, `$collectionId`, `$origin`, `$hasPendingWrites`])
     delete copy[field]
   return copy as Row
-}
-
-function expectRawWindow(
-  actual: ReadonlyArray<Row>,
-  expected: ReadonlyArray<Row>,
-  direction: Scenario[`direction`],
-  idTieBreak: boolean,
-) {
-  expect([...actual].sort(compareRows(direction))).toStrictEqual(
-    [...expected].sort(compareRows(direction)),
-  )
-  for (let index = 1; index < actual.length; index++) {
-    const left = actual[index - 1]!
-    const right = actual[index]!
-    const rank =
-      direction === `asc` ? left.rank - right.rank : right.rank - left.rank
-    expect(rank || (idTieBreak ? left.id - right.id : 0)).toBeLessThanOrEqual(0)
-  }
-}
-
-function expectInitialWindows(
-  publications: ReadonlyArray<ReadonlyArray<Row>>,
-  expected: ReadonlyArray<Row>,
-  direction: Scenario[`direction`],
-  idTieBreak: boolean,
-) {
-  let published = expected.length === 0
-  for (const rows of publications) {
-    if (!published && rows.length === 0) continue
-    expectRawWindow(rows, expected, direction, idTieBreak)
-    published = true
-  }
-  expect(published, `complete initial public window reached`).toBe(true)
-}
-
-function expectNoProviderStart(before: number, after: number) {
-  expect(after, `no provider start during disposal`).toBe(before)
-}
-
-function expectDistinctRequests(
-  requests: ReadonlyArray<{ fingerprint: string }>,
-) {
-  expect(new Set(requests.map(({ fingerprint }) => fingerprint)).size).toBe(
-    requests.length,
-  )
 }
 
 async function observeConsumer(
@@ -1749,58 +1605,6 @@ describe(`ordered source work oracle`, () => {
     ).toBe(64)
   })
 
-  it(`rejects scrambled order and partial or regressed initial publications`, () => {
-    const rows: Array<Row> = [
-      { id: 1, rank: 1, eligible: true, label: `first` },
-      { id: 2, rank: 2, eligible: true, label: `second` },
-    ]
-    expectInitialWindows([[], rows], rows, `asc`, true)
-    expect(() =>
-      expectRawWindow([...rows].reverse(), rows, `asc`, true),
-    ).toThrow()
-    expect(() =>
-      expectInitialWindows([[rows[0]!], rows], rows, `asc`, true),
-    ).toThrow()
-    expect(() => expectInitialWindows([rows, []], rows, `asc`, true)).toThrow()
-    const tied = rows.map((row) => ({ ...row, rank: 1 })).reverse()
-    expectRawWindow(tied, tied, `asc`, false)
-    expect(() => expectRawWindow(tied, tied, `asc`, true)).toThrow()
-  })
-
-  it(`identifies repeated finite requests without the production request key`, () => {
-    const options: LoadSubsetOptions = { limit: 1 }
-    const fingerprint = requestFingerprint(options)
-    const requests = [
-      { key: `a`, fingerprint },
-      { key: `b`, fingerprint },
-    ]
-    expect(() => expectDistinctRequests(requests)).toThrow()
-    options.limit = 2
-    expectDistinctRequests([
-      requests[0]!,
-      { fingerprint: requestFingerprint(options) },
-    ])
-    expect(fingerprint).toBe(requestFingerprint({ limit: 1 }))
-    expect(() =>
-      requestFingerprint({
-        where: new Func<boolean>(`eq`, [
-          new Value(new Date()),
-          new Value(new Date()),
-        ]),
-      }),
-    ).toThrow()
-  })
-
-  it(`checks the live request recorder after disposal rather than its earlier copy`, () => {
-    const requests = [{ fingerprint: requestFingerprint({ limit: 1 }) }]
-    const returned = [...requests]
-    const before = requests.length
-    expectNoProviderStart(before, requests.length)
-    requests.push({ fingerprint: requestFingerprint({ limit: 2 }) })
-    expect(returned).toHaveLength(1)
-    expect(() => expectNoProviderStart(before, requests.length)).toThrow()
-  })
-
   it(`keeps later order-term invalidation equal across consumers`, async () => {
     const [collection, effect] = await Promise.all([
       observeLaterOrderTermMutation(`collection`),
@@ -1994,153 +1798,6 @@ describe(`ordered source work oracle`, () => {
     })
   })
 
-  it(`suppresses the initial joined-filter window while child demand settles`, async () => {
-    type Root = { id: number; rank: number; label: string }
-    const initial = { id: 1, rank: 1, label: `initial` }
-    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
-    const root = createCollection<Root, number>({
-      id: `ordered-skip-joined-root-${harnessId++}`,
-      getKey: ({ id }) => id,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          rootSync = operations
-          operations.begin()
-          operations.write({ type: `insert`, value: initial })
-          operations.commit()
-          operations.markReady()
-        },
-      },
-    })
-    const childGate = createDeferred<void>()
-    let childLoads = 0
-    const child = createCollection<Marker, number>({
-      id: `ordered-skip-joined-child-${harnessId++}`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          operations.markReady()
-          return {
-            loadSubset: () => {
-              childLoads++
-              return childGate.promise
-            },
-          }
-        },
-      },
-    })
-    const events: Array<string> = []
-    const effect = createEffect<{ id: number; label: string }>({
-      query: (q) =>
-        q
-          .from({ row: root })
-          .leftJoin({ marker: child }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
-          .where(({ marker }) => isUndefined(marker.rowId))
-          .orderBy(({ row }) => row.rank)
-          .limit(1)
-          .select(({ row }) => ({ id: row.id, label: row.label })),
-      skipInitial: true,
-      onBatch: (batch) => {
-        events.push(...batch.map((event) => event.type))
-      },
-    })
-    await withHistoryCleanup(
-      async () => {
-        await vi.waitFor(() => expect(childLoads).toBeGreaterThan(0))
-        await flushPromises()
-        expect(events).toEqual([])
-        childGate.resolve()
-        await flushPromises()
-        expect(events).toEqual([])
-
-        rootSync.begin()
-        rootSync.write({
-          type: `update`,
-          value: { ...initial, label: `later` },
-        })
-        const receipt = rootSync.commit()
-        if (receipt !== true) await receipt
-        await vi.waitFor(() => expect(events).toContain(`update`))
-      },
-      () => [
-        () => childGate.resolve(),
-        () => effect.dispose(),
-        () => root.cleanup(),
-        () => child.cleanup(),
-      ],
-    )
-  })
-
-  it(`avoids an extra joined-filter graph turn when the root becomes ready`, async () => {
-    type Root = { id: number; rank: number }
-    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
-    let joinedSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
-    const root = createCollection<Root, number>({
-      id: `ordered-ready-root-${harnessId++}`,
-      getKey: ({ id }) => id,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: { sync: (operations) => void (rootSync = operations) },
-    })
-    const joined = createCollection<Marker, number>({
-      id: `ordered-ready-joined-${harnessId++}`,
-      getKey: ({ id }) => id,
-      startSync: true,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          joinedSync = operations
-          return { loadSubset: () => true }
-        },
-      },
-    })
-    const live = createLiveQueryCollection({
-      id: `ordered-ready-live-${harnessId++}`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ row: root })
-          .leftJoin({ marker: joined }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
-          .where(({ marker }) => isUndefined(marker.rowId))
-          .orderBy(({ row }) => row.rank)
-          .limit(0)
-          .select(({ row }) => ({ id: row.id })),
-    })
-    await withHistoryCleanup(
-      () => {
-        const builder = getCollectionBuilder(live)!
-        expect(
-          Object.values(builder.optimizableOrderByCollections).some(
-            (info) => info.joinedFilterSourceId !== undefined,
-          ),
-        ).toBe(true)
-        const scheduled = vi.spyOn(builder, `scheduleGraphRun`)
-        rootSync.markReady()
-        // Root readiness already schedules its ordinary graph turn.
-        expect(scheduled).toHaveBeenCalledTimes(1)
-        joinedSync.markReady()
-        // Joined readiness also rechecks the joined-filter demand gate.
-        expect(scheduled).toHaveBeenCalledTimes(3)
-        return Promise.resolve()
-      },
-      () => [
-        () => live.cleanup(),
-        () => root.cleanup(),
-        () => joined.cleanup(),
-      ],
-    )
-  })
-
   it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {
     await expect(observeMutationDuringBoundedRepair()).resolves.toMatchObject({
       rows: [3],
@@ -2161,229 +1818,6 @@ describe(`ordered source work oracle`, () => {
       observeHeldEffectDelta(`present-update-exit`),
     ).resolves.toMatchObject({ rows: [3, 4] })
   })
-
-  it(`loads each source of a filtered join once`, async () => {
-    type Order = {
-      id: number
-      scheduledAt: string
-      status: string
-      addressId: number
-    }
-    type Charge = { id: number; addressId: number }
-    let orderLoads = 0
-    let chargeLoads = 0
-    const orders = createCollection<Order>({
-      id: `ordered-filtered-join-orders`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({
-            type: `insert`,
-            value: {
-              id: 1,
-              scheduledAt: `2024-01-15`,
-              status: `queued`,
-              addressId: 1,
-            },
-          })
-          write({
-            type: `insert`,
-            value: {
-              id: 2,
-              scheduledAt: `2024-01-10`,
-              status: `queued`,
-              addressId: 2,
-            },
-          })
-          commit()
-          markReady()
-          return {
-            loadSubset: () => {
-              orderLoads++
-              return true
-            },
-          }
-        },
-      },
-    })
-    const charges = createCollection<Charge>({
-      id: `ordered-filtered-join-charges`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: 10, addressId: 1 } })
-          write({ type: `insert`, value: { id: 20, addressId: 2 } })
-          commit()
-          markReady()
-          return {
-            loadSubset: () => {
-              chargeLoads++
-              return true
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ order: orders })
-        .where(({ order }) => gte(order.scheduledAt, `2024-01-12`))
-        .where(({ order }) => eq(order.status, `queued`))
-        .innerJoin({ charge: charges }, ({ order, charge }) =>
-          eq(order.addressId, charge.addressId),
-        ),
-    )
-
-    try {
-      await live.preload()
-      expect(
-        [...live.values()].map(({ order, charge }) => [order.id, charge.id]),
-      ).toEqual([[1, 10]])
-      expect(orderLoads).toBe(1)
-      expect(chargeLoads).toBe(1)
-    } finally {
-      await Promise.all([live.cleanup(), orders.cleanup(), charges.cleanup()])
-    }
-  })
-
-  it.each([`collection`, `effect`] as const)(
-    `does no source work for a zero-sized %s window`,
-    async (consumer) => {
-      let loads = 0
-      const source = createCollection<Row, number>({
-        id: `ordered-zero-window`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                loads++
-                return true
-              },
-            }
-          },
-        },
-      })
-      const query = (q: InitialQueryBuilder) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank)
-          .limit(0)
-      const live =
-        consumer === `collection`
-          ? createLiveQueryCollection({
-              id: `ordered-zero-window-live`,
-              query,
-              startSync: true,
-            })
-          : undefined
-      const effect =
-        consumer === `effect`
-          ? createEffect({ query, onBatch: () => {} })
-          : undefined
-
-      try {
-        if (live) await live.preload()
-        else await flushPromises()
-        expect(loads).toBe(0)
-      } finally {
-        if (effect) await effect.dispose()
-        if (live) await live.cleanup()
-        await source.cleanup()
-      }
-    },
-  )
-
-  it.each(
-    ([`collection`, `effect`] as const).flatMap((consumer) =>
-      ([`eager`, `off`] as const).map((autoIndex) => ({
-        consumer,
-        autoIndex,
-      })),
-    ),
-  )(
-    `does no source work for a joined $consumer with a zero-sized $autoIndex window`,
-    async ({ consumer, autoIndex }) => {
-      let rowLoads = 0
-      let markerLoads = 0
-      const source = createCollection<Row, number>({
-        id: `ordered-zero-window-unindexed-${consumer}-source`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex,
-        defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                rowLoads++
-                return true
-              },
-            }
-          },
-        },
-      })
-      const markers = createCollection<Marker, number>({
-        id: `ordered-zero-window-unindexed-${consumer}-marker`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex,
-        defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                markerLoads++
-                return true
-              },
-            }
-          },
-        },
-      })
-      const query = (q: InitialQueryBuilder) =>
-        q
-          .from({ row: source })
-          .innerJoin({ marker: markers }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
-          .orderBy(({ row }) => row.rank)
-          .limit(0)
-      const live =
-        consumer === `collection`
-          ? createLiveQueryCollection({ query, startSync: true })
-          : undefined
-      const effect =
-        consumer === `effect`
-          ? createEffect({ query, onBatch: () => {} })
-          : undefined
-
-      try {
-        if (live) await live.preload()
-        else await flushPromises()
-        expect({ rowLoads, markerLoads }).toEqual({
-          rowLoads: 0,
-          markerLoads: 0,
-        })
-      } finally {
-        if (effect) await effect.dispose()
-        if (live) await live.cleanup()
-        await Promise.all([source.cleanup(), markers.cleanup()])
-      }
-    },
-  )
 
   it.each(
     ([`collection`, `effect`] as const).flatMap((consumer) =>
@@ -2469,7 +1903,7 @@ describe(`ordered source work oracle`, () => {
       try {
         if (live) await live.preload()
         await flushPromises()
-        const expected = [...rows].sort(compareRows(direction)).slice(0, limit)
+        const expected = expectedVisibleWindow(rows, direction, limit)
         expect(readRows()).toEqual(expected)
         const loadCount = loads
         const row = position === `first` ? expected[0]! : expected.at(-1)!
@@ -3169,156 +2603,6 @@ describe(`ordered source work oracle`, () => {
     )
   })
 
-  it.each([`resolve`, `reject`, `retire`] as const)(
-    `keeps a widened window aligned with existing joined demand (%s)`,
-    async (outcome) => {
-      type Root = { id: number; rank: number }
-      type Child = { id: number; rootId: number }
-      const childGate = createDeferred<void>()
-      const rootContinuationGate = createDeferred<void>()
-      const rootRequests: Array<LoadSubsetOptions> = []
-      let childLoads = 0
-      let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
-      const rootCollection = createCollection<Root, number>({
-        id: `ordered-held-window-root`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: (operations) => {
-            rootSync = operations
-            const { begin, write, commit, markReady } = operations
-            markReady()
-            let delivered = false
-            return {
-              loadSubset: async (options) => {
-                rootRequests.push(options)
-                if (options.cursor) await rootContinuationGate.promise
-                if (!delivered && options.orderBy) {
-                  delivered = true
-                  begin()
-                  write({ type: `insert`, value: { id: 1, rank: 1 } })
-                  const receipt = commit(options.signal)
-                  if (receipt !== true) await receipt
-                }
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const childCollection = createCollection<Child, number>({
-        id: `ordered-held-window-child`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                childLoads++
-                return childGate.promise
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const live = createLiveQueryCollection({
-        id: `ordered-held-window-live`,
-        startSync: false,
-        query: (q) =>
-          q
-            .from({ root: rootCollection })
-            .leftJoin({ child: childCollection }, ({ root, child }) =>
-              eq(root.id, child.rootId),
-            )
-            .where(({ child }) => isUndefined(child.rootId))
-            .orderBy(({ root }) => root.rank)
-            .limit(1)
-            .select(({ root }) => ({ id: root.id })),
-      })
-
-      await withHistoryCleanup(
-        async () => {
-          const preload = live.preload()
-          void preload.catch(() => {})
-          await vi.waitFor(() => {
-            expect(childLoads).toBe(1)
-            expect(rootRequests).toHaveLength(2)
-          })
-
-          let moveSettled = false
-          const move = Promise.resolve(
-            live.utils.setWindow({ offset: 0, limit: 2 }),
-          ).then(() => {
-            moveSettled = true
-          })
-          await flushPromises()
-          expect(moveSettled).toBe(false)
-          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-          expect(live.toArray.map(({ id }) => id)).toEqual([])
-
-          if (outcome === `reject`) {
-            childGate.reject(new Error(`joined demand failed`))
-            await expect(move).rejects.toThrow(`joined demand failed`)
-            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-            await Promise.allSettled([preload])
-            return
-          }
-
-          if (outcome === `retire`) {
-            rootSync.begin()
-            rootSync.write({
-              type: `delete`,
-              value: { id: 1, rank: 1 },
-            })
-            const receipt = rootSync.commit()
-            if (receipt !== true) await receipt
-            rootContinuationGate.resolve()
-            await vi.waitFor(() => expect(moveSettled).toBe(true))
-            expect(rootRequests.length).toBeGreaterThan(2)
-            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-            expect(live.toArray).toEqual([])
-            childGate.reject(new Error(`obsolete joined demand failed`))
-            await flushPromises()
-            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-            return
-          }
-
-          childGate.resolve()
-          await vi.waitFor(() =>
-            expect(
-              rootRequests.some(({ cursor }) => cursor !== undefined),
-            ).toBe(true),
-          )
-          await flushPromises()
-          expect(moveSettled).toBe(false)
-          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-          rootContinuationGate.resolve()
-          await Promise.all([move, preload])
-          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-          expect(live.toArray.map(({ id }) => id)).toEqual([1])
-          expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
-            true,
-          )
-        },
-        () => [
-          () => childGate.resolve(),
-          () => rootContinuationGate.resolve(),
-          () => live.cleanup(),
-          () => rootCollection.cleanup(),
-          () => childCollection.cleanup(),
-        ],
-      )
-    },
-  )
-
   it(`resumes bounded ordered repair after joined demand settles`, async () => {
     type Root = { id: number; rank: number }
     type Child = { id: number; rootId: number }
@@ -3744,71 +3028,6 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it.each([false, true])(
-    `cancels queued ordered recovery on cleanup (restart=%s)`,
-    async (restart) => {
-      const seedRow: Row = { id: 1, rank: 1, eligible: true, label: `retained` }
-      let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      let installed = false
-      const requests: Array<LoadSubsetOptions> = []
-      const source = createCollection<Row, number>({
-        id: `queued-recovery-cleanup-${harnessId++}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: (operations) => {
-            sync = operations
-            operations.markReady()
-            return {
-              loadSubset: (options) => {
-                requests.push(options)
-                if (installed) return true
-                installed = true
-                operations.begin()
-                operations.write({ type: `insert`, value: seedRow })
-                return operations.commit()
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const live = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank)
-          .limit(1),
-      )
-      try {
-        await live.preload()
-        const initialRequests = requests.length
-        sync.begin()
-        sync.truncate()
-        installed = false
-        expect(sync.commit()).toBe(true)
-        await live.cleanup()
-        await flushPromises()
-        expect(requests).toHaveLength(initialRequests)
-        if (restart) {
-          await live.preload()
-          expect(live.toArray.map(({ id }) => id)).toEqual([1])
-          expect(live.utils.lastSubsetError).toBeUndefined()
-          expect(requests.length).toBeGreaterThan(initialRequests)
-        }
-        expect(
-          requests.filter(
-            ({ where, limit }) => where === undefined && limit === undefined,
-          ),
-        ).toEqual([])
-      } finally {
-        await Promise.all([live.cleanup(), source.cleanup()])
-      }
-    },
-  )
-
   it.each([
     { name: `until full-source recovery settles`, failure: undefined },
     {
@@ -4215,93 +3434,6 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
-  it(`releases held Effect changes after an empty joined replay`, async () => {
-    type ReplayRow = { id: number; rank: number; label: string }
-    const initialRow = { id: 1, rank: 1, label: `old` }
-    let rootSync!: Parameters<SyncConfig<ReplayRow, number>[`sync`]>[0]
-    const root = createCollection<ReplayRow, number>({
-      id: `ordered-replay-wakeup-root-${harnessId++}`,
-      getKey: ({ id }) => id,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          rootSync = operations
-          operations.begin()
-          operations.write({ type: `insert`, value: initialRow })
-          operations.commit()
-          operations.markReady()
-        },
-      },
-    })
-    const replayGate = createDeferred<void>()
-    let joinedLoads = 0
-    let joinedSync!: Parameters<
-      SyncConfig<{ id: number; rowId: number }, number>[`sync`]
-    >[0]
-    const joined = createCollection<{ id: number; rowId: number }, number>({
-      id: `ordered-replay-wakeup-joined-${harnessId++}`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          joinedSync = operations
-          operations.markReady()
-          return {
-            loadSubset: () => {
-              joinedLoads++
-              return joinedLoads === 1 ? true : replayGate.promise
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const visible = new Map<number, string>()
-    const effect = createEffect<{ id: number; label: string }>({
-      query: (q) =>
-        q
-          .from({ row: root })
-          .leftJoin({ marker: joined }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
-          .where(({ marker }) => isUndefined(marker.rowId))
-          .orderBy(({ row }) => row.rank)
-          .limit(1)
-          .select(({ row }) => ({ id: row.id, label: row.label })),
-      onBatch: (events) => {
-        for (const event of events) {
-          if (event.type === `exit`) visible.delete(event.value.id)
-          else visible.set(event.value.id, event.value.label)
-        }
-      },
-    })
-    try {
-      await vi.waitFor(() => expect(visible.get(1)).toBe(`old`))
-      joinedSync.begin()
-      joinedSync.truncate()
-      const truncateReceipt = joinedSync.commit()
-      if (truncateReceipt !== true) await truncateReceipt
-      await vi.waitFor(() => expect(joinedLoads).toBeGreaterThan(1))
-
-      rootSync.begin()
-      rootSync.write({ type: `update`, value: { ...initialRow, label: `new` } })
-      const updateReceipt = rootSync.commit()
-      if (updateReceipt !== true) await updateReceipt
-      for (let i = 0; i < 5; i++) await flushPromises()
-      expect(visible.get(1)).toBe(`old`)
-
-      replayGate.resolve()
-      await vi.waitFor(() => expect(visible.get(1)).toBe(`new`))
-    } finally {
-      replayGate.resolve()
-      await Promise.all([effect.dispose(), root.cleanup(), joined.cleanup()])
-    }
-  })
-
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 20 * multiplier
 
@@ -4375,7 +3507,7 @@ describe(`ordered source work oracle`, () => {
  * source's limit), the index (present or absent), the direction, one or two
  * order terms (rank, then ascending id), limit 1..3, offset 0..1, and a history
  * of upserts, deletes, deletes of the first visible row, and label-only
- * touches over ids 0..29 and ranks 0..15, NaN, or null, so ties, deletes
+ * touches over ids 0..29 and ranks 0..15, NaN, null, or undefined, so ties, deletes
  * inside and at the edge of the window, rank changes across its boundary, and
  * distant rows the query has already received all occur. A second campaign
  * fixes the premise of the joined law: a joined filter, an index and one order
@@ -4474,9 +3606,25 @@ describe(`ordered source work oracle`, () => {
  * One case in four adds a peer with its own window, the first
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
- * to those cases. A peer over a refetching provider is excluded from the
- * grammar until #2155 is fixed: an indexed trace is fixed and pinned, but an
- * unindexed peer still keeps a short joined window after a refetch.
+ * to those cases. A peer over a refetching provider with a joined filter is
+ * excluded from the grammar until #2155 is fixed: an indexed trace is fixed
+ * and pinned, but an unindexed peer still keeps a short joined window after
+ * a refetch. A peer over a source filter stays in the grammar.
+ *
+ * `null` and `undefined` ranks are both nullish, so they tie: either may
+ * come first, and neither is an expressible cursor value.
+ *
+ * - **Proven report:** a signalling refetch can report a shift that changes
+ *   nothing the first query's own first page proves. Its page and the tie
+ *   of the page's end answer the same rows, the page ends on a plain number,
+ *   and the model's next row sorts strictly after that end and is
+ *   installed, as a peer's longer page installs it. The refetch also deletes
+ *   and reorders no installed row the first query received, because such a
+ *   change starts the repair path by itself. Then the report starts no
+ *   request for the first query, and until a step that can change source
+ *   ordering, the first query issues no repair (`refetch: true`) request.
+ *   A campaign fixed to that premise must reach it, and a loader that
+ *   repairs every report fails it.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4589,6 +3737,7 @@ function eagerRowOf(maxId: number) {
       { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
       { weight: 1, arbitrary: fc.constant(Number.NaN) },
       { weight: 1, arbitrary: fc.constant(null as unknown as number) },
+      { weight: 1, arbitrary: fc.constant(undefined as unknown as number) },
     ),
     eligible: fc.boolean(),
   })
@@ -4680,13 +3829,15 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 // A peer over a refetching on-demand provider can keep a short joined window
 // after a refetch (#2155). An indexed plan's trace is fixed and pinned below,
 // but an unindexed one still fails (a peer shows [100] where the model shows
-// [100, 101]). Each campaign excludes only that pairing, as its last map,
-// until the fix.
+// [100, 101]). Each campaign excludes only a joined, anti-joined, or full-joined
+// filter in that pairing, as its last map, until the fix; a source filter
+// keeps its peer.
 function withoutPeerRefetch(testCase: EagerCase): EagerCase {
   return testCase.path === `on-demand` &&
     (testCase.provider === `refetch` ||
       testCase.provider === `refetch-signal`) &&
-    testCase.peer
+    testCase.peer &&
+    testCase.filter !== `source`
     ? { ...testCase, peer: false }
     : testCase
 }
@@ -4778,6 +3929,7 @@ const gapRank: fc.Arbitrary<number> = fc.oneof(
   { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
   { weight: 1, arbitrary: fc.constant(Number.NaN) },
   { weight: 1, arbitrary: fc.constant(null as unknown as number) },
+  { weight: 1, arbitrary: fc.constant(undefined as unknown as number) },
 )
 
 const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
@@ -4848,6 +4000,54 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
 // first deletes a visible row, so the refill request is in flight while the
 // later commands change rows. Releases answer it from the rows at that
 // moment, between those changes.
+// The proven-report premise: a peer over a signalling refetch provider and a
+// source filter, so the peer installs the row after the first query's page.
+// Histories upsert rows that tie with the peer's end or sort past both
+// windows, then refetch, so a report fires while the first query's own page
+// and tie stay the same; later moves check that it owes no repair.
+const eagerProvenReportCase: fc.Arbitrary<EagerCase> = fc
+  .record({
+    base: eagerCaseBase,
+    ranks: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), {
+      minLength: 3,
+      maxLength: 6,
+    }),
+    upserts: fc.array(
+      fc.record({ id: fc.integer({ min: 10, max: 19 }), offset: fc.nat(3) }),
+      { minLength: 1, maxLength: 3 },
+    ),
+    rest: eagerJoinedHistory,
+  })
+  .map(({ base, ranks, upserts, rest }) => {
+    const sorted = [...ranks].sort((left, right) => left - right)
+    const size = base.offset + base.limit
+    // Ranks at or after the peer's end, so the first query's page keeps its
+    // rows while the peer's answers change.
+    const peerEnd = sorted[Math.min(size, sorted.length - 1)]!
+    return {
+      ...base,
+      path: `on-demand` as const,
+      provider: `refetch-signal` as const,
+      latency: `immediate` as const,
+      peer: true,
+      filter: `source` as const,
+      indexed: true,
+      direction: `asc` as const,
+      terms: 1 as const,
+      initial: sorted.map((rank, id) => ({ id, rank, eligible: true })),
+      history: [
+        ...upserts.map(({ id, offset }) => ({
+          type: `upsert` as const,
+          id,
+          rank: peerEnd + offset,
+          eligible: true,
+        })),
+        { type: `refetch` as const },
+        ...rest,
+      ],
+    }
+  })
+
 const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
   .tuple(
     eagerCaseBase,
@@ -4919,9 +4119,10 @@ function eagerOrder(
 ): Array<Row> {
   // Documented order (live-queries guide): nulls first in either direction
   // unless the query asks for them last; NaN is greater than every other
-  // non-null value; ties by ascending id.
-  const position = (rank: number | null): [number, number] => {
-    if (rank === null) return [nulls === `last` ? 3 : 0, 0]
+  // non-null value; ties by ascending id. `null` and `undefined` are both
+  // nullish, so they tie with each other.
+  const position = (rank: number | null | undefined): [number, number] => {
+    if (rank == null) return [nulls === `last` ? 3 : 0, 0]
     if (Number.isNaN(rank)) return [direction === `asc` ? 2 : 1, 0]
     return [direction === `asc` ? 1 : 2, direction === `asc` ? rank : -rank]
   }
@@ -4964,12 +4165,37 @@ function expectEagerWindow(
     expect(actual, label).toEqual(expected)
     return
   }
+  // `null` and `undefined` tie, so either may come first among nullish rows.
   const rank = (id: number) => {
     const row = rows.get(id)
-    return row?.eligible ? row.rank : `ineligible ${id}`
+    return row?.eligible
+      ? ((row.rank as number | null | undefined) ?? null)
+      : `ineligible ${id}`
   }
   expect(actual.map(rank), label).toEqual(expected.map(rank))
   expect(new Set(actual).size, `${label}: distinct rows`).toBe(actual.length)
+}
+
+/**
+ * Whether a bounded prefix of the source leaves the window short. The prefix
+ * is the first `offset + limit` source rows in the query's order. A source
+ * filter runs inside the request, so its prefix holds only eligible rows. A
+ * joined or function filter drops rows only after the source's limit, so its
+ * prefix can hold fewer eligible rows than the window needs.
+ */
+function prefixLeavesWindowShort(
+  rows: ReadonlyMap<number, Row>,
+  testCase: EagerCase,
+): boolean {
+  const size = testCase.offset + testCase.limit
+  const candidates =
+    testCase.filter === `source`
+      ? rows
+      : new Map(
+          [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
+        )
+  const prefix = eagerOrder(candidates, testCase).slice(0, size)
+  return prefix.filter(({ id }) => rows.get(id)!.eligible).length < size
 }
 
 /** Ranks of the last window row and the first row after the window. */
@@ -4996,6 +4222,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   heldRequests: number
   cooperativeCancels: number
   lateAnswers: number
+  ignoredProvenReports: number
+  unindexedRefetchChecks: number
+  shortUnindexedRefills: number
 }> {
   const joined = isJoinedFilter(testCase)
   const fullJoin = testCase.filter === `full-joined`
@@ -5090,6 +4319,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // The requests the provider has served. A request without a predicate
   // covers every row.
   const servedRequests: Array<LoadSubsetOptions> = []
+  // Loader requests per consumer subscription. The first query starts its
+  // sync run before any peer, so the first request is its own.
+  const requestsBy = new Map<unknown, number>()
+  let firstSubscription: unknown
   // A refetching provider has skipped a change since its last refetch, so
   // the Collection may lag the rows and the window laws wait for a refetch.
   let stale = false
@@ -5193,11 +4426,38 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // The rows each served request last returned, at its answer or at the
   // latest refetch. A refetching provider keeps exactly these rows.
   const lastAnswered = new Map<LoadSubsetOptions, Set<number>>()
+  let refetchedAnswers = new Map<LoadSubsetOptions, Set<number>>()
   // Bounded pages that ended on a null or NaN rank. Neither can be
   // expressed as a cursor (canExpressCursorOrder), so the loader then takes
   // the documented full-source fallback.
   let unexpressiblePageEnds = 0
+  // Reports that the first query's own page proved, so it owed no request,
+  // and the first query's request count before the latest such report.
+  let ignoredProvenReports = 0
+  // Signalling refetches of an unindexed plan where the full-source law
+  // applied, and where the documented short-prefix fallback excused it.
+  let unindexedRefetchChecks = 0
+  let shortUnindexedRefills = 0
+  let provenReportRequestsBefore: number | undefined
+  // Set by such a report until a step that can change source ordering, and
+  // the first repair request the first query issued meanwhile.
+  let provenSinceOrderingChange = false
+  let repairAfterProvenReport: string | undefined
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
+    firstSubscription ??= options.subscription
+    // A repair marks its requests `refetch: true`. After a report the first
+    // query's own page proved, it owes none until ordering changes again.
+    if (
+      provenSinceOrderingChange &&
+      options.subscription === firstSubscription &&
+      options.refetch === true
+    ) {
+      repairAfterProvenReport ??= `request ${providerRequests + 1}`
+    }
+    requestsBy.set(
+      options.subscription,
+      (requestsBy.get(options.subscription) ?? 0) + 1,
+    )
     providerRequests++
     if (providerRequests > 4 * rows.size + 100) {
       // A rejected load is a provider failure the loader must handle, so it
@@ -5248,7 +4508,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       rangeEnds.set(options, { ...page.at(-1)! })
       // Generated rows may carry a null rank behind the `number` row type.
       const end = page.at(-1)!.rank as number | null
-      if (end === null || Number.isNaN(end)) unexpressiblePageEnds++
+      if (end == null || Number.isNaN(end)) unexpressiblePageEnds++
     }
     served += page.length
     servedBy.set(
@@ -5312,7 +4572,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // the rows apply, and only when some answer changed; the contract lets a
   // sync adapter report whenever its pages may have shifted, so this
   // provider judges the loader's response, not query-db's gate.
-  async function refetch(): Promise<void> {
+  async function refetch(): Promise<boolean> {
     const current = new Map<number, Row>()
     let changed = false
     for (const request of servedRequests) {
@@ -5329,6 +4589,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       lastAnswered.set(request, ids)
       for (const row of covered) current.set(row.id, row)
     }
+    // The answers as this refetch produced them, before a report's repair
+    // can retire the requests that gave them.
+    refetchedAnswers = new Map(
+      [...lastAnswered].map(([request, ids]) => [request, new Set(ids)]),
+    )
     const applied = send(
       [...current.values()],
       [...sent.keys()].filter((rowId) => !current.has(rowId)),
@@ -5340,6 +4605,74 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       // Core reports in a microtask; the repair then runs its requests.
       await flushPromises()
     }
+    return signalsRefetch && changed
+  }
+  // The first query's own served requests, when they are only its first
+  // page and one tie request: the answers a report could change for it.
+  function firstPageAnswers():
+    | {
+        page: LoadSubsetOptions
+        tie: LoadSubsetOptions
+        pageIds: Set<number>
+        tieIds: Set<number>
+      }
+    | undefined {
+    if (testCase.filter !== `source` || inFlight()) return
+    const own = servedRequests.filter(
+      (options) => options.subscription === firstSubscription,
+    )
+    const size = shown.offset + shown.limit
+    const page = own.find(
+      (options) =>
+        options.orderBy !== undefined &&
+        options.cursor === undefined &&
+        options.limit === size,
+    )
+    const tie = own.find(
+      (options) => options.where !== undefined && options.orderBy === undefined,
+    )
+    const pageIds = page && lastAnswered.get(page)
+    const tieIds = tie && lastAnswered.get(tie)
+    if (own.length !== 2 || !page || !tie || !pageIds || !tieIds) return
+    return { page, tie, pageIds: new Set(pageIds), tieIds: new Set(tieIds) }
+  }
+  // After a refetch, the first query's window is proven by its own page
+  // alone when the refetch left its page and tie answers unchanged, the page
+  // holds the model's first rows through a plain numeric end, the tie reads
+  // that end, and the model's next row sorts strictly after the end and is
+  // installed. Then a report has nothing to repair for it.
+  function provenFirstPage(
+    before: NonNullable<ReturnType<typeof firstPageAnswers>>,
+  ): boolean {
+    // Read the answers of the requests judged before the refetch. Requests
+    // the step added, such as a repair, must not hide the premise.
+    const pageIds = refetchedAnswers.get(before.page)
+    const tieIds = refetchedAnswers.get(before.tie)
+    if (!pageIds || !tieIds) return false
+    const after = { ...before, pageIds, tieIds }
+    const sameIds = (left: Set<number>, right: Set<number>) =>
+      left.size === right.size && [...left].every((key) => right.has(key))
+    const size = shown.offset + shown.limit
+    const ordered = eagerOrder(rows, shown)
+    const end = ordered[size - 1]
+    const next = ordered[size]
+    const endRank = end?.rank as number | null | undefined
+    return (
+      sameIds(before.pageIds, after.pageIds) &&
+      sameIds(before.tieIds, after.tieIds) &&
+      end !== undefined &&
+      next !== undefined &&
+      endRank != null &&
+      !Number.isNaN(endRank) &&
+      !Object.is(next.rank, endRank) &&
+      sent.has(next.id) &&
+      after.pageIds.size === size &&
+      ordered.slice(0, size).every((row) => after.pageIds.has(row.id)) &&
+      // The tie admits the end's rank and nothing on either side of it.
+      matches(after.tie.where, end) &&
+      !matches(after.tie.where, { ...end, rank: endRank + 0.5 }) &&
+      !matches(after.tie.where, { ...end, rank: endRank - 0.5 })
+    )
   }
   function pageFor(options: LoadSubsetOptions): Array<Row> {
     let page = [...rows.values()].filter(
@@ -5462,7 +4795,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       matched
         ? markers.insert(marker(rowId))
         : markers.delete(current.map(({ key }) => key))
-    ).isPersisted.promise
+    ).when(`settled`)
   }
   const markersOf = (rowId: number) =>
     [...markerModel.values()].filter((entry) => entry.rowId === rowId)
@@ -5701,7 +5034,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     // A full join reads its full source too: a rootless row cannot be shown
     // unmatched until every root row has loaded.
     if (testCase.filter !== `source`) return undefined
-    if (boundary.some((rank) => rank === null || Number.isNaN(rank))) return
+    if (boundary.some((rank) => rank == null || Number.isNaN(rank))) return
     return prefixBound(boundary, shown.offset + shown.limit)
   }
   // Publication: a change publishes its window once. Each batch a subscriber
@@ -5762,7 +5095,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         // Generated rows may carry a null rank behind the `number` row type.
         prefix.every(
           (row) =>
-            (row.rank as number | null) !== null && !Number.isNaN(row.rank),
+            (row.rank as number | null) != null && !Number.isNaN(row.rank),
         )
       if (proven) {
         expect(
@@ -5833,9 +5166,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       )
       for (const [index, rowId] of shownIds.slice(1).entries()) {
         const predecessor = shownIds[index]!
+        // `null` and `undefined` ranks tie, so either may come first.
         const sameRank = Object.is(
-          ledger.get(predecessor)?.rank,
-          ledger.get(rowId)?.rank,
+          ledger.get(predecessor)?.rank ?? null,
+          ledger.get(rowId)?.rank ?? null,
         )
         expect(
           sameRank || position.get(predecessor)! < position.get(rowId)!,
@@ -5886,23 +5220,54 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       const requestsBefore = providerRequests
       const visibleBefore = JSON.stringify(visibleIds())
       stepChangedInFlight = false
+      // Only a window move keeps a proven report's no-repair premise; any
+      // other step can change source ordering.
+      if (command.type !== `move`) provenSinceOrderingChange = false
       if (command.type === `refetch`) {
         const fullSourceBefore = fullSourceRequests
         const unexpressibleBefore = unexpressiblePageEnds
-        await refetch()
+        const firstAnswers = firstPageAnswers()
+        const firstRequestsBefore = requestsBy.get(firstSubscription) ?? 0
+        const installedBefore = new Map(sent)
+        const reported = await refetch()
+        // A delete or rank change of an installed row that the first query's
+        // subscription received starts the repair path by itself
+        // (ARCHITECTURE.md), so only a refetch that changes neither is judged.
+        // A source-filter subscription receives every eligible row.
+        const keptInstalledRows = [...installedBefore.values()]
+          .filter((row) => row.eligible)
+          .every((row) => {
+            const now = sent.get(row.id)
+            return now !== undefined && Object.is(now.rank, row.rank)
+          })
+        // A report that changes nothing the first query's own page proves
+        // starts no request for it (ARCHITECTURE.md: a window inside the
+        // loader's own first page needs no repair).
+        // The report's repair would start on a later pass, so the step's
+        // checkpoint judges it.
+        if (
+          reported &&
+          keptInstalledRows &&
+          firstAnswers &&
+          provenFirstPage(firstAnswers)
+        ) {
+          provenReportRequestsBefore = firstRequestsBefore
+        }
         // The repair a report starts reads each window's bounded prefix,
         // tie, and refill; a whole-source read would be the cost the report
-        // exists to avoid. A page that ends on a null or NaN rank takes the
-        // documented full-source fallback instead.
-        // A joined predicate can leave the root prefix underfilled. Without
-        // an order index, finite continuation is unavailable, so the
-        // architecture permits full-source fallback. Row checks still apply.
-        const boundedContinuation = testCase.indexed || !joined
-        if (
-          signalsRefetch &&
-          boundedContinuation &&
-          unexpressiblePageEnds === unexpressibleBefore
-        ) {
+        // exists to avoid. One documented fallback reads the full source
+        // instead: a page that ends on a null or NaN rank. An unindexed plan
+        // whose bounded prefix leaves the window short grows the prefix
+        // (ARCHITECTURE.md, "an underfilled unindexed prefix grows").
+        const shortRefill =
+          !testCase.indexed && prefixLeavesWindowShort(rows, shown)
+        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
+          if (!testCase.indexed) {
+            if (shortRefill) shortUnindexedRefills++
+            else unindexedRefetchChecks++
+          }
+        }
+        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
@@ -5955,7 +5320,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(`delete`, before)
         } else {
-          await source.delete(command.id).isPersisted.promise
+          await source.delete(command.id).when(`settled`)
         }
         // A full join keeps the marker, which becomes a rootless row. An
         // anti-join's deleted row needs no marker change.
@@ -5974,18 +5339,19 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(`update`, next)
         } else {
-          await source.update(command.id, (draft) => {
-            draft.eligible = next.eligible
-            draft.link = next.link
-          }).isPersisted.promise
+          await source
+            .update(command.id, (draft) => {
+              draft.eligible = next.eligible
+              draft.link = next.link
+            })
+            .when(`settled`)
         }
         await setMarker(command.id, eligible)
       } else if (command.type === `dup`) {
         if (!(joined || fullJoin) || viaLink || !before) continue
         if (markersOf(before.link ?? before.id).length === 0) continue
         if (ledgerHasRoot(before.link ?? before.id)) noteChange()
-        await markers.insert(marker(before.link ?? before.id)).isPersisted
-          .promise
+        await markers.insert(marker(before.link ?? before.id)).when(`settled`)
       } else if (command.type === `touch`) {
         if (!before) continue
         const next = { ...before, label: `touched-${step}` }
@@ -5993,9 +5359,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(`update`, next)
         } else {
-          await source.update(command.id, (draft) => {
-            draft.label = next.label
-          }).isPersisted.promise
+          await source
+            .update(command.id, (draft) => {
+              draft.label = next.label
+            })
+            .when(`settled`)
         }
       } else {
         const next = {
@@ -6009,13 +5377,15 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         if (testCase.path !== `local-only`) {
           sourceWrite(before ? `update` : `insert`, next)
         } else if (before) {
-          await source.update(command.id, (draft) => {
-            draft.rank = next.rank
-            draft.eligible = next.eligible
-            draft.link = next.link
-          }).isPersisted.promise
+          await source
+            .update(command.id, (draft) => {
+              draft.rank = next.rank
+              draft.eligible = next.eligible
+              draft.link = next.link
+            })
+            .when(`settled`)
         } else {
-          await source.insert(next).isPersisted.promise
+          await source.insert(next).when(`settled`)
         }
         await setMarker(command.id, next.eligible)
       }
@@ -6028,6 +5398,19 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       )
       if (changedInFlight()) caseHeldChanges++
       expectProviderLedger(`after step ${step}`)
+      if (provenReportRequestsBefore !== undefined) {
+        ignoredProvenReports++
+        expect(
+          (requestsBy.get(firstSubscription) ?? 0) - provenReportRequestsBefore,
+          `requests the first query issued for a report its own page proves, at step ${step}`,
+        ).toBe(0)
+        provenReportRequestsBefore = undefined
+        provenSinceOrderingChange = true
+      }
+      expect(
+        repairAfterProvenReport,
+        `a repair the first query issued after a report its own page proved, by step ${step}`,
+      ).toBeUndefined()
       if (inFlight()) {
         expectInFlightWindow(
           visibleIds(),
@@ -6156,6 +5539,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       heldRequests: caseHeldRequests,
       cooperativeCancels,
       lateAnswers,
+      ignoredProvenReports,
+      unindexedRefetchChecks,
+      shortUnindexedRefills,
     }
   } finally {
     unsubscribe?.()
@@ -6177,6 +5563,14 @@ type OptimisticWindowCheckpoint =
   `initial` | `optimistic` | `settled` | `restored`
 const MAX_OPTIMISTIC_WINDOW_REQUESTS = 8
 const OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS = 8
+
+// The most rows a bounded refill may ask for. An indexed plan pages past
+// the window. An unindexed plan grows its prefix to twice the rows it
+// installed (ARCHITECTURE.md, "an underfilled unindexed prefix grows"), and
+// a request also covers the one row that the pending transaction overlays.
+function refillBound({ indexed, width, installedIds }: OptimisticWindowCase) {
+  return indexed ? width + 2 : 2 * installedIds.length + 1
+}
 
 type OptimisticWindowCase = {
   shape: OptimisticWindowShape
@@ -6224,6 +5618,8 @@ type OptimisticWindowObservation = {
     submittedRows: Array<number>
     limit: number | undefined
     direction: string | undefined
+    // The request had a limit or a predicate, so it read no full source.
+    bounded?: boolean
     appliedReceiptPending: boolean
     providerPending: boolean
   }>
@@ -6371,6 +5767,7 @@ async function checkOptimisticWindow(
     submittedRows: Array<number>
     limit: number | undefined
     direction: string | undefined
+    bounded: boolean
     appliedReceiptSettled: boolean
     providerSettled: boolean
     provider: Promise<unknown>
@@ -6420,6 +5817,8 @@ async function checkOptimisticWindow(
                   submittedRows: [] as Array<number>,
                   limit: options.limit,
                   direction: options.orderBy?.[0]?.compareOptions.direction,
+                  bounded:
+                    options.limit !== undefined || options.where !== undefined,
                   appliedReceiptSettled: false,
                   providerSettled: false,
                   provider: Promise.resolve(),
@@ -6697,7 +6096,7 @@ async function checkOptimisticWindow(
                 else if (shape !== `source`) draft.link = -draft.id
               })
       let settlementOutcome: `fulfilled` | `rejected` = `fulfilled`
-      settled = transaction.isPersisted.promise.then(
+      settled = transaction.when(`settled`).then(
         () => undefined,
         () => {
           settlementOutcome = `rejected`
@@ -6729,6 +6128,7 @@ async function checkOptimisticWindow(
         submittedRows: [...attempt.submittedRows],
         limit: attempt.limit,
         direction: attempt.direction,
+        bounded: attempt.bounded,
         appliedReceiptPending: !attempt.appliedReceiptSettled,
         providerPending: !attempt.providerSettled,
       }))
@@ -6764,6 +6164,7 @@ async function checkOptimisticWindow(
               submittedRows: [...attempt.submittedRows],
               limit: attempt.limit,
               direction: attempt.direction,
+              bounded: attempt.bounded,
               appliedReceiptPending: !attempt.appliedReceiptSettled,
               providerPending: !attempt.providerSettled,
             }))
@@ -6793,7 +6194,7 @@ async function checkOptimisticWindow(
           .map(copyOptimisticWindowPublication)
         await awaitOptimisticCheckpoint(
           `marker restoration`,
-          restoration.isPersisted.promise,
+          restoration.when(`settled`),
         )
       }
 
@@ -6932,7 +6333,7 @@ function optimisticWindowViolations(
     needsAcquisition &&
     (refillAttempt?.direction !== (testCase.direction ?? `desc`) ||
       refillAttempt.limit === undefined ||
-      refillAttempt.limit > width + 2)
+      refillAttempt.limit > refillBound(testCase))
   ) {
     violations.push(`refill used an unbounded provider request`)
   } else if (
@@ -6947,6 +6348,22 @@ function optimisticWindowViolations(
   }
   if (testCase.acquisition === `forbidden` && observation.attempts.length > 0) {
     violations.push(`refill acquisition started with complete local extent`)
+  }
+  // A refill the case allows but does not require is still bounded: an
+  // ordered read within the refill bound, or a predicate read, never the
+  // full source.
+  if (testCase.acquisition === `allowed`) {
+    for (const attempt of observation.attempts) {
+      if (
+        attempt.bounded === false ||
+        (attempt.direction !== undefined &&
+          (attempt.limit === undefined ||
+            attempt.limit > refillBound(testCase)))
+      ) {
+        violations.push(`an allowed refill used an unbounded provider request`)
+        break
+      }
+    }
   }
   const requested = new Set<string>()
   for (const request of observation.requestHistory ?? []) {
@@ -7141,6 +6558,202 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
+  // An unindexed joined window whose only domain row is ineligible. After a
+  // signalling refetch the repair's bounded prefix holds just that row, so
+  // the window is short. The refill grows the prefix instead of reading the
+  // full source, which the refetch law forbids.
+  it(`grows the prefix of a short unindexed window after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+      initial: [],
+      history: [
+        { type: `upsert`, id: 0, rank: 0, eligible: false },
+        { type: `dup`, id: 0 },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // The trace from #2221. A descending, nulls-first, unindexed window behind
+  // an anti-joined marker has a NaN rank, so its boundary has no cursor.
+  // After a signalling refetch the loader read the full source twice: the
+  // short prefix took the full-source fallback. The prefix now grows, so the
+  // refetch law, which allows no full-source read here, holds.
+  it(`reads no full source after a signalling refetch past a NaN boundary`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: false },
+      ],
+      history: [
+        { type: `delete-visible` },
+        { type: `move`, offset: 0, limit: 1 },
+      ],
+    })
+  })
+
+  // Trace 1 from a comment on #2221: an ascending unindexed window behind an
+  // anti-joined marker whose only row is ineligible. Before prefix growth the
+  // short prefix took the full-source fallback, twice, after a signalling
+  // refetch; the refetch law allows none.
+  it(`reads no full source after a signalling refetch of a short anti-joined window`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+      initial: [],
+      history: [
+        { type: `upsert`, id: 0, rank: 0, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // Found by the unindexed-refetch random campaign. A refetch report moves
+  // the page's end onto a null rank, which no cursor can express. Reading
+  // that end's tie would take the boundary's full-source fallback, so the
+  // loader repairs with its bounded prefix instead; a loader that read the
+  // tie broke the refetch law.
+  it(`repairs instead of reading an unexpressible end's tie after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 1,
+      initial: [
+        { id: 0, rank: null as unknown as number, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 3, rank: 0, eligible: true },
+      ],
+      history: [
+        {
+          type: `upsert`,
+          id: 10,
+          rank: null as unknown as number,
+          eligible: false,
+        },
+        { type: `dup`, id: 0 },
+      ],
+    })
+  })
+
+  // A peer's tie answer changes, so the provider reports, but the first
+  // query's page and tie answers stay the same and the peer installed the
+  // row after its page. That page proves the window, so the report must
+  // start no request for the first query and leave it owing no repair: the
+  // window move that follows continues from its boundary instead.
+  it(`starts no request for a window its own first page still proves after a report`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: true,
+      filter: `source`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 1, eligible: true },
+        { id: 1, rank: 2, eligible: true },
+        { id: 2, rank: 3, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 2, eligible: true },
+        { type: `refetch` },
+        { type: `move`, offset: 0, limit: 3 },
+      ],
+    })
+  })
+
+  // A signalling refetch moves the first page's end earlier, to a rank that
+  // a row the provider never sent ties with. The window is still inside the
+  // page, but the rank-2 row past it is local only because the old tie
+  // request read it, so it proves nothing about the rows that now tie with
+  // the end. The loader must read the new end's tie; ignoring the report
+  // made a later window move read the local rows and skip row 11.
+  it(`repairs a signalling refetch before a window move reads past its page`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      latency: `immediate`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: null as unknown as number, eligible: true },
+        { id: 1, rank: 2, eligible: true },
+        { id: 2, rank: 3, eligible: true },
+        { id: 3, rank: Number.NaN, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 0, eligible: true },
+        { type: `flip`, id: 2 },
+        { type: `upsert`, id: 11, rank: 0, eligible: true },
+        { type: `refetch` },
+        { type: `move`, offset: 0, limit: 3 },
+        { type: `delete`, id: 0 },
+      ],
+    })
+  })
+
   // A page with no later page whose end moves earlier. Two rank-0 rows
   // arrive while the provider lags; the refetched page ends at rank 0, but
   // the tie request still holds the rank-1 row, so the loader sees no
@@ -7283,7 +6896,17 @@ describe(`eager indexed ordered windows`, () => {
                       ? [4, 3]
                       : [4, 3, 2]
                   : [1, 2, 3, 4],
-                acquisition: extent === `missing` ? `required` : `forbidden`,
+                // An unindexed plan proves rows only up to its bounded
+                // prefix, so behind a joined filter it may grow the prefix
+                // even when the replacement row is installed (ARCHITECTURE.md,
+                // "an underfilled unindexed prefix grows"). A source filter
+                // leaves no rows out of the prefix, so it needs no request.
+                acquisition:
+                  extent === `missing`
+                    ? `required`
+                    : shape === `source`
+                      ? `forbidden`
+                      : `allowed`,
               }
             }),
           ),
@@ -7324,6 +6947,27 @@ describe(`eager indexed ordered windows`, () => {
           acquisition: `required` as const,
           answerTiming: `after-settlement` as const,
         })),
+      ),
+    ),
+    // An unindexed one-row window behind a joined filter installs only the
+    // prefix it grew to: the rejected leading row 4 and the window row 3.
+    // The departure of row 3 leaves the replacement row 2 missing, so the
+    // refill must grow the prefix before persistence settles.
+    ...([`joined`, `anti-joined`] as const).flatMap((shape) =>
+      ([`update`, `delete`] as const).flatMap((mutation) =>
+        ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+          ([`collection`, `effect`] as const).map((consumer) => ({
+            shape,
+            mutation,
+            consumer,
+            outcome,
+            width: 1 as const,
+            indexed: false,
+            extent: `missing` as const,
+            installedIds: [4, 3],
+            acquisition: `required` as const,
+          })),
+        ),
       ),
     ),
     {
@@ -7753,15 +7397,7 @@ describe(`eager indexed ordered windows`, () => {
       })
       const ids = () => query.toArray.map(({ id }) => id)
       const order = (removed?: number) =>
-        rows
-          .filter(({ id }) => id !== removed)
-          .sort((left, right) =>
-            direction === `asc`
-              ? left.rank - right.rank
-              : right.rank - left.rank,
-          )
-          .slice(offset, offset + limit)
-          .map(({ id }) => id)
+        expectedInstalledWindow(rows, { direction, offset, limit }, removed)
       let unsubscribe: (() => void) | undefined
       try {
         await query.preload()
@@ -7784,7 +7420,7 @@ describe(`eager indexed ordered windows`, () => {
         ])
         if (outcome === `acknowledge`) persistence.resolve()
         else persistence.reject(new Error(`rollback`))
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         expect(ids(), `settled installed rows`).toEqual(
           outcome === `acknowledge` ? expected : initial,
         )
@@ -7991,7 +7627,7 @@ describe(`eager indexed ordered windows`, () => {
       if (
         hasRootless &&
         window.some(
-          (id) => id >= 0 && (model.get(id)!.rank as number | null) === null,
+          (id) => id >= 0 && (model.get(id)!.rank as number | null) == null,
         )
       ) {
         mixedNullGroup++
@@ -8019,8 +7655,92 @@ describe(`eager indexed ordered windows`, () => {
   // the reach check always reads the cases that test just executed. Reach is
   // keyed by case, so rerunning an identical case overwrites its entry;
   // shrinking runs only after a failure, which ends the test first.
+  // Reconstruction: the fixed campaign must reach the proven-report law, so
+  // a loader that repairs every report fails it.
+  it(`starts no repair for reports a window's own first page proves for a fixed seed`, async () => {
+    const PROVEN_SEED = 2091
+    let proven = 0
+    await fc.assert(
+      fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
+        proven += (await runEagerWindow(testCase)).ignoredProvenReports
+      }),
+      { numRuns: runs, seed: PROVEN_SEED },
+    )
+    expect(proven, `reports a first page proved`).toBeGreaterThan(0)
+  })
+
+  it(`starts no repair for reports a window's own first page proves for a random or replayed seed`, async () => {
+    const options = oracleRandomParameters(
+      runs,
+      replay,
+      `ordered-work.eager-proven-report`,
+    )
+    const reach = createOracleReach(`ordered-work.eager-proven-report`, [
+      `ignoredProvenReports`,
+    ] as const)
+    await fc.assert(
+      fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
+        reach.beginHistory()
+        const observed = await runEagerWindow(testCase)
+        if (observed.ignoredProvenReports > 0)
+          reach.reach(`ignoredProvenReports`)
+      }),
+      options,
+    )
+    reach.assertReached()
+  })
+
+  // The refetch law over unindexed joined windows behind a signalling
+  // provider. A repair must not read the full source, including the refill
+  // of an unindexed plan whose bounded prefix leaves the window short, which
+  // grows the prefix. The campaign must reach windows the prefix fills and
+  // windows it leaves short.
+  // Ineligible rows crowd the bounded prefix and leave the window short, so
+  // half the cases start with every row eligible, where the law applies.
+  const eagerUnindexedRefetchCase = fc
+    .tuple(eagerJoinedCase, fc.boolean())
+    .map(([testCase, allEligible]) => ({
+      ...testCase,
+      path: `on-demand` as const,
+      provider: `refetch-signal` as const,
+      indexed: false,
+      peer: false,
+      initial: allEligible
+        ? testCase.initial.map((row) => ({ ...row, eligible: true }))
+        : testCase.initial,
+    }))
+  for (const campaign of [`fixed`, `random`] as const) {
+    it(`grows a short unindexed prefix instead of reading the full source after a signalling refetch (${campaign} campaign)`, async () => {
+      const property = `ordered-work.eager-unindexed-refetch`
+      const reach = createOracleReach(
+        property,
+        [`unindexedRefetchChecks`, `shortUnindexedRefills`] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(eagerUnindexedRefetchCase, async (testCase) => {
+          reach.beginHistory()
+          const observed = await runEagerWindow(testCase)
+          for (const state of [
+            `unindexedRefetchChecks`,
+            `shortUnindexedRefills`,
+          ] as const) {
+            if (observed[state] > 0) reach.reach(state)
+          }
+        }),
+        campaign === `fixed`
+          ? // This seed kills a loader that repairs every report with a
+            // full-source read; about half of seeds do.
+            { numRuns: runs, seed: 2094 }
+          : oracleRandomParameters(runs, replay, property),
+      )
+      reach.assertReached()
+    })
+  }
+
   it(`keeps a window whose loads answer between live changes for a fixed seed`, async () => {
-    const HELD_SEED = 2081
+    // Chosen for reach after nullish ranks joined the row generator.
+    const HELD_SEED = 2083
     const heldReach = new Map<
       string,
       Awaited<ReturnType<typeof runEagerWindow>>
@@ -8044,7 +7764,7 @@ describe(`eager indexed ordered windows`, () => {
     ).toEqual([])
     const reach = [...executed].map((key) => heldReach.get(key)!)
     // A case whose deletes refill from rows the query already holds issues
-    // no held request; at one times the run count, 35 of 40 cases issue one.
+    // no held request; at one times the run count, 33 of 40 cases issue one.
     expect(
       reach.filter((count) => count.heldRequests > 0).length,
       `held cases that issue a held request`,
@@ -8056,7 +7776,7 @@ describe(`eager indexed ordered windows`, () => {
       `held cases with a held request but no in-flight change`,
     ).toEqual([])
     // `release-peer` aborts held requests: at one times the run count, a
-    // cooperative provider cancels 4 and a late provider answers 1 anyway.
+    // cooperative provider cancels 6 and a late provider answers 4 anyway.
     expect(
       reach.reduce((sum, count) => sum + count.cooperativeCancels, 0),
       `held requests a cooperative provider cancelled`,
@@ -8139,4 +7859,55 @@ describe(`eager indexed ordered windows`, () => {
     `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
     checkEagerWindow,
   )
+})
+
+/**
+ * A visible ordered window after a change that leaves the ordering key alone:
+ * the first `limit` authored rows in `orderBy` order. The law is that a value
+ * change outside the key does not move rows, so this prediction also holds
+ * after such a change.
+ */
+function expectedVisibleWindow(
+  rows: ReadonlyArray<Row>,
+  direction: Scenario[`direction`],
+  limit: number,
+): Array<Row> {
+  return [...rows].sort(compareRows(direction)).slice(0, limit)
+}
+
+/**
+ * The installed window after one optimistic departure: the requested slice of
+ * the authored rows without the departed key, in rank order. The departure
+ * removes one key from a plain row list before the window is taken.
+ */
+function expectedInstalledWindow(
+  rows: ReadonlyArray<{ id: number; rank: number }>,
+  {
+    direction,
+    offset,
+    limit,
+  }: { direction: `asc` | `desc`; offset: number; limit: number },
+  removed?: number,
+): Array<number> {
+  return rows
+    .filter(({ id }) => id !== removed)
+    .sort((left, right) =>
+      direction === `asc` ? left.rank - right.rank : right.rank - left.rank,
+    )
+    .slice(offset, offset + limit)
+    .map(({ id }) => id)
+}
+
+// Each check compares production with the model it names. The grammar parts
+// are the generators of legal histories: the exhaustive small domain and the
+// full-join case that the null-group calibration samples.
+declareOracle({
+  check: [expectEagerWindow, optimisticWindowViolations, assertConsumerParity],
+  model: [
+    eagerWindow,
+    referenceOptimisticWindow,
+    expectedVisibleWindow,
+    expectedInstalledWindow,
+  ],
+  grammar: [exhaustiveScenarios, eagerFullJoinCase],
 })
