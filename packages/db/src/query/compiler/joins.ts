@@ -32,9 +32,11 @@ import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
 import {
+  CALLBACK_INPUT,
   INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
   attachRouteMetadataToResult,
+  getCallbackInput,
   getNamespacedRouteMetadata,
   getRouteMetadata,
   getRoutedScalarMetadata,
@@ -55,6 +57,7 @@ import type {
 import type { IStreamBuilder, JoinType } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type {
+  InputRow,
   KeyedStream,
   NamespacedAndKeyedStream,
   NamespacedRow,
@@ -91,7 +94,7 @@ function parameterizeJoinInputByParentRoutes(
   return crossJoinParentRoutes(
     input,
     parentKeyStream,
-    (rowKey, row, correlationKey, parentContext) => {
+    (rowKey, row, correlationKey, parentContext, callbackValue) => {
       return [
         serializeValue([
           valueIdentity.equality(rowKey),
@@ -105,12 +108,24 @@ function parameterizeJoinInputByParentRoutes(
           correlationKey,
           parentContext,
         ),
-      ]
+        callbackValue,
+      ] as unknown as [unknown, unknown]
     },
   )
 }
 
-function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
+function wrapJoinedInputRow(
+  alias: string,
+  row: any,
+  callbackValue?: unknown,
+): NamespacedRow {
+  const finish = (namespaced: NamespacedRow): NamespacedRow => {
+    if (callbackValue !== undefined && callbackValue !== row)
+      Object.assign(namespaced, {
+        [CALLBACK_INPUT]: { [alias]: callbackValue },
+      })
+    return namespaced
+  }
   const scalar = getRoutedScalarMetadata(row)
   if (scalar) {
     const namespaced = attachRouteMetadata(
@@ -122,11 +137,11 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
       scalar.correlationKey,
       scalar.parentContext,
     ) as unknown as NamespacedRow
-    return namespaced
+    return finish(namespaced)
   }
 
   if (row == null || typeof row !== `object`) {
-    return { [alias]: row }
+    return finish({ [alias]: row } as NamespacedRow)
   }
 
   const route = getRouteMetadata(row)
@@ -138,7 +153,7 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
   if (route) {
     attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
   }
-  return namespaced
+  return finish(namespaced)
 }
 
 function getRouteJoinKey(
@@ -421,10 +436,10 @@ function processJoin(
   )
 
   let joinedPipeline = joinedInput.pipe(
-    map(([currentKey, row]) =>
+    map(([currentKey, row, callbackValue]: [...InputRow, unknown?]) =>
       keyJoinInput(
         currentKey,
-        wrapJoinedInputRow(joinedSource, row),
+        wrapJoinedInputRow(joinedSource, row, callbackValue),
         joinedSource,
         `joined`,
         compiledJoinedExpressions,
@@ -738,10 +753,17 @@ function processJoinSource(
         map((data: any) => {
           const [
             key,
-            [value, _orderByIndex, correlationKey, parentContext, publicKey],
+            [
+              value,
+              _orderByIndex,
+              correlationKey,
+              parentContext,
+              publicKey,
+              callbackValue,
+            ],
           ] = data
           if (!parentKeyStream) {
-            return [key, value] as [unknown, any]
+            return [key, value, callbackValue] as unknown as InputRow
           }
           return [
             key,
@@ -751,7 +773,8 @@ function processJoinSource(
               parentContext,
               publicKey,
             ),
-          ] as [unknown, any]
+            callbackValue,
+          ] as unknown as InputRow
         }),
       )
 
@@ -811,6 +834,21 @@ function processJoinResults(
         } else {
           // A missing joined side cannot inherit a same-named parent source.
           delete mergedNamespacedRow[joinedSource]
+        }
+
+        const mainView =
+          mainNamespacedRow && getCallbackInput(mainNamespacedRow)
+        const joinedView =
+          joinedNamespacedRow && getCallbackInput(joinedNamespacedRow)
+        if (
+          mainView !== mainNamespacedRow ||
+          joinedView !== joinedNamespacedRow
+        ) {
+          const view = { ...(mainView ?? joinedView) } as NamespacedRow
+          if (main == null) for (const alias of mainAliases) delete view[alias]
+          if (joinedView) view[joinedSource] = joinedView[joinedSource]!
+          else delete view[joinedSource]
+          Object.assign(mergedNamespacedRow, { [CALLBACK_INPUT]: view })
         }
 
         // Combine the main and joined keys without ambiguity: keys may contain

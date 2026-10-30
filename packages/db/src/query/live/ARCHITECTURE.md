@@ -386,27 +386,44 @@ internal matches. The public-container copy matrix crosses reference-key type,
 ordered and unordered subqueries, materialization form, and parent/child updates.
 
 Reserved public row fields have a separate callback-input law (maintainer
-decision, 2026-10-28). Direct source rows and structured whole-row source
+decisions, 2026-10-28 and 2026-10-30). Direct source rows and structured whole-row source
 spreads expose genuine source `$key`, `$origin`, `$hasPendingWrites`, and
 `$collectionId`, including when a spread selects conflicting reserved names.
 A subquery projection that creates its own row shape, including a new
 functional object or functional spread, exposes none of those reserved fields
-before downstream `fn.select()` code runs. An inline include value keeps its
+before downstream `fn.select()`, `fn.where()`, or `fn.having()` code runs.
+The October 30 decision extends the original selection-only promise to both
+functional predicates. An inline include value keeps its
 authored selected shape. Sanitizing only the eventual Collection publication
 cannot satisfy this law, because user code may already have derived an
 ordinary field from a spoofed input.
 
-The compiler enforces this source/projection boundary when a functional callback
-consumes a QueryRef or joined subquery result, including inside a correlated
-inline child. An inline-only QueryRef and the include's final authored value
-retain their separate inline shape. The runtime
-owner checks root, wrapped child and direct child callbacks at initial readiness,
-held mutation, settlement and remote next use. Its bounded repair evidence is in
+The compiler carries a callback view beside each authored selected-row
+occurrence. FROM, joined-source and union adapters transport that view.
+Functional callbacks read it without rewriting the query's authored row.
+Private callback state never crosses the callback or result boundary.
+An inline-only QueryRef and an inline child's final authored value retain
+that authored shape, including when a predicate runs without a selection.
+The selected-row normalization flag describes the output metadata view and
+is independent of callback-view transport. A two-slot cache retains authored
+and normalized compilations separately. Each ordered top-K retains its own
+window; the source loader's registered plan covers every window that shares
+that source, including subsequent moves.
+
+The runtime owner checks select, where and having source inputs through root,
+wrapped child, direct child and real Effect receivers. Predicate-with-select
+controls distinguish callback syntax from placement. Collection receivers
+observe initial readiness, held mutation, settlement and remote next use.
+Effects additionally observe every delivered value and previousValue,
+exit/reentry and post-disposal silence. Its bounded evidence is in
 [the callback metadata record](../../../../../docs/contributing/oracle-reviews/callback-metadata.md).
 Reusing a compilation cache on one graph with the same input streams must retain
 the callback inputs and authored selected output that separate compilations
 produce. The exported `compileQuery` receiver checks both compilation orders
-at initial graph drain, separately from the Collection lifecycle receivers.
+through FROM, JOIN and union placement at initial graph drain. Its raw output
+comparison is differential and supplies no independent Effect-root attribution
+policy. Optimizer cloning can prevent an original raw-key cache hit in union
+placement; that path checks propagation and transparency instead.
 Separate static receiving-type gaps remain in the
 [deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
 

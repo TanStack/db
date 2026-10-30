@@ -2,11 +2,16 @@
  * # Reserved fields must be correct before user JavaScript consumes them.
  *
  * The shared input oracle states the maintainer's source/projection/inline law.
- * This finite receiver exhausts 231 root histories, 231 wrapped child histories
- * and 165 direct child histories. Another 198 inline-value/rejection histories
- * and three direct-source controls exercise the neighboring boundaries.
- * Another 132 histories use the exported compiler with exact shared QueryIR,
- * both compilation orders and shared/separate caches at initial graph drain.
+ * This finite receiver exhausts 1,155 root histories, 1,155 wrapped child
+ * histories, 825 direct child histories and 1,155 real Effect histories.
+ * Each crosses select, where, having and predicate-with-select controls.
+ * Another 198 inline value/rejection histories and 20 direct-source controls exercise neighboring
+ * boundaries. Effects also check exit, reentry, delivery continuity in both
+ * callback channels, every delivered value/previousValue, and post-disposal
+ * silence. Another 396 histories use the exported compiler across FROM, JOIN
+ * and union placement, both compilation orders and shared/separate caches at
+ * initial graph drain. Optimizer cloning can prevent a placement from reusing
+ * the original raw key; explicit counters distinguish that from cache reuse.
  * It invokes real query callbacks and compares their copied input and ordinary derived output at
  * initial readiness, held mutation, settlement and later remote use. The
  * materializer receiver uses the same judgment, not a competing child model.
@@ -32,6 +37,7 @@ import {
   expectedMetadataRecord,
   expectedSourceVirtualFields,
   metadataCallbackHistories,
+  metadataCallbackKinds,
   metadataCallbackReceiverHistories,
   metadataCompilerCacheHistories,
   metadataInlineHistories,
@@ -47,6 +53,8 @@ import {
 import type { MetadataSourceFact } from './virtual-row-fields-input-oracle.js'
 
 const cuts = [`initial`, `held`, `settled`, `remote-next-use`] as const
+const receiverCuts = (receiver: string) =>
+  receiver === `effect` ? [...cuts, `exit`, `reentry`, `disposed`] : cuts
 const key = (history: {
   shape: string
   collision: string
@@ -56,10 +64,11 @@ const key = (history: {
 // Escape only the display label; the grammar and reach retain exact names.
 const callbackCases = metadataCallbackReceiverHistories.map((history) => ({
   ...history,
-  label: `${history.receiver}/${history.path}/${key(history)}`.replaceAll(
-    `$`,
-    `field:`,
-  ),
+  label:
+    `${history.kind}/${history.receiver}/${history.path}/${key(history)}`.replaceAll(
+      `$`,
+      `field:`,
+    ),
 }))
 const inlineCases = metadataInlineHistories.map((history) => ({
   ...history,
@@ -70,10 +79,11 @@ const inlineCases = metadataInlineHistories.map((history) => ({
 }))
 const compilerCases = metadataCompilerCacheHistories.map((history) => ({
   ...history,
-  label: `${history.order}/${history.cache}/${key(history)}`.replaceAll(
-    `$`,
-    `field:`,
-  ),
+  label:
+    `${history.path}/${history.order}/${history.cache}/${key(history)}`.replaceAll(
+      `$`,
+      `field:`,
+    ),
 }))
 const compilerObservations = [
   `callback`,
@@ -85,7 +95,7 @@ const compilerReach = createOracleReach(
   metadataCompilerCacheHistories.flatMap((history) =>
     compilerObservations.map(
       (observation) =>
-        `${history.order}/${history.cache}/${key(history)}/${observation}`,
+        `${history.path}/${history.order}/${history.cache}/${key(history)}/${observation}`,
     ),
   ),
   { replaying: false },
@@ -94,12 +104,18 @@ const callbackReach = createOracleReach(
   `functional metadata callback`,
   [
     ...metadataCallbackReceiverHistories.flatMap((history) =>
-      cuts.map(
-        (cut) => `${history.receiver}/${history.path}/${key(history)}/${cut}`,
+      receiverCuts(history.receiver).map(
+        (cut) =>
+          `${history.kind}/${history.receiver}/${history.path}/${key(history)}/${cut}`,
       ),
     ),
-    ...[`root`, `inline-child`, `inline-child-direct`].flatMap((receiver) =>
-      cuts.map((cut) => `${receiver}/direct-source/${cut}`),
+    ...metadataCallbackKinds.flatMap((kind) =>
+      [`root`, `inline-child`, `inline-child-direct`, `effect`].flatMap(
+        (receiver) =>
+          receiverCuts(receiver).map(
+            (cut) => `${kind}/${receiver}/direct-source/${cut}`,
+          ),
+      ),
     ),
   ],
   { replaying: false },
@@ -142,6 +158,7 @@ declareOracle({
   model: [expectedMetadataInput],
   grammar: [
     metadataCallbackHistories,
+    metadataCallbackKinds,
     metadataCallbackReceiverHistories,
     metadataInlineHistories,
     metadataCompilerCacheHistories,
@@ -158,9 +175,10 @@ test.each(callbackCases)(
       history.path,
       (cut) =>
         callbackReach.reach(
-          `${history.receiver}/${history.path}/${key(history)}/${cut}`,
+          `${history.kind}/${history.receiver}/${history.path}/${key(history)}/${cut}`,
         ),
       history.receiver,
+      history.kind,
     )
     expect(
       report.violations,
@@ -168,9 +186,15 @@ test.each(callbackCases)(
     ).toStrictEqual([])
   },
 )
-test.each([`root`, `inline-child`, `inline-child-direct`] as const)(
-  `receives direct source metadata before deriving ordinary values: %s`,
-  async (receiver) => {
+test.each(
+  metadataCallbackKinds.flatMap((kind) =>
+    ([`root`, `inline-child`, `inline-child-direct`, `effect`] as const).map(
+      (receiver) => ({ kind, receiver }),
+    ),
+  ),
+)(
+  `receives direct source metadata before deriving ordinary values: %j`,
+  async ({ kind, receiver }) => {
     callbackEntered = true
     callbackReach.beginHistory()
     const report = await runMetadataCallbackHistory(
@@ -180,8 +204,9 @@ test.each([`root`, `inline-child`, `inline-child-direct`] as const)(
         authoredPending: false,
       },
       `direct-source`,
-      (cut) => callbackReach.reach(`${receiver}/direct-source/${cut}`),
+      (cut) => callbackReach.reach(`${kind}/${receiver}/direct-source/${cut}`),
       receiver,
+      kind,
     )
     expect(report.violations).toStrictEqual([])
   },
@@ -208,8 +233,9 @@ test.each(inlineCases)(
 )
 
 // The initial compiler graph-drain cut is distinct from the Collection
-// lifecycle cuts above. Both compilation orders must retain authored output
-// while source/projection metadata is judged before downstream JavaScript.
+// lifecycle cuts above. Both orders must preserve the cache-transparency
+// relation. Independent source/projection judgments still check both executions;
+// raw output does not borrow an implicit Effect-root attribution policy.
 test.each(compilerCases)(
   `preserves metadata across compiler cache modes: $label`,
   async (history) => {
@@ -219,9 +245,10 @@ test.each(compilerCases)(
       history,
       history.order,
       history.cache,
+      history.path,
       (observation) =>
         compilerReach.reach(
-          `${history.order}/${history.cache}/${key(history)}/${observation}`,
+          `${history.path}/${history.order}/${history.cache}/${key(history)}/${observation}`,
         ),
     )
     expect(

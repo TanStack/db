@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
@@ -20,6 +20,7 @@ import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import { receiveOrderedCompilerCacheHistory } from './ordered-compiler-cache-driver.js'
 import {
   compareRows,
   expectDistinctRequests,
@@ -7911,3 +7912,112 @@ declareOracle({
   ],
   grammar: [exhaustiveScenarios, eagerFullJoinCase],
 })
+
+/** A source's ordered acquisition must serve every compiled window that reads
+ * that lexical source. Authored/source metadata modes may have separate result
+ * streams; overwriting one window's demand with the other's cannot change the
+ * independent sorted slice. Authority: ordered acquisition and window laws in
+ * ARCHITECTURE.md. The exported compiler plus real loader is a controlled core
+ * receiving cut; the existing live Collection/Effect histories supply the host
+ * gate. These finite histories do not promise a universal operator-count bound.
+ */
+const compilerCacheWindows = (
+  [`authored-first`, `callback-first`] as const
+).flatMap((order) =>
+  ([`shared`, `separate`] as const).flatMap((cache) =>
+    ([`query-ref`, `joined-source`, `union-branch`] as const).flatMap((path) =>
+      ([`structured`, `functional`] as const).flatMap((shape) =>
+        ([`asc`, `desc`] as const).flatMap((direction) =>
+          [
+            {
+              initial: { limit: 1, offset: 0 },
+              moved: { limit: 3, offset: 0 },
+            },
+            {
+              initial: { limit: 3, offset: 0 },
+              moved: { limit: 1, offset: 0 },
+            },
+            {
+              initial: { limit: 1, offset: 0 },
+              moved: { limit: 2, offset: 1 },
+            },
+          ].map((window) => ({
+            order,
+            cache,
+            path,
+            shape,
+            direction,
+            ...window,
+          })),
+        ),
+      ),
+    ),
+  ),
+)
+const compilerWindowCuts = [`initial`, `moved`, `returned`] as const
+const compilerWindowKey = (history: (typeof compilerCacheWindows)[number]) =>
+  JSON.stringify(history)
+const compilerWindowReach = createOracleReach(
+  `compiled ordered cache windows`,
+  compilerCacheWindows.flatMap((history) =>
+    compilerWindowCuts.map((cut) => `${compilerWindowKey(history)}/${cut}`),
+  ),
+  { replaying: false },
+)
+let compilerWindowEntered = false
+afterAll(() => {
+  if (compilerWindowEntered) compilerWindowReach.assertReached()
+})
+declareOracle({
+  model: [expectedInstalledWindow],
+  grammar: [compilerCacheWindows],
+})
+it.each(compilerCacheWindows)(
+  `serves every metadata-mode window of one ordered source: %j`,
+  async (history) => {
+    compilerWindowEntered = true
+    compilerWindowReach.beginHistory()
+    const rows = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const failures: Array<unknown> = []
+    const traces: Array<unknown> = []
+    await receiveOrderedCompilerCacheHistory(history, rows, (cut, actual) => {
+      const window = cut === `moved` ? history.moved : history.initial
+      const expected = {
+        authored: expectedInstalledWindow(rows, {
+          ...window,
+          direction: history.direction,
+        }),
+        callback: expectedInstalledWindow(rows, {
+          ...history.initial,
+          direction: history.direction,
+        }),
+      }
+      // Compare signed-bag occurrences, not D2 output delivery order. Rank order
+      // is independently exercised by the enclosing ordered-work owner.
+      const byId = (ids: Array<number>) => [...ids].sort((a, b) => a - b)
+      try {
+        expect(
+          { authored: byId(actual.authored), callback: byId(actual.callback) },
+          `${compilerWindowKey(history)}/${cut}`,
+        ).toStrictEqual({
+          authored: byId(expected.authored),
+          callback: byId(expected.callback),
+        })
+      } catch (error) {
+        failures.push(error)
+        traces.push({ cut, actual, expected })
+      }
+      compilerWindowReach.reach(`${compilerWindowKey(history)}/${cut}`)
+    })
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        `ordered compiler cache window mismatch: ${JSON.stringify(traces)}`,
+        { cause: failures[0] },
+      )
+  },
+)

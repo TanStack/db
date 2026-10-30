@@ -797,54 +797,62 @@ facade-local optimistic mutations. Every shape declares active empty readiness
 and nonempty child receiving cuts. Six lifetime and four inline-value hostile
 controls reject wrong observations. See [chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
 Functional callback-input observations have a separate receiving boundary in
-`virtual-row-fields-input-oracle.test.ts`, sharing source metadata judgment with
-the existing root/Effect owners. Its 33 authoring descriptions cross seven
-QueryRef/join/union paths through root and wrapped correlated child compilation
-(462 histories), plus five direct correlated child paths (165 histories).
-Flat union children require a named QueryRef for include correlation; their
-supported forms remain in the wrapped and union-query-ref paths. Three
-source controls preserve genuine metadata without an intermediate projection.
-Each compares immutable callback captures and ordinary derived output at initial
-readiness, held mutation, settlement and remote next use. Complete before/after
-source facts permit retraction evaluation. Startup LEFT joins may expose an
-absent side; established outputs require both numeric/string-key rows. Reserved
-metadata is judged by presence/readable value, with ownership diagnostic.
-Ordinary own undefined stays distinct from absence. Another 132 histories retain
-nested inline array/materialized authored values through direct and QueryRef
-paths, and 66 reject compiled Collection inputs before callbacks. All 2,520
-callback and 594 inline/rejection
-states reach once; 19 controls calibrate the same judgments. Partial receiving
-selections still owe the selected campaign's full reach matrix.
+`virtual-row-fields-input-oracle.test.ts`, sharing the existing source metadata
+judgment. The maintainer extended O12 on 2026-10-30 from fn.select to fn.where
+and fn.having while preserving authored inline output. Thirty-three authoring
+descriptions cross seven QueryRef/join/union paths, five callback forms
+(select, where, having, where-select, having-select), and root, wrapped child,
+direct child and real Effect receivers. Flat union children require a named
+QueryRef for include correlation; direct flat union children remain inadmissible.
+The finite grammar has 4,290 receiving histories and 20 direct-source controls.
 
-Another 132 histories use the exported `compileQuery` receiver with the exact
-same QueryIR and D2 input streams across two compilations. Both compilation
-orders cross shared/separate caches and the 33 source/projection descriptions.
-At initial graph drain, 396 states compare every callback capture, complete
-derived output and authored selected output. Actual source Collection rows
-supply genuine metadata. This receiver establishes the low-level compiler
-boundary, not another inline include or optimistic lifecycle witness.
+Each receiver checks immutable callback captures and complete derived or
+predicate-filtered output at initial readiness, held mutation, settlement and
+remote next use. Effects also check exit/reentry, every delivered value and
+previousValue, continuity in both callback channels and silence after disposal.
+Before/after source facts permit retraction evaluation. Startup LEFT joins may
+expose an absent side; after source exit the unmatched peer remains a result.
+Reserved fields use presence/readable value, with ownership diagnostic.
+Ordinary own undefined remains distinct from absence. Another 132 histories
+retain inline array/materialized authored values through direct and QueryRef
+paths; 66 reject compiled Collection inputs before callbacks. All 20,720
+callback and 594 inline/rejection states reach once.
 
-The restored owner reproduced 203 correlated-child REDs on unchanged main.
-Adding the direct receiving paths before production repair raised that to 348
-REDs with 398 passes. The expanded 845-test owner also rejects the first repair in 58 inline QueryRef
-histories before the corrected production edit. The compiler now requests
-source/projection metadata at FROM and joined-source boundaries when a functional
-callback consumes the rows. Inline-only QueryRefs preserve authored shape.
-All 979 owner tests pass, including two controls that reject extra named own
-fields on inline arrays. The recorder preserves those fields without changing
-the model or either judgment. A QueryRef-only mutant leaves 58 joined-source
-violations; sanitizing every inline child breaks 116 authored-value histories.
-Restoring unconditional source sanitization breaks 58 inline QueryRef histories.
-The extended compiler receiver reproduced 26 shared-comparison failures on
-unchanged `9bd623cd5`, with the original 847 tests still passing and all 3,510
-states reached. The cache now keeps results separate by publication mode.
-The original raw-query-only cache is the rejected wrong design: authored-first
-leaks reserved fields to callbacks, while callback-first loses authored output.
-All eight existing compiler-cache controls and the neighboring metadata and
-include suites also pass after repair.
+Another 396 histories use exported `compileQuery`, the same exact QueryIR and
+D2 input streams, both compilation orders, shared/separate caches, and FROM,
+joined-source and union-branch placement. At initial graph drain, all 1,188
+states compare callback captures, complete derived output and raw authored
+output. Raw output uses a shared-cache/separate-cache differential, while both
+executions still undergo the independent callback/derived-output judgment.
+The union optimizer clones branch IR: counters establish original-key reuse
+for FROM/JOIN, while union checks propagation/transparency without claiming
+that cache hit. This receiver supplies no Effect-root metadata attribution law.
+
+The owner has 4,923 tests. Before callback production edits, it rejected 1,102
+metadata input comparisons on the reviewed implementation; 3,821 tests passed.
+All 22,502 callback, inline and compiler states reached. The repaired owner
+passes. Final mutants reject a WHERE-only repair (551 comparisons), enabling
+normalization for every predicate pipeline (696 authored-output comparisons),
+and dropping the selected-row cache mode (26 comparisons). Earlier path-specific
+FROM/JOIN/union normalization mutants each failed 112 compiler comparisons.
+The real Effect receiver additionally rejects 203 metadata comparisons on the
+actual PR base. That receiving evidence does not retroactively supply the
+historical selection repair's initial pre-edit gate.
+
+The ordered-work owner, `ordered-work-oracle.property.test.ts`, adds 144 finite
+histories through `ordered-compiler-cache-driver.ts`. Two compilation orders,
+shared/separate caches, FROM/JOIN/union paths, two projection forms, two order
+directions and three window moves exercise actual source Collections and the
+real OrderedSourceLoader. The independent installed-window model checks signed
+output bags at initial, moved and returned cuts. Original registration overwrite
+fails 48 histories; the repaired full 424-test owner passes. All 432 new states
+reach once. This receiver claims the controlled compiler/loader boundary, not
+public Collection window-promise integration. Its 280 existing histories retain
+their Collection/Effect receiving evidence. Separate metadata-mode pipelines
+remain a permitted representation; no one-pipeline performance promise follows.
 The [runtime repair record](oracle-reviews/callback-metadata.md) retains the
-commands, distinguishing traces, source fingerprints and limits. Historical
-instrument acceptance remains in
+commands, source bindings, lossless nine-item audit, calibrations and limits.
+Historical instrument acceptance remains in
 [chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
 The separate static receiving-type failures in the
 [deferred record](oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md) remain open.

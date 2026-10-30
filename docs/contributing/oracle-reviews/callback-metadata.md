@@ -9,7 +9,9 @@ Collection-valued callback inputs reject before user code runs.
 
 Authority: the maintainer's O12 decision from 2026-10-28 and the
 [architecture's callback-input boundary](../../../packages/db/src/query/live/ARCHITECTURE.md#route-context-transport).
-This repair enforces that existing runtime law. It revises no product contract.
+The original repair enforced the selection-input law. The maintainer extended
+it to functional predicates on 2026-10-30, as recorded in the nine-finding
+review below. Earlier evidence in this record describes the historical repair.
 The [coverage owner](../oracle-coverage.md) retains the separate static type gaps.
 
 ## Independent owner and receiving histories
@@ -370,3 +372,232 @@ original failures without temporary log files.
 | `packages/db/tests/query/virtual-row-fields-input-oracle.ts` | `d0d526479dda63a01906bcb377675120386e02fe26720ebc7b2c3b7b6e57e658` |
 | `packages/db/tests/query/virtual-row-fields-input-driver.ts` | `b24f421e3f5126078d7103ba6ba6a9d7bdd90251c1b4b69ca55e57c020e10292` |
 | `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `22f075260e1ff8be769409a12b39ce51436c19936d47324d9f866260ab40cfcc` |
+
+## Nine-finding review and predicate extension (2026-10-30)
+
+Reviewed production: `5ba869f0fc8398243a45a923828b717f0050f40a`.
+The implementation and executable evidence below supersede the historical
+selection-only counts and source bindings above. The raw nine-item review and
+append-only working ledger remain in
+`/private/tmp/callback-metadata/nine-issue-review-2312/`.
+
+### Law, experiment and inference
+
+The original O12 decision named fn.select. Later architecture prose claimed
+functional callbacks generally. The maintainer resolved that conflict on
+2026-10-30: extend the input law to select, where and having, while preserving
+authored inline output. This is an explicit contract extension. The earlier
+selection owner enforced its narrower law but could not generate predicates.
+
+Direct source rows and structured whole-row source spreads retain genuine
+reserved metadata at each source-input callback. A projection with its own
+shape exposes none. Callback evaluation must not rewrite the authored result
+that an inline child exports. The callback owner derives both views from
+independent source facts and projection syntax. Functional predicates actually
+derive membership from their captured input, so a spoof can change output.
+Predicate-with-selection controls distinguish placement from callback syntax.
+Grouped HAVING evaluates its selected group context rather than a local source
+namespace; this extension does not revise group attribution or arbitrary
+user-created selected-context semantics.
+
+The extended finite owner has 4,923 tests: 4,290 receiving histories, 20 direct
+source controls, 198 inline/rejection histories, 396 compiler histories and 19
+checker controls. The receiving paths are root Collection, wrapped inline
+child, direct inline child and real Effect. Each checks initial readiness,
+held mutation, settlement and remote next use. Effects also check exit,
+reentry, both event channels, every value/previousValue, event continuity and
+post-disposal silence. LEFT-join absence has its own model observation.
+
+The final pre-edit predicate gate produced 1,102 MetadataCallbackOracleFailure
+comparisons and 3,821 passes. All 20,720 callback, 594 inline/rejection and 1,188
+compiler states reached once. Initial recorder attempts incorrectly framed
+absence and the flat union's `$selected` context. Those setup/evaluation errors
+are retained separately and do not supply production RED. Reach now records
+callback/host-cut entry independently of output correctness; comparisons remain
+strict. Production had only mechanical flag/cache edits and the separately
+gated ordered repair before this predicate RED. The callback boundary itself
+remained unrepaired.
+
+The production repair carries a normalized callback view with each row
+occurrence beside its authored selected value. FROM, JOIN and union adapters
+transport it. Functional callbacks consume that view, then the existing walker
+removes private state. Output also removes private state, including for raw
+Effect roots. No global object-to-provenance registry merges distinct row
+occurrences. Inline output keeps authored values. Selected-row normalization
+has an explicit name; its two cache slots replace the per-query boolean Map.
+The existing single source-mode expression serves FROM and JOIN.
+
+The compiler receiver now checks raw selected output by a shared-cache versus
+separate-cache relation. It no longer borrows an inline-include attribution
+rule for an exported compiler root. Both executions independently check
+callback input and derived output, so their agreement cannot excuse a shared
+spoof. Its 396 histories cross both orders and all three consuming paths.
+Original-key counters distinguish actual FROM/JOIN reuse from optimizer-cloned
+union branches. Union coverage establishes propagation/transparency, not an
+original-key cache hit.
+
+A second law requires every ordered window to receive the source rows it
+needs. The original source-plan assignment orphaned an earlier top-K: widening
+its window from one to three left output `[1]`, while reversed compilation
+order produced `[1,2,3]`. The probe recorded two registrations and 15 graph
+operators. These are measured work facts, not a universal pipeline budget.
+The ordered-work owner now crosses compilation order, cache sharing, FROM/JOIN/
+union placement, projection form, order direction and three window moves:
+144 histories and 432 initial/moved/returned states. Its independent existing
+installed-window model checks signed output bags. Before the order-by repair,
+48 histories failed and 376 tests passed; all old 280 histories passed.
+Registration now combines live window bounds and data-needed judgments. It
+requires the full source when orders differ. Individual top-K windows and
+setters remain independent. All 424 ordered owner tests pass.
+
+This ordered receiver uses a real source Collection and OrderedSourceLoader
+with a controlled subscription/provider seam. It claims the compiler/loader
+cut, not public window-promise integration. The existing owner separately
+retains its real Collection/Effect lifecycle coverage.
+
+### Enforcement evidence
+
+Scratch root: `/private/tmp/callback-metadata/nine-issue-review-2312`.
+Commands run with `pnpm_config_verify_deps_before_run=false`, without installs,
+builds or lockfile changes, and with at most two Vitest workers.
+
+| Experiment | Result and evidence |
+| --- | --- |
+| Unchanged callback production, extended predicate owner | 1,102 failed / 3,821 passed, `predicate-owner-red-corrected.{json,log}` |
+| Repaired callback owner | 4,923 passed, `boundary-attempt3.{json,log}` |
+| Actual PR base `bfd1da1a7e752d66fd667adfd3cdf54f60732b22` with new Effect receiver | 203 Effect comparisons failed, `pr-base-owner.{json,log}` |
+| Original ordered source registration | 48 failed / 376 passed, `ordered-owner-red.{json,log}` |
+| Repaired ordered owner | 424 passed, `ordered-owner-green.{json,log}` |
+| Normal package configuration, eight neighboring suites | 5,912 passed, `final-package-green.{json,log}` |
+| WHERE-only callback repair | 551 HAVING comparisons failed, `final-where-only.{json,log}` |
+| Normalize every predicate's source pipeline | 696 authored-output comparisons failed, `final-sanitize-all-predicates.{json,log}` |
+| Lose selected-row cache mode | 26 compiler comparisons failed, `final-raw-only-cache.{json,log}` |
+| Restore source-plan overwrite | 48 ordered comparisons failed, `final-overwrite-window.{json,log}` |
+| Earlier FROM/JOIN/union mode omissions | 112 compiler comparisons failed per path, `mutant-summary.json` |
+
+The final mutants ran against copied final sources and final tests. They failed
+at the intended comparisons, rather than during setup. Their source edits and
+full failure traces remain in `run-final-mutants.py`, `final-mutant-baseline/`
+and `final-mutant-summary.json`. The original predicate RED also rejects the
+reviewed implementation as a hostile wrong design. No comparison, reach
+minimum or run budget was lowered.
+
+### Lossless item audit
+
+| ID | Technical verdict | Action and durable value |
+| --- | --- | --- |
+| EXT2312-01 | Confirmed predicate input spoof for WHERE and HAVING, including real Effects and inline children. The original select-only authority required the maintainer's resolved extension. | fixed-now: occurrence callback view plus callback-kind grammar, membership and authored-output checks. |
+| EXT2312-02 | Confirmed broad prose exceeded the implemented and generated select-only promise. No predicate comparison existed to enforce it. | fixed-now: approved law, executable grammar and current architecture/coverage claims agree. Historical initial-gate gaps remain explicit. |
+| EXT2312-03 | Confirmed real Effect receiver was missing. Its actual PR-base run rejects 203 metadata comparisons. | fixed-now: shared-model Effect lifecycle receiver and corrected changeset. New evidence does not retroactively repair the original pre-edit process. |
+| EXT2312-04 | Confirmed absolute raw-root judgment lacked an independent attribution authority. | fixed-now: differential raw-output law, retaining independent input/output checks in both executions. |
+| EXT2312-05 | Confirmed two mode pipelines and the orphaned ordered plan, with an actual underfilled result. Pipeline duplication alone violates no stated resource law. | fixed-now: primary ordered owner plus live aggregate source plan. Separate top-Ks remain permitted. No unsupported one-pipeline or speed claim. |
+| EXT2312-06 | Confirmed duplicate expression at FROM/JOIN. | fixed-now: compute the expression once. Path-specific mutation evidence preserves the reason. |
+| EXT2312-07 | Confirmed ambiguous publication name. The cited branches normalize selected metadata rather than performing Collection publication. | fixed-now: rename to sanitizeSelectedMetadata and separate callback view transport. No independent root-only behavior defect follows from the old name. |
+| EXT2312-08 | Confirmed a Map represented only two slots. No heap or bundle measurement supported the claimed magnitude. | fixed-now: typed two-slot tuple. Claim only the removed Map structure, not measured bytes or speed. |
+| EXT2312-09 | Confirmed FROM-only cache grammar omitted JOIN and union. | fixed-now: three-path grammar and path-specific mutant sensitivity. Preserve the union optimizer-cloning limit. |
+
+All nine raw items have separate IDs, claims, proposed repairs, evidence and
+dispositions in the append-only ledger. Total: nine fixed-now, zero deferred,
+zero unresolved product decisions. The ordered-loader counterexample is the
+confirmed consequence of item 5, rather than an extra invented raw item.
+The initial repair attempt exposed private callback-view state in raw Effect
+output; final result cleanup removes it, and Effect continuity rejects that
+attempt. This collateral attempt is retained as implementation feedback.
+
+The reviewer earns a strong hire recommendation. The predicate probes identified
+a real placement-dependent leak, and source analysis predicted the ordered-plan
+failure that execution confirmed. The differential and path-dimension proposals
+improve test integrity. The flag and allocation comments are useful cleanup,
+with lower severity than the correctness findings. The review did not establish
+a performance budget or an original-key union cache hit. Those qualifications
+limit the claims without discarding the findings.
+
+### Guide audit and limits
+
+ORC-001–003: the approved law, limits, independent model, grammar, real receivers
+and comparisons remain beside their executable definitions. ORC-004: existing
+33 legal descriptions retain all single/all/no collisions and typed peers;
+callback-kind ablation loses predicates, selection controls lose placement
+independence, and path ablation loses a distinct transport boundary. Compiled
+Collection inputs and direct-return overrides remain excluded by admission.
+ORC-005: each receiving cut and every delivered Effect value is compared.
+ORC-006: the recorded original and final mutants fail their intended judgments.
+ORC-007: callback/cache additions exhaust finite grammars, so seed campaigns do
+not apply; existing ordered generated campaigns keep fixed/random parity.
+ORC-008–009: source facts distinguish retractions, callback snapshots differ
+from Collection rows, and the controlled ordered seam has an explicit mapping.
+ORC-010: all-cut reports and cleanup preserve primary failures. ORC-011:
+cache transparency uses two executions while independent input truth prevents
+a shared false green. ORC-012: this versioned record binds the final source
+hashes below. ORC-013: WHERE-only and over-sanitizing repairs demonstrate the
+neighboring consequences. ORC-014: actual Collection/Effect receivers supply
+core lifecycle evidence; ordered provider and framework claims stay bounded.
+ORC-015: all 22,502 metadata and 432 ordered added states reach once.
+ORC-016: all added histories use shared judgments, without pinned expected
+answers or unit tests inside oracle files.
+
+The finite metadata grammar bounds recursion at two QueryRefs, joins at one
+LEFT join, sources at two typed-key peers, and mutations at one held successful
+update. It does not establish arbitrary descriptors/prototypes, deeper
+recursion, overlapping same-key mutations, other join kinds, truncate,
+provider scheduling, framework timing or construction-failure cleanup.
+Grouped selected-context attribution is a separate judgment from the local
+source-input predicate law. The existing aggregate and materialization owners
+remain responsible for those semantics. Static metadata and P11/P12 literal/
+type gaps stay open in the retained deferred record. No universal runtime or
+static closure follows from the finite evidence here.
+
+### Final source binding and verification
+
+The final package run passes all 5,912 tests across eight suites. Focused
+TypeScript passes with no diagnostics. Explicit ESLint passes with zero errors
+and four existing no-shadow warnings in the ordered owner. Formatting,
+whitespace and changed-file oracle enforcement pass. The final four mutants
+were refreshed from these exact compiler and test sources and again rejected
+551, 696, 26 and 48 intended comparisons respectively. Their logs retain all
+failure messages. These results supersede intermediate repair attempts.
+
+Run both owners under the normal package configuration:
+
+```sh
+TANSTACK_DB_ORACLE_STATISTICS=1 pnpm_config_verify_deps_before_run=false \
+  pnpm --dir packages/db exec vitest run --maxWorkers=2 \
+  --coverage.enabled=false --typecheck.enabled=false \
+  tests/query/virtual-row-fields-input-oracle.test.ts \
+  tests/query/ordered-work-oracle.property.test.ts
+```
+
+The predicate RED command used the extended tests and the pre-edit compiler
+binding in `predicate-gate-fingerprints.json`:
+
+```sh
+pnpm_config_verify_deps_before_run=false pnpm exec vitest run \
+  --config /private/tmp/callback-metadata/nine-issue-review-2312/owner.config.mjs \
+  --reporter=json \
+  --outputFile=/private/tmp/callback-metadata/nine-issue-review-2312/predicate-owner-red-corrected.json
+```
+
+The ordered RED used the extended ordered owner and the pre-edit binding in
+`ordered-gate-fingerprints.json`, with `ordered-original.config.mjs`. The final
+hostile calibrations are reproducible through `run-final-mutants.py`. The
+normal eight-suite command adds the existing Effect metadata, cache-control,
+functional projection/input boundary, public-container-copy and context
+transport suites to the two-owner command above. No full build or dependency
+installation supplied this evidence.
+
+These SHA-256 fingerprints bind the final behavioral sources without making
+the report hash itself refer to its own contents:
+
+| Source | SHA-256 |
+| --- | --- |
+| `packages/db/src/query/compiler/index.ts` | `c566eccd683862fb3235a84e841fafca32fb8c5a43491570b2fa65a3c1874487` |
+| `packages/db/src/query/compiler/joins.ts` | `1c3642f632a10b25ac784d5728e680803d657452969496a4e21b1a8213f44fcd` |
+| `packages/db/src/query/compiler/order-by.ts` | `384d8a132c86265f4bb4e12ec4ed5200f062a182e35402dcd38b4d546828d0d2` |
+| `packages/db/src/query/compiler/parent-routes.ts` | `5f8caf4504d70639bcd9b109da28ddb6880ebc81b1e4489e0ae8de2e7151cf42` |
+| `packages/db/src/query/compiler/route-metadata.ts` | `ba0c42104288720ff221b516298d39da9e7201d68984f8101adb7df20f286cb1` |
+| `packages/db/src/query/compiler/types.ts` | `e06dbdf363cc1878226692de890650680e1c84bf35f17424fd23dad09313c27d` |
+| `packages/db/tests/query/virtual-row-fields-input-oracle.ts` | `7b7c5055fe58dd701ad10db9620f516d1ab4b0127a95e17bee629310b3b5450a` |
+| `packages/db/tests/query/virtual-row-fields-input-driver.ts` | `3d157039ec6c7aead891865738346e4e52c3747fe199fca44fce0224ed4998ad` |
+| `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `58ae2e54947145220a8b78a28cadc37456e3d11d507ce36846843f002d79550d` |
+| `packages/db/tests/query/ordered-compiler-cache-driver.ts` | `ba7b244250754d9a5d8480847562c26907edf192c8a028973dca0de32e6c43e6` |
+| `packages/db/tests/query/ordered-work-oracle.property.test.ts` | `a8e2f5884570f0659764ad0b7be7398c432b411fcf796dd007ddd3f4bb9d5e68` |

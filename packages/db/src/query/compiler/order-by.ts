@@ -17,6 +17,7 @@ import {
   supportsOrderedRange,
 } from '../../utils/index-optimization.js'
 import { hasVirtualPropPath } from '../../virtual-props.js'
+import { deepEquals } from '../../utils.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
@@ -332,7 +333,40 @@ export function processOrderBy(
       // Ordered loading is owned by one lexical source. A collection can occur
       // more than once in a query tree, so collection ID and alias are not
       // sufficient identities here.
-      optimizableOrderByCollections[orderBySourceId] = info
+      const previous = optimizableOrderByCollections[orderBySourceId]
+      // One lexical source can feed separate authored/source metadata views.
+      // Each top-K owns its own window. Acquisition must cover all windows,
+      // including moves made through a previously compiled root's callback.
+      // Keep these reads live: setWindowFn updates the individual info objects.
+      const sameOrder = previous && deepEquals(previous.orderBy, info.orderBy)
+      optimizableOrderByCollections[orderBySourceId] = previous
+        ? {
+            ...info,
+            get offset() {
+              return Math.min(previous.offset, info.offset)
+            },
+            get limit() {
+              return (
+                Math.max(
+                  previous.offset + previous.limit,
+                  info.offset + info.limit,
+                ) - Math.min(previous.offset, info.offset)
+              )
+            },
+            get requiresFullSource() {
+              return (
+                !sameOrder ||
+                previous.requiresFullSource ||
+                info.requiresFullSource
+              )
+            },
+            dataNeeded: (boundary) =>
+              Math.max(
+                previous.dataNeeded?.(boundary) ?? 0,
+                info.dataNeeded?.(boundary) ?? 0,
+              ),
+          }
+        : info
 
       // loadMoreIfNeeded reads how many rows the window needs. Without an
       // index, only an on-demand joined filter can leave the window short.

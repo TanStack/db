@@ -2,7 +2,8 @@
  * # What may user JavaScript learn from a query input?
  *
  * Authority: the maintainer's O12 decision, recorded in the RC challenge on
- * 2026-10-28, and ARCHITECTURE.md's functional-input boundary. Direct source
+ * 2026-10-28, extended by the maintainer on 2026-10-30 to fn.select, fn.where
+ * and fn.having, and ARCHITECTURE.md's functional-input boundary. Direct source
  * returns and structured source spreads expose genuine source metadata.
  * Own-shape projections (including functional spreads) expose no reserved
  * fields before a downstream callback. Inline include values keep authored
@@ -65,9 +66,17 @@ export const metadataCallbackHistories = metadataInputDescriptions.flatMap(
   (description) =>
     metadataCallbackPaths.map((path) => ({ ...description, path })),
 )
+export const metadataCallbackKinds = [
+  `select`,
+  `where`,
+  `having`,
+  `where-select`,
+  `having-select`,
+] as const
+export type MetadataCallbackKind = (typeof metadataCallbackKinds)[number]
 export const metadataCallbackReceiverHistories =
   metadataCallbackHistories.flatMap((history) =>
-    ([`root`, `inline-child`, `inline-child-direct`] as const)
+    ([`root`, `inline-child`, `inline-child-direct`, `effect`] as const)
       // A flat union has no named source reference for include correlation.
       // Admission requires the QueryRef used by union-query-ref or the wrapped
       // receiver; direct union-first/last are not legal include children.
@@ -76,7 +85,9 @@ export const metadataCallbackReceiverHistories =
           receiver !== `inline-child-direct` ||
           (history.path !== `union-first` && history.path !== `union-last`),
       )
-      .map((receiver) => ({ ...history, receiver })),
+      .flatMap((receiver) =>
+        metadataCallbackKinds.map((kind) => ({ ...history, receiver, kind })),
+      ),
   )
 export const metadataInlineHistories = metadataInputDescriptions.flatMap(
   (description) =>
@@ -92,14 +103,24 @@ export const metadataInlineHistories = metadataInputDescriptions.flatMap(
 // Reusing one selected query across two roots must preserve both its authored
 // output and the source/projection judgment before a downstream callback.
 // Separate caches distinguish that promise from an ordinary projection defect.
+export const metadataCompilerCachePaths = [
+  `query-ref`,
+  `joined-source`,
+  `union-branch`,
+] as const
+export type MetadataCompilerCachePath =
+  (typeof metadataCompilerCachePaths)[number]
 export const metadataCompilerCacheHistories = metadataInputDescriptions.flatMap(
   (description) =>
     ([`authored-first`, `callback-first`] as const).flatMap((order) =>
-      ([`shared`, `separate`] as const).map((cache) => ({
-        ...description,
-        order,
-        cache,
-      })),
+      ([`shared`, `separate`] as const).flatMap((cache) =>
+        metadataCompilerCachePaths.map((path) => ({
+          ...description,
+          order,
+          cache,
+          path,
+        })),
+      ),
     ),
 )
 export type MetadataInputSnapshot = {

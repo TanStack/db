@@ -1,12 +1,16 @@
 import { isPlainObject } from '../../utils/type-guards.js'
 
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
+export const CALLBACK_INPUT = Symbol(`tanstack_db_callback_input`)
+export const CALLBACK_SELECTED = Symbol(`tanstack_db_callback_selected`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
 const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
   ROUTE_METADATA,
   INCLUDES_PUBLIC_KEY,
+  CALLBACK_INPUT,
+  CALLBACK_SELECTED,
 ])
 const INTERNAL_CALLBACK_KEYS = new Set<PropertyKey>([
   ...INTERNAL_ROUTE_KEYS,
@@ -123,6 +127,20 @@ export function getRoutedScalarMetadata(
     parentContext: route.parentContext,
     publicKey: routed[INCLUDES_PUBLIC_KEY],
   }
+}
+
+/** A namespace keeps authored values beside its callback source overrides.
+ * A one-element tuple denotes a flat union view: absent fields must disappear,
+ * whereas named overrides replace only their own source aliases.
+ */
+export function getCallbackInput<T extends object>(row: T): T {
+  const view = (row as Record<PropertyKey, unknown>)[CALLBACK_INPUT]
+  if (Array.isArray(view)) {
+    const result = { ...view[0] }
+    if (`$selected` in row) result.$selected = row.$selected
+    return result as T
+  }
+  return view && typeof view === `object` ? { ...row, ...view } : row
 }
 
 /** Copy public containers while removing private route state at every depth. */

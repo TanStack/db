@@ -18,9 +18,14 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { createEffect } from '../../src/query/effect.js'
 import { getQueryIR } from '../../src/query/builder/index.js'
-import { QueryRef } from '../../src/query/ir.js'
-import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
+import { PropRef, QueryRef, UnionAll } from '../../src/query/ir.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  withOracleCleanup,
+} from '../utils.js'
 import { virtualFieldNames } from './virtual-row-fields-support.js'
 import {
   authoredMetadataCollision,
@@ -35,7 +40,9 @@ import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { QueryCache } from '../../src/query/compiler/types.js'
 import type { QueryIR } from '../../src/query/ir.js'
 import type {
+  MetadataCallbackKind,
   MetadataCallbackPath,
+  MetadataCompilerCachePath,
   MetadataInputDescription,
   MetadataInputRow,
   MetadataInputSnapshot,
@@ -58,7 +65,13 @@ type ProjectionContext = {
   hasResult: true
 }
 export type CallbackInputCut =
-  `initial` | `held` | `settled` | `remote-next-use`
+  | `initial`
+  | `held`
+  | `settled`
+  | `remote-next-use`
+  | `exit`
+  | `reentry`
+  | `disposed`
 export type CallbackInputReport = {
   violations: Array<{
     cut: CallbackInputCut
@@ -215,7 +228,8 @@ export async function runMetadataCallbackHistory(
   description: MetadataInputDescription,
   path: MetadataCallbackPath | `direct-source`,
   reached: (cut: CallbackInputCut) => void,
-  receiver: `root` | `inline-child` | `inline-child-direct` = `root`,
+  receiver: `root` | `inline-child` | `inline-child-direct` | `effect` = `root`,
+  callbackKind: MetadataCallbackKind = `select`,
 ): Promise<CallbackInputReport> {
   const initial = freshRows()
   const union = path.startsWith(`union`)
@@ -230,16 +244,24 @@ export async function runMetadataCallbackHistory(
   }))
   let cut: CallbackInputCut = `initial`
   let allowed = facts.map((fact) => expectedMetadataInput(fact, description))
+  let enteredCallback = `select`
   const captures: Array<{
     cut: CallbackInputCut
+    callback: string
     input: MetadataInputSnapshot
   }> = []
   const project = (row: unknown, id: string | number) => {
     const observed = captureMetadataInput(row)
-    captures.push({ cut, input: observed })
+    // A flat union HAVING callback also receives the compiler's selected-value
+    // context. It is not an ordinary field of the source value being judged.
+    // Capture reserved fields before removing that known context from ordinary
+    // fields; spreading first could hide inherited or nonenumerable metadata.
+    if (union && enteredCallback === `having`)
+      delete observed.ordinary.$selected
+    captures.push({ cut, callback: enteredCallback, input: observed })
     return { id, observed }
   }
-  const makeQuery = (parentId?: RefLeaf<string | number>) => {
+  const makeSelectQuery = (parentId?: RefLeaf<string | number>) => {
     const input = projectInput(first, `chosen`, description)
     if (path === `direct-source`) {
       const direct = new Query().from({ direct: first })
@@ -306,8 +328,71 @@ export async function runMetadataCallbackHistory(
         : once.where(({ nested }) => eq(nested.id, parentId))
     ).fn.select(({ nested }) => project(nested, nested.id))
   }
+  const selects = callbackKind === `select` || callbackKind.endsWith(`-select`)
+  const makeQuery = (parentId?: RefLeaf<string | number>) => {
+    const authored = makeSelectQuery(parentId)
+    if (callbackKind === `select`) return authored
+    const ir = getQueryIR(authored)
+    const recordSelection = ir.fnSelect!
+    const predicateKind = callbackKind.startsWith(`where`) ? `where` : `having`
+    const predicate = (row: Parameters<typeof recordSelection>[0]) => {
+      enteredCallback = predicateKind
+      try {
+        const derived = recordSelection(row) as Output
+        // A real predicate derives membership from the observed reserved field.
+        // It uses no expected answer or production provenance classification.
+        return derived.observed.fields.$key?.value !== `spoof-$key`
+      } finally {
+        enteredCallback = `select`
+      }
+    }
+    if (predicateKind === `where`)
+      ir.fnWhere = [...(ir.fnWhere ?? []), predicate]
+    else ir.fnHaving = [...(ir.fnHaving ?? []), predicate]
+    if (!selects) {
+      delete ir.fnSelect
+      if (!union) {
+        const alias =
+          path === `direct-source`
+            ? `direct`
+            : path === `nested-query-ref`
+              ? `outer`
+              : `nested`
+        ir.select = {
+          id: new PropRef([path === `joined-source` ? `peer` : alias, `id`]),
+          value: new PropRef([alias]),
+        }
+      }
+    }
+    // The builder receives its authored IR back; this changes callback syntax,
+    // not the receiver's production path or expected source facts.
+    return authored
+  }
+  const observeRows = (rows: ReadonlyArray<object>): Array<Output> =>
+    selects
+      ? outputRows(rows)
+      : rows.map((row) => {
+          const record = row as Record<string, unknown>
+          const observed = captureMetadataInput(union ? row : record.value)
+          return {
+            id: record.id as string | number,
+            observed: receiver.startsWith(`inline-child`)
+              ? observed
+              : expectedMetadataRecord(
+                  observed.present ? observed.ordinary : undefined,
+                ),
+          }
+        })
+  const expectedOutput = (fact: MetadataSourceFact) =>
+    selects
+      ? expectedMetadataInput(fact, description)
+      : receiver.startsWith(`inline-child`)
+        ? expectedMetadataInput(fact, description, true)
+        : expectedMetadataRecord(
+            expectedMetadataInput(fact, description, true).ordinary,
+          )
   const query =
-    receiver === `root`
+    receiver === `root` || receiver === `effect`
       ? makeQuery()
       : new Query()
           .from({ parent: containingParents })
@@ -331,30 +416,117 @@ export async function runMetadataCallbackHistory(
                       .where(({ result }) => eq(result.id, parent.id)),
                   ),
           }))
-  const live = createLiveQueryCollection({
-    query: () => query as unknown as QueryBuilder<OutputContext>,
-    getKey: (row: Output) => row.id,
-  })
+  // A real Effect receives the same model and callback grammar through both
+  // public channels. Its ledgers retain each value/previousValue before another
+  // action. No implicit Effect-root metadata policy is inferred here.
+  const effectRows = new Map<string | number, Output>()
+  const namedRows = new Map<string | number, Output>()
+  const effectErrors: Array<unknown> = []
+  const effectEvents: Array<{
+    type: string
+    key: string | number
+    value: unknown
+    previousValue?: unknown
+  }> = []
+  const namedEvents: typeof effectEvents = []
+  const receive = (
+    rows: typeof effectRows,
+    events: typeof effectEvents,
+    event: {
+      type: string
+      key: string | number
+      value: unknown
+      previousValue?: unknown
+    },
+  ) => {
+    const captured = copyData(event) as (typeof effectEvents)[number]
+    events.push(captured)
+    const previous = rows.get(event.key)
+    if (
+      event.type === `update` &&
+      !isDeepStrictEqual(previous, event.previousValue)
+    )
+      effectErrors.push({
+        kind: `Effect previousValue differs from prior delivered value`,
+        previous,
+        event: captured,
+      })
+    if (event.type === `enter` && previous !== undefined)
+      effectErrors.push({
+        kind: `Effect enters an active occurrence`,
+        event: captured,
+      })
+    if (event.type !== `enter` && previous === undefined)
+      effectErrors.push({
+        kind: `Effect changes an absent occurrence`,
+        event: captured,
+      })
+    if (event.type === `exit`) rows.delete(event.key)
+    else rows.set(event.key, copyData(event.value) as Output)
+  }
+  const effect =
+    receiver === `effect`
+      ? createEffect({
+          query: () => query as unknown as QueryBuilder<OutputContext>,
+          onBatch: (events) => {
+            for (const event of events) receive(effectRows, effectEvents, event)
+          },
+          onEnter: (event) => receive(namedRows, namedEvents, event),
+          onUpdate: (event) => receive(namedRows, namedEvents, event),
+          onExit: (event) => receive(namedRows, namedEvents, event),
+          onError: (error) => {
+            effectErrors.push(error)
+          },
+          onSourceError: (error) => {
+            effectErrors.push(error)
+          },
+        })
+      : undefined
+  const live = effect
+    ? undefined
+    : createLiveQueryCollection({
+        query: () => query as unknown as QueryBuilder<OutputContext>,
+        getKey: (row: Output) => row.id,
+      })
   const report: CallbackInputReport = {
     violations: [],
-    callbackCounts: { initial: 0, held: 0, settled: 0, 'remote-next-use': 0 },
+    callbackCounts: {
+      initial: 0,
+      held: 0,
+      settled: 0,
+      'remote-next-use': 0,
+      exit: 0,
+      reentry: 0,
+      disposed: 0,
+    },
   }
-  const check = () => {
+  let checkedEffectEvents = 0
+  const check = async () => {
+    if (effect) await flushPromises()
     const premise =
-      live.isReady() && first.get(1)?.$hasPendingWrites === (cut === `held`)
+      (live?.isReady() ?? (!effect?.disposed && first.isReady())) &&
+      first.get(1)?.$hasPendingWrites === (cut === `held`)
     if (!premise)
       report.violations.push({
         cut,
         kind: `readiness or held-source premise missing`,
         actual: {
-          ready: live.isReady(),
+          ready: live?.isReady() ?? (!effect?.disposed && first.isReady()),
           pending: first.get(1)?.$hasPendingWrites,
         },
         expected: { ready: true, pending: cut === `held` },
       })
     const current = captures.filter((capture) => capture.cut === cut)
     report.callbackCounts[cut] = current.length
-    if (current.length === 0)
+    const requiredCallback = callbackKind.startsWith(`where`)
+      ? `where`
+      : callbackKind.startsWith(`having`)
+        ? `having`
+        : `select`
+    const callbacksEntered =
+      current.some((capture) => capture.callback === requiredCallback) &&
+      (!selects || current.some((capture) => capture.callback === `select`))
+    if (!callbacksEntered)
       report.violations.push({
         cut,
         kind: `callback not entered`,
@@ -363,7 +535,7 @@ export async function runMetadataCallbackHistory(
       })
     for (const capture of current) {
       const permitted =
-        cut === `initial` && path === `joined-source`
+        path === `joined-source`
           ? [...allowed, expectedMetadataRecord(undefined)]
           : allowed
       for (const kind of metadataInputViolations(capture.input, permitted))
@@ -376,26 +548,92 @@ export async function runMetadataCallbackHistory(
     }
     const expected = facts.map((fact) => ({
       id: fact.row.id,
-      observed: expectedMetadataInput(fact, description),
+      observed: expectedOutput(fact),
     }))
+    // The unmatched LEFT-join peer remains a result after its source exits.
+    // The model's absent snapshot is judged at callbacks and output separately.
+    if (path === `joined-source` && cut === `exit`)
+      expected.push({ id: `1`, observed: expectedMetadataRecord(undefined) })
     const raw =
-      receiver === `root`
-        ? live.toArray
-        : live.toArray.flatMap(
-            (row) => (row as unknown as { children: Array<Output> }).children,
+      receiver === `effect`
+        ? [...effectRows.values()]
+        : receiver === `root`
+          ? live!.toArray
+          : live!.toArray.flatMap(
+              (row) => (row as unknown as { children: Array<Output> }).children,
+            )
+    if (effect) {
+      // Check each delivered value, not only the final active rows. Retraction
+      // evaluation can legally use before/after facts; it cannot deliver a
+      // snapshot outside those independently authored source states.
+      const permitted = allowed.flatMap((observed) => [
+        {
+          id: observed.ordinary.id,
+          observed: selects
+            ? observed
+            : expectedMetadataRecord(
+                observed.present ? observed.ordinary : undefined,
+              ),
+        },
+      ])
+      if (path === `joined-source`)
+        for (const row of initial)
+          permitted.push({
+            id: row.id,
+            observed: expectedMetadataRecord(undefined),
+          })
+      for (const event of effectEvents.slice(checkedEffectEvents)) {
+        for (const value of [
+          event.value,
+          ...(event.type === `update` ? [event.previousValue] : []),
+        ]) {
+          const actual = observeRows([value as object])
+          if (
+            !permitted.some(
+              (row) =>
+                metadataOutputViolations(actual, [row as Output]).length === 0,
+            )
           )
-    const actual = outputRows(raw)
+            report.violations.push({
+              cut,
+              kind: `Effect delivered value outside authored states`,
+              actual,
+              expected: permitted,
+            })
+        }
+      }
+      checkedEffectEvents = effectEvents.length
+    }
+    if (effect) {
+      if (effectErrors.length || !isDeepStrictEqual(effectEvents, namedEvents))
+        report.violations.push({
+          cut,
+          kind: `Effect callback channels or event continuity`,
+          actual: { effectErrors, effectEvents, namedEvents },
+          expected: `matching complete channels and continuous values`,
+        })
+      for (const kind of metadataOutputViolations(
+        observeRows([...namedRows.values()]),
+        expected,
+      ))
+        report.violations.push({
+          cut,
+          kind: `named Effect: ${kind}`,
+          actual: [...namedRows.values()],
+          expected,
+        })
+    }
+    const actual = observeRows(raw)
     for (const kind of metadataOutputViolations(actual, expected))
       report.violations.push({ cut, kind, actual, expected })
     // Reach records the actual callback path and established source/output
     // boundary even when the law comparison is RED. It is not a passing count.
-    if (premise && current.length > 0 && raw.length === facts.length)
-      reached(cut)
+    if (premise && callbacksEntered) reached(cut)
   }
   let finish = async () => {}
   await withOracleCleanup(async () => {
-    await live.preload()
-    check()
+    if (live) await live.preload()
+    await check()
     cut = `held`
     const before = facts.map((fact) => expectedMetadataInput(fact, description))
     facts = facts.map((fact) =>
@@ -419,7 +657,7 @@ export async function runMetadataCallbackHistory(
       await transaction.when(`settled`)
       finish = async () => {}
     }
-    check()
+    await check()
     cut = `settled`
     const pending = facts.map((fact) =>
       expectedMetadataInput(fact, description),
@@ -434,7 +672,7 @@ export async function runMetadataCallbackHistory(
       ...facts.map((fact) => expectedMetadataInput(fact, description)),
     ]
     await finish()
-    check()
+    await check()
     cut = `remote-next-use`
     const settled = facts.map((fact) =>
       expectedMetadataInput(fact, description),
@@ -452,12 +690,64 @@ export async function runMetadataCallbackHistory(
     receivingSource.utils.begin()
     receivingSource.utils.write({ type: `update`, value: { ...facts[1]!.row } })
     receivingSource.utils.commit()
-    check()
+    await check()
+    if (effect) {
+      // Source exit/reentry exercises onExit and a fresh active interval. The
+      // same before/after authored facts judge both channels at each cut.
+      cut = `exit`
+      const departing = facts[1]!
+      allowed = facts.map((fact) => expectedMetadataInput(fact, description))
+      facts = [facts[0]!]
+      const receiving = union ? second : first
+      // Use the actual branch owning the string key; no model source is moved.
+      receiving.utils.begin()
+      receiving.utils.write({ type: `delete`, value: { ...departing.row } })
+      receiving.utils.commit()
+      await check()
+      cut = `reentry`
+      facts = [
+        ...facts,
+        { ...departing, row: { ...departing.row, label: `string-reentry` } },
+      ]
+      allowed = facts.map((fact) => expectedMetadataInput(fact, description))
+      receiving.utils.begin()
+      receiving.utils.write({ type: `insert`, value: { ...facts[1]!.row } })
+      receiving.utils.commit()
+      await check()
+      cut = `disposed`
+      await effect.dispose()
+      const beforeDisposal = {
+        captures: captures.length,
+        batch: effectEvents.length,
+        named: namedEvents.length,
+      }
+      receiving.utils.begin()
+      receiving.utils.write({
+        type: `update`,
+        value: { ...facts[1]!.row, label: `after-disposal` },
+      })
+      receiving.utils.commit()
+      await flushPromises()
+      const afterDisposal = {
+        captures: captures.length,
+        batch: effectEvents.length,
+        named: namedEvents.length,
+      }
+      if (!effect.disposed || !isDeepStrictEqual(beforeDisposal, afterDisposal))
+        report.violations.push({
+          cut,
+          kind: `Effect delivery after disposal`,
+          actual: afterDisposal,
+          expected: beforeDisposal,
+        })
+      else reached(cut)
+    }
     if (report.violations.length)
       throw new MetadataCallbackOracleFailure(report)
   }, [
     () => finish(),
-    () => live.cleanup(),
+    () => effect?.dispose(),
+    () => live?.cleanup(),
     () => containingParents.cleanup(),
     () => peers.cleanup(),
     () => second.cleanup(),
@@ -563,7 +853,15 @@ export async function runInlineMetadataCallbackHistory(
     })
   const report: CallbackInputReport = {
     violations: [],
-    callbackCounts: { initial: 0, held: 0, settled: 0, 'remote-next-use': 0 },
+    callbackCounts: {
+      initial: 0,
+      held: 0,
+      settled: 0,
+      'remote-next-use': 0,
+      exit: 0,
+      reentry: 0,
+      disposed: 0,
+    },
   }
   if (form === `collection`) {
     let unexpected: ReturnType<typeof build> | undefined
@@ -702,12 +1000,13 @@ export async function runInlineMetadataCallbackHistory(
  *
  * Only the initial graph-drain cut is claimed here. Public source Collection
  * rows supply genuine metadata; independent authored facts predict callback
- * input and both outputs. The raw selected output uses the same authored-shape
- * judgment as an inline value, without claiming an actual include lifecycle. */
+ * input and derived output. Raw selected output is compared across shared and
+ * separate caches; no implicit metadata law is assigned to an Effect root. */
 export async function runMetadataCompilerCacheHistory(
   description: MetadataInputDescription,
   order: `authored-first` | `callback-first`,
   cache: `shared` | `separate`,
+  path: MetadataCompilerCachePath,
   reached: (
     observation: `callback` | `derived-output` | `authored-output`,
   ) => void,
@@ -721,74 +1020,136 @@ export async function runMetadataCompilerCacheHistory(
   }))
   const report: CallbackInputReport = {
     violations: [],
-    callbackCounts: { initial: 0, held: 0, settled: 0, 'remote-next-use': 0 },
+    callbackCounts: {
+      initial: 0,
+      held: 0,
+      settled: 0,
+      'remote-next-use': 0,
+      exit: 0,
+      reentry: 0,
+      disposed: 0,
+    },
   }
   await withOracleCleanup(async () => {
     await first.preload()
-    const captures: Array<MetadataInputSnapshot> = []
-    const selected = getQueryIR(projectInput(first, `chosen`, description))
-    const consumed: QueryIR = {
-      from: new QueryRef(selected, `nested`),
-      fnSelect: ({ nested }) => {
-        const observed = captureMetadataInput(nested)
+    const execute = (sharing: `shared` | `separate`) => {
+      const selected = getQueryIR(projectInput(first, `chosen`, description))
+      const captures: Array<MetadataInputSnapshot> = []
+      const capture = (value: unknown, id?: string | number) => {
+        const observed = captureMetadataInput(value)
         captures.push(observed)
-        return { id: (nested as MetadataInputRow).id, observed }
-      },
-    }
-    const graph = new D2()
-    const input = graph.newInput<[string | number, MetadataInputRow]>()
-    const sharedCache: QueryCache = new WeakMap()
-    const compile = (query: QueryIR) =>
-      compileQuery(
-        query,
-        { chosen: input },
-        { [first.id]: first },
-        {},
-        {},
-        new Set(),
-        {},
-        () => {},
-        cache === `shared` ? sharedCache : new WeakMap(),
+        return { id: id ?? (value as MetadataInputRow).id, observed }
+      }
+      const joined = getQueryIR(
+        new Query()
+          .from({ peer: first })
+          .leftJoin(
+            { nested: projectInput(first, `chosen`, description) },
+            ({ peer, nested }) => eq(peer.id, nested.id),
+          ),
       )
-    const [authored, callback] =
-      order === `authored-first`
-        ? [compile(selected), compile(consumed)]
-        : (() => {
-            const compiledCallback = compile(consumed)
-            return [compile(selected), compiledCallback]
-          })()
-    const authoredDeltas: Array<{ row: Output; weight: number }> = []
-    const derivedDeltas: Array<{ row: Output; weight: number }> = []
-    authored.pipeline.pipe(
-      output((message) => {
-        for (const [[, [value]], weight] of message.getInner())
-          authoredDeltas.push({
-            row: {
-              id: (value as MetadataInputRow).id,
-              observed: captureMetadataInput(value),
-            },
-            weight,
-          })
-      }),
+      // Install the exact shared IR after authoring the legal join expression.
+      // Query builders normally clone placements, which concealed the cache bug.
+      joined.join![0]!.from = new QueryRef(
+        selected,
+        `nested`,
+        joined.join![0]!.from.bindingId,
+      )
+      const consumed: QueryIR =
+        path === `joined-source`
+          ? {
+              ...joined,
+              fnSelect: ({ nested, peer }) =>
+                capture(nested, (peer as MetadataInputRow).id),
+            }
+          : path === `union-branch`
+            ? {
+                from: new UnionAll([selected]),
+                fnSelect: (value) => capture(value),
+              }
+            : {
+                from: new QueryRef(selected, `nested`),
+                fnSelect: ({ nested }) => capture(nested),
+              }
+      const graph = new D2()
+      const input = graph.newInput<[string | number, MetadataInputRow]>()
+      const sharedCache: QueryCache = new WeakMap()
+      const readCache = sharedCache.get.bind(sharedCache)
+      let exactQueryReads = 0
+      sharedCache.get = (query) => {
+        if (query === selected) exactQueryReads++
+        return readCache(query)
+      }
+      const compile = (query: QueryIR) =>
+        compileQuery(
+          query,
+          { chosen: input, peer: input },
+          { [first.id]: first },
+          {},
+          {},
+          new Set(),
+          {},
+          () => {},
+          sharing === `shared` ? sharedCache : new WeakMap(),
+        )
+      const [authored, callback] =
+        order === `authored-first`
+          ? [compile(selected), compile(consumed)]
+          : (() => {
+              const compiledCallback = compile(consumed)
+              return [compile(selected), compiledCallback]
+            })()
+      const authoredDeltas: Array<{ row: Output; weight: number }> = []
+      const derivedDeltas: Array<{ row: Output; weight: number }> = []
+      authored.pipeline.pipe(
+        output((message) => {
+          for (const [[, [value]], weight] of message.getInner())
+            authoredDeltas.push({
+              row: {
+                id: (value as MetadataInputRow).id,
+                observed: captureMetadataInput(value),
+              },
+              weight,
+            })
+        }),
+      )
+      callback.pipeline.pipe(
+        output((message) => {
+          for (const [[, [value]], weight] of message.getInner()) {
+            const row = value as Output
+            derivedDeltas.push({
+              row: {
+                id: row.id,
+                // Copy the selected ordinary capture at output delivery too.
+                observed: copyData(row.observed) as MetadataInputSnapshot,
+              },
+              weight,
+            })
+          }
+        }),
+      )
+      graph.finalize()
+      input.sendData(
+        new MultiSet(first.toArray.map((row) => [[row.id, row], 1])),
+      )
+      graph.run()
+
+      return { captures, authoredDeltas, derivedDeltas, exactQueryReads }
+    }
+    const { captures, authoredDeltas, derivedDeltas, exactQueryReads } =
+      execute(cache)
+    const reference = execute(`separate`)
+    if (
+      process.env.TANSTACK_DB_ORACLE_STATISTICS === `1` &&
+      description.shape === `structured-projection` &&
+      description.collision === `none` &&
+      cache === `shared`
     )
-    callback.pipeline.pipe(
-      output((message) => {
-        for (const [[, [value]], weight] of message.getInner()) {
-          const row = value as Output
-          derivedDeltas.push({
-            row: {
-              id: row.id,
-              // Copy the selected ordinary capture at output delivery too.
-              observed: copyData(row.observed) as MetadataInputSnapshot,
-            },
-            weight,
-          })
-        }
-      }),
-    )
-    graph.finalize()
-    input.sendData(new MultiSet(first.toArray.map((row) => [[row.id, row], 1])))
-    graph.run()
+      console.info(`compiler exact raw-query reads`, {
+        path,
+        order,
+        reads: exactQueryReads,
+      })
 
     // Independent signed-bag bookkeeping preserves duplicate contributions and
     // retractions. It does not replace the source/projection judgment.
@@ -828,10 +1189,35 @@ export async function runMetadataCompilerCacheHistory(
       id: fact.row.id,
       observed: expectedInput[index]!,
     }))
-    const expectedAuthored = facts.map((fact) => ({
-      id: fact.row.id,
-      observed: expectedMetadataInput(fact, description, true),
-    }))
+    // Cache transparency is a relation, not an Effect-root attribution rule.
+    // Separate compilation supplies the other execution, never the O12 truth.
+    // The independent source/projection model still judges callback inputs and
+    // complete ordinary derived outputs in both executions below.
+    const expectedAuthored = accumulate(reference.authoredDeltas)
+    const referenceDerived = accumulate(reference.derivedDeltas)
+    for (const capture of reference.captures)
+      for (const kind of metadataInputViolations(
+        capture,
+        path === `joined-source`
+          ? [...expectedInput, expectedMetadataRecord(undefined)]
+          : expectedInput,
+      ))
+        report.violations.push({
+          cut: `initial`,
+          kind: `reference: ${kind}`,
+          actual: capture,
+          expected: expectedInput,
+        })
+    for (const kind of metadataOutputViolations(
+      referenceDerived,
+      expectedDerived,
+    ))
+      report.violations.push({
+        cut: `initial`,
+        kind: `reference: ${kind}`,
+        actual: referenceDerived,
+        expected: expectedDerived,
+      })
     report.callbackCounts.initial = captures.length
     if (!captures.length)
       report.violations.push({
@@ -841,7 +1227,12 @@ export async function runMetadataCompilerCacheHistory(
         expected: `one or more`,
       })
     for (const capture of captures)
-      for (const kind of metadataInputViolations(capture, expectedInput))
+      for (const kind of metadataInputViolations(
+        capture,
+        path === `joined-source`
+          ? [...expectedInput, expectedMetadataRecord(undefined)]
+          : expectedInput,
+      ))
         report.violations.push({
           cut: `initial`,
           kind,
