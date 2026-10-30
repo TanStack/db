@@ -15,6 +15,7 @@ import {
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils.js'
 import {
   assertTerminalPublication,
@@ -102,7 +103,8 @@ type SourceMutation = {
 }
 
 type PublicationCommand =
-  | Exclude<LifecycleCommand, { type: `truncate` }>
+  | Exclude<LifecycleCommand, { type: `truncate` | `settle` }>
+  | (Extract<LifecycleCommand, { type: `settle` }> & { value?: number })
   | { type: `truncate`; replacement?: Row }
   | SourceMutation
 
@@ -161,6 +163,9 @@ type PublicationObservation = {
   unloads: number
   syncRuns: number
   collectionStatus: string
+  visibleBefore: Array<Row>
+  writtenRows: Array<Row>
+  currentAttempts: number
 }
 
 type PublicationMismatch = {
@@ -437,7 +442,7 @@ function projectPublication(
       ({ attemptId }) => attemptId === attempt.id,
     )
     if (command.outcome === `resolve` && isCurrent && !attempt.aborted) {
-      const row = { id: attempt.demand, value: attempt.id }
+      const row = { id: attempt.demand, value: command.value ?? attempt.id }
       const replacement = publication.replacement
       if (
         replacement &&
@@ -556,6 +561,343 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
       return commands
     }),
 )
+
+/**
+ * Cleanup retains subscriber rows, not source rows. A successful restarted
+ * acquisition must publish the new source, including an equal retained row.
+ * Equality suppresses a public delta; it cannot erase replacement membership.
+ * This follows the opening publication law and the cleanup/restart grammar.
+ *
+ * Cross row equality with demand lifetime and delivery path. An ordinary source
+ * write can restore an independent retained row while acquisitions hold the
+ * replacement. Another retained row is deliberately omitted: keeping every old
+ * row would violate replacement just as deleting an equal restored row does.
+ * Current and obsolete resolve/reject outcomes distinguish authority from
+ * transport settlement. A failed attempt is followed by an authoritative retry.
+ * Every source operation is a complete transaction; malformed writes are excluded.
+ * Removing equality loses the reported defect, removing source delivery admits
+ * an acquisition-only patch, and removing omission admits a keep-all-rows patch.
+ */
+const restartOwnerStates = [
+  `pending`,
+  `settled`,
+  `peer`,
+  `aborted`,
+  `released`,
+  `none`,
+] as const
+const restartRowStates = [`absent`, `equal`, `changed`] as const
+const restartDeliveries = [`acquisition`, `source`] as const
+const restartOutcomes = [`resolve`, `reject`] as const
+const restartPublicationInputArbitrary = fc.record({
+  demand: fc.constantFrom(`a` as const, `b` as const),
+  value: fc.integer({ min: -100_000, max: 100_000 }),
+  obsoleteOutcome: fc.constantFrom(...restartOutcomes),
+  priorAcquisitions: fc.integer({ min: 0, max: 3 }),
+})
+type RestartPublicationInput =
+  typeof restartPublicationInputArbitrary extends fc.Arbitrary<infer Input>
+    ? Input
+    : never
+
+// Only live acquisitions distinguish success from failure or restored equality.
+// An inactive acquisition has no delivered row: its retained value is one regime.
+const restartScenarios = restartDeliveries.flatMap((delivery) =>
+  restartOwnerStates.flatMap((owner) => {
+    const live = owner === `pending` || owner === `settled` || owner === `peer`
+    const rows =
+      delivery === `acquisition` && !live
+        ? ([`absent`, `retained`] as const)
+        : restartRowStates
+    return rows.flatMap((row) =>
+      (live ? restartOutcomes : ([`noop`] as const)).map((outcome) => ({
+        delivery,
+        owner,
+        row,
+        outcome,
+        state: `${delivery}:${owner}:${row}:${outcome}`,
+      })),
+    )
+  }),
+)
+
+function restartPublicationHistory(
+  {
+    demand,
+    value,
+    obsoleteOutcome,
+    priorAcquisitions,
+  }: RestartPublicationInput,
+  scenario: (typeof restartScenarios)[number],
+) {
+  const { delivery, owner, row: rowState, outcome } = scenario
+  const other = demand === `a` ? `b` : `a`
+  const settle = (
+    target: DemandName,
+    scope: `current` | `obsolete`,
+    result: `resolve` | `reject`,
+  ): PublicationCommand => ({
+    type: `settle`,
+    demand: target,
+    scope,
+    age: `newest`,
+    outcome: result,
+    // Input data supplies row content. Neither model nor grammar predicts a
+    // fixture's attempt counter to manufacture equality.
+    value,
+  })
+  const history: Array<PublicationCommand> = []
+  // Retired preliminary loads change attempt numbering without changing the
+  // target row. Equality must survive that fixture perturbation.
+  for (let index = 0; index < priorAcquisitions; index++)
+    history.push(
+      { type: `request`, demand: other },
+      settle(other, `current`, `resolve`),
+      { type: `release`, demand: other },
+    )
+  if (owner !== `none`) history.push({ type: `request`, demand })
+  if (owner === `peer`) history.push({ type: `request`, demand: other })
+  if (owner === `settled`) history.push(settle(demand, `current`, `resolve`))
+  const target = delivery === `source` ? `c` : demand
+  if (rowState !== `absent`)
+    history.push({
+      type: `source`,
+      key: target,
+      action: `upsert`,
+      value: value + (rowState === `changed` ? 1 : 0),
+    })
+  else if (owner === `settled` && delivery === `acquisition`)
+    history.push({ type: `source`, key: target, action: `delete`, value: 0 })
+  history.push({ type: `source`, key: `d`, action: `upsert`, value })
+  if (owner === `aborted`) history.push({ type: `abort`, demand })
+  if (owner === `released`) history.push({ type: `release`, demand })
+  const cleanupIndex = history.length
+  history.push({ type: `cleanup` }, { type: `restart` })
+  const restartIndex = history.length - 1
+  history.push(settle(demand, `obsolete`, obsoleteOutcome))
+  if (delivery === `source`)
+    history.push({ type: `source`, key: target, action: `upsert`, value })
+  const focalIndex = history.length - (delivery === `source` ? 1 : 0)
+  history.push(
+    settle(demand, `current`, outcome === `noop` ? `resolve` : outcome),
+  )
+  if (owner === `peer`) history.push(settle(other, `current`, `resolve`))
+  if (outcome === `reject`) {
+    history.push({ type: `truncate` }, settle(demand, `current`, `resolve`))
+    if (owner === `peer`) history.push(settle(other, `current`, `resolve`))
+  }
+  history.push({ type: `release`, demand })
+  if (owner === `peer`) history.push({ type: `release`, demand: other })
+  return { history, target, cleanupIndex, restartIndex, focalIndex }
+}
+
+// Reach is conditional on facts recorded by the real driver, before comparison
+// can hide a missing premise. A successful acquisition records its actual write;
+// failure records its settled outcome. Retained equality compares that write
+// with the callback-applied row before cleanup, never with an input label.
+function observeRestartRow(
+  prior: Row | undefined,
+  written: Row | undefined,
+): `absent` | `retained` | `equal` | `changed` {
+  if (!prior) return `absent`
+  if (!written) return `retained`
+  return prior.value === written.value ? `equal` : `changed`
+}
+
+// Owner lifetime is observed from executed operations and adapter callbacks.
+// This is a reach classifier, not the reference publication computation.
+function observeRestartOwner(
+  observations: ReadonlyArray<PublicationObservation>,
+  history: ReadonlyArray<PublicationCommand>,
+  demand: DemandName,
+): (typeof restartOwnerStates)[number] {
+  const executed = observations.flatMap((item) =>
+    item.executed ? [history[item.index]!] : [],
+  )
+  if (
+    !executed.some((item) => item.type === `request` && item.demand === demand)
+  )
+    return `none`
+  if (
+    executed.some((item) => item.type === `release` && item.demand === demand)
+  )
+    return `released`
+  if (executed.some((item) => item.type === `abort` && item.demand === demand))
+    return `aborted`
+  if (observations.at(-1)!.currentAttempts === 2) return `peer`
+  return executed.some(
+    (item) =>
+      item.type === `settle` &&
+      item.demand === demand &&
+      item.scope === `current`,
+  )
+    ? `settled`
+    : `pending`
+}
+
+/**
+ * A restarted direct subscription publishes the current replacement at applied
+ * acquisition settlement (ARCHITECTURE, "Cleanup, restart, and detached waiters").
+ * Subscription predicates restrict membership; order and limit select a local
+ * snapshot, not the order of later callback batches. The same Map diff above
+ * judges these receiving paths, including a snapshot of installed rows whose
+ * source events were withheld. Source event deferral is an internal controlled
+ * seam; this makes no claim about a provider's delivery policy.
+ */
+const restartReceiverPaths = [
+  `direct`,
+  `filtered`,
+  `ordered`,
+  `snapshot`,
+] as const
+async function runRestartReceiver(
+  input: RestartPublicationInput,
+  path: (typeof restartReceiverPaths)[number],
+  relation: (typeof restartRowStates)[number],
+): Promise<string> {
+  const gate = createDeferred<void>()
+  let operations: SyncOperations | undefined
+  let restarting = false
+  let loads = 0
+  const source = createCollection<Row, RowKey>({
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (ops) => {
+        operations = ops
+        ops.markReady()
+        return {
+          loadSubset: () => {
+            loads++
+            return restarting ? gate.promise : true
+          },
+        }
+      },
+    },
+  })
+  const shown = new Map<RowKey, Row>()
+  const batches: Array<Array<PublicationChange>> = []
+  const subscription = source.subscribeChanges(
+    (changes) => {
+      const batch = changes.map((change): PublicationChange => ({
+        type: change.type,
+        key: change.key,
+        value: cloneRow(change.value),
+        ...(change.previousValue
+          ? { previousValue: cloneRow(change.previousValue) }
+          : {}),
+      }))
+      for (const change of batch) {
+        if (change.type === `delete`) shown.delete(change.key)
+        else shown.set(change.key, cloneRow(change.value))
+      }
+      batches.push(batch)
+    },
+    {
+      includeInitialState: false,
+      ...(path === `filtered`
+        ? {
+            whereExpression: new Func(`not`, [
+              new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+            ]),
+          }
+        : {}),
+    },
+  )
+  const selected = (rows: ReadonlyArray<Row>) =>
+    new Map(
+      rows
+        .filter(({ id }) => path !== `filtered` || id !== `b`)
+        .map((row) => [row.id, cloneRow(row)] as const),
+    )
+  const write = (rows: ReadonlyArray<Row>) => {
+    if (!operations) throw new Error(`missing receiver sync run`)
+    operations.begin()
+    for (const row of rows)
+      operations.write({ type: `insert`, value: cloneRow(row) })
+    const receipt = operations.commit()
+    expect(receipt).toBe(true)
+  }
+  const priorRows: Array<Row> = [
+    ...(relation === `absent`
+      ? []
+      : [
+          {
+            id: `a` as const,
+            value: input.value + (relation === `changed` ? 1 : 0),
+          },
+        ]),
+    { id: `b`, value: input.value },
+    { id: `d`, value: input.value },
+  ]
+  const nextRows: Array<Row> = [
+    { id: `a`, value: input.value },
+    { id: `b`, value: input.value + 2 },
+  ]
+  const failures: Array<unknown> = []
+  let reached = ``
+  try {
+    write(priorRows)
+    subscription.requestSnapshot()
+    await flushPromises()
+    expect(shown).toEqual(selected(priorRows))
+    const prior = new Map(shown)
+    await source.cleanup()
+    restarting = true
+    source.startSyncImmediate()
+    await flushPromises()
+    expect(loads).toBe(2)
+    expect(subscription.status).toBe(`loadingSubset`)
+    const start = batches.length
+    // A snapshot must be able to supply replacement membership independently
+    // of source callbacks. The held events still publish before settlement.
+    const held = path === `snapshot` ? source._deferPublication() : undefined
+    write(nextRows)
+    if (path === `snapshot` || path === `ordered`) {
+      subscription.requestSnapshot(
+        path === `ordered` ? { orderBy: valueOrderBy(), limit: 3 } : {},
+      )
+    }
+    held?.publish()
+    expect([...source.values()].map(cloneRow)).toEqual(nextRows)
+    expect(shown).toEqual(prior)
+    expect(batches.slice(start)).toEqual([])
+    const observedRelation = observeRestartRow(
+      prior.get(`a`),
+      cloneRow(source.get(`a`)!),
+    )
+    expect(observedRelation).toBe(relation)
+    reached = `${path}:${observedRelation}`
+    gate.resolve()
+    await flushPromises()
+    const next = selected(nextRows)
+    expect(normalizePublicationOrder(batches.slice(start))).toEqual(
+      normalizePublicationOrder([publicationDiff(prior, next)]),
+    )
+    expect(shown).toEqual(next)
+    expect(subscription.status).toBe(`ready`)
+  } catch (error) {
+    failures.push(error)
+  } finally {
+    gate.resolve()
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await source.cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1)
+    throw new AggregateError(failures, `receiver and cleanup failed`, {
+      cause: failures[0],
+    })
+  return reached
+}
 
 async function runPublicationHistory(
   history: ReadonlyArray<PublicationCommand>,
@@ -711,13 +1053,16 @@ async function runPublicationHistory(
     syncRuns: operationsBySyncRun.size,
   })
 
-  const writeAttempt = async (attempt: RuntimeAttempt): Promise<void> => {
+  const writeAttempt = async (
+    attempt: RuntimeAttempt,
+    rowValue = attempt.id,
+  ): Promise<Row | undefined> => {
     // Cancellation fences request-scoped writes at the adapter boundary.
     // Transport may settle later; it must not publish canceled snapshot rows.
     if (attempt.signal?.aborted) return
     const rows = sourceRows.get(attempt.syncRunGeneration)
     const previous = rows?.get(attempt.demand)
-    const value = { id: attempt.demand, value: attempt.id }
+    const value = { id: attempt.demand, value: rowValue }
     attempt.operations.begin()
     attempt.operations.write({
       type: previous ? `update` : `insert`,
@@ -727,6 +1072,7 @@ async function runPublicationHistory(
     const receipt = attempt.operations.commit()
     if (receipt !== true) await receipt
     rows?.set(attempt.demand, value)
+    return cloneRow(value)
   }
 
   const assertPublications = (
@@ -788,6 +1134,8 @@ async function runPublicationHistory(
       const expectedPublicationCount = publication.batches.length
       const unloadCount = unloads.length
       const syncRunCount = operationsBySyncRun.size
+      const visibleBefore = [...visible.values()].map(cloneRow)
+      const writtenRows: Array<Row> = []
       let executed = false
       let sourceEffect: SourceEffect | undefined
       let settlement: `resolve` | `reject` | undefined
@@ -840,6 +1188,7 @@ async function runPublicationHistory(
             ...(previous ? { previousValue: previous } : {}),
           })
           rows?.set(command.key, value)
+          writtenRows.push(cloneRow(value))
         }
         const receipt = operations?.commit()
         if (receipt !== true) await receipt
@@ -877,7 +1226,8 @@ async function runPublicationHistory(
             effect.attemptId
           ] as LifecycleAttempt
           if (command.outcome === `resolve`) {
-            await writeAttempt(runtimeAttempt)
+            const written = await writeAttempt(runtimeAttempt, command.value)
+            if (written) writtenRows.push(written)
             runtimeAttempt.deferred.resolve()
           } else {
             runtimeAttempt.deferred.reject(expected.failure)
@@ -981,6 +1331,11 @@ async function runPublicationHistory(
         unloads: unloads.length - unloadCount,
         syncRuns: operationsBySyncRun.size - syncRunCount,
         collectionStatus: collection.status,
+        visibleBefore,
+        writtenRows,
+        currentAttempts: [...attempts.values()].filter(
+          ({ current, signal }) => current && !signal?.aborted,
+        ).length,
       })
     }
     if (runOptions.terminal) {
@@ -1458,8 +1813,10 @@ function expectedSelection(
 // and unloads with the model. The model predicts the publication step by
 // step, and the selection model predicts which keys local snapshots select.
 declareOracle({
-  check: [runPublicationHistory, runPublicationProduct],
+  check: [runPublicationHistory, runPublicationProduct, runRestartReceiver],
   model: [
+    observeRestartRow,
+    observeRestartOwner,
     projectPublication,
     publicationDiff,
     publishIfChanged,
@@ -1467,7 +1824,12 @@ declareOracle({
     finishReplacement,
     expectedSelection,
   ],
-  grammar: [deferralCleanupHistories, publicationProductCases],
+  grammar: [
+    deferralCleanupHistories,
+    publicationProductCases,
+    restartPublicationInputArbitrary,
+    restartPublicationHistory,
+  ],
 })
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
@@ -2387,7 +2749,151 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
+  it(`keeps an equal row restored by the restarted acquisition`, async () => {
+    // Original generated failure: seed -1439698414, path 1:22.
+    await runPublicationHistory([
+      { type: `source`, key: `b`, action: `upsert`, value: 1 },
+      { type: `request`, demand: `b` },
+      { type: `cleanup` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `restart` },
+      {
+        type: `settle`,
+        demand: `b`,
+        scope: `current`,
+        age: `newest`,
+        outcome: `resolve`,
+      },
+      { type: `abort`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `release`, demand: `b` },
+    ])
+  })
+
   const { multiplier, ...replay } = readOracleRunConfig()
+  const restartProperty = `subscription-lifecycle.restart-publication`
+  // Each generated input runs every structural lane. Reach never depends on
+  // the random seed choosing equality, a live owner, or ordinary source delivery.
+  // Both campaigns use the same budget, grammar, model, driver and comparisons.
+  for (const seed of replay.replaySeed === undefined
+    ? [2310, undefined]
+    : [undefined]) {
+    for (const delivery of restartDeliveries) {
+      it(`matches restarted row publication ${delivery} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
+        const scenarios = restartScenarios.filter(
+          (item) => item.delivery === delivery,
+        )
+        const reach = createOracleReach(
+          restartProperty,
+          scenarios.map(({ state }) => state),
+          { minimum: 12 * multiplier },
+        )
+        await fc.assert(
+          fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
+            for (const scenario of scenarios) {
+              reach.beginHistory()
+              const {
+                history,
+                target,
+                cleanupIndex,
+                restartIndex,
+                focalIndex,
+              } = restartPublicationHistory(input, scenario)
+              const observations = await runPublicationHistory(history)
+              expect(observations[restartIndex]?.executed).toBe(true)
+              expect(observations[restartIndex]?.syncRuns).toBe(1)
+              const focal = observations[focalIndex]!
+              const prior = observations[cleanupIndex]!.visibleBefore.find(
+                ({ id }) => id === target,
+              )
+              const written = focal.writtenRows.find(({ id }) => id === target)
+              const current = observations.find((item) => {
+                const command = history[item.index]
+                return (
+                  item.index > restartIndex &&
+                  command?.type === `settle` &&
+                  command.scope === `current`
+                )
+              })!
+              const actualOwner = observeRestartOwner(
+                observations.slice(0, cleanupIndex),
+                history,
+                input.demand,
+              )
+              expect(actualOwner).toBe(scenario.owner)
+              const actualOutcome = current.settlement ?? `noop`
+              // Failed acquisitions write nothing. Observe the row relation on
+              // their authoritative retry, after proving the actual rejection.
+              const delivered =
+                written ??
+                (actualOutcome === `reject`
+                  ? observations
+                      .slice(focalIndex + 1)
+                      .flatMap((item) => item.writtenRows)
+                      .find(({ id }) => id === target)
+                  : undefined)
+              const actualRow = observeRestartRow(prior, delivered)
+              expect(actualOutcome).toBe(scenario.outcome)
+              expect(actualRow).toBe(scenario.row)
+              const live =
+                scenario.owner === `pending` ||
+                scenario.owner === `settled` ||
+                scenario.owner === `peer`
+              expect(observations[restartIndex]!.currentAttempts).toBe(
+                live ? (scenario.owner === `peer` ? 2 : 1) : 0,
+              )
+              reach.reach(
+                `${delivery}:${actualOwner}:${actualRow}:${actualOutcome}`,
+              )
+            }
+          }),
+          {
+            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
+            ...(seed === undefined ? {} : { seed }),
+          },
+        )
+        reach.assertReached()
+      }, 120_000)
+    }
+  }
+  for (const seed of replay.replaySeed === undefined
+    ? [2310, undefined]
+    : [undefined]) {
+    for (const path of restartReceiverPaths) {
+      it(`matches restarted row publication receiver ${path} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
+        const reach = createOracleReach(
+          restartProperty,
+          restartRowStates.map((row) => `${path}:${row}`),
+          { minimum: 12 * multiplier },
+        )
+        await fc.assert(
+          fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
+            for (const row of restartRowStates) {
+              reach.beginHistory()
+              reach.reach(await runRestartReceiver(input, path, row))
+            }
+          }),
+          {
+            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
+            ...(seed === undefined ? {} : { seed }),
+          },
+        )
+        reach.assertReached()
+      }, 120_000)
+    }
+  }
   const runs = 60 * multiplier
   fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,

@@ -84,10 +84,12 @@ export class TopKState<K extends string | number, T> {
    * Returns the changes to the topK window.
    */
   processElement(key: K, value: T, multiplicity: number): TopKChanges<[K, T]> {
-    const { oldMultiplicity, newMultiplicity } = this.#updateMultiplicity(
-      key,
-      multiplicity,
-    )
+    const oldMultiplicity = this.#multiplicities.get(key) ?? 0
+    const newMultiplicity = oldMultiplicity + multiplicity
+    if (multiplicity !== 0) {
+      if (newMultiplicity === 0) this.#multiplicities.delete(key)
+      else this.#multiplicities.set(key, newMultiplicity)
+    }
 
     if (oldMultiplicity <= 0 && newMultiplicity > 0) {
       // The value was invisible but should now be visible
@@ -111,25 +113,6 @@ export class TopKState<K extends string | number, T> {
       )
     }
     return this.#topK.move(options)
-  }
-
-  #updateMultiplicity(
-    key: K,
-    multiplicity: number,
-  ): { oldMultiplicity: number; newMultiplicity: number } {
-    if (multiplicity === 0) {
-      const current = this.#multiplicities.get(key) ?? 0
-      return { oldMultiplicity: current, newMultiplicity: current }
-    }
-
-    const oldMultiplicity = this.#multiplicities.get(key) ?? 0
-    const newMultiplicity = oldMultiplicity + multiplicity
-    if (newMultiplicity === 0) {
-      this.#multiplicities.delete(key)
-    } else {
-      this.#multiplicities.set(key, newMultiplicity)
-    }
-    return { oldMultiplicity, newMultiplicity }
   }
 }
 

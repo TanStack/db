@@ -1,7 +1,10 @@
-import { DifferenceStreamWriter, LinearUnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type { DifferenceStreamReader } from '../graph.js'
+import { LinearUnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
+import type { PipedOperator } from '../types.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
 import type { MultiSet } from '../multiset.js'
 
 /**
@@ -30,18 +33,5 @@ export class FilterOperator<T> extends LinearUnaryOperator<T, T> {
  * @param f - The predicate to filter elements
  */
 export function filter<T>(f: (data: T) => boolean): PipedOperator<T, T> {
-  return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
-    const output = new StreamBuilder<T>(
-      stream.graph,
-      new DifferenceStreamWriter<T>(),
-    )
-    const operator = new FilterOperator<T>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader(),
-      output.writer,
-      f,
-    )
-    stream.graph.addOperator(operator)
-    return output
-  }
+  return unaryOperator(FilterOperator<T>, f)
 }
