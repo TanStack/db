@@ -641,7 +641,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`,
     `sync-metadata-session`,
-    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand`,
+    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand persisted-seed-reinsert-reload`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-seed-reinsert-reload`,
   ],
 ]
 
