@@ -40,19 +40,20 @@ function runReplay(
   fault?: string,
   property = `oracle-replay.calibration`,
   cleanupFailure = false,
+  workingDirectory = packageDirectory,
 ): { status: number | null; output: string } {
   const result = spawnSync(
     process.execPath,
     [
       `--import`,
       `tsx`,
-      `tests/oracle-replay.ts`,
+      join(packageDirectory, `tests/oracle-replay.ts`),
       ...args,
       `--maxWorkers=1`,
       `--coverage.enabled=false`,
     ],
     {
-      cwd: packageDirectory,
+      cwd: workingDirectory,
       env: {
         ...process.env,
         TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `1`,
@@ -76,6 +77,19 @@ describe(`guarded oracle replay`, () => {
   // spawnSync blocks the worker. Let progress replies arrive between complete
   // replays instead of starving Vitest's RPC channel across the whole suite.
   afterEach(() => setImmediate())
+
+  it(`rejects a window replay through a different framework driver`, () => {
+    const result = runReplay(
+      [`tests/conformance.test.tsx`],
+      undefined,
+      `framework.solid.window-history`,
+      false,
+      join(repositoryDirectory, `packages/react-db`),
+    )
+    expect(result.status, result.output).toBe(1)
+    expect(result.output).toContain(`oracle replay target never executed`)
+    expect(result.output).toContain(`"executions":0`)
+  }, 40_000)
 
   it(`runs a named replay directly without the owner's fixed campaign`, () => {
     const result = runReplay([fixture])
@@ -370,6 +384,37 @@ describe(`oracle replay reporting`, () => {
 })
 
 describe(`named oracle replay manifest`, () => {
+  // ORC-007 requires the same production path during replay. A shared model
+  // does not make different framework schedulers interchangeable. Enumerate
+  // the finite driver × history grammar, including React's dependency-list
+  // path, and compare its independently named owner with the manifest.
+  it.each(
+    [
+      [`react`, `react-db/tests/conformance.test.tsx`],
+      [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+      [`preact`, `preact-db/tests/conformance.test.ts`],
+      [`vue`, `vue-db/tests/conformance.test.ts`],
+      [`solid`, `solid-db/tests/conformance.test.tsx`],
+      [`angular`, `angular-db/tests/conformance.test.ts`],
+      [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+    ].flatMap(([driver, owner]) =>
+      [
+        `window-history`,
+        `pending-window-history`,
+        `publication-window-history`,
+      ].map((family) => [`framework.${driver}.${family}`, owner]),
+    ),
+  )(`keeps the originating driver for %s`, (property, owner) => {
+    const entry = oracleReplayManifest.find(
+      (candidate) => candidate.property === property,
+    )
+    expect(entry, property).toMatchObject({
+      file: `packages/${owner}`,
+      status: `assertion`,
+      source: `packages/db/tests/conformance/window-history-oracle.ts`,
+    })
+  })
+
   it(`accounts for every registry name`, () => {
     expect(
       new Set(oracleReplayManifest.map(({ property }) => property)),
@@ -430,6 +475,18 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(
           family?.[1] ?? `includes.matrix.flat-materialization`,
         )
+      } else if (entry.property.startsWith(`framework.`)) {
+        const [, driver, family] = entry.property.split(`.`)
+        const driverSource = readFileSync(
+          join(repositoryDirectory, entry.file),
+          `utf8`,
+        )
+        const driverName =
+          driver === `react-dependency-list`
+            ? `react (dependency list)`
+            : driver
+        expect(driverSource).toContain(`name: \`${driverName}\``)
+        expect(source).toContain(`windowHistoryProperty(driver, \`${family}\`)`)
       } else if (entry.property.startsWith(`react.ssr-effects-`)) {
         const [runtime, ...parts] = entry.property
           .slice(`react.ssr-effects-`.length)

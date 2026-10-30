@@ -405,3 +405,20 @@ Final routing source hashes:
 | --- | --- |
 | `packages/db/tests/oracle-replay-manifest.ts` | `936a42065fb4031e67410dbb530e3d566a3c7ce75c7e739c199d69aa3d375901` |
 | `packages/db/tests/oracle-replay.test.ts` | `c624c7cd6e58fff27e9e488af270887fc1bdf9de36913f3303005291b855dfd0` |
+
+
+## Correction after the CodeRabbit replay review
+
+The canonical-React routing claim above described parent
+`cc058b802ed6921f692f234399437c5a4e663991`. It did not preserve the originating
+framework driver and is superseded by the
+[driver replay review](2026-10-30-adapter-page-window-replay.md). The earlier
+eighteen commands prove only their named target executions on that parent.
+Current property IDs include one of seven driver identities, including React's
+dependency-list path, with a separate owner for each of three history families.
+The new independent matrix first failed all 21 comparisons before routing was
+repaired. All 21 guarded commands then passed; a React-for-Solid mutant failed
+three owner comparisons and a real wrong-driver invocation reported zero
+executions. The complete protocol suite passes 63 tests. Source hashes and
+per-route witnesses are in the linked review manifest. No shipped source,
+product expectation or oracle run budget changed in this correction.

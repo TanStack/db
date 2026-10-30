@@ -3665,15 +3665,19 @@ properties have separate environment variables; inspect their test headers.
 Do not assume the core multiplier reaches them.
 
 The adapter-window properties have named replay routes in
-`packages/db/tests/oracle-replay-manifest.ts`. Shared framework histories use
-the React conformance driver as their canonical guarded route and name the
-shared model module as their source. React and Preact render witnesses, all
-twelve React SSR runtime/path cells, and the IVM numeric-window lane have
-their own routes. Selectors choose only the fresh or random campaign. The
-manifest checks and guarded seed-2291/path-0 commands cover all eighteen new
-entries; the [preparation record](oracle-reviews/2026-10-30-adapter-page-windows-prep.md)
-records the CI discovery and repair. Other framework drivers keep their native
-seed/path replay interface.
+`packages/db/tests/oracle-replay-manifest.ts`. Each shared history property
+includes its production driver: `framework.<driver>.window-history`,
+`framework.<driver>.pending-window-history`, or
+`framework.<driver>.publication-window-history`. The drivers are `react`,
+`react-dependency-list`, `preact`, `vue`, `solid`, `angular`, and `svelte`.
+Each route selects its own conformance file and names the shared model module
+as its source. React and Preact render witnesses, all twelve React SSR
+runtime/path cells, and the IVM numeric-window lane retain their own routes.
+Selectors choose only the fresh or random campaign. The earlier three shared
+`framework.*` names are retired because they lost the failing driver's identity.
+The [replay review](oracle-reviews/2026-10-30-adapter-page-window-replay.md)
+records the 21 driver/history witnesses and correction of the earlier canonical
+React routing claim in the preparation record.
 
 The Node expression-index oracle runs matching fixed-seed and seedless-random
 campaigns by default. A path replay of its property selects only the

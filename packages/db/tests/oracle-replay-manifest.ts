@@ -15,7 +15,43 @@ const ownerGroups: ReadonlyArray<
 > = [
   [
     `react-db/tests/conformance.test.tsx`,
-    `framework`,
+    `framework.react`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `react-db/tests/conformance.test.tsx`,
+    `framework.react-dependency-list`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `preact-db/tests/conformance.test.ts`,
+    `framework.preact`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `vue-db/tests/conformance.test.ts`,
+    `framework.vue`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `solid-db/tests/conformance.test.tsx`,
+    `framework.solid`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `angular-db/tests/conformance.test.ts`,
+    `framework.angular`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `svelte-db/tests/conformance.svelte.test.ts`,
+    `framework.svelte`,
     `window-history pending-window-history publication-window-history`,
     `db/tests/conformance/window-history-oracle.ts`,
   ],
@@ -764,15 +800,6 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
-  [
-    `framework.window-history`,
-    `(?:direct|nested) window histories \\(fresh\\)`,
-  ],
-  [`framework.pending-window-history`, `pending window histories \\(fresh\\)`],
-  [
-    `framework.publication-window-history`,
-    `publication callback window histories \\(fresh\\)`,
-  ],
   [`react.window-render`, `window changes at React commit.*fresh`],
   [`preact.window-render`, `window changes at Preact commit.*fresh`],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
@@ -915,6 +942,16 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`framework.`)) {
+    switch (property.split(`.`).at(-1)) {
+      case `window-history`:
+        return `(?:direct|nested) window histories \\(fresh\\)`
+      case `pending-window-history`:
+        return `pending window histories \\(fresh\\)`
+      case `publication-window-history`:
+        return `publication callback window histories \\(fresh\\)`
+    }
+  }
   if (property.startsWith(`react.ssr-effects-`)) {
     const [runtime, ...path] = property
       .slice(`react.ssr-effects-`.length)

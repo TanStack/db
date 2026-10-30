@@ -117,6 +117,10 @@ RED replay used seed `1915472220`, path `0`.
 
 Example command, run at repository root:
 
+This command records the original property name. On the current branch, use
+`framework.react.window-history`; the [replay review](2026-10-30-adapter-page-window-replay.md)
+records the later driver-scoped names.
+
 ```sh
 TANSTACK_DB_ORACLE_PROPERTY=framework.window-history \
 TANSTACK_DB_ORACLE_SEED=2121258135 TANSTACK_DB_ORACLE_PATH=0 \
@@ -129,9 +133,12 @@ pnpm --filter @tanstack/react-db exec vitest run tests/conformance.test.tsx \
 
 DbClient/hydration and Suspense identify shared results by complete query
 identity. This repair does not retarget those shared Collections. Supplied
-Collections, opaque-plan optimization, unbounded transitions and `findOne` keep
-their existing paths. Those are ownership and API boundaries, not evidence that
-every existing API can reuse every compiled result.
+Collections, opaque-plan optimization and `findOne` keep their existing paths.
+An ordered query with an explicit `.limit(Infinity)` can retain its Collection
+when it moves to a finite safe-integer target. Other unbounded transitions keep
+their existing paths. The retention evidence below covers finite windows; it
+does not establish the additional Infinity-to-finite domain. These ownership
+and API boundaries do not establish reuse for every compiled result.
 
 The model covers finite numeric rows and selected projections, not every query
 operator or arbitrary concurrent schedule. Core ordered-window owners retain

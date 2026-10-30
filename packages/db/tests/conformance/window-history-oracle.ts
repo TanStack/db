@@ -543,6 +543,16 @@ export async function runWindowHistory(
   })
 }
 
+// Replay identity includes the production driver. Equal seeds and paths in a
+// different framework cannot reproduce a scheduler-specific counterexample.
+function windowHistoryProperty(
+  driver: LiveQueryDriver,
+  family: string,
+): string {
+  const id = driver.name.replace(/\W+/g, `-`).replace(/-$/, ``)
+  return `framework.${id}.${family}`
+}
+
 // Each registration runs the same grammar and comparison with a fixed and fresh
 // seed. Reach belongs to one driver and input form; one framework cannot supply
 // another's missing witness. Replay goes directly to the requested campaign.
@@ -616,7 +626,7 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
           : ([`changing`] as const)) {
           for (const campaign of [`fixed`, `fresh`] as const) {
             const form = `${keyed ? keyPolicy : `derived`}/${nested ? `nested` : `direct`}`
-            const property = `framework.window-history`
+            const property = windowHistoryProperty(driver, `window-history`)
             const test =
               campaign === `fixed`
                 ? oracleReplayTest(it)
@@ -885,7 +895,7 @@ declareOracle({
 
 function registerPendingWindowOracle(driver: LiveQueryDriver) {
   for (const campaign of [`fixed`, `fresh`] as const) {
-    const property = `framework.pending-window-history`
+    const property = windowHistoryProperty(driver, `pending-window-history`)
     const test =
       campaign === `fixed`
         ? oracleReplayTest(it)
@@ -1102,7 +1112,7 @@ async function checkPublicationWindowHistory(
 
 function registerPublicationWindowOracle(driver: LiveQueryDriver) {
   for (const campaign of [`fixed`, `fresh`] as const) {
-    const property = `framework.publication-window-history`
+    const property = windowHistoryProperty(driver, `publication-window-history`)
     const test =
       campaign === `fixed`
         ? oracleReplayTest(it)
