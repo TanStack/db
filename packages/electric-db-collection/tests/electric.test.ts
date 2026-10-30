@@ -3443,6 +3443,7 @@ describe(`Electric Integration`, () => {
       })
 
       try {
+        subscriber([{ headers: { control: `up-to-date` } }])
         transaction.mutate(() =>
           testCollection.insert({ id: 3, name: `Local row` }),
         )

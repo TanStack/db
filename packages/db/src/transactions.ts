@@ -754,6 +754,38 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (this.mutations.length > 0) {
       // Run mutationFn
       try {
+        const collections = [
+          ...new Set(this.mutations.map((mutation) => mutation.collection)),
+        ]
+        const prepareCollections = collections.filter(
+          (collection) => collection.config.sync.beforeMutation,
+        )
+        if (prepareCollections.length > 0) {
+          const retired = this.when(`settled`).then(
+            () => null,
+            () => null,
+          )
+          for (;;) {
+            const guards = await Promise.race([
+              Promise.all(
+                prepareCollections.map((collection) =>
+                  Promise.resolve().then(() => {
+                    collection._resumeSyncStart()
+                    return collection.config.sync.beforeMutation!(collection)
+                  }),
+                ),
+              ),
+              retired,
+            ])
+            if (
+              guards === null ||
+              (this.state as TransactionState) !== `persisting`
+            )
+              return this
+            // Validate every source together; no await between this check and dispatch.
+            if (guards.every((isCurrent) => isCurrent())) break
+          }
+        }
         // At this point we know there's at least one mutation
         // We've already verified mutations is non-empty, so this cast is safe
         // Use a direct type assertion instead of object spreading to preserve the original type
