@@ -335,7 +335,9 @@ export function useLiveQuery(
   // it unmounts.
   const sourceIdClaims = createLiveQuerySourceIdClaims()
 
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
   const resolved = $derived.by(() => {
+    let commitWindow: (() => void) | undefined
     // First check if the original parameter might be a getter
     // by seeing if toValue returns something different than the original
     let unwrappedParam = configOrQueryOrCollection
@@ -357,6 +359,7 @@ export function useLiveQuery(
         contextDbClient)
 
     if (inputIsCollection) {
+      previousCollection = null
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -384,6 +387,7 @@ export function useLiveQuery(
           `queryKey`,
         ),
         resumeDeferredCollections: () => {},
+        move: undefined,
       }
     }
 
@@ -453,8 +457,16 @@ export function useLiveQuery(
         collection = resolveLiveQueryValue(preparedValue, {
           gcTime: DEFAULT_GC_TIME_MS,
           pool: dbClient ? false : undefined,
+          previousCollection: dbClient ? undefined : previousCollection,
+          windowOwner: sourceIdClaims,
+          onWindowChange: (move) => {
+            commitWindow = move
+          },
         })
       }
+
+      previousCollection =
+        dbClient || isCollection(preparedValue) ? null : collection
 
       // A setup that never subscribes releases its deferred sync starts when
       // garbage collection reclaims the live query it built. A Collection
@@ -465,6 +477,7 @@ export function useLiveQuery(
           : undefined
       return {
         collection,
+        move: commitWindow,
         client: dbClient,
         queryHash,
         // The subscribing effect releases the starts, so it drops the
@@ -532,9 +545,20 @@ export function useLiveQuery(
     })
   }
 
+  // Source notifications write Svelte state. Apply moves outside the derived
+  // input and retain the observer when only its window changes.
+  $effect.pre(() => {
+    const next = resolved
+    untrack(() => next.move?.())
+  })
+  const observerInput = $derived.by(() => {
+    const next = resolved
+    return next.client ? next : next.collection
+  })
   // Watch for collection changes and subscribe to updates
   $effect(() => {
-    const nextResolved = resolved
+    observerInput
+    const nextResolved = untrack(() => resolved)
 
     if (nextResolved !== currentResolved) {
       currentObserver.dispose()

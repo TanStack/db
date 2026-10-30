@@ -8,7 +8,6 @@ import {
 } from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
 import {
-  BaseQueryBuilder,
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
   getPublicCollection,
@@ -251,36 +250,27 @@ export function useLiveQuery<
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection,
+      windowOwner: resolveNext,
+    }))
   const collection = createMemo(
     () => {
-      if (configOrQueryOrCollection.length === 1) {
-        // This is a query function - check if it returns null/undefined
-        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-        const result = configOrQueryOrCollection(queryBuilder)
-
-        if (result === undefined || result === null) {
-          // Disabled query - return null
-          return null
-        }
-
-        return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
-      }
-
-      const innerCollection = configOrQueryOrCollection()
-
-      if (innerCollection === undefined || innerCollection === null) {
-        // Disabled query - return null
-        return null
-      }
+      const innerCollection =
+        configOrQueryOrCollection.length === 1
+          ? configOrQueryOrCollection
+          : configOrQueryOrCollection()
 
       if (isCollection(innerCollection)) {
         innerCollection.startSyncImmediate()
+        previousCollection = null
         return innerCollection as Collection
       }
 
-      return resolveLiveQueryValue(innerCollection, {
-        gcTime: DEFAULT_GC_TIME_MS,
-      })
+      return resolveNext(innerCollection)
     },
     undefined,
     { name: `TanstackDBCollectionMemo` },

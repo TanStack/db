@@ -5,6 +5,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core'
 import {
   BaseQueryBuilder,
@@ -21,11 +22,10 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryHookConfig,
-  LiveQueryObserver,
+  LiveQuerySnapshot,
   LiveQueryStatusFlags,
   NonSingleResult,
   PooledLiveQueries,
@@ -152,23 +152,27 @@ export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
   const destroyRef = inject(DestroyRef)
 
-  const collection = computed(() => {
+  let pendingWindow: (() => void) | undefined
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown, pool?: PooledLiveQueries) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      pool,
+      previousCollection,
+      windowOwner: resolveNext,
+      onWindowChange: (move) => {
+        pendingWindow = move
+      },
+    }))
+  const resolveInput = () => {
     // Check if it's an existing collection
     if (isCollection(opts)) {
+      previousCollection = null
       return opts
     }
 
     if (typeof opts === `function`) {
-      // Check if query function returns null/undefined (disabled query)
-      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-      const result = opts(queryBuilder)
-
-      if (result === undefined || result === null) {
-        // Disabled query - return null
-        return null
-      }
-
-      return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
+      return resolveNext(opts)
     }
 
     // Check if it's reactive query options
@@ -186,59 +190,61 @@ export function injectLiveQuery(opts: any) {
         params: opts.params(),
         q: new BaseQueryBuilder() as InitialQueryBuilder,
       })
-      return resolveLiveQueryValue(result, {
-        gcTime: DEFAULT_GC_TIME_MS,
-        pool,
-      })
+      return resolveNext(result, pool)
     }
 
     // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
     // match the query-fn and reactive-options paths, but let an explicit value
     // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return resolveLiveQueryValue(opts, { gcTime: DEFAULT_GC_TIME_MS })
+      return resolveNext(opts)
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)
+  }
+  const resolved = computed<{
+    collection: ReturnType<typeof resolveLiveQueryValue>
+    move: (() => void) | undefined
+  }>(() => {
+    pendingWindow = undefined
+    const collection = resolveInput()
+    return { collection, move: pendingWindow }
+  })
+  const collection = computed(() => resolved().collection)
+  effect(() => {
+    const { move } = resolved()
+    untracked(() => move?.())
   })
 
-  const state = signal(new Map<string | number, any>())
-  const internalData = signal<Array<any>>([])
-  const statusValue = signal<CollectionStatus | `disabled`>(`idle`)
+  // The shared observer already captures one coherent view per publication.
+  // Signals project that snapshot instead of copying its rows and health again.
+  const snapshot = signal<LiveQuerySnapshot<any, string | number> | null>(null)
+  const state = computed(
+    () => (snapshot()?.state ?? new Map()) as Map<string | number, any>,
+  )
   const status = computed(() => {
-    const value = statusValue()
+    const value = snapshot()?.status ?? `idle`
     return value === `idle` && !collection() ? `disabled` : value
   })
-  const health = signal<HealthNode | undefined>(undefined)
+  const health = computed(() => snapshot()?.health)
   // Every status flag comes from the shared rule; a disabled query is ready.
   const flags = computed(() =>
     getLiveQueryStatusFlags(status() as CollectionStatus, health()),
   )
 
-  // Returns single item for singleResult collections, array otherwise
+  // The snapshot already applies findOne's single-result projection. Before
+  // the observer attaches, preserve Angular's empty array/undefined defaults.
   const data = computed(() => {
+    // Read the current input even when a snapshot exists: a compile rejection
+    // must propagate instead of exposing the previous query's rows.
     const currentCollection = collection()
-    if (!currentCollection) {
-      return internalData()
-    }
-    return isSingleResultCollection(currentCollection)
-      ? internalData()[0]
-      : internalData()
+    return (
+      snapshot()?.data ??
+      (currentCollection && isSingleResultCollection(currentCollection)
+        ? undefined
+        : [])
+    )
   })
-
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
-    observer: LiveQueryObserver<any, any>,
-  ) => {
-    const newState = new Map(currentCollection.entries())
-    const newData = Array.from(newState.values())
-
-    state.set(newState)
-    internalData.set(newData)
-    const snapshot = observer.getSnapshot()
-    statusValue.set(snapshot.status)
-    health.set(snapshot.health)
-  }
 
   let unsub: (() => void) | null = null
   const cleanup = () => {
@@ -251,35 +257,25 @@ export function injectLiveQuery(opts: any) {
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
-      statusValue.set(`disabled` as const)
-      health.set(undefined)
-      state.set(new Map())
-      internalData.set([])
+      snapshot.set(null)
       cleanup()
       return
     }
 
     cleanup()
 
-    // The shared observer owns sync start, subscription, the ready-race, and
-    // status transitions; Angular re-reads the whole collection on each notify
-    // (wholesale) into its signals.
-    // Angular re-reads the collection on notify; wholesale mode preserves its
-    // pre-observer loading policy (no initial-state snapshot request).
+    // Wholesale mode preserves Angular's loading policy: attaching requests no
+    // initial-state snapshot from the source.
     const observer = createLiveQueryObserver(currentCollection, {
       mode: `wholesale`,
     })
 
-    const unsubscribe = observer.subscribe(() => {
-      syncDataFromCollection(currentCollection, observer)
-    })
+    const syncSnapshot = () => snapshot.set(observer.getSnapshot())
+    observer.subscribe(syncSnapshot)
     // Wholesale attach suppresses listener calls raised by synchronous sync
     // startup. Read once after subscribe returns to capture that final state.
-    syncDataFromCollection(currentCollection, observer)
-    unsub = () => {
-      unsubscribe()
-      observer.dispose()
-    }
+    syncSnapshot()
+    unsub = () => observer.dispose()
 
     onCleanup(cleanup)
   })
