@@ -194,86 +194,41 @@ export function deepEqualsInternal(
       return aValues.every((val) => b.has(val))
     }
 
-    // Candidate comparisons share only the active ancestors. Each recursive
-    // comparison removes its own pairs, so an edge's result is independent of
-    // other assignments. Cache edges and reassign matches instead of retrying
-    // permutations. Plain records can match distinct keyed classes, so a
-    // greedy first match alone would reject some equal Sets.
-    // Cache diagonal comparisons separately: aligned Sets need linear storage
-    // and no candidate scan. Other rows cache only the pairs actually tried.
-    // Zero is unknown, one is unequal, and two is equal.
-    const diagonal = new Uint8Array(aValues.length)
-    const edges: Array<Map<number, boolean> | undefined> = []
-    const equalAt = (left: number, right: number): boolean => {
-      if (left === right && diagonal[left] !== 0) return diagonal[left] === 2
-      const row =
-        left === right
-          ? undefined
-          : (edges[left] ??= new Map<number, boolean>())
-      const cached = row?.get(right)
-      if (cached !== undefined) return cached
-      const equal = deepEqualsInternal(
-        aValues[left],
-        bValues[right],
-        visited,
-        draft,
-        persistedSnapshot,
-      )
-      if (left === right) diagonal[left] = equal ? 2 : 1
-      else row!.set(right, equal)
-      return equal
-    }
-    const matchedRight = bValues.map(() => -1)
-    const matchedLeft = aValues.map(() => -1)
-    const matchValue = (index: number): boolean => {
-      if (matchedRight[index] === -1 && equalAt(index, index)) {
-        matchedRight[index] = index
-        matchedLeft[index] = index
-        return true
-      }
-      // An isolated final column cannot participate in any complete assignment.
-      // Check it directly rather than rediscovering that through every path.
-      if (index === aValues.length - 1) {
-        const free = matchedRight.indexOf(-1)
-        if (aValues.every((_, left) => !equalAt(left, free))) return false
-      }
-      // Find an augmenting path without using JavaScript call depth for the
-      // number of members. Each right predecessor names the left that found it.
-      const predecessors = new Int32Array(bValues.length).fill(-1)
-      const stack = [{ left: index, next: 0 }]
-      while (stack.length > 0) {
-        const frame = stack[stack.length - 1]!
-        if (frame.next === bValues.length) {
-          stack.pop()
-          continue
+    // Object-valued Sets are unordered. Match each value once, carrying a
+    // branch-local cycle map so a failed candidate cannot poison the next.
+    const matchValues = (
+      index: number,
+      remaining: ReadonlyArray<number>,
+      branchVisited: Map<object, object>,
+    ): boolean => {
+      if (index === aValues.length) return true
+      const value = aValues[index]
+      for (const [remainingIndex, candidateIndex] of remaining.entries()) {
+        const candidateVisited = new Map(branchVisited)
+        if (
+          deepEqualsInternal(
+            value,
+            bValues[candidateIndex],
+            candidateVisited,
+            draft,
+            persistedSnapshot,
+          ) &&
+          matchValues(
+            index + 1,
+            remaining.filter((_, otherIndex) => otherIndex !== remainingIndex),
+            candidateVisited,
+          )
+        ) {
+          return true
         }
-        // After displacement, try the successor of the former assignment
-        // first. Wrap once so every candidate remains eligible.
-        const start =
-          matchedLeft[frame.left] === -1
-            ? frame.left
-            : matchedLeft[frame.left]! + 1
-        const right = (start + frame.next++) % bValues.length
-        if (predecessors[right] !== -1 || !equalAt(frame.left, right)) continue
-        predecessors[right] = frame.left
-        if (matchedRight[right] !== -1) {
-          stack.push({ left: matchedRight[right]!, next: 0 })
-          continue
-        }
-        // Flip every edge back to the root, releasing each old assignment.
-        let slot = right
-        while (slot !== -1) {
-          const owner = predecessors[slot]!
-          const previous = matchedLeft[owner]!
-          matchedRight[slot] = owner
-          matchedLeft[owner] = slot
-          slot = previous
-        }
-        return true
       }
       return false
     }
-    const result = aValues.every((_, index) => matchValue(index))
+    const result = matchValues(
+      0,
+      bValues.map((_, index) => index),
+      visited,
+    )
     visited.delete(a)
     return result
   }

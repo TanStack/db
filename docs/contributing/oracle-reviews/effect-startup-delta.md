@@ -209,7 +209,7 @@ No broader metadata or general delta-classifier closure follows.
 ## Subsequent prep-pr review
 
 Review of `a7ea76cddf7ab2fe03f49d84c6d596dd598fedba` found a newly exposed
-factorial object-Set comparison path. The [Set-work repair](set-equality-work.md)
+factorial object-Set comparison path. The [historical Set-work repair](https://github.com/TanStack/db/blob/0b47ee825aaa0c36b199a3c42652cab8d9672ec9/docs/contributing/oracle-reviews/set-equality-work.md)
 records its independent model, pre-edit RED, receiving paths, GREEN and mutants.
 The scalar startup owner's native model and histories still pass all 216 cases.
 Its separate opaque-key calibration repair is recorded below; startup and work
@@ -236,8 +236,9 @@ assertion from the full repaired owner gives **214 passes and those same two
 failures**, with zero skipped tests. Cross-channel agreement therefore cannot
 substitute for continuity enforcement.
 
-The repaired owner passes all **216 tests**. Combined equality, Collection/Effect
-receiving, proxy-revert and startup checks pass **619/619**. All 5,512 startup
+At that earlier head, the repaired owner passed all **216 tests**. Combined
+equality, Collection/Effect receiving, proxy-revert and startup checks passed
+**619/619**, including the later-removed Set work. All 5,512 startup
 reach cells still count 1; Set-work reach is unchanged. Targeted TypeScript,
 ESLint, oracle lint and formatting pass. Tests use at most two workers; no full
 build ran. Other applicable rubric outcomes above remain unchanged.
@@ -254,3 +255,113 @@ Review identity is parent `a7ea76cddf7ab2fe03f49d84c6d596dd598fedba` plus that
 fingerprint and the Set-work fingerprints. The combined command is recorded in
 the Set-work review. Raw checker variants, reports and logs remain under
 `/private/tmp/effect-startup-delta/prep-pr/key-calibration/accepted-cr1/`.
+
+## Membership and coalesced source writes
+
+The high review of `d97c1aaf412661e8d5d3e0d528fe5c4667f69d65` exposed a
+remaining membership distinction. An absent key can receive insert/delete/insert
+in one flush and must enter. A present key receiving delete/insert/delete must
+exit. Fresh callable and private-field projections also exposed a startup update
+for an unmatched occurrence that never entered. Presence cannot be inferred from
+payload equality or gross insert/delete counts.
+
+The existing owner adds 24 finite histories: scalar/callable/private payload,
+one source/LEFT join, initially absent/present and separate/coalesced writes.
+Independent source snapshots determine the whole expected delta at initial,
+sequence, absent, reentry and next-use cuts. Both callback channels compare event
+multiplicity, previous readable values and active opaque-key intervals. All 120
+new cells reach once. The original 200 histories and 5,512 reach cells stay.
+The rich recorder preserves payload kind and readable result, without a claim
+about exact re-evaluated instance identity.
+
+Before production edits, the expanded owner on unchanged `d97c1aaf4` failed
+14 of these histories at delta/interval assertions. The complete recorded run
+passed 631 tests and failed 16, including two separate Set stack probes. The
+membership repair passes all 240 owner tests. Restoring the original classifier
+fails 14 histories; inferring prior presence from net count alone fails all 24.
+Public sync writes inside a real optimistic transaction's scheduler scope reach
+the reported three-write histories. No production information is missing at
+these observation cuts.
+
+Every Effect now retains its preceding coherent result, including a skipped
+initial baseline. Prior membership plus net multiplicity decides membership
+at the next cut. Only a continued row compares values to decide an update.
+An Effect without update/batch handlers refreshes retained values without that
+comparison or an update dispatch, preserving its later exit's value. Public
+`EffectConfig`, `DeltaEvent` and the Effect guide supply the authority.
+
+The Effect production and owner files are unchanged from the verified subject
+`375e9b26ca93b19cc266dd1ccdfcd10e97e820fc`. Their SHA256 values are:
+
+```text
+6835de1fc044efec14f80ce7aa546451c9c1ce6134a1c5198779ee5ebd45c8b9  packages/db/src/query/effect.ts
+469415454de90a75db84caaa5b6893ae8fb54a1f85536872070f9a3c54ded1a6  packages/db/tests/query/virtual-row-fields-effect-oracle.test.ts
+```
+
+The [exact-head high-review record](https://github.com/TanStack/db/blob/0b47ee825aaa0c36b199a3c42652cab8d9672ec9/docs/contributing/oracle-reviews/effect-startup-high-review.md)
+preserves all eight original findings, experiments, hostile variants, grammar
+controls, rubric outcomes and reviewer assessment. That historical record's
+647-test result includes the now-removed Set work. It is not the current count.
+Current claims remain bounded to the declared eager controlled core histories.
+Arbitrary provider/framework schedules, changing join keys/multiplicity and
+exact rich-payload instance identity remain outside this instrument.
+
+## Maintainer scope revision, 2026-10-30
+
+The maintainer explicitly removed Set performance work from this PR because no
+application performance problem had been reported. The old Set matcher returns
+byte-for-byte, together with the existing `utils.1`–`utils.40` owner and registry.
+New Set models, receivers, properties 41/42, scale/work guards and the dedicated
+Set report are removed. Existing laws, comparisons, reach and budgets remain.
+The Set work's own new guards retire only with this explicit scope decision.
+Their known synthetic limitations remain recorded under the primary deep-equality
+owner in the coverage map; resumption requires a maintainer request or a real
+workload. Historical generators and full traces remain in commit `0b47ee825` and
+`/private/tmp/effect-startup-delta/high-review/`.
+
+The high-review ledger now has three Effect repairs (1, 2, 4), one accepted-design
+semantic finding with a release-note correction (3), three explicitly deferred
+Set findings (5–7), and one refuted coverage allegation (8). The original
+factorial Set work is deferred with those findings. None is relabeled refuted or
+closed by removing its test. The Effect membership repair, checker calibration,
+callback comparison bypass and equal-projection suppression remain intact.
+
+### Validation after Set removal
+
+The six retained suites pass **581/581**, with zero failures or skipped tests.
+They cover the existing change-event equality owner, ordinary utils tests,
+proxy revert, ordinary Effects, Effect disposal and the Effect metadata owner.
+All 240 metadata-owner tests pass. The original 5,512 reach cells and 120 added
+membership cells each reach count 1. Targeted TypeScript, ESLint, oracle lint,
+formatting and whitespace checks pass.
+
+The executed local configuration uses the installed dependencies, jsdom,
+`tests/test-setup.ts`, a source alias for `@tanstack/db-ivm`, no coverage, and
+at most two workers:
+
+```sh
+node node_modules/vitest/vitest.mjs run \
+  --config /private/tmp/effect-startup-delta/remove-set/focused.config.mjs \
+  --reporter=default --reporter=json \
+  --outputFile=/private/tmp/effect-startup-delta/remove-set/focused.json
+```
+
+The config, log and JSON report remain under that directory. The source alias
+changes dependency resolution only. It does not replace the production driver
+or independent comparison. The normal repository selectors name the same six
+test files. Every `test:oracles` path exists after the removed receiver leaves
+the script.
+
+The maintainer separately authorized `pnpm size:compare`, including its normal
+package builds. Against merge base `bea84cd4554b7bd49df50cb0c569a34d8b2cd915`,
+the typical app remains **96,732 bytes gzip** (0-byte change). The Effects app
+changes from **99,303 to 99,340 bytes gzip** (+37 bytes). All other app scenarios
+remain unchanged. The DB package adds 20 bytes gzip. The log is
+`/private/tmp/effect-startup-delta/remove-set/size-compare.log`.
+
+These results supersede the earlier combined 619/647 counts for the current
+scope. Those counts remain historical evidence for their stated subjects.
+The Effect source and owner fingerprints above still identify the verified
+implementation. Set production, its former `utils.1`–`utils.40` owner and its
+registry are byte-identical to the merge base. No full repository test or build
+ran beyond the separately authorized size comparison's normal package builds.

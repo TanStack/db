@@ -1889,25 +1889,18 @@ The [round 7 ledger](oracle-reviews/utils-unit-retirement-round-7.md) retains
 the retired examples. Caller-modified built-ins and Collection publication
 are outside this direct-return owner.
 
-The [Set-work extension](oracle-reviews/set-equality-work.md) adds `utils.41`
-and a shared descriptor judgment in `set-equality-oracle.ts`. Class/plain
-assignment and homologous cycles preserve equality while flat duplicate-valued
-members require quadratic leaf reads. Both 100-run campaigns reach all eight
-states 200 times together. `query/set-equality-receivers-oracle.test.ts` reuses
-the judgment for Collection changes and ordered/unordered Effects, including
-scalar sources that synthesize projected Sets. All 180 finite receiving cells
-reach count 1. Original-matcher and greedy mutants fail work and equality
-assertions respectively. This bounds the stated flat-member family, not nested
-graph complexity, changing getters, arbitrary graphs or every comparator caller.
-
-The subsequent high-review repair adds `utils.42`: generated Gray-code
-assignment chains vary length (4–64 members), insertion order, and an isolated
-column. Both 100-run campaigns reach `assignment` and `isolated` 200 times
-combined. Two finite 8,192-member witnesses use the same independent bijection
-or isolated-column judgment. They expose recursive matching depth, independently
-of arbitrary nested-value depth. The iterative matcher preserves reassignment,
-shares active ancestors, and takes a direct diagonal path for aligned members.
-See [the high-review evidence](oracle-reviews/effect-startup-high-review.md).
+Set performance work evaluated in PR #2301 is excluded by the maintainer's
+2026-10-30 decision: "we've never had this perf problem ... let's remove it."
+The production matcher and the existing `utils.1`–`utils.40` campaigns and
+budgets remain unchanged. The synthetic duplicate-valued object-Set family
+exposes factorial assignment work, and an 8,192-member flat assignment chain
+exposes recursive stack depth. No application incident was established.
+The [historical experiments](https://github.com/TanStack/db/blob/0b47ee825aaa0c36b199a3c42652cab8d9672ec9/docs/contributing/oracle-reviews/effect-startup-high-review.md)
+retain the descriptors, observations and limits. The primary owner remains
+`packages/db/tests/utils-oracle.property.test.ts`; resume optimization when the
+maintainer requests it or an application workload requires it. The new
+`utils.41`/`utils.42` work guards and dedicated receivers leave with that work.
+This records a scope decision, not closure of those performance limitations.
 
 The [Duration query equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/duration-query-equality-oracle.test.ts)
 uses ten public fields to predict direct BasicIndex/BTreeIndex exact lookups and
@@ -5830,7 +5823,7 @@ equality. The original classifier and a net-count-only classifier fail these
 comparisons. This finite extension does not claim exact rich-payload instance
 identity, arbitrary nondeterministic projections, changing join keys, provider
 schedules or framework behavior. The earlier scalar and ordered-repair limits
-remain. See [the high-review evidence](oracle-reviews/effect-startup-high-review.md).
+remain. See the [Effect membership evidence](oracle-reviews/effect-startup-delta.md#membership-and-coalesced-source-writes).
 
 ### RC bound schema mutation receivers (2026-10-28)
 

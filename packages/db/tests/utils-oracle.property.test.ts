@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
@@ -15,12 +15,6 @@ import {
   expectEqualityPair,
   expectRingLaw,
 } from './deep-equals-support'
-import { createOracleReach } from './oracle-reach.js'
-import {
-  checkSetChain,
-  checkSetFamily,
-  setShapes,
-} from './set-equality-oracle.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -820,80 +814,4 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
-  // Append this property so existing numeric replay selectors stay stable.
-  // Generated payload and order choices cross every class-pair/cycle shape;
-  // duplicate multiplicity and a late mismatch expose factorial work.
-  const setReach = createOracleReach(`utils Set equality`, [
-    ...setShapes,
-    `equal-duplicates`,
-    `late-mismatch`,
-    `cardinality`,
-  ])
-  let enteredSetProperty = false
-  afterAll(() => {
-    if (enteredSetProperty) setReach.assertReached()
-    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
-      console.info(
-        `utils Set equality reach`,
-        Object.fromEntries(setReach.counts()),
-      )
-  })
-  describe(`ambiguous Set membership`, () => {
-    utilsProperty([fc.integer({ min: -100, max: 100 }), fc.boolean()])(
-      `matches ambiguous object Sets with quadratic flat-member reads`,
-      (value, reverse) => {
-        enteredSetProperty = true
-        setReach.beginHistory()
-        checkSetFamily(value, reverse, (state) => setReach.reach(state))
-      },
-    )
-  })
-})
-
-// The chain family varies structural length, insertion order and a neighboring
-// isolated-column violation. Both campaigns use the same descriptor judgment.
-// The large finite witness checks flat matching depth without multiplying that
-// expensive witness by the random campaign budget.
-describe(`Set assignment paths`, () => {
-  const chainReach = createOracleReach(`Set augmenting chains`, [
-    `assignment`,
-    `isolated`,
-  ])
-  let entered = false
-  afterAll(() => {
-    if (entered) chainReach.assertReached()
-    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
-      console.info(`Set chain reach`, Object.fromEntries(chainReach.counts()))
-  })
-  utilsProperty([fc.integer({ min: 2, max: 6 }), fc.boolean()])(
-    `preserves Set assignment across augmenting paths and isolated columns`,
-    (bits, rotate) => {
-      entered = true
-      chainReach.beginHistory()
-      for (const broken of [false, true]) {
-        checkSetChain(bits, broken, rotate)
-        chainReach.reach(broken ? `isolated` : `assignment`)
-      }
-    },
-  )
-  const scaleReach = createOracleReach(
-    `flat Set matching scale`,
-    [`positive`, `negative`],
-    { replaying: false },
-  )
-  let enteredScale = false
-  afterAll(() => {
-    if (enteredScale) scaleReach.assertReached()
-    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
-      console.info(`Set scale reach`, Object.fromEntries(scaleReach.counts()))
-  })
-  it.each([false, true])(
-    `keeps flat Set matching off the call stack: isolated=%s`,
-    (broken) => {
-      enteredScale = true
-      scaleReach.beginHistory()
-      checkSetChain(13, broken, false)
-      scaleReach.reach(broken ? `negative` : `positive`)
-    },
-  )
 })
