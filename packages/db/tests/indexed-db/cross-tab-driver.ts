@@ -85,16 +85,18 @@ export async function runTransportHistory(
       else if (operation === 'import')
         await subject.utils.importData(structuredClone(change.rows))
       else if (operation === 'delete')
-        await subject.delete(change.deletes[0]!).isPersisted.promise
+        await subject.delete(change.deletes[0]!).when(`settled`)
       else {
         const row = change.rows[0]!
         if (before.some((item) => item.id === row.id))
-          await subject.update(row.id, (draft) => {
-            draft.name = row.name
-            if (row.optional === undefined) delete draft.optional
-            else draft.optional = row.optional
-          }).isPersisted.promise
-        else await subject.insert(structuredClone(row)).isPersisted.promise
+          await subject
+            .update(row.id, (draft) => {
+              draft.name = row.name
+              if (row.optional === undefined) delete draft.optional
+              else draft.optional = row.optional
+            })
+            .when(`settled`)
+        else await subject.insert(structuredClone(row)).when(`settled`)
       }
       model.accept(tab, change)
       for (const message of Channel.pending)

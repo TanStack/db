@@ -244,12 +244,25 @@ An on-demand cache is not yet a certified offline snapshot. The first managed ge
 
 ## Render after SQLite restore
 
-Without `initialRender`, a persisted Collection becomes `ready` when its sync adapter calls `markReady()`, like any other Collection. The restored rows are in the Collection while it loads, but `status` stays `loading`.
+Without `initialRender`, a persisted Collection becomes `ready` when its sync adapter calls `markReady()`, like any other Collection. The restored rows are in the Collection while it loads, but `status` stays `loading`. Eager and on-demand Collections both support `initialRender`; [on-demand Collections](#on-demand-collections-offline) apply it to each query demand.
 
 With `initialRender: { strategy: 'network-first', networkTimeoutMs }`, the Collection prefers the network for `networkTimeoutMs` (default 3 seconds). It becomes `ready` from the restored rows when both of these are true:
 
 - the SQLite restore completed and installed at least one row, and
 - the deadline passed, or the sync adapter failed its first load.
+
+To render cached rows as soon as the restore completes, set `networkTimeoutMs: 0`. Use this when a fast first render is more important than fresh data:
+
+```ts
+persistedCollectionOptions({
+  ...todoSyncOptions,
+  persistence: syncedPersistence,
+  schemaVersion: 1,
+  initialRender: { strategy: 'network-first', networkTimeoutMs: 0 },
+})
+```
+
+A Collection with restored rows then becomes `ready` from them immediately. Network sync continues, and its changes apply over the restored rows when they arrive. An empty restore still waits for the network, so the Collection never shows an empty list that the network did not confirm. An on-demand Collection applies this to each query demand, as [On-demand Collections offline](#on-demand-collections-offline) describes.
 
 The status is the only signal. Every hook, Suspense, and `preload()` follow it, so you do not need a separate persisted flag:
 
@@ -278,7 +291,7 @@ These rules keep `ready` meaningful:
 - **A failed restore is a crash.** The Collection becomes `crashed`, because local storage cannot serve reads.
 - **The deadline does not stop network sync.** Network changes apply over the restored rows when they arrive.
 
-`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot.
+These rules apply to an eager Collection. An on-demand Collection applies `initialRender` to each query demand. See [On-demand Collections offline](#on-demand-collections-offline).
 
 Suspense uses the same status. This React component uses the `syncedTodos` Collection configured above:
 
@@ -303,6 +316,45 @@ function TodosScreen() {
 Place `TodosScreen` inside an [Error Boundary](./error-handling.md#using-suspense-and-error-boundaries-react) to handle a failed first load or a crash.
 
 Restored rows do not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately: a remote failure can open the Collection from restored rows.
+
+### On-demand Collections offline
+
+An on-demand Collection loads rows for each query demand: the filter, order, and limit that a query asks the source for. With `initialRender`, a demand can settle on its rows from SQLite when the network does not answer. This includes Electric's `syncMode: 'progressive'`, which loads query subsets on demand until its full sync completes.
+
+```ts
+type Issue = { id: string; title: string }
+
+const issues = createCollection(
+  persistedCollectionOptions({
+    ...electricCollectionOptions<Issue>({
+      id: 'issues',
+      shapeOptions: { url: 'http://localhost:3000/v1/shape', params: { table: 'issues' } },
+      syncMode: 'progressive',
+      getKey: (issue) => issue.id,
+    }),
+    persistence: syncedPersistence,
+    initialRender: { strategy: 'network-first', networkTimeoutMs: 3_000 },
+  }),
+)
+```
+
+The rule applies to each demand separately:
+
+- A demand is covered after a load of that exact demand settles online and its rows are saved in SQLite. Another filter, order, or limit is a different demand, even when its rows overlap.
+- A later load of a covered demand first shows its rows from SQLite. If the network does not answer within `networkTimeoutMs`, or it fails, the load settles on those rows. `isReady`, `preload()`, and Suspense then proceed as they do after a network load. Only the load settles from SQLite; the on-demand Collection's own status does not change.
+- The network load keeps running. Its rows replace the restored rows when they arrive. If it fails after the load settled, the query stays ready on the rows it shows.
+- A demand that never settled online is not covered. Offline, it waits for the network. A query that has never run therefore stays loading offline unless a completed progressive full sync already holds every row.
+- A source truncate, such as an Electric must-refetch, ends coverage for every demand, and so does a snapshot transaction (`begin({ snapshot: true })`), which replaces every row. A new cache generation starts without coverage.
+- Scoped recovery also ends coverage. For the rest of that sync run, no load settles from SQLite and no load records coverage.
+- A load that is released before it settles records no coverage, even if its source finishes it afterward.
+- Coverage also ends when SQLite holds fewer rows for the demand than it held when the demand settled. A row that the source deletes, or that Query DB retention removes after `gcTime`, therefore ends coverage until the demand loads online again, unless another row of the demand reached SQLite meanwhile, for example through another query. Coverage counts the rows of an unordered demand; it does not record which rows they were.
+- An ordered window with a `limit` stays covered only while SQLite holds the same rows for it, in any order. A row that leaves, joins, or replaces a row of the window ends its coverage.
+- A load with `refetch: true` always waits for the network.
+- Only the default single-process coordinator supports this. If you pass a multi-tab coordinator, such as `BrowserCollectionCoordinator`, on-demand loads do not settle from SQLite. They wait for the network, as they did before this option.
+
+Coverage proves that the rows were complete when the earlier load settled. It does not prove that they are current. The wait changes when readiness arrives, not which rows the source has. A cursor page or a demand built from other rows' values is covered only if the restored rows produce the same demand again.
+
+For a query that joins eager and on-demand sources, the query becomes ready when every eager source is ready, which network-first allows from its restored rows after the deadline, and every demand that the query reaches on an on-demand source has settled. A network failure alone does not settle an on-demand demand that is not covered.
 
 ## Browser tabs and Electron renderers
 

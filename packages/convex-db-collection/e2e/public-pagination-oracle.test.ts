@@ -44,6 +44,7 @@ import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import { describe, expect, inject, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from '../tests/helpers'
 import { createNetworkGate } from './network-gate'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
@@ -71,6 +72,10 @@ function expectedRows(
         : { ...message },
     )
 }
+
+// The model: the append-only ledger in reverse insertion order, with the
+// query's author predicate and text transformation.
+declareOracle({ model: [expectedRows] })
 
 // The backend starts with a new runtime directory and empty database. File and
 // test execution are sequential, so this ledger includes all successful writes

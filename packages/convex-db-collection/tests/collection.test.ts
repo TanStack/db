@@ -43,7 +43,7 @@ describe(`Convex collection`, () => {
     const transaction = collection.update(`a`, (row) => {
       row.text = `optimistic`
     })
-    await transaction.isPersisted.promise
+    await transaction.when('settled')
     expect(collection.get(`a`)?.text).toBe(`server`)
     await collection.cleanup()
   })
@@ -131,7 +131,7 @@ describe(`Convex collection`, () => {
     expect(collection.get(`a`)?.text).toBe(`optimistic`)
     transport.cache([{ _id: `a`, text: `server` }])
     resolve()
-    await tx.isPersisted.promise
+    await tx.when('settled')
     expect(collection.get(`a`)?.text).toBe(`server`)
     await collection.cleanup()
   })
@@ -143,7 +143,7 @@ describe(`Convex collection`, () => {
     })
     transport.emit([{ _id: `a`, text: `keep` }])
     const tx = collection.delete(`a`)
-    await expect(tx.isPersisted.promise).rejects.toBe(error)
+    await expect(tx.when('settled')).rejects.toBe(error)
     expect(collection.get(`a`)?.text).toBe(`keep`)
     await collection.cleanup()
   })
@@ -234,7 +234,7 @@ it(`waits for deferred sync acceptance without waiting for its own visibility`, 
   expect(transaction.state).toBe(`persisting`)
   expect(collection.get(`a`)?.text).toBe(`optimistic`)
   accept()
-  await transaction.isPersisted.promise
+  await transaction.when('settled')
   expect(collection.get(`a`)?.text).toBe(`server`)
   await collection.cleanup()
 })
@@ -323,10 +323,10 @@ it(`confirms optimistic inserts and deletes from subscription results`, async ()
   collection.startSyncImmediate()
   transport.emit([])
   const inserted = collection.insert({ _id: `a`, text: `optimistic` })
-  await inserted.isPersisted.promise
+  await inserted.when('settled')
   expect(collection.get(`a`)?.text).toBe(`server insert`)
   const deleted = collection.delete(`a`)
-  await deleted.isPersisted.promise
+  await deleted.when('settled')
   expect(collection.size).toBe(0)
   await collection.cleanup()
 })
@@ -343,7 +343,7 @@ it(`reports a cached query error discovered while settling a mutation`, async ()
   const transaction = collection.update(`a`, (row) => {
     row.text = `optimistic`
   })
-  await expect(transaction.isPersisted.promise).rejects.toBe(error)
+  await expect(transaction.when('settled')).rejects.toBe(error)
   expect(collection.utils.getSyncError()).toBe(error)
   expect(onError).toHaveBeenCalledExactlyOnceWith(error)
   expect(collection.get(`a`)?.text).toBe(`old`)

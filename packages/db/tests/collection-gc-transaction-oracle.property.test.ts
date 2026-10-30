@@ -250,7 +250,8 @@ async function runHistory(history: History): Promise<void> {
       } else {
         collections[step.into]
           .insert({ id })
-          .isPersisted.promise.catch(() => {})
+          .when('settled')
+          .catch(() => {})
       }
       model.pendingHandlers.push({ id, sides: into })
       for (const side of into) {

@@ -81,10 +81,11 @@ const tasks = createCollection(
   }),
 )
 
+const taskId: string = selectedTask._id
 const transaction = tasks.update(taskId, (task) => {
   task.completed = true
 })
-await transaction.isPersisted.promise
+await transaction.when('settled')
 ```
 
 DB applies optimistic writes immediately. Successful Convex mutation promises wait for the client's queries to catch up. Before a handler settles, the adapter reads the latest cached result and waits for DB to accept its sync writes. It does not wait for visibility held by that same optimistic transaction. If a wrapping persistence layer rejects source acceptance, that sync run stays failed. Call `collection.reload()` before retrying replay. After readiness, a provider query error can recover when a later valid result arrives. A failed first load requires `reload()`. A rejected handler rolls back its optimistic writes.

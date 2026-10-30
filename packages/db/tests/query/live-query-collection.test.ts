@@ -1281,7 +1281,7 @@ describe(`createLiveQueryCollection`, () => {
         const tx2 = base.insert({ id: `2`, created_at: Date.now() + 1 })
 
         await vi.advanceTimersByTimeAsync(2000)
-        await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+        await Promise.all([tx1.when(`settled`), tx2.when(`settled`)])
 
         expect(base.size).toBe(2)
         expect(live.size).toBe(2)
@@ -1342,7 +1342,7 @@ describe(`createLiveQueryCollection`, () => {
         )
 
         await vi.advanceTimersByTimeAsync(5000)
-        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+        await Promise.all(transactions.map((tx) => tx.when(`settled`)))
 
         expect(base.size).toBe(5)
         expect(live.size).toBe(5)
@@ -1465,8 +1465,8 @@ describe(`createLiveQueryCollection`, () => {
                 draft.completed = !draft.completed
               })
               // Observe each real receipt before any assertion can abandon it.
-              void tx.isPersisted.promise.catch(() => {})
-              receipts.push(tx.isPersisted.promise)
+              void tx.when(`settled`).catch(() => {})
+              receipts.push(tx.when(`settled`))
               const previous = expected.get(id)!
               expected.set(id, {
                 ...previous,
@@ -5194,4 +5194,86 @@ describe(`createLiveQueryCollection`, () => {
       expect(derived.size).toBe(4)
     })
   })
+})
+
+type TruncateWorkRow = { id: number; rank: number }
+const truncateWorkRows: Array<TruncateWorkRow> = [
+  { id: 1, rank: 1 },
+  { id: 2, rank: 2 },
+  { id: 3, rank: 3 },
+]
+
+describe(`truncate replay work for an ordered window`, () => {
+  // A truncate reacquires the demand its subscriptions hold (ARCHITECTURE.md,
+  // "Replay participants and failure"). A window that holds no demand, such
+  // as a zero-limit window, owes no provider request and no loading state at
+  // a truncate. A query subscription still opens a replay then, so demand
+  // its graph starts during the commit belongs to that replay; the replay
+  // itself starts no recovery work. The one-row window is the neighbour: its
+  // truncate must reacquire, so a law that issued nothing would fail there.
+  it.each([0, 1])(
+    `reacquires only held demand when a %s-row window truncates`,
+    async (limit) => {
+      let sync!: Parameters<SyncConfig<TruncateWorkRow, number>[`sync`]>[0]
+      const requests: Array<LoadSubsetOptions> = []
+      const source = createCollection<TruncateWorkRow, number>({
+        id: `ordered-truncate-work-${limit}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push(options)
+                sync.begin()
+                for (const value of truncateWorkRows) {
+                  sync.write({
+                    type: source.has(value.id) ? `update` : `insert`,
+                    value,
+                  })
+                }
+                sync.commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(limit),
+      )
+      let observation:
+        { replayRequests: number; loadingAtCommit: boolean } | undefined
+      try {
+        await live.preload()
+        const before = requests.length
+        sync.begin()
+        sync.truncate()
+        sync.commit()
+        const loadingAtCommit = live.isLoadingSubset
+        await flushPromises()
+        observation = {
+          replayRequests: requests.length - before,
+          loadingAtCommit,
+        }
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+      if (limit === 0) {
+        expect(observation).toEqual({
+          replayRequests: 0,
+          loadingAtCommit: false,
+        })
+      } else {
+        expect(observation.replayRequests).toBeGreaterThan(0)
+      }
+    },
+  )
 })

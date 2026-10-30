@@ -26,8 +26,7 @@
     "3c4eb9ac68393d56",
     "574da77a1ab435b7",
     "593fdd8f16e7bb3c",
-    "d939a4d773c025d9",
-    "de4f60e52a1fded4"
+    "d939a4d773c025d9"
   ],
   "docs/collections/query-collection.md": [
     "17ecec465534b4b7",
@@ -36,14 +35,12 @@
     "591e3701f69c95b4",
     "81737982980a49c2",
     "890dfc8753b21594",
-    "8d67ffec676bff5e",
     "96e4d491476525eb",
     "c0a80e7b00dfc5a2",
     "c189db28619a7013",
     "c587b8f2c29a2bef",
     "cf8f717f9e183cca",
     "d014ee810380decc",
-    "d0c90e4498c30842",
     "f4bab217efc97d4d"
   ],
   "docs/collections/query-initial-placeholder-data-design.md": [
@@ -61,18 +58,14 @@
     "a066dfd28d064b54"
   ],
   "docs/framework/angular/overview.md": ["55d749380b445d1a"],
-  "docs/framework/preact/overview.md": ["a3802a251c868f43"],
   "docs/framework/react/overview.md": ["1c1f2ec0a48394e3", "d89b6c8f8cab169d"],
-  "docs/framework/solid/overview.md": ["1d73c50b6fbcdc45"],
   "docs/guides/collection-options-creator.md": [
     "305eb0ca15d244e8",
     "317682b162fb9c23",
     "5a39ac2d8bf736c1",
-    "77c6a60683015923",
     "7eb96bb3e1a02559",
     "9516c46255070495",
     "aa0717c5a01bd68e",
-    "c73aac2da56ce5f1",
     "cb2681c7a735a057",
     "e80ac4d8045ae2ac",
     "ee3484e10b6ef7a6",
@@ -86,11 +79,9 @@
     "5b84d211959180fa",
     "616d91cebb8e0444",
     "64761975ec476980",
-    "699b7c7f0952cfb2",
     "8f931d6f08c9b84e",
     "acc6b4f0b6366b01",
     "c1a0fb0441cd511f",
-    "d0aa6010f82c4b43",
     "f78881b9544ee2bd"
   ],
   "docs/guides/live-queries.md": [
@@ -141,11 +132,9 @@
     "3460d25e3e94fea2",
     "451e79898e806bef",
     "52d5ff6370f1e6a0",
-    "6313feb09c9181cf",
     "6bbdb9e1f2eb68c4",
     "768ea5ce66daefc9",
     "8f31e34bc4d76866",
-    "97a1313a585d3c63",
     "aaa22bc8fac514ab",
     "ac00a2c29c780401",
     "bbc5202625c594e5",
@@ -169,11 +158,9 @@
     "3c86b5b5cb766d75",
     "468a5432574ef426",
     "47ce624e6a63284d",
-    "84217eb306ebf4d5",
     "9a89b362c8137d5f",
     "a36a525b02c6d42e",
     "b3e1d768a9f479ca",
-    "c8016cdf6c039ac1",
     "fd31d501616eab04"
   ],
   "docs/guides/sqlite-persistence.md": [
@@ -198,15 +185,9 @@
     "6f61f8d0d7505d02",
     "841621123beacf7a",
     "a48a6a8b08a220ee",
-    "b4543f4a42abdb64",
-    "d8fc3756c3a844a9"
+    "b4543f4a42abdb64"
   ],
-  "docs/quick-start.md": [
-    "03847424308f7afc",
-    "4a2027fd4417f1aa",
-    "5509cb0c141754ce",
-    "d89b6c8f8cab169d"
-  ],
+  "docs/quick-start.md": ["5509cb0c141754ce", "d89b6c8f8cab169d"],
   "packages/angular-db/skills/angular-db/SKILL.md": [
     "1f8763adf5d59713",
     "86bdea1b8ff91fb8",
@@ -216,7 +197,6 @@
   ],
   "packages/db/skills/db-core/collection-setup/references/electric-adapter.md": [
     "02c4838714657357",
-    "3ce433265b840116",
     "5bec8f41c9b181c6"
   ],
   "packages/db/skills/db-core/collection-setup/references/local-adapters.md": [
@@ -229,8 +209,6 @@
     "ff5aa699d975cc63"
   ],
   "packages/db/skills/db-core/collection-setup/references/query-adapter.md": [
-    "05af94d61ef8f1c4",
-    "2ab7fed186602b02",
     "35a41e0298dd191f",
     "376463dd17f34ad4",
     "682d8eef9f96dc06",
@@ -246,7 +224,6 @@
   "packages/db/skills/db-core/collection-setup/SKILL.md": [
     "09a82388169989af",
     "1c3a256040dcd523",
-    "7c5bcf2fa8e357db",
     "7c956187bfc7b417",
     "8ad94a17eef5ac99",
     "9be49564d49c3537",
@@ -281,14 +258,12 @@
     "b63ca0e85298580e",
     "c2607a812bf23a87",
     "c3641a3e3c7e04b5",
-    "cef7872ef0ebeef3",
-    "efb992514857e03c"
+    "cef7872ef0ebeef3"
   ],
   "packages/db/skills/db-core/mutations-optimistic/SKILL.md": [
     "0e8055b0d2ce8000",
     "3ef7d931dfa74957",
     "46ebcf40013c34ed",
-    "5413867e633869e0",
     "691a5679dacefc9a",
     "c39e554a3dc95a71"
   ],

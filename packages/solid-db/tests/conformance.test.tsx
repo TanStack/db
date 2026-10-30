@@ -34,6 +34,7 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { createPublicationLog } from '../../db/tests/conformance/publication-log'
+import { expectPublishedRows } from '../../db/tests/conformance/publication-laws-oracle'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { makeSyncSource } from '../../db/tests/conformance/sync-source'
 import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
@@ -138,7 +139,7 @@ function makeHandle(
     current(): ConformanceResult {
       const result = getResult()
       return expectResultSurface({
-        data: result?.data,
+        data: result?.(),
         state: result?.state,
         status: result?.status,
         isReady: result?.isReady,
@@ -234,7 +235,7 @@ function mountControllable<P>(
         : // Reading param() inside the query fn makes Solid recompute on change.
           useLiveQuery((q: any) => build(q, param()))
     // Solid renders the value each render effect reads.
-    createRenderEffect(() => published.record(query.data, query.state))
+    createRenderEffect(() => published.record(query(), query.state))
     return query
   })
   const handle = makeHandle(getResult, dispose)
@@ -246,7 +247,7 @@ function mountControllable<P>(
       setParam(() => next)
       // The first paint after the change: the framework ran its reactive
       // work synchronously, but no later task has run.
-      published.record(getResult().data, getResult().state)
+      published.record(getResult()(), getResult().state)
       await settle()
     },
   }
@@ -331,8 +332,8 @@ describe(`owned native scope setup`, () => {
 
 runSuite(solidDriver)
 it(`preserves raw result types through the actual driver reader`, () => {
-  const raw: Record<string, unknown> = {
-    data: [{ id: `a`, value: undefined }],
+  const rawData = [{ id: `a`, value: undefined }]
+  const raw = Object.assign(() => rawData, {
     state: new Map(),
     status: `disabled`,
     isReady: false,
@@ -340,32 +341,64 @@ it(`preserves raw result types through the actual driver reader`, () => {
     isCrashed: false,
     isSyncError: false,
     isEnabled: false,
-  }
+  })
   const handle = makeHandle(
     () => raw,
     () => {},
   )
   try {
     const healthy = handle.current()
-    expect(healthy.data).toBe(raw.data)
+    expect(healthy.data).toBe(rawData)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
     expect(healthy.isLoadingError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isLoadingError`]) {
+    for (const key of [`status`, `isReady`, `isLoadingError`] as const) {
       const original = raw[key]
-      delete raw[key]
+      Reflect.deleteProperty(raw, key)
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
       for (const invalid of key === `status`
         ? [undefined, 0]
         : [undefined, 0, ``]) {
-        raw[key] = invalid
+        Reflect.set(raw, key, invalid)
         expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
       }
-      raw[key] = original
+      Reflect.set(raw, key, original)
       expect(handle.current()[key as keyof ConformanceResult]).toBe(original)
     }
   } finally {
     handle.unmount()
   }
+})
+
+// These controls supply wrong traces to the same comparison used by the
+// shared source-ID and pooled scenarios. They add no production histories.
+describe(`settled publication comparison`, () => {
+  const rows = [{ id: `current` }]
+  const stale = [{ id: `previous` }]
+  it.each([
+    { name: `settled rows`, values: [rows], expected: rows },
+    {
+      name: `empty loading turns before settled rows`,
+      values: [undefined, [], rows],
+      expected: rows,
+    },
+    {
+      name: `a model whose settled result is empty`,
+      values: [undefined, []],
+      expected: [],
+    },
+  ])(`accepts $name`, ({ values, expected }) => {
+    expectPublishedRows(values, expected)
+  })
+
+  it.each([
+    { name: `an omitted log`, values: [] },
+    { name: `a dropped accessor value`, values: [undefined] },
+    { name: `a dropped settled publication`, values: [undefined, []] },
+    { name: `stale rows before the settled value`, values: [stale, rows] },
+    { name: `stale rows as the settled value`, values: [rows, stale] },
+  ])(`rejects $name`, ({ values }) => {
+    expect(() => expectPublishedRows(values, rows)).toThrow()
+  })
 })

@@ -158,6 +158,17 @@ If you want to run an example without installing dependencies for the whole repo
 
 This repo uses [Changesets](https://github.com/changesets/changesets) to automate releases. If your PR should release a new package version (patch, minor, or major), please run `pnpm changeset` and commit the generated file. If your PR affects docs, examples, styles, etc., you probably don't need to generate a changeset.
 
+During the 1.0 release candidate period, use the same Changeset types. For a
+package at `1.0.0-rc.1`, a patch produces `1.0.0-rc.1.1`, and another patch
+produces `1.0.0-rc.1.2`. A minor or major change advances the candidate number:
+`1.0.0-rc.1.2` becomes `1.0.0-rc.2`. Packages already on stable 1.x versions,
+including `@tanstack/query-db-collection` and
+`@tanstack/offline-transactions`, continue to use normal semantic versioning
+and publish under npm's `latest` tag. Release candidates also publish under
+`latest`, per the maintainer's 2026-10-29 decision. Existing versions are not
+republished to move a tag: use `npm dist-tag add <package>@<version> latest`.
+This preserves any existing `rc` alias.
+
 ## Pull requests
 
 Maintainers merge pull requests by squashing all commits and editing the commit message if necessary using the GitHub user interface.
@@ -167,3 +178,12 @@ Use an appropriate commit type. Be especially careful with breaking changes.
 ## Releases
 
 For each new commit added to `main`, a GitHub Workflow is triggered which runs the [Changesets Action](https://github.com/changesets/action). This generates a preview PR showing the impact of all changesets. When this PR is merged, the package will be published to npm.
+
+The first 1.0 candidate Changeset enters Changesets prerelease mode through
+`pnpm run changeset:version`. Leave `.changeset/pre.json` in prerelease mode
+for subsequent candidate releases; the normal release workflow handles each
+patch or minor Changeset. When the candidates are ready for stable 1.0, run
+`pnpm changeset pre exit` and commit the resulting `.changeset/pre.json` change.
+The next Version Packages PR promotes the candidate packages to `1.0.0`.
+Already stable packages keep their versions unless a pending Changeset
+explicitly releases them. Merge that PR to publish 1.0.

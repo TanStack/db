@@ -92,7 +92,7 @@ const errorGroups = {
   DebounceCallDroppedError: `DebounceCallDroppedError`,
   OnMutateMustBeSynchronousError: `OnMutateMustBeSynchronousError`,
   QueryBuilderError: `QueryBuilderError OnlyOneSourceAllowedError SubQueryMustHaveFromClauseError InvalidSourceError InvalidSourceTypeError JoinConditionMustBeEqualityError QueryMustHaveFromClauseError InvalidWhereExpressionError IncludeOperatorRequiredError`,
-  QueryCompilationError: `QueryCompilationError DistinctRequiresSelectError FnSelectWithGroupByError UnsupportedFnSelectResultError UnsupportedRootScalarSelectError HavingRequiresGroupByError LimitOffsetRequireOrderByError CollectionInputNotFoundError DuplicateAliasInSubqueryError UnsupportedFromTypeError UnknownExpressionTypeError EmptyReferencePathError UnknownFunctionError JoinCollectionNotFoundError MissingAliasInputsError SetWindowRequiresOrderByError SetWindowFindOneLimitError GroupingOperatorRequiredError`,
+  QueryCompilationError: `QueryCompilationError DistinctRequiresSelectError FnSelectWithGroupByError UnsupportedFnSelectResultError UnsupportedRootScalarSelectError HavingRequiresGroupByError LimitOffsetRequireOrderByError CollectionInputNotFoundError UnsupportedFromTypeError UnknownExpressionTypeError EmptyReferencePathError UnknownFunctionError JoinCollectionNotFoundError MissingAliasInputsError SetWindowRequiresOrderByError SetWindowFindOneLimitError GroupingOperatorRequiredError`,
   UnsafeAliasPathError: `UnsafeAliasPathError`,
   JoinError: `JoinError UnsupportedJoinTypeError InvalidJoinConditionSameSourceError InvalidJoinConditionSourceMismatchError InvalidJoinConditionLeftSourceError InvalidJoinConditionRightSourceError InvalidJoinCondition UnsupportedJoinSourceTypeError`,
   GroupByError: `GroupByError NonAggregateExpressionNotInGroupByError UnsupportedAggregateFunctionError AggregateFunctionNotInSelectError UnknownHavingExpressionTypeError`,
@@ -208,7 +208,6 @@ async function checkCollectionsAndQueries(db) {
       rows.map((row) => {
         const selected = { ...row }
         delete selected.$hasPendingWrites
-        delete selected.$synced
         delete selected.$origin
         delete selected.$key
         delete selected.$collectionId

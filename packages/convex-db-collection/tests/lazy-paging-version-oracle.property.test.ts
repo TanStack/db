@@ -124,7 +124,7 @@ async function runVersions(h: History, fault: Fault = `none`) {
       transaction.mutate(() =>
         f.source.insert({ id: `overlay`, rank: -1, text: `optimistic only` }),
       )
-      persisted = transaction.isPersisted.promise
+      persisted = transaction.when('settled')
       const accepted = f.receipts.length
       change()
       await f.remote.deliver(h.choices[0])

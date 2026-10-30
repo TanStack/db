@@ -1,5 +1,25 @@
 # @tanstack/offline-transactions
 
+## 1.2.0
+
+### Minor Changes
+
+- Add a Convex collection adapter with typed query subscriptions, full-row sync, automatic reactive pagination with on-demand windows for a fixed ordered query, durable offline mutation replay, optimistic mutation handlers, and support for both Convex JavaScript and React clients. ([#2230](https://github.com/TanStack/db/pull/2230))
+
+  Add opt-in mutation codecs to the durable outbox while preserving the default wire format and retaining unreadable codec records for recovery.
+
+- Release the first 1.0 candidate. Remove deprecated pre-1.0 APIs and give ([#2171](https://github.com/TanStack/db/pull/2171))
+  published row metadata precedence over colliding selected fields. Structured
+  source spreads and direct source-row returns keep source attribution; new
+  functional objects and other projections receive output Collection metadata.
+  Keep the two packages accidentally released as stable 1.x on their stable
+  release lines. Both stable minor releases require `@tanstack/db@^1.0.0-rc.0`
+  for the RC health and restoration settlement APIs; upgrade DB with them.
+
+  Remove Query Collection’s automatic refetch after mutation handlers. Handlers
+  return `Promise<void>` and must await `collection.utils.refetch()` or write
+  confirmed data with the `write*` utilities; `{ refetch: false }` is removed.
+
 ## 1.1.4
 
 ### Patch Changes

@@ -53,34 +53,25 @@
  * still check those.
  */
 
-const testRoots = new Set([`describe`, `fcTest`, `it`, `suite`, `test`])
-const disablingModifiers = new Set([`fixme`, `skip`, `todo`])
-const conditionalModifiers = new Set([`runIf`, `skipIf`])
-const aliasModifiers = new Set([
-  ...disablingModifiers,
-  ...conditionalModifiers,
-  `only`,
-])
+import {
+  aliasModifiers,
+  calleeChain,
+  conditionalModifiers,
+  disablingModifiers,
+  findVariable,
+  isFunction,
+  isSharedHelperCall,
+  isTestRoot,
+  registrationMembers,
+  selectionHelpers,
+  testRoots,
+} from '../registration.js'
+
 const replayConditions = new Set([`oracleReplayRequested`, `oracleReplaySkips`])
-// The members that keep a call a test registration. Playwright's `test` also
-// has calls such as `test.info()` and `test.step()` that register nothing.
-const registrationMembers = new Set([
-  ...aliasModifiers,
-  `concurrent`,
-  `describe`,
-  `each`,
-  `fails`,
-  `parallel`,
-  `prop`,
-  `sequential`,
-  `serial`,
-])
 // oracle-config implements replay selection, so its options may carry a
 // replay path from configuration.
 const replaySelectionModule =
   /(^|[/\\])packages[/\\]db[/\\]tests[/\\]oracle-config\.ts$/
-// The shared helpers that return a test registration or its `skip` form.
-const selectionHelpers = new Set([`oracleCalibrationTest`, `oracleReplayTest`])
 // The variables that select a replay. Any other variable whose name ends
 // in one of these suffixes is a private replay selection.
 const sharedReplayVariables = new Set([
@@ -94,70 +85,6 @@ const runHelpers = new Set([
   `oracleRandomParameters`,
   `oracleRuns`,
 ])
-
-/** The root identifier and member names of a callee such as `it.skip.prop(...)`. */
-function calleeChain(callee) {
-  const names = []
-  let node = callee
-  for (;;) {
-    if (node.type === `MemberExpression`) {
-      if (node.property.type === `Identifier`) names.unshift(node.property.name)
-      node = node.object
-    } else if (
-      node.type === `CallExpression` &&
-      node.callee.type === `Identifier` &&
-      selectionHelpers.has(node.callee.name) &&
-      node.arguments.length > 0
-    ) {
-      // `oracleReplayTest(it)` returns `it` or `it.skip`, so a registration
-      // made through it is checked as a registration of `it`.
-      node = node.arguments[0]
-    } else if (node.type === `CallExpression`) {
-      node = node.callee
-    } else {
-      break
-    }
-  }
-  return {
-    root: node.type === `Identifier` ? node.name : undefined,
-    rootNode: node,
-    names,
-  }
-}
-
-/**
- * Whether an identifier names a test function: `it`, `test`, and the
- * other test roots, a renamed import of one (`import { it as vitestIt }`),
- * or a constant bound to one through a selection helper or a member chain
- * (`const fixedCase = oracleReplayTest(it)`). A registration made through
- * such a constant is checked as a registration of its test.
- */
-function isTestRoot(node, sourceCode, seen = new Set()) {
-  if (node?.type !== `Identifier`) return false
-  if (testRoots.has(node.name)) return true
-  const definition = findVariable(sourceCode.getScope(node), node.name)?.defs[0]
-  if (definition === undefined || seen.has(definition.node)) return false
-  seen.add(definition.node)
-  if (definition.type === `ImportBinding`) {
-    const imported = definition.node.imported
-    return (
-      imported !== undefined && testRoots.has(imported.name ?? imported.value)
-    )
-  }
-  return (
-    definition.type === `Variable` &&
-    definition.parent.kind === `const` &&
-    definition.node.init !== null &&
-    isTestRoot(calleeChain(definition.node.init).rootNode, sourceCode, seen)
-  )
-}
-
-function isFunction(node) {
-  return (
-    node?.type === `ArrowFunctionExpression` ||
-    node?.type === `FunctionExpression`
-  )
-}
 
 /** A test body that runs something: a named function or a non-empty one. */
 function hasBody(body) {
@@ -186,26 +113,6 @@ function registrationCondition(callee) {
     node = node.type === `CallExpression` ? node.callee : node.object
   }
   return undefined
-}
-
-/**
- * A call to one of the shared oracle-config helpers in `names`. The binding
- * must be the import, not a local function with the same name.
- */
-function isSharedHelperCall(node, names, sourceCode) {
-  if (
-    node?.type !== `CallExpression` ||
-    node.callee.type !== `Identifier` ||
-    !names.has(node.callee.name)
-  ) {
-    return false
-  }
-  const definition = findVariable(sourceCode.getScope(node), node.callee.name)
-    ?.defs[0]
-  return (
-    definition?.type === `ImportBinding` &&
-    /(^|\/)oracle-config(\.js)?$/.test(definition.parent.source.value)
-  )
 }
 
 /** Exactly `.skipIf(<shared replay condition>)`, not negated. */
@@ -432,14 +339,6 @@ function isNumberLiteral(node) {
   return node?.type === `Literal` && typeof node.value === `number`
 }
 
-function findVariable(scope, name) {
-  for (let current = scope; current; current = current.upper) {
-    const variable = current.set.get(name)
-    if (variable !== undefined) return variable
-  }
-  return undefined
-}
-
 function isProcessEnv(node) {
   return (
     node?.type === `MemberExpression` &&
@@ -464,7 +363,6 @@ function isPrivateReplayVariable(name) {
   return replayVariableName.test(name) && !sharedReplayVariables.has(name)
 }
 
-/** A number literal, or a constant bound to one. */
 /** The number literal that `node` is, or that a constant `node` names. */
 function constantNumber(node, sourceCode) {
   if (isNumberLiteral(node)) return node
@@ -507,6 +405,115 @@ function isPinnedOrObservation(object, sourceCode) {
   }
   const { root, names } = calleeChain(parent.callee)
   return root === `expect` || (root === `fc` && names[0] === `sample`)
+}
+
+/**
+ * The shared replay writer serializes completed-history counts. They are
+ * observations, not run options. A type name alone proves nothing: every
+ * value reference must pass directly to the unshadowed one-argument standard
+ * serializer. Aliases, writes, callbacks and additional uses retain reporting.
+ */
+function isSerializedReplayWitness(object, filename, sourceCode) {
+  if (
+    !/(^|[/\\])packages[/\\]db[/\\]tests[/\\]oracle-replay-witness\.ts$/.test(
+      filename,
+    )
+  )
+    return false
+  // Standard JSON invokes own or inherited toJSON hooks. A spread, accessor,
+  // method or prototype field can expose the record through `this` without
+  // another binding reference. Only the plain witness data shape qualifies.
+  const fields = new Set([`property`, `seed`, `path`, `numRuns`, `failed`])
+  if (
+    !object.properties.every(
+      (property) =>
+        property.type === `Property` &&
+        property.kind === `init` &&
+        !property.method &&
+        !property.computed &&
+        fields.has(propertyName(property)),
+    )
+  )
+    return false
+  const declaration = object.parent
+  if (
+    declaration.type !== `VariableDeclarator` ||
+    declaration.init !== object ||
+    declaration.id.type !== `Identifier`
+  )
+    return false
+  if (
+    declaration.parent.type === `VariableDeclaration` &&
+    declaration.parent.parent.type === `ExportNamedDeclaration`
+  )
+    return false
+  const id = declaration.id
+  const type = id.typeAnnotation?.typeAnnotation
+  if (
+    type?.type !== `TSTypeReference` ||
+    type.typeName.type !== `Identifier` ||
+    type.typeName.name !== `OracleReplayWitness`
+  )
+    return false
+  const variable = findVariable(sourceCode.getScope(object), id.name)
+  if (variable === null || variable === undefined) return false
+  const uses = variable.references.filter(({ identifier }) => {
+    if (identifier === id) return false
+    // A TS typeof query resolves a value symbol, so scope-manager marks it as
+    // a value reference. Its syntax still has no runtime consumption.
+    let name = identifier
+    while (name.parent.type === `TSQualifiedName` && name.parent.left === name)
+      name = name.parent
+    return name.parent.type !== `TSTypeQuery` || name.parent.exprName !== name
+  })
+  return (
+    uses.length > 0 &&
+    uses.every((reference) => {
+      if (!reference.isReadOnly()) return false
+      const call = reference.identifier.parent
+      if (
+        call.type !== `CallExpression` ||
+        call.optional ||
+        call.arguments.length !== 1 ||
+        call.arguments[0] !== reference.identifier
+      )
+        return false
+      const callee = call.callee
+      if (
+        callee.type !== `MemberExpression` ||
+        callee.computed ||
+        callee.optional ||
+        callee.object.type !== `Identifier` ||
+        callee.object.name !== `JSON` ||
+        callee.property.type !== `Identifier` ||
+        callee.property.name !== `stringify`
+      )
+        return false
+      // Type-only names do not shadow the standard runtime JSON binding. Keep
+      // walking: an inner type alias can hide an outer runtime parameter from
+      // findVariable, although that parameter still supplies JSON.stringify.
+      for (
+        let scope = sourceCode.getScope(call);
+        scope !== null;
+        scope = scope.upper
+      ) {
+        const json = scope.set.get(`JSON`)
+        if (
+          json?.defs.some(
+            (definition) =>
+              definition.isVariableDefinition !== false &&
+              !(
+                definition.type === `ImportBinding` &&
+                (definition.parent?.importKind === `type` ||
+                  definition.node.importKind === `type`)
+              ),
+          )
+        )
+          return false
+      }
+      return true
+    })
+  )
 }
 
 /**
@@ -605,7 +612,12 @@ export default {
         parent.type === `Property` &&
         propertyName(parent) === `numRuns` &&
         parent.parent.type === `ObjectExpression` &&
-        isPinnedOrObservation(parent.parent, sourceCode)
+        (isPinnedOrObservation(parent.parent, sourceCode) ||
+          isSerializedReplayWitness(
+            parent.parent,
+            context.filename,
+            sourceCode,
+          ))
       )
     }
 

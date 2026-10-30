@@ -7,10 +7,10 @@
  * null or undefined operand is UNKNOWN, `NaN` equals `NaN` (PostgreSQL float
  * semantics), a valid Date compares as its millisecond timestamp, and other
  * values of different types are unequal. `not`, `and`, and `or` follow Kleene
- * logic, so `not(UNKNOWN)` is UNKNOWN. Virtual row fields (`$synced`,
- * `$origin`, `$key`) are row fields for filtering; a pending optimistic insert
- * is `$synced: false` and `$origin: 'local'`, and a synced row from this
- * adapter is `$synced: true` and `$origin: 'remote'`.
+ * logic, so `not(UNKNOWN)` is UNKNOWN. Virtual row fields
+ * (`$hasPendingWrites`, `$origin`, `$key`) are row fields for filtering; a
+ * pending optimistic insert has `$hasPendingWrites: true` and local origin.
+ * A settled source row has `$hasPendingWrites: false` and remote origin.
  *
  * Filtered publication must agree with that predicate after every source
  * transaction. `Collection.subscribeChanges` with a `whereExpression` turns an
@@ -58,12 +58,11 @@
  *
  * Refinement check: each consumer's exact key set equals the model after the
  * subscribers attach and after each sync transaction commits. Direct
- * subscribers are reconstructed from their callback batches. Two fixed
- * witnesses check boundaries outside the generated grammar: Collection
- * readiness reaches a filtered subscriber as one empty batch, and an eager
- * source restarted after cleanup retracts a vanished row even when its first
- * batch cannot satisfy the predicate. A third witness checks that a same-key
- * update which stays TRUE publishes its new row and exact subscriber payload.
+ * subscribers are reconstructed from their callback batches. Fixed witnesses
+ * for boundaries outside the generated grammar (Collection readiness, a
+ * same-key update that stays TRUE, a pending optimistic delete, a layout-only
+ * publication, and a restarted source) compare with written values, so they
+ * are unit tests in where-predicate-publication.test.ts.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
@@ -88,7 +87,6 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { and, eq, not, or } from '../../src/query/builder/functions.js'
-import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
   oraclePropertyOptions,
@@ -96,25 +94,30 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
+import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import {
-  mockSyncCollectionOptions,
-  mockSyncCollectionOptionsNoInitialState,
-  withOracleCleanup,
-} from '../utils.js'
+  MISSING,
+  fieldEq,
+  irPredicate,
+  recordVisibleKeys,
+} from './where-predicate-support.js'
+import type {
+  FieldValue,
+  Operand,
+  Predicate,
+  Row,
+} from './where-predicate-support.js'
 import type { BasicExpression } from '../../src/query/ir.js'
-import type { ChangeMessage } from '../../src/types.js'
 
 const property = `where-predicate.publication`
 
 // A string whose content equals an internal normalized-key prefix must still
 // compare as an ordinary string.
 const PREFIXED = `\u0000tanstack-db:string:a`
-const MISSING = Symbol(`missing field`)
 // A valid Date equals the number of its timestamp.
 const DATE_ONE = new Date(1)
 
-type FieldValue = string | boolean | number | Date | null | typeof MISSING
-type Row = { id: string; v?: unknown }
 type Truth = boolean | null
 
 const fieldValues: ReadonlyArray<FieldValue> = [
@@ -140,16 +143,6 @@ const literalValues: ReadonlyArray<FieldValue> = [
   null,
 ]
 
-type Operand =
-  | { kind: `field` }
-  | { kind: `literal`; value: FieldValue }
-  | { kind: `virtual`; name: `$synced` | `$origin` | `$key` }
-
-type Predicate =
-  | { kind: `eq`; left: Operand; right: Operand }
-  | { kind: `not`; arg: Predicate }
-  | { kind: `and` | `or`; args: [Predicate, Predicate] }
-
 type SeedRow = { v: FieldValue; optimistic: boolean }
 type Operation =
   | { type: `insert`; v: FieldValue; reuse?: number }
@@ -171,7 +164,7 @@ type History =
 type ModelRow = {
   id: string
   v: FieldValue
-  $synced: boolean
+  $hasPendingWrites: boolean
   $origin: `local` | `remote`
   $key: string
 }
@@ -249,8 +242,8 @@ function equivalentFieldValues(a: FieldValue, b: FieldValue): boolean {
   return Object.is(a, b)
 }
 
-function syncedModelRow(id: string, v: FieldValue): ModelRow {
-  return { id, v, $synced: true, $origin: `remote`, $key: id }
+function settledModelRow(id: string, v: FieldValue): ModelRow {
+  return { id, v, $hasPendingWrites: false, $origin: `remote`, $key: id }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +262,11 @@ const operandArbitrary: fc.Arbitrary<Operand> = fc.oneof(
   {
     weight: 1,
     arbitrary: fc
-      .constantFrom(`$synced` as const, `$origin` as const, `$key` as const)
+      .constantFrom(
+        `$hasPendingWrites` as const,
+        `$origin` as const,
+        `$key` as const,
+      )
       .map((name): Operand => ({ kind: `virtual`, name })),
   },
 )
@@ -370,12 +367,6 @@ const historyArbitrary: fc.Arbitrary<History> = fc.oneof(
   },
 )
 
-const fieldEq = (value: FieldValue): Predicate => ({
-  kind: `eq`,
-  left: { kind: `field` },
-  right: { kind: `literal`, value },
-})
-
 // Kleene and two-valued logic disagree on each snapshot history. The first is
 // the negated nullish comparison that a FALSE-for-UNKNOWN fast path misses.
 const pinnedHistories: ReadonlyArray<History> = [
@@ -410,8 +401,8 @@ const pinnedHistories: ReadonlyArray<History> = [
         },
         {
           kind: `eq`,
-          left: { kind: `virtual`, name: `$synced` },
-          right: { kind: `literal`, value: false },
+          left: { kind: `virtual`, name: `$hasPendingWrites` },
+          right: { kind: `literal`, value: true },
         },
       ],
     },
@@ -564,32 +555,6 @@ function builderPredicate(
   }
 }
 
-function irOperand(operand: Operand): BasicExpression {
-  switch (operand.kind) {
-    case `field`:
-      return new PropRef([`v`])
-    case `literal`:
-      return new Value(operand.value === MISSING ? undefined : operand.value)
-    case `virtual`:
-      return new PropRef([operand.name])
-  }
-}
-
-function irPredicate(predicate: Predicate): BasicExpression<boolean> {
-  switch (predicate.kind) {
-    case `eq`:
-      return new Func(`eq`, [
-        irOperand(predicate.left),
-        irOperand(predicate.right),
-      ])
-    case `not`:
-      return new Func(`not`, [irPredicate(predicate.arg)])
-    case `and`:
-    case `or`:
-      return new Func(predicate.kind, predicate.args.map(irPredicate))
-  }
-}
-
 function sourceRow(id: string, v: FieldValue): Row {
   return v === MISSING ? { id } : { id, v }
 }
@@ -607,8 +572,8 @@ const peerPredicates: ReadonlyArray<Predicate> = [
   ...[`a`, `b`, PREFIXED, true, false].map(fieldEq),
   {
     kind: `eq`,
-    left: { kind: `virtual`, name: `$synced` },
-    right: { kind: `literal`, value: true },
+    left: { kind: `virtual`, name: `$hasPendingWrites` },
+    right: { kind: `literal`, value: false },
   },
 ]
 
@@ -616,16 +581,6 @@ type Observation = {
   checkpoint: string
   consumer: Consumer
   keys: Array<string>
-}
-
-// Rebuild a subscriber's visible key set from its callback batches.
-function recordVisibleKeys(visible: Set<string | number>) {
-  return (changes: Array<ChangeMessage<Row>>) => {
-    for (const change of changes) {
-      if (change.type === `delete`) visible.delete(change.key)
-      else visible.add(change.key)
-    }
-  }
 }
 
 let collectionSerial = 0
@@ -662,8 +617,8 @@ async function observeHistory(
     seeds.map((seed) => [
       seed.id,
       {
-        ...syncedModelRow(seed.id, seed.v),
-        $synced: !seed.optimistic,
+        ...settledModelRow(seed.id, seed.v),
+        $hasPendingWrites: seed.optimistic,
         $origin: seed.optimistic ? `local` : `remote`,
       },
     ]),
@@ -777,7 +732,7 @@ async function observeHistory(
               type: `insert`,
               value: sourceRow(id, operation.v),
             })
-            modelRows.set(id, syncedModelRow(id, operation.v))
+            modelRows.set(id, settledModelRow(id, operation.v))
             touched.add(id)
             continue
           }
@@ -804,7 +759,7 @@ async function observeHistory(
             type: `update`,
             value: { id, v: operation.v === MISSING ? undefined : operation.v },
           })
-          modelRows.set(id, syncedModelRow(id, operation.v))
+          modelRows.set(id, settledModelRow(id, operation.v))
           touched.add(id)
         }
         collection.utils.commit()
@@ -832,6 +787,18 @@ async function runHistory(history: History): Promise<void> {
     )
   }
 }
+
+// The check is `runHistory`: it runs each generated history with and without a
+// BasicIndex, and compares every consumer's observed key set with the model's
+// keys after each checkpoint. The model is `expectedTruth`, the Kleene
+// evaluator, and `expectedVisible`, which adds the touched-row rule for a
+// subscriber without initial state. The pinned calibration and the generated
+// properties reach them; the witness tests in where-predicate-publication.test.ts
+// do not.
+declareOracle({
+  check: [runHistory],
+  model: [expectedTruth, expectedVisible],
+})
 
 function describeValue(value: FieldValue): string {
   if (value === MISSING) return `<missing>`
@@ -893,8 +860,8 @@ describe(`WHERE predicate publication oracle`, () => {
           history.rows.map((seed, index): [string, ModelRow] => [
             `r${index}`,
             {
-              ...syncedModelRow(`r${index}`, seed.v),
-              $synced: !seed.optimistic,
+              ...settledModelRow(`r${index}`, seed.v),
+              $hasPendingWrites: seed.optimistic,
               $origin: seed.optimistic ? `local` : `remote`,
             },
           ]),
@@ -905,205 +872,6 @@ describe(`WHERE predicate publication oracle`, () => {
           .sort()
         expect(naive).not.toEqual(expectedVisible(history.predicate, rows))
       }
-    })
-
-    it(`Collection readiness reaches a filtered subscriber as one empty batch`, async () => {
-      // `markReady` notifies subscribers of Collection readiness with an
-      // empty batch. A subscriber
-      // whose predicate no row can satisfy must still receive it.
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Row>({
-          id: `where-publication-ready-${collectionSerial++}`,
-          getKey: (row) => row.id,
-        }),
-      )
-      const batches: Array<number> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => batches.push(changes.length),
-        { whereExpression: irPredicate(fieldEq(`a`)) },
-      )
-      await withOracleCleanup(() => {
-        collection.utils.begin()
-        collection.utils.commit()
-        collection.utils.markReady()
-        expect(batches).toEqual([0])
-      }, [() => subscription.unsubscribe(), () => collection.cleanup()])
-    })
-
-    it(`publishes the new payload for a same-key update that stays TRUE`, async () => {
-      type PayloadRow = { id: string; v: string; n: number }
-      const collection = createCollection(
-        mockSyncCollectionOptions<PayloadRow>({
-          id: `where-publication-payload-${collectionSerial++}`,
-          getKey: (row) => row.id,
-          initialData: [{ id: `r0`, v: `a`, n: 1 }],
-        }),
-      )
-      const live = createLiveQueryCollection((q) =>
-        q.from({ row: collection }).where(({ row }) => eq(row.v, `a`)),
-      )
-      const events: Array<{
-        type: string
-        key: string | number
-        n: number
-        previousN: number | undefined
-      }> = []
-      await collection.stateWhenReady()
-      await live.preload()
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            events.push({
-              type: change.type,
-              key: change.key,
-              n: change.value.n,
-              previousN: change.previousValue?.n,
-            })
-          }
-        },
-        {
-          includeInitialState: true,
-          whereExpression: irPredicate(fieldEq(`a`)),
-        },
-      )
-      await withOracleCleanup(() => {
-        events.length = 0
-        expect(live.get(`r0`)?.n).toBe(1)
-        collection.utils.begin()
-        collection.utils.write({
-          type: `update`,
-          value: { id: `r0`, v: `a`, n: 2 },
-        })
-        collection.utils.commit()
-        expect(live.get(`r0`)?.n).toBe(2)
-        expect(events).toEqual([
-          { type: `update`, key: `r0`, n: 2, previousN: 1 },
-        ])
-      }, [
-        () => subscription.unsubscribe(),
-        () => live.cleanup(),
-        () => collection.cleanup(),
-      ])
-    })
-
-    it(`a pending optimistic delete hides a row from a prefiltered unindexed scan`, async () => {
-      // The scan may read synced rows directly only when no optimistic state
-      // changes visibility. A pending delete removes a synced row.
-      const collection = createCollection(
-        mockSyncCollectionOptions<Row>({
-          id: `where-publication-optimistic-delete-${collectionSerial++}`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: `r0`, v: `a` },
-            { id: `r1`, v: `a` },
-            { id: `r2`, v: `b` },
-          ],
-        }),
-      )
-      const visible = new Set<string | number>()
-      let subscription: { unsubscribe: () => void } | undefined
-      await withOracleCleanup(async () => {
-        await collection.stateWhenReady()
-        // The adapter's onDelete awaits a sync acknowledgement that this test
-        // never sends, so the delete stays pending.
-        collection.delete(`r1`)
-        subscription = collection.subscribeChanges(recordVisibleKeys(visible), {
-          includeInitialState: true,
-          whereExpression: irPredicate(fieldEq(`a`)),
-        })
-        const snapshot = collection.currentStateAsChanges({
-          where: irPredicate(fieldEq(`a`)),
-        })
-        expect(snapshot?.map((change) => change.key)).toEqual([`r0`])
-        expect([...visible]).toEqual([`r0`])
-      }, [() => subscription?.unsubscribe(), () => collection.cleanup()])
-    })
-
-    it(`a layout-only publication reaches a filtered subscriber as one empty batch`, async () => {
-      // An ordered live query whose rows move without changing their selected
-      // values publishes no rows, only a layout change. Every subscriber still
-      // learns that the layout changed, whatever its predicate.
-      type RankedRow = { id: string; rank: number }
-      const source = createCollection(
-        mockSyncCollectionOptions<RankedRow>({
-          id: `where-publication-layout-${collectionSerial++}`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: `r0`, rank: 1 },
-            { id: `r1`, rank: 2 },
-          ],
-        }),
-      )
-      const live = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank)
-          .select(({ row }) => ({ id: row.id })),
-      )
-      const batches: Array<number> = []
-      let subscription: { unsubscribe: () => void } | undefined
-      await withOracleCleanup(async () => {
-        await live.preload()
-        subscription = live.subscribeChanges(
-          (changes) => batches.push(changes.length),
-          {
-            whereExpression: new Func(`eq`, [
-              new PropRef([`id`]),
-              new Value(`missing`),
-            ]),
-          },
-        )
-        source.utils.begin()
-        source.utils.write({ type: `update`, value: { id: `r0`, rank: 3 } })
-        source.utils.commit()
-        expect([...live.keys()]).toEqual([`r1`, `r0`])
-        expect(batches).toEqual([0])
-      }, [
-        () => subscription?.unsubscribe(),
-        () => live.cleanup(),
-        () => source.cleanup(),
-      ])
-    })
-
-    it(`a restarted source retracts a vanished row even when its first batch cannot match`, async () => {
-      // Cleanup keeps the subscriber's published rows. The restarted eager
-      // source's first publication must retract rows it no longer holds,
-      // although no change in that batch satisfies the predicate. The check
-      // runs before ready, whose empty batch would also reconcile them.
-      let sourceRows: Array<Row> = [{ id: `r0`, v: `a` }]
-      let markSourceReady = () => {}
-      const collection = createCollection<Row>({
-        id: `where-publication-restart-${collectionSerial++}`,
-        getKey: (row) => row.id,
-        startSync: true,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            begin()
-            for (const row of sourceRows) write({ type: `insert`, value: row })
-            commit()
-            markSourceReady = markReady
-          },
-        },
-      })
-      const visible = new Set<string | number>()
-      markSourceReady()
-      await collection.stateWhenReady()
-      const subscription = collection.subscribeChanges(
-        recordVisibleKeys(visible),
-        {
-          includeInitialState: true,
-          whereExpression: irPredicate(fieldEq(`a`)),
-        },
-      )
-      await withOracleCleanup(async () => {
-        expect([...visible]).toEqual([`r0`])
-        sourceRows = [{ id: `r1`, v: `b` }]
-        await collection.cleanup()
-        collection.startSyncImmediate()
-        expect([...visible]).toEqual([])
-        markSourceReady()
-        expect([...visible]).toEqual([])
-      }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     })
 
     for (const history of [

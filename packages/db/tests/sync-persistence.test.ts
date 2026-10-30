@@ -97,4 +97,27 @@ describe(`sync persistence capability`, () => {
       }),
     ).toThrow(/startupCacheGenerationRotated must be a boolean/)
   })
+
+  it(`accepts source progress only when the optional capability is callable`, () => {
+    const capability = {
+      ...baseCapability,
+      resumeSnapshot: {
+        certify: () => Promise.resolve(),
+        getKeySetEvidence: () => ({ status: `consistent` as const }),
+        expectCurrentCommit: () => {},
+        expectSourceProgress: () => {},
+        getSourceProgressCompatible: () => true,
+      },
+    }
+    expect(validateSyncPersistenceCapability(capability)).toBe(capability)
+    expect(() =>
+      validateSyncPersistenceCapability({
+        ...capability,
+        resumeSnapshot: {
+          ...capability.resumeSnapshot,
+          expectSourceProgress: true,
+        },
+      }),
+    ).toThrow(/resumeSnapshot.expectSourceProgress must be a function/)
+  })
 })

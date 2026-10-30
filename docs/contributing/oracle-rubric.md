@@ -390,6 +390,45 @@ Use `oracle` in filenames that own an independent expected-result computation,
 state model, differential or metamorphic comparison, or reusable law checker.
 A separate module that defines that model, checker, or its history grammar also
 qualifies. Identify the mechanism in the code before applying the name.
+
+An oracle file holds only oracle tests. It names its parts with
+`declareOracle({ check: [...], model: [...], grammar: [...] })` from
+[`oracle-declaration.ts`](../../packages/db/tests/oracle-declaration.ts), which
+imports nothing so that browser and native-app modules can use it: the check
+compares production observations with the model or with a second
+formulation, and the grammar is the generators that produce legal histories.
+Each part is optional. Every test in the file uses a declared part, directly
+or through a driver:
+
+- A generated property or a fixed history runs through the check.
+- A model pin steps the model and checks one rule against its authority.
+- A calibration shows that the check rejects a wrong answer (ORC-006).
+- A grammar calibration shows that the generators reach the states that the
+  laws need (ORC-004, ORC-015).
+- A generated property can state its law inline: its predicate relates
+  production to inputs that nobody wrote down. A property whose arbitraries
+  are all constants, or whose predicate ignores its input, checks written
+  values instead.
+- A type-level test compares an inferred type with a type model. A type has no
+  value to pass, so the file names its model types in
+  `declareOracle({ typeModel: [...] })`. Each name is a type alias or
+  interface in the same file, and a type built from one counts as using it.
+
+A test that uses none of them compares production with a hand-written value. It
+is a unit test, even when it asserts a contract, and it belongs in an
+ordinary test file beside the oracle. A finite table of hand-written expected
+values selected by a test's parameters is not a model. The `oracle/no-unit-test` lint rule
+reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are
+the shared oracle machinery and declare no parts.
+
+An oracle file also registers no test through a helper from an ordinary module.
+The rule reports a call to such a helper, because the helper's tests then appear
+under the oracle file. The ordinary runner registers those tests, and passes the
+shared suite a registrar when the suite needs one. A helper from an oracle-named
+module is linted on its own, so the rule does not report a call to it. An
+`oracle-` machinery module, such as `oracle-config.ts`, is not linted, so the
+rule judges a call to its helpers as it judges an ordinary module's.
+
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
 files. Fixed regressions replay the shared law; supplemental examples live in
 ordinary test files.

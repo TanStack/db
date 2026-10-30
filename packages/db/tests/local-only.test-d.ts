@@ -86,9 +86,9 @@ describe(`LocalOnly Collection Types`, () => {
     const configWithCallbacks = {
       id: `test-with-callbacks`,
       getKey: (item: TestItem) => item.id,
-      onInsert: () => Promise.resolve({}),
-      onUpdate: () => Promise.resolve({}),
-      onDelete: () => Promise.resolve({}),
+      onInsert: () => Promise.resolve(),
+      onUpdate: () => Promise.resolve(),
+      onDelete: () => Promise.resolve(),
     }
 
     const options = localOnlyCollectionOptions(configWithCallbacks)

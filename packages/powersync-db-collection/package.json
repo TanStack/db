@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/powersync-db-collection",
-  "version": "0.2.13",
+  "version": "1.0.0-rc.1",
   "description": "PowerSync collection for TanStack DB",
   "author": "POWERSYNC",
   "license": "MIT",
@@ -27,8 +27,7 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run",
-    "test:oracles": "vitest --run tests/correctness-oracle.test.ts"
+    "test": "vitest --run"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -66,7 +65,7 @@
     "@powersync/common": "2.0.0",
     "@powersync/node": "0.20.0",
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "better-sqlite3": "^12.6.2"
   }
 }

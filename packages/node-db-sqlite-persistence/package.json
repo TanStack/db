@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/node-db-sqlite-persistence",
-  "version": "0.2.37",
+  "version": "1.0.0-rc.1",
   "description": "Node SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -56,6 +56,6 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^4.1.12"
   }
 }

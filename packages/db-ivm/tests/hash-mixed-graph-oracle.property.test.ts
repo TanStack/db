@@ -7,6 +7,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * Mixed-carrier graphs extend the established structural-hash graph law across
@@ -116,6 +117,17 @@ function carry(carrier: Carrier, target: unknown, symbol: symbol): unknown {
   }
 }
 
+// Model: the value that an acyclic graph denotes from node `id`. Sharing is
+// unfolded into distinct equal values, and each edge keeps its carrier.
+function unfoldGraph(graph: Graph, id: number, symbol: symbol): unknown {
+  return {
+    label: graph[id]!.label,
+    edges: graph[id]!.edges.map((edge) =>
+      carry(edge.carrier, unfoldGraph(graph, edge.target, symbol), symbol),
+    ),
+  }
+}
+
 function expectMixedGraph(
   graph: Graph,
   hashValue: (value: unknown) => number = hash,
@@ -140,14 +152,13 @@ function expectMixedGraph(
     }
     return
   }
-  const unfold = (id: number): unknown => ({
-    label: graph[id]!.label,
-    edges: graph[id]!.edges.map((edge) =>
-      carry(edge.carrier, unfold(edge.target), symbol),
-    ),
-  })
-  expect(hashValue(nodes[0])).toBe(hashValue(unfold(0)))
+  expect(hashValue(nodes[0])).toBe(hashValue(unfoldGraph(graph, 0, symbol)))
 }
+
+declareOracle({
+  check: [expectMixedGraph],
+  model: [isAcyclic, unfoldGraph],
+})
 
 function mixedGraphProperty(
   hashValue: (value: unknown) => number = hash,

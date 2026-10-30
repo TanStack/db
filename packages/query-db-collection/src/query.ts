@@ -12,7 +12,6 @@ import {
   makeComparator,
   toBooleanPredicate,
   validateSyncPersistenceCapability,
-  warnOnce,
   whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigFactory,
@@ -32,9 +31,12 @@ import type {
   BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
+  UpdateMutationFnParams,
 } from '@tanstack/db'
 import type {
   FetchStatus,
@@ -105,6 +107,18 @@ function pickDefinedQueryObserverOptions(
   return options
 }
 
+type QueryCollectionHandlerUtils<
+  T extends object,
+  TKey extends string | number,
+  TSchema extends StandardSchemaV1,
+  TError,
+> = QueryCollectionUtils<
+  T,
+  TKey,
+  [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+  TError
+>
+
 /**
  * Configuration options for creating a Query Collection
  * @template T - The explicit type of items stored in the collection
@@ -124,17 +138,37 @@ export interface QueryCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
-> extends BaseCollectionConfig<
-  T,
-  TKey,
-  TSchema,
-  QueryCollectionUtils<
+> extends Omit<
+  BaseCollectionConfig<
     T,
     TKey,
-    [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
-    TError
-  >
+    TSchema,
+    QueryCollectionHandlerUtils<T, TKey, TSchema, TError>
+  >,
+  `onInsert` | `onUpdate` | `onDelete`
 > {
+  /** Mutation handlers must await an explicit refetch or write confirmed data before settling. */
+  onInsert?: (
+    params: InsertMutationFnParams<
+      T,
+      TKey,
+      QueryCollectionHandlerUtils<T, TKey, TSchema, TError>
+    >,
+  ) => Promise<void>
+  onUpdate?: (
+    params: UpdateMutationFnParams<
+      T,
+      TKey,
+      QueryCollectionHandlerUtils<T, TKey, TSchema, TError>
+    >,
+  ) => Promise<void>
+  onDelete?: (
+    params: DeleteMutationFnParams<
+      T,
+      TKey,
+      QueryCollectionHandlerUtils<T, TKey, TSchema, TError>
+    >,
+  ) => Promise<void>
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -1522,11 +1556,10 @@ export function queryCollectionOptions(
       return true
     }
 
-    const getRowMetadata = (rowKey: string | number) => {
-      return (metadata?.row.get(rowKey) ??
-        collection._state.syncedMetadata.get(rowKey)) as
-        Record<string, unknown> | undefined
-    }
+    // The sync session's read already falls back to applied metadata, and a
+    // staged clear reads as undefined, so it must not fall back again.
+    const getRowMetadata = (rowKey: string | number) =>
+      metadata?.row.get(rowKey) as Record<string, unknown> | undefined
 
     const getOwnersFromMetadata = (
       rowMetadata: unknown,
@@ -1544,13 +1577,13 @@ export function queryCollectionOptions(
 
       const result = new Set(Object.keys(owners as Record<string, true>))
       if (rowKey === undefined) return result
-      // Resolved Queries supersede stale persisted edges; accepted in-memory
-      // edges supplement owners whose metadata has not published yet.
+      // Resolved Queries supersede stale persisted edges. An owner set that a
+      // held sync transaction staged is readable here, because metadata reads
+      // include every accepted sync transaction in commit order.
       result.forEach((owner) => {
         const rows = queryToRows.get(owner)
         if (rows && !rows.has(rowKey)) result.delete(owner)
       })
-      rowToQueries.get(rowKey)?.forEach((owner) => result.add(owner))
       return result
     }
 
@@ -3928,9 +3961,7 @@ export function queryCollectionOptions(
    * This matches TanStack Query's hook behavior where refetch() bypasses enabled: false.
    * See: https://tanstack.com/query/latest/docs/framework/react/guides/disabling-queries
    *
-   * Used by both:
-   * - utils.refetch() - for explicit user-triggered refetches
-   * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
+   * Used by utils.refetch(), including explicit calls inside mutation handlers.
    *
    * Calls wait for each accepted Query result to be applied to Collection rows
    * unless a user mutation is persisting or its handler is active. Normal
@@ -4467,73 +4498,19 @@ export function queryCollectionOptions(
     () => writeContext,
   )
 
-  // Helper to handle deprecated auto-refetch behavior with warnings
-  async function handleDeprecatedAutoRefetch(
-    handlerResult: unknown,
-  ): Promise<void> {
-    const canHaveProperties =
-      (typeof handlerResult === `object` && handlerResult !== null) ||
-      typeof handlerResult === `function`
-    const explicitRefetchFalse =
-      canHaveProperties &&
-      'refetch' in handlerResult &&
-      (handlerResult as Record<string, unknown>).refetch === false
-
-    if (explicitRefetchFalse) {
-      return
-    } else {
-      warnOnce(
-        'query-collection-auto-refetch',
-        '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
-          'This behavior will be removed in v1.0. To prepare: ' +
-          '(1) Add `await collection.utils.refetch()` and temporarily return `{ refetch: false }` to avoid a second refetch, or ' +
-          "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
-          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-      )
-      await refetchQueryResults(undefined, false)
-    }
-  }
-
-  const runMutationHandler = async <TParams>(
-    handler: (params: TParams) => unknown,
-    params: TParams,
-  ): Promise<unknown> => {
-    activeMutationHandlerCount++
-    try {
-      return await handler(params)
-    } finally {
-      activeMutationHandlerCount--
-    }
-  }
-
-  // Create wrapper handlers for direct persistence operations that handle refetching
-  // These wrappers process deprecated return values but don't pass them through
-  const wrappedOnInsert = onInsert
-    ? async (
-        params: Parameters<NonNullable<typeof onInsert>>[0],
-      ): Promise<void> => {
-        const handlerResult = (await runMutationHandler(onInsert, params)) ?? {}
-        await handleDeprecatedAutoRefetch(handlerResult)
+  // Explicit refetches use the fetch boundary while any handler is active.
+  const runMutationHandler = <TParams>(
+    handler: ((params: TParams) => Promise<void>) | undefined,
+  ): ((params: TParams) => Promise<void>) | undefined =>
+    handler &&
+    (async (params) => {
+      activeMutationHandlerCount++
+      try {
+        await handler(params)
+      } finally {
+        activeMutationHandlerCount--
       }
-    : undefined
-
-  const wrappedOnUpdate = onUpdate
-    ? async (
-        params: Parameters<NonNullable<typeof onUpdate>>[0],
-      ): Promise<void> => {
-        const handlerResult = (await runMutationHandler(onUpdate, params)) ?? {}
-        await handleDeprecatedAutoRefetch(handlerResult)
-      }
-    : undefined
-
-  const wrappedOnDelete = onDelete
-    ? async (
-        params: Parameters<NonNullable<typeof onDelete>>[0],
-      ): Promise<void> => {
-        const handlerResult = (await runMutationHandler(onDelete, params)) ?? {}
-        await handleDeprecatedAutoRefetch(handlerResult)
-      }
-    : undefined
+    })
 
   // Create utils instance with state and dependencies passed explicitly
   const utils: QueryCollectionUtils = new QueryCollectionUtilsImpl(
@@ -4565,9 +4542,9 @@ export function queryCollectionOptions(
     getKey,
     syncMode,
     sync,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
+    onInsert: runMutationHandler(onInsert),
+    onUpdate: runMutationHandler(onUpdate),
+    onDelete: runMutationHandler(onDelete),
     utils,
   }
 

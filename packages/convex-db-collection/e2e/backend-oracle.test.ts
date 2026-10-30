@@ -37,21 +37,13 @@ import { describe, expect, inject, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { withTestCleanup } from '../tests/helpers'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { all, seed } from './backend-support'
+import type { Task } from './backend-support'
 import type { Value } from 'convex/values'
 import type { ConvexCollectionClient } from '../src/index'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
 
-type Task = {
-  _id: string
-  _creationTime: number
-  clientId: string
-  text: string
-  rank: number
-  payload?: Value
-}
-const seed = makeFunctionReference<`mutation`, { count: number }, null>(
-  `tasks:seed`,
-)
 const write = makeFunctionReference<
   `mutation`,
   {
@@ -63,42 +55,39 @@ const write = makeFunctionReference<
   },
   null
 >(`tasks:write`)
-const all = makeFunctionReference<`query`, {}, Array<Task>>(`tasks:all`)
 const url = inject(`convexUrl`)
+
+/**
+ * The check, a second formulation: after the source accepts each write, the
+ * mirrored Collection equals the unpaginated tasks:all query in rank order.
+ * That query does not paginate or use the adapter.
+ */
+async function expectMirrorsAllTasks(
+  client: ConvexClient | ConvexReactClient,
+  collection: {
+    utils: { awaitSync: () => Promise<unknown> }
+    values: () => Iterable<Task>
+  },
+): Promise<void> {
+  const expected = await client.query(all, {})
+  await collection.utils.awaitSync()
+  const actual = [...collection.values()]
+    .map(({ clientId, text, rank }) => ({ clientId, text, rank }))
+    .sort((a, b) => a.rank - b.rank)
+  expect(actual).toEqual(
+    expected.map(({ clientId, text, rank }) => ({
+      clientId,
+      text,
+      rank,
+    })),
+  )
+}
+
+declareOracle({ check: [expectMirrorsAllTasks] })
 
 describe.each([`javascript`, `react`] as const)(
   `real backend with %s client`,
   (kind) => {
-    it(`rejects a mirror beyond its row bound without publishing a partial result`, async () => {
-      const client =
-        kind === `javascript`
-          ? new ConvexClient(url, { unsavedChangesWarning: false })
-          : new ConvexReactClient(url, { unsavedChangesWarning: false })
-      const collection = createCollection(
-        convexPaginatedCollectionOptions({
-          client,
-          query: makeFunctionReference<
-            `query`,
-            { paginationOpts: PaginationOptions },
-            PaginationResult<Task>
-          >(`tasks:list`),
-          queryArgs: {},
-          pageSize: 4,
-          maxRows: 5,
-          getKey: (task) => task.clientId,
-          gcTime: 0,
-        }),
-      )
-      await withTestCleanup(
-        async () => {
-          await client.mutation(seed, { count: 23 })
-          await expect(collection.preload()).rejects.toBeInstanceOf(RangeError)
-          expect([...collection.values()]).toEqual([])
-        },
-        () => collection.cleanup(),
-        () => client.close(),
-      )
-    })
     it.each([`list`, `split`] as const)(
       `loads %s pages through inserts, moves, deletions, and server splits`,
       async (functionName) => {
@@ -160,20 +149,7 @@ describe.each([`javascript`, `react`] as const)(
             gcTime: 0,
           }),
         )
-        const check = async () => {
-          const expected = await client.query(all, {})
-          await collection.utils.awaitSync()
-          const actual = [...collection.values()]
-            .map(({ clientId, text, rank }) => ({ clientId, text, rank }))
-            .sort((a, b) => a.rank - b.rank)
-          expect(actual).toEqual(
-            expected.map(({ clientId, text, rank }) => ({
-              clientId,
-              text,
-              rank,
-            })),
-          )
-        }
+        const check = () => expectMirrorsAllTasks(client, collection)
         await withTestCleanup(
           async () => {
             await client.mutation(seed, { count: 23 })

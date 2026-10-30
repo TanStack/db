@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/solid-db",
-  "version": "0.3.12",
+  "version": "1.0.0-rc.1",
   "description": "Solid integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -46,15 +46,15 @@
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
-    "solid-js": ">=1.9.0"
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
     "@electric-sql/client": "^1.5.15",
     "@solidjs/testing-library": "^0.8.10",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "jsdom": "^27.4.0",
     "solid-js": "^1.9.11",
     "vite-plugin-solid": "^2.11.10",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   }
 }

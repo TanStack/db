@@ -226,8 +226,6 @@ Live query results include computed, read-only virtual properties on every row:
 - `$collectionId`: the source collection ID.
 
 These props are added automatically and can be used in `where`, `select`, and `orderBy` clauses. Do not persist them back to storage.
-The deprecated `$synced` alias is the inverse of `$hasPendingWrites` and will
-be removed in the 1.0 RC.
 
 ## Includes (Subqueries in Select)
 

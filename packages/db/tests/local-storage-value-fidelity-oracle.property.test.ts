@@ -38,6 +38,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import {
   observeHistoryPromise,
   withHistoryCleanup,
@@ -287,7 +288,7 @@ function open(storage: Storage, onWrite?: () => void) {
 
 // ---------------------------------------------------------------------------
 // Production driver and refinement check. The checkpoint is the settlement of
-// the write's `isPersisted` promise. A faithful payload must fulfil it; the
+// the write's `when('settled')` promise. A faithful payload must fulfil it; the
 // writer keeps its authored value (the guide lets the writer hold it until
 // restore); durable storage and a fresh Collection hold the model's restored
 // form. A lost payload must reject with `SerializationError`; the writer's
@@ -310,12 +311,13 @@ async function runHistory({ entry, handler, payload }: History) {
       const previous = collection.get(`row`)
       const row = { id: `row`, payload: payload.authored }
       let receipt: Promise<unknown>
-      if (entry === `insert`)
-        receipt = collection.insert(row).isPersisted.promise
+      if (entry === `insert`) receipt = collection.insert(row).when(`settled`)
       else if (entry === `update`)
-        receipt = collection.update(`row`, (draft) => {
-          draft.payload = payload.authored
-        }).isPersisted.promise
+        receipt = collection
+          .update(`row`, (draft) => {
+            draft.payload = payload.authored
+          })
+          .when(`settled`)
       else {
         const tx = createTransaction({
           mutationFn: ({ transaction }) =>
@@ -328,7 +330,7 @@ async function runHistory({ entry, handler, payload }: History) {
               draft.payload = payload.authored
             })
         })
-        receipt = tx.isPersisted.promise
+        receipt = tx.when(`settled`)
       }
       const outcome = observeHistoryPromise(receipt)
       await outcome.settled
@@ -371,6 +373,11 @@ async function runHistory({ entry, handler, payload }: History) {
     ],
   )
 }
+
+declareOracle({
+  check: [runHistory],
+  model: [restoredArray, restoredObject],
+})
 
 describe(`LocalStorage value fidelity oracle`, () => {
   if (!oracleReplayRequested()) {

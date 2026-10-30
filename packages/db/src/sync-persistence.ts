@@ -94,6 +94,18 @@ export function validateSyncPersistenceCapability<
     `expectCurrentCommit`,
     `resumeSnapshot.expectCurrentCommit`,
   )
+  if (resumeSnapshot.expectSourceProgress !== undefined) {
+    requireFunction(
+      resumeSnapshot,
+      `expectSourceProgress`,
+      `resumeSnapshot.expectSourceProgress`,
+    )
+    requireFunction(
+      resumeSnapshot,
+      `getSourceProgressCompatible`,
+      `resumeSnapshot.getSourceProgressCompatible`,
+    )
+  }
 
   return value as SyncPersistenceCapabilityV1<TKey>
 }

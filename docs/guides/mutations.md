@@ -66,17 +66,19 @@ const addTodoMutation = useMutation({
 
 ```typescript
 const todoCollection = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean }>({
     queryKey: ['todos'],
+    queryClient,
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
     schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
           api.todos.create(mutation.modified)
         )
       )
+      await collection.utils.refetch()
     },
   })
 )
@@ -271,9 +273,7 @@ with the transaction on success and rejects with the original error on failure
 (or `undefined` for a rollback without an error). It does not by itself prove
 that a server uploaded, confirmed, or returned the write. It proves those
 stronger guarantees only when the handler waits for that backend observation
-before returning. The old `tx.isPersisted.promise` remains available for the
-pre-RC releases but is deprecated and will be removed in the 1.0 RC; replace
-each use with `tx.when('settled')`.
+before returning.
 
 ### Concurrent Optimistic Transactions
 
@@ -518,7 +518,7 @@ const todoCollection = createCollection({
 
 Different collection types have specific patterns for their handlers:
 
-**QueryCollection** - currently refetches automatically after persisting changes. To adopt the explicit v1.0 pattern now:
+**QueryCollection** - explicitly refetch or apply the server response with the write utilities before the handler returns:
 ```typescript
 onUpdate: async ({ transaction, collection }) => {
   await Promise.all(
@@ -528,9 +528,6 @@ onUpdate: async ({ transaction, collection }) => {
   )
   // Trigger refetch to sync server state
   await collection.utils.refetch()
-  // Prevent the current pre-1.0 wrapper from refetching a second time.
-  // Remove this return in v1.0.
-  return { refetch: false }
 }
 ```
 
@@ -997,7 +994,7 @@ You can mix local and server collections in the same transaction:
 
 ```ts
 const localSettings = createCollection(
-  localStorageCollectionOptions({
+  localStorageCollectionOptions<{ id: string; mode: string }>({
     id: "user-settings",
     storageKey: "app-settings",
     getKey: (item) => item.id,
@@ -1005,12 +1002,14 @@ const localSettings = createCollection(
 )
 
 const userProfile = createCollection(
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; name: string }>({
     queryKey: ["profile"],
+    queryClient,
     queryFn: async () => api.profile.get(),
     getKey: (item) => item.id,
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       await api.profile.update(transaction.mutations[0].modified)
+      await collection.utils.refetch()
     },
   })
 )
@@ -1020,7 +1019,7 @@ const tx = createTransaction({
     // Handle server collection mutations explicitly in mutationFn
     await Promise.all(
       transaction.mutations
-        .filter((m) => m.collection === userProfile)
+        .filter((m) => Object.is(m.collection, userProfile))
         .map((m) => api.profile.update(m.modified))
     )
 

@@ -28,6 +28,7 @@ import {
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { renderHook, settle } from './render-probe'
@@ -275,4 +276,4 @@ const preactInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(preactInfiniteDriver)
+runInfiniteQuerySuite(preactInfiniteDriver, registerInfiniteQueryUnitScenarios)

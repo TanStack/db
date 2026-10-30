@@ -241,7 +241,6 @@ function comparison(
     type Read = NonNullable<Result>;
     type Published = Output & {
       readonly $hasPendingWrites: boolean;
-      readonly $synced: boolean;
       readonly $origin: "local" | "remote";
       readonly $key: Key;
       readonly $collectionId: string;

@@ -59,6 +59,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 type Prefix = number | string | bigint
 type Value = [Prefix, number | string] | number | string
@@ -230,6 +231,14 @@ function expectRefinement(
     }
   }
 }
+
+// The refinement law is declared with its model, the multiset of values per
+// key, and its grammar, the generated addition histories.
+declareOracle({
+  check: [expectRefinement],
+  model: [expectedIndex],
+  grammar: [historyArbitrary],
+})
 
 // ---------------------------------------------------------------------------
 // Campaigns. The fixed and random campaigns run the same property, grammar,

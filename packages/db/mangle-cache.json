@@ -20,7 +20,6 @@
   "initialLoadComplete": "ao",
   "needsOrderingRepair": "ap",
   "pendingLoadSubsetParticipants": "aq",
-  "appliedAdapterDeletedKeys": "ar",
   "finishOrderedPrefixRepair": "au",
   "pendingLoadSubsetPromises": "aw",
   "valueMap": "ax",
@@ -98,7 +97,6 @@
   "_clone": "bW",
   "requestAndObserve": "bY",
   "syncCallbackEpoch": "bZ",
-  "hasAppliedAdapterTruncate": "b_",
   "inFlightLeaseHolders": "b$",
   "releaseInFlightLease": "b0",
   "sentToD2RowsBySource": "b3",
@@ -373,7 +371,6 @@
   "repairNeedsReplacement": "gK",
   "coversSource": "gL",
   "standing": "gM",
-  "windowIsInsideOwnPrefix": "gN",
   "debt": "gO",
   "releaseOwned": "gP",
   "moveWork": "ae",
@@ -437,5 +434,10 @@
   "recordOutcome": "ha",
   "endedProblem": "hb",
   "views": "hc",
-  "show": "hd"
+  "show": "hd",
+  "getWritableSyncTransaction": "ar",
+  "mergesOverRow": "b_",
+  "awaitsSiblingReplays": "gN",
+  "grownPrefixRows": "gZ",
+  "ownPrefixEnd": "he"
 }

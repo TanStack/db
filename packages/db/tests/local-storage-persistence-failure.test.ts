@@ -56,7 +56,7 @@ it.each(cases)(
     const log = vi.spyOn(console, `error`).mockImplementation(() => {})
     try {
       await collection.preload()
-      await collection.insert({ id: `seed`, value: 1 }).isPersisted.promise
+      await collection.insert({ id: `seed`, value: 1 }).when(`settled`)
       const mutate = () => {
         if (operation === `insert`)
           return collection.insert({ id: `bad`, value: 2 })
@@ -74,14 +74,14 @@ it.each(cases)(
             },
           })
         : mutate()
-      const rejection = expect(failed.isPersisted.promise).rejects.toBe(error)
+      const rejection = expect(failed.when(`settled`)).rejects.toBe(error)
       if (manual) {
         failed.mutate(mutate)
         await failed.commit().catch(() => {})
       }
       await rejection
       fail = false
-      await collection.insert({ id: `good`, value: 3 }).isPersisted.promise
+      await collection.insert({ id: `good`, value: 3 }).when(`settled`)
       const restored = makeCollection()
       try {
         await restored.preload()

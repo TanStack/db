@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config'
 import { createOracleReach } from './oracle-reach'
+import { declareOracle } from './oracle-declaration'
+import { expectMap, expectView, modelOrder } from './sorted-map-support'
+import type { ModelKey, Row } from './sorted-map-support'
 
 /**
  * SortedMap is the ordered map behind Collection state: synced rows, ordered
@@ -51,14 +58,6 @@ import { createOracleReach } from './oracle-reach'
  * inconsistent views of the same state, and work that grows with the map.
  */
 
-type Order = `key` | `ascending` | `descending`
-
-// Production stores row objects so the driver can change one in place. The
-// model stores each row's rank as a number and never shares an object.
-type Row = { rank: number }
-
-type ModelKey = number
-
 // A burst writes more keys than one small batch holds, in an order derived
 // from its seed value, so ordered restoration has many pending keys to place.
 function burstEntries(seed: number): Array<[number, number]> {
@@ -68,85 +67,10 @@ function burstEntries(seed: number): Array<[number, number]> {
   return keys.map((key) => [key, ((key * 7) % 5) - 2])
 }
 
-const probeKeys: Array<ModelKey> = [
-  -3,
-  -2,
-  -1,
-  0,
-  1,
-  2,
-  3,
-  Number.NaN,
-  10,
-  26,
-  50,
-]
-
-// The generated keys are numbers, which key order sorts ascending with `NaN`
-// after every other number.
-const compareModelKeys = (a: ModelKey, b: ModelKey) =>
-  Number.isNaN(a) || Number.isNaN(b)
-    ? Number(Number.isNaN(a)) - Number(Number.isNaN(b))
-    : a - b
-
-function modelOrder(model: Map<ModelKey, number>, order: Order) {
-  return [...model].sort(
-    ([ka, va], [kb, vb]) =>
-      (order === `key` ? 0 : order === `ascending` ? va - vb : vb - va) ||
-      compareModelKeys(ka, kb),
-  )
-}
-
 // The work law's bound for restoring k deferred keys among n others.
 function restoreBound(k: number, n: number): number {
   if (k === 0) return 0
   return k * (Math.ceil(Math.log2(k)) + Math.ceil(Math.log2(n + 1)) + 2)
-}
-
-const byKey = (entries: Array<[ModelKey, number]>) =>
-  [...entries].sort(([a], [b]) => compareModelKeys(a, b))
-
-// Compare one observed view with the model. Without the order promise, the
-// view must still hold each key once with its current value.
-function expectView(
-  actual: Array<[ModelKey, number]>,
-  expected: Array<[ModelKey, number]>,
-  orderPromised: boolean,
-) {
-  if (orderPromised) expect(actual).toEqual(expected)
-  else expect(byKey(actual)).toEqual(byKey(expected))
-}
-
-function expectMap(
-  actual: SortedMap<number, Row>,
-  model: Map<ModelKey, number>,
-  order: Order,
-  orderPromised = true,
-) {
-  // Recompute from a plain Map; do not copy SortedMap's binary insertion logic.
-  const expected = modelOrder(model, order)
-  const ranks = (entries: Iterable<[number, Row]>) =>
-    // A stale slot reads no row; keep it visible to the comparison.
-    [...entries].map(([key, row]): [ModelKey, number] => [
-      key,
-      (row as Row | undefined)?.rank as number,
-    ])
-  expect(actual.size).toBe(model.size)
-  expectView(ranks(actual), expected, orderPromised)
-  expectView(ranks(actual.entries()), expected, orderPromised)
-  const values = [...actual.values()]
-  expectView(
-    [...actual.keys()].map((key, index) => [
-      key,
-      (values[index] as Row | undefined)?.rank as number,
-    ]),
-    expected,
-    orderPromised,
-  )
-  for (const key of probeKeys) {
-    expect(actual.has(key)).toBe(model.has(key))
-    expect(actual.get(key)?.rank).toBe(model.get(key))
-  }
 }
 
 type Action = {
@@ -214,6 +138,221 @@ const fixedHistories: Array<Array<Action>> = [
   ],
 ]
 
+// This is reach bookkeeping, not a second ordering model. It remembers the
+// authored rank before an in-place change until a restoring comparison, write,
+// delete, or clear consumes that evidence.
+type ReachState =
+  | `deferred-burst-observed`
+  | `entry-yielded-after-pruning`
+  | `placed-nan-key-written`
+  | `restore-bound-below-order-size`
+  | `placed-row-changed-then-written`
+  | `deferred-row-changed-before-restore`
+
+type HistoryReach = Pick<
+  ReturnType<typeof createOracleReach<ReachState>>,
+  `beginHistory` | `reach`
+>
+
+function runHistory(
+  actions: ReadonlyArray<Action>,
+  order: `key` | `ascending` | `descending`,
+  reach: HistoryReach,
+): void {
+  reach.beginHistory()
+  // The driver counts comparator calls to check the work law.
+  let comparatorCalls = 0
+  const actual = new SortedMap<number, Row>(
+    order === `key`
+      ? undefined
+      : (a, b) => {
+          comparatorCalls++
+          return order === `ascending` ? a.rank - b.rank : b.rank - a.rank
+        },
+  )
+  const model = new Map<ModelKey, number>()
+  // Keys written or deleted with deferOrder since the last ordered
+  // read or immediate write; the next ordered read restores them.
+  const deferred = new Set<ModelKey>()
+  // Rows changed in place after they were placed. Once one exists,
+  // comparator order is no longer promised in this history.
+  const changedPlaced = new Set<ModelKey>()
+  // A key counts only while its current rank differs from the authored rank
+  // before its first in-place mutation. Returning to that rank loses the
+  // distinguishing state. Replacing the row loses this evidence too.
+  const changedDeferred = new Map<ModelKey, number>()
+  let orderPromised = true
+  const restored = () => {
+    deferred.clear()
+    changedDeferred.clear()
+  }
+  const changedDeferredAtRead = () =>
+    order !== `key` &&
+    orderPromised &&
+    [...changedDeferred.keys()].some(
+      (key) => deferred.has(key) && model.has(key),
+    )
+  const observe = () => {
+    const observesDeferredChange = changedDeferredAtRead()
+    if (deferred.size > 16) reach.reach(`deferred-burst-observed`)
+    if (order !== `key`) {
+      // The first ordered read restores the deferred keys.
+      const k = [...deferred].filter((key) => model.has(key)).length
+      const bound = restoreBound(k, model.size - k)
+      if (k > 0 && bound < model.size - k)
+        reach.reach(`restore-bound-below-order-size`)
+      comparatorCalls = 0
+      void [...actual.keys()]
+      expect(comparatorCalls).toBeLessThanOrEqual(bound)
+    }
+    restored()
+    expectMap(actual, model, order, orderPromised)
+    // Credit the state after the restoring comparison actually enforced order,
+    // never merely because a mutation once ran before some later clear.
+    if (observesDeferredChange)
+      reach.reach(`deferred-row-changed-before-restore`)
+  }
+  const written = (key: ModelKey) => {
+    changedDeferred.delete(key)
+    if (changedPlaced.delete(key))
+      reach.reach(`placed-row-changed-then-written`)
+  }
+  observe()
+  for (const action of actions) {
+    const key = action.key
+    if (
+      (action.kind === `set` || action.kind === `delete`) &&
+      !action.deferOrder &&
+      Number.isNaN(key) &&
+      model.has(key) &&
+      !deferred.has(key)
+    )
+      reach.reach(`placed-nan-key-written`)
+    if (action.kind === `set`) {
+      written(key)
+      expect(actual.set(key, { rank: action.value }, action.deferOrder)).toBe(
+        actual,
+      )
+      model.set(key, action.value)
+      if (action.deferOrder) {
+        deferred.add(key)
+      } else restored()
+    } else if (action.kind === `delete`) {
+      written(key)
+      expect(actual.delete(key, action.deferOrder)).toBe(model.delete(key))
+      if (action.deferOrder) deferred.add(key)
+      else restored()
+    } else if (action.kind === `mutate`) {
+      // Change a stored row object without a write, as a sync
+      // source that reuses its row objects does. The target is a
+      // deferred row when deferOrder is set, else a placed row.
+      const targets = [...model.keys()].filter(
+        (candidate) => deferred.has(candidate) === action.deferOrder,
+      )
+      if (targets.length > 0) {
+        const target = targets[(action.value + 3) % targets.length]!
+        const before = changedDeferred.get(target) ?? model.get(target)!
+        actual.get(target)!.rank = action.value
+        model.set(target, action.value)
+        if (order !== `key`) {
+          if (action.deferOrder) {
+            if (before === action.value) changedDeferred.delete(target)
+            else changedDeferred.set(target, before)
+          } else {
+            changedDeferred.clear()
+            changedPlaced.add(target)
+            orderPromised = false
+          }
+        }
+      }
+    } else if (action.kind === `burst`) {
+      for (const [burstKey, value] of burstEntries(action.value)) {
+        written(burstKey)
+        actual.set(burstKey, { rank: value }, true)
+        model.set(burstKey, value)
+        deferred.add(burstKey)
+      }
+    } else if (action.kind === `prune`) {
+      // Iterate in order, deleting each entry whose value has the
+      // action's parity with deferOrder, as settled transactions
+      // are pruned. The iteration yields the order it began with.
+      const observesDeferredChange = changedDeferredAtRead()
+      const expected = modelOrder(model, order)
+      const yielded: Array<[ModelKey, number]> = []
+      let pruned = false
+      for (const [entryKey, row] of actual) {
+        if (pruned) reach.reach(`entry-yielded-after-pruning`)
+        yielded.push([entryKey, row.rank])
+        if ((row.rank - action.value) % 2 === 0) {
+          expect(actual.delete(entryKey, true)).toBe(true)
+          pruned = true
+        }
+      }
+      expectView(yielded, expected, orderPromised)
+      if (observesDeferredChange)
+        reach.reach(`deferred-row-changed-before-restore`)
+      // Iteration restored the order before the deletes.
+      restored()
+      for (const [entryKey, value] of expected) {
+        if ((value - action.value) % 2 !== 0) continue
+        written(entryKey)
+        model.delete(entryKey)
+        deferred.add(entryKey)
+      }
+    } else {
+      actual.clear()
+      model.clear()
+      deferred.clear()
+      changedDeferred.clear()
+      changedPlaced.clear()
+      // No slot survives clear, so order is promised again.
+      orderPromised = true
+    }
+    expect(actual.size).toBe(model.size)
+    expect(actual.has(key)).toBe(model.has(key))
+    expect(actual.get(key)?.rank).toBe(model.get(key))
+    if (
+      action.kind === `clear` ||
+      ((action.kind === `set` || action.kind === `delete`) &&
+        !action.deferOrder) ||
+      action.observe
+    )
+      observe()
+  }
+  observe()
+}
+
+/**
+ * Every generated array keeps its original actions as an unchanged suffix.
+ * Before it, a fresh two-row episode changes the only deferred row across its
+ * peer's rank and observes its restored order. A clear then restores the old
+ * suffix's empty starting condition, including the original final read.
+ *
+ * Keys and crossing direction come from generated values, not a selected seed.
+ * Both signs, finite keys, and NaN remain legal. The peer always has a distinct
+ * key. An empty input stays empty; the campaign's arrays have 6 to 40 actions.
+ * Existing fixed examples bypass this prefix and still replay unchanged.
+ */
+function withDeferredChange(actions: Array<Action>): Array<Action> {
+  const first = actions[0]
+  if (first === undefined) return actions
+  const peer = first.key === 0 ? 1 : 0
+  const before = first.value < 0 ? -3 : 3
+  return [
+    fixedStep(`set`, peer, 0),
+    fixedStep(`set`, first.key, before, true),
+    fixedStep(`mutate`, first.key, -before, true, true),
+    fixedStep(`clear`, 0),
+    ...actions,
+  ]
+}
+
+declareOracle({
+  check: [expectMap, expectView],
+  model: [modelOrder, restoreBound],
+  grammar: [withDeferredChange],
+})
+
 describe.each([`key`, `ascending`, `descending`] as const)(
   `SortedMap %s history`,
   (order) => {
@@ -245,174 +384,35 @@ describe.each([`key`, `ascending`, `descending`] as const)(
         )
         await fc.assert(
           fc.asyncProperty(
-            fc.array(
-              fc.record({
-                kind: fc.constantFrom(
-                  `set`,
-                  `set`,
-                  `set`,
-                  `delete`,
-                  `delete`,
-                  `delete`,
-                  `clear`,
-                  `burst`,
-                  `prune`,
-                  `mutate`,
-                  `mutate`,
-                ),
-                key: fc.oneof(
-                  { arbitrary: fc.integer({ min: -3, max: 3 }), weight: 6 },
-                  { arbitrary: fc.constant(Number.NaN), weight: 2 },
-                ),
-                value: fc.integer({ min: -3, max: 3 }),
-                deferOrder: fc.boolean(),
-                observe: fc.boolean(),
-              }),
-              { minLength: 6, maxLength: 40 },
-            ),
-            (actions) => {
-              reach.beginHistory()
-              // The driver counts comparator calls to check the work law.
-              let comparatorCalls = 0
-              const actual = new SortedMap<number, Row>(
-                order === `key`
-                  ? undefined
-                  : (a, b) => {
-                      comparatorCalls++
-                      return order === `ascending`
-                        ? a.rank - b.rank
-                        : b.rank - a.rank
-                    },
+            fc
+              .array(
+                fc.record({
+                  kind: fc.constantFrom<Action[`kind`]>(
+                    `set`,
+                    `set`,
+                    `set`,
+                    `delete`,
+                    `delete`,
+                    `delete`,
+                    `clear`,
+                    `burst`,
+                    `prune`,
+                    `mutate`,
+                    `mutate`,
+                  ),
+                  key: fc.oneof(
+                    { arbitrary: fc.integer({ min: -3, max: 3 }), weight: 6 },
+                    { arbitrary: fc.constant(Number.NaN), weight: 2 },
+                  ),
+                  value: fc.integer({ min: -3, max: 3 }),
+                  deferOrder: fc.boolean(),
+                  observe: fc.boolean(),
+                }),
+                { minLength: 6, maxLength: 40 },
               )
-              const model = new Map<ModelKey, number>()
-              // Keys written or deleted with deferOrder since the last ordered
-              // read or immediate write; the next ordered read restores them.
-              const deferred = new Set<ModelKey>()
-              // Rows changed in place after they were placed. Once one exists,
-              // comparator order is no longer promised in this history.
-              const changedPlaced = new Set<ModelKey>()
-              let orderPromised = true
-              const restored = () => {
-                deferred.clear()
-              }
-              const observe = () => {
-                if (deferred.size > 16) reach.reach(`deferred-burst-observed`)
-                if (order !== `key`) {
-                  // The first ordered read restores the deferred keys.
-                  const k = [...deferred].filter((key) => model.has(key)).length
-                  const bound = restoreBound(k, model.size - k)
-                  if (k > 0 && bound < model.size - k)
-                    reach.reach(`restore-bound-below-order-size`)
-                  comparatorCalls = 0
-                  void [...actual.keys()]
-                  expect(comparatorCalls).toBeLessThanOrEqual(bound)
-                }
-                restored()
-                expectMap(actual, model, order, orderPromised)
-              }
-              const written = (key: ModelKey) => {
-                if (changedPlaced.delete(key))
-                  reach.reach(`placed-row-changed-then-written`)
-              }
-              observe()
-              for (const action of actions) {
-                const key = action.key
-                if (
-                  (action.kind === `set` || action.kind === `delete`) &&
-                  !action.deferOrder &&
-                  Number.isNaN(key) &&
-                  model.has(key) &&
-                  !deferred.has(key)
-                )
-                  reach.reach(`placed-nan-key-written`)
-                if (action.kind === `set`) {
-                  written(key)
-                  expect(
-                    actual.set(key, { rank: action.value }, action.deferOrder),
-                  ).toBe(actual)
-                  model.set(key, action.value)
-                  if (action.deferOrder) {
-                    deferred.add(key)
-                  } else restored()
-                } else if (action.kind === `delete`) {
-                  written(key)
-                  expect(actual.delete(key, action.deferOrder)).toBe(
-                    model.delete(key),
-                  )
-                  if (action.deferOrder) deferred.add(key)
-                  else restored()
-                } else if (action.kind === `mutate`) {
-                  // Change a stored row object without a write, as a sync
-                  // source that reuses its row objects does. The target is a
-                  // deferred row when deferOrder is set, else a placed row.
-                  const targets = [...model.keys()].filter(
-                    (candidate) =>
-                      deferred.has(candidate) === action.deferOrder,
-                  )
-                  if (targets.length > 0) {
-                    const target = targets[(action.value + 3) % targets.length]!
-                    actual.get(target)!.rank = action.value
-                    model.set(target, action.value)
-                    if (order !== `key`) {
-                      if (action.deferOrder)
-                        reach.reach(`deferred-row-changed-before-restore`)
-                      else {
-                        changedPlaced.add(target)
-                        orderPromised = false
-                      }
-                    }
-                  }
-                } else if (action.kind === `burst`) {
-                  for (const [burstKey, value] of burstEntries(action.value)) {
-                    written(burstKey)
-                    actual.set(burstKey, { rank: value }, true)
-                    model.set(burstKey, value)
-                    deferred.add(burstKey)
-                  }
-                } else if (action.kind === `prune`) {
-                  // Iterate in order, deleting each entry whose value has the
-                  // action's parity with deferOrder, as settled transactions
-                  // are pruned. The iteration yields the order it began with.
-                  const expected = modelOrder(model, order)
-                  const yielded: Array<[ModelKey, number]> = []
-                  let pruned = false
-                  for (const [entryKey, row] of actual) {
-                    if (pruned) reach.reach(`entry-yielded-after-pruning`)
-                    yielded.push([entryKey, row.rank])
-                    if ((row.rank - action.value) % 2 === 0) {
-                      expect(actual.delete(entryKey, true)).toBe(true)
-                      pruned = true
-                    }
-                  }
-                  expectView(yielded, expected, orderPromised)
-                  // Iteration restored the order before the deletes.
-                  restored()
-                  for (const [entryKey, value] of expected) {
-                    if ((value - action.value) % 2 !== 0) continue
-                    written(entryKey)
-                    model.delete(entryKey)
-                    deferred.add(entryKey)
-                  }
-                } else {
-                  actual.clear()
-                  model.clear()
-                  deferred.clear()
-                  changedPlaced.clear()
-                  // No slot survives clear, so order is promised again.
-                  orderPromised = true
-                }
-                expect(actual.size).toBe(model.size)
-                expect(actual.has(key)).toBe(model.has(key))
-                expect(actual.get(key)?.rank).toBe(model.get(key))
-                if (
-                  action.kind === `clear` ||
-                  ((action.kind === `set` || action.kind === `delete`) &&
-                    !action.deferOrder) ||
-                  action.observe
-                )
-                  observe()
-              }
-              observe()
+              .map(withDeferredChange),
+            (actions) => {
+              runHistory(actions, order, reach)
               return Promise.resolve()
             },
           ),
@@ -431,59 +431,102 @@ describe.each([`key`, `ascending`, `descending`] as const)(
   },
 )
 
-it(`rejects wrong default ordering, missing tied entries, stale overwrites, and lost keys`, () => {
-  const byValue = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
-  byValue.set(1, { rank: 3 }).set(-1, { rank: 4 })
-  expect(() =>
-    expectMap(
-      byValue,
-      new Map([
-        [1, 3],
-        [-1, 4],
-      ]),
-      `key`,
-    ),
-  ).toThrow()
-  const missingTie = new SortedMap<number, Row>((a, b) => a.rank - b.rank)
-  missingTie.set(1, { rank: 3 })
-  expect(() =>
-    expectMap(
-      missingTie,
-      new Map([
-        [1, 3],
-        [-1, 3],
-      ]),
-      `ascending`,
-    ),
-  ).toThrow()
-  const stale = new SortedMap<number, Row>()
-  stale.set(1, { rank: 3 })
-  expect(() => expectMap(stale, new Map([[1, 2]]), `key`)).toThrow()
-  // Without the order promise, a view may reorder keys but must hold each
-  // key once with its current value.
-  const expected: Array<[ModelKey, number]> = [
-    [1, 3],
-    [2, 3],
-  ]
-  expect(() =>
-    expectView(
-      [
-        [2, 3],
-        [1, 3],
-      ],
-      expected,
-      false,
-    ),
-  ).not.toThrow()
-  expect(() =>
-    expectView(
-      [
-        [1, 3],
-        [1, 3],
-      ],
-      expected,
-      false,
-    ),
-  ).toThrow()
-  expect(() => expectView([[1, 3]], expected, false)).toThrow()
-})
+/**
+ * These grammar ablations replay the shared production driver and Map/full-sort
+ * check. Only a still-present changed deferred row at a promised-order read
+ * earns reach. Reading after a clear, replacement, delete, eager restore, or a
+ * placed-row change cannot stand in for that observation. Returning to the
+ * authored pre-mutation rank is also not a distinguishing changed-row state.
+ *
+ * The 16 bounded inputs vary every small key, NaN, and both crossing directions.
+ * Each positive control exceeds the unchanged minimum of five histories. Each
+ * ablation must fail that same reach obligation; it is a missing-premise control,
+ * not a rejection of wrong production output.
+ */
+describe.each([`ascending`, `descending`] as const)(
+  `SortedMap %s deferred-change reach calibration`,
+  (order) => {
+    oracleReplayTest(it).each([
+      `observed`,
+      `omitted observation`,
+      `empty history`,
+      `equal rank`,
+      `returned rank`,
+      `overwrite`,
+      `delete`,
+      `eager restore`,
+      `unpromised order`,
+      `prune observation`,
+    ] as const)(`credits only a restoring comparison: %s`, (control) => {
+      const state = `deferred-row-changed-before-restore`
+      const reach = createOracleReach<ReachState>(
+        `sorted-map.${order}.${control}`,
+        [state],
+        { minimum: 5, replaying: false },
+      )
+      const watchedReach: HistoryReach = {
+        beginHistory: reach.beginHistory,
+        reach: (reached) => {
+          if (reached === state) reach.reach(reached)
+        },
+      }
+      for (const key of [-3, -2, -1, 0, 1, 2, 3, Number.NaN]) {
+        for (const value of [-3, 3]) {
+          const prefix = withDeferredChange([
+            fixedStep(`set`, key, value),
+          ]).slice(0, 3)
+          const target = prefix[1]!
+          const mutation = prefix[2]!
+          const held = { ...mutation, observe: false }
+          const peer = prefix[0]!
+          let actions: Array<Action>
+          switch (control) {
+            case `observed`:
+              actions = prefix
+              break
+            case `prune observation`:
+              actions = [...prefix.slice(0, 2), held, fixedStep(`prune`, 0)]
+              break
+            case `unpromised order`:
+              actions = [
+                ...prefix.slice(0, 2),
+                fixedStep(`mutate`, peer.key, 1),
+                mutation,
+              ]
+              break
+            case `empty history`:
+              actions = withDeferredChange([])
+              break
+            default: {
+              const after =
+                control === `returned rank`
+                  ? fixedStep(`mutate`, target.key, target.value, true, true)
+                  : control === `overwrite`
+                    ? fixedStep(`set`, target.key, 2, true, true)
+                    : control === `delete`
+                      ? fixedStep(`delete`, target.key, 0, true, true)
+                      : control === `eager restore`
+                        ? fixedStep(`set`, peer.key, 0)
+                        : fixedStep(`clear`, 0)
+              actions = [
+                ...prefix.slice(0, 2),
+                control === `equal rank`
+                  ? { ...mutation, value: target.value }
+                  : held,
+                after,
+              ]
+            }
+          }
+          runHistory(actions, order, watchedReach)
+        }
+      }
+      if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
+        console.log(`sorted-map.${order}.${control}`, [...reach.counts()])
+      if (control === `observed` || control === `prune observation`) {
+        reach.assertReached()
+      } else {
+        expect(() => reach.assertReached()).toThrow(`${state} (0)`)
+      }
+    })
+  },
+)

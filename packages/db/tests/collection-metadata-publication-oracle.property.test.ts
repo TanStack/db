@@ -11,7 +11,9 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
+import { metadataWorlds } from './metadata-publication-worlds.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
@@ -50,13 +52,6 @@ type MetadataWrite = { key: number } & MetadataOperation
 type MetadataDriver = (value: unknown) => unknown
 const unchangedMetadata: MetadataDriver = (value) => value
 
-// This grammar contains structured values only. Clone the whole scenario, not
-// each write: aliases within one world stay intact, but cannot rewrite the
-// other world's authority or the original replay input.
-function metadataWorlds<T>(scenario: T): { model: T; driver: T } {
-  return { model: structuredClone(scenario), driver: structuredClone(scenario) }
-}
-
 type PublicationRound = {
   key: number
   delta: number
@@ -88,7 +83,6 @@ type PublishedPublicationRow = PublicationRow & {
   $key: number
   $origin: `local` | `remote`
   $hasPendingWrites: boolean
-  $synced: boolean
 }
 
 // Grammar controls: the fixed same-key and cancellation witnesses below are
@@ -236,7 +230,6 @@ function selectPublishedRow(
     $key: published.$key,
     $origin: published.$origin,
     $hasPendingWrites: published.$hasPendingWrites,
-    $synced: published.$synced,
   }
 }
 
@@ -334,7 +327,7 @@ async function applyRound(
       draft.position = next.position
     })
   })
-  await transaction.isPersisted.promise
+  await transaction.when(`settled`)
 
   model.set(round.key, next)
   if (round.outcome === `commit`) {
@@ -350,26 +343,25 @@ async function applyRound(
   corruptCut?.(harness.cuts.slice(cutCountBefore))
   const virtualRow = (
     row: PublicationRow,
-    synced: boolean,
+    hasPendingWrites: boolean,
   ): PublishedPublicationRow => ({
     ...row,
     $collectionId: harness.rows.id,
     $key: row.id,
     $origin: `local`,
-    $hasPendingWrites: !synced,
-    $synced: synced,
+    $hasPendingWrites: hasPendingWrites,
   })
   const expectedOptimisticChange = keyWasPreviouslyPublished
     ? {
         type: `update`,
         key: round.key,
-        value: virtualRow(next, false),
-        previousValue: virtualRow(previous, true),
+        value: virtualRow(next, true),
+        previousValue: virtualRow(previous, false),
       }
     : {
         type: `insert`,
         key: round.key,
-        value: virtualRow(next, false),
+        value: virtualRow(next, true),
         previousValue: undefined,
       }
   expect(
@@ -382,8 +374,8 @@ async function applyRound(
       {
         type: `update`,
         key: round.key,
-        value: virtualRow(next, true),
-        previousValue: virtualRow(next, false),
+        value: virtualRow(next, false),
+        previousValue: virtualRow(next, true),
       },
     ],
   ])
@@ -550,7 +542,7 @@ async function expectMetadataCancellationOwnership(
           )
 
           persistence.resolve()
-          await heldTransaction.isPersisted.promise
+          await heldTransaction.when(`settled`)
           await expect(retained).resolves.toBeUndefined()
           expect(readMetadata(harness, [0, 1, 2])).toEqual(
             observableMetadata(expectedMetadata, [0, 1, 2]),
@@ -562,7 +554,7 @@ async function expectMetadataCancellationOwnership(
         },
         () => [
           () => persistence.resolve(),
-          () => heldTransaction.isPersisted.promise.catch(() => undefined),
+          () => heldTransaction.when(`settled`).catch(() => undefined),
           () => canceled.catch(() => undefined),
           () => retained.catch(() => undefined),
         ],
@@ -575,26 +567,6 @@ async function expectMetadataCancellationOwnership(
     ],
   )
 }
-
-it(`keeps metadata aliases within each independent input world`, () => {
-  const value = { nested: 1 }
-  const input = {
-    first: value,
-    second: value,
-    absentValue: undefined,
-    nan: NaN,
-  }
-  const worlds = metadataWorlds(input)
-  for (const world of [worlds.model, worlds.driver]) {
-    expect(world.first).toBe(world.second)
-    expect(world.first).not.toBe(value)
-    expect(world).toEqual(input)
-  }
-  expect(worlds.model.first).not.toBe(worlds.driver.first)
-  worlds.driver.first.nested = 2
-  expect(worlds.model.first.nested).toBe(1)
-  expect(value.nested).toBe(1)
-})
 
 const mutateDriverMetadata: MetadataDriver = (value) => {
   if (typeof value === `object` && value !== null && `nested` in value) {
@@ -816,6 +788,8 @@ const runCancellationHistory = ({
     canceledFirst,
     initialMetadata,
   )
+
+declareOracle({ check: [applyRound, expectMetadataCancellationOwnership] })
 
 describe(`generated metadata publication histories`, () => {
   if (!oracleReplayRequested()) {

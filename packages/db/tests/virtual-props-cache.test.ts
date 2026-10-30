@@ -84,7 +84,7 @@ describe(`virtual props cache`, () => {
       const transaction = collection.insert({ id: `y`, a: 1 })
       collection.get(`y`)
       collection.utils.rejectSync(new Error(`rolled back`))
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
     })
     expect(collection.has(`y`)).toBe(false)
     expect(cacheSize(collection)).toBe(0)
@@ -143,7 +143,7 @@ describe(`virtual props cache`, () => {
       const receipt = sync.commit()
       if (blocker) {
         release()
-        await blocker.isPersisted.promise
+        await blocker.when(`settled`)
       }
       await receipt
       expect(collection.get(1)?.a).toBe(2)

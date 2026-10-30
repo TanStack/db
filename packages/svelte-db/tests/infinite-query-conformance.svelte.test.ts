@@ -18,6 +18,7 @@ import { flushSync, untrack } from 'svelte'
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
@@ -272,7 +273,7 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(svelteInfiniteDriver)
+runInfiniteQuerySuite(svelteInfiniteDriver, registerInfiniteQueryUnitScenarios)
 
 describe(`infinite driver post-root ownership`, () => {
   it(`retains successful root until its owner disposes`, () => {

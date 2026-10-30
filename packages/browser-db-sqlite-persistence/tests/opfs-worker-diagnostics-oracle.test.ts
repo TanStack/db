@@ -6,6 +6,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import type {
   BrowserOPFSWorkerRequest,
   BrowserOPFSWorkerResponse,
@@ -328,6 +329,8 @@ TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
+declareOracle({ check: [checkDiagnostic], model: [referenceMessage] })
+
 describe(`OPFS worker diagnostics oracle`, () => {
   if (!oracleReplayRequested()) {
     it.each(diagnosticExamples)(

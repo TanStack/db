@@ -104,6 +104,7 @@
  */
 import fc from 'fast-check'
 import { createCollection, createLiveQueryCollection } from '@tanstack/db'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -549,8 +550,9 @@ export async function observeReload(
     await Promise.all(filled.map((collection) => collection.preload()))
     for (const [index, collection] of filled.entries()) {
       if (history.collections[index]!.kind !== `eager`) continue
-      await collection.insert({ id: `row`, title: collection.id }).isPersisted
-        .promise
+      await collection
+        .insert({ id: `row`, title: collection.id })
+        .when(`settled`)
     }
     await closeTab(filler, filled)
     const generations = await host.rawQuery(
@@ -668,8 +670,9 @@ export async function observeReload(
     if ((history.need === `local-write` || writeBeforeGrant) && hold) {
       await waitFor(hold.isHeld, `held startup read`)
       await preloads[0]
-      const write = leaderCollections[0]!.insert({ id: `local`, title: `l` })
-        .isPersisted.promise
+      const write = leaderCollections[0]!
+        .insert({ id: `local`, title: `l` })
+        .when(`settled`)
       writeIssued = true
       // The write asks for its route within a few tasks; then it is granted.
       for (let task = 0; task < 5; task++) await nextTask()
@@ -691,8 +694,9 @@ export async function observeReload(
         () => leader.isLeader(queuedWrite.writer),
         `writer leadership`,
       )
-      const write = leaderCollections[0]!.insert({ id: `local`, title: `l` })
-        .isPersisted.promise
+      const write = leaderCollections[0]!
+        .insert({ id: `local`, title: `l` })
+        .when(`settled`)
       await waitFor(queuedWrite.hold.isHeld, `held queued write`)
       openGate()
       await waitFor(
@@ -789,8 +793,10 @@ export async function observeReload(
         )
         .at(-1)!
       if (history.need === `follower-write`) {
-        await followerCollections[lastEager]!.insert({ id: `f`, title: `f` })
-          .isPersisted.promise
+        await followerCollections[lastEager]!.insert({
+          id: `f`,
+          title: `f`,
+        }).when(`settled`)
         needSettled = true
       }
       if (history.need === `bystander-write`) {
@@ -806,8 +812,10 @@ export async function observeReload(
         await Promise.all(
           bystanderCollections.map((collection) => collection.preload()),
         )
-        await bystanderCollections[lastEager]!.insert({ id: `b`, title: `b` })
-          .isPersisted.promise
+        await bystanderCollections[lastEager]!.insert({
+          id: `b`,
+          title: `b`,
+        }).when(`settled`)
         await closeTab(bystander, bystanderCollections)
         needSettled = true
       }
@@ -1673,3 +1681,5 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
     },
   ],
 ]
+
+declareOracle({ check: [reloadViolations], model: [expectedReload] })

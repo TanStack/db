@@ -868,10 +868,10 @@
   },
   "234": {
     "file": "client.ts",
-    "template": "DbClient cannot reuse live query \"${queryHash}\" with different source Collections. Use the same Collection objects or a distinct query key.",
+    "template": "DbClient cannot reuse live query \"${queryHash}\" with different source Collections or getKey/schema options. Use the same Collection objects and options, or a distinct query key.",
     "literals": [
       "DbClient cannot reuse live query \"",
-      "\" with different source Collections. Use the same Collection objects or a distinct query key."
+      "\" with different source Collections or getKey/schema options. Use the same Collection objects and options, or a distinct query key."
     ]
   },
   "235": {

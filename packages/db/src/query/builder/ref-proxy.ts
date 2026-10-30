@@ -4,7 +4,7 @@ import { REF_PROXY_BRAND, readRefProxyBrand } from './ref-proxy-identity.js'
 import { getWrapperExpressionName } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
-import type { PublishedVirtualRowProps } from '../../virtual-props.js'
+import type { VirtualRowProps } from '../../virtual-props.js'
 
 export { isRefProxy } from './ref-proxy-identity.js'
 
@@ -33,9 +33,7 @@ export interface RefProxy<T = any> {
 export type VirtualPropsRefProxy<
   TKey extends string | number = string | number,
 > = {
-  readonly [K in keyof PublishedVirtualRowProps<TKey>]: RefLeaf<
-    PublishedVirtualRowProps<TKey>[K]
-  >
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
 // Strip nullish members before deciding whether a schema field is traversable,

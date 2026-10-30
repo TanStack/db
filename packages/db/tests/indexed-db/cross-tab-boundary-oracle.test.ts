@@ -66,8 +66,8 @@ async function omission(fault: 'none' | 'partial' | 'error') {
     await receiver.preload()
     const record = recordCollection(receiver, 'reader')
     h.disposers.push(record.stop)
-    await writer.delete(0).isPersisted.promise
-    await writer.insert({ ...after }).isPersisted.promise
+    await writer.delete(0).when(`settled`)
+    await writer.insert({ ...after }).when(`settled`)
     const receipts = []
     while (Channel.pending.length) {
       const receipt = Channel.dispatch()
@@ -172,7 +172,7 @@ for (const abort of [false, true]) {
       const record = recordCollection(receiver, 'receiver')
       h.disposers.push(record.stop)
       const row = { id: 1, name: 'durable before cleanup' }
-      await writer.insert(row).isPersisted.promise
+      await writer.insert(row).when(`settled`)
       const gate = holdStore(h.db.db)
       h.disposers.push(gate.release)
       await gate.started
@@ -193,9 +193,11 @@ for (const abort of [false, true]) {
         'obsolete receiver completion',
       )
       assertSnapshot(receiver.values(), [row], 'new sync run restore')
-      await writer.update(1, (draft) => {
-        draft.name = 'later version'
-      }).isPersisted.promise
+      await writer
+        .update(1, (draft) => {
+          draft.name = 'later version'
+        })
+        .when(`settled`)
       await Channel.drain()
       assertSnapshot(
         receiver.values(),
@@ -213,7 +215,7 @@ it('reports an active receiver abort as the Collection error while its callback 
     const receiver = await h.open('items', { db: descriptor })
     const record = recordCollection(receiver, 'receiver')
     h.disposers.push(record.stop)
-    await writer.insert({ id: 1, name: 'durable' }).isPersisted.promise
+    await writer.insert({ id: 1, name: 'durable' }).when(`settled`)
     const gate = holdStore(h.db.db)
     h.disposers.push(gate.release)
     await gate.started
@@ -280,7 +282,7 @@ for (const deliver of [false, true])
       await seed(h.db, 'items', [before])
       const a = await h.open(),
         b = await h.open('items', { db: await h.connect() })
-      await a.delete(0).isPersisted.promise
+      await a.delete(0).when(`settled`)
       if (deliver) {
         await Channel.drain()
         assertSnapshot(b.values(), [], 'delivered admission')
@@ -291,9 +293,11 @@ for (const deliver of [false, true])
         ).toThrow()
       } else {
         assertSnapshot(b.values(), [before], 'stale admission')
-        await b.update(0, (row) => {
-          row.name = 'updated'
-        }).isPersisted.promise
+        await b
+          .update(0, (row) => {
+            row.name = 'updated'
+          })
+          .when(`settled`)
         await Channel.drain()
         assertSnapshot(
           a.values(),

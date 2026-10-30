@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/browser-db-sqlite-persistence",
-  "version": "0.2.37",
+  "version": "1.0.0-rc.1",
   "description": "Browser wa-sqlite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -65,7 +65,7 @@
     "@tanstack/query-core": "^5.90.20",
     "@tanstack/query-db-collection": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "@vitest/coverage-istanbul": "^3.2.4",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "better-sqlite3": "^12.6.2",
     "next": "^16.3.1",
     "react": "^19.2.4",

@@ -1,5 +1,5 @@
 /** Shared production driver for real pages and dedicated workers. Expected
- * rows stay in host-oracle.spec.ts. Native events and storage supply all premises.
+ * rows stay in host.spec.ts. Native events and storage supply all premises.
  */
 import {
   createCollection,
@@ -107,14 +107,15 @@ export async function createHost({ database, stores }: HostSetup) {
         })),
       )
     const c = collections.get(command.store)!
-    if (command.type === 'insert')
-      await c.insert(command.rows).isPersisted.promise
+    if (command.type === 'insert') await c.insert(command.rows).when(`settled`)
     else if (command.type === 'import') await c.utils.importData(command.rows)
     else if (command.type === 'clear') await c.utils.clearObjectStore()
     else
-      await c.update(command.key, (draft) => {
-        draft.name = command.name
-      }).isPersisted.promise
+      await c
+        .update(command.key, (draft) => {
+          draft.name = command.name
+        })
+        .when(`settled`)
     return undefined
   }
 }

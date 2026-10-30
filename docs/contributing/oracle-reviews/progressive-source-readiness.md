@@ -357,3 +357,55 @@ the non-equivalent neighbor that makes the argument executable.
 
 Open: Effects without `skipInitial` over an ordered window, an include, or a
 single result, and `useLiveQueryEffect`, have no lane.
+
+## PR #2277 merge validation (2026-10-30)
+
+Scope: self-review of the `effect-initial-rows` lane after merging upstream
+`main` at `9cfa11fc712866f8f276e85762865ebb8bd49cbe` into original PR head
+`d1617e95a626a15364f8f4ca9550f8ab27efa01a`. The coverage-map merge keeps
+upstream's owner updates and adds this consumer to its existing temporal row.
+Production code is identical to upstream. The contract and model predictions
+are unchanged.
+
+Upstream #2278 requires declared oracle parts. The new model and the existing
+history grammar are now declared. The reach calibration also compares the
+number of executed new-consumer histories with the grammar's enumeration,
+so it checks all 156 histories rather than a literal case count. This is the
+grammar calibration described by ORC-004, ORC-015, and ORC-016. The prose now
+qualifies the older delta-only observation as belonging to `skipInitial`.
+
+- **Law:** the architecture's callback-timing rule above permits ordinary
+  initial callbacks without `skipInitial` before initial-query readiness.
+  The independent model selects authored matching post IDs and row count;
+  the recorder reconstructs the callback-visible result and invalid events.
+- **Reach:** all 156 new-consumer histories execute. Measured counts remain
+  117 for rows visible before readiness, 46 for a later written row visible
+  after readiness, and 80 for truncate replay before settlement. A temporary
+  dump of `initialRowsReach.counts()` recorded them and was removed.
+- **RED:** production already conforms; this test-only merge changes no
+  product behavior. The unadapted merge failed `oracle/no-unit-test` on the
+  standalone reach assertion. Declaring the actual grammar and checking its
+  complete execution repairs that registration gap without weakening a law.
+- **GREEN:** `pnpm exec vitest run --coverage.enabled=false
+  tests/query/includes-temporal-oracle.test.ts
+  tests/query/includes-temporal.test.ts` passes 1,084 tests: 1,048 oracle tests
+  and the 36 scenarios moved upstream. ESLint, Prettier, and targeted
+  `pnpm lint:changed` pass.
+- **Mutants:** holding callbacks while `!skipInitial && !reachedReady`, and
+  forcing `skipInitial = true`, each fail 152 new histories: 52 direct,
+  92 join, and four per eager shape. Each also fails the reach calibration
+  because no pre-readiness row is visible. All 878 existing Model D histories
+  and the four equivalent new histories pass. The failures are trace
+  assertions at checkpoints 1–5 and the separate reach assertion; no timeout
+  or setup failure is counted. Both temporary production edits were removed.
+- **Limits:** observations compare row count, selected post IDs, and event
+  consistency at the trace checkpoints; they do not establish every row
+  field or callback timing inside a step. The ordered, include, single-result,
+  framework-hook, and real-provider Effect boundaries above remain open.
+
+The default `pnpm lint:changed` also reports an inherited removed-budget
+notification for seed 271828 in the OP-SQLite replay-configuration unit test.
+Upstream #2278 moved that assertion into `op-sqlite-driver.test.ts`; its
+literal `numRuns: 1` describes a replay option, not a generated campaign that
+was removed. This PR changes neither that package nor its budgets. The oracle
+lint rules themselves pass.

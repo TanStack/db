@@ -26,7 +26,7 @@ const dbClient = new DbClient({ queryClient })
 
 // Define a stable collection descriptor that loads data using TanStack Query
 const todoCollection = collectionOptions('todos', (client) =>
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean; createdAt: string }>({
     id: 'todos',
     queryKey: ['todos'],
     queryClient: client.requireDependency<QueryClient>('queryClient'),
@@ -35,12 +35,13 @@ const todoCollection = collectionOptions('todos', (client) =>
       return response.json()
     },
     getKey: (item) => item.id,
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { original, modified } = transaction.mutations[0]
       await fetch(`/api/todos/${original.id}`, {
         method: 'PUT',
         body: JSON.stringify(modified),
       })
+      await collection.utils.refetch()
     },
   })
 )
@@ -60,7 +61,7 @@ function Todos() {
        .orderBy(({ todo }) => todo.createdAt, 'desc'),
   })
 
-  const toggleTodo = (todo) => {
+  const toggleTodo = (todo: { id: string }) => {
     // Instantly applies optimistic state, then syncs to server
     todosCollection.update(todo.id, (draft) => {
       draft.completed = !draft.completed
@@ -108,7 +109,7 @@ Collections store your data and handle persistence. The `queryCollectionOptions`
 
 ```tsx
 const todoCollection = collectionOptions('todos', (client) =>
-  queryCollectionOptions({
+  queryCollectionOptions<{ id: string; text: string; completed: boolean; createdAt: string }>({
     id: 'todos',
     queryKey: ['todos'],
     queryClient: client.requireDependency<QueryClient>('queryClient'),
@@ -118,23 +119,26 @@ const todoCollection = collectionOptions('todos', (client) =>
     },
     getKey: (item) => item.id,
     // Handle all CRUD operations
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { modified: newTodo } = transaction.mutations[0]
       await fetch('/api/todos', {
         method: 'POST',
         body: JSON.stringify(newTodo),
       })
+      await collection.utils.refetch()
     },
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { original, modified } = transaction.mutations[0]
       await fetch(`/api/todos/${original.id}`, {
         method: 'PUT', 
         body: JSON.stringify(modified),
       })
+      await collection.utils.refetch()
     },
-    onDelete: async ({ transaction }) => {
+    onDelete: async ({ transaction, collection }) => {
       const { original } = transaction.mutations[0]
       await fetch(`/api/todos/${original.id}`, { method: 'DELETE' })
+      await collection.utils.refetch()
     },
   })
 )

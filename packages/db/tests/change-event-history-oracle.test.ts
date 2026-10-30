@@ -11,7 +11,21 @@ import {
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import { captureCreatedTransactions } from './utils'
+import {
+  cases,
+  describeSequence,
+  fileIdForKey,
+  mirrorRows,
+  replacement,
+} from './change-event-history-fixture.js'
+import type {
+  Key,
+  Op,
+  OpKind,
+  TestItem,
+} from './change-event-history-fixture.js'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
@@ -73,14 +87,6 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * cancellation histories.
  */
 
-interface TestItem extends Record<string, unknown> {
-  id: number
-  name: string
-  fileId: `f1` | `f2`
-}
-
-type OpKind = `insert` | `update` | `delete`
-type Key = 1 | 2 | 3 | 4
 type IndexType = typeof BasicIndex | typeof BTreeIndex
 type SyncActions = Parameters<SyncConfig<TestItem, number>[`sync`]>[0]
 
@@ -88,15 +94,6 @@ type EventProjection = {
   type: OpKind
   value: TestItem
   previousValue?: TestItem
-}
-
-const fileIdForKey = (key: number): TestItem[`fileId`] =>
-  key % 2 === 1 ? `f1` : `f2`
-
-interface Op {
-  kind: OpKind
-  key: Key
-  step: number
 }
 
 type GeneratedHistory = {
@@ -128,36 +125,6 @@ function opsFromPresence(
     return { kind, key, step: firstStep + index }
   })
 }
-
-/**
- * Every sequence the keyed-presence model permits up to `maxLength`.
- */
-function generateSequences(
-  maxLength: number,
-  keys: ReadonlyArray<Key>,
-  sequence: ReadonlyArray<Op> = [],
-  present: ReadonlySet<Key> = new Set(),
-): Array<Array<Op>> {
-  return keys.flatMap((key) => {
-    const kinds: ReadonlyArray<OpKind> = present.has(key)
-      ? [`update`, `delete`]
-      : [`insert`]
-    return kinds.flatMap((kind) => {
-      const next = [...sequence, { kind, key, step: sequence.length + 1 }]
-      const nextPresent = new Set(present)
-      if (kind === `delete`) nextPresent.delete(key)
-      else nextPresent.add(key)
-      const rest =
-        next.length < maxLength
-          ? generateSequences(maxLength, keys, next, nextPresent)
-          : []
-      return [next, ...rest]
-    })
-  })
-}
-
-const describeSequence = (sequence: ReadonlyArray<Op>): string =>
-  sequence.map((op) => `${op.kind}(${op.key},${op.step})`).join(` -> `)
 
 function applyModelOp(rows: Map<number, TestItem>, op: Op): void {
   if (op.kind === `delete`) rows.delete(op.key)
@@ -242,7 +209,7 @@ function expectedEventTrace(
 function applyOp(
   collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,
   op: Op,
-): { isPersisted: { promise: Promise<unknown> } } {
+): { when: (state: 'settled') => Promise<unknown> } {
   switch (op.kind) {
     case `insert`:
       return collection.insert({
@@ -259,24 +226,13 @@ function applyOp(
   }
 }
 
-const settle = (tx: { isPersisted: { promise: Promise<unknown> } }) =>
-  tx.isPersisted.promise
+const settle = (tx: { when: (state: 'settled') => Promise<unknown> }) =>
+  tx.when(`settled`)
 
 function publicRows(
   collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,
 ): Array<readonly [number, TestItem]> {
   return [...collection.state]
-    .map(
-      ([key, row]) =>
-        [key, { id: row.id, name: row.name, fileId: row.fileId }] as const,
-    )
-    .sort(([left], [right]) => left - right)
-}
-
-function mirrorRows(
-  mirror: ReadonlyMap<number, TestItem>,
-): Array<readonly [number, TestItem]> {
-  return [...mirror]
     .map(
       ([key, row]) =>
         [key, { id: row.id, name: row.name, fileId: row.fileId }] as const,
@@ -600,6 +556,43 @@ async function verifyGeneratedHistory({
   )
 }
 
+interface DurationRow extends Record<string, unknown> {
+  id: number
+  duration: Temporal.Duration
+}
+
+// The model's expected field values, and the public observations that must
+// agree with them. Two Durations with the same display text but different
+// intrinsic fields must reach the row, the change message, and the mirror.
+function expectDurationFieldPublication(
+  expected: ReadonlyMap<number, DurationRow>,
+  state: ReadonlyMap<number, DurationRow>,
+  received: ReadonlyArray<ChangeMessage<DurationRow, number>>,
+  mirror: ReadonlyMap<number, DurationRow>,
+): void {
+  const expectedFields = [0, 1000]
+  const fields = (row: DurationRow | undefined) => [
+    row?.duration.seconds,
+    row?.duration.milliseconds,
+  ]
+  expect(fields(expected.get(1))).toEqual(expectedFields)
+  expect(fields(state.get(1))).toEqual(expectedFields)
+  expect(received.map((message) => message.type)).toEqual([`update`])
+  expect(fields(received[0]?.previousValue)).toEqual([1, 0])
+  expect(fields(received[0]?.value)).toEqual(expectedFields)
+  expect(fields(mirror.get(1))).toEqual(expectedFields)
+}
+
+declareOracle({
+  check: [
+    assertFinalAgreement,
+    assertIndexAgreement,
+    runHistory,
+    expectDurationFieldPublication,
+  ],
+  model: [applyModelOp, expectedRowsAfter, expectedEventTrace],
+})
+
 describe(`change-event history oracle`, () => {
   // Published #1519 keeps equivalent Duration forms distinct for query `eq`.
   // Under #1901's change-message reconstruction law, a source replacement
@@ -611,10 +604,6 @@ describe(`change-event history oracle`, () => {
   // This witness covers ordinary same-realm Durations, not altered objects or
   // a requirement to suppress events for a separately allocated equal copy.
   it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
-    interface DurationRow extends Record<string, unknown> {
-      id: number
-      duration: Temporal.Duration
-    }
     let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
     const collection = createCollection<DurationRow, number>({
       id: `duration-field-change-history`,
@@ -665,17 +654,12 @@ describe(`change-event history oracle`, () => {
           sync.write({ type: `update`, value: second })
           expect(sync.commit()).toBe(true)
 
-          const expectedFields = [0, 1000]
-          const fields = (row: DurationRow | undefined) => [
-            row?.duration.seconds,
-            row?.duration.milliseconds,
-          ]
-          expect(fields(expected.get(1))).toEqual(expectedFields)
-          expect(fields(collection.state.get(1))).toEqual(expectedFields)
-          expect(received.map((message) => message.type)).toEqual([`update`])
-          expect(fields(received[0]?.previousValue)).toEqual([1, 0])
-          expect(fields(received[0]?.value)).toEqual(expectedFields)
-          expect(fields(mirror.get(1))).toEqual(expectedFields)
+          expectDurationFieldPublication(
+            expected,
+            collection.state,
+            received,
+            mirror,
+          )
         } finally {
           subscription.unsubscribe()
         }
@@ -779,40 +763,6 @@ describe(`change-event history oracle`, () => {
     [`BasicIndex`, BasicIndex],
     [`BTreeIndex`, BTreeIndex],
   ]
-  const replacement: ReadonlyArray<Op> = [
-    { kind: `delete`, key: 1, step: 1 },
-    { kind: `delete`, key: 2, step: 2 },
-    { kind: `insert`, key: 1, step: 3 },
-    { kind: `insert`, key: 2, step: 4 },
-  ]
-  const oneKeyCases = generateSequences(4, [1]).flatMap((sequence, index) =>
-    ([`batched`, `sequential`] as const).map((mode) => ({
-      mode,
-      sequence,
-      initialKeys: [] as ReadonlyArray<Key>,
-      label: describeSequence(sequence),
-      id: `one-key-${mode}-${index}`,
-    })),
-  )
-  const initialPresence: ReadonlyArray<ReadonlyArray<Key>> = [
-    [],
-    [1],
-    [2],
-    [1, 2],
-  ]
-  const twoKeyCases = initialPresence.flatMap((initialKeys, initialIndex) =>
-    generateSequences(3, [1, 2], [], new Set(initialKeys)).flatMap(
-      (sequence, index) =>
-        ([`batched`, `sequential`] as const).map((mode) => ({
-          mode,
-          sequence,
-          initialKeys,
-          label: describeSequence(sequence),
-          id: `two-key-${initialIndex}-${mode}-${index}`,
-        })),
-    ),
-  )
-  const cases = [...oneKeyCases, ...twoKeyCases]
 
   const generatedHistory = fc
     .record({
@@ -852,39 +802,6 @@ describe(`change-event history oracle`, () => {
       const tail = opsFromPresence([1, 2], steps, replacement.length + 1)
       return { initialKeys: [1, 2], sequence: [...replacement, ...tail], mode }
     })
-
-  it(`reaches reinsertion and rejects missing or extra mirrored rows`, () => {
-    const witness: Array<Op> = [
-      { kind: `insert`, key: 1, step: 1 },
-      { kind: `delete`, key: 1, step: 2 },
-      { kind: `insert`, key: 1, step: 3 },
-    ]
-    expect(generateSequences(4, [1])).toContainEqual(witness)
-    expect(oneKeyCases).toHaveLength(22)
-    expect(twoKeyCases).toHaveLength(344)
-    expect(generateSequences(3, [1, 2], [], new Set<Key>([1]))).toContainEqual([
-      { kind: `update`, key: 1, step: 1 },
-      { kind: `insert`, key: 2, step: 2 },
-      { kind: `delete`, key: 1, step: 3 },
-    ])
-    expect(
-      generateSequences(3, [1, 2], [], new Set<Key>([1])),
-    ).not.toContainEqual([{ kind: `insert`, key: 1, step: 1 }])
-    expect(new Set(cases.map(({ id }) => id)).size).toBe(cases.length)
-    const expected = [[1, { id: 1, name: `v3`, fileId: `f1` }]]
-    expect(mirrorRows(new Map())).not.toEqual(expected)
-    expect(
-      mirrorRows(new Map([[1, { id: 1, name: `wrong`, fileId: `f1` }]])),
-    ).not.toEqual(expected)
-    expect(
-      mirrorRows(
-        new Map([
-          [1, { id: 1, name: `v3`, fileId: `f1` }],
-          [2, { id: 2, name: `ghost`, fileId: `f2` }],
-        ]),
-      ),
-    ).not.toEqual(expected)
-  })
 
   it(`rejects a deferred message with the right name but wrong row fields`, () => {
     const sequence: Array<Op> = [

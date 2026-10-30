@@ -25,7 +25,7 @@ export function createConvexOptions<
   TSchema extends StandardSchemaV1<TItem, TItem>,
 >(
   config: Omit<
-    BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils, unknown>,
+    BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils>,
     `utils`
   > & {
     select?: (result: TResult) => ReadonlyArray<TItem>

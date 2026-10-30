@@ -19,8 +19,7 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
-import { useLiveQuery, useLiveQueryForSuspense } from '../src/useLiveQuery'
-import { getLiveQueryResultInfo } from '../src/live-query-internals'
+import { useLiveQuery } from '../src/useLiveQuery'
 import { DbProvider } from '../src/DbProvider'
 import {
   mockSyncCollectionOptions,
@@ -566,8 +565,8 @@ describe(`Query Collections`, () => {
 
     const { result, rerender } = renderHook(
       ({ minAge }: { minAge: number }) => {
-        return useLiveQuery(
-          (q) =>
+        return useLiveQuery({
+          query: (q) =>
             q
               .from({ collection })
               .where(({ collection: c }) => gt(c.age, minAge))
@@ -576,8 +575,8 @@ describe(`Query Collections`, () => {
                 name: c.name,
                 age: c.age,
               })),
-          [minAge],
-        )
+          queryKey: [minAge],
+        })
       },
       { initialProps: { minAge: 30 } },
     )
@@ -640,8 +639,8 @@ describe(`Query Collections`, () => {
 
     const { result, rerender } = renderHook(
       ({ minAge }: { minAge: number }) => {
-        return useLiveQuery(
-          (q) =>
+        return useLiveQuery({
+          query: (q) =>
             q
               .from({ collection })
               .where(({ collection: c }) => gt(c.age, minAge))
@@ -649,8 +648,8 @@ describe(`Query Collections`, () => {
                 id: c.id,
                 name: c.name,
               })),
-          [minAge],
-        )
+          queryKey: [minAge],
+        })
       },
       { initialProps: { minAge: 30 } },
     )
@@ -927,7 +926,7 @@ describe(`Query Collections`, () => {
     })
 
     // Wait for the transaction to be committed
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     await waitFor(() => {
       // Wait for the permanent key to appear
@@ -1554,8 +1553,8 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ minAge }: { minAge: number }) => {
-          return useLiveQuery(
-            (q) =>
+          return useLiveQuery({
+            query: (q) =>
               q
                 .from({ collection })
                 .where(({ collection: c }) => gt(c.age, minAge))
@@ -1563,8 +1562,8 @@ describe(`Query Collections`, () => {
                   id: c.id,
                   name: c.name,
                 })),
-            [minAge],
-          )
+            queryKey: [minAge],
+          })
         },
         { initialProps: { minAge: 30 } },
       )
@@ -2111,7 +2110,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isEnabled).toBe(false)
     })
 
-    it(`disables a config query with deprecated dependencies`, async () => {
+    it(`disables a config query with an explicit queryKey`, async () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -2123,17 +2122,15 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) =>
-          useLiveQuery(
-            {
-              query: (q) => {
-                if (!enabled) return undefined
-                return q
-                  .from({ persons: collection })
-                  .where(({ persons }) => gt(persons.age, 30))
-              },
+          useLiveQuery({
+            query: (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
             },
-            [enabled],
-          ),
+            queryKey: [enabled],
+          }),
         { initialProps: { enabled: false } },
       )
 
@@ -2204,7 +2201,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).toBeUndefined()
     })
 
-    it(`should handle callback returning undefined without a dependency array`, async () => {
+    it(`should handle callback returning undefined with derived query identity`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `undefined-callback-test`,
@@ -2281,7 +2278,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isCleanedUp).toBe(false)
     })
 
-    it(`should handle callback returning null without a dependency array`, async () => {
+    it(`should handle callback returning null with derived query identity`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `null-callback-test`,
@@ -2346,34 +2343,31 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ useConfig }: { useConfig: boolean }) => {
-          return useLiveQuery(
-            (q) => {
-              if (useConfig) {
-                return {
-                  query: q
-                    .from({ persons: collection })
-                    .where(({ persons }) => gt(persons.age, 30))
-                    .select(({ persons }) => ({
-                      id: persons.id,
-                      name: persons.name,
-                      age: persons.age,
-                    })),
-                  startSync: true,
-                  gcTime: 0,
-                }
+          return useLiveQuery((q) => {
+            if (useConfig) {
+              return {
+                query: q
+                  .from({ persons: collection })
+                  .where(({ persons }) => gt(persons.age, 30))
+                  .select(({ persons }) => ({
+                    id: persons.id,
+                    name: persons.name,
+                    age: persons.age,
+                  })),
+                startSync: true,
+                gcTime: 0,
               }
-              return q
-                .from({ persons: collection })
-                .where(({ persons }) => lte(persons.age, 30))
-                .select(({ persons }) => ({
-                  id: persons.id,
-                  name: persons.name,
-                  age: persons.age,
-                }))
-                .orderBy(({ persons }) => persons.age)
-            },
-            [useConfig],
-          )
+            }
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => lte(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+              .orderBy(({ persons }) => persons.age)
+          })
         },
         { initialProps: { useConfig: false } },
       )
@@ -2446,22 +2440,19 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ useCollection }: { useCollection: boolean }) => {
-          return useLiveQuery(
-            (q) => {
-              if (useCollection) {
-                return liveQueryCollection
-              }
-              return q
-                .from({ persons: collection })
-                .where(({ persons }) => lte(persons.age, 30))
-                .select(({ persons }) => ({
-                  id: persons.id,
-                  name: persons.name,
-                  age: persons.age,
-                }))
-            },
-            [useCollection],
-          )
+          return useLiveQuery((q) => {
+            if (useCollection) {
+              return liveQueryCollection
+            }
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => lte(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+          })
         },
         { initialProps: { useCollection: false } },
       )
@@ -2511,7 +2502,7 @@ describe(`Query Collections`, () => {
       ])
     })
 
-    it(`should handle conditional returns with dependencies`, async () => {
+    it(`should handle conditional returns with queryKey changes`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `conditional-deps-test`,
@@ -2522,8 +2513,8 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ minAge, enabled }: { minAge: number; enabled: boolean }) => {
-          return useLiveQuery(
-            (q) => {
+          return useLiveQuery({
+            query: (q) => {
               if (!enabled) return undefined
               return q
                 .from({ persons: collection })
@@ -2534,8 +2525,8 @@ describe(`Query Collections`, () => {
                   age: persons.age,
                 }))
             },
-            [minAge, enabled],
-          )
+            queryKey: [minAge, enabled],
+          })
         },
         { initialProps: { minAge: 30, enabled: false } },
       )
@@ -2638,25 +2629,28 @@ describe(`Query Collections`, () => {
       )
 
       const { result } = renderHook(() => {
-        return useLiveQuery((q) => {
-          const issueCountSubquery = q
-            .from({ issues: issueCollection })
-            .groupBy(({ issues }) => issues.userId)
-            .select(({ issues }) => ({
-              userId: issues.userId,
-              issueCount: coalesce(count(issues.id), 0),
-            }))
+        return useLiveQuery({
+          query: (q) => {
+            const issueCountSubquery = q
+              .from({ issues: issueCollection })
+              .groupBy(({ issues }) => issues.userId)
+              .select(({ issues }) => ({
+                userId: issues.userId,
+                issueCount: coalesce(count(issues.id), 0),
+              }))
 
-          return q
-            .from({ persons: personCollection })
-            .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
-              eq(persons.id, ic.userId),
-            )
-            .select(({ persons, ic }) => ({
-              name: persons.name,
-              issueCount: ic.issueCount,
-            }))
-        }, [])
+            return q
+              .from({ persons: personCollection })
+              .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
+                eq(persons.id, ic.userId),
+              )
+              .select(({ persons, ic }) => ({
+                name: persons.name,
+                issueCount: ic.issueCount,
+              }))
+          },
+          queryKey: [],
+        })
       })
 
       await waitFor(() => {
@@ -3296,49 +3290,6 @@ describe(`Query Collections`, () => {
       ).toThrow(UnhashableQueryIRError)
     })
 
-    // A dependency list decides reuse, so the identity is checked when the
-    // query compiles: at mount and when a dependency changes. With a
-    // DbClient, the hook also hashes the query for hydration on every render;
-    // an unhashable query there leaves hydration without a key until the
-    // query compiles again.
-    it(`rejects an unhashable dependency-list query with a DbClient only when it compiles`, async () => {
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `deps-client-unhashable`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-      const client = new DbClient()
-      const wrapper = ({ children }: { children: ReactNode }) => (
-        <DbProvider client={client}>{children}</DbProvider>
-      )
-      const hook = renderHook(
-        ({ functional, version }) =>
-          useLiveQuery(
-            (q) =>
-              functional
-                ? q
-                    .from({ people: collection })
-                    .fn.where(({ people }) => people.age > 25)
-                : q.from({ people: collection }),
-            [version],
-          ),
-        { initialProps: { functional: false, version: 1 }, wrapper },
-      )
-      await waitFor(() => expect(hook.result.current.data).toHaveLength(3))
-
-      // The query changed but its dependency did not, so nothing compiles.
-      expect(() =>
-        hook.rerender({ functional: true, version: 1 }),
-      ).not.toThrow()
-      expect(hook.result.current.data).toHaveLength(3)
-
-      expect(() => hook.rerender({ functional: true, version: 2 })).toThrow(
-        UnhashableQueryIRError,
-      )
-    })
-
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const collection = createCollection(
@@ -3459,35 +3410,6 @@ describe(`Query Collections`, () => {
       expect(queryExecutions).toBe(1)
     })
 
-    it(`preserves reference semantics for deprecated dependency arrays`, async () => {
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `legacy-deps-reference-semantics`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      const { result, rerender } = renderHook(
-        ({ filter }: { filter: { minAge: number } }) =>
-          useLiveQuery(
-            (q) =>
-              q
-                .from({ people: collection })
-                .where(({ people }) => gt(people.age, filter.minAge)),
-            [filter],
-          ),
-        { initialProps: { filter: { minAge: 25 } } },
-      )
-
-      await waitFor(() => expect(result.current.data).toHaveLength(2))
-      const firstCollection = result.current.collection
-
-      rerender({ filter: { minAge: 25 } })
-
-      expect(result.current.collection).not.toBe(firstCollection)
-    })
-
     it(`warns when derived query identity is slow enough to need queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const nowSpy = vi.spyOn(globalThis.performance, `now`)
@@ -3571,88 +3493,6 @@ describe(`Query Collections`, () => {
       nowSpy.mockRestore()
       warnSpy.mockRestore()
     })
-
-    it(`warns once for the deprecated dependency-array form`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `deps-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      const { rerender } = renderHook(
-        ({ minAge }) =>
-          useLiveQuery(
-            (q) =>
-              q
-                .from({ people: collection })
-                .where(({ people }) => gt(people.age, minAge)),
-            [minAge],
-          ),
-        { initialProps: { minAge: 25 } },
-      )
-
-      rerender({ minAge: 30 })
-      rerender({ minAge: 30 })
-
-      expect(warnSpy).toHaveBeenCalledTimes(1)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`will be removed in 1.0`),
-      )
-
-      warnSpy.mockRestore()
-    })
-
-    it(`warns for an explicitly passed empty dependency array`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `empty-deps-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      renderHook(() => useLiveQuery((q) => q.from({ people: collection }), []))
-
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`useLiveQuery({ query })`),
-      )
-
-      warnSpy.mockRestore()
-    })
-
-    it(`includes the query in legacy dependency-array SSR identity`, () => {
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `legacy-deps-query-identity`,
-          getKey: (person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-      // Suspense is the reader of this identity; plain useLiveQuery skips it.
-      const first = renderHook(() =>
-        useLiveQueryForSuspense(
-          (q: any) => q.from({ people: collection }),
-          [1],
-        ),
-      )
-      const second = renderHook(() =>
-        useLiveQueryForSuspense(
-          (q: any) =>
-            q
-              .from({ people: collection })
-              .where(({ people }: any) => gt(people.age, 30)),
-          [1],
-        ),
-      )
-
-      expect(getLiveQueryResultInfo(first.result.current).queryHash).not.toBe(
-        getLiveQueryResultInfo(second.result.current).queryHash,
-      )
-    })
   })
 })
 
@@ -3692,4 +3532,44 @@ describe(`retained useLiveQuery results`, () => {
       expect([...read.state.values()].map((row) => row.version)).toEqual([1])
     },
   )
+
+  it(`retains getKey until the query identity changes`, async () => {
+    const source = createCollection(
+      localOnlyCollectionOptions<{ id: string; value: string }, string>({
+        id: `hook-opaque-config-identity`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, value: `value` }],
+      }),
+    )
+    const firstKey = (row: { id: string }) => row.id
+    const secondKey = (row: { id: string }) => `other-${row.id}`
+    const { result, rerender, unmount } = renderHook(
+      ({ getKey }) =>
+        useLiveQuery({
+          query: (q) => q.from({ row: source }),
+          getKey,
+        }),
+      { initialProps: { getKey: firstKey } },
+    )
+    let firstCollection: typeof result.current.collection | undefined
+
+    try {
+      await waitFor(() => expect(result.current.isReady).toBe(true))
+      firstCollection = result.current.collection
+      expect(firstCollection.has(`one`)).toBe(true)
+
+      rerender({ getKey: secondKey })
+      await waitFor(() => expect(result.current.isReady).toBe(true))
+      expect(result.current.collection).toBe(firstCollection)
+      expect(result.current.collection.has(`one`)).toBe(true)
+      expect(result.current.collection.has(`other-one`)).toBe(false)
+    } finally {
+      unmount()
+      await firstCollection?.cleanup()
+      if (result.current.collection !== firstCollection) {
+        await result.current.collection.cleanup()
+      }
+      await source.cleanup()
+    }
+  })
 })

@@ -1,0 +1,303 @@
+/**
+ * Ordinary scenario tests for optimistic snapshot ownership: a failed update
+ * does not own a later remote write, a synchronous handler acknowledgement is
+ * local, and settled or ambient transactions keep the right owner. The
+ * ownership law is owned by optimistic-composition-oracle.test.ts.
+ */
+import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { createCollection } from '../src/collection/index.js'
+import { createDeferred } from '../src/deferred.js'
+import { createLiveQueryCollection } from '../src/query/index.js'
+import { stripVirtualProps } from './utils.js'
+import {
+  initial,
+  pendingTransaction,
+  source,
+} from './optimistic-composition-fixture.js'
+import type { Row } from './optimistic-composition-fixture.js'
+
+describe(`optimistic snapshot ownership`, () => {
+  it.each([false, true])(
+    `does not attribute a later remote write to a failed-only update, optimistic=%s`,
+    async (optimistic) => {
+      const done = createDeferred<void>()
+      const fixture = source(() => done.promise)
+      await fixture.collection.preload()
+      const tx = fixture.collection.update(1, { optimistic }, (row) => {
+        row.a = `failed`
+      })
+      const settled = tx.when('settled').catch(() => {})
+      try {
+        done.reject(new Error(`failed update`))
+        await settled
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, a: `remote` },
+        })
+        await fixture.sync.commit()
+        expect(fixture.collection.get(1)?.$origin).toBe(`remote`)
+      } finally {
+        done.resolve()
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    `attributes synchronous handler acknowledgement to its local update, optimistic=%s`,
+    async (optimistic) => {
+      const fixture = source(() => {
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, a: `accepted` },
+        })
+        void fixture.sync.commit()
+        return Promise.resolve()
+      })
+      await fixture.collection.preload()
+      try {
+        const tx = fixture.collection.update(1, { optimistic }, (row) => {
+          row.a = `accepted`
+        })
+        await tx.when('settled')
+        expect(fixture.collection.get(1)?.$origin).toBe(`local`)
+        expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
+          ...initial,
+          a: `accepted`,
+        })
+      } finally {
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    `attributes a confirmation committed after settlement to the source, completed first=%s`,
+    async (completedFirst) => {
+      const done = [createDeferred<void>(), createDeferred<void>()]
+      let calls = 0
+      const fixture = source(() => done[calls++]!.promise)
+      await fixture.collection.preload()
+      const first = fixture.collection.update(
+        1,
+        { optimistic: false },
+        (row) => {
+          row.a = `accepted`
+        },
+      )
+      const second = fixture.collection.update(1, (row) => {
+        row.b = `rejected`
+      })
+      const secondSettled = second.when('settled').catch(() => {})
+      try {
+        if (completedFirst) {
+          done[0]!.resolve()
+          await first.when('settled')
+        }
+        done[1]!.reject(new Error(`sibling failure`))
+        await secondSettled
+        if (!completedFirst) {
+          done[0]!.resolve()
+          await first.when('settled')
+        }
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, a: `accepted` },
+        })
+        await fixture.sync.commit()
+        // Committed after the optimistic state dropped, so it is remote.
+        expect(fixture.collection.get(1)?.$origin).toBe(`remote`)
+        expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
+          ...initial,
+          a: `accepted`,
+        })
+      } finally {
+        done.forEach((entry) => entry.resolve())
+        await Promise.allSettled([
+          first.when('settled'),
+          second.when('settled'),
+        ])
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    `publishes the queued sync rows when its update settles, confirm=%s`,
+    async (confirm) => {
+      const done = createDeferred<void>()
+      const fixture = source(() => done.promise)
+      const downstream = createLiveQueryCollection({
+        query: (q) => q.from({ row: fixture.collection }),
+      })
+      await downstream.preload()
+      const replica = new Map<string | number, Row>([[1, initial]])
+      const subscription = fixture.collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) replica.delete(change.key)
+          else replica.set(change.key, stripVirtualProps(change.value))
+        }
+      })
+      const check = (expected: Row) => {
+        expect(stripVirtualProps(fixture.collection.get(1))).toEqual(expected)
+        expect(replica.get(1)).toEqual(expected)
+        expect(stripVirtualProps(downstream.get(1))).toEqual(expected)
+      }
+      try {
+        const tx = fixture.collection.update(1, (row) => {
+          row.a = `a1`
+        })
+        check({ ...initial, a: `a1` })
+        fixture.sync.begin()
+        fixture.sync.write({ type: `update`, value: { ...initial, b: `b1` } })
+        const held = fixture.sync.commit()
+        expect(held).not.toBe(true)
+        check({ ...initial, a: `a1` })
+        let applied: true | Promise<void> = true
+        if (confirm) {
+          fixture.sync.begin()
+          fixture.sync.write({ type: `update`, value: { ...initial, a: `a1` } })
+          applied = fixture.sync.commit()
+          expect(applied).not.toBe(true)
+        }
+        done.resolve()
+        await tx.when('settled')
+        await held
+        await applied
+        // The optimistic row drops, and the held sync rows publish with it.
+        check(confirm ? { ...initial, a: `a1` } : { ...initial, b: `b1` })
+      } finally {
+        done.resolve()
+        subscription.unsubscribe()
+        await downstream.cleanup()
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`pending`, `persisting`] as const)(
+    `does not merge new synced fields into a $phase mutation snapshot`,
+    async (phase) => {
+      const fixture = source()
+      const entry = pendingTransaction()
+      try {
+        await fixture.collection.preload()
+        entry.tx.mutate(() =>
+          fixture.collection.update(1, (row) => {
+            row.a = `local`
+          }),
+        )
+        if (phase === `persisting`) void entry.tx.commit().catch(() => {})
+        // A persisting mutation holds the sync transaction; a pending one
+        // lets it apply beneath the overlay.
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, b: `remote` },
+        })
+        expect(fixture.sync.commit() === true).toBe(phase === `pending`)
+        expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
+          ...initial,
+          a: `local`,
+        })
+      } finally {
+        entry.tx.rollback()
+        entry.done.resolve()
+        await entry.settled
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it(`keeps a settled direct update beneath an older pending update`, async () => {
+    const fixture = source()
+    const entry = pendingTransaction()
+    try {
+      await fixture.collection.preload()
+      entry.tx.mutate(() =>
+        fixture.collection.update(1, (row) => {
+          row.a = `local`
+        }),
+      )
+      void entry.tx.commit().catch(() => {})
+      const settled = fixture.collection.update(1, (row) => {
+        row.b = `settled`
+      })
+      await settled.when('settled')
+      fixture.sync.begin()
+      fixture.sync.write({ type: `insert`, value: { ...initial, id: 2 } })
+      expect(fixture.sync.commit()).not.toBe(true)
+      expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
+        ...initial,
+        a: `local`,
+      })
+    } finally {
+      entry.tx.rollback()
+      entry.done.resolve()
+      await entry.settled
+      await fixture.collection.cleanup()
+    }
+  })
+
+  it(`preserves insert defaults and suppresses unchanged overlay publications`, async () => {
+    const collection = createCollection({
+      schema: z.object({
+        id: z.number(),
+        title: z.string(),
+        priority: z.number().default(3),
+      }),
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+    const entries = [
+      pendingTransaction(),
+      pendingTransaction(),
+      pendingTransaction(),
+    ]
+    try {
+      await collection.preload()
+      entries[0]!.tx.mutate(() => collection.insert({ id: 1, title: `first` }))
+      entries[1]!.tx.mutate(() =>
+        collection.update(1, (row) => {
+          row.title = `second`
+        }),
+      )
+      expect(stripVirtualProps(collection.get(1))).toEqual({
+        id: 1,
+        title: `second`,
+        priority: 3,
+      })
+      const before = collection.get(1)
+      const seen: Array<unknown> = []
+      const subscription = collection.subscribeChanges((changes) => {
+        seen.push(...changes.filter((change) => change.key === 1))
+      })
+      try {
+        entries[2]!.tx.mutate(() =>
+          collection.insert({ id: 2, title: `unrelated` }),
+        )
+        expect(collection.get(1)).toBe(before)
+        expect(seen).toEqual([])
+      } finally {
+        subscription.unsubscribe()
+      }
+    } finally {
+      for (const entry of entries) {
+        entry.tx.rollback({ isSecondaryRollback: true })
+        entry.done.resolve()
+      }
+      await Promise.all(entries.map((entry) => entry.settled))
+      await collection.cleanup()
+    }
+  })
+})

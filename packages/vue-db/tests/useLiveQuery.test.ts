@@ -702,7 +702,7 @@ describe(`Query Collections`, () => {
     expect(state.value.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     await waitForVueUpdate()
 

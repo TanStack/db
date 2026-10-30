@@ -1,1778 +1,36 @@
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
-import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
   OrderedLoaderInvariantError,
   OrderedSourceLoader,
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
-import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { captureMicrotaskErrors, flushPromises } from '../utils.js'
+import { createOracleReach } from '../oracle-reach.js'
+import { captureMicrotaskErrors } from '../utils.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration.js'
+import {
+  createDeferred,
+  createOrderByInfo,
+} from './ordered-source-loader-support.js'
+import type { CollectionSubscription } from '../../src/collection/subscription.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
 import type {
-  CollectionSubscription,
-  ReleaseLoadSubset,
-} from '../../src/collection/subscription.js'
-import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
-import type {
-  LoadSubsetOptions,
-  LoadSubsetRequestResult,
-} from '../../src/types.js'
+  Observed,
+  RequestOptions,
+} from './ordered-source-loader-state-support.js'
 
-type RequestOptions = LoadSubsetOptions & {
-  minValues?: Array<unknown>
-  onLoadSubsetResult?: (
-    result: LoadSubsetRequestResult,
-    acquisition: LoadSubsetOptions,
-    release: ReleaseLoadSubset,
-  ) => void
+// The leading order value that a tie request asks for: its `where` is
+// `eq(rank, value)`. Other requests have no tie value.
+function tieValue(options: RequestOptions): unknown {
+  const where = options.where as
+    { name?: string; args?: Array<{ value?: unknown }> } | undefined
+  return where?.name === `eq` ? where.args?.[1]?.value : undefined
 }
-
-function createDeferred() {
-  let resolve!: () => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<void>((done, fail) => {
-    resolve = done
-    reject = fail
-  })
-  return { promise, resolve, reject }
-}
-
-function createOrderByInfo(
-  overrides: Partial<OrderByOptimizationInfo> = {},
-): OrderByOptimizationInfo {
-  return {
-    sourceId: `source`,
-    alias: `row`,
-    orderBy: [
-      {
-        expression: new PropRef([`row`, `rank`]),
-        compareOptions: {
-          direction: `asc`,
-          nulls: `first`,
-          stringSort: `lexical`,
-        },
-      },
-    ],
-    offset: 0,
-    limit: 1,
-    comparator: (left, right) =>
-      (left?.rank as number) - (right?.rank as number),
-    valueExtractorForRawRow: (row) => row.rank,
-    index: {} as NonNullable<OrderByOptimizationInfo[`index`]>,
-    dataNeeded: () => 1,
-    requiresFullSource: false,
-    // A finite provider, not an eager source: its rows are not all installed.
-    sourceHoldsAllRows: false,
-    ...overrides,
-  }
-}
-
-type Observed = {
-  method: `limited` | `snapshot`
-  options: RequestOptions
-  acquisition: LoadSubsetOptions
-  deferred: ReturnType<typeof createDeferred>
-}
-
-function fakeSubscription(
-  requests: Array<Observed>,
-  releases: Array<LoadSubsetOptions>,
-  onRelease: () => void = () => {},
-) {
-  const request = (method: Observed[`method`], options: RequestOptions) => {
-    const acquisition: LoadSubsetOptions = {
-      orderBy: options.orderBy,
-      limit: options.limit,
-      where: options.where,
-    }
-    const deferred = createDeferred()
-    requests.push({ method, options, acquisition, deferred })
-    options.onLoadSubsetResult?.(deferred.promise, acquisition, () => {
-      releases.push(acquisition)
-      onRelease()
-    })
-  }
-  return {
-    readOrderedSnapshot: () => [],
-    setOrderByIndex: () => {},
-    requestLimitedSnapshot: (options: RequestOptions) =>
-      request(`limited`, options),
-    requestSnapshot: (options: RequestOptions) => request(`snapshot`, options),
-  } as unknown as CollectionSubscription
-}
-
-describe(`Ordered source request ownership`, () => {
-  // A request from before a cursor reset that fails raises the debt to a
-  // full-source read but keeps the work staged after the reset. A finite step
-  // staged there must not run first: its boundary would come from rows the
-  // failed request may have written only in part. The failure clears that
-  // boundary, so the staged tie issues nothing and the owed read comes next.
-  it(`starts the owed full-source read before a finite step staged after a reset`, async () => {
-    const requests: Array<{
-      options: RequestOptions
-      deferred: ReturnType<typeof createDeferred>
-    }> = []
-    let revision = 0
-    let answerAtOnce = false
-    const request = (options: RequestOptions) => {
-      const acquisition: LoadSubsetOptions = {
-        orderBy: options.orderBy,
-        limit: options.limit,
-        where: options.where,
-      }
-      const deferred = createDeferred()
-      requests.push({ options, deferred })
-      if (answerAtOnce) {
-        // The answer writes rows, so the graph has input it has not run.
-        revision++
-        options.onLoadSubsetResult?.(true, acquisition, () => {})
-      } else {
-        options.onLoadSubsetResult?.(deferred.promise, acquisition, () => {})
-      }
-    }
-    const subscription = {
-      readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
-      setOrderByIndex: () => {},
-      requestLimitedSnapshot: request,
-      requestSnapshot: request,
-    } as unknown as CollectionSubscription
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo(),
-      subscription,
-      `row`,
-      undefined,
-      undefined,
-      () => revision,
-    )
-    try {
-      loader.start()
-      const dead = requests[0]!
-      loader.resetCursor()
-      answerAtOnce = true
-      loader.loadMore()
-      expect(requests).toHaveLength(2)
-      answerAtOnce = false
-      dead.deferred.reject(new Error(`page from before the reset failed`))
-      await flushPromises()
-      loader.loadMore()
-      const next = requests[2]!.options
-      expect(next.where, `a tie from the staged step`).toBeUndefined()
-      expect(next.orderBy, `the owed full-source read`).toBeUndefined()
-    } finally {
-      loader.dispose()
-      for (const { deferred } of requests) deferred.resolve()
-    }
-  })
-
-  it(`retains an explicit failed-request retry blocked by joined demand`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    let joinedPending = false
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({
-        joinedFilterSourceId: `child`,
-        requiresFullSource: true,
-      }),
-      fakeSubscription(requests, releases),
-      `row`,
-      undefined,
-      undefined,
-      undefined,
-      () => joinedPending,
-    )
-
-    try {
-      loader.start()
-      const first = (loader as unknown as { pending: Promise<void> }).pending
-      const failure = new Error(`initial full-source request failed`)
-      requests[0]!.deferred.reject(failure)
-      await expect(first).rejects.toBe(failure)
-
-      joinedPending = true
-      expect(loader.loadMore(1)).toBeUndefined()
-      expect(requests).toHaveLength(1)
-
-      joinedPending = false
-      const retry = loader.loadMore()
-      expect(requests).toHaveLength(2)
-      requests[1]!.deferred.resolve()
-      await retry
-    } finally {
-      for (const request of requests) request.deferred.resolve()
-      loader.dispose()
-    }
-  })
-
-  it(`keeps nested refinement pending when an older lease release throws`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<number> = []
-    const participants: Array<Promise<unknown>> = []
-    const participantErrors = new Map<Promise<unknown>, unknown>()
-    const cleanupError = new Error(`older prefix cleanup failed`)
-    let boundary = 1
-    const request = (method: Observed[`method`], options: RequestOptions) => {
-      const index = requests.length
-      const acquisition: LoadSubsetOptions = {
-        orderBy: options.orderBy,
-        limit: options.limit,
-        where: options.where,
-      }
-      const deferred = createDeferred()
-      requests.push({ method, options, acquisition, deferred })
-      options.onLoadSubsetResult?.(
-        index === 2 ? true : deferred.promise,
-        acquisition,
-        () => {
-          releases.push(index)
-          if (index === 0) throw cleanupError
-        },
-      )
-    }
-    const subscription = {
-      readOrderedSnapshot: () => [
-        {
-          type: `insert`,
-          key: boundary,
-          value: { id: boundary, rank: boundary },
-        },
-      ],
-      setOrderByIndex: () => {},
-      requestLimitedSnapshot: (options: RequestOptions) =>
-        request(`limited`, options),
-      requestSnapshot: (options: RequestOptions) =>
-        request(`snapshot`, options),
-    } as unknown as CollectionSubscription
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo(),
-      subscription,
-      `row`,
-      (result) => {
-        if (result instanceof Promise) {
-          participants.push(result)
-          void result.catch((error) => participantErrors.set(result, error))
-        }
-      },
-    )
-
-    const uncaught = captureMicrotaskErrors()
-    try {
-      loader.start()
-      requests[0]!.deferred.resolve()
-      await participants[0]
-      requests[1]!.deferred.resolve()
-      await participants[1]
-
-      boundary = 2
-      loader.invalidateCursor()
-      const result = loader.loadMore(1)!
-      expect(requests).toHaveLength(4)
-      expect(participants).toHaveLength(4)
-      await flushPromises()
-      // The older prefix's release throws: an adapter bug, reported
-      // uncaught. No participant reports it, and the nested refinement stays
-      // pending.
-      const recent = participants.slice(2)
-      const pending = (
-        loader as unknown as { pending: Promise<unknown> | undefined }
-      ).pending
-      expect(result).toBe(pending)
-      expect(recent).toContain(pending)
-      expect(
-        recent.some((participant) => participantErrors.has(participant)),
-      ).toBe(false)
-      expect(uncaught.errors).toEqual([cleanupError])
-
-      expect(loader.loadMore()).toBe(pending)
-      expect(requests).toHaveLength(4)
-      expect(releases).toEqual([0])
-    } finally {
-      uncaught.restore()
-      loader.dispose()
-      for (const observed of requests) observed.deferred.resolve()
-      await Promise.allSettled(participants)
-    }
-  })
-
-  it.each([
-    { name: `indexed page`, indexed: true },
-    { name: `unindexed prefix`, indexed: false },
-  ] as const)(
-    `finishes a repeated $name repair continuation and permits the next repair`,
-    async ({ indexed }) => {
-      type Row = { id: number; rank: number }
-      let rows: Array<Row> = [
-        { id: 1, rank: 1 },
-        { id: 2, rank: 2 },
-        { id: 3, rank: 3 },
-      ]
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const subscription = fakeSubscription(requests, releases) as unknown as {
-        readOrderedSnapshot: () => Array<{ value: Row }>
-      }
-      subscription.readOrderedSnapshot = () =>
-        rows
-          .slice()
-          .sort((left, right) => left.rank - right.rank)
-          .map((value) => ({ value }))
-      const loader = new OrderedSourceLoader(
-        createOrderByInfo({
-          index: indexed
-            ? ({} as NonNullable<OrderByOptimizationInfo[`index`]>)
-            : undefined,
-          limit: 10,
-          dataNeeded: () => (indexed ? 10 - rows.length : 0),
-        }),
-        subscription as unknown as CollectionSubscription,
-        `row`,
-      )
-      let nextRequest = 0
-      const settleThrough = async (finalCount: number) => {
-        while (nextRequest < finalCount) {
-          const pending = (
-            loader as unknown as { pending: Promise<unknown> | undefined }
-          ).pending
-          requests[nextRequest]!.deferred.resolve()
-          nextRequest++
-          await pending
-        }
-      }
-
-      try {
-        loader.start()
-        await settleThrough(indexed ? 3 : 2)
-
-        rows = rows.filter(({ id }) => id !== 2)
-        loader.invalidateSourceOrdering()
-        loader.loadMore(indexed ? undefined : 7)
-        const repairEnd = indexed ? 6 : 4
-        await settleThrough(repairEnd)
-
-        expect(releases).toEqual(
-          requests
-            .slice(0, indexed ? 3 : 2)
-            .map(({ acquisition }) => acquisition),
-        )
-
-        loader.invalidateSourceOrdering()
-        loader.loadMore(8)
-        expect(requests).toHaveLength(repairEnd + 1)
-      } finally {
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-      }
-    },
-  )
-
-  it(`starts a replacement repair before continuing a stale repair chain`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    let needed = 0
-    const subscription = fakeSubscription(requests, releases) as unknown as {
-      readOrderedSnapshot: () => Array<{
-        value: { id: number; rank: number }
-      }>
-    }
-    subscription.readOrderedSnapshot = () => [{ value: { id: 1, rank: 1 } }]
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({ dataNeeded: () => needed }),
-      subscription as unknown as CollectionSubscription,
-      `row`,
-    )
-    let nextRequest = 0
-    const settle = async () => {
-      const pending = (
-        loader as unknown as { pending: Promise<unknown> | undefined }
-      ).pending
-      requests[nextRequest]!.deferred.resolve()
-      nextRequest++
-      await pending
-    }
-
-    try {
-      loader.start()
-      await settle()
-      await settle()
-
-      loader.invalidateSourceOrdering()
-      loader.loadMore()
-      await settle()
-      expect(requests).toHaveLength(4)
-
-      // A second mutation invalidates the chain while its tie request is held.
-      // Its settlement may apply rows, but it must not start stale refill work.
-      needed = 1
-      loader.invalidateSourceOrdering()
-      await settle()
-
-      expect(requests).toHaveLength(5)
-      expect(requests[4]!.method).toBe(`snapshot`)
-      expect(requests[4]!.options).toMatchObject({
-        refetch: true,
-        limit: 1,
-      })
-      expect(requests[4]!.options.orderBy).toBeDefined()
-      expect(requests[4]!.options.cursor).toBeUndefined()
-    } finally {
-      loader.dispose()
-      for (const request of requests) request.deferred.resolve()
-    }
-  })
-
-  it(`reissues a bounded prefix when settled source ordering is invalidated`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({
-        index: undefined,
-        offset: 2,
-        limit: 2,
-        dataNeeded: () => 0,
-      }),
-      fakeSubscription(requests, releases),
-      `row`,
-    )
-    let repair: Promise<unknown> | undefined
-
-    try {
-      loader.start()
-      const initial = (
-        loader as unknown as { pending: Promise<unknown> | undefined }
-      ).pending!
-      requests[0]!.deferred.resolve()
-      await initial
-
-      loader.invalidateSourceOrdering()
-      repair = loader.loadMore()
-
-      expect(requests).toHaveLength(2)
-      expect(requests[1]!.method).toBe(`snapshot`)
-      expect(
-        requests[1]!.options.orderBy?.map(({ expression, compareOptions }) => ({
-          path: expression instanceof PropRef ? expression.path : undefined,
-          direction: compareOptions.direction,
-        })),
-      ).toStrictEqual([{ path: [`rank`], direction: `asc` }])
-      expect(requests[1]!.options.limit).toBe(4)
-      expect(requests[1]!.options.refetch).toBe(true)
-      expect(requests[1]!.options.cursor).toBeUndefined()
-      expect(requests[1]!.options.offset).toBeUndefined()
-    } finally {
-      for (const request of requests) request.deferred.resolve()
-      await Promise.allSettled(repair ? [repair] : [])
-      loader.dispose()
-    }
-  })
-
-  it(`retains finite leases after bounded repair fails until full-source recovery succeeds`, async () => {
-    const requests: Array<{
-      options: RequestOptions
-      acquisition: LoadSubsetOptions
-      deferred: ReturnType<typeof createDeferred>
-    }> = []
-    const releases: Array<number> = []
-    const request = (options: RequestOptions) => {
-      const deferred = createDeferred()
-      const acquisition: LoadSubsetOptions = {
-        orderBy: options.orderBy,
-        limit: options.limit,
-        where: options.where,
-        cursor: options.cursor,
-        offset: options.offset,
-      }
-      const index = requests.length
-      requests.push({ options, acquisition, deferred })
-      options.onLoadSubsetResult?.(deferred.promise, acquisition, () => {
-        releases.push(index)
-      })
-    }
-    const subscription = {
-      hasPendingTruncateReplacement: false,
-      readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
-      setOrderByIndex: () => {},
-      requestLimitedSnapshot: request,
-      requestSnapshot: request,
-    } as unknown as CollectionSubscription
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({
-        index: undefined,
-        dataNeeded: () => 0,
-      }),
-      subscription,
-      `row`,
-    )
-    const pending = () =>
-      (loader as unknown as { pending: Promise<unknown> | undefined }).pending!
-    const settle = async (index: number) => {
-      const participant = pending()
-      requests[index]!.deferred.resolve()
-      await participant
-    }
-
-    try {
-      loader.start()
-      await settle(0)
-      await settle(1)
-
-      loader.invalidateSourceOrdering()
-      loader.loadMore()
-      await settle(2)
-      expect(requests).toHaveLength(4)
-
-      // Core cannot know whether the failed adapter request wrote a partial
-      // result, so finite continuation is no longer authoritative.
-      const failedTie = pending()
-      const failure = new Error(`partial bounded-repair failure`)
-      requests[3]!.deferred.reject(failure)
-      await expect(failedTie).rejects.toBe(failure)
-
-      const retry = loader.loadMore(1)
-      expect(retry).toBeDefined()
-      expect(requests).toHaveLength(5)
-      expect(requests[4]!.options.orderBy).toBeUndefined()
-      expect(requests[4]!.options.where).toBeUndefined()
-      expect(requests[4]!.options.limit).toBeUndefined()
-      expect(requests[4]!.options.cursor).toBeUndefined()
-      expect(requests[4]!.options.offset).toBeUndefined()
-      await settle(4)
-
-      expect(
-        requests.map(({ options }) =>
-          options.orderBy ? `prefix` : options.where ? `tie` : `full-source`,
-        ),
-      ).toEqual([`prefix`, `tie`, `prefix`, `tie`, `full-source`])
-      expect(releases).toEqual([3, 0, 1, 2])
-    } finally {
-      loader.dispose()
-      for (const observed of requests) observed.deferred.resolve()
-    }
-  })
-
-  // An order change while a tie request is in flight starts a bounded prefix
-  // repair at once; the tie's later result is ignored for the boundary. When
-  // that repair fails, the window move rejects with its error and the last
-  // public window stays, whatever the older tie request does. An explicit
-  // retry then recovers under today's failure law, from the full source, and
-  // publishes once.
-  it.each([`success`, `failure`] as const)(
-    `keeps a failed public window private when its older tie request ends in %s`,
-    async (olderOutcome) => {
-      type Row = { id: number; rank: number }
-      const truth: Array<Row> = [1, 2, 3].map((id) => ({ id, rank: id }))
-      const requests: Array<{
-        kind: `page` | `boundary` | `full`
-        options: LoadSubsetOptions
-        gate: ReturnType<typeof createDeferred>
-      }> = []
-      const releases: Array<LoadSubsetOptions> = []
-      let hold = false
-      let holdRepair = false
-      let update!: (row: Row) => void
-      const source = createCollection<Row, number>({
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: (sync) => {
-            const installed = new Map<number, Row>()
-            update = (row) => {
-              installed.set(row.id, row)
-              sync.begin()
-              sync.write({ type: `update`, value: row })
-              sync.commit()
-            }
-            sync.markReady()
-            return {
-              loadSubset: async (options) => {
-                const kind = options.orderBy
-                  ? `page`
-                  : options.where
-                    ? `boundary`
-                    : `full`
-                const gate = createDeferred()
-                requests.push({ kind, options, gate })
-                if (!hold || (kind === `page` && !holdRepair)) gate.resolve()
-                await gate.promise
-                if (options.signal?.aborted) return
-                const rows = truth
-                  .filter(
-                    (row) =>
-                      (!options.where ||
-                        evaluateReferenceExpression(options.where, row) ===
-                          true) &&
-                      (!options.cursor ||
-                        evaluateReferenceExpression(
-                          options.cursor.whereFrom,
-                          row,
-                        ) === true),
-                  )
-                  .sort((a, b) => a.rank - b.rank)
-                const offset = options.cursor ? 0 : (options.offset ?? 0)
-                const selected = rows.slice(
-                  offset,
-                  options.limit === undefined
-                    ? undefined
-                    : offset + options.limit,
-                )
-                sync.begin()
-                for (const row of selected) {
-                  if (installed.get(row.id) === row) continue
-                  sync.write({
-                    type: installed.has(row.id) ? `update` : `insert`,
-                    value: row,
-                  })
-                  installed.set(row.id, row)
-                }
-                await sync.commit()
-              },
-              unloadSubset: (options) => {
-                releases.push(options)
-              },
-            }
-          },
-        },
-      })
-      const live = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank)
-          .limit(1)
-          .select(({ row }) => ({ id: row.id, rank: row.rank })),
-      )
-      const visibleRows = () =>
-        live.toArray.map(({ id, rank }) => ({ id, rank }))
-      const publications: Array<Array<Row>> = []
-      live.subscribeChanges(
-        (batch) => {
-          if (batch.length) publications.push(visibleRows())
-        },
-        { includeInitialState: false },
-      )
-      try {
-        await live.preload()
-        expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
-        publications.length = 0
-        hold = true
-        const move = Promise.resolve(live.utils.setWindow({ limit: 2 })).then(
-          () => ({ status: `fulfilled` as const }),
-          (error) => ({ status: `rejected` as const, error }),
-        )
-        await flushPromises()
-        const boundary = requests.at(-1)!
-        expect(boundary.kind).toBe(`boundary`)
-        holdRepair = true
-        truth[0] = { id: 1, rank: 10 }
-        update(truth[0])
-        await flushPromises()
-        const repair = requests.at(-1)!
-        expect(repair.kind).toBe(`page`)
-        expect(repair.options.limit).toBe(2)
-        expect(repair.options.cursor).toBeUndefined()
-        const count = requests.length
-        const failure = new Error(`authoritative repair failed`)
-        repair.gate.reject(failure)
-        // The window still waits for its older publication participant to settle.
-        await flushPromises()
-        if (olderOutcome === `failure`)
-          boundary.gate.reject(new Error(`older tie failed`))
-        else boundary.gate.resolve()
-        await flushPromises()
-        expect(requests).toHaveLength(count)
-        expect(await move).toEqual({ status: `rejected`, error: failure })
-        expect(releases).toEqual([])
-        expect(publications).toEqual([])
-        expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-
-        hold = false
-        holdRepair = false
-        await live.utils.setWindow({ limit: 2 })
-        expect(requests).toHaveLength(count + 1)
-        expect(requests.at(-1)!.kind).toBe(`full`)
-        expect(releases).toHaveLength(count)
-        expect(new Set(releases)).toEqual(
-          new Set(requests.slice(0, count).map(({ options }) => options)),
-        )
-        expect(visibleRows()).toEqual([
-          { id: 2, rank: 2 },
-          { id: 3, rank: 3 },
-        ])
-        expect(publications).toEqual([
-          [
-            { id: 2, rank: 2 },
-            { id: 3, rank: 3 },
-          ],
-        ])
-      } finally {
-        await live.cleanup()
-        for (const request of requests) request.gate.resolve()
-        await source.cleanup()
-      }
-    },
-  )
-
-  // Finite success is not authority to repair a newer full-source failure.
-  // Cross settlement order with both outcomes instead of testing each alone.
-  // An invalidation while the first page is still in flight comes before any
-  // request has settled, so the loader still recovers from the full source.
-  // An overlap after the source has settled once repairs with a bounded
-  // prefix instead; the next property owns that case.
-  it.each(
-    ([`older-first`, `full-first`] as const).flatMap((order) =>
-      ([`success`, `failure`] as const).flatMap((outcome) =>
-        ([`success`, `failure`] as const).map((olderOutcome) => ({
-          order,
-          outcome,
-          olderOutcome,
-        })),
-      ),
-    ),
-  )(
-    `keeps full-source recovery authoritative across an initial page overlap: %j`,
-    async ({ order, outcome, olderOutcome }) => {
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const participants: Array<Promise<unknown>> = []
-      const subscription = fakeSubscription(requests, releases)
-      subscription.readOrderedSnapshot = () => [
-        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-      ]
-      const loader = new OrderedSourceLoader(
-        createOrderByInfo(),
-        subscription,
-        `row`,
-        (result) => {
-          if (result instanceof Promise) participants.push(result)
-        },
-      )
-      try {
-        loader.start()
-        const olderIndex = requests.length - 1
-        loader.invalidateSourceOrdering()
-        loader.loadMore()
-        const fullIndex = olderIndex + 1
-        const count = fullIndex + 1
-        expect(requests).toHaveLength(count)
-        expect(requests[fullIndex]!.options.orderBy).toBeUndefined()
-        expect(requests[fullIndex]!.options.where).toBeUndefined()
-        const failure = new Error(`full-source failed`)
-        const olderFailure = new Error(`older request failed`)
-        const settleOlder = async () => {
-          if (olderOutcome === `failure`) {
-            requests[olderIndex]!.deferred.reject(olderFailure)
-            await expect(participants[olderIndex]).rejects.toBe(olderFailure)
-          } else {
-            requests[olderIndex]!.deferred.resolve()
-            await participants[olderIndex]
-          }
-          expect(requests).toHaveLength(count)
-        }
-        const settleFull = async () => {
-          if (outcome === `failure`) {
-            requests[fullIndex]!.deferred.reject(failure)
-            await expect(participants[fullIndex]).rejects.toBe(failure)
-          } else {
-            requests[fullIndex]!.deferred.resolve()
-            await participants[fullIndex]
-          }
-          expect(requests).toHaveLength(count)
-        }
-        if (order === `older-first`) {
-          await settleOlder()
-          await settleFull()
-        } else {
-          await settleFull()
-          await settleOlder()
-        }
-        loader.loadMore()
-        expect(requests).toHaveLength(count)
-        // A successful full-source read retires every settled finite demand.
-        // It also retires the older request when that request failed: the
-        // full-source read superseded it, so its partial writes are covered
-        // and its lease needs no explicit retry.
-        const successfulFinite =
-          outcome === `success`
-            ? requests.slice(0, fullIndex).map(({ acquisition }) => acquisition)
-            : []
-        expect(releases).toEqual(successfulFinite)
-
-        // An explicit retry releases the failed demands that remain, in
-        // failure order: all of them when the full-source read failed.
-        loader.loadMore(1)
-        const failedIndices =
-          outcome === `success`
-            ? []
-            : (order === `older-first`
-                ? [olderIndex, fullIndex]
-                : [fullIndex, olderIndex]
-              ).filter(
-                (index) =>
-                  (index === olderIndex ? olderOutcome : outcome) === `failure`,
-              )
-        expect(releases).toEqual([
-          ...successfulFinite,
-          ...failedIndices.map((index) => requests[index]!.acquisition),
-        ])
-        if (outcome === `failure`) {
-          expect(requests).toHaveLength(count + 1)
-          loader.loadMore(1)
-          expect(requests).toHaveLength(count + 1)
-          requests[count]!.deferred.resolve()
-          await participants[count]
-        } else expect(requests).toHaveLength(count)
-      } finally {
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-        await Promise.allSettled(participants)
-      }
-    },
-  )
-
-  // An invalidation that overlaps an in-flight tie request, after the source
-  // has settled once, repairs with a bounded prefix: full-source reads can be
-  // very expensive, and the bounded repair sets its boundary from its own
-  // settled requests. The older tie's later success is ignored for that
-  // boundary. When both succeed, the repair chain runs to its fixed point and
-  // retires exactly the acquisitions it replaced, once each, with no
-  // full-source request. When the repair succeeds but the older tie fails,
-  // the tie's partial writes need the full-source read that the overlap
-  // replaced, so the loader starts it at once, in either settlement order,
-  // and needs no explicit retry; on main, the overlapping full-source read
-  // recovered this case. When the repair itself fails, today's failure law
-  // holds: nothing retries eagerly, and an explicit retry releases exactly
-  // the failed acquisitions, in failure order, and recovers from the full
-  // source.
-  it.each(
-    ([`older-first`, `repair-first`] as const).flatMap((order) =>
-      ([`success`, `failure`] as const).flatMap((outcome) =>
-        ([`success`, `failure`] as const).map((olderOutcome) => ({
-          order,
-          outcome,
-          olderOutcome,
-        })),
-      ),
-    ),
-  )(
-    `repairs a tie overlap with a bounded prefix: %j`,
-    async ({ order, outcome, olderOutcome }) => {
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const participants: Array<Promise<unknown>> = []
-      const subscription = fakeSubscription(requests, releases)
-      subscription.readOrderedSnapshot = () => [
-        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-      ]
-      const loader = new OrderedSourceLoader(
-        createOrderByInfo(),
-        subscription,
-        `row`,
-        (result) => {
-          if (result instanceof Promise) {
-            participants.push(result.catch(() => undefined))
-          }
-        },
-      )
-      const flush = async () => {
-        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
-      }
-      const settle = async (index: number, succeeds: boolean) => {
-        if (succeeds) requests[index]!.deferred.resolve()
-        else requests[index]!.deferred.reject(new Error(`request failed`))
-        await flush()
-      }
-      const isFullSource = ({ options }: Observed) =>
-        options.orderBy === undefined && options.where === undefined
-      try {
-        loader.start()
-        await settle(0, true)
-        expect(requests).toHaveLength(2)
-        expect(requests[1]!.options.where).toBeDefined()
-        const olderIndex = 1
-        loader.invalidateSourceOrdering()
-        loader.loadMore()
-        const repairIndex = 2
-        expect(requests).toHaveLength(3)
-        expect(requests[repairIndex]!.options.orderBy).toBeDefined()
-        expect(requests[repairIndex]!.options.limit).toBe(1)
-        expect(requests[repairIndex]!.options.where).toBeUndefined()
-
-        const settleOlder = () => settle(olderIndex, olderOutcome === `success`)
-        const settleRepair = () => settle(repairIndex, outcome === `success`)
-        if (order === `older-first`) {
-          await settleOlder()
-          await settleRepair()
-        } else {
-          await settleRepair()
-          await settleOlder()
-        }
-
-        if (outcome === `success` && olderOutcome === `success`) {
-          // Run the repair chain to its fixed point.
-          for (let index = repairIndex + 1; index < requests.length; index++) {
-            await settle(index, true)
-          }
-          const settled = requests.length
-          expect(settled).toBeGreaterThan(repairIndex + 1)
-          expect(requests.some(isFullSource)).toBe(false)
-          expect(releases).toEqual([
-            requests[0]!.acquisition,
-            requests[olderIndex]!.acquisition,
-          ])
-          loader.loadMore()
-          loader.loadMore(1)
-          expect(requests).toHaveLength(settled)
-          expect(releases).toHaveLength(2)
-          return
-        }
-
-        if (outcome === `success`) {
-          // The older tie failed: the loader recovers from the full source.
-          for (let index = repairIndex + 1; index < requests.length; index++) {
-            if (isFullSource(requests[index]!)) break
-            await settle(index, true)
-          }
-          const full = requests.findIndex(isFullSource)
-          expect(full).toBeGreaterThan(repairIndex)
-          expect(requests.filter(isFullSource)).toHaveLength(1)
-          await settle(full, true)
-          const settled = requests.length
-          loader.loadMore()
-          expect(requests).toHaveLength(settled)
-          return
-        }
-
-        // The repair failed: nothing retries eagerly. Repair-chain work
-        // already in flight settles first; an explicit retry then waits for
-        // no request.
-        for (let index = repairIndex + 1; index < requests.length; index++) {
-          await settle(index, true)
-        }
-        const before = requests.length
-        loader.loadMore()
-        expect(requests).toHaveLength(before)
-        expect(requests.some(isFullSource)).toBe(false)
-        const failed = (
-          order === `older-first`
-            ? [olderIndex, repairIndex]
-            : [repairIndex, olderIndex]
-        ).filter(
-          (index) =>
-            (index === olderIndex ? olderOutcome : outcome) === `failure`,
-        )
-        const releasedBeforeRetry = releases.length
-        loader.loadMore(1)
-        expect(releases.slice(releasedBeforeRetry)).toEqual(
-          failed.map((index) => requests[index]!.acquisition),
-        )
-        expect(requests).toHaveLength(before + 1)
-        expect(isFullSource(requests[before]!)).toBe(true)
-      } finally {
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-        await Promise.allSettled(participants)
-      }
-    },
-  )
-
-  // A request that a bounded repair superseded can fail after that repair
-  // has finished and after a newer ordering invalidation. The failure law
-  // lets the loader's own failure block ordinary refills until an explicit
-  // retry. A superseded request's failure is not the loader's own: its
-  // partial writes need the full-source read that the overlap replaced, and
-  // nothing else will start one. Here the newer invalidation's reaction is
-  // deferred, as pending joined work or a later graph run can defer it, so
-  // the old tie fails first. The next ordinary pass must still recover.
-  // Found by a TLA+ model of the loader's request authority (#2191).
-  it(`recovers a superseded tie that fails after its repair and a newer invalidation`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const participants: Array<Promise<unknown>> = []
-    const subscription = fakeSubscription(requests, releases)
-    subscription.readOrderedSnapshot = () => [
-      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-    ]
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo(),
-      subscription,
-      `row`,
-      (result) => {
-        if (result instanceof Promise) {
-          participants.push(result.catch(() => undefined))
-        }
-      },
-    )
-    const flush = async () => {
-      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
-    }
-    const isFullSource = ({ options }: Observed) =>
-      options.orderBy === undefined && options.where === undefined
-    try {
-      loader.start()
-      requests[0]!.deferred.resolve()
-      await flush()
-      const tieIndex = 1
-      expect(requests[tieIndex]!.options.where).toBeDefined()
-
-      // The repair supersedes the in-flight tie and runs to its fixed point.
-      loader.invalidateSourceOrdering()
-      loader.loadMore()
-      const repairIndex = 2
-      expect(requests[repairIndex]!.options.where).toBeUndefined()
-      for (let index = repairIndex; index < requests.length; index++) {
-        requests[index]!.deferred.resolve()
-        await flush()
-      }
-      expect(requests.some(isFullSource)).toBe(false)
-
-      // A newer invalidation arrives; the loader's reaction is deferred.
-      loader.invalidateSourceOrdering()
-      const before = requests.length
-      requests[tieIndex]!.deferred.reject(new Error(`tie failed`))
-      await flush()
-      loader.loadMore()
-      // One full-source read recovers it, with no explicit retry.
-      expect(requests.slice(before).filter(isFullSource)).toHaveLength(1)
-    } finally {
-      loader.dispose()
-      for (const request of requests) request.deferred.resolve()
-      await Promise.allSettled(participants)
-    }
-  })
-
-  // The same overlap with an in-flight prefix read. A prefix acquisition
-  // normally supersedes every smaller settled prefix, because it covers their
-  // rows. A prefix issued before an ordering invalidation proves no current
-  // coverage, so its later result is ignored for the boundary, and for the
-  // same reason it must not release the repair's acquisitions. A refetching
-  // provider removes the rows only a released request holds, so releasing the
-  // repair's prefix can drop a row the stale read never saw. The stale prefix
-  // itself is superseded by the repair, so it is released too, in either
-  // settlement order; holding it would make every later refetch read it.
-  it.each([`older-first`, `repair-first`] as const)(
-    `keeps the repair's prefix when an older prefix read settles %s`,
-    async (order) => {
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const participants: Array<Promise<unknown>> = []
-      const subscription = fakeSubscription(requests, releases)
-      subscription.readOrderedSnapshot = () => [
-        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-      ]
-      const info = createOrderByInfo({ index: undefined, dataNeeded: () => 0 })
-      const loader = new OrderedSourceLoader(
-        info,
-        subscription,
-        `row`,
-        (result) => {
-          if (result instanceof Promise) {
-            participants.push(result.catch(() => undefined))
-          }
-        },
-      )
-      const flush = async () => {
-        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
-      }
-      const settle = async (index: number) => {
-        requests[index]!.deferred.resolve()
-        await flush()
-      }
-      const isPrefix = ({ options }: Observed) =>
-        options.orderBy !== undefined && options.cursor === undefined
-      try {
-        loader.start()
-        for (let index = 0; index < requests.length; index++) {
-          await settle(index)
-        }
-        const initial = requests.length
-
-        // A window move reads a longer prefix; it is still in flight when an
-        // order change invalidates the source.
-        info.limit = 3
-        loader.loadMore(1)
-        expect(requests).toHaveLength(initial + 1)
-        const olderIndex = initial
-        expect(requests[olderIndex]!.options.limit).toBe(3)
-        loader.invalidateSourceOrdering()
-        loader.loadMore()
-        const repairIndex = initial + 1
-        expect(requests).toHaveLength(initial + 2)
-        expect(requests[repairIndex]!.options).toMatchObject({
-          refetch: true,
-          limit: 3,
-        })
-
-        const runRepair = async () => {
-          for (let index = repairIndex; index < requests.length; index++) {
-            if (index !== olderIndex) await settle(index)
-          }
-        }
-        if (order === `older-first`) {
-          await settle(olderIndex)
-          await runRepair()
-        } else {
-          await runRepair()
-          await settle(olderIndex)
-        }
-
-        const repairAcquisitions = requests
-          .slice(repairIndex)
-          .map(({ acquisition }) => acquisition)
-        expect(requests.slice(repairIndex).filter(isPrefix)).toHaveLength(1)
-        expect(
-          releases.filter((release) => repairAcquisitions.includes(release)),
-        ).toEqual([])
-        expect(releases).toEqual(
-          expect.arrayContaining(
-            requests.slice(0, initial).map(({ acquisition }) => acquisition),
-          ),
-        )
-
-        // A stale prefix that settles after the repair finished is already
-        // superseded, so it is released at once. One that settled first is
-        // covered by the repair's own retirement.
-        expect(releases).toContain(requests[olderIndex]!.acquisition)
-
-        // A later repair still runs normally.
-        loader.invalidateSourceOrdering()
-        loader.loadMore()
-        for (let index = 0; index < requests.length; index++) {
-          await settle(index)
-        }
-        expect(releases).toContain(requests[olderIndex]!.acquisition)
-      } finally {
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-        await Promise.allSettled(participants)
-      }
-    },
-  )
-
-  // When a bounded repair finishes, it releases the acquisitions it
-  // superseded. A refetching provider then removes the rows only those
-  // acquisitions held, and the loader sees a delete of a row it sent. That
-  // removal is the repair's own retirement, not a source change: every row
-  // through the repair's boundary is held by the repair. The repair's
-  // boundary must survive it. Otherwise the loader restarts paging from the
-  // start of the order with a smaller first page that cannot retire the
-  // repair's larger prefix, and every later refetch reads both prefixes.
-  // Law: once a chain settles, the loader holds at most one acquisition that
-  // reads from the start of the order.
-  it(`keeps a repair's boundary when its retirement removes a row the loader sent`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const participants: Array<Promise<unknown>> = []
-    let removedOnRelease = false
-    // Releasing the first tie request removes row 9, which only it held.
-    const subscription = fakeSubscription(requests, releases, () => {
-      if (removedOnRelease || releases.at(-1)?.where === undefined) return
-      removedOnRelease = true
-      const row = { id: 9, rank: 2 }
-      loader.onSourceChanges(
-        [{ type: `delete`, key: 9, value: row }],
-        new Map([[9, row]]),
-        () => false,
-      )
-    })
-    subscription.readOrderedSnapshot = () => [
-      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-      { type: `insert`, key: 2, value: { id: 2, rank: 2 } },
-    ]
-    let needed = 0
-    const info = createOrderByInfo({ limit: 2, dataNeeded: () => needed })
-    const loader = new OrderedSourceLoader(
-      info,
-      subscription,
-      `row`,
-      (result) => {
-        if (result instanceof Promise) {
-          participants.push(result.catch(() => undefined))
-        }
-      },
-    )
-    const settleAll = async () => {
-      for (let index = 0; index < requests.length; index++) {
-        requests[index]!.deferred.resolve()
-        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
-      }
-    }
-    const heldPrefixes = () =>
-      requests.filter(
-        ({ options, acquisition }) =>
-          options.orderBy !== undefined &&
-          options.where === undefined &&
-          options.minValues === undefined &&
-          !releases.includes(acquisition),
-      )
-    try {
-      loader.start()
-      await settleAll()
-      expect(heldPrefixes()).toHaveLength(1)
-
-      loader.invalidateSourceOrdering()
-      loader.loadMore()
-      await settleAll()
-      expect(removedOnRelease).toBe(true)
-      expect(heldPrefixes()).toHaveLength(1)
-
-      // The window now needs one more row. It continues after the repair's
-      // boundary instead of restarting from the start of the order.
-      needed = 1
-      const before = requests.length
-      loader.loadMore()
-      await settleAll()
-      expect(requests.length).toBeGreaterThan(before)
-      expect(requests[before]!.options.minValues).toEqual([2])
-      expect(heldPrefixes()).toHaveLength(1)
-    } finally {
-      loader.dispose()
-      for (const request of requests) request.deferred.resolve()
-      await Promise.allSettled(participants)
-    }
-  })
-
-  // A provider can answer a request synchronously, as Query DB does when it
-  // reacquires a released Query from its cache. Its writes run a graph turn
-  // inside the request; that turn asks the loader for more, but the loader
-  // is still requesting and ignores it. The continuation it then stages has
-  // no later graph turn to resume it. When a turn has already processed the
-  // request's writes, the loader must continue at once, or a short window
-  // stops paging and treats unread rows as loaded.
-  it(`continues a chain whose synchronous answer the graph already processed`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    let revision = 0
-    const subscription = fakeSubscription(requests, releases)
-    const asyncRequest = subscription.requestSnapshot
-    subscription.readOrderedSnapshot = () => [
-      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-    ]
-    // Tie requests answer synchronously: they write a row, the graph turn
-    // processes it and asks for more, and the request returns `true`.
-    subscription.requestSnapshot = ((options: RequestOptions) => {
-      if (options.where === undefined) {
-        asyncRequest(options)
-        return
-      }
-      const acquisition: LoadSubsetOptions = { where: options.where }
-      requests.push({
-        method: `snapshot`,
-        options,
-        acquisition,
-        deferred: createDeferred(),
-      })
-      revision++
-      loader.loadMore()
-      options.onLoadSubsetResult?.(true, acquisition, () => {
-        releases.push(acquisition)
-      })
-    }) as typeof subscription.requestSnapshot
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({ limit: 3, dataNeeded: () => 1 }),
-      subscription,
-      `row`,
-      () => {},
-      () => false,
-      () => revision,
-    )
-    try {
-      loader.start()
-      requests[0]!.deferred.resolve()
-      await flushPromises()
-      expect(
-        requests.map(({ options }) => options.where !== undefined),
-      ).toEqual([false, true, false])
-      expect(requests[2]!.options.minValues).toEqual([1])
-    } finally {
-      loader.dispose()
-      for (const request of requests) request.deferred.resolve()
-      await flushPromises()
-    }
-  })
-
-  it.each(
-    [false, true].flatMap((fullFirst) =>
-      [false, true].flatMap((replayed) =>
-        [false, true].map((releaseThrows) => ({
-          fullFirst,
-          replayed,
-          releaseThrows,
-        })),
-      ),
-    ),
-  )(
-    `releases each failed lease once, at a covering replay or the explicit retry: %j`,
-    async ({ fullFirst, replayed, releaseThrows }) => {
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const participants: Array<Promise<unknown>> = []
-      const cleanupError = new Error(`release failed`)
-      const loader = new OrderedSourceLoader(
-        createOrderByInfo(),
-        fakeSubscription(requests, releases, () => {
-          if (releaseThrows) throw cleanupError
-        }),
-        `row`,
-        (result) => {
-          if (result instanceof Promise) participants.push(result)
-        },
-      )
-      const uncaught = captureMicrotaskErrors()
-      try {
-        loader.start()
-        loader.invalidateSourceOrdering()
-        loader.loadMore()
-        expect(requests).toHaveLength(2)
-        const order = fullFirst ? [1, 0] : [0, 1]
-        for (const index of order) {
-          const failure = new Error(`request ${index} failed`)
-          requests[index]!.deferred.reject(failure)
-          await expect(participants[index]).rejects.toBe(failure)
-        }
-        // A replay covers the source like a full-source success, so it
-        // releases the superseded page itself. Without a replay, the explicit
-        // retry releases both. A throwing release is reported uncaught.
-        if (replayed) loader.settleFullSourceReplay()
-        loader.loadMore(1)
-        await flushPromises()
-        const expected = order
-          .filter((index) => !replayed || index === 0)
-          .map((index) => requests[index]!.acquisition)
-        expect(releases).toEqual(expected)
-        // Each throwing release is reported uncaught, exactly once.
-        expect(uncaught.errors).toEqual(
-          releaseThrows ? releases.map(() => cleanupError) : [],
-        )
-        loader.loadMore(2)
-        expect(releases).toEqual(expected)
-        expect(requests).toHaveLength(replayed ? 2 : 3)
-      } finally {
-        uncaught.restore()
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-        await Promise.allSettled(participants)
-      }
-    },
-  )
-
-  it(`a page failure while a full-source demand is held releases only the page`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo(),
-      fakeSubscription(requests, releases),
-      `row`,
-    )
-    loader.start()
-    const page = (
-      loader as unknown as { pending: Promise<unknown> | undefined }
-    ).pending!
-    expect(requests.map(({ method }) => method)).toEqual([`limited`])
-
-    // A delete during the in-flight page requires authoritative repair.
-    loader.invalidateSourceOrdering()
-    loader.loadMore()
-    expect(requests.map(({ method }) => method)).toEqual([
-      `limited`,
-      `snapshot`,
-    ])
-    expect(requests[1]!.options.limit).toBeUndefined()
-    const fullSource = (
-      loader as unknown as { pending: Promise<unknown> | undefined }
-    ).pending!
-    expect(fullSource).not.toBe(page)
-
-    const failure = new Error(`page rejected`)
-    requests[0]!.deferred.reject(failure)
-    await expect(page).rejects.toBe(failure)
-
-    // Blocked automatic retry; explicit retry releases the page only and must
-    // not issue a duplicate full-source demand while one is already held.
-    expect(loader.loadMore()).toBe(fullSource)
-    expect(requests).toHaveLength(2)
-    expect(releases).toEqual([])
-    expect(loader.loadMore(1)).toBe(fullSource)
-    expect(releases).toEqual([requests[0]!.acquisition])
-    expect(requests).toHaveLength(2)
-
-    requests[1]!.deferred.resolve()
-    await fullSource
-    expect(loader.loadMore(2)).toBeUndefined()
-    expect(requests).toHaveLength(2)
-    expect(releases).toEqual([requests[0]!.acquisition])
-    loader.dispose()
-  })
-
-  it(`sync full-source failure retains no demand: replay settle is a no-op and retry reissues once`, () => {
-    const releases: Array<LoadSubsetOptions> = []
-    const methods: Array<string> = []
-    const failure = new Error(`full-source threw after callback`)
-    const acquisition: LoadSubsetOptions = {}
-    let fail = true
-    const subscription = {
-      setOrderByIndex: () => {},
-      requestSnapshot: (options: RequestOptions) => {
-        methods.push(`snapshot`)
-        if (!fail) return
-        fail = false
-        options.onLoadSubsetResult?.(true, acquisition, () =>
-          releases.push(acquisition),
-        )
-        throw failure
-      },
-    } as unknown as CollectionSubscription
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({ requiresFullSource: true }),
-      subscription,
-      `row`,
-    )
-    expect(() => loader.start()).toThrow(failure)
-    expect(releases).toEqual([acquisition])
-    expect(methods).toEqual([`snapshot`])
-
-    loader.settleFullSourceReplay()
-    expect(loader.loadMore()).toBeUndefined()
-    expect(methods).toEqual([`snapshot`])
-
-    loader.loadMore(1)
-    expect(methods).toEqual([`snapshot`, `snapshot`])
-    expect(releases).toEqual([acquisition])
-    loader.dispose()
-  })
-
-  it(`replay repairs a failed full-source demand: a later explicit retry releases nothing`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({ requiresFullSource: true }),
-      fakeSubscription(requests, releases),
-      `row`,
-    )
-    loader.start()
-    const pending = (
-      loader as unknown as { pending: Promise<unknown> | undefined }
-    ).pending!
-    const failure = new Error(`full-source rejected`)
-    requests[0]!.deferred.reject(failure)
-    await expect(pending).rejects.toBe(failure)
-    expect(requests).toHaveLength(1)
-
-    loader.settleFullSourceReplay()
-    expect(loader.loadMore(1)).toBeUndefined()
-    expect(releases).toEqual([])
-    expect(requests).toHaveLength(1)
-    expect(loader.loadMore(2)).toBeUndefined()
-    expect(requests).toHaveLength(1)
-    loader.dispose()
-  })
-
-  it(`without replay the explicit retry releases and reissues exactly once`, async () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({ requiresFullSource: true }),
-      fakeSubscription(requests, releases),
-      `row`,
-    )
-    loader.start()
-    const pending = (
-      loader as unknown as { pending: Promise<unknown> | undefined }
-    ).pending!
-    requests[0]!.deferred.reject(new Error(`full-source rejected`))
-    await expect(pending).rejects.toThrow(`full-source rejected`)
-
-    loader.loadMore(1)
-    expect(releases).toEqual([requests[0]!.acquisition])
-    expect(requests).toHaveLength(2)
-    loader.loadMore(1)
-    expect(requests).toHaveLength(2)
-    loader.dispose()
-  })
-
-  it(`a zero window opening with an offset requests the whole prefix from zero`, () => {
-    const requests: Array<Observed> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const info = createOrderByInfo({ offset: 2, limit: 0 })
-    // Production dataNeeded is limit - topK size; it never adds the offset.
-    info.dataNeeded = () => info.limit
-    const loader = new OrderedSourceLoader(
-      info,
-      fakeSubscription(requests, releases),
-      `row`,
-    )
-    loader.start()
-    expect(requests).toHaveLength(0)
-
-    info.limit = 3
-    loader.loadMore(1)
-    expect(requests).toHaveLength(1)
-    expect(requests[0]!.method).toBe(`limited`)
-    expect(requests[0]!.options.limit).toBe(5)
-    expect(requests[0]!.options.offset).toBe(0)
-    expect(requests[0]!.options.minValues).toBeUndefined()
-    loader.dispose()
-  })
-
-  it(`a failed window move keeps the snapshot; the retry loads the source once`, async () => {
-    type Row = { id: number; rank: number }
-    const truth: Array<Row> = [1, 2, 3, 4, 5, 6].map((id) => ({ id, rank: id }))
-    const failure = new Error(`page rejected`)
-    const requests: Array<{ kind: string; options: LoadSubsetOptions }> = []
-    const unloads: Array<LoadSubsetOptions> = []
-    let failNextCursor = false
-    const kindOf = (options: LoadSubsetOptions) =>
-      options.orderBy !== undefined
-        ? options.cursor
-          ? `cursor-page`
-          : `page`
-        : options.where !== undefined
-          ? `boundary`
-          : `full`
-    const source = createCollection<Row, number>({
-      id: `cut-c-probe-source`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (sync) => {
-          const installed = new Set<number>()
-          sync.markReady()
-          return {
-            loadSubset: (options) => {
-              requests.push({ kind: kindOf(options), options })
-              if (options.cursor && failNextCursor) {
-                failNextCursor = false
-                return Promise.reject(failure)
-              }
-              let rows = truth.filter(
-                (row) =>
-                  !options.where ||
-                  evaluateReferenceExpression(options.where, row) === true,
-              )
-              if (options.cursor)
-                rows = rows.filter(
-                  (row) =>
-                    evaluateReferenceExpression(
-                      options.cursor!.whereFrom,
-                      row,
-                    ) === true,
-                )
-              const offset = options.cursor ? 0 : (options.offset ?? 0)
-              rows = rows.slice(
-                offset,
-                options.limit === undefined
-                  ? undefined
-                  : offset + options.limit,
-              )
-              return (async () => {
-                await Promise.resolve()
-                const fresh = rows.filter(({ id }) => !installed.has(id))
-                if (fresh.length === 0) return
-                sync.begin()
-                for (const value of fresh) {
-                  installed.add(value.id)
-                  sync.write({ type: `insert`, value })
-                }
-                const receipt = sync.commit()
-                if (receipt !== true) await receipt
-              })()
-            },
-            unloadSubset: (options) => {
-              unloads.push(options)
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(2)
-        .select(({ row }) => ({ id: row.id, rank: row.rank })),
-    )
-    const publications: Array<Array<number>> = []
-    live.subscribeChanges(
-      (batch) => {
-        if (batch.length > 0)
-          publications.push(live.toArray.map(({ id }) => id))
-      },
-      { includeInitialState: false },
-    )
-    try {
-      await live.preload()
-      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
-      expect(requests.map(({ kind }) => kind)).toEqual([`page`, `boundary`])
-      expect(unloads).toEqual([])
-      const initialRequests = requests.length
-      publications.length = 0
-
-      failNextCursor = true
-      const move = live.utils.setWindow({ limit: 4 })
-      expect(move).not.toBe(true)
-      await expect(move).rejects.toBe(failure)
-      await flushPromises()
-      // Rows: last settled snapshot; events: none; wait: rejected; requests: one.
-      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
-      expect(publications).toEqual([])
-      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-      expect(requests.slice(initialRequests).map(({ kind }) => kind)).toEqual([
-        `cursor-page`,
-      ])
-      expect(unloads).toEqual([])
-      expect(live.status).not.toBe(`error`)
-
-      const retry = live.utils.setWindow({ limit: 4 })
-      expect(retry).not.toBe(true)
-      await retry
-      await flushPromises()
-      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3, 4])
-      expect(publications).toEqual([[1, 2, 3, 4]])
-      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
-      expect(requests.slice(initialRequests).map(({ kind }) => kind)).toEqual([
-        `cursor-page`,
-        `full`,
-      ])
-      // Retry retires the failed page; successful repair then retires earlier
-      // finite demands while keeping the new authoritative demand.
-      expect(unloads).toEqual([
-        requests[initialRequests]!.options,
-        ...requests.slice(0, initialRequests).map(({ options }) => options),
-      ])
-
-      await flushPromises()
-      expect(requests).toHaveLength(initialRequests + 2)
-    } finally {
-      await live.cleanup()
-      await source.cleanup()
-    }
-  })
-})
-
-describe(`Successful finite demand retirement`, () => {
-  it.each([`none`, `throw`, `truncate`, `dispose`] as const)(
-    `attempts releases once across %s reentry`,
-    async (action) => {
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const participants: Array<Promise<unknown>> = []
-      const failure = new Error(`release failed`)
-      let first = true
-      const subscription = fakeSubscription(requests, releases, () => {
-        if (!first) return
-        first = false
-        if (action === `throw`) throw failure
-        if (action === `truncate`) loader.resetCursor()
-        if (action === `dispose`) loader.dispose()
-      })
-      subscription.readOrderedSnapshot = () => [
-        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-      ]
-      const loader = new OrderedSourceLoader(
-        createOrderByInfo({ dataNeeded: () => 0 }),
-        subscription,
-        `row`,
-        (result) => {
-          if (result instanceof Promise) participants.push(result)
-        },
-      )
-      const uncaught = captureMicrotaskErrors()
-      try {
-        loader.start()
-        requests[0]!.deferred.resolve()
-        await participants[0]
-        requests[1]!.deferred.resolve()
-        await participants[1]
-        loader.invalidateSourceOrdering()
-        loader.loadMore()
-        requests[2]!.deferred.resolve()
-        await participants[2]
-        requests[3]!.deferred.resolve()
-        // A throwing release is reported uncaught; the load still settles.
-        await participants[3]
-        await flushPromises()
-        expect(uncaught.errors).toEqual(action === `throw` ? [failure] : [])
-        expect(releases).toEqual(
-          requests
-            .slice(0, action === `truncate` || action === `dispose` ? 1 : 2)
-            .map(({ acquisition }) => acquisition),
-        )
-        if (action === `truncate`) {
-          loader.settleFullSourceReplay()
-          expect(releases).toEqual(
-            requests.slice(0, 2).map(({ acquisition }) => acquisition),
-          )
-        }
-        loader.loadMore(1)
-        expect(new Set(releases).size).toBe(releases.length)
-        expect(requests).toHaveLength(4)
-      } finally {
-        uncaught.restore()
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-        await Promise.allSettled(participants)
-      }
-    },
-  )
-
-  it.each([`before-replay`, `after-replay`] as const)(
-    `keeps unfinished physical work observed when it settles %s`,
-    async (when) => {
-      const requests: Array<Observed> = []
-      const releases: Array<LoadSubsetOptions> = []
-      const participants: Array<Promise<unknown>> = []
-      const subscription = fakeSubscription(requests, releases)
-      let replaying = false
-      Object.defineProperty(subscription, `hasPendingTruncateReplacement`, {
-        get: () => replaying,
-      })
-      const loader = new OrderedSourceLoader(
-        createOrderByInfo(),
-        subscription,
-        `row`,
-        (result) => {
-          if (result instanceof Promise) participants.push(result)
-        },
-      )
-      try {
-        loader.start()
-        replaying = true
-        loader.resetCursor()
-        loader.loadFullSource()
-        requests[1]!.deferred.resolve()
-        await participants[1]
-        expect(releases).toEqual([])
-        const settlePage = async () => {
-          requests[0]!.deferred.resolve()
-          await participants[0]
-        }
-        if (when === `before-replay`) {
-          await settlePage()
-          expect(releases).toEqual([])
-        }
-        replaying = false
-        loader.settleFullSourceReplay()
-        if (when === `after-replay`) {
-          expect(releases).toEqual([])
-          await settlePage()
-        }
-        expect(releases).toEqual([requests[0]!.acquisition])
-      } finally {
-        loader.dispose()
-        for (const request of requests) request.deferred.resolve()
-        await Promise.allSettled(participants)
-      }
-    },
-  )
-})
 
 /**
  * # Request authority under generated settlement orders
@@ -1811,15 +69,34 @@ describe(`Successful finite demand retirement`, () => {
  *   invalidation reads no full source, and it issues at most one chain (in
  *   this fake, a prefix, a tie, and a refill) per ordering epoch move.
  * - **Ignored report:** a sync adapter's report that served pages may have
- *   shifted issues no authoritative request when nothing it describes can
- *   be wrong: before any request settled (a request in flight still owes an
- *   exact result for its own options), or while the loader's coverage is
- *   its own first ordered prefix of at least `offset + limit` rows, with
- *   only that prefix's tie after it, and a row past the page sorts strictly
- *   after its end with no more rows needed (ARCHITECTURE.md). The law judges
- *   only quiet histories: every earlier step settled a request successfully,
- *   ran a pass, inserted a row, reported, or changed joined work, and no
- *   release callback has side effects, so no earlier event owes a repair.
+ *   shifted issues no authoritative request before any request settled: a
+ *   request in flight still owes an exact result for its own options. The
+ *   loader ignores the report, and so issues no request at all, while its
+ *   coverage is a held full-source read since the last truncate, whatever
+ *   came before (an ordering invalidation owes such coverage nothing), or,
+ *   in a quiet history, while its coverage is the loader's own
+ *   first ordered prefix of at least `offset + limit` rows, with only that
+ *   prefix's tie after it, and a row past the page sorts strictly after its
+ *   end with no more rows needed (ARCHITECTURE.md). That row is evidence
+ *   only when the page read it, or when the tie the loader read is the tie
+ *   of the page's end. The law judges only quiet histories: every earlier
+ *   step settled a request successfully, ran a pass, inserted a row,
+ *   reported, shrank the window, or changed joined work, and no release
+ *   callback has side effects, so no earlier event owes a repair.
+ * - **Owed repair:** a report while the loader already owes a repair
+ *   repairs instead (ARCHITECTURE.md): the pass that reacts to it reads no
+ *   tie or page before the repair's prefix.
+ * - **Unexpressible tie:** the loader never reads the tie of a rank that no
+ *   cursor can express, such as NaN or an infinity; it reads the full source
+ *   or repairs instead (ARCHITECTURE.md; `canExpressCursorOrder`).
+ * - **Reset:** a truncate resets ordered loading, so the first finite
+ *   request after it starts at the beginning of the order, with no cursor.
+ * - **Unproven report:** in such a quiet history, a report over the loader's
+ *   own first prefix that no row it read proves starts a repair on its pass,
+ *   or reads the tie of the page's end, which completes the proof.
+ *   An installed row past the page can come from another request, and a
+ *   refetch can move the page's end before the tie the loader read, so the
+ *   loader cannot use either as proof.
  * - **One request at a time:** a request issued while another is in flight
  *   starts authority, or an authority start lies between them. A repair
  *   chain that a newer start replaced issues no more steps.
@@ -1881,6 +158,10 @@ describe(`Successful finite demand retirement`, () => {
  * - `invalidate` invalidates source ordering, and `report` delivers a
  *   loaded-subset report; either can run an ordinary pass at once or leave
  *   the reaction deferred, as pending joined work or a later graph run can;
+ * - `headInsert` delivers a new row that sorts before every installed row,
+ *   as a refetch that moved a provider row into the first page does, so the
+ *   page's end moves one row earlier. The row's rank may be `-Infinity`,
+ *   which no cursor can express;
  * - `pass` runs an ordinary `loadMore()`;
  * - `move` is an explicit window move, which may also widen the window, so
  *   an unindexed loader reads a longer prefix;
@@ -1940,8 +221,9 @@ describe(`Successful finite demand retirement`, () => {
  *
  * ## Limits
  *
- * The fake subscription's rows do not move except for the unexpressible
- * boundary, so cursor values are fixed. Publication holds are outside this
+ * The fake subscription's installed rows move only through the unexpressible
+ * boundary and a head insert. Its ordered reads apply a tie's equality, a
+ * cursor, and a limit as the subscription's reads do. Publication holds are outside this
  * property; other tests here own them. The laws do not judge requests issued
  * before a truncate, which the replay owns. The loader has no request
  * timeout, so a hung authoritative request may hold its work slot: progress
@@ -1983,6 +265,8 @@ type AuthorityCommand =
   | { type: `settle`; pick: number; ok: boolean }
   | { type: `invalidate`; react: boolean }
   | { type: `report`; react: boolean }
+  // `unexpressible` gives the row a rank that no cursor can express.
+  | { type: `headInsert`; unexpressible?: boolean }
   | { type: `failOldest` }
   | { type: `settleNewest` }
   | { type: `invalidateThenFailOldest` }
@@ -2065,6 +349,13 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
     arbitrary: fc.record({
       type: fc.constant(`report` as const),
       react: fc.boolean(),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`headInsert` as const),
+      unexpressible: fc.boolean(),
     }),
   },
   // The oldest in-flight request is the one most often superseded.
@@ -2174,6 +465,20 @@ type AuthorityObservation = {
   joinedDeferrals: number
   ignoredReportsBeforeSettle: number
   ignoredReportsInsideFirstPage: number
+  ignoredReportsOverFullSource: number
+  ignoredReportsOverFallback: number
+  repairedReportsOnOwnPage: number
+  // Reports after a refetch moved the page's end, while a repair was owed,
+  // and while authoritative work was in flight.
+  movedEndReports: number
+  // Reports whose own first page read past a window that then shrank, and
+  // reports to a disposed loader.
+  reportsPastWindow: number
+  reportsAfterDispose: number
+  // Reports whose page's end, moved by a head insert, has no cursor.
+  unexpressibleEndReports: number
+  reportsOwingRepair: number
+  reportsDuringWork: number
   truncates: number
   replayFailures: number
   optimisticDepartures: number
@@ -2200,6 +505,11 @@ async function checkAuthorityCase(
   let joinedPending = false
   let truncatePending = false
   let boundaryUnexpressible = false
+  // Rows a refetch delivered before every installed row, in rank order.
+  const headRows: Array<{ id: number; rank: number }> = []
+  // Whether an event since the last authoritative start owes a repair: an
+  // ordering invalidation, a visible delete, or an unexpressible boundary.
+  let repairOwed = false
   const info = createOrderByInfo({
     limit: testCase.limit,
     ...(testCase.indexed ? {} : { index: undefined }),
@@ -2207,7 +517,22 @@ async function checkAuthorityCase(
     ...(testCase.syncRepair ? { sourceHoldsAllRows: true } : {}),
     requiresFullSource: testCase.requiresFullSource,
     ...(testCase.joined ? { joinedFilterSourceId: `markers` } : {}),
-    dataNeeded: () => (testCase.needsMore ? 1 : 0),
+    // A window that needs more always needs one row, as behind a joined
+    // filter that drops rows. Otherwise it needs the window's rows that do
+    // not sort at or before the loaded boundary.
+    dataNeeded: (boundary?: Record<string, unknown>) =>
+      testCase.needsMore
+        ? 1
+        : Math.max(
+            0,
+            info.offset +
+              info.limit -
+              (boundary === undefined
+                ? 0
+                : snapshot().filter(
+                    ({ value }) => value.rank <= (boundary.rank as number),
+                  ).length),
+          ),
     offset: testCase.offset,
   })
   let revision = 0
@@ -2245,6 +570,8 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  let unexpressibleTieViolation: string | undefined
+  let resetViolation: string | undefined
   // A disposed loader owns nothing: it issues no request and releases no
   // lease, even as requests it issued earlier settle.
   let disposed = false
@@ -2266,21 +593,25 @@ async function checkAuthorityCase(
   let releaseFaults = 0
   let syncRepairs = 0
   let invalidatingPages = 0
+  // The rank each continuation's cursor starts after, so a read of its
+  // acquisition's rows applies the cursor as the subscription does.
+  const cursorStarts = new WeakMap<object, unknown>()
   const record = (method: Observed[`method`], options: RequestOptions) => {
     // Like the real subscription, a continuation's acquisition carries a
     // cursor, so the loader does not take it for a prefix read.
+    const cursor =
+      options.minValues === undefined
+        ? undefined
+        : ({
+            whereFrom: new PropRef([`row`, `rank`]),
+            whereCurrent: new PropRef([`row`, `rank`]),
+          } as unknown as NonNullable<LoadSubsetOptions[`cursor`]>)
+    if (cursor) cursorStarts.set(cursor, options.minValues![0])
     const acquisition: LoadSubsetOptions = {
       orderBy: options.orderBy,
       limit: options.limit,
       where: options.where,
-      ...(options.minValues === undefined
-        ? {}
-        : {
-            cursor: {
-              whereFrom: new PropRef([`row`, `rank`]),
-              whereCurrent: new PropRef([`row`, `rank`]),
-            } as unknown as NonNullable<LoadSubsetOptions[`cursor`]>,
-          }),
+      ...(cursor ? { cursor } : {}),
     }
     const fullSource =
       method === `snapshot` &&
@@ -2316,6 +647,29 @@ async function checkAuthorityCase(
       failedAt: -1,
     }
     ledger.push(request)
+    // No cursor expresses a NaN or infinite rank, so the loader reads the
+    // full source or repairs instead of reading that value's tie
+    // (ARCHITECTURE.md; `canExpressCursorOrder`).
+    // A truncate resets ordered loading (ARCHITECTURE.md), so the first
+    // finite request after it starts at the beginning of the order. A cursor
+    // there would continue from a boundary the truncate discarded.
+    if (
+      truncates > 0 &&
+      !fullSource &&
+      options.minValues !== undefined &&
+      ledger.every(
+        (other) =>
+          other === request ||
+          other.fullSource ||
+          other.issuedTruncates !== truncates,
+      )
+    ) {
+      resetViolation ??= `request ${request.index}, the first finite request after a truncate, continued from a cursor`
+    }
+    const tie = tieValue(options)
+    if (typeof tie === `number` && !Number.isFinite(tie)) {
+      unexpressibleTieViolation ??= `request ${request.index} read the tie of rank ${tie}, which no cursor can express`
+    }
     if (disposed) {
       disposeViolation ??= `request ${request.index} was issued after dispose`
     }
@@ -2329,7 +683,10 @@ async function checkAuthorityCase(
     ) {
       concurrencyViolation ??= `request ${request.index}, a step of a repair chain whose epoch moved, was issued before its replacement`
     }
-    if (startsAuthority(request)) epochMovesAtLastStart = epochMoves
+    if (startsAuthority(request)) {
+      epochMovesAtLastStart = epochMoves
+      repairOwed = false
+    }
     // An issued request consumes an owed continuation. An ordinary page also
     // shows the chain finished, since none is issued while a repair runs.
     continuationOwed = false
@@ -2449,25 +806,40 @@ async function checkAuthorityCase(
       // The page's own delivery changes source order before it returns.
       invalidateNextPage = false
       invalidatingPages++
+      repairOwed = true
       loader.invalidateSourceOrdering()
     }
     answering.push(request)
     options.onLoadSubsetResult?.(request.deferred.promise, acquisition, release)
   }
   // Installed rows in ascending rank. An unexpressible boundary makes the
-  // last one NaN, which no cursor can express.
-  const snapshot = () =>
-    Array.from({ length: testCase.snapshotRows }, (_, index) => ({
-      type: `insert`,
-      key: index + 1,
-      value: {
-        id: index + 1,
-        rank:
-          boundaryUnexpressible && index === testCase.snapshotRows - 1
-            ? Number.NaN
-            : index + 1,
-      },
-    }))
+  // last one NaN, which no cursor can express. A read applies a tie's
+  // equality, a cursor (rows strictly after its start), and the limit, as
+  // the subscription's ordered read does.
+  const snapshot = (options?: LoadSubsetOptions) => {
+    const tie = options === undefined ? undefined : tieValue(options)
+    const after = options?.cursor && cursorStarts.get(options.cursor)
+    return [
+      ...headRows.map((row) => ({ type: `insert`, key: row.id, value: row })),
+      ...Array.from({ length: testCase.snapshotRows }, (_, index) => ({
+        type: `insert`,
+        key: index + 1,
+        value: {
+          id: index + 1,
+          rank:
+            boundaryUnexpressible && index === testCase.snapshotRows - 1
+              ? Number.NaN
+              : index + 1,
+        },
+      })),
+    ]
+      .filter(
+        ({ value }) =>
+          (tie === undefined || value.rank === tie) &&
+          (after === undefined || value.rank > (after as number)),
+      )
+      .slice(0, options?.limit)
+  }
   const subscription = {
     readOrderedSnapshot: snapshot,
     setOrderByIndex: () => {},
@@ -2540,6 +912,53 @@ async function checkAuthorityCase(
   let joinedDeferrals = 0
   let ignoredReportsBeforeSettle = 0
   let ignoredReportsInsideFirstPage = 0
+  let ignoredReportsOverFullSource = 0
+  let ignoredReportsOverFallback = 0
+  let repairedReportsOnOwnPage = 0
+  let movedEndReports = 0
+  let reportsPastWindow = 0
+  let reportsAfterDispose = 0
+  let unexpressibleEndReports = 0
+  let reportsOwingRepair = 0
+  let reportsDuringWork = 0
+  // Steps that settle a request successfully, run a pass, report, or change
+  // joined work. None of them owes a repair.
+  const quietCommand = (command: AuthorityCommand) =>
+    (command.type === `settle` && command.ok) ||
+    command.type === `settleNewest` ||
+    command.type === `pass` ||
+    command.type === `report` ||
+    command.type === `headInsert` ||
+    // A window that shrinks shows only rows that were already proven.
+    (command.type === `move` && command.delta === -1) ||
+    command.type === `joinedBusy` ||
+    command.type === `joinedIdle`
+  // An unproven report whose pass pending joined work deferred: the ledger
+  // index at the report and the window size it judged.
+  let owedProof:
+    { from: number; endRank: unknown; expressible: boolean } | undefined
+  // The proof is a bounded repair or the tie of the page's end. With every
+  // installed rank expressible, a full-source read is not a repair: the
+  // bounded repair is available (ARCHITECTURE.md), and a full-source read is
+  // the cost the report path avoids.
+  const expectProofRequest = (
+    from: number,
+    endRank: unknown,
+    expressible: boolean,
+  ) => {
+    const issued = ledger
+      .slice(from)
+      .some(
+        ({ authoritative, fullSource, options }) =>
+          (authoritative && (!fullSource || !expressible)) ||
+          tieValue(options) === endRank,
+      )
+    if (!issued) {
+      throw new Error(
+        `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
+      )
+    }
+  }
   let truncates = 0
   let replayFailures = 0
   let optimisticDepartures = 0
@@ -2668,6 +1087,14 @@ async function checkAuthorityCase(
     if (releaseViolation) {
       throw new Error(`release ${checkpoint}: ${releaseViolation}`)
     }
+    if (resetViolation) {
+      throw new Error(`reset ${checkpoint}: ${resetViolation}`)
+    }
+    if (unexpressibleTieViolation) {
+      throw new Error(
+        `unexpressible tie ${checkpoint}: ${unexpressibleTieViolation}`,
+      )
+    }
     if (concurrencyViolation) {
       throw new Error(
         `one request at a time ${checkpoint}: ${concurrencyViolation}`,
@@ -2759,6 +1186,9 @@ async function checkAuthorityCase(
     await flush()
     if (testCase.settledFirst && ledger[0]) await settle(ledger[0], true)
     for (const [step, command] of testCase.history.entries()) {
+      // An event outside the quiet set, such as a truncate, a failure, a
+      // move, or a disposal, can change or end what a deferred report owes.
+      if (owedProof && !quietCommand(command)) owedProof = undefined
       switch (command.type) {
         case `settle`: {
           const open = inflight()
@@ -2795,6 +1225,7 @@ async function checkAuthorityCase(
         // or a later graph run defers it, while the oldest in-flight request
         // fails before the loader reacts.
         case `invalidateThenFailOldest`: {
+          repairOwed = true
           loader.invalidateSourceOrdering()
           const request = inflight()[0]
           if (!request) break
@@ -2808,6 +1239,7 @@ async function checkAuthorityCase(
           break
         }
         case `invalidate`:
+          repairOwed = true
           loader.invalidateSourceOrdering()
           if (command.react) graphPass()
           await flush()
@@ -2820,25 +1252,21 @@ async function checkAuthorityCase(
             !testCase.releaseTruncates &&
             !testCase.releaseDisposes &&
             !boundaryUnexpressible &&
-            testCase.history
-              .slice(0, step)
-              .every(
-                (earlier) =>
-                  (earlier.type === `settle` && earlier.ok) ||
-                  earlier.type === `settleNewest` ||
-                  earlier.type === `pass` ||
-                  earlier.type === `report` ||
-                  earlier.type === `joinedBusy` ||
-                  earlier.type === `joinedIdle`,
-              ) &&
+            testCase.history.slice(0, step).every(quietCommand) &&
             ledger.every(({ outcome }) => outcome !== `failed`)
           const windowSize = testCase.offset + info.limit
           const [first, ...later] = ledger
           const beforeSettle = ledger.every(({ outcome }) => outcome !== `ok`)
-          const insideFirstPage =
+          // The page's end is the installed row at the window's last position.
+          const ranks = snapshot().map(({ value }) => value.rank)
+          const endRank = ranks[windowSize - 1]
+          const expressible = ranks.every((rank) => Number.isFinite(rank))
+          // The loader's coverage is its own first page with only tie
+          // requests after it.
+          const ownFirstPage =
             !testCase.requiresFullSource &&
             !testCase.needsMore &&
-            testCase.snapshotRows > windowSize &&
+            ranks.length > windowSize &&
             first !== undefined &&
             first.outcome === `ok` &&
             !first.authoritative &&
@@ -2855,11 +1283,89 @@ async function checkAuthorityCase(
                 options.cursor === undefined &&
                 options.orderBy === undefined,
             )
+          // A row past the page proves the source's next row only when the
+          // page read it, or when it ties with the page's end and the loader
+          // read that tie. Any other installed row can come from another
+          // request, so it proves nothing, and neither does a tie of an older
+          // end that a head insert moved.
+          const insideFirstPage =
+            ownFirstPage &&
+            ((first.options.limit ?? 0) > windowSize ||
+              later.some(({ options }) => tieValue(options) === endRank))
+          if (ownFirstPage && (first.options.limit ?? 0) > windowSize) {
+            reportsPastWindow++
+          }
+          if (
+            ownFirstPage &&
+            later.some(({ options }) => tieValue(options) !== undefined) &&
+            !insideFirstPage
+          ) {
+            movedEndReports++
+          }
+          // Coverage is a held full-source read since the last truncate. It
+          // owes nothing whatever came before, so this premise needs no quiet
+          // history.
+          const coversSource =
+            !replayPending() &&
+            !isDisposed() &&
+            ledger.some(
+              ({ fullSource, outcome, released, issuedTruncates }) =>
+                fullSource &&
+                outcome === `ok` &&
+                !released &&
+                issuedTruncates === truncates,
+            )
+          if (isDisposed()) reportsAfterDispose++
+          if (
+            ownFirstPage &&
+            typeof endRank === `number` &&
+            !Number.isFinite(endRank)
+          ) {
+            unexpressibleEndReports++
+          }
+          const owesRepair =
+            repairOwed && !replayPending() && !isDisposed() && command.react
+          if (owesRepair) reportsOwingRepair++
+          if (
+            ledger.some(
+              ({ outcome, authoritative, hung }) =>
+                outcome === `inflight` && authoritative && !hung,
+            )
+          ) {
+            reportsDuringWork++
+          }
           const before = ledger.length
           loader.revalidateLoadedCoverage()
           if (command.react) graphPass()
           await flush()
-          if (quiet && (beforeSettle || insideFirstPage)) {
+          // A report while a repair is owed repairs instead: no tie or page
+          // comes before the repair's prefix.
+          const firstIssued = ledger[before]
+          if (owesRepair && firstIssued && !firstIssued.authoritative) {
+            throw new Error(
+              `owed repair: request ${firstIssued.index}, an ordinary read, came before the repair a report owed`,
+            )
+          }
+          // A report the loader cannot prove covers nothing it could change
+          // owes a repair, which its next pass starts, or a tie request for
+          // the page's end, which completes the proof. Pending joined work
+          // defers ordinary loading, so the pass that runs when that work
+          // finishes owes the request instead.
+          if (
+            command.react &&
+            quiet &&
+            !beforeSettle &&
+            ownFirstPage &&
+            !insideFirstPage
+          ) {
+            if (joinedPending && testCase.joined) {
+              owedProof = { from: before, endRank, expressible }
+            } else {
+              expectProofRequest(before, endRank, expressible)
+              repairedReportsOnOwnPage++
+            }
+          }
+          if (quiet && beforeSettle) {
             const issued = ledger
               .slice(before)
               .find(({ authoritative }) => authoritative)
@@ -2868,9 +1374,48 @@ async function checkAuthorityCase(
                 `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
               )
             }
-            if (beforeSettle) ignoredReportsBeforeSettle++
-            else ignoredReportsInsideFirstPage++
+            ignoredReportsBeforeSettle++
+          } else if ((quiet && insideFirstPage) || coversSource) {
+            // The loader ignores the report, so it reads nothing for it.
+            const issued = ledger[before]
+            if (issued) {
+              throw new Error(
+                `ignored report: request ${issued.index} was read for a report over coverage that ${coversSource ? `a full-source read` : `the loader's own first page`} proves`,
+              )
+            }
+            if (!coversSource) ignoredReportsInsideFirstPage++
+            else if (testCase.requiresFullSource) ignoredReportsOverFullSource++
+            // A paged loader whose boundary fell back to a full-source read.
+            else ignoredReportsOverFallback++
           }
+          break
+        }
+        // A refetch delivered a row that sorts before every installed row.
+        case `headInsert`: {
+          // One `-Infinity` row at most: a second would tie with it, which
+          // the fake's subtraction order cannot compare.
+          const unexpressible =
+            command.unexpressible === true &&
+            headRows.every(({ rank }) => Number.isFinite(rank))
+          const row = {
+            id: 1001 + headRows.length,
+            rank: unexpressible
+              ? Number.NEGATIVE_INFINITY
+              : -1 -
+                headRows.filter(({ rank }) => Number.isFinite(rank)).length,
+          }
+          headRows.push(row)
+          headRows.sort((left, right) =>
+            left.rank === right.rank ? 0 : left.rank < right.rank ? -1 : 1,
+          )
+          loader.onSourceChanges(
+            [{ type: `insert`, key: row.id, value: row }],
+            sentRows,
+            () => false,
+          )
+          sentRows.set(row.id, row)
+          graphPass()
+          await flush()
           break
         }
         case `pass`:
@@ -2897,6 +1442,7 @@ async function checkAuthorityCase(
         case `unexpressibleBoundary`:
           boundaryUnexpressible = !boundaryUnexpressible
           if (boundaryUnexpressible) unexpressibleBoundaries++
+          repairOwed = true
           loader.invalidateSourceOrdering()
           graphPass()
           await flush()
@@ -2910,6 +1456,15 @@ async function checkAuthorityCase(
           joinedPending = false
           graphPass()
           await flush()
+          if (owedProof) {
+            expectProofRequest(
+              owedProof.from,
+              owedProof.endRank,
+              owedProof.expressible,
+            )
+            owedProof = undefined
+            repairedReportsOnOwnPage++
+          }
           break
         case `truncate`:
           truncate()
@@ -2939,6 +1494,7 @@ async function checkAuthorityCase(
           await flush()
           break
         case `sourceDelete`:
+          repairOwed = true
           sourceDeletes++
           loader.onSourceChanges(
             [{ type: `delete`, key: 1, value: { id: 1, rank: 1 } }],
@@ -3128,16 +1684,20 @@ async function checkAuthorityCase(
         // Cost: a full-source read is very expensive, so a repair avoids one
         // whenever a bounded read is available (ARCHITECTURE.md). That holds
         // after a settled request in this incarnation, for a plan that does
-        // not need the full source, with an expressible boundary, unless an
-        // unindexed window still needs rows past a repeated prefix (the
-        // documented fallback). One repair is then one chain per ordering
-        // epoch move: in this fake, a prefix, a tie, and a refill.
+        // not need the full source, with an expressible boundary. An
+        // unindexed window that still needs rows grows its prefix instead
+        // (ARCHITECTURE.md, "an underfilled unindexed prefix grows"). One
+        // repair is then one chain per ordering epoch move: a prefix, then a
+        // tie and a refill page for each boundary it reaches (ARCHITECTURE.md,
+        // ordered repair). Each boundary is a different installed row, so a
+        // chain issues at most one prefix plus two requests per row.
         await drain()
         const repair = ledger.slice(before)
         const boundedRepair =
           !testCase.requiresFullSource &&
-          !boundaryUnexpressible &&
-          (testCase.indexed || !testCase.needsMore) &&
+          // Every installed rank is expressible, so no boundary needs the
+          // full-source fallback.
+          snapshot().every(({ value }) => Number.isFinite(value.rank)) &&
           repair.every(({ outcome }) => outcome === `ok`) &&
           ledger.some(
             (request) =>
@@ -3157,10 +1717,29 @@ async function checkAuthorityCase(
             (request) => request.authoritative,
           ).length
           const chains = epochMoves - movesBefore
-          if (authoritative > 3 * chains) {
+          if (authoritative > chains * (1 + 2 * snapshot().length)) {
             throw new Error(
               `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
             )
+          }
+          // Each boundary is a different read: no chain reads the same
+          // prefix, tie, or page twice.
+          const reads = new Map<string, number>()
+          for (const { authoritative: owed, options } of repair) {
+            if (!owed) continue
+            const read = JSON.stringify([
+              options.limit,
+              tieValue(options),
+              options.minValues,
+            ])
+            reads.set(read, (reads.get(read) ?? 0) + 1)
+          }
+          for (const [read, count] of reads) {
+            if (count > chains) {
+              throw new Error(
+                `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+              )
+            }
           }
         }
       }
@@ -3196,6 +1775,15 @@ async function checkAuthorityCase(
     joinedDeferrals,
     ignoredReportsBeforeSettle,
     ignoredReportsInsideFirstPage,
+    ignoredReportsOverFullSource,
+    ignoredReportsOverFallback,
+    repairedReportsOnOwnPage,
+    movedEndReports,
+    reportsPastWindow,
+    reportsAfterDispose,
+    unexpressibleEndReports,
+    reportsOwingRepair,
+    reportsDuringWork,
     truncates,
     replayFailures,
     optimisticDepartures,
@@ -3236,6 +1824,15 @@ const authorityCampaigns =
     : authorityReplay.replayProperty === authorityProperty
       ? ([`replay`] as const)
       : ([] as const)
+
+// The authority law is checked by checkAuthorityCase: it runs one generated or
+// replayed history through the real loader and compares each observation with
+// the request ledger. The grammar is authorityCaseArbitrary, which the campaigns
+// and the calibration witnesses below read for coverage.
+declareOracle({
+  check: [checkAuthorityCase],
+  grammar: [authorityCaseArbitrary],
+})
 
 describe(`Ordered source request authority`, () => {
   // The model's strand trace: a repair supersedes the in-flight tie and
@@ -3612,9 +2209,85 @@ describe(`Ordered source request authority`, () => {
       },
     },
     {
-      // Without the first-page check, the report repaired a window that the
-      // loader's own first prefix already proves.
-      name: `a report while the window is inside the loader's first page`,
+      // The first page and its tie settle, then joined work starts. A report
+      // over the moved end stages only that end's tie, and pending joined
+      // work defers it. The pass after the joined work finishes must read it;
+      // a loader that dropped the staged tie read nothing.
+      name: `a staged end tie that waits for joined work`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `joinedBusy` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // A truncate after a deferred unproven report hands the window to its
+      // replay, so the pass after the joined work owes no repair or tie.
+      name: `an unproven report whose deferred pass a truncate replaces`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: true },
+          { type: `truncate` },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // Pending joined work defers the pass after an unproven report, so the
+      // repair or tie that the report owes waits for that work. The pass that
+      // runs when it finishes must start it. A random campaign found the law
+      // judging the deferred pass instead.
+      name: `an unproven report while joined work defers loading`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        snapshotRows: 3,
+        needsMore: false,
+        history: [
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+          { type: `report`, react: true },
+          { type: `joinedIdle` },
+        ],
+      },
+    },
+    {
+      // The first page read only the window, and the loader's tie request
+      // read a value past it, not the page's end. An installed row past the
+      // page can come from another request, so it proves nothing, and the
+      // report must repair. Ignoring it kept a window that missed a row tied
+      // with a refetched page's end.
+      name: `a report over a first page that read only the window`,
       testCase: {
         indexed: false,
         limit: 1,
@@ -3625,6 +2298,7 @@ describe(`Ordered source request authority`, () => {
         snapshotRows: 3,
         needsMore: false,
         history: [
+          { type: `settle`, pick: 0, ok: true },
           { type: `settle`, pick: 0, ok: true },
           { type: `report`, react: true },
         ],
@@ -3667,6 +2341,7 @@ describe(`Ordered source request authority`, () => {
         joinedDeferrals: 0,
         ignoredReportsBeforeSettle: 0,
         ignoredReportsInsideFirstPage: 0,
+        repairedReportsOnOwnPage: 0,
         truncates: 0,
         replayFailures: 0,
         optimisticDepartures: 0,
@@ -3728,12 +2403,178 @@ describe(`Ordered source request authority`, () => {
         for (const [dimension, count] of Object.entries(later)) {
           if (
             dimension === `startThrowsDuringFailure` ||
-            dimension === `ignoredReportsInsideFirstPage`
+            dimension === `ignoredReportsInsideFirstPage` ||
+            dimension === `repairedReportsOnOwnPage`
           )
             continue
           expect(count, dimension).toBeGreaterThan(0)
         }
       }
+    },
+    120_000,
+  )
+
+  // The report laws need premises that the broad grammar rarely lines up.
+  // Each history here starts with one of these prefixes over random case
+  // parameters, then a random suffix:
+  // - the first page and its tie settle, then a report: the window is
+  //   inside the loader's own first page, so the report is ignored;
+  // - the same, but a head insert first moves the page's end before the tie
+  //   the loader read, so the report is unproven;
+  // - an invalidation whose reaction waits, then a report that reacts: a
+  //   repair is owed;
+  // - an invalidation that starts its repair, then a report while that
+  //   repair is in flight;
+  // - a two-row window whose first page and tie settle, then shrinks to one
+  //   row before a report: the page read past the window, which proves it;
+  // - the moved-end prefix with the loader disposed before the report, which
+  //   the dispose law then judges;
+  // - the moved-end prefix with a `-Infinity` head row, so no cursor can
+  //   express the page's new end;
+  // - a one-row window whose page and tie settle, then a `-Infinity` head
+  //   row and an invalidation: the repair's boundary has no cursor, so it
+  //   falls back to a full-source read, and a report follows over it;
+  // - a plan that reads only the full source, then a report over it.
+  // A release that truncates or disposes would end the quiet history, so
+  // no prefix allows one.
+  const unprovenReportProperty = `ordered-loader.unproven-report`
+  const reportPrefixes: Array<{
+    history: Array<AuthorityCommand>
+    fullSource?: boolean
+    narrow?: boolean
+    wide?: boolean
+  }> = [
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert` },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `invalidate`, react: false },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `invalidate`, react: true },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `move`, delta: -1 },
+        { type: `report`, react: true },
+      ],
+      wide: true,
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert` },
+        { type: `dispose` },
+        { type: `report`, react: true },
+      ],
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert`, unexpressible: true },
+        { type: `report`, react: true },
+      ],
+      // The end is the `-Infinity` row only in a one-row window.
+      narrow: true,
+    },
+    {
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `headInsert`, unexpressible: true },
+        { type: `invalidate`, react: true },
+        { type: `settleNewest` },
+        { type: `settleNewest` },
+        { type: `settleNewest` },
+        { type: `report`, react: true },
+      ],
+      narrow: true,
+    },
+    { history: [{ type: `report`, react: true }], fullSource: true },
+  ]
+  const unprovenReportCase: fc.Arbitrary<AuthorityCase> = fc
+    .tuple(
+      authorityCaseArbitrary,
+      fc.constantFrom(...reportPrefixes),
+      fc.array(authorityCommand, { maxLength: 8 }),
+    )
+    .map(([testCase, prefix, rest]) => ({
+      ...testCase,
+      settledFirst: true,
+      requiresFullSource: prefix.fullSource === true,
+      ...(prefix.wide ? { limit: 2 as const, offset: 0 as const } : {}),
+      ...(prefix.narrow ? { limit: 1 as const, offset: 0 as const } : {}),
+      snapshotRows: 3,
+      needsMore: false,
+      releaseTruncates: false,
+      releaseDisposes: false,
+      history: [...prefix.history, ...rest],
+    }))
+  const unprovenReportCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === unprovenReportProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+
+  it.each(unprovenReportCampaigns)(
+    `answers each loaded-subset report as its coverage requires (%s campaign)`,
+    async (campaign) => {
+      // Declared reach: histories where each report law judged a report.
+      const reportStates = [
+        `repairedReportsOnOwnPage`,
+        `ignoredReportsInsideFirstPage`,
+        `ignoredReportsOverFullSource`,
+        `ignoredReportsOverFallback`,
+        `movedEndReports`,
+        `reportsPastWindow`,
+        `reportsAfterDispose`,
+        `unexpressibleEndReports`,
+        `reportsOwingRepair`,
+        `reportsDuringWork`,
+      ] as const
+      const reach = createOracleReach(unprovenReportProperty, reportStates, {
+        minimum: 20,
+      })
+      await fc.assert(
+        fc.asyncProperty(unprovenReportCase, async (testCase) => {
+          reach.beginHistory()
+          const observation = await checkAuthorityCase(testCase)
+          for (const state of reportStates) {
+            if (observation[state] > 0) reach.reach(state)
+          }
+        }),
+        campaign === `fixed`
+          ? { seed: 20261023, numRuns: oracleRuns(1000) }
+          : oraclePropertyOptions(1000, unprovenReportProperty),
+      )
+      reach.assertReached()
     },
     120_000,
   )

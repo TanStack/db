@@ -45,6 +45,8 @@ type PendingSyncedKeyState<T extends object> = {
 type PendingSyncedProjection<T extends object, TKey extends string | number> = {
   states: Map<TKey, PendingSyncedKeyState<T>>
   truncated: boolean
+  /** Keys a queued source operation writes; seeds do not count. */
+  sourceKeys: Set<TKey>
 }
 
 type PendingInsertDisposition = `insert` | `update` | `duplicate`
@@ -70,7 +72,17 @@ interface PendingSyncedTransaction<
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
   /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
-  preserveHydrationSeedKeys?: boolean
+  /**
+   * Keys whose writes keep their hydration-seed status and fix no adapter
+   * authority: a DbClient seed chunk's keys, or a wrapping sync's storage
+   * read's seed rows.
+   */
+  preserveHydrationSeedKeys?: ReadonlySet<TKey>
+  /**
+   * Set on a truncate that keeps `preserveHydrationSeedKeys`: a schema reset
+   * on demand truncates the source's state of every other key (decision 20).
+   */
+  sourceTruncate?: boolean
   /** Builds the error for an open transaction whose insert a replay invalidates. */
   duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
   /**
@@ -78,6 +90,27 @@ interface PendingSyncedTransaction<
    * later transaction begun inside it commits first. Its commit rejects.
    */
   invalidationError?: Error
+}
+
+/** The parts of a wrapping sync's staged transaction that seed authority reads. */
+export type StagedSyncTransaction<TKey extends string | number> = {
+  truncate?: boolean
+  operations: ReadonlyArray<{ key: unknown }>
+  rowMetadataWrites: ReadonlyMap<TKey, unknown>
+  preserveHydrationSeedKeys?: ReadonlySet<TKey>
+  sourceTruncate?: boolean
+}
+
+/** Whether a sync transaction truncates the source's state of this key. */
+export function truncatesSourceKey<TKey extends string | number>(
+  transaction: StagedSyncTransaction<TKey>,
+  key: TKey,
+): boolean {
+  const kept = transaction.preserveHydrationSeedKeys
+  return (
+    transaction.truncate === true &&
+    (!kept || (transaction.sourceTruncate === true && !kept.has(key)))
+  )
 }
 
 export type PendingMetadataWrite =
@@ -123,17 +156,23 @@ export class CollectionStateManager<
   private pendingSyncedProjection: PendingSyncedProjection<TOutput, TKey> = {
     states: new Map(),
     truncated: false,
+    sourceKeys: new Set(),
   }
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
   public syncedCollectionMetadata = new Map<string, unknown>()
   public hydrationSeedKeys = new Set<TKey>()
   public hydratedKeys = new Set<TKey>()
-  // DbClient may receive a stale hydration chunk after an adapter delete.
-  // Only DbClient collections retain these absences until cleanup because
+  // DbClient may receive a stale hydration chunk after adapter work. Each key
+  // whose row metadata an applied adapter write fixed maps to whether that
+  // write deleted the row: row metadata is a separate object, closed to later
+  // seeds even when the adapter never wrote the row, and a delete also closes
+  // the row. Only DbClient collections retain these until cleanup because
   // hydration has no completion boundary.
-  private appliedAdapterDeletedKeys?: Set<TKey>
-  private hasAppliedAdapterTruncate = false
+  public appliedAdapterKeys?: Map<TKey, boolean>
+  public hasAppliedAdapterTruncate = false
+  /** Held seeds that the applied adapter truncate kept (decision 20). */
+  public adapterTruncateKeptKeys = new Set<TKey>()
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -147,6 +186,9 @@ export class CollectionStateManager<
   // transaction for the key that it has not handed to this Collection yet.
   // Such a transaction holds settled optimistic rows like a queued one.
   private isDeferredSyncKey: (key: TKey) => boolean = () => false
+  // Those committed transactions themselves, for hydration seed authority.
+  public getStagedSyncTransactions: () => Array<StagedSyncTransaction<TKey>> =
+    () => []
   public heldOptimisticRows = new Map<
     TKey,
     { owner: Transaction<any>; row?: TOutput }
@@ -177,7 +219,7 @@ export class CollectionStateManager<
     TKey,
     {
       row: TOutput
-      synced: boolean
+      hasPendingWrites: boolean
       origin: VirtualOrigin
       collectionId: string
       enriched: WithVirtualProps<TOutput, TKey>
@@ -239,10 +281,10 @@ export class CollectionStateManager<
 
   /**
    * Snapshot virtual properties from the current or supplied prior state.
-   * A row with an optimistic write is local and unsynced; otherwise it keeps
-   * the source row's attribution. Local-only rows are always local and synced.
+   * A row with an optimistic write is local and pending; otherwise it keeps
+   * the source row's attribution. Local-only rows are always local without pending writes.
    *
-   * This is local mutation status, not backend confirmation: `$synced: true` means the
+   * This is local mutation status, not backend confirmation: `$hasPendingWrites: false` means the
    * row is not currently affected by an optimistic transaction in this
    * collection's visible state.
    */
@@ -260,7 +302,6 @@ export class CollectionStateManager<
 
     return {
       $hasPendingWrites: hasOptimisticChange,
-      $synced: !hasOptimisticChange,
       $origin:
         this.isLocalOnly || hasOptimisticChange
           ? 'local'
@@ -290,7 +331,8 @@ export class CollectionStateManager<
     virtualProps: VirtualRowProps<TKey>,
   ): WithVirtualProps<TOutput, TKey> {
     const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
-    const synced = existingRow.$synced ?? virtualProps.$synced
+    const hasPendingWrites =
+      existingRow.$hasPendingWrites ?? virtualProps.$hasPendingWrites
     const origin = existingRow.$origin ?? virtualProps.$origin
     const resolvedKey = existingRow.$key ?? virtualProps.$key
     const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
@@ -299,7 +341,7 @@ export class CollectionStateManager<
     if (
       cached &&
       cached.row === row &&
-      cached.synced === synced &&
+      cached.hasPendingWrites === hasPendingWrites &&
       cached.origin === origin &&
       cached.collectionId === collectionId
     ) {
@@ -308,8 +350,7 @@ export class CollectionStateManager<
 
     const enriched = {
       ...row,
-      $hasPendingWrites: !synced,
-      $synced: synced,
+      $hasPendingWrites: hasPendingWrites,
       $origin: origin,
       $key: resolvedKey,
       $collectionId: collectionId,
@@ -317,7 +358,7 @@ export class CollectionStateManager<
 
     this.virtualPropsCache.set(resolvedKey, {
       row,
-      synced,
+      hasPendingWrites,
       origin,
       collectionId,
       enriched,
@@ -525,8 +566,12 @@ export class CollectionStateManager<
    * Lets a wrapping sync report which keys have committed sync transactions
    * it has not handed to this Collection yet.
    */
-  public setDeferredSyncKeys(isDeferred: (key: TKey) => boolean): void {
+  public setDeferredSyncKeys(
+    isDeferred: (key: TKey) => boolean,
+    getStaged: () => Array<StagedSyncTransaction<TKey>> = () => [],
+  ): void {
     this.isDeferredSyncKey = isDeferred
+    this.getStagedSyncTransactions = getStaged
   }
 
   /**
@@ -744,7 +789,8 @@ export class CollectionStateManager<
         currentValue !== undefined &&
         (!deepEquals(previousValue, currentValue) ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
-          previousVirtualProps.$synced !== nextVirtualProps.$synced)
+          previousVirtualProps.$hasPendingWrites !==
+            nextVirtualProps.$hasPendingWrites)
       ) {
         events.push({
           type: `update`,
@@ -780,27 +826,7 @@ export class CollectionStateManager<
   }
 
   enableHydrationAuthorityTracking(): void {
-    this.appliedAdapterDeletedKeys ??= new Set<TKey>()
-  }
-
-  /** A late hydration seed cannot supersede committed adapter work. */
-  createAdapterAuthorityLookup(): (key: TKey) => boolean {
-    const queuedKeys = new Set<TKey>()
-    let queuedTruncate = false
-    for (const transaction of this.pendingSyncedTransactions) {
-      if (!transaction.committed || transaction.preserveHydrationSeedKeys)
-        continue
-      if (transaction.truncate) queuedTruncate = true
-      for (const operation of transaction.operations) {
-        queuedKeys.add(operation.key as TKey)
-      }
-    }
-    return (key) =>
-      this.hasAppliedAdapterTruncate ||
-      queuedTruncate ||
-      queuedKeys.has(key) ||
-      this.appliedAdapterDeletedKeys?.has(key) === true ||
-      (this.syncedData.has(key) && !this.hydrationSeedKeys.has(key))
+    this.appliedAdapterKeys ??= new Map<TKey, boolean>()
   }
 
   private getProjectedSyncedKeyState(
@@ -827,19 +853,23 @@ export class CollectionStateManager<
   }
 
   /**
-   * Accept a committed seed transaction, such as a DbClient hydration chunk,
-   * ahead of any still-open source transaction, so that source's `commit()`
-   * still targets its own writes.
+   * Accept a committed transaction in commit order: after every accepted
+   * transaction and ahead of every open one. A transaction begun inside an
+   * open one is independent, so when it commits first it also applies, and
+   * the source reads it, beneath that open transaction. A seed, such as a
+   * DbClient hydration chunk, is accepted the same way, so an open source
+   * transaction's `commit()` still targets its own writes.
    */
-  acceptSeedTransaction(
+  acceptSyncTransaction(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
   ): void {
-    const open = this.pendingSyncedTransactions.findIndex(
-      (pending) => !pending.committed,
-    )
-    if (open === -1) this.pendingSyncedTransactions.push(transaction)
-    else this.pendingSyncedTransactions.splice(open, 0, transaction)
-    this.refreshPendingSyncedProjection()
+    const queue = this.pendingSyncedTransactions
+    const index = queue.indexOf(transaction)
+    if (index !== -1) queue.splice(index, 1)
+    const open = queue.findIndex((pending) => !pending.committed)
+    const position = open === -1 ? queue.length : open
+    queue.splice(position, 0, transaction)
+    if (position !== index) this.refreshPendingSyncedProjection()
     this.commitPendingTransactions()
   }
 
@@ -889,13 +919,27 @@ export class CollectionStateManager<
   ): PendingInsertDisposition {
     const current = this.getProjectedSyncedKeyState(projection, key)
     if (!current.exists) return `insert`
-    if (
-      (current.value !== undefined && deepEquals(current.value, value)) ||
-      this.hydrationSeedKeys.has(key)
-    ) {
+    // A seed is older than every source write, so an insert replaces a row
+    // that only a seed supplied. Over a row the source wrote, it is judged
+    // like any insert, holds and seeds notwithstanding.
+    if (this.hydrationSeedKeys.has(key) && !projection.sourceKeys.has(key))
+      return `insert`
+    if (current.value !== undefined && deepEquals(current.value, value)) {
       return `update`
     }
     return `duplicate`
+  }
+
+  /**
+   * A partial update merges over the row before it. An insert names the
+   * whole row, even as an equal re-insert, and replaces it.
+   */
+  private mergesOverRow(operation: PendingSyncOperation<TOutput, TKey>) {
+    return (
+      operation.type === `update` &&
+      operation.originalSyncType !== `insert` &&
+      (this.config.sync.rowUpdateMode || `partial`) === `partial`
+    )
   }
 
   /** Classify an adapter insert against retained and queued source state. */
@@ -915,10 +959,9 @@ export class CollectionStateManager<
     operation: PendingSyncOperation<TOutput, TKey>,
   ): void {
     const key = operation.key as TKey
-    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
     if (operation.type === `delete`) {
       projection.states.set(key, { exists: false, value: undefined })
-    } else if (operation.type === `update` && rowUpdateMode === `partial`) {
+    } else if (this.mergesOverRow(operation)) {
       const current = this.getProjectedSyncedKeyState(projection, key)
       projection.states.set(key, {
         exists: true,
@@ -930,11 +973,17 @@ export class CollectionStateManager<
     }
   }
 
-  /** Extend the queued projection after admitting one sync operation. */
+  /**
+   * Extend the queued projection after admitting one sync operation. A key
+   * its transaction keeps as a seed's is no source write, as in the rebuild.
+   */
   stagePendingSyncOperation(
     operation: PendingSyncOperation<TOutput, TKey>,
+    preserved?: boolean,
   ): void {
     this.applyPendingSyncOperation(this.pendingSyncedProjection, operation)
+    if (!preserved)
+      this.pendingSyncedProjection.sourceKeys.add(operation.key as TKey)
   }
 
   private rebuildAutomaticRowMetadataWrites(
@@ -957,22 +1006,32 @@ export class CollectionStateManager<
 
   /**
    * Rebuild the queued projection after truncate, application, or an
-   * accepted seed changes queue history. An open transaction can become
+   * accepted transaction changes queue history. An accepted transaction keeps
+   * the operation kinds it was accepted with, even when it commits ahead of
+   * an open transaction it began inside: its insert names the whole row. An
+   * open transaction's inserts follow the rows before it, so it can become
    * invalid when a later transaction begun inside it commits first; it then
-   * holds an invalidation error that its commit returns. Only the open last
-   * transaction can be canceled, so a replay that invalidates a committed
-   * transaction is an invariant failure.
+   * holds an invalidation error that its commit returns.
    */
   private rebuildPendingSyncedProjection(): void {
     const projection: PendingSyncedProjection<TOutput, TKey> = {
       states: new Map(),
       truncated: false,
+      sourceKeys: new Set(),
     }
+    // The source keys that an accepted transaction writes.
+    const acceptedSourceKeys = new Set<TKey>()
 
     for (const transaction of this.pendingSyncedTransactions) {
       if (transaction.invalidationError !== undefined) continue
-      const statesBeforeTransaction = new Map(projection.states)
-      const truncatedBeforeTransaction = projection.truncated
+      // Only an open transaction can become invalid and need this rollback.
+      const before = transaction.committed
+        ? undefined
+        : {
+            states: new Map(projection.states),
+            truncated: projection.truncated,
+            sourceKeys: new Set(projection.sourceKeys),
+          }
       if (transaction.truncate) {
         projection.states = new Map()
         projection.truncated = true
@@ -981,9 +1040,19 @@ export class CollectionStateManager<
       let invalidKey: TKey | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
+        // A seed beneath an open insert of a row the source also wrote can
+        // change that row, but not the insert's kind: it stays what the
+        // source wrote. An accepted source write makes the row the source's,
+        // as its application does.
         if (
+          !transaction.committed &&
           operation.originalSyncType === `insert` &&
-          operation.type !== `delete`
+          operation.type !== `delete` &&
+          !(
+            this.hydrationSeedKeys.has(key) &&
+            projection.sourceKeys.has(key) &&
+            !acceptedSourceKeys.has(key)
+          )
         ) {
           const disposition = this.classifyProjectedInsert(
             projection,
@@ -997,20 +1066,20 @@ export class CollectionStateManager<
           operation.type = disposition
         }
         this.applyPendingSyncOperation(projection, operation)
+        if (!transaction.preserveHydrationSeedKeys?.has(key)) {
+          projection.sourceKeys.add(key)
+          if (transaction.committed) acceptedSourceKeys.add(key)
+        }
       }
       if (invalidKey !== undefined) {
-        if (transaction.committed)
-          throw new SyncQueueInvariantError(
-            `replay made an accepted insert a duplicate`,
-          )
-        projection.states = statesBeforeTransaction
-        projection.truncated = truncatedBeforeTransaction
+        Object.assign(projection, before)
         transaction.invalidationError =
           transaction.duplicateKeyError?.(invalidKey) ??
           new SyncTransactionAbortedError()
         continue
       }
-      this.rebuildAutomaticRowMetadataWrites(transaction)
+      if (!transaction.committed)
+        this.rebuildAutomaticRowMetadataWrites(transaction)
     }
 
     this.pendingSyncedProjection = projection
@@ -1162,7 +1231,6 @@ export class CollectionStateManager<
           })
         }
       }
-      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
@@ -1172,15 +1240,28 @@ export class CollectionStateManager<
           // Keep active local mutations for later source transactions on keys
           // this truncate does not write. Completed attribution is one-use.
           this.syncedData.clear()
-          this.syncedMetadata.clear()
-          this.hydrationSeedKeys.clear()
-          this.hydratedKeys.clear()
-          if (
-            !transaction.preserveHydrationSeedKeys &&
-            this.appliedAdapterDeletedKeys
-          ) {
-            this.hasAppliedAdapterTruncate = true
-            this.appliedAdapterDeletedKeys.clear()
+          // A wrapping sync's storage read that keeps seed keys replaces
+          // rows without truncating the source's authority over them or
+          // their metadata. A schema reset on demand truncates all but its
+          // kept seeds (decision 20).
+          const kept = transaction.sourceTruncate
+            ? transaction.preserveHydrationSeedKeys
+            : undefined
+          if (!transaction.preserveHydrationSeedKeys || kept) {
+            // A kept seed keeps the authority a source write fixed over
+            // one of its objects too.
+            for (const keys of [
+              this.syncedMetadata,
+              this.hydrationSeedKeys,
+              this.hydratedKeys,
+              this.appliedAdapterKeys ?? new Set<TKey>(),
+            ])
+              for (const key of keys.keys())
+                if (!kept?.has(key)) keys.delete(key)
+            if (this.appliedAdapterKeys) {
+              this.hasAppliedAdapterTruncate = true
+              this.adapterTruncateKeptKeys = new Set(kept)
+            }
           }
           this.virtualPropsCache.clear()
           this.rowOrigins.clear()
@@ -1228,7 +1309,7 @@ export class CollectionStateManager<
           } else {
             this.syncedData.set(
               key,
-              operation.type === `update` && rowUpdateMode === `partial`
+              this.mergesOverRow(operation)
                 ? { ...this.syncedData.get(key), ...operation.value }
                 : operation.value,
               deferOrder,
@@ -1240,16 +1321,24 @@ export class CollectionStateManager<
           this.pendingLocalChanges.delete(key)
           this.pendingLocalOrigins.delete(key)
           if (!this.isDeferredSyncKey(key)) this.heldOptimisticRows.delete(key)
-          if (!transaction.preserveHydrationSeedKeys) {
+          if (!transaction.preserveHydrationSeedKeys?.has(key)) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
+            // A write that brings a deleted row back keeps the metadata the
+            // delete cleared.
             if (operation.type === `delete`)
-              this.appliedAdapterDeletedKeys?.add(key)
-            else this.appliedAdapterDeletedKeys?.delete(key)
+              this.appliedAdapterKeys?.set(key, true)
+            else if (this.appliedAdapterKeys?.get(key))
+              this.appliedAdapterKeys.set(key, false)
           }
         }
 
         for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+          if (
+            !transaction.preserveHydrationSeedKeys?.has(key) &&
+            !this.appliedAdapterKeys?.has(key)
+          )
+            this.appliedAdapterKeys?.set(key, false)
           if (metadataWrite.type === `delete`) {
             this.syncedMetadata.delete(key)
             continue
@@ -1347,7 +1436,7 @@ export class CollectionStateManager<
             value,
             key,
             this.collection.id,
-            () => previousVirtualProps.$synced,
+            () => previousVirtualProps.$hasPendingWrites,
             () => previousVirtualProps.$origin,
           )
 
@@ -1361,7 +1450,8 @@ export class CollectionStateManager<
         }
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         if (
-          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
+          previousVirtualProps.$hasPendingWrites !==
+            nextVirtualProps.$hasPendingWrites ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
           !deepEquals(previousVisibleValue, newVisibleValue)
         ) {
@@ -1567,14 +1657,15 @@ export class CollectionStateManager<
     this.heldOptimisticRows.clear()
     this.hydrationSeedKeys.clear()
     this.hydratedKeys.clear()
-    this.appliedAdapterDeletedKeys?.clear()
+    this.appliedAdapterKeys?.clear()
     this.hasAppliedAdapterTruncate = false
+    this.adapterTruncateKeptKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.localOnlyDirectWrite = undefined
     this.size = 0
     this.pendingSyncedTransactions = []
-    this.pendingSyncedProjection = { states: new Map(), truncated: false }
+    this.refreshPendingSyncedProjection()
     this.preSyncVisibleState.clear()
     this.preSyncVirtualState.clear()
     this.recentlySyncedKeys.clear()

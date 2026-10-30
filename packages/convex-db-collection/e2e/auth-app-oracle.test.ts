@@ -19,6 +19,7 @@ import { makeFunctionReference } from 'convex/server'
 import { createCollection } from '@tanstack/db'
 import { expect, inject, it } from 'vitest'
 import { convexCollectionOptions } from '../src/index'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from '../tests/helpers'
 
 declare module 'vitest' {
@@ -54,7 +55,31 @@ const permitted: Record<Role, ReadonlyArray<Operation>> = {
   write: [`send`],
   admin: [`send`, `delete`],
 }
-const history: ReadonlyArray<{ role: Role; operation: Operation }> = [
+type Step = { role: Role; operation: Operation }
+
+/**
+ * The model: one authored step, from the message multiset before it to the
+ * multiset after it. A permitted send adds the body and a permitted delete
+ * removes one copy of it. A denied step leaves the multiset unchanged. The
+ * permitted table above is the model's authority.
+ */
+function stepModel(
+  model: ReadonlyArray<string>,
+  step: Step,
+  body: string,
+): { allowed: boolean; next: Array<string> } {
+  const next = [...model]
+  const allowed = permitted[step.role].includes(step.operation)
+  if (allowed) {
+    if (step.operation === `send`) next.push(body)
+    else next.splice(next.indexOf(body), 1)
+  }
+  return { allowed, next }
+}
+
+declareOracle({ model: [stepModel] })
+
+const history: ReadonlyArray<Step> = [
   { role: `read`, operation: `send` },
   { role: `write`, operation: `send` },
   { role: `write`, operation: `delete` },
@@ -116,11 +141,11 @@ it.each([`javascript`, `react`] as const)(
     await withTestCleanup(
       async () => {
         await collection.preload()
-        const model: Array<string> = []
+        let model: Array<string> = []
         for (const step of history) {
           // This is the upstream demo's public role selector, not admin auth.
           await client.mutation(role, { role: step.role })
-          const allowed = permitted[step.role].includes(step.operation)
+          const predicted = stepModel(model, step, marker)
           const inserted = [...collection.values()].find(
             (row) => row.body === marker,
           )
@@ -128,10 +153,9 @@ it.each([`javascript`, `react`] as const)(
             step.operation === `send`
               ? client.mutation(send, { body: marker })
               : client.mutation(remove, { messageId: inserted!._id })
-          if (allowed) {
+          if (predicted.allowed) {
             await attempt
-            if (step.operation === `send`) model.push(marker)
-            else model.splice(model.indexOf(marker), 1)
+            model = predicted.next
           } else
             await expect(attempt).rejects.toThrow(`Insufficient permissions`)
           await collection.utils.awaitSync()

@@ -32,18 +32,20 @@ The SSR-friendly API adds six concepts:
 - `@tanstack/react-router-with-db` streams live queries discovered by Suspense
   during a TanStack Start server render.
 
-Existing apps continue to work. `createCollection(...)` and direct collection
-instances still exist. The migration is required when you want SSR-safe request
-isolation, hydration, incremental chunks, Suspense streaming, or the 1.0-ready
-React hook shape.
+`createCollection(...)` and direct collection instances remain supported.
+Adopt descriptors and a `DbClient` when you want SSR-safe request isolation,
+hydration, incremental chunks, or Suspense streaming. These APIs were already
+available in 0.9.2; adopting SSR is optional when upgrading to the RC. For the
+breaking changes from 0.9.2, see
+[Migrating to the 1.0 RC](./migrate-to-1-0-rc.md).
 
-The old dependency-array form now warns:
+The dependency-array form was removed in the first 1.0 RC:
 
 ```tsx
 useLiveQuery((q) => q.from({ todos }).where(...), [status])
 ```
 
-It still works, but warns in development and will be removed in 1.0. Prefer:
+Use the query config form instead:
 
 ```tsx
 useLiveQuery({
@@ -645,8 +647,18 @@ is:
 3. hydrated rows
 
 Fresh adapter sync is authoritative over all three. Hydrated and initial rows
-are provisional base state, so the adapter's first insert for the same key is
-reconciled as an update instead of raising a duplicate-key error.
+are provisional base state. The adapter's first insert for the same key
+replaces the provisional row and its row metadata instead of raising a
+duplicate-key error; an insert without metadata clears the seed's metadata.
+An adapter update merges over the provisional row like any update. A hydrated
+row that arrives after the adapter has written its key, or while the adapter's
+transaction for it is open, does not change what the adapter wrote: it only
+supplies a row or row metadata that the adapter has not written. Row data and
+row metadata count separately, so a later hydrated row can still supply
+metadata for a key whose row the adapter only updated. After an adapter delete
+or truncate, a later hydrated row does not bring the key back. Among hydrated
+rows for a key the adapter has not written, the latest one wins, including its
+row metadata or the lack of it.
 
 Hydrated rows and `initialData` never mark adapter sync as ready by themselves.
 The adapter still owns readiness through its sync lifecycle.
@@ -704,14 +716,7 @@ captures in `queryKey`, so the query recompiles when they change.
 DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
 
-Dependency arrays are accepted for backwards compatibility:
-
-```tsx
-useLiveQuery((q) => q.from({ todo: todoCollection }), [status])
-```
-
-They warn in development and will be removed in 1.0. Migrate to the config
-object form:
+Use the config object form:
 
 ```tsx
 useLiveQuery({
@@ -723,6 +728,11 @@ Add `queryKey` only if the query uses opaque logic or trips the performance
 warning.
 
 ## Migration Guide
+
+This section shows how to adopt SSR from standalone Collections. If your app
+already uses `DbClient`, keep that setup and apply the
+[RC migration changes](./migrate-to-1-0-rc.md), including hook dependency arrays
+and explicit server preparation.
 
 ### 1. Create descriptors instead of SSR singletons
 
@@ -810,6 +820,7 @@ useLiveQuery(
     q
       .from({ todo: todoCollection })
       .where(({ todo }) => eq(todo.status, status)),
+  // @ts-expect-error Dependency arrays are removed in the RC.
   [status],
 )
 
@@ -874,23 +885,25 @@ rendering instead.
 
 ## Compatibility
 
-No existing public API is removed by this change.
+The SSR APIs remain available in the first 1.0 RC. React dependency-array hook forms have been removed.
 
 Still supported:
 
 - `createCollection(...)`
 - passing collection instances to `useLiveQuery(...)`
-- `useLiveQuery(queryFn, deps)`
-- `useLiveSuspenseQuery(queryFn, deps)`
 - mutation APIs such as `insert`, `update`, `delete`, `subscribe`, and
   optimistic mutation helpers
 
-Warnings:
+Query identity checks:
 
-- React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` throws `UnhashableQueryIRError` in a
-  hook that compares identity (React, Preact, or any `DbClient`-backed hook).
+- React hooks use derived query identity or an explicit, nonempty `queryKey`.
+- Opaque query IR without a nonempty `queryKey` throws
+  `UnhashableQueryIRError` in a hook that compares identity (React, Preact, or
+  any `DbClient`-backed hook).
 - Expensive derived identity warns in development and suggests `queryKey`.
+
+Opaque query IR without a serializable `queryKey` throws when React cannot
+derive a stable identity.
 
 Required for SSR:
 
@@ -906,7 +919,10 @@ Required for render-time Suspense streaming:
 - `useLiveSuspenseQuery(...)` inside a Suspense boundary
 - a stable derived query identity or explicit serializable `queryKey`
 
-## Detailed Changelog
+## SSR Introduction Changelog
+
+This section records the original SSR feature release. Its React dependency
+array deprecation was completed in the first 1.0 RC.
 
 ### Added
 
@@ -946,7 +962,7 @@ Required for render-time Suspense streaming:
   `from`, `join`, `leftJoin`, and `unionAll` sources when a `DbProvider` is
   present.
 - React live query identity is derived from normalized structured IR when no
-  explicit `queryKey` or legacy dependency array is supplied.
+  explicit `queryKey` is supplied.
 - Explicit collection preloading serializes normalized collection rows.
 - Live-query preloading and render-time discovery serialize ordered result
   snapshots without implicitly serializing source collections.
@@ -961,10 +977,10 @@ Required for render-time Suspense streaming:
 - Incremental chunks use the same collection payload shape as full dehydration.
 - Streamed live-query promises resolve to live-query result snapshots.
 
-### Deprecated
+### Since Removed
 
 - React dependency arrays for `useLiveQuery` and wrappers that delegate to it.
-  They still work and warn in development. They are planned for removal in 1.0.
+  They were removed in the first 1.0 RC.
 
 ### Not Changed
 
@@ -982,7 +998,8 @@ The SSR strategy is covered by:
 - core `DbClient` tests for hydration, streaming chunks, sync metadata,
   initial data precedence, explicit ids, and no optimistic serialization
 - React tests for `DbProvider`, descriptor resolution, derived query identity,
-  `queryKey`, deprecation warnings, SSR result snapshots, and atomic handoff
+  `queryKey`, derived-identity performance warnings, SSR result snapshots, and
+  atomic handoff
 - Svelte tests for provider ownership, server snapshot rendering, and browser
   handoff
 - query adapter tests to ensure Query cache behavior still holds

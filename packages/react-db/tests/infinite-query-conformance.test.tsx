@@ -19,6 +19,7 @@ import {
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { rejectReadsAfterRenderError } from './rejected-binding'
@@ -139,7 +140,8 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   )
 }
 
-// An empty dependency list compiles the query once, at mount.
+// Retain this registration for replay coordinates. It uses the current
+// derived-identity API.
 function mountWithDependencyList(
   build: QueryBuild,
   config: InfiniteQueryConfig = {},
@@ -147,15 +149,15 @@ function mountWithDependencyList(
   const log: Observations = []
   return makeHandle(
     renderHook(() =>
-      useRecorded(useLiveInfiniteQuery(build as any, config as any, []), log),
+      useRecorded(useLiveInfiniteQuery(build as any, config as any), log),
     ),
     log,
   )
 }
 
-// React compares query identity on two production paths: the identity derived
-// from the query IR on every render (the 1.0 form), and a deprecated
-// dependency list. The suite runs once per path.
+// The legacy dependency-list label preserves receiving registrations and replay
+// coordinates. Both branches now use the current derived-identity API; these
+// labels do not represent separate production paths.
 type IdentityPath = `derived` | `dependency list`
 
 const mountControllableWith = (path: IdentityPath) =>
@@ -171,9 +173,7 @@ const mountControllableWith = (path: IdentityPath) =>
           path === `derived`
             ? // The callback captures param, so its IR identity changes with it.
               useLiveInfiniteQuery((q: any) => build(q, param), config as any)
-            : useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
-                param,
-              ]),
+            : useLiveInfiniteQuery((q: any) => build(q, param), config as any),
           log,
         ),
       { initialProps: { param: initial } },
@@ -247,11 +247,10 @@ function mountInputControllable(
   const hook = renderHook(
     ({ kind }: { kind: `collection` | `query` }) =>
       useRecorded(
-        useLiveInfiniteQuery(
-          kind === `collection` ? collection : build,
-          config as any,
-          [kind],
-        ),
+        useLiveInfiniteQuery(kind === `collection` ? collection : build, {
+          ...(config as any),
+          queryKey: [kind],
+        }),
         log,
       ),
     {
@@ -285,7 +284,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
         return useRecorded(
           path === `derived`
             ? useLiveInfiniteQuery((q: any) => build(q, param), keyed)
-            : useLiveInfiniteQuery((q: any) => build(q, param), keyed, [param]),
+            : useLiveInfiniteQuery((q: any) => build(q, param), keyed),
           log,
         )
       },
@@ -329,16 +328,19 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   knownGaps: [],
 }
 
-runInfiniteQuerySuite(reactInfiniteDriver)
-runInfiniteQuerySuite({
-  ...reactInfiniteDriver,
-  name: `react (dependency list)`,
-  mount: mountWithDependencyList,
-  mountControllable: mountControllableWith(`dependency list`),
-  mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
-})
+runInfiniteQuerySuite(reactInfiniteDriver, registerInfiniteQueryUnitScenarios)
+runInfiniteQuerySuite(
+  {
+    ...reactInfiniteDriver,
+    name: `react (dependency list)`,
+    mount: mountWithDependencyList,
+    mountControllable: mountControllableWith(`dependency list`),
+    mountKeyedControllable: mountKeyedControllableWith(`dependency list`),
+  },
+  registerInfiniteQueryUnitScenarios,
+)
 
-it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {
+it(`publishes query-function pages on the first layout commit after mount and queryKey replacement`, async () => {
   const source = makeSource(
     Array.from({ length: 10 }, (_, index) => ({
       id: String(index + 1),
@@ -355,8 +357,7 @@ it(`publishes query-function pages on the first layout commit after mount and de
             .from({ row: source.collection })
             .where(({ row }) => gt(row.rank, minimum))
             .orderBy(({ row }) => row.rank, `desc`),
-        { pageSize: 3 },
-        [minimum],
+        { ...{ pageSize: 3 }, queryKey: [minimum] },
       )
       useLayoutEffect(() => {
         if (!result.collection) {
@@ -386,7 +387,7 @@ it(`publishes query-function pages on the first layout commit after mount and de
     await waitFor(() =>
       expect(hook.result.current.data.map(({ rank }) => rank)).toEqual([10, 9]),
     )
-    // Replacing the dependency builds a fresh eager collection, so its first
+    // Replacing queryKey builds a fresh eager collection, so its first
     // commit is ready too — no idle flash on re-query.
     expect(commits[0]).toEqual({
       ranks: [10, 9],
