@@ -6133,57 +6133,64 @@ mutants remain required receiving checks. Generated docs remain CI-owned.
 
 ### Framework row snapshot isolation
 
-The Frameworks owner now includes
-[`conformance/row-snapshot-oracle.ts`](../../packages/db/tests/conformance/row-snapshot-oracle.ts),
-registered by the existing shared adapter suite. Its law comes from immutable
-Collection updates, `PendingMutation.original`, `ChangeMessage.previousValue`,
-and the framework result contract. Materialization preserves borrowed source
-rows while current hook results follow each update.
+The **Frameworks** owner judges preservation of borrowed Collection values at
+actual framework boundaries. Authority is immutable updates,
+`PendingMutation.original`, `ChangeMessage.previousValue`, and the shared
+`packages/db/tests/conformance/contract.ts` result law. The shared executable
+owner is `packages/db/tests/conformance/row-snapshot-oracle.ts`. Core supplies
+admitted source facts before materialization. This relational comparison judges
+adapter preservation, not Core draft normalization or prototype policy.
 
-Each real framework driver runs 42 bounded histories: seven nested container
-shapes × callback/config/supplied Collection inputs × sync/optimistic writes.
-Solid adds a native `createStore` shape for 48 histories, plus 24 local-only
-source histories covering all eight shapes through the same model and
-comparison. Three successive updates distinguish initial objects from later
-admissions. The oracle retains `get()`, `previousValue`, and mutation original
-references and checks them at settled cuts and while an optimistic handler is
-held. Every input/write group and container shape declares and asserts its own
-reach. Complete row values and recursive exact own keys expose added fields,
-root deletion representation, and own-undefined admission and removal in an
-existing nested container. Subclass methods have independent model premises
-for both current and retained values.
+Eight common shapes cross one/two keys, callback/config/supplied Collection
+inputs, and sync/optimistic writes: 96 histories per common driver. Solid adds
+native stores for 108 histories, plus 54 real local-only histories. React also
+runs a DbClient driver. All six adapters pass. Two-key histories share initial
+containers and alternate updates. Odd alias splits retain the actual prior
+right source node. Three updates per key distinguish initial and later
+admissions, alias split/merge, hidden string data, and own-undefined/omission.
 
-Expected rows come from scalar versions and declared source profiles. The
-local-only profile models Core normalization and own-undefined deletion;
-null-prototype, subclass, and native-store held edits change only scalar values
-so Core normalization does not masquerade as adapter behavior. Controlled sync
-histories admit native stores on every update; local-only histories start with
-a native store and then use ordinary replacements.
+Every receiving group asserts its own reach. The shared comparison checks
+complete current values and retained `get()`, `previousValue`, and actual
+transaction `original` references after each update. Optimistic handlers also
+have a held cut. The local-only driver returns actual mutation receipts.
+Alternative legal source-shape policy is accepted. Original-only corruption and
+cross-row caching mutants distinguish the extended owner from its predecessor.
 
-Original Solid production fails the extended oracle. Eight hostile mutants
-reject the original defect, initial-only or update-only copying, shared sibling
-aliases, lost array prototypes, source-owned enumerable getters, and missing
-root or nested own-undefined reconciliation. The repair detaches mutable Solid
-containers at both entry points, preserves container prototypes and opaque
-leaves, materializes enumerable accessor values, and preserves nonenumerable
-accessor descriptors. Separate Solid shape subscriptions witness `Object.keys`
-and `in` notifications for root and nested own-undefined transitions. All six
-adapters pass. See the [evidence and review record](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md).
+Solid's separate receiving owner,
+`packages/solid-db/tests/row-materialization-oracle.test.tsx`, judges nested
+identity, binding lifetime, current array membership, live nested getters, and
+bounded shared-graph work. Its 85 finite histories include real `For` and effect
+consumers, native-store-only writes, reorder, growth/shrink/empty arrays, getter
+admission/replacement/omission/readmission, and crossed old/new graph sharing.
+The maintainer chose live getters and efficient shared acyclic graphs on
+2026-10-30, with cyclic support decided separately. Work counts source and owned
+container enumerations against an unchanged 32-per-distinct-container budget.
+This is a bounded regression check, not a public SLO or a complexity proof.
 
-Limits: one key, three updates, the modeled container shapes, immutable function
-leaves, and the drivers' documented settled cuts. Nonenumerable accessor
-evaluation, general symbol-update fidelity, cyclic updates, callback-time
-atomicity, and other settlement schedules are outside this receiving
-comparison. Hidden symbols remain outside the selected-value boundary;
-enumerable user symbols are copied. Existing framework and optimistic-history
-owners retain their other responsibilities.
+The repair skips unchanged source rows, reuses unchanged nested copies,
+untracks admission, preserves live getters through private result copies, and
+separates aliases that diverge. Solid setters retain notification ownership.
+The extended oracles run RED before each repair and GREEN afterward. Hostile
+mutants reject source tracking, frozen getters, cross-row caches, alias
+corruption, hidden-field omission, repeated graph expansion, and missed array
+length notifications. See the [current review and evidence record](oracle-reviews/2026-10-30-solid-row-materialization-review.md)
+and [historical record](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md).
+
+Limits: the stated finite histories and real hosts' settled/held-handler cuts.
+Core normalization, arbitrary cycles, arbitrary getter/setter bodies, hidden
+symbols, all descriptor-visibility notification combinations, callback atomicity,
+other settlement schedules, and real browser rendering are not established.
+Core may evaluate root getters before the adapter receives them. The live
+getter claim covers nested accessors actually admitted to Solid. Cycle policy
+remains a separate maintainer decision, as explicitly requested. Existing
+framework, includes, and optimistic-history owners retain other responsibilities.
 
 The **Drafts and native values** owner retains an unresolved Core boundary:
 assigning a native Solid store through `Collection.update` can promote hidden
 host bookkeeping symbols during Core detachment. Support policy for that
-host-proxy assignment needs a maintainer decision before it can be classified
-as a product-law violation. The needed receiving witness is real `createStore`
-→ `Collection.update`, distinguishing user keys from wrapper metadata in stored
-and retained values. The current local-only histories use ordinary replacements
-after initial admission and do not establish this path. This limit does not
-exempt direct adapter store input, which the controlled sync histories cover.
+host-proxy assignment needs a maintainer decision before classification as a
+product-law violation. The needed receiving witness is actual `createStore`
+into `Collection.update`, distinguishing user keys from wrapper metadata in
+stored and retained values. Local-only histories use ordinary replacements
+after initial admission. Controlled sync histories admit native stores on
+every update and cover direct adapter input.

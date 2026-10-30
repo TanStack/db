@@ -384,3 +384,13 @@ Final evaluated code fingerprint: **`bf8ca3a767dc7d204a75a3f4d69386b58c8e9669fc2
 This is SHA-256 over the 13 changed TypeScript paths in sorted repository-relative
 order, each path followed by NUL, file contents, and NUL. It supersedes the initial
 five-file fingerprint above.
+
+## Subsequent materialization review
+
+The ten-item external review and later independent findings changed the
+materializer and snapshot model again. The append-only
+[materialization review](2026-10-30-solid-row-materialization-review.md) records
+that evaluation against published head `1d619bb67`, the repaired code commit,
+final receiving reach, RED/GREEN/mutant evidence, and remaining limits. Its
+current evidence supersedes the earlier implementation and coverage summaries
+above without rewriting their historical claims.
