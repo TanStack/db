@@ -262,3 +262,27 @@ and real browser rendering are not established. Native Solid proxy assignment
 through Core drafts remains a separate support-policy question. The coverage
 map retains its owner and required receiving witness. No wall-clock SLO or
 universal graph-complexity proof follows from the bounded counters.
+
+
+## Subsequent oracle-review correction
+
+A later four-agent review found that the React registrations described above
+as ordinary and DbClient drivers actually execute the same derived-identity
+API. Neither supplies DbClient receiving evidence. The former alias counts also
+credited the later-object history whose initial config is null. It supplies no
+mutable cross-row alias. These historical claims are inaccurate. The current
+coverage map and [native revision record](2026-10-30-solid-native-store-review.md)
+correct them and preserve the later findings. Earlier closure statements apply
+only to their recorded comparisons and do not establish the newly expanded
+root-field boundary, which has a known Core counterexample.
+
+## Final native and Core correction, code `2e962b1797e69066de52344fad9ea71811bc843e`
+
+The maintainer authorized fixing Core here. The pending-scope status above is
+historical. The final native helper replaces custom recursive reconciliation,
+and Core now preserves enumerable own source fields and accepted inherited-name
+destinations. The final [native review](2026-10-30-solid-native-store-review.md)
+records all new O1-O12 dispositions, valid RED/GREEN/mutant evidence, exact code,
+and accepted limits. Both React registrations remain derived-identity paths,
+with no DbClient credit. Core draft symbol-write policy and lifecycle #2310
+retain their separate owners.

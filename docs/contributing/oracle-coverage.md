@@ -6141,13 +6141,18 @@ owner is `packages/db/tests/conformance/row-snapshot-oracle.ts`. Core supplies
 admitted source facts before materialization. This relational comparison judges
 adapter preservation, not Core draft normalization or prototype policy.
 
-Eight common shapes cross one/two keys, callback/config/supplied Collection
-inputs, and sync/optimistic writes: 96 histories per common driver. Solid adds
-native stores for 108 histories, plus 54 real local-only histories. React also
-runs a DbClient driver. All six adapters pass. Two-key histories share initial
-containers and alternate updates. Odd alias splits retain the actual prior
-right source node. Three updates per key distinguish initial and later
-admissions, alias split/merge, hidden string data, and own-undefined/omission.
+Nine common shapes cross one/two keys, callback/config/supplied Collection
+inputs, and sync/optimistic writes: 108 histories per common driver. Solid adds
+native stores for 120 histories, plus 60 real local-only histories. React has two
+registrations of its derived-identity API, labelled `react` and
+`react (dependency list)`; neither is a DbClient receiving driver. Two-key
+histories share initial containers and alternate updates. Actual mutable sharing
+is asserted before crediting cross-row alias reach: eight common histories and
+nine Solid histories per group. The later-object shape starts at null and gets
+no mutable-alias credit. Three updates per key distinguish initial and later
+admissions, alias split/merge, hidden string data, inherited-name shadows, and
+own-undefined/omission. The grammar contains 828 history slots across 45 group tests, including the
+duplicate React API registration.
 
 Every receiving group asserts its own reach. The shared comparison checks
 complete current values and retained `get()`, `previousValue`, and actual
@@ -6167,14 +6172,45 @@ The maintainer chose live getters and efficient shared acyclic graphs on
 container enumerations against an unchanged 32-per-distinct-container budget.
 This is a bounded regression check, not a public SLO or a complexity proof.
 
-The repair skips unchanged source rows, reuses unchanged nested copies,
-untracks admission, preserves live getters through private result copies, and
-separates aliases that diverge. Solid setters retain notification ownership.
-The extended oracles run RED before each repair and GREEN afterward. Hostile
-mutants reject source tracking, frozen getters, cross-row caches, alias
-corruption, hidden-field omission, repeated graph expansion, and missed array
-length notifications. See the [current review and evidence record](oracle-reviews/2026-10-30-solid-row-materialization-review.md)
-and [historical record](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md).
+The native-store revision skips unchanged source rows and memoizes immutable,
+detached nested stores by source identity within each row. Solid setters update
+the ordinary stable root row and replace changed nested containers. Consumers
+must read the current nested path reactively: a captured old nested proxy does
+not follow replacement. Native stores supply getter tracking and notifications.
+Explicit root own-key admission handles inherited-name and own-undefined cases.
+The complete graph comparison checks mixed paths without imposing alias identity.
+Valid derived array-wrapper prototypes retain source methods, and local-only
+original reach requires a nonempty actual receipt. See the
+[native revision review](oracle-reviews/2026-10-30-solid-native-store-review.md)
+and the historical [materialization](oracle-reviews/2026-10-30-solid-row-materialization-review.md)
+and [snapshot](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md) records.
+
+**Core source-field and destination preservation:** the maintainer authorized
+fixing the sibling Core boundary in this PR. The existing context-transport
+owner now imports its public-field model/grammar from
+`packages/db/tests/conformance/public-field-oracle.ts`. Sixty histories cross
+six source keys, root/nested location, four selection forms, five stages, and
+ordinary/inherited nested destinations. Root Collection and three correlated
+forms supply 1,200 path/stage observations; the original 819 observations remain.
+The source admission check precedes result comparisons. Five restored wrong
+merge/destination designs fail intended own-field assertions. Real framework
+callback/config receivers reuse the same models and comparison for twelve
+new destination cells per input. Fourteen groups across seven registrations
+supply 168 histories / 840 comparisons. Core creates own enumerable data fields
+and own destination containers; unsafe authored alias paths retain rejection.
+The final [review record](oracle-reviews/2026-10-30-solid-native-store-review.md)
+records RED, GREEN, mutant classifications, reviewer outcomes, and exact code.
+
+The local-only draft driver does not claim top-level symbol-write admission.
+Its shared preservation comparison still checks every field actually admitted,
+including nested symbols and all actual mutation originals. The proxy-revert
+owner excludes top-level symbol writes explicitly; **Drafts and native values**
+and [#1820](https://github.com/TanStack/db/issues/1820) own that support decision.
+The minimal trace assigns a fresh enumerable root symbol and nested symbol
+through `Collection.update`: the root is absent from the modified/source row,
+the nested symbol survives. Current and clean-main traces agree. Initial data
+admits both. No adapter or Core-selection claim extends through this missing
+source premise.
 
 Limits: the stated finite histories and real hosts' settled/held-handler cuts.
 Core normalization, arbitrary cycles, arbitrary getter/setter bodies, hidden
