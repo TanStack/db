@@ -182,6 +182,24 @@ document update removes`) failed the same way.
     TrailBase are GREEN; Neon passes 300 failure-free histories with values
     and keeps its READY-4 and HEALTH-1 RED. TrailBase now runs 600 histories
     (`field-removed` fell to 7 at 400).
-  - **Open:** the rejection lane (FID-3, PUB-4); the optimistic and
-    subscription-reconciliation paths in core still compare with
-    `deepEquals` (recorded in the coverage map).
+  - **Open then:** the rejection lane (FID-3, PUB-4), and core's other
+    `-0` paths; see the next entry.
+- **2026-10-29, core `-0` paths beyond sync (from the typed-value lane).**
+  Maintainer decision: `-0` and `0` are distinct for user writes too. Each
+  owner was extended first and went RED on the parent:
+  - **Draft proxy:** a write of `0` over `-0` recorded no mutation.
+    `proxy-oracle` gained `-0` values and deltas (`zero-sign-write` reach);
+    the flat change-tracking law "-0 written over 0 is not a change" was
+    reversed. Both trackers now compare with `Object.is`.
+  - **Optimistic path:** two stacked pending writes, `-0` then `0`, left
+    subscribers at `-0`. `optimistic-history-oracle` gained `-0`, a
+    `flipZeros` edit, and `zeroSignEditsOverPending` reach; two model rules
+    that used `===` (`author`'s no-op test and the unchanged-settlement
+    check) now tell the zeros apart. `collectOptimisticChanges` uses
+    `sameRowValue`.
+  - **Subscription replay and stale reconcile:** a replay replacing `-0`
+    with `0` published nothing. The replay and lifecycle publication
+    oracles gained `-0` and zero-sign reach, and their models use
+    `Object.is`. `createStateDiff` is rejected by generated histories;
+    `reconcileStalePublishedChanges` only by a pinned replay, since
+    generated histories never reach retained rows (coverage map).

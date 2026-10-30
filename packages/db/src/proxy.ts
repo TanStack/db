@@ -357,13 +357,14 @@ function deepClone<T extends unknown>(
 }
 
 // Generic value equality intentionally ignores some native state. Draft
-// assignments must also preserve Set contents/order and RegExp match position.
+// assignments must also preserve Set contents/order and RegExp match position,
+// and tell -0 from 0, which are distinct row values.
 function draftValuesEqual(
   left: unknown,
   right: unknown,
   paired?: Map<object, object>,
 ): boolean {
-  return deepEqualsInternal(left, right, paired, true)
+  return deepEqualsInternal(left, right, paired, true, false, true)
 }
 
 /**
@@ -927,7 +928,6 @@ export function withFlatChangeTracking<T extends object>(
       if (
         !Object.hasOwn(original, key) ||
         !(
-          value === before ||
           Object.is(value, before) ||
           (typeof before === `object` &&
             before !== null &&

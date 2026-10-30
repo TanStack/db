@@ -9,6 +9,7 @@ import {
   oracleRuns,
 } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
+import { createOracleReach } from './oracle-reach'
 import type { FrozenRow, StoredRow } from './proxy-native-rows'
 
 /**
@@ -121,8 +122,10 @@ function observeArrayCallbacks(
     const expectedCall = runArrayCallback(native, step)
     const actualCall = runArrayCallback(proxy, step)
     const expectedRow = copyCallbackRow(native)
+    // A value is changed unless it is the same value. -0 and 0 are distinct
+    // row values (maintainer decision, 2026-10-29), so `Object.is` decides.
     const changed = native.items.some(
-      (item, index) => item.value !== values[index],
+      (item, index) => !Object.is(item.value, values[index]),
     )
     const changes: Partial<CallbackRow> = getChanges()
     return {
@@ -269,36 +272,63 @@ describe(`native array callback oracle`, () => {
     },
   )
 
+  // -0 joins the values and deltas, so `-0 += 0` writes 0: a change of a
+  // zero's sign alone, which a draft must record like any other write.
+  const signedInteger = (min: number, max: number) =>
+    fc.oneof(fc.integer({ min, max }), fc.constant(-0))
   const step = fc.record({
     method: fc.constantFrom(...callbackMethods),
     target: fc.integer({ min: 0, max: 5 }),
-    delta: fc.integer({ min: -5, max: 5 }),
+    delta: signedInteger(-5, 5),
   })
   // A fixed and a random campaign. A path replay of
   // `proxy.callback-history` runs only the random campaign, from its path.
   const callbackHistory = fc.record({
-    values: fc.array(fc.integer({ min: -10, max: 10 }), {
+    values: fc.array(signedInteger(-10, 10), {
       minLength: 1,
       maxLength: 6,
     }),
     steps: fc.tuple(step, step),
   })
-  const callbackProperty = fc.property(callbackHistory, ({ values, steps }) => {
-    assertArrayCallbacks(observeArrayCallbacks(values, steps))
-  })
+  const callbackCampaign = (options: fc.Parameters<[unknown]>) => {
+    const reach = createOracleReach(
+      `proxy.callback-history`,
+      [`zero-sign-write`],
+      { minimum: 5 },
+    )
+    fc.assert(
+      fc.property(callbackHistory, ({ values, steps }) => {
+        reach.beginHistory()
+        const cuts = observeArrayCallbacks(values, steps)
+        // Reach: a step left an item whose value differs from its start only
+        // by the sign of a zero.
+        if (
+          cuts.some((cut) =>
+            cut.expectedRow.items.some(
+              (item, index) =>
+                item.value === values[index] &&
+                !Object.is(item.value, values[index]),
+            ),
+          )
+        ) {
+          reach.reach(`zero-sign-write`)
+        }
+        assertArrayCallbacks(cuts)
+      }),
+      options as fc.Parameters<[{ values: Array<number>; steps: unknown }]>,
+    )
+    reach.assertReached()
+  }
   oracleReplayTest(it)(
     `matches native two-step callback histories (2026103)`,
     () => {
-      fc.assert(callbackProperty, { seed: 2026103, numRuns: oracleRuns(200) })
+      callbackCampaign({ seed: 2026103, numRuns: oracleRuns(200) })
     },
   )
   oracleReplayTest(it, `proxy.callback-history`)(
     `matches native two-step callback histories (random)`,
     () => {
-      fc.assert(
-        callbackProperty,
-        oraclePropertyOptions(200, `proxy.callback-history`),
-      )
+      callbackCampaign(oraclePropertyOptions(200, `proxy.callback-history`))
     },
   )
 

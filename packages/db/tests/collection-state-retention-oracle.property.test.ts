@@ -742,6 +742,19 @@ it(`writes distinguishing partial updates in the fixed partial campaign`, async 
   expect(distinguishing).toBeGreaterThan(0)
 })
 
+// Reach: an edit over an in-flight optimistic write that changes the
+// visible row only by a zero's sign. Neither the pending-writes flag nor
+// deep equality without signed zeros sees that change.
+it(`writes zero-sign edits over in-flight writes in the fixed campaign`, async () => {
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  let zeroSignEdits = 0
+  for (const { initial, steps } of histories) {
+    const counts = await runOptimisticHistory(initial, steps)
+    zeroSignEdits += counts.zeroSignEditsOverPending
+  }
+  expect(zeroSignEdits).toBeGreaterThan(0)
+})
+
 // Pinned replays for a source delete of a key the source never held. The
 // backend accepted an optimistic insert, then deleted the row before the
 // source streamed it. The model's drain applies the delete to the applied

@@ -787,7 +787,7 @@ export class CollectionStateManager<
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
-        (!deepEquals(previousValue, currentValue) ||
+        (!sameRowValue(previousValue, currentValue) ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
           previousVirtualProps.$hasPendingWrites !==
             nextVirtualProps.$hasPendingWrites)
