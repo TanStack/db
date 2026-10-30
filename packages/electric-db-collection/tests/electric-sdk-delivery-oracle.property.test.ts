@@ -1,7 +1,8 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import { IR, createCollection, createTransaction } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
+import { createDeferred } from '../../db/src/deferred'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
@@ -26,7 +27,10 @@ import {
   createRetryModel,
   expectedRetryObservation,
 } from './electric-retry-decision-model'
-import { storageTargetId } from './electric-persistence-fixture'
+import {
+  managedTagPersistence,
+  storageTargetId,
+} from './electric-persistence-fixture'
 import type { Item, Request } from './electric-sdk-delivery-support'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
@@ -131,6 +135,7 @@ declareOracle({
     runClientRetryCell,
     checkSourceRelease,
     checkManagedRotation,
+    checkMutationStartup,
   ],
   model: [createRetryModel, applyRetryModel, expectedRetryObservation],
 })
@@ -1631,5 +1636,290 @@ sdkCampaigns(
       ...(seed === undefined ? {} : { seed }),
     })
     releaseReach.assertReached()
+  },
+)
+
+// Proposed mutation-admission contract: an on-demand source must establish its
+// changes-only cursor before a mutation can reach the server. This is stream
+// evidence, not applied-row readiness (application may be parked by optimism).
+// Grammar varies payload and release order; every history crosses direct,
+// manual, derived-descriptor, persisted startup, multi-collection reset/retirement,
+// rollback, and abort paths. The persisted driver holds metadata before source
+// entry, then succeeds, fails, or cleans up. Its storage is controlled, not native
+// SQLite; cleanup is observed after releasing storage, not as prompt I/O abort.
+// Removing the second collection loses the all-participants law; removing the held echo loses the
+// distinction between admitting a write and confirming it. It excludes backend
+// retry, persisted cache rotation, and missing update/delete target admission.
+const mutationStartupStates = [
+  `direct`,
+  `manual`,
+  `materialized`,
+  `persisted`,
+  `persisted-failure`,
+  `persisted-cleanup`,
+  `multi`,
+  `reset`,
+  `retire`,
+  `rollback`,
+  `abort`,
+] as const
+let startupSource = 0
+async function checkMutationStartup(
+  name: string,
+  reverse: boolean,
+  reach: ReturnType<
+    typeof createOracleReach<(typeof mutationStartupStates)[number]>
+  >,
+) {
+  for (const mode of mutationStartupStates) {
+    const sources = Array.from(
+      { length: [`multi`, `reset`, `retire`].includes(mode) ? 2 : 1 },
+      (_, index) => {
+        const http = controlledHttp()
+        const signal = new AbortController()
+        const invoked = deferred<void>()
+        let writes = 0
+        const metadataEntered = deferred<void>()
+        const releaseMetadata = createDeferred<void>()
+        const persistence = managedTagPersistence()
+        const loadResumeSnapshot = persistence.adapter.loadResumeSnapshot
+        persistence.adapter.loadResumeSnapshot = async (...args) => {
+          metadataEntered.resolve()
+          await releaseMetadata.promise
+          return loadResumeSnapshot(...args)
+        }
+        const options = electricCollectionOptions<Item>({
+          id: `startup-${mode}-${index}`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          shapeOptions: {
+            url: `https://example.com/startup-${++startupSource}`,
+            signal: signal.signal,
+            fetchClient: http.fetchClient,
+          },
+          onInsert: async ({ collection: target }) => {
+            writes++
+            invoked.resolve()
+            await target.utils.awaitTxId(101 + index, 1000)
+          },
+        })
+        const original =
+          mode === `materialized` ? createCollection(options) : undefined
+        const collection = createCollection(
+          original
+            ? { ...original.config, id: `${options.id}-derived` }
+            : mode.startsWith(`persisted`)
+              ? persistedCollectionOptions({
+                  ...options,
+                  persistence: { adapter: persistence.adapter },
+                })
+              : options,
+        )
+        return {
+          original,
+          metadataEntered,
+          releaseMetadata,
+          http,
+          signal,
+          invoked,
+          collection,
+          writes: () => writes,
+          index,
+        }
+      },
+    )
+    await Promise.all(sources.map((source) => source.original?.cleanup()))
+    let calls = 0
+    const tx = [`manual`, `multi`, `reset`, `retire`].includes(mode)
+      ? createTransaction({
+          mutationFn: async () => {
+            calls++
+            sources.forEach((source) => source.invoked.resolve())
+            await Promise.all(
+              sources.map((source) =>
+                source.collection.utils.awaitTxId(101 + source.index, 1000),
+              ),
+            )
+          },
+        })
+      : sources[0]!.collection.insert({ id: 1, name })
+    if ([`manual`, `multi`, `reset`, `retire`].includes(mode)) {
+      tx.mutate(() =>
+        sources.forEach((source) => source.collection.insert({ id: 1, name })),
+      )
+    }
+    const settled = tx.when(`settled`).then(
+      () => undefined,
+      (error) => error,
+    )
+    await withElectricCleanup(async () => {
+      if (mode.startsWith(`persisted`)) {
+        const source = sources[0]!
+        await atCheckpoint(
+          source.metadataEntered.promise,
+          `held persistence metadata`,
+        )
+        reach.reach(mode)
+        expect(tx.state, `metadata loading is not source retirement`).toBe(
+          `persisting`,
+        )
+        if (mode === `persisted-failure`) {
+          const failure = new Error(`metadata unavailable`)
+          source.releaseMetadata.reject(failure)
+          expect(
+            await atCheckpoint(settled, `failed persistence startup`),
+          ).toBe(failure)
+          expect(source.writes()).toBe(0)
+          return
+        }
+        if (mode === `persisted-cleanup`) {
+          const cleanup = source.collection.cleanup()
+          source.releaseMetadata.resolve()
+          await cleanup
+          expect(
+            await atCheckpoint(settled, `cleanup before source entry`),
+          ).toBeInstanceOf(Error)
+          expect(source.writes()).toBe(0)
+          return
+        }
+        source.releaseMetadata.resolve()
+      }
+      const first = await Promise.all(
+        sources.map((source) =>
+          atCheckpoint(source.http.take(), `cold baseline`),
+        ),
+      )
+      const writeCount = () =>
+        calls + sources.reduce((count, source) => count + source.writes(), 0)
+      reach.reach(mode)
+      expect(writeCount(), `no write before baseline: ${mode}`).toBe(0)
+      if (mode === `abort`) {
+        sources[0]!.signal.abort()
+        expect(await atCheckpoint(settled, `aborted startup`)).toBeInstanceOf(
+          Error,
+        )
+        expect(writeCount()).toBe(0)
+        return
+      }
+      if (mode === `rollback`) tx.rollback()
+      const live: Array<Request> = []
+      const order = reverse ? [...sources].reverse() : sources
+      let replacement: Request | undefined
+      for (const [position, source] of order.entries()) {
+        first[source.index]!.respond(
+          new Response(
+            JSON.stringify([{ headers: { control: `up-to-date` } }]),
+            { headers: headers(1) },
+          ),
+        )
+        live[source.index] = await atCheckpoint(
+          source.http.take(),
+          `live poll after baseline`,
+        )
+        if (position < sources.length - 1) expect(writeCount()).toBe(0)
+        if (position === 0 && mode === `reset`) {
+          live[source.index]!.respond(
+            new Response(
+              JSON.stringify([{ headers: { control: `must-refetch` } }]),
+              { headers: headers(2) },
+            ),
+          )
+          replacement = await atCheckpoint(
+            source.http.take(),
+            `replacement baseline`,
+          )
+        }
+        if (position === 0 && mode === `retire`) source.signal.abort()
+      }
+      if (mode === `retire`) {
+        expect(
+          await atCheckpoint(settled, `retired participant`),
+        ).toBeInstanceOf(Error)
+        expect(writeCount()).toBe(0)
+        return
+      }
+      if (replacement) {
+        expect(writeCount(), `replacement cursor still held`).toBe(0)
+        replacement.respond(
+          new Response(
+            JSON.stringify([{ headers: { control: `up-to-date` } }]),
+            { headers: headers(3) },
+          ),
+        )
+        live[order[0]!.index] = await atCheckpoint(
+          order[0]!.http.take(),
+          `replacement live poll`,
+        )
+      }
+      if (mode === `rollback`) {
+        await settled
+        expect(writeCount(), `rollback prevents late write`).toBe(0)
+        return
+      }
+      expect(
+        tx.state,
+        `admission remains live: ${mode}; ${tx.error?.message ?? ``}`,
+      ).toBe(`persisting`)
+      await atCheckpoint(
+        Promise.all(sources.map((source) => source.invoked.promise)),
+        `admitted mutation ${mode}`,
+      )
+      expect(tx.state, `baseline is not confirmation`).toBe(`persisting`)
+      for (const source of sources) {
+        live[source.index]!.respond(
+          new Response(
+            JSON.stringify([
+              {
+                key: `1`,
+                value: { id: 1, name },
+                headers: { operation: `insert`, txids: [101 + source.index] },
+              },
+              { headers: { control: `up-to-date` } },
+            ]),
+            { headers: headers(mode === `reset` ? 4 : 2) },
+          ),
+        )
+      }
+      expect(await atCheckpoint(settled, `confirmed mutation`)).toBeUndefined()
+      for (const source of sources)
+        expect(source.collection.get(1)?.name).toBe(name)
+    }, [
+      ...sources.map((source) => () => source.releaseMetadata.resolve()),
+      ...sources.map((source) => () => source.collection.cleanup()),
+      ...sources.map((source) => () => source.http.close()),
+      async () => {
+        await settled
+      },
+    ])
+  }
+}
+const startupViolation = sameViolation()
+sdkCampaigns(
+  `electric.sdk-mutation-startup`,
+  `admits cold mutations only after every participant establishes its stream`,
+  20261030,
+  startupViolation,
+  async (seed) => {
+    const reach = createOracleReach(
+      `electric.sdk-mutation-startup`,
+      mutationStartupStates,
+    )
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ maxLength: 8 }),
+        fc.boolean(),
+        async (name, reverse) => {
+          reach.beginHistory()
+          await startupViolation.check({ name, reverse }, () =>
+            checkMutationStartup(name, reverse, reach),
+          )
+        },
+      ),
+      {
+        ...oraclePropertyOptions(8, `electric.sdk-mutation-startup`),
+        ...(seed === undefined ? {} : { seed }),
+      },
+    )
+    reach.assertReached()
   },
 )

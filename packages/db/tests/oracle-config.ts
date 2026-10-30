@@ -157,6 +157,7 @@ const staticOracleProperties = [
   `electric.sdk-snapshot-delivery`,
   `electric.sdk-dnf-membership`,
   `electric.sdk-source-release`,
+  `electric.sdk-mutation-startup`,
   `electric.sdk-rotation-release`,
   `electric-recovery.publication-stream-convergence`,
   `sqlite-resume.startup-generation`,

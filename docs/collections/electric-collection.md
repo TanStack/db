@@ -64,6 +64,20 @@ Each handler should call `await collection.utils.awaitTxId(txid)` to wait for sy
 
 Handlers persist mutations to the backend and wait for Electric to sync the changes back. This prevents UI glitches where optimistic updates would be removed and then re-added. TanStack DB blocks sync data until the mutation is confirmed, ensuring smooth user experience.
 
+For on-demand collections, optimistic changes appear immediately, but the
+mutation handler waits until each participating Electric stream has established
+its continuation position. You do not need to query or preload a collection
+before inserting into it. This also applies to explicit transactions spanning
+several collections. A stream reset before dispatch requires a fresh position;
+rollback or a terminal source failure before dispatch prevents the write.
+
+This preparation waits for stream evidence, not for source rows to become
+visible. A handler must still await its transaction ID or match, and must not
+wait for an on-demand query whose publication is held by its own transaction.
+Cold writes require sync connectivity. If confirmation fails after the handler
+has sent a write, the backend may already have committed it; the library does
+not automatically repeat the handler.
+
 ### 1. Using Txid (Recommended)
 
 The recommended approach uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client waits for that specific txid to appear in the Electric stream.
