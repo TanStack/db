@@ -5985,13 +5985,18 @@ detection (`optimistic-history-oracle`, with a `flipZeros` edit and
 `zeroSignEditsOverPending` reach), subscription truncate replay
 (`collection-subscription-replay-oracle`), and stale-row reconciliation
 (`collection-subscription-lifecycle-publication-oracle`) all compare row
-values with signed zeros. A generated failed-replay
-history in the lifecycle publication oracle (source writes, a load, a
-truncate, a rejected replay, the final owner's release, more source writes)
-reaches source writes over retained rows; both campaigns reject a stale
-reconcile without signed zeros. Under PUB-6 and that oracle's law, a write
-equal to the installed source row publishes nothing, even to a subscriber
-that still shows a retained older value. Every driver is also
+values with signed zeros. Open: generated publication histories never write
+over a row a failed replay retained (the random grammar inserts source
+writes into green lifecycle histories), so the stale reconcile is reached
+only by pinned replays, including a `-0` one. A generated failed-replay
+history reached an open counterexample: after a failed, released replay, a
+write equal to the committed row leaves the subscriber at its older retained
+value while a direct read returns the new one, against the law that a
+subscriber equals a direct read. That contradicts ARCHITECTURE.md law 9's
+retention rule, so the generator is held back until the replay-convergence
+law is settled with #2294 (owner: the lifecycle publication oracle; witness
+needed: a generated failed-replay history; shrunk trace: source `a`=0, request,
+settle resolve, truncate, source `a`=5, settle reject, release, source `a`=5). Every driver is also
 checked for the rows at the moment status becomes `ready`. Its model is an independent row Map and sync-run
 phase; drivers supply only a controlled provider and declare whether they
 commit per batch or per change. PUB-1 checks every change publication during
