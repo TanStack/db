@@ -19,6 +19,7 @@ import {
   eq,
   groupKeys,
   gt,
+  localOnlyCollectionOptions,
   sum,
 } from '@tanstack/db'
 import {
@@ -27,12 +28,14 @@ import {
   createSignal,
   onCleanup,
 } from 'solid-js'
+import { createStore } from 'solid-js/store'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { runRowSnapshotHistories } from '../../db/tests/conformance/row-snapshot-oracle'
 import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { expectPublishedRows } from '../../db/tests/conformance/publication-laws-oracle'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
@@ -64,12 +67,14 @@ function writer<T extends { id: string }>(collection: any) {
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
   collectionId?: string,
+  options?: { rowUpdateMode?: `full` },
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: collectionId ?? `conformance-solid-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
+      rowUpdateMode: options?.rowUpdateMode,
     }),
   )
   const write = writer<T>(collection)
@@ -260,6 +265,7 @@ const solidDriver: LiveQueryDriver = {
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   makeSource,
+  wrapSnapshotValue: <T extends object>(value: T) => createStore(value)[0],
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(
@@ -331,6 +337,63 @@ describe(`owned native scope setup`, () => {
 })
 
 runSuite(solidDriver)
+
+// The reported source is local-only. Keep that receiving path on the same
+// snapshot law and histories as the adapter suite's controlled sync source.
+it.each([`callback`, `config`, `collection`] as const)(
+  `preserves local-only row snapshots through the %s input`,
+  async (input) => {
+    await runRowSnapshotHistories(
+      {
+        ...solidDriver,
+        name: `solid-local-only`,
+        snapshotSourceUsesDraft: true,
+        makeSource<T extends { id: string }>(
+          initialData: ReadonlyArray<T>,
+          collectionId?: string,
+          options?: { rowUpdateMode?: `full` },
+        ) {
+          const collection = createCollection(
+            localOnlyCollectionOptions<T>({
+              id: collectionId,
+              getKey: (row) => row.id,
+              initialData: [...initialData],
+            }),
+          )
+          return {
+            collection,
+            insert: (row: T) => {
+              collection.insert(row)
+            },
+            update: (row: T) => {
+              collection.update(row.id, (draft) => {
+                // Local-only sync already replaces full rows. Remove omitted
+                // keys from the draft when the shared history requests it.
+                if (options?.rowUpdateMode === `full`)
+                  for (const key of Reflect.ownKeys(draft))
+                    if (
+                      key !== `$hasPendingWrites` &&
+                      key !== `$origin` &&
+                      key !== `$key` &&
+                      key !== `$collectionId` &&
+                      !Object.hasOwn(row, key)
+                    )
+                      Reflect.deleteProperty(draft, key)
+                Object.assign(draft, row)
+              })
+            },
+            remove: (row: T) => {
+              collection.delete(row.id)
+            },
+          }
+        },
+      },
+      input,
+      `sync`,
+    )
+  },
+)
+
 it(`preserves raw result types through the actual driver reader`, () => {
   const rawData = [{ id: `a`, value: undefined }]
   const raw = Object.assign(() => rawData, {

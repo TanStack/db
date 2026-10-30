@@ -154,7 +154,11 @@ export interface DbOps {
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void
     mutationFn: (variables: any) => Promise<any>
-  }) => (variables?: any) => { when: (state: 'settled') => Promise<any> }
+  }) => (variables?: any) => {
+    when: (state: 'settled') => Promise<any>
+    /** Borrowed mutation snapshots must survive framework materialization. */
+    mutations: ReadonlyArray<{ original: unknown }>
+  }
 }
 
 /** Normalized, adapter-agnostic view of a live query's current result. */
@@ -270,7 +274,12 @@ export interface LiveQueryDriver {
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
     collectionId?: string,
+    options?: { rowUpdateMode?: `full` },
   ) => SourceHandle<T>
+  /** Wrap a source value in the real host's observable container, when supported. */
+  wrapSnapshotValue?: <T extends object>(value: T) => T
+  /** Local-only sources confirm draft patches, including own undefined deletes. */
+  snapshotSourceUsesDraft?: boolean
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
   /** Create a ready source whose sync adapter reports the scenario controls. */

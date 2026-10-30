@@ -61,6 +61,7 @@ import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
 import { expectDisabledResult } from './disabled-laws'
 import { expectPublishedRows } from './publication-laws-oracle'
+import { runRowSnapshotHistories } from './row-snapshot-oracle'
 import {
   expectKeyedRows,
   expectOrderedRows,
@@ -176,8 +177,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
   const driver: LiveQueryDriver = {
     ...rawDriver,
-    makeSource: (data, collectionId) =>
-      sources!.track(rawDriver.makeSource(data, collectionId)),
+    makeSource: (data, collectionId, options) =>
+      sources!.track(rawDriver.makeSource(data, collectionId, options)),
     makeDeferredSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
@@ -229,6 +230,14 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
+    for (const input of [`callback`, `config`, `collection`] as const)
+      for (const writes of [`sync`, `optimistic`] as const)
+        scenario(
+          `row-snapshot-isolation-${input}-${writes}`,
+          `materialization preserves borrowed rows and immutable mutation snapshots`,
+          () => runRowSnapshotHistories(rawDriver, input, writes),
+          30000,
+        )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -2189,7 +2198,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(49)
+      expect(registry.size).toBe(55)
     })
   })
 }

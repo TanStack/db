@@ -6129,3 +6129,61 @@ controls are separate files. The [chunk 26 record](oracle-reviews/2026-10-28-pr-
 retains exact source/evidence hashes and all ORC outcomes. Actual production
 bundle erasure, Typedoc generation, tooling GREEN and restored-old-tooling
 mutants remain required receiving checks. Generated docs remain CI-owned.
+
+
+### Framework row snapshot isolation
+
+The Frameworks owner now includes
+[`conformance/row-snapshot-oracle.ts`](../../packages/db/tests/conformance/row-snapshot-oracle.ts),
+registered by the existing shared adapter suite. Its law comes from immutable
+Collection updates, `PendingMutation.original`, `ChangeMessage.previousValue`,
+and the framework result contract. Materialization preserves borrowed source
+rows while current hook results follow each update.
+
+Each real framework driver runs 42 bounded histories: seven nested container
+shapes × callback/config/supplied Collection inputs × sync/optimistic writes.
+Solid adds a native `createStore` shape for 48 histories, plus 24 local-only
+source histories covering all eight shapes through the same model and
+comparison. Three successive updates distinguish initial objects from later
+admissions. The oracle retains `get()`, `previousValue`, and mutation original
+references and checks them at settled cuts and while an optimistic handler is
+held. Every input/write group and container shape declares and asserts its own
+reach. Complete row values and recursive exact own keys expose added fields,
+root deletion representation, and own-undefined admission and removal in an
+existing nested container. Subclass methods have independent model premises
+for both current and retained values.
+
+Expected rows come from scalar versions and declared source profiles. The
+local-only profile models Core normalization and own-undefined deletion;
+null-prototype, subclass, and native-store held edits change only scalar values
+so Core normalization does not masquerade as adapter behavior. Controlled sync
+histories admit native stores on every update; local-only histories start with
+a native store and then use ordinary replacements.
+
+Original Solid production fails the extended oracle. Eight hostile mutants
+reject the original defect, initial-only or update-only copying, shared sibling
+aliases, lost array prototypes, source-owned enumerable getters, and missing
+root or nested own-undefined reconciliation. The repair detaches mutable Solid
+containers at both entry points, preserves container prototypes and opaque
+leaves, materializes enumerable accessor values, and preserves nonenumerable
+accessor descriptors. Separate Solid shape subscriptions witness `Object.keys`
+and `in` notifications for root and nested own-undefined transitions. All six
+adapters pass. See the [evidence and review record](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md).
+
+Limits: one key, three updates, the modeled container shapes, immutable function
+leaves, and the drivers' documented settled cuts. Nonenumerable accessor
+evaluation, general symbol-update fidelity, cyclic updates, callback-time
+atomicity, and other settlement schedules are outside this receiving
+comparison. Hidden symbols remain outside the selected-value boundary;
+enumerable user symbols are copied. Existing framework and optimistic-history
+owners retain their other responsibilities.
+
+The **Drafts and native values** owner retains an unresolved Core boundary:
+assigning a native Solid store through `Collection.update` can promote hidden
+host bookkeeping symbols during Core detachment. Support policy for that
+host-proxy assignment needs a maintainer decision before it can be classified
+as a product-law violation. The needed receiving witness is real `createStore`
+→ `Collection.update`, distinguishing user keys from wrapper metadata in stored
+and retained values. The current local-only histories use ordinary replacements
+after initial admission and do not establish this path. This limit does not
+exempt direct adapter store input, which the controlled sync histories cover.
