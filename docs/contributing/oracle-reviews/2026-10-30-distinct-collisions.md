@@ -362,3 +362,87 @@ TypeScript checks, explicit ESLint, formatting, `pnpm lint:changed` and
 `git diff --check` pass for the prep-review tree. The source fingerprints above
 remain current. The published PR and CI will provide subsequent verification;
 the local evidence alone does not establish merge readiness.
+
+
+## Published CI and CodeRabbit follow-up
+
+This entry evaluates published head `973b0a0376b88ac8fe53495f58b5237d6eab47b0`
+and [CodeRabbit review 5714853334](https://github.com/TanStack/db/pull/2309#pullrequestreview-5714853334).
+The complete review, inline comment 4425543635, and mutable summary 6526868450
+were preserved before probes. The summary covered the same commit. An
+append-only scratch ledger inventories findings and optional suggestions;
+this section preserves their final dispositions. No production code changed.
+
+**Law and experiment.** A claimed collision witness must establish its collision
+premise. This follows the rubric's path/reach and checker-calibration requirements
+(ORC-005, ORC-006 and ORC-015). Printing digests alone supplied no enforcement.
+Changing only initialization from `Math.random = () => 0.5` to `0.25` made the
+unchanged reported-pair test pass with digests `3921157555` and `3428378875`.
+This is a false-green calibration, not another product counterexample.
+After adding the equality premise assertion, the identical mutation fails at
+that assertion before creating any Collection. Restoring `0.5` passes with
+both digests `2650141082`. The shared independent snapshot judgment is unchanged.
+
+The generated owner already discovers real collisions constructively and
+rejects exhausted setup. Its histories, model, public observations, comparisons,
+limits and budgets need no change for this fixed-witness omission. The new
+check rejects invalid setup; the previously recorded original-operator,
+shared-output-key and capped-support mutants establish product sensitivity.
+The evidence does not extend the flat-record or two-collision-member domain.
+
+| ID | Original claim or suggestion | Technical verdict, action and durable value |
+| --- | --- | --- |
+| CR1 | Minor: the reported-pair regression only prints digests; changed seeding could make it pass without a collision. Import `expect` and assert equality, retaining stdout and `checkDistinctSnapshot`. | **fixed-now.** The alternate-seed false green and repaired assertion failure confirm the exact test-integrity defect. The native-seed replay and generated public paths pass. Retain the setup assertion and shared judgment. |
+| CR2 | Review prompt optionally suggests another local CodeRabbit CLI review. | **already-fixed.** Its independent-review objective is supplied by the completed prep review and this actual remote review. No additional CLI installation or execution is needed. |
+| CR3 | Summary scope warning: output/tap consolidation has no demonstrated connection to issue 2306; remove it or move it to another PR. | **refuted.** The user's explicit shipped-byte reduction request authorizes this consolidation. Its measured savings, unchanged message behavior and full IVM checks are recorded above. Retain the change and exact mixed compressed-size results. |
+| CR4 | Summary documentation warning: 75% coverage is below an 80% threshold across four functions/seven files, with three unsupported skips; document missing functions. | **refuted as a required repair.** The report names no missing function or concrete explanation gap. The threshold is a bot default, with no corresponding repository requirement. Production has operator/factory documentation and local explanations of representatives, collision keys and cancellation; the model/grammar/checker/fixture have proportional contract prose. Preserve the raw percentage as unverified tooling output; it does not establish a documentation defect. |
+| CR5 | Finishing-touch suggestion: generate docstrings in this branch or another PR. | **duplicate of CR4.** Both automation destinations remain recorded; neither identifies another explanation gap. |
+| CR6 | Finishing-touch suggestion: generate unit tests in this branch or another PR. | **already-fixed.** The generic testing objective is covered by the shared-model replay, generated fixed/random histories, public receiving drivers, declared reaches and rejected mutants. No uncovered law is identified. |
+
+**Reviewer assessment:** hire recommendation on this sample is yes, with
+qualifications. CR1 accurately identifies a test-integrity flaw, assigns suitable
+minor severity, and proposes an idiomatic minimal fix. The scope warning lacks
+user-request context; the generic tooling suggestions reduce signal. This
+sample supports no broader claim about reviewer performance.
+
+**CI registration repair.** The first remote replay job and a local run failed
+`names an owner for every registered property`, naming `ivm.distinct-collisions`
+and `query.distinct-collisions`. Their registration in `oracle-config.ts` lacked
+manifest owner mappings. The aggregate Test job consequently failed its
+all-groups-success gate. The manifest now supplies each actual owner and random
+campaign test-name selector. This is replay metadata, with no model or product
+behavior change. The same local replay suite passes **41 tests**.
+
+Guarded direct replays also pass and record exactly one execution of the requested
+property/seed/path: IVM seed `1041521789`, path `0:0:0:0:0`, tuple mode, 40
+histories; public seed `-1901465925`, path `0:0:0`, unordered mode, 23 histories.
+Both reach all five declared conditions. The IVM guard's first async-reporter
+attempt rejects the synchronous property; its supported sync fallback succeeds.
+That first setup rejection is not a product failure.
+
+Verification commands use `--maxWorkers=2 --coverage.enabled=false`:
+
+- `pnpm --filter @tanstack/db exec vitest run tests/oracle-replay.test.ts`
+- `pnpm --filter @tanstack/db exec vitest run tests/query/distinct-collision-oracle.test.ts tests/query/distinct-reported-collision.test.ts`
+
+The second command passes five tests, including 400 generated public histories;
+each declared condition reaches 100 histories per fixed/random and ordered/
+unordered campaign. The alternate-seed calibration uses the same reported-pair
+command and changes no production hash function. TypeScript, explicit ESLint,
+Prettier, `pnpm lint:changed` and `git diff --check` validate the follow-up.
+
+**Loss audit:** six review items = one fixed-now, two already-fixed, two refuted,
+and one duplicate. The full raw review and mutable summary were reread, including
+pre-merge warnings and finishing-touch suggestions. Positive checks, walkthrough,
+merge-risk wording and bot UI controls contain no additional repair claim.
+No confirmed-open item, deferral, product-law revision or production edit remains.
+This completes review accounting and the bounded evidence repair. Remote CI for
+the follow-up commit still determines CI status; this entry alone is not a
+whole-PR readiness verdict.
+
+Follow-up SHA-256 fingerprints (other prep-review fingerprints remain current):
+
+```text
+9745b7fe682277a998a20e00f6d6ab2801c6f8ba064a7be83ca395f5b52c32a7  packages/db/tests/oracle-replay-manifest.ts
+09f6d6820dd204bf6cd96a11311d6c0ccd45a386f85bef9174c2860388fb6226  packages/db/tests/query/distinct-reported-collision.test.ts
+```

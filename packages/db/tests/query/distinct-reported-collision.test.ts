@@ -1,6 +1,6 @@
 // The issue fixed Math.random only before module initialization. Restore it
 // before any test work; neither the hash implementation nor its output is mocked.
-import { it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { hash } from '../../../db-ivm/src/hashing/hash.js'
@@ -21,6 +21,8 @@ it(`replays the reported selected rows with repeatable hash initialization`, asy
   process.stdout.write(
     `reported pair digests ${JSON.stringify(rows.map(hash))}\n`,
   )
+  // Reject setup if hash initialization no longer makes this pair collide.
+  expect(hash(rows[0]!)).toBe(hash(rows[1]!))
   const source = createCollection(
     mockSyncCollectionOptions({
       id: `collision-repro`,
