@@ -813,7 +813,7 @@ Ordinary own undefined stays distinct from absence. Another 132 histories retain
 nested inline array/materialized authored values through direct and QueryRef
 paths, and 66 reject compiled Collection inputs before callbacks. All 2,520
 callback and 594 inline/rejection
-states reach once; 17 controls calibrate the same judgments. Partial receiving
+states reach once; 19 controls calibrate the same judgments. Partial receiving
 selections still owe the selected campaign's full reach matrix.
 
 The restored owner reproduced 203 correlated-child REDs on unchanged main.
@@ -822,7 +822,9 @@ REDs with 398 passes. The expanded 845-test owner also rejects the first repair 
 histories before the corrected production edit. The compiler now requests
 source/projection metadata at FROM and joined-source boundaries when a functional
 callback consumes the rows. Inline-only QueryRefs preserve authored shape.
-All 845 owner tests pass. A QueryRef-only mutant leaves 58 joined-source
+All 847 owner tests pass, including two controls that reject extra named own
+fields on inline arrays. The recorder preserves those fields without changing
+the model or either judgment. A QueryRef-only mutant leaves 58 joined-source
 violations; sanitizing every inline child breaks 116 authored-value histories.
 Restoring unconditional source sanitization breaks 58 inline QueryRef histories.
 The [runtime repair record](oracle-reviews/callback-metadata.md) retains the

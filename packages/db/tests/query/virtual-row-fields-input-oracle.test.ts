@@ -353,3 +353,36 @@ test.each([`selected-virtual`, `own-undefined`] as const)(
     ).not.toStrictEqual([])
   },
 )
+
+// The inline array is public data too. An extra ordinary or reserved own field
+// must survive capture so both judgments can reject the unauthored shape.
+test.each([`unexpected`, `$collectionId`] as const)(
+  `rejects an extra own field on an inline array: %s`,
+  (field) => {
+    const child = expectedMetadataInput(
+      sourceFact,
+      {
+        shape: `functional-projection`,
+        collision: `none`,
+        authoredPending: false,
+      },
+      true,
+    ).ordinary
+    const authored = { id: `parent`, children: [child] }
+    const expected = expectedMetadataRecord(authored)
+    const value = structuredClone(authored)
+    const lawful = captureMetadataInput(value)
+    expect(metadataInputViolations(lawful, [expected])).toStrictEqual([])
+    Object.assign(value.children, { [field]: `spoof` })
+    const hostile = captureMetadataInput(value)
+    const rejected = {
+      input: metadataInputViolations(hostile, [expected]).length > 0,
+      output:
+        metadataOutputViolations(
+          [{ id: `parent`, observed: hostile }],
+          [{ id: `parent`, observed: expected }],
+        ).length > 0,
+    }
+    expect(rejected).toStrictEqual({ input: true, output: true })
+  },
+)

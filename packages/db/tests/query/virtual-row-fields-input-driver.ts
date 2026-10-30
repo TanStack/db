@@ -75,7 +75,21 @@ class MetadataCallbackOracleFailure extends Error {
 }
 
 function copyData(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(copyData)
+  if (Array.isArray(value)) {
+    const copy = value.map(copyData)
+    // Array.map retains indices and holes but omits named own fields. Keep
+    // those fields too, so capture cannot erase a wrong inline array shape.
+    for (const key of Object.getOwnPropertyNames(value)) {
+      if (Object.hasOwn(copy, key)) continue
+      Object.defineProperty(copy, key, {
+        value: copyData(Reflect.get(value, key)),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
+    }
+    return copy
+  }
   if (value && typeof value === `object`)
     return Object.fromEntries(
       Object.getOwnPropertyNames(value).map((key) => [

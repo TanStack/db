@@ -30,7 +30,7 @@ Five paths also run directly as the correlated child: 165 histories. Flat union
 children have no named source reference for include correlation, so their
 supported forms use the wrapper or union-query-ref path. They remain covered.
 Three direct-source controls, 132 inline array/materialized histories, 66 compiled
-Collection rejections and 17 checker/recorder controls complete 845 tests. Inline
+Collection rejections and 19 checker/recorder controls complete 847 tests. Inline
 values cross direct and QueryRef paths. The QueryRef path correlates each parent
 with one typed-key child, so it preserves authored child fields without a child
 functional callback.
@@ -104,7 +104,7 @@ compilation. An inline-only QueryRef retains its authored selected shape.
 Existing mode parameters and propagation remain. The production diff changes
 two call sites. It adds no metadata registry, state, traversal or public API.
 
-All 845 tests pass. Every one of the 2,520 callback and 594 inline/rejection
+The pre-review head passed all 845 tests. Every one of the 2,520 callback and 594 inline/rejection
 states reaches once. Seven neighboring suites pass 1,883 tests: root metadata,
 functional projection/input rejection, route-context transport, public container
 copying, include query shapes and subquery user values. Focused no-emit TypeScript,
@@ -112,8 +112,9 @@ ESLint and changed-file oracle lint pass. The normal package pnpm configuration
 also passes all 845 owner tests after integrating #2301
 (`bfd1da1a7e752d66fd667adfd3cdf54f60732b22`). No local build or installation ran.
 
-Three wrong repairs ran sequentially in copied source trees. They did not change
-the reviewed worktree:
+Three wrong repairs ran sequentially in copied source trees before the
+independent review. They did not change the reviewed worktree. These counts use
+the 845-test owner at `a30256cfb`, before the two added recorder calibrations:
 
 | Mutant | Intended wrong design | Result at the shared comparison |
 | --- | --- | --- |
@@ -146,6 +147,13 @@ The probe constructs the following source and nested consumer before selecting
 QueryRef-only, `unionAll(projected, consumed)`, or its reverse:
 
 ```ts
+import { createCollection, localOnlyCollectionOptions, Query } from '@tanstack/db'
+
+const source = createCollection(localOnlyCollectionOptions({
+  initialData: [{ id: 1 }],
+  getKey: (row: { id: number }) => row.id,
+}))
+const captures: Array<{ present: boolean; value: unknown }> = []
 const projected = new Query().from({ source }).select(({ source }) => ({
   id: source.id,
   $collectionId: 'spoof',
@@ -177,6 +185,67 @@ controls, not generated lifecycle coverage. Their repeated documentation notes
 link to the original count item, giving seven raw items: three fixed, one
 refuted and three duplicates. Neither review supplies a whole-library verdict.
 
+## Independent oracle review after PR creation
+
+Four subagents used the repository oracle-review skill on
+`a30256cfbaf99138f274db224362325c37ea1da4`. They independently challenged laws,
+grammar/reach, driver/comparisons, and mutation/process evidence.
+
+The law review confirmed a historical process gap: the first pre-edit receiving
+inventory omitted inline-only QueryRef preservation. That path was added after
+the first production repair. The later baseline run cannot satisfy the initial
+gate retrospectively. The corrected production edit did have the expanded RED
+before its edit. This record preserves that distinction and claims no complete
+initial-gate compliance.
+
+The driver review found a recorder blind spot. `Array.map` copied inline array
+entries but dropped named own fields. An ordinary `Object.assign(children,
+{ unexpected: "spoof" })`, or its `$collectionId` counterpart, remained publicly
+readable but disappeared from capture. Both shared judgments accepted it.
+This was a confirmed test-integrity defect, not a reproduced production defect.
+
+Two new calibration cases ran before the recorder edit. Both failed because
+both judgments returned false for rejection. Capture now preserves named own
+string fields recursively as well as array entries. `Object.defineProperty`
+avoids setter traps. The expected model and both judgments are unchanged.
+All 847 owner tests pass: the existing 845 plus two recorder calibrations.
+All 2,520 callback and 594 inline/rejection states still reach once. Restoring
+the old recorder is the demonstrated wrong design: both new calibrations fail.
+The reviewer inspected the fix and found that it closes the reported gap.
+
+The mutant reviewer independently omitted only the FROM callback-mode change,
+leaving joined-source handling intact. On copied sources at the reviewed head,
+290 comparisons fail and 555 tests pass. The first distinguishing history is
+`inline-child/query-ref/structured-projection/$key/false`, initial: the callback
+reads authored `$key: "spoof-$key"` where the model requires absence. Every
+failure is `MetadataCallbackOracleFailure`; an earlier configuration EPERM ran
+no tests and supplies no evidence. This supplements the three mutants above.
+
+The grammar review independently reconciled all 845 original tests and the
+per-receiver reach matrix. Flattened child output does not prove parent-child
+route placement. It retains every child's metadata capture, typed key and
+occurrence count; those reviews found no hidden metadata violation from that
+flattening. Parent routing remains owned by the separate include oracles.
+
+The review accounts for two findings: one repaired recorder gap and one
+historical gate miss preserved above. No current production defect emerged.
+The source-only law and grammar reviews supplied useful independent reasoning.
+The driver review supplied an executable false-green witness and a reviewed
+repair. The mutant review supplied an additional independent discriminator.
+These results support the finite runtime boundary, not a whole-library verdict.
+
+CI also rejected this record's query example because its source was untyped.
+The example now declares its typed source and capture array. Its focused
+snippet typecheck passes without a baseline exclusion. That mechanical docs
+repair is separate from the two oracle-review findings.
+
+The full local snippet scan reports 12 failures in unchanged examples and one
+stale baseline entry under the reused dependency tree. The earlier CI scan
+reported only this record's example as a new failure. No dependency install or
+baseline exclusion was used to mask that local environment difference. Full
+final-head snippet verification remains for CI; the changed example passes its
+focused local check.
+
 ## Rubric accounting and limits
 
 ORC-001–005: accepted authority, independent source facts, literate layers,
@@ -186,7 +255,8 @@ named source/projection/inline distinction. Both populated union positions and
 both typed keys remain represented. Direct-source controls distinguish a
 blanket stripping rule. The rejected flat-union form bounds admission.
 
-ORC-006: 17 hostile observation/recorder controls and all three production mutants.
+ORC-006: 19 hostile observation/recorder controls, the three recorded production
+mutants and the independent FROM-only mutant.
 ORC-007: exhaustive finite enumeration, so random campaigns and seed replay do
 not apply. A valid unrelated `utils.1` seed/path run passes all 845 tests with
 all reach intact. A calibration-only selection passes 17 controls without
@@ -231,5 +301,5 @@ original failures without temporary log files.
 | --- | --- |
 | `packages/db/src/query/compiler/index.ts` | `07c93e178ddf176af57f85b86479a3f2a762fd96b726f31755e7ed13eafc2fa3` |
 | `packages/db/tests/query/virtual-row-fields-input-oracle.ts` | `25f729a6444f7e35526a499aefd7c624acba06348d18f4c31b9d3c2f5d7259a6` |
-| `packages/db/tests/query/virtual-row-fields-input-driver.ts` | `f1cb1ec6bc441679030cfe08cead25478caf419b49e77a582db6fe74407cf953` |
-| `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `dd6d015e7bff43e6af6038dc70e257b34cf700748eafbcb30bf7a7ae6182a707` |
+| `packages/db/tests/query/virtual-row-fields-input-driver.ts` | `c84cf4330e17590b3f9fc55bb449b489a3160e975966823f9ebb4fb4675f18ff` |
+| `packages/db/tests/query/virtual-row-fields-input-oracle.test.ts` | `948e84d4f3400ebf8b4e867252580a613dc98e3ebb7eef0811e95727f3624337` |
