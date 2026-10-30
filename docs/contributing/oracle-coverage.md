@@ -796,27 +796,37 @@ stay ready/empty, and a new interval gets a new handle. This assumes no
 facade-local optimistic mutations. Every shape declares active empty readiness
 and nonempty child receiving cuts. Six lifetime and four inline-value hostile
 controls reject wrong observations. See [chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
-Functional callback-input observations now have a separate receiving boundary
-in `virtual-row-fields-input-oracle.test.ts`, sharing source metadata judgment
-with the existing root/Effect owners. Its finite 33 authoring descriptions cross
-seven QueryRef/join/union consumers through root and correlated inline-child
-compilation (462 histories), plus two direct-source controls. Each compares
-immutable callback captures and their ordinary derived output at initial
+Functional callback-input observations have a separate receiving boundary in
+`virtual-row-fields-input-oracle.test.ts`, sharing source metadata judgment with
+the existing root/Effect owners. Its 33 authoring descriptions cross seven
+QueryRef/join/union paths through root and wrapped correlated child compilation
+(462 histories), plus five direct correlated child paths (165 histories).
+Flat union children require a named QueryRef for include correlation; their
+supported forms remain in the wrapped and union-query-ref paths. Three
+source controls preserve genuine metadata without an intermediate projection.
+Each compares immutable callback captures and ordinary derived output at initial
 readiness, held mutation, settlement and remote next use. Complete before/after
-source facts permit retraction evaluation; startup LEFT joins may expose an
-absent side, while established outputs require both typed-key rows. Reserved
-metadata is judged by presence/readable value, with ownership flags diagnostic;
-ordinary own undefined remains distinct from absence. Another 66 histories keep
+source facts permit retraction evaluation. Startup LEFT joins may expose an
+absent side; established outputs require both numeric/string-key rows. Reserved
+metadata is judged by presence/readable value, with ownership diagnostic.
+Ordinary own undefined stays distinct from absence. Another 66 histories retain
 nested inline array/materialized authored values, and 33 reject compiled
-Collection inputs before callbacks. Per-history/path/cut reach is mandatory even
-under unrelated replay seeds; unentered calibration-only runs stand aside.
-Unchanged production exposes 203 correlated-child violations: new-shape fields
-leak and source-spread collisions spoof genuine metadata. Root receivers and
-nested inline preservation pass. All 2,153 declared states reach; 17 controls
-and independent seeded/unentered/partial-selection checks calibrate this owner.
-See [chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md) for exact
-fingerprints and independent evidence. Production repair is deferred under the
-[RC oracle challenge](oracle-reviews/2026-10-28-pr-2171-oracle-challenge.md).
+Collection inputs before callbacks. All 2,520 callback and 297 inline/rejection
+states reach once; 17 controls calibrate the same judgments. Partial receiving
+selections still owe the selected campaign's full reach matrix.
+
+The restored owner reproduced 203 correlated-child REDs on unchanged main.
+Adding the direct receiving paths before production repair raised that to 348
+REDs with 398 passes. The compiler now enforces source/projection metadata at
+QueryRef and joined-source boundaries independently of final inline output.
+All 746 owner tests pass. A QueryRef-only mutant leaves 29 joined-source
+violations; sanitizing every inline child breaks 58 authored-value histories.
+The [runtime repair record](oracle-reviews/callback-metadata.md) retains the
+commands, distinguishing traces, source fingerprints and limits. Historical
+instrument acceptance remains in
+[chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
+The separate static receiving-type failures in the
+[deferred record](oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md) remain open.
 This extension does not establish arbitrary descriptors/prototypes, greater
 recursive depth, same-source overlapping transactions, other dynamic
 join kinds, truncate, provider scheduling, framework receivers or construction

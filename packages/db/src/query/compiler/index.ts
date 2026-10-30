@@ -622,7 +622,8 @@ function compileQueryInternal(
       ignoreWindow,
       rawQuery,
       query.from,
-      (...args) => compileQueryInternal(args, true, publishCollectionRoot),
+      // Joined subqueries are callback inputs even inside inline includes.
+      (...args) => compileQueryInternal(args, true, true),
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
@@ -1646,7 +1647,6 @@ function processFromClause(
         aliasRemapping,
         sourceWhereClauses,
         parentKeyStream,
-        publishCollectionRoot,
       )
 
     return {
@@ -1693,7 +1693,6 @@ function processFromClause(
       aliasRemapping,
       sourceWhereClauses,
       parentKeyStream,
-      publishCollectionRoot,
     )
 
     if (!mainAlias) {
@@ -1935,7 +1934,6 @@ function processFrom(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   parentKeyStream?: KeyedStream,
-  publishCollectionRoot = false,
 ): {
   alias: string
   input: KeyedStream
@@ -1989,7 +1987,9 @@ function processFrom(
           undefined,
         ],
         true,
-        publishCollectionRoot,
+        // A QueryRef exports a source row, not its enclosing inline value.
+        // Enforce source/projection metadata before any consumer runs.
+        true,
       )
 
       // Pull up alias mappings from subquery to parent scope.
