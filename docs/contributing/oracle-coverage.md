@@ -6003,7 +6003,7 @@ commit per batch or per change. PUB-1 checks every change publication during
 a step, not only the settled checkpoint. The reference push adapter
 (`tests/reference-adapter-oracle.property.test.ts`,
 `adapter-conformance.eager-live-source.reference`) runs fixed and random
-campaigns of 600 histories with declared reach, a per-change variant, and 27
+campaigns of 600 histories with declared reach, a per-change variant, and 35
 law-named hostile mutants, with ORC-004 reconstruction, exclusion, and
 ablation controls. The Neon Realtime receiving driver
 (`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
@@ -6045,3 +6045,27 @@ table views keep 15 significant digits (9007199254740991 reads back as
 9007199254740990, 0.30000000000000004 as 0.3) and reject Number.MAX_VALUE
 (`powersync_diff: number out of range`); owner: the PowerSync driver;
 evidence: a direct write and read through `@powersync/node` 0.20.0.
+Electric (`adapter-conformance.eager-live-source.electric`, eager mode over
+the installed `@electric-sql/client` and a controlled `fetchClient` that
+answers the HTTP protocol, per-batch commits, typed Postgres columns for
+nine kinds) is GREEN after three fixes. After ready, an outage of five
+consecutive failed attempts that the client retries (network error, 429,
+5xx) or the shape's `onError` retries is now reported in `failureReason`,
+once, and the next applied commit point clears it; shorter outages show
+nothing (HEALTH-1, HEALTH-2, RETRY-1, driver parameter
+`retryReportAfter: 5`; maintainer decision 2026-10-30: a retrying source
+must not flap its health, so only an extended outage reports). A restarted run no
+longer settles `awaitTxId` from the retired run's txids (EVID-2). An
+`onError` that throws now gives up without a detached rejection (HEALTH-5,
+RETRY-1); the driver gives up alternately by returning nothing and by
+throwing. Electric's
+failures are values its client creates (`failureValue: any`), so the check
+owes some error, at most one per attempt, and the outage's first failure
+kept; it does not check identity. Its empty batches carry no txid
+(`txidEvidence: change`). Excluded by `excludesValue` (column domains, not
+adapter behavior): int4 values outside 32 bits, and a `-0` nested in an
+array or object for the float8 column. Limits: no on-demand or progressive
+mode, no persisted resume (so a held commit receipt that clears an outage
+late is not exercised), and no real Electric server. Two generated scenario
+prefixes reach EVID-2 (a batch, a restart, a wait for its txid) and the
+second retried failure of one outage.

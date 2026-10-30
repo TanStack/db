@@ -27,23 +27,23 @@ reviewed change.
 
 ## Adapters
 
-| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                               |
-| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Not started                                                                                                                                                                                                                                   |
-| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started |
-| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                      |
-| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started   |
-| Convex            | eager live source, mutations, on-demand, source shapes                                | Not started                                                                                                                                                                                                                                   |
-| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                            |
-| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                   |
-| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                   |
-| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                   |
-| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                   |
+| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                        |
+| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started |
+| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started                          |
+| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                                               |
+| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started                            |
+| Convex            | eager live source, mutations, on-demand, source shapes                                | Not started                                                                                                                                                                                                                                                            |
+| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                     |
+| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                            |
+| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                            |
+| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                            |
+| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                            |
 
 ## Suggested order
 
-1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode), and Convex. Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
+1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode, done), and Convex. Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
 2. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN.
 3. **The mutations family.** It applies to every adapter except the storage hosts.
 4. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
@@ -287,3 +287,68 @@ document update removes`) failed the same way.
 range`). The Collection shows what the database stored, so this is not
     the adapter's FID-1; the driver excludes such numbers. Worth reporting
     to PowerSync.
+- **2026-10-30, Electric, eager live source: three Electric defects.** The
+  driver runs the real adapter over the installed `@electric-sql/client`,
+  whose `fetchClient` the driver answers with the HTTP shape protocol, as
+  `electric-sdk-delivery-oracle` does. A complete delivery answers the
+  initial request, or, after ready, a must-refetch (409) and the refetch; a
+  batch answers the live request with row messages that carry its txid; a
+  failure is an HTTP 400 that the shape's `onError` gives up on; a retried
+  failure is an HTTP 503 the client retries or an HTTP 400 that `onError`
+  retries. The propagation step waits until the client asks again, or until
+  `onError` gave up.
+  - **Oracle changes this exposed:** `failureValue: any` for failures whose
+    value the client creates. The retried-failure check then owes one to one
+    listed failure per attempt, `cause` its newest, and the outage's first
+    failure kept until recovery (RETRY-1). `retryReportAfter: k`: a retried
+    failure shows only from the `k`th consecutive failed attempt after ready
+    (maintainer decision 2026-10-30: no flapping on a blip; Electric
+    declares 5), with reach state `transient-failure-below-threshold`.
+    `txidEvidence: change`: Electric's
+    empty batches carry no txid. The model names EVID-2 for a wait fulfilled
+    by a retired run's txid; reference mutant `keeps-retired-evidence`. Two
+    generated scenario prefixes (one history in six each) reach EVID-2 and a
+    repeated retried failure, with reach states `wait-on-retired-evidence`
+    and `transient-failure-repeated`. The `wait-off-by-one` mutant now
+    shrinks to a wait for a buffered batch, so that label names
+    `EVID-1/READY-10/PUB-9`.
+  - **RED 1 (HEALTH-1):** after ready, a retried 503 left health empty.
+    Shrunk: `[snapshot [], transient-failure, changes []]`. The same for a
+    400 that `onError` retries. After the threshold decision, the first
+    fix (report every attempt) went RED in turn: one 503 after ready showed
+    a failure where the law owes none.
+  - **RED 2 (EVID-2):** after a restart, `awaitTxId` for a txid the retired
+    run delivered fulfilled before the new run delivered it. Electric kept
+    `seenTxids` for the Collection's life, against its README ("Transaction
+    evidence ... belong to one collection lifecycle").
+  - **RED 3 (HEALTH-5):** an `onError` that throws was rethrown into the
+    client, whose start then rejected unobserved. Shrunk:
+    `[fail, restart, fail]`.
+  - **Fixes:** the adapter wraps the client's `fetchClient` and counts each
+    retried attempt (network error, 429, 5xx) after ready, and each `onError`
+    retry decision; the fifth in a row reports the outage once through
+    `reportError`. A commit point ends the outage, and `reportHealthy`
+    clears its failure once that commit applies. Retirement forgets the run's
+    evidence, as scoped recovery already did. A throwing `onError` gives up
+    by returning nothing, so the client reports its error to the subscriber.
+  - **GREEN:** Electric suite 1242 passed (4 skipped); both campaigns pass
+    at 400 histories. Across six seeds the lowest reach is 19
+    (`field-removed`).
+  - **Mutants of `src/electric.ts`:** no retry reporting (HEALTH-1), no
+    count for an `onError` retry (HEALTH-1), a threshold of 4 or 6
+    (HEALTH-1), an attempt count that a commit does not reset (HEALTH-1), a
+    new failure per attempt that replaces the first (RETRY-1), no recovery
+    (HEALTH-2), evidence kept across retirement (EVID-2), a rethrown
+    `onError` error (HEALTH-5).
+  - **Size:** Electric +223 gzip bytes (+2.3%); the `app` scenario does not
+    include Electric. The cost is the `fetchClient` wrapper, which builds a
+    `FetchError` with the status and headers an app can read, and one
+    attempt counter shared by both retry paths. `onFailedAttempt` was ruled
+    out: it carries no error and also fires for a must-refetch 409 and for
+    aborts.
+  - **Driver lessons:** a retry is part of its run's request chain; only a
+    request after an abort or a give-up starts a new run. A float8 column
+    holds a scalar `-0` only, and int4 holds 32 bits; both are column
+    domains (`excludesValue`). Waiting out a deadline after each give-up
+    made histories take 1 s each; the driver now counts the give-ups its
+    own `onError` made.

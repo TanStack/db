@@ -1,4 +1,5 @@
 import {
+  FetchError,
   ShapeStream,
   isChangeMessage,
   isControlMessage,
@@ -953,10 +954,11 @@ class ElectricLifecycle<T extends Row<unknown>> {
     }
     this.pendingTxidWaits.clear()
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
-    this.evidence.hydratedResumeState = undefined
+    // A retired run's evidence does not settle a later run's waits (EVID-2).
+    this.forgetEvidence()
   }
 
-  forgetEvidenceAfterScopedRecovery(): void {
+  forgetEvidence(): void {
     this.evidence.seenTxids.clear()
     this.evidence.seenSnapshots.length = 0
     this.evidence.hydratedResumeState = undefined
@@ -1628,7 +1630,7 @@ function createElectricSync<T extends Row<unknown>>(
     } = tagState
     if (freshScopedGeneration) clearTagTrackingState()
     const lifecycle = getLifecycle(params.collection)
-    if (freshScopedGeneration) lifecycle.forgetEvidenceAfterScopedRecovery()
+    if (freshScopedGeneration) lifecycle.forgetEvidence()
     const lifecycleEpoch = lifecycle.start()
     const isActiveLifecycle = () => lifecycle.isActive(lifecycleEpoch)
     Object.assign(params.collection.utils, lifecycle.utils)
@@ -1649,6 +1651,32 @@ function createElectricSync<T extends Row<unknown>>(
     const markReady = () => {
       ready = true
       params.markReady()
+    }
+    // After the first ready, a retried outage shows only once it lasted
+    // five failed attempts in a row, so health does not flap on a blip
+    // (maintainer decision). It is reported once: later attempts keep its
+    // failure. A commit point ends the outage, and its failure clears once
+    // that commit applies (HEALTH-1, HEALTH-2, RETRY-1). A give-up after
+    // ready ends health reports; the other failures abort the run.
+    let failedAttempts = 0
+    let retrying: unknown
+    let gaveUp = false
+    const reportsHealth = () => ready && !gaveUp && isActiveLifecycle()
+    const reportRetry = (cause: unknown) => {
+      if (!reportsHealth() || abortController.signal.aborted) return
+      if (++failedAttempts < 5) return
+      retrying ??= cause
+      params.reportError(retrying)
+    }
+    const endOutage = () => {
+      const recovered = retrying
+      failedAttempts = 0
+      retrying = undefined
+      return () => {
+        if (recovered !== undefined && reportsHealth()) {
+          params.reportHealthy(recovered)
+        }
+      }
     }
     // The stream can give up (fail()) from several places; the first one
     // stops this sync run. Core ignores a later fail() in the same run, so
@@ -1731,7 +1759,7 @@ function createElectricSync<T extends Row<unknown>>(
       requiresFreshSourceEvidence &&
       persistence?.managedCacheGeneration === true &&
       persistence.startScopedRecovery !== undefined
-    if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
+    if (scopedRecovery) lifecycle.forgetEvidence()
     const usesChangesOnlyLog =
       syncMode === `on-demand` &&
       (!requiresFreshSourceEvidence || scopedRecovery)
@@ -1896,6 +1924,31 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.handle ??
         (canUsePersistedResume ? persistedResumeState.handle : undefined),
       signal: abortController.signal,
+      // The client retries a network error, 429, and 5xx without calling
+      // onError; onError decides the other failures.
+      fetchClient: async (input, init) => {
+        try {
+          const response = await (shapeOptions.fetchClient ?? fetch)(
+            input,
+            init,
+          )
+          if (response.status === 429 || response.status >= 500) {
+            reportRetry(
+              new FetchError(
+                response.status,
+                undefined,
+                undefined,
+                Object.fromEntries(response.headers),
+                String(input),
+              ),
+            )
+          }
+          return response
+        } catch (error) {
+          if (!init?.signal?.aborted) reportRetry(error)
+          throw error
+        }
+      },
       onError: async (errorParams) => {
         if (!isActiveLifecycle() || abortController.signal.aborted) return
         streamErrorVersion++
@@ -1919,10 +1972,14 @@ function createElectricSync<T extends Row<unknown>>(
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
+            // A throwing handler gives up. Rethrown, its error would reject
+            // the client's own start unobserved; returning nothing stops the
+            // stream, and the client reports its error to the subscriber.
             failWaits(error)
-            throw error
+            return
           }
           if (!retry || typeof retry !== `object`) failWaits(errorParams)
+          else reportRetry(errorParams)
           return retry
         } else {
           const initialSyncFailed = !ready
@@ -2554,19 +2611,18 @@ function createElectricSync<T extends Row<unknown>>(
             () => undefined,
           )
         }
-        if (applied !== true) {
-          void applied.then(
-            () => undefined,
-            (error: unknown) => {
-              if (!isActiveLifecycle() || abortController.signal.aborted) {
-                return
-              }
-              streamErrorVersion++
-              stream.unsubscribeAll()
-              abortController.abort()
-              fail(error)
-            },
-          )
+        const recover = endOutage()
+        if (applied === true) recover()
+        else {
+          void applied.then(recover, (error: unknown) => {
+            if (!isActiveLifecycle() || abortController.signal.aborted) {
+              return
+            }
+            streamErrorVersion++
+            stream.unsubscribeAll()
+            abortController.abort()
+            fail(error)
+          })
         }
 
         if (finishesReset) {
@@ -2623,7 +2679,10 @@ function createElectricSync<T extends Row<unknown>>(
         rejectFullSnapshot(error)
         if (isActiveLifecycle() && !abortController.signal.aborted) {
           if (!ready) failInitialSync(error)
-          else fail(error)
+          else {
+            gaveUp = true
+            fail(error)
+          }
         }
         // A source that stops must end its reserved transaction. The initial
         // failure decides first: abandoning commits.

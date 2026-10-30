@@ -344,7 +344,9 @@ await todosCollection.utils.awaitMatch(
 Transaction evidence and pending `awaitTxId`/`awaitMatch` calls belong to one
 collection lifecycle. Explicit cleanup and automatic garbage collection reject
 pending waits with `StreamAbortedError`; callbacks from the retired stream cannot
-settle waits in a restarted collection. Observe these promises even when the
+settle waits in a restarted collection, and a restarted collection does not
+treat a txid the retired stream delivered as synced: `awaitTxId` waits for the
+new stream's evidence. Observe these promises even when the
 component or collection may be disposed before they settle.
 
 An on-demand Collection with managed SQLite persistence can also replace its
@@ -429,10 +431,14 @@ source node shows an `error` in `collection.health` and in each live query's
 `health` tree. This does not silently retry the failed stream;
 `collection.reload()` refetches.
 
-While the Electric stream retries a failed request, the Collection reports
-nothing: it stays `loading` before its first up-to-date, and keeps its health tree
-unchanged afterward. When the stream gives up, it calls `fail()`: a failed first load
-before readiness, or the source node's `error` after it. Complete updates from an explicit `replica: 'full'` stream remain valid.
+While the Electric stream retries a failed request, the Collection stays
+`loading` before its first up-to-date. After it, a short outage leaves the
+health tree unchanged, so a blip does not flap it. Once five attempts in a row
+have failed, whether the client retried them or your `onError` returned a
+retry, the source node shows the outage as its `failureReason`; the next
+applied up-to-date clears it. When the stream gives up, including when
+`onError` throws, it calls `fail()`: a failed first load before readiness, or
+the source node's `error` after it. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
 Outside scoped recovery, complete rows published by persistence reloads or
