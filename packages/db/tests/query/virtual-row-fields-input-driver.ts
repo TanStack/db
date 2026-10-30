@@ -453,49 +453,84 @@ export async function runInlineMetadataCallbackHistory(
   description: MetadataInputDescription,
   form: `array` | `materialized` | `collection`,
   reached: (cut: CallbackInputCut | `rejected`) => void,
+  path: `direct` | `query-ref` = `direct`,
 ): Promise<CallbackInputReport> {
   const initial = freshRows()
   const children = source(`callback-inline-child`, initial)
-  const parents = source(`callback-inline-parent`, [
-    { id: `parent`, parentId: `group`, label: `parent`, optional: undefined },
-  ])
+  const parentRows: Array<MetadataInputRow> =
+    path === `direct`
+      ? [
+          {
+            id: `parent`,
+            parentId: `group`,
+            label: `parent`,
+            optional: undefined,
+          },
+        ]
+      : initial.map((row) => ({ ...row }))
+  const parents = source(`callback-inline-parent`, parentRows)
   let facts = initial.map((row) => ({
     row: { ...row },
     sourceId: children.id,
     pending: false,
   }))
   let cut: CallbackInputCut = `initial`
+  // A QueryRef in a child without a functional callback preserves the inline
+  // selected shape too. One parent per typed key gives its outer correlation
+  // a named source field without requiring a projected parentId.
   const expected = () =>
-    expectedMetadataRecord({
-      id: `parent`,
-      children: rowsFromSnapshots(
-        facts.map((fact) => expectedMetadataInput(fact, description, true)),
-      ),
-    })
-  let allowed = [expected()]
+    parentRows.map((parent) =>
+      expectedMetadataRecord({
+        id: parent.id,
+        children: rowsFromSnapshots(
+          facts
+            .filter((fact) => path === `direct` || fact.row.id === parent.id)
+            .map((fact) => expectedMetadataInput(fact, description, true)),
+        ),
+      }),
+    )
+  let allowed = expected()
   // The controlled source publishes its initial child batch atomically. A
   // startup callback can precede that batch or consume its complete rows.
-  allowed.push(expectedMetadataRecord({ id: `parent`, children: [] }))
+  allowed.push(
+    ...parentRows.map((parent) =>
+      expectedMetadataRecord({ id: parent.id, children: [] }),
+    ),
+  )
   const calls: Array<{ cut: CallbackInputCut; input: MetadataInputSnapshot }> =
     []
   const build = () =>
     createLiveQueryCollection({
       query: (q) => {
         const included = q.from({ parent: parents }).select(({ parent }) => {
-          const selected = projectInput(
-            children,
-            `child`,
-            description,
-            parent.parentId,
-          ).orderBy(({ $selected }) => $selected.label)
+          const selected =
+            path === `direct`
+              ? projectInput(
+                  children,
+                  `child`,
+                  description,
+                  parent.parentId,
+                ).orderBy(({ $selected }) => $selected.label)
+              : new Query()
+                  .from({
+                    nested: projectInput(children, `child`, description),
+                  })
+                  .where(({ nested }) => eq(nested.id, parent.id))
+                  .orderBy(({ nested }) => nested.label)
           return {
             id: parent.id,
             children:
               form === `collection`
-                ? include(selected)
+                ? include(
+                    selected as unknown as QueryBuilder<ProjectionContext>,
+                  )
                 : form === `array`
-                  ? toArray(selected)
-                  : materialize(selected),
+                  ? toArray(
+                      selected as unknown as QueryBuilder<ProjectionContext>,
+                    )
+                  : materialize(
+                      selected as unknown as QueryBuilder<ProjectionContext>,
+                    ),
           }
         })
         return q.from({ nested: included }).fn.select(({ nested }) => {
@@ -574,10 +609,14 @@ export async function runInlineMetadataCallbackHistory(
           expected: allowed,
         })
     const actual = outputRows(live.toArray)
-    const next = [{ id: `parent`, observed: expected() }]
+    const next = expected().map((observed, index) => ({
+      id: parentRows[index]!.id,
+      observed,
+    }))
     for (const kind of metadataOutputViolations(actual, next))
       report.violations.push({ cut, kind, actual, expected: next })
-    if (premise && current.length && live.toArray.length === 1) reached(cut)
+    if (premise && current.length && live.toArray.length === parentRows.length)
+      reached(cut)
   }
   let finish = async () => {}
   await withOracleCleanup(async () => {
@@ -594,7 +633,7 @@ export async function runInlineMetadataCallbackHistory(
           }
         : fact,
     )
-    allowed = [before, expected()]
+    allowed = [...before, ...expected()]
     const transaction = children.update(1, (row) => {
       row.label = `number-pending`
     })
@@ -611,7 +650,7 @@ export async function runInlineMetadataCallbackHistory(
         ? { ...fact, row: { ...initial[0]! }, pending: false }
         : fact,
     )
-    allowed = [pending, expected()]
+    allowed = [...pending, ...expected()]
     await finish()
     check()
     cut = `remote-next-use`
@@ -621,7 +660,7 @@ export async function runInlineMetadataCallbackHistory(
         ? { ...fact, row: { ...fact.row, label: `string-remote` } }
         : fact,
     )
-    allowed = [settled, expected()]
+    allowed = [...settled, ...expected()]
     children.utils.begin()
     children.utils.write({ type: `update`, value: { ...facts[1]!.row } })
     children.utils.commit()

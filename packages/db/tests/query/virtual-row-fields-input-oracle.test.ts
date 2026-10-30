@@ -3,7 +3,7 @@
  *
  * The shared input oracle states the maintainer's source/projection/inline law.
  * This finite receiver exhausts 231 root histories, 231 wrapped child histories
- * and 165 direct child histories. Another 99 inline-value/rejection histories
+ * and 165 direct child histories. Another 198 inline-value/rejection histories
  * and three direct-source controls exercise the neighboring boundaries.
  * It invokes real query callbacks and compares their copied input and ordinary derived output at
  * initial readiness, held mutation, settlement and later remote use. The
@@ -59,7 +59,10 @@ const callbackCases = metadataCallbackReceiverHistories.map((history) => ({
 }))
 const inlineCases = metadataInlineHistories.map((history) => ({
   ...history,
-  label: `${history.form}/${key(history)}`.replaceAll(`$`, `field:`),
+  label: `${history.path}/${history.form}/${key(history)}`.replaceAll(
+    `$`,
+    `field:`,
+  ),
 }))
 const callbackReach = createOracleReach(
   `functional metadata callback`,
@@ -79,8 +82,10 @@ const inlineReach = createOracleReach(
   `inline metadata callback`,
   metadataInlineHistories.flatMap((history) =>
     history.form === `collection`
-      ? [`${history.form}/${key(history)}/rejected`]
-      : cuts.map((cut) => `${history.form}/${key(history)}/${cut}`),
+      ? [`${history.path}/${history.form}/${key(history)}/rejected`]
+      : cuts.map(
+          (cut) => `${history.path}/${history.form}/${key(history)}/${cut}`,
+        ),
   ),
   { replaying: false },
 )
@@ -159,7 +164,11 @@ test.each(inlineCases)(
     const report = await runInlineMetadataCallbackHistory(
       history,
       history.form,
-      (cut) => inlineReach.reach(`${history.form}/${key(history)}/${cut}`),
+      (cut) =>
+        inlineReach.reach(
+          `${history.path}/${history.form}/${key(history)}/${cut}`,
+        ),
+      history.path,
     )
     expect(
       report.violations,

@@ -509,7 +509,9 @@ function compileQueryInternal(
     aliasRemapping,
     sourceWhereClauses,
     parentKeyStream,
-    publishCollectionRoot,
+    // Sanitize source rows before a callback consumes them. Inline values
+    // without a callback keep their authored selected shape.
+    publishCollectionRoot || query.fnSelect !== undefined,
   )
   Object.assign(sources, fromSources)
   const sourceCarriesInternalRouteState =
@@ -622,8 +624,12 @@ function compileQueryInternal(
       ignoreWindow,
       rawQuery,
       query.from,
-      // Joined subqueries are callback inputs even inside inline includes.
-      (...args) => compileQueryInternal(args, true, true),
+      (...args) =>
+        compileQueryInternal(
+          args,
+          true,
+          publishCollectionRoot || query.fnSelect !== undefined,
+        ),
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
@@ -1647,6 +1653,7 @@ function processFromClause(
         aliasRemapping,
         sourceWhereClauses,
         parentKeyStream,
+        publishCollectionRoot,
       )
 
     return {
@@ -1693,6 +1700,7 @@ function processFromClause(
       aliasRemapping,
       sourceWhereClauses,
       parentKeyStream,
+      publishCollectionRoot,
     )
 
     if (!mainAlias) {
@@ -1934,6 +1942,7 @@ function processFrom(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   parentKeyStream?: KeyedStream,
+  publishCollectionRoot = false,
 ): {
   alias: string
   input: KeyedStream
@@ -1987,9 +1996,7 @@ function processFrom(
           undefined,
         ],
         true,
-        // A QueryRef exports a source row, not its enclosing inline value.
-        // Enforce source/projection metadata before any consumer runs.
-        true,
+        publishCollectionRoot,
       )
 
       // Pull up alias mappings from subquery to parent scope.

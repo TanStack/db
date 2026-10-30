@@ -809,18 +809,22 @@ readiness, held mutation, settlement and remote next use. Complete before/after
 source facts permit retraction evaluation. Startup LEFT joins may expose an
 absent side; established outputs require both numeric/string-key rows. Reserved
 metadata is judged by presence/readable value, with ownership diagnostic.
-Ordinary own undefined stays distinct from absence. Another 66 histories retain
-nested inline array/materialized authored values, and 33 reject compiled
-Collection inputs before callbacks. All 2,520 callback and 297 inline/rejection
+Ordinary own undefined stays distinct from absence. Another 132 histories retain
+nested inline array/materialized authored values through direct and QueryRef
+paths, and 66 reject compiled Collection inputs before callbacks. All 2,520
+callback and 594 inline/rejection
 states reach once; 17 controls calibrate the same judgments. Partial receiving
 selections still owe the selected campaign's full reach matrix.
 
 The restored owner reproduced 203 correlated-child REDs on unchanged main.
 Adding the direct receiving paths before production repair raised that to 348
-REDs with 398 passes. The compiler now enforces source/projection metadata at
-QueryRef and joined-source boundaries independently of final inline output.
-All 746 owner tests pass. A QueryRef-only mutant leaves 29 joined-source
-violations; sanitizing every inline child breaks 58 authored-value histories.
+REDs with 398 passes. The expanded 845-test owner also rejects the first repair in 58 inline QueryRef
+histories before the corrected production edit. The compiler now requests
+source/projection metadata at FROM and joined-source boundaries when a functional
+callback consumes the rows. Inline-only QueryRefs preserve authored shape.
+All 845 owner tests pass. A QueryRef-only mutant leaves 58 joined-source
+violations; sanitizing every inline child breaks 116 authored-value histories.
+Restoring unconditional source sanitization breaks 58 inline QueryRef histories.
 The [runtime repair record](oracle-reviews/callback-metadata.md) retains the
 commands, distinguishing traces, source fingerprints and limits. Historical
 instrument acceptance remains in

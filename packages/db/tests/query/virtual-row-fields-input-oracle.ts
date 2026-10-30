@@ -80,10 +80,13 @@ export const metadataCallbackReceiverHistories =
   )
 export const metadataInlineHistories = metadataInputDescriptions.flatMap(
   (description) =>
-    ([`array`, `materialized`, `collection`] as const).map((form) => ({
-      ...description,
-      form,
-    })),
+    ([`array`, `materialized`, `collection`] as const).flatMap((form) =>
+      ([`direct`, `query-ref`] as const).map((path) => ({
+        ...description,
+        form,
+        path,
+      })),
+    ),
 )
 export type MetadataInputSnapshot = {
   present: boolean

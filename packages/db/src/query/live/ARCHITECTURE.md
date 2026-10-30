@@ -396,9 +396,10 @@ authored selected shape. Sanitizing only the eventual Collection publication
 cannot satisfy this law, because user code may already have derived an
 ordinary field from a spoofed input.
 
-The compiler enforces this source/projection boundary when a QueryRef or joined
-subquery exports its result, including inside a correlated inline child. The
-include's final authored value retains its separate inline shape. The runtime
+The compiler enforces this source/projection boundary when a functional callback
+consumes a QueryRef or joined subquery result, including inside a correlated
+inline child. An inline-only QueryRef and the include's final authored value
+retain their separate inline shape. The runtime
 owner checks root, wrapped child and direct child callbacks at initial readiness,
 held mutation, settlement and remote next use. Its bounded repair evidence is in
 [the callback metadata record](../../../../../docs/contributing/oracle-reviews/callback-metadata.md).
