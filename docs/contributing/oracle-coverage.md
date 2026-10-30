@@ -1960,7 +1960,7 @@ unscoped/client caches, and distinct same-name constructor references. It checks
 both admissions, each admitted output's settings, retained first settings, and
 compatible sharing and forbidden sharing between two admitted outputs.
 The same 534 histories now check first-option retention on rerender (480
-admitted-first histories) and application after an actual queryKey change
+admitted-first histories) and application after an actual `queryKey` change
 (432 histories with two valid declarations). Invalid admissions have no output
 identity to compare. Constructor labels use grammar roles, and equal function
 names cannot collapse registration keys. This protects local cache qualification

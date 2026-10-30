@@ -22,7 +22,7 @@ These laws are separate. Local compatibility does not enter the portable hash. D
 ## Scope and declared reach
 
 - Shared indexing policy exhausts nine mode/constructor declarations. Core construction crosses direct/options entry points: 16 valid histories reach output reads and two reach rejection, eight/one per path. Ordered consumers read two projected fields, both null placements, repeat a specification, and observe a later source update. The independent model sorts plain values; it imports no production comparator or index selector.
-- Real React, Preact, Vue, Solid, Svelte and Angular each receive all nine declarations at their settled flush cut. Each case asserts its own admission/read reach. The final non-React focused runs each pass nine cases; React's full suite includes its nine.
+- Real React, Preact, Vue, Solid, Svelte and Angular each receive all nine declarations at their settled flush cut. Each case asserts its own admission/read reach. Focused runs for the five frameworks other than React each pass nine cases; React's full suite includes its nine.
 - Suspense indexing keeps 534 histories: 486 built-in pairs plus 48 distinct same-name-constructor pairs, across two scopes and three identity relations. First/second admission and retained-first reach apply to every history. Retained-options and rebound-options reach apply to the 480/432 legal mounted cases above.
 - The existing local-cache owner now has a real Suspense independent-output receiver: **348 histories, 174 per scope**, covering every non-indexing field in the public config type. Compile-checked fixture keys prevent a new field from silently missing this driver. Six reference/presence pairs cover each field; singleResult admits only its legal absent/true declarations. First output, second output and retained-first reach each cover all 348 histories. The indexing owner supplies the two indexing fields separately.
 - Warm React cache receivers now have 144 histories per ordinary mounted, Suspense and server-render path, each checking admission, retry and original reuse. Both mounted paths check settled rows. They use the shared getKey/schema declaration model.
@@ -136,3 +136,17 @@ Review accounting and authorized repairs are complete. At publication,
 All accepted-law repairs have decisive local witnesses and no product decision
 remains pending. The previous head's green CI does not establish the new head's
 readiness.
+
+## CodeRabbit follow-up on `80985a1ab`
+
+Review `5717923866`, run `21f44a11-4a65-466f-a493-12f311bfd0b5`, covers the implementation and evidence commits through `80985a1ab`. Its two unverified comments concern wording. Its mutable summary also reports a generic documentation metric. These claims require source and policy checks, not a behavioral oracle or a new runtime experiment.
+
+| ID | Claim | Evaluation and action | Durable value |
+| --- | --- | --- | --- |
+| CB1 | Format the coverage map's queryKey identifier as code. | Confirmed unformatted identifier; `fixed-now` with code formatting. | Preserve API spelling in prose. |
+| CB2 | Hyphenate non-React-focused in the reach report. | The modifier is awkward; `fixed-now` by rewriting the sentence to name the five other frameworks. The proposed compound is unnecessary. | Make the receiving-path count clear. |
+| CB3 | Raise docstring coverage from the service-reported 23.53% to its 80% threshold. | `refuted` as a repository requirement: no repository CodeRabbit configuration or docstring threshold exists in AGENTS.md, ESLint configuration, package scripts or CI workflows. The service identifies no specific missing explanation. Its percentage was not independently recalculated. | Retain the advisory metric in the raw task ledger; assess comments for useful explanations rather than adding them to meet an external ratio. |
+
+Loss audit: three distinct suggestions = two documentation fixes and one refuted repository requirement. The raw review, complete mutable summary and generic test-generation/autofix controls are preserved in the uncommitted task ledger. The controls supply no concrete test gap or additional finding. No behavioral claim, runtime repair or oracle budget change is introduced by this follow-up. Production measurements and oracle calibration therefore remain applicable.
+
+Reviewer assessment: no hire on this sample alone. The two wording observations are useful but unverified; the generic metric adds no code-level evidence. This conclusion is separate from the high-effort reviewer's assessment above. CI completion remains a separate final-head check.
