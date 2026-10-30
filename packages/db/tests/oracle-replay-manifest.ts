@@ -195,7 +195,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `publication-history`,
+    `publication-history restart-publication`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
