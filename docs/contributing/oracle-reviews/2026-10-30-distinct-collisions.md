@@ -446,3 +446,207 @@ Follow-up SHA-256 fingerprints (other prep-review fingerprints remain current):
 9745b7fe682277a998a20e00f6d6ab2801c6f8ba064a7be83ca395f5b52c32a7  packages/db/tests/oracle-replay-manifest.ts
 09f6d6820dd204bf6cd96a11311d6c0ccd45a386f85bef9174c2860388fb6226  packages/db/tests/query/distinct-reported-collision.test.ts
 ```
+
+## Follow-up: ten user-supplied code-reading candidates
+
+Reviewed source: `973b0a0376b88ac8fe53495f58b5237d6eab47b0`.
+Evaluation parent: `3fc1cb8e824720ebccd5dfeb4fe34f8cad207607`.
+This entry supersedes the earlier output/tap compatibility and coverage claims.
+It is a self-review with executable challenges, not an independent verifier.
+The complete raw review and append-only working ledger remain in
+`/tmp/db-2309-review-user-candidates/`; no candidate was dropped.
+
+### Law, experiments, inference and repair
+
+The accepted laws remain positive-support distinct membership and full-row
+contribution conservation. The live-query guide supplies distinct authority;
+`ARCHITECTURE.md`, “Weighted relations and public keys”, requires a negative
+row to retract the same contribution. No first/last representative policy is
+added. The maintainer explicitly chose to leave implicit keys unspecified
+across query rebuilds and use `getKey` when stable keys are needed. The guide
+now records that decision.
+
+Before production repairs, the primary owner gained a wider grammar and full
+emitted-relation comparison, and the existing includes structural owner gained
+a receiving lane. All comparisons passed unchanged production. The following
+hostile experiments then identified missing enforcement:
+
+- A mutant that substitutes each retracting input for the stored emitted row
+  passes all five old distinct tests. All four wider campaigns reject its
+  positive original-row/negative different-row residue. Fixed seed `2309`,
+  path `0:0:0`, fails at atomic checkpoint 4 and a split checkpoint within
+  world 3. This confirms U1's missing unselected-payload dimension and the
+  correctness of retaining the emitted contribution.
+- A mutant that uses `-1` for every collision output key passes all five old
+  tests. It fails all four wider campaigns when a third member arrives or a
+  removed hash-key member leaves a hole. Fixed seed `2309`, path `0:0:0`,
+  fails at atomic checkpoint 5 or split world 6. This confirms U3's missing
+  bucket-cardinality/arrival dimension.
+- The original digest-only operator fails both Collection-valued includes
+  campaigns at public checkpoint 2 (fixed seed `2309`, path `0:0:0`). Both
+  inline controls pass. `createActiveBuckets` is used only for Collection
+  facades, so the witness distinguishes the actual affected path.
+- A public API regression checks an OutputOperator subclass with an unrelated
+  `inner()` method. The alias invokes that method and suppresses the output
+  callback (0 calls instead of 1). Restoring the original exported class
+  makes the test pass and preserves its constructor name, base and independent
+  `instanceof` relationships. This repair removes the API change entirely.
+
+The wider D2 grammar permutes four verified unequal native-collision members,
+varies duplicate counts 2–4 and unselected variants 0–3, removes a member before
+later arrivals, and adds up to twelve random worlds of up to eight slots plus
+empty/reinsert boundaries. Every atomic/split fixed/random 100-history campaign
+reaches unequal unselected payloads, three colliding members, later arrival after
+removal, and empty output after unequal payloads in **100 histories each**.
+The full-row comparison sums signed output without discarding negative residue
+or duplicate representatives. It derives supported selections independently
+from model labels and permits representative choice and arbitrary numerical
+keys, while requiring simultaneous key uniqueness.
+
+The includes lane reuses the original distinct support grammar and the primary
+includes full-tree recompute. It searches actual serialized numeric-group route
+keys for collisions. Each inline/Collection fixed/random 100-history campaign
+reaches collision coexistence, duplicate support, partial removal, last removal
+and reinsertion in **100 histories each**. Each source transaction is followed
+by a public row comparison. Existing top-level ordered/unordered and selected/
+default-tuple campaigns keep their original budgets.
+
+The initial attempt to compose a root collision into nested values failed its
+fixture premise: final digests can collide without equal inner object digests.
+That was a setup failure, not product RED. The final family search verifies all
+four actual digests. Missing property registration and a sandbox-rejected tsx
+CLI IPC socket were also setup failures. Normal registration and `node --import
+tsx` repair those test paths without changing production or comparisons.
+
+### Lossless item audit
+
+| ID | Claim and verdict | PR action and retained value |
+| --- | --- | --- |
+| U1 | Confirmed test gap, not an incorrect production retraction. First and last payloads differed only outside the old grammar. | **fixed-now:** full-row contribution checker, variable unselected data, generated removal and replay witness. Last-input mutant changes old GREEN to new RED. |
+| U2 | True at reviewed `973b0a037`; current head already asserts equal digests. | **already-fixed:** retain altered-initialization calibration and current seeded test. |
+| U3 | Prefix-only sample reaches all five old states in 100/100 cases. Tail ablation claim is true. The scaffold does vary order, insertion grouping and support. Independent input reach after successful driver checks is valid. Larger buckets were genuinely absent. | **fixed-now:** four-member family and new-member-after-removal grammar. Reused-key mutant survives old owner and fails wider owner. |
+| U4 | No collision-specific Collection active-bucket witness existed. | **fixed-now:** primary includes receiving lane, separate form/campaign reach and original-operator public RED. Inline remains a useful unaffected control. |
+| U5 | Identity and emitted-row references increase retained representation, including namespaced compiler rows. They are references, not deep copies. No measured heap-byte or latency result was supplied. | **accepted-design:** exact identity and conservation require information beyond a digest and one retained emitted contribution. State scales with supported classes; zero entries/buckets are removed. Keep the cost explicit. |
+| U6 | Equality allocates a Map even for the same reference: 100 direct calls allocate 100 Maps. “Every diff” overstates this because empty buckets perform no comparison. `structuralIdentity` is partial and has known #2192 unsoundness. | **fixed-now:** identity/reference equality short-circuit avoids unnecessary deep comparison inside distinct. Preserve structural equality for fresh objects. Reject universal structuralIdentity substitution: functions have no key; unequal function-valued RegExp lastIndex values share a defined key. |
+| U7 | Filtering every touched bucket creates an array and stores it again even with no removal. | **fixed-now:** compact in place and delete only empty buckets. Deterministic 100-support-update probe changes filter calls 100→0 and bucket-map writes 101→1. |
+| U8 | Valid independent Index collision, incorrect claim that moving this repair there covers all four operators. Distinct has no Index. | **refuted** as relocation. Preserve sibling S1 below, exact trace, primary owner and receiving-work obligation. GroupBy also has its own structuralIdentity path and #2192. |
+| U9 | Arrival-order-dependent implicit collision keys are confirmed. Stable keys across builds were not promised. | **accepted-design:** explicit maintainer decision keeps keys unspecified; guide recommends `getKey`. Live simultaneous key uniqueness is checked and calibrated. |
+| U10 | Alias changes public class identity/name/base/instanceof and breaks valid subclass dispatch. Simplification scope was authorized, semantic API changes were not. | **fixed-now:** restore original OutputOperator and keep the failing API regression. No alias API change remains for the changeset to document. |
+
+**Accounting:** ten raw items = six fixed-now + one already-fixed + two
+accepted-design + one refuted. No raw item is deferred or unaccounted for.
+
+**Sibling S1 remains open:** under fixed module initialization `Math.random =
+() => 0.5`, the reported two plain records both hash to `2650141082`.
+`Index.addValue('k', [a, 1])` followed by `[b, 1]` returns only `b × 2`;
+`reduce(values => values)` repeats that result. Direct distinct emits both
+values with unit support. This is a separate storage boundary, not a distinct
+implementation dependency. The coverage map now records the exact trace under
+`index-refinement-oracle.property.test.ts`, with the missing structural value
+history and reduce/join receiving witnesses. No claim that #2309 repairs
+Index/reduce/join/groupBy collision safety is made. This preserves the
+reviewer's repair-location question without silently expanding this PR into a
+shared storage rewrite.
+
+**Reviewer assessment:** hire for code review, with a requirement to verify
+behavioral claims. The reviewer found useful false-green tests, a missing
+receiving boundary and an actual public API risk. Severity ordering mixed
+coverage, necessary state cost and proposed policy. Universal structuralIdentity
+replacement and Index-only relocation were unsound. The original review ran
+no tests or typecheck, so these were candidates until the experiments above.
+
+### Evidence block and limits
+
+- **Law:** positive-support distinct membership and exact full-row retraction,
+  from the guide and materialization weighted-relation contract.
+- **Reach:** 400 wider D2 histories and 400 includes histories, in addition to
+  the prior 800 histories. Every declared state reaches 100 histories on
+  each independently counted normal campaign/path.
+- **RED:** commands below reject the last-input and reused-key mutants in the
+  wider owner, and the original operator in Collection includes. The output
+  API test also fails before its repair. Production was restored after every
+  temporary mutant.
+- **GREEN:** the same core/public comparisons pass with repaired production.
+  The full IVM suite passes, the full includes owner plus public distinct
+  tests passes, package TypeScript checks pass, and guarded replay validates
+  each new property. Final command results are recorded below.
+- **Mutant:** original digest-only, last-input retraction and reused collision
+  key. Failures are value/contribution assertions at the stated checkpoints,
+  not setup failures or timeouts.
+- **Limits:** four immutable nested collision selections plus an anchor at
+  D2, two numeric-group route collisions plus an anchor through includes,
+  finite source worlds and applied-transaction checkpoints. No arbitrary
+  mutable payload, getter, framework render, intermediate source publication,
+  or general Index collision-safety claim. Representative selection and
+  cross-build implicit numerical-key equality remain unspecified.
+
+Grammar controls: the fixed replay reconstructs the unequal-payload removal.
+The generated scaffold reconstructs late arrivals after removal in every
+member permutation. Removing variants makes the retraction mutant equivalent
+within the prior domain; removing the third-member dimension makes the reused
+key mutant survive. Tail ablation preserves scaffold reaches and loses extra
+arbitrary replacement histories, so reach is not advertised as tail coverage.
+World slots always have one source row and nonnegative support. A deletion of
+an absent source slot is not generated. Atomic and split paths share the
+model/check, and split comparisons run after each unit graph drain. Input
+labels are explicitly model-only identities for fixture-defined unequal values.
+
+ORC audit: 001–007 and 009–010, 012–016 have the contract, independent model,
+nearby prose, bounded histories/ablation, real drivers/checkpoints, calibrated
+mutants, equal fixed/random budgets/replay, model vocabulary, failure-preserving
+cleanup (includes), versioned evidence, adjacent support/cardinality cases,
+receiving witnesses, separate reach and shared-check regression described
+above. ORC-008 does not add a new stateful reference: full recomputation and
+signed output accumulation remain the judgment. ORC-011 adds no second copied
+model: the named masking hypothesis was loss of full payload multiplicity,
+which the raw signed-relation observer now distinguishes. Includes already
+uses an independent relationship recompute. This is bounded evidence rather
+than a universal proof.
+
+Validation commands use `--maxWorkers=2 --coverage.enabled=false`:
+
+```sh
+pnpm --filter @tanstack/db-ivm test --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/db exec vitest run tests/query/includes-oracle.property.test.ts tests/query/distinct-collision-oracle.test.ts tests/query/distinct-reported-collision.test.ts --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/db exec vitest run tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/db-ivm exec tsc --noEmit
+pnpm --filter @tanstack/db exec tsc --noEmit
+pnpm lint:changed
+pnpm size:compare --packages db-ivm,db --files
+```
+
+Guarded direct replays, from each package directory:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=ivm.distinct-representatives TANSTACK_DB_ORACLE_SEED=2309 TANSTACK_DB_ORACLE_PATH=0:0:0 node --import tsx ../db/tests/oracle-replay.ts tests/distinct-representative-oracle.property.test.ts --maxWorkers=2 --coverage.enabled=false
+TANSTACK_DB_ORACLE_PROPERTY=includes.bucket-collisions TANSTACK_DB_ORACLE_SEED=2309 TANSTACK_DB_ORACLE_PATH=0:0:0 node --import tsx tests/oracle-replay.ts tests/query/includes-oracle.property.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+The final size comparison against `c351fc04d` gives typical app **+42 gzip /
++124 brotli bytes**, db-ivm **+57 / +51**, and db **0 / 0**. This replaces the
+prior alias-based size result. The unsafe output alias is rejected despite its
+size saving. StructuralIdentity-only storage is rejected because it loses
+supported value distinctions. The in-place bucket refactor removes transient
+arrays/map writes, but the exact identity, emitted row and independent output
+key still cost bytes. No net-negative shipped-byte claim is made. Oracle tests
+and documentation grow separately from shipped code.
+
+Final local results: **642 IVM tests**, **269 includes/public distinct tests**,
+**41 replay guard tests** pass. Both package TypeScript checks, explicit ESLint,
+Prettier, `lint:changed`, and `git diff --check` pass. New guarded replays
+complete two executions each at seed `2309`, path `0:0:0` (synchronous fallback
+for D2). The fetched main advanced only by unrelated Effect fix #2301; the
+merge-base remains `c351fc04d`. Remote CI must verify the newly pushed head.
+
+Final source SHA-256 fingerprints:
+
+```text
+84bfe3138e810f5c93e1412071c3e5e8c91a919225a09b10b69ec394a8d90416  packages/db-ivm/src/operators/distinct.ts
+0968eb6580a7d3ad2b2a36846c8ad175c97e588da6d1dfdadc2caaebe63bc703  packages/db-ivm/src/operators/output.ts
+5bb1867a6e228c24120ed299cb99ea0b8b00dfcf864516aff2bb6a1cf5492b5e  packages/db-ivm/tests/distinct-incrementalization-oracle.ts
+0e41ff998185cd002678abaec7b257c7b0a01ed1dad7041b44c88967350b93d8  packages/db-ivm/tests/distinct-representative-oracle.property.test.ts
+f8908d69a0c93cc84f55dd791f9c1736ce28d9e79c97f7924266319aa64ceb4f  packages/db-ivm/tests/operators/output.test.ts
+fa9eb3f861837027563417f31e97f3a0aa49f182b414660de3f656f531559a1a  packages/db/tests/query/includes-oracle.property.test.ts
+74c6d4e1d1b8076c6d1e5ee06baf7d5e71731e968594388d933858504de39cea  packages/db/tests/oracle-config.ts
+d1c0849f46b471cce367516b431c549ff2e50d26efa58ca384d7a4b8337ca2d8  packages/db/tests/oracle-replay-manifest.ts
+```

@@ -49,8 +49,9 @@ export class DistinctOperator<
         const hashedValue = hash(identity)
         let bucket = this.#values.get(hashedValue)
         if (!bucket) this.#values.set(hashedValue, (bucket = []))
-        let entry = bucket.find(([candidate]) =>
-          equalHashValues(candidate, identity),
+        let entry = bucket.find(
+          ([candidate]) =>
+            candidate === identity || equalHashValues(candidate, identity),
         )
         if (!entry) {
           entry = [
@@ -75,15 +76,16 @@ export class DistinctOperator<
     // Cancelling changes must retain the same entry and output key.
     for (const hashedValue of updatedBuckets) {
       const bucket = this.#values.get(hashedValue)!
-      const retained = bucket.filter((entry) => {
+      let retained = 0
+      for (const entry of bucket) {
         const [, row, multiplicity, wasVisible] = entry
         const visible = multiplicity > 0
         if (visible !== wasVisible) result.push([row, visible ? 1 : -1])
         entry[3] = visible
-        return multiplicity !== 0
-      })
-      if (retained.length) this.#values.set(hashedValue, retained)
-      else this.#values.delete(hashedValue)
+        if (multiplicity !== 0) bucket[retained++] = entry
+      }
+      bucket.length = retained
+      if (retained === 0) this.#values.delete(hashedValue)
     }
 
     if (result.length > 0) {

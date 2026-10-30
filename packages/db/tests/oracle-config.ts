@@ -338,6 +338,8 @@ const staticOracleProperties = [
   `ivm.hash-value`,
   `ivm.incrementalization-law`,
   `ivm.distinct-collisions`,
+  `ivm.distinct-representatives`,
+  `includes.bucket-collisions`,
   `query.distinct-collisions`,
   `ivm.topk-support-window`,
   `opfs.close`,
