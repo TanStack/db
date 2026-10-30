@@ -9,7 +9,6 @@ import {
   watchEffect,
 } from 'vue'
 import {
-  BaseQueryBuilder,
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
   getPublicCollection,
@@ -275,13 +274,12 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
-  const windowOwner = {}
   let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
   const resolveNext = (value: unknown) =>
     (previousCollection = resolveLiveQueryValue(value, {
       gcTime: DEFAULT_GC_TIME_MS,
       previousCollection,
-      windowOwner,
+      windowOwner: resolveNext,
     }))
   const resolveInput = () => {
     // First check if the original parameter might be a ref/getter
@@ -330,15 +328,8 @@ export function useLiveQuery(
     // Reference deps to make computed reactive to them
     deps.forEach((dep) => toValue(dep))
 
-    // Ensure we always start sync for Vue hooks
-    if (typeof unwrappedParam === `function`) {
-      // A query function returning null or undefined disables the query.
-      return resolveNext(
-        unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
-      )
-    } else {
-      return resolveNext(unwrappedParam)
-    }
+    // The shared resolver prepares query callbacks and disabled inputs.
+    return resolveNext(unwrappedParam)
   }
   // The input's live-query Collection, or the error resolving it threw. A
   // Vue computed that throws serves its previous value on the next read, so

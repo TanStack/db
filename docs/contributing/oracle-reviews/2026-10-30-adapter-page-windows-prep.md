@@ -422,3 +422,69 @@ three owner comparisons and a real wrong-driver invocation reported zero
 executions. The complete protocol suite passes 63 tests. Source hashes and
 per-route witnesses are in the linked review manifest. No shipped source,
 product expectation or oracle run budget changed in this correction.
+
+
+## Production simplification after the size review
+
+The user requested a net-negative implementation. This follow-up removes
+intermediate rank arrays and the unused half-open-range helper, shares TopK's
+insertion/deletion boundary calculation, and searches indexed rows without a
+synthetic lookup tuple or a fresh comparator closure. The resolver now has one
+builder/config compilation path and one query-config reader. Existing semantic
+identity, exact-source, option, ownership, publication, and commit guards remain.
+Vue, Solid, and Angular delegate callback preparation and disablement to that
+resolver, and use their existing resolver closure as the binding identity.
+Angular projects the shared observer snapshot instead of keeping parallel copies.
+React uses one optional profiling timestamp and excludes development counters
+from production; its environment probe preserves bundled development and
+unbundled-browser behavior. No public API, oracle law, grammar, comparison,
+replay route, or run budget changed.
+
+An attempted Angular data projection short-circuited the current input and
+returned stale rows after compilation failed. The unchanged conformance suite
+rejected it in `grouping-operator-switch` and `compile-error-after-rerender`.
+The retained projection reads the current Collection before its cached snapshot;
+the same two cases and all ten window histories then pass. Direct environment
+checks and permanently disabled profiler allocation were also rejected during
+inspection because they would change supported development diagnostics.
+
+`pnpm size:compare --packages db-ivm,db,react-db,preact-db,vue-db,solid-db,angular-db --files`
+compares the final sources with main `0531c50ad`. The typical app changes from
+**+540 to -15 gzip bytes** and from **+515 to +126 brotli bytes**. The seven-package
+sum changes from **+772 to +83 gzip bytes**, and from **+626 to +35 brotli bytes**.
+Thus the typical gzip scenario is net negative; all measurements are not.
+The remaining guards enforce distinctions that existing receiving tests reject
+when removed. Svelte's adapter source is unchanged, and its separate package
+measurement remains +110 gzip bytes. These figures exclude tests and evidence.
+The original RED/GREEN/mutant records and R2-5/G1 chronology qualification remain
+unchanged; a behavior-preserving refactor supplies no new oracle-first claim.
+
+Final window receiving checks pass 106 tests across React (44), Preact (22),
+Vue (10), Solid (10), Angular (10), and Svelte (10). The complete IVM suite
+passes 657 tests. Four focused resolver/cache/pooling suites pass 4,446 tests;
+the five React development, hook, Suspense, render and SSR suites pass 145.
+Vue and Solid full suites pass 152 and 132 tests respectively. IVM, core,
+React, Angular, Vue, and Solid TypeScript checks pass. Explicit ESLint,
+changed-file lint, formatting, and whitespace checks pass. The root test
+command was not run. These checks preserve the existing bounded evidence;
+they do not extend its closure claim.
+
+The follow-up removes 217 net production lines from the published version;
+the complete branch removes 82 net production lines relative to main.
+Shipped-byte measurements above, rather than these line counts, determine
+production weight.
+
+| Verification log | SHA256 |
+| --- | --- |
+| `reduction-size-23.log` | `379c08a502c21abcb4a6b7cd91db6ed395e19bf06670cae819f8f8b281a7c75c` |
+| `reduction-ivm-verified.log` | `1dc19af4313e94afb18d0b3763af72603bd526398f0890cfab44908c3729d07c` |
+| `reduction-core-verified.log` | `c1d4b3927d9d7dac741dae9283dca2c6ccb05b41c0165c304f6f0672c902502c` |
+| `reduction-react-verified.log` | `edea08e3ee5afe412cb55a17b50ab6cc9f28256ea03bb6805fe4a1e970e5469c` |
+| `reduction-react-windows.log` | `7cd3c265d3cf208b295d0877e8cd75af94aad16ad93d9263f537641dbb008a99` |
+| `reduction-preact-windows.log` | `52b9195d842501faf8eb8da7f08950f66b27321b3ac7d28cec10b00887294eb3` |
+| `reduction-vue-windows.log` | `743df5ec99bf5fbd5a6f86245a6207d794b67bab2e93516ed7f662dc436947a0` |
+| `reduction-solid-windows.log` | `05a1319bbc71c67d8cee0b93a3159fb543181ae68a082885ef5b5bcb9e5ae5e9` |
+| `reduction-angular-windows.log` | `9afb4e92151a9b63f66dc1fc652677850cf6159cc21ef05dcc99a4071dbf1f19` |
+| `reduction-svelte-windows.log` | `abd368f953a4d7a73fb9b4456f2c4beff5dcea8cc6c693c87dc53e477cd59227` |
+| `reduction-eslint-verified.log` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `reduction-changed-lint-verified.log` | `89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168` |

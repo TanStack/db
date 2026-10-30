@@ -219,11 +219,8 @@ function warnDerivedIdentityHotPath(
 }
 
 function getExplicitDbClient(value: unknown): DbClient | undefined {
-  return value &&
-    typeof value === `object` &&
-    `client` in value &&
-    (value as { client?: unknown }).client !== undefined
-    ? (value as { client: DbClient }).client
+  return value && typeof value === `object`
+    ? (value as { client?: DbClient }).client
     : undefined
 }
 
@@ -262,14 +259,18 @@ export function getIdentityScope(
  */
 export function prepareDerivedQuery(
   value: unknown,
-  profiler: DerivedIdentityProfiler,
+  profiler: DerivedIdentityProfiler | undefined,
   scope: LiveQueryIdentityScope,
   deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
 ): DerivedQueryPreparation {
-  const shouldProfile =
-    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`) &&
-    process.env.NODE_ENV !== `production`
-  const start = shouldProfile ? getCurrentTime() : 0
+  // An absent timestamp means profiling is disabled. Keep the literal build
+  // guard beside the measured work so production bundlers erase the profiler.
+  const start =
+    /* @__PURE__ */ shouldWarnInDevelopment(
+      `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
+    ) && process.env.NODE_ENV !== `production`
+      ? getCurrentTime()
+      : undefined
   const preparedValue = prepareQueryValue(
     value,
     scope.client,
@@ -282,7 +283,7 @@ export function prepareDerivedQuery(
       identityDeps: [`derived`, identifyLiveQuery(preparedValue, scope)],
     }
   } finally {
-    if (shouldProfile) {
+    if (start !== undefined && profiler) {
       const durationMs = getCurrentTime() - start
       profiler.renderCount += 1
       profiler.totalMs += durationMs
@@ -569,17 +570,27 @@ export function useLiveQueryForSuspense(configOrQueryOrCollection: any) {
 // What one hook instance keeps across renders. It lives in a single ref
 // slot, so a render neither looks up nor allocates more.
 function createHookInstance(dbClient: DbClient | undefined) {
+  let derivedIdentityProfiler: DerivedIdentityProfiler | undefined
+  // Unbundled browsers can have no process global. Bundled development builds
+  // inline NODE_ENV and keep diagnostics even without that global.
+  try {
+    if (process.env.NODE_ENV !== `production`) {
+      derivedIdentityProfiler = {
+        renderCount: 0,
+        totalMs: 0,
+        maxMs: 0,
+        warned: false,
+      }
+    }
+  } catch {
+    // Without an environment, development diagnostics stay off.
+  }
   return {
     collection: null as Collection<object, string | number, {}> | null,
     identityDeps: null as Array<unknown> | null,
     config: null as unknown,
     client: dbClient,
-    derivedIdentityProfiler: {
-      renderCount: 0,
-      totalMs: 0,
-      maxMs: 0,
-      warned: false,
-    } as DerivedIdentityProfiler,
+    derivedIdentityProfiler,
     deferredCollections: new Set<
       CollectionImpl<any, string | number, any, any, any>
     >(),
@@ -641,16 +652,14 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
     }
 
     let queryHash: string | undefined
-    if (streamIdentity !== undefined) {
-      try {
-        queryHash = getStableValueHash(streamIdentity, `queryKey`)
-      } catch (error) {
-        if (error instanceof UnhashableQueryIRError) {
-          if (queryKey !== undefined) throw error
-          identityError = error
-        } else {
-          throw error
-        }
+    try {
+      queryHash = getStableValueHash(streamIdentity, `queryKey`)
+    } catch (error) {
+      if (error instanceof UnhashableQueryIRError) {
+        if (queryKey !== undefined) throw error
+        identityError = error
+      } else {
+        throw error
       }
     }
 
@@ -714,15 +723,13 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
         // Warn when passing a collection directly with on-demand sync mode
         // In on-demand mode, data is only loaded when queries with predicates request it
         // Passing the collection directly doesn't provide any predicates, so no data loads
-        const syncMode = (
-          configOrQueryOrCollection as { config?: { syncMode?: string } }
-        ).config?.syncMode
         if (
-          syncMode === `on-demand` &&
-          shouldWarnInDevelopment(
+          /* @__PURE__ */ shouldWarnInDevelopment(
             `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
           ) &&
-          process.env.NODE_ENV !== `production`
+          process.env.NODE_ENV !== `production` &&
+          (configOrQueryOrCollection as { config?: { syncMode?: string } })
+            .config?.syncMode === `on-demand`
         ) {
           console.warn(
             `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
@@ -781,42 +788,25 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
           }
           if (suspenseCollections && suspenseKey && instance.collection) {
             const collection = instance.collection
-            const removeCleanupListener = collection.on(
-              `status:cleaned-up`,
-              () =>
-                releaseSuspenseCollection(
-                  suspenseCollections,
-                  suspenseKey,
-                  collection,
-                ),
-            )
+            const retire = () =>
+              releaseSuspenseCollection(
+                suspenseCollections,
+                suspenseKey,
+                collection,
+              )
             // Keep a failed or crashed collection through React's immediate
             // retry so the hook can throw its actual error to an ErrorBoundary.
             // Retire it afterward so a later boundary reset starts fresh.
-            const retireAfterRetry = () =>
-              setTimeout(
-                () =>
-                  releaseSuspenseCollection(
-                    suspenseCollections,
-                    suspenseKey,
-                    collection,
-                  ),
-                0,
-              )
-            const removeErrorListener = collection.on(
-              `status:error`,
-              retireAfterRetry,
-            )
-            const removeCrashListener = collection.on(
-              `status:crashed`,
-              retireAfterRetry,
-            )
+            const retireAfterRetry = () => setTimeout(retire, 0)
+            const removeStatusListeners = [
+              collection.on(`status:cleaned-up`, retire),
+              collection.on(`status:error`, retireAfterRetry),
+              collection.on(`status:crashed`, retireAfterRetry),
+            ]
             const entry: SuspenseCollectionEntry = {
               collection,
               removeStatusListeners: () => {
-                removeCleanupListener()
-                removeErrorListener()
-                removeCrashListener()
+                for (const remove of removeStatusListeners) remove()
               },
             }
             suspenseCollections.set(suspenseKey, entry)

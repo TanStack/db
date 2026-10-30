@@ -8,7 +8,6 @@ import {
 } from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
 import {
-  BaseQueryBuilder,
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
   getPublicCollection,
@@ -251,35 +250,19 @@ export function useLiveQuery<
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
-  const windowOwner = {}
   let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
   const resolveNext = (value: unknown) =>
     (previousCollection = resolveLiveQueryValue(value, {
       gcTime: DEFAULT_GC_TIME_MS,
       previousCollection,
-      windowOwner,
+      windowOwner: resolveNext,
     }))
   const collection = createMemo(
     () => {
-      if (configOrQueryOrCollection.length === 1) {
-        // This is a query function - check if it returns null/undefined
-        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-        const result = configOrQueryOrCollection(queryBuilder)
-
-        if (result === undefined || result === null) {
-          // Disabled queries end the previous binding.
-          return (previousCollection = null)
-        }
-
-        return resolveNext(result)
-      }
-
-      const innerCollection = configOrQueryOrCollection()
-
-      if (innerCollection === undefined || innerCollection === null) {
-        // Disabled queries end the previous binding.
-        return (previousCollection = null)
-      }
+      const innerCollection =
+        configOrQueryOrCollection.length === 1
+          ? configOrQueryOrCollection
+          : configOrQueryOrCollection()
 
       if (isCollection(innerCollection)) {
         innerCollection.startSyncImmediate()
