@@ -189,9 +189,9 @@ function projectParentContext(
   valueIdentity: ValueIdentity,
 ): Record<string, any> {
   const inherited = getRouteMetadata(nsRow)?.parentContext
-  const inheritedValue = getParentContextValue(inherited)
-  const parentContext: Record<string, any> =
-    inheritedValue === undefined ? {} : { ...inheritedValue }
+  const parentContext: Record<string, any> = {
+    ...getParentContextValue(inherited),
+  }
   const projectedBindings = {
     ...getParentContextProjectedBindings(inherited),
   }
@@ -281,13 +281,7 @@ function correlationValuesEqual(left: unknown, right: unknown): boolean {
   if (left == null || right == null) return false
   const normalizedLeft = normalizeValue(left)
   const normalizedRight = normalizeValue(right)
-  return (
-    Object.is(normalizedLeft, normalizedRight) ||
-    (typeof normalizedLeft === `number` &&
-      typeof normalizedRight === `number` &&
-      Number.isNaN(normalizedLeft) &&
-      Number.isNaN(normalizedRight))
-  )
+  return Object.is(normalizedLeft, normalizedRight)
 }
 
 /**

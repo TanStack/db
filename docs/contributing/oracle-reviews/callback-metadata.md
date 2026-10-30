@@ -971,3 +971,49 @@ bindings supersede earlier bindings for these four refactored files only.
 | `packages/db/src/query/compiler/joins.ts` | `a5618bb1da3bff18b91fc4d9bf155447712e0bb1b68cd0f66a1cda0662d80450` |
 | `packages/db/src/query/compiler/order-by.ts` | `a104d4f4829e9b4ea801fcc60914772c1d97a47d7d46dbfa5e24f49724b12267` |
 | `packages/db/src/query/compiler/route-metadata.ts` | `bc6313f715e84949d0a6f8f5b48511bb3bc05ba5fd13a0b5e8a1033f3ee8e4df` |
+
+
+### Integration with current main and final size
+
+The maintainer approved updating this branch from main. Merge `ce555e739`
+incorporates `a2f346596c34faa7e65211134194337bd2e0007d`. The only conflict
+was appended coverage-map prose. Both sides remain. This updates the branch
+without merging PR #2312.
+
+The final compiler removes two redundant branches. `Object.is` already accepts
+two `NaN` values, so its later `Number.isNaN` case cannot change the answer.
+Object spread already accepts `undefined`, so parent-context copying needs no
+separate empty-object case. Accepted laws, oracle grammars, comparisons and
+budgets remain unchanged.
+
+The default `pnpm size:compare --packages db --files` now compares the integrated
+tree with current main `a2f346596`, rather than the earlier merge-base.
+
+| Measurement | Main gzip | Final gzip | Gzip delta | Brotli delta |
+| --- | ---: | ---: | ---: | ---: |
+| Full `@tanstack/db` package | 109,658 B | 109,601 B | −57 B | −48 B |
+| Typical app | 96,591 B | 96,529 B | −62 B | −31 B |
+
+Every measured scenario shrinks with gzip. The Effect scenario grows by one
+byte with Brotli. The earlier original-base and exact-base diagnostics remain
+historical measurements of their named trees.
+
+The frozen integrated source passes 6,533 tests across 16 files, including the
+primary owners, restart publication, replay, distinct collisions and include
+receivers. Focused no-emit TypeScript and ESLint pass, with zero lint warnings.
+Evidence is `/private/tmp/callback-metadata/ci-monitor/size-final-integration`:
+`size.log`, `green.*`, `types.log`, `eslint.log` and `final-fingerprints.json`.
+The refreshed compiler index binding below supersedes its previous binding.
+Other compiler sources retain the previous refactor bindings.
+
+`packages/db/src/query/compiler/index.ts`: `c356929cce3db647ec28f79ff2dd14bead69450ac6567176ec0bb63d6b8d970d`.
+
+
+All seven controls reject the intended wrong behavior on the frozen integrated
+source: HAVING view loss 551, over-normalized predicates 696, raw-only cache 26,
+window overwrite 48, joined overwrite 24, joined last-only eight and joined
+first-only eight. `size-mutant-summary.json` retains the assertion errors and
+source hashes. The missing-dependency setup attempt remains separately in
+`setup-failure-1`; it supplies no RED evidence. Existing dependency links
+resolved that copied-tree setup. No install or production mutation occurred.
+The isolated copies were restored and both trees match the frozen fingerprints.
