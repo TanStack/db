@@ -15,6 +15,7 @@ import {
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils.js'
 import {
   assertTerminalPublication,
@@ -556,6 +557,136 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
       return commands
     }),
 )
+
+/**
+ * Cleanup retains subscriber rows, not source rows. A successful restarted
+ * acquisition must publish the new source, including an equal retained row.
+ * Equality suppresses a public delta; it cannot erase replacement membership.
+ * This follows the opening publication law and the cleanup/restart grammar.
+ *
+ * Cross row equality with demand lifetime and delivery path. An ordinary source
+ * write can restore an independent retained row while acquisitions hold the
+ * replacement. Another retained row is deliberately omitted: keeping every old
+ * row would violate replacement just as deleting an equal restored row does.
+ * Current and obsolete resolve/reject outcomes distinguish authority from
+ * transport settlement. A failed attempt is followed by an authoritative retry.
+ * Every source operation is a complete transaction; malformed writes are excluded.
+ * Removing equality loses the reported defect, removing source delivery admits
+ * an acquisition-only patch, and removing omission admits a keep-all-rows patch.
+ */
+const restartOwnerStates = [
+  `pending`,
+  `settled`,
+  `peer`,
+  `aborted`,
+  `released`,
+  `none`,
+] as const
+const restartRowStates = [`absent`, `equal`, `changed`] as const
+const restartDeliveries = [`acquisition`, `source`] as const
+const restartReachStates = restartDeliveries.flatMap((delivery) =>
+  restartOwnerStates.flatMap((owner) =>
+    restartRowStates.flatMap((row) =>
+      ([`resolve`, `reject`] as const).map(
+        (outcome) => `${delivery}:${owner}:${row}:${outcome}`,
+      ),
+    ),
+  ),
+)
+
+const restartPublicationInputArbitrary = fc.record({
+  demand: fc.constantFrom(`a` as const, `b` as const),
+  value: fc.integer({ min: 0, max: 5 }),
+  obsoleteOutcome: fc.constantFrom(`resolve` as const, `reject` as const),
+})
+
+type RestartPublicationInput = {
+  demand: `a` | `b`
+  value: number
+  obsoleteOutcome: `resolve` | `reject`
+}
+
+function restartPublicationHistories(
+  input: RestartPublicationInput,
+  outcome: `resolve` | `reject`,
+) {
+  const { demand, value, obsoleteOutcome } = input
+  const other = demand === `a` ? `b` : `a`
+  const settle = (
+    target: DemandName,
+    scope: `current` | `obsolete`,
+    result: `resolve` | `reject`,
+  ): PublicationCommand => ({
+    type: `settle`,
+    demand: target,
+    scope,
+    age: `newest`,
+    outcome: result,
+  })
+  return restartDeliveries.flatMap((delivery) =>
+    restartOwnerStates.flatMap((owner) =>
+      restartRowStates.map((rowState) => {
+        const history: Array<PublicationCommand> = []
+        if (owner !== `none`) history.push({ type: `request`, demand })
+        if (owner === `peer`) history.push({ type: `request`, demand: other })
+        if (owner === `settled`)
+          history.push(settle(demand, `current`, `resolve`))
+        const target = delivery === `source` ? `c` : demand
+        // The fixture writes an acquisition's ID. Initial attempts are 0,
+        // or 0 and 1 with a peer; restart's first attempt is therefore 1 or 2.
+        const equalValue =
+          delivery === `source` ? value : owner === `peer` ? 2 : 1
+        if (rowState !== `absent`)
+          history.push({
+            type: `source`,
+            key: target,
+            action: `upsert`,
+            value: equalValue + (rowState === `changed` ? 10 : 0),
+          })
+        else if (owner === `settled` && delivery === `acquisition`)
+          history.push({
+            type: `source`,
+            key: target,
+            action: `delete`,
+            value: 0,
+          })
+        // Omission is independent of either demand's key.
+        history.push({ type: `source`, key: `d`, action: `upsert`, value })
+        if (owner === `aborted`) history.push({ type: `abort`, demand })
+        if (owner === `released`) history.push({ type: `release`, demand })
+        history.push({ type: `cleanup` }, { type: `restart` })
+        const restartIndex = history.length - 1
+        history.push(settle(demand, `obsolete`, obsoleteOutcome))
+        if (delivery === `source`)
+          history.push({
+            type: `source`,
+            key: target,
+            action: `upsert`,
+            value: equalValue,
+          })
+        history.push(settle(demand, `current`, outcome))
+        if (owner === `peer`) history.push(settle(other, `current`, `resolve`))
+        // Failure holds the prior public snapshot. A newer replay can succeed;
+        // obsolete settlement alone cannot authorize either publication.
+        if (outcome === `reject`) {
+          history.push(
+            { type: `truncate` },
+            settle(demand, `current`, `resolve`),
+          )
+          if (owner === `peer`)
+            history.push(settle(other, `current`, `resolve`))
+        }
+        history.push({ type: `release`, demand })
+        if (owner === `peer`) history.push({ type: `release`, demand: other })
+        return {
+          state: `${delivery}:${owner}:${rowState}:${outcome}`,
+          history,
+          restartIndex,
+        }
+      }),
+    ),
+  )
+}
 
 async function runPublicationHistory(
   history: ReadonlyArray<PublicationCommand>,
@@ -1467,7 +1598,12 @@ declareOracle({
     finishReplacement,
     expectedSelection,
   ],
-  grammar: [deferralCleanupHistories, publicationProductCases],
+  grammar: [
+    deferralCleanupHistories,
+    publicationProductCases,
+    restartPublicationInputArbitrary,
+    restartPublicationHistories,
+  ],
 })
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
@@ -2387,7 +2523,103 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
+  it(`keeps an equal row restored by the restarted acquisition`, async () => {
+    // Original generated failure: seed -1439698414, path 1:22.
+    await runPublicationHistory([
+      { type: `source`, key: `b`, action: `upsert`, value: 1 },
+      { type: `request`, demand: `b` },
+      { type: `cleanup` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `restart` },
+      {
+        type: `settle`,
+        demand: `b`,
+        scope: `current`,
+        age: `newest`,
+        outcome: `resolve`,
+      },
+      { type: `abort`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `release`, demand: `b` },
+    ])
+  })
+
   const { multiplier, ...replay } = readOracleRunConfig()
+  const restartProperty = `subscription-lifecycle.restart-publication`
+  // Each generated input runs every structural lane. Reach never depends on
+  // the random seed choosing equality, a live owner, or ordinary source delivery.
+  // Both campaigns use the same budget, grammar, model, driver and comparisons.
+  for (const seed of replay.replaySeed === undefined
+    ? [2310, undefined]
+    : [undefined]) {
+    for (const delivery of restartDeliveries) {
+      it(`matches restarted row publication ${delivery} (${seed ?? `random or replayed`})`, async () => {
+        const reach = createOracleReach(
+          restartProperty,
+          restartReachStates.filter((state) =>
+            state.startsWith(`${delivery}:`),
+          ),
+        )
+        await fc.assert(
+          fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
+            for (const outcome of [`resolve`, `reject`] as const) {
+              for (const scenario of restartPublicationHistories(
+                input,
+                outcome,
+              ).filter((candidate) =>
+                candidate.state.startsWith(`${delivery}:`),
+              )) {
+                reach.beginHistory()
+                const observations = await runPublicationHistory(
+                  scenario.history,
+                )
+                // A named lane counts only after a real cleanup/restart and every
+                // public callback, source row and consumer-row comparison passed.
+                expect(observations[scenario.restartIndex]?.executed).toBe(true)
+                // Canceled, released and absent owners have no current attempt.
+                // Their resolve/reject command must be a no-op, not a claimed
+                // successful or failed acquisition reach.
+                const currentSettlement = observations.find((observation) => {
+                  const command = scenario.history[observation.index]
+                  return (
+                    observation.index > scenario.restartIndex &&
+                    command?.type === `settle` &&
+                    command.scope === `current`
+                  )
+                })
+                const hasCurrentAttempt = [`pending`, `settled`, `peer`].some(
+                  (owner) => scenario.state.startsWith(`${delivery}:${owner}:`),
+                )
+                expect(currentSettlement?.executed).toBe(hasCurrentAttempt)
+                reach.reach(scenario.state)
+              }
+            }
+          }),
+          {
+            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
+            ...(seed === undefined ? {} : { seed }),
+          },
+        )
+        reach.assertReached()
+        if (replay.replayPath === undefined)
+          expect([...new Set(reach.counts().values())]).toEqual([
+            12 * multiplier,
+          ])
+      }, 120_000)
+    }
+  }
   const runs = 60 * multiplier
   fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,

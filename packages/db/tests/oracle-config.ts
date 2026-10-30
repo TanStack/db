@@ -320,6 +320,7 @@ const staticOracleProperties = [
   `subscription-replay.same-tick`,
   `subscription-lifecycle.history-statistics`,
   `subscription-lifecycle.publication-history`,
+  `subscription-lifecycle.restart-publication`,
   `subscription-lifecycle.sync-history`,
   `subscription-lifecycle.async-history`,
   `subscription-lifecycle.demand-change`,

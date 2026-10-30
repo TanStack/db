@@ -2349,6 +2349,21 @@ The following related oracles own distinct production paths or observation cuts:
   Limit: the generated grammars reach a failed retirement followed by another
   retired replay only rarely (the replay grammar releases one demand, on the
   last attempt), so the named histories own that sequence.
+  The cleanup/restart equality crossing (`subscription-lifecycle.restart-publication`)
+  retains equal rows actually restored into a direct subscriber's private
+  replacement while deleting omitted retained rows. It runs the shared model,
+  driver, and exact per-command batch/source/subscriber comparisons over two
+  delivery paths (acquisition writes and independent source writes), six demand
+  lifetimes (pending, settled, two live demands, aborted, released, absent),
+  three prior-row relationships (absent, equal, changed), and resolve/reject
+  commands. Canceled or absent current attempts are explicitly measured as no-ops.
+  Fixed and random campaigns each reach all 72 declared history states 12 times;
+  both current outcomes are structural, while keys, values, and obsolete outcomes
+  vary. The exact issue #2310 history remains a shared replay. Original suppression,
+  an acquisition-only repair, and retention of omitted rows fail publication
+  assertions. [Evidence and limits](oracle-reviews/issue-2310-restart-publication.md).
+  This crossing concerns direct subscriptions under the controlled sync boundary;
+  it does not establish delegated includes or external-provider behavior.
   Bounded three-row histories now compare a subscription's selected keys with
   callback key/type batches across full, explicit, filtered, and empty snapshots,
   two later ordered selections, both initial-state modes, and callback reentry.

@@ -1906,7 +1906,12 @@ export class CollectionSubscription
           value: previous,
           previousValue: undefined,
         })
-      } else if (!deepEquals(previous, change.value)) {
+      } else if (
+        this.truncateReplayState?.privateRows ||
+        !deepEquals(previous, change.value)
+      ) {
+        // An equal retained row still belongs in the private replacement.
+        // Its final diff suppresses the redundant public update.
         reconciled.push({
           ...change,
           type: `update`,
