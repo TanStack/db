@@ -276,3 +276,35 @@ the original base.
 
 Local quality review is complete. PR readiness remains unproven until the
 changeset, committed/pushed head and PR checks have been prepared and verified.
+
+
+## CI replay registration follow-up
+
+PR #2313 first ran at `ebdd2140d6a25efdc6c747070f1385d4b367449d`.
+The replay shard found a missing manifest owner for the newly registered
+`subscription-lifecycle.restart-publication` property. The property's direct
+Vitest replay was valid, but the guarded replay portfolio could not discover
+its owner. This was a test-registration omission, not a changed product law
+or a mismatch in the independent publication model.
+
+The existing `named oracle replay manifest` tests reproduce RED locally:
+one failure names that property as `no-named-owner`. Adding its suffix beside
+`publication-history` in `oracle-replay-manifest.ts` gives GREEN: all six
+manifest tests pass. The same check rejects the omitted mapping, so it also
+calibrates the registration repair. No production, model, history, comparison,
+exclusion or run budget changed.
+
+```sh
+pnpm --filter @tanstack/db exec vitest run tests/oracle-replay.test.ts \
+  -t 'named oracle replay manifest' --maxWorkers=2 --coverage.enabled=false
+
+TANSTACK_DB_ORACLE_SEED=2310 TANSTACK_DB_ORACLE_PATH=0:0:0 \
+TANSTACK_DB_ORACLE_PROPERTY=subscription-lifecycle.restart-publication \
+pnpm --filter @tanstack/db exec node --import tsx tests/oracle-replay.ts \
+  tests/collection-subscription-lifecycle-publication-oracle.property.test.ts \
+  -t 'matches restarted row publication' --maxWorkers=2 --coverage.enabled=false
+```
+
+The guarded replay now passes both delivery paths and reports two successful
+witnesses with the requested property, seed and path. This supplements the
+earlier direct replay and closes the missing portfolio-discovery boundary.
