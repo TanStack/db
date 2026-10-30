@@ -2,7 +2,7 @@
 
 This record covers code commit `2e962b1797e69066de52344fad9ea71811bc843e`. It supersedes the implementation
 account at published head `ca5597803ac385a945105785c498f28d7082488f`.
-Documentation-only commits can follow this code commit. Final source SHA-256:
+Documentation-only commits can follow this code commit. Source SHA-256 at that commit:
 
 - Solid materializer: `2aa43e691bf9a84101cd3ed92fbdfc28601d01523261b217ff1c0a9ed79443cb`.
 - Core select compiler: `959faf4dc755cf381af07e1381730ce5ac5b78e1a6544992e61c5cd872523a8d`.
@@ -246,3 +246,65 @@ Core/dependency build, 344 Core/query tests, all 228 Solid tests, and snapshot
 plus destination groups on all six adapters, without type errors. Changed-oracle
 lint and diff checks pass. This tests integration with main's Effect and D2
 changes without revising their laws or the separate counterexample owners.
+
+## Later CodeRabbit visibility finding
+
+Review `5718065479` covered `3ca65a6a1`; inline `4428014103` identified a
+raw/proxy comparison in the root descriptor-visibility branch. The same source
+was present after merge commit `11b42a11f`. The claim is correct for the internal
+materializer: an unchanged nested payload becomes a native proxy, while the
+current raw row contains its unwrapped node. Changing only enumerability then
+skipped a native write and left captured-root `Object.keys` consumers stale.
+
+Public-path probes did not supply this premise. Direct sync input and functional
+projection through callback, config, and supplied live-query Collection inputs
+omit the hidden root field before adapter admission. Core's public row snapshot
+enrichment spreads the row, normalizing root descriptors. The snapshot in
+`sync.ts` is a reused-row guard, not the admission copy. These probes are missing
+public premises, not public-hook RED evidence. No public descriptor-admission
+promise follows from this repair.
+
+The internal invariant preserves the helper's existing data-descriptor behavior
+and native shape notifications. Twelve helper histories cross six payload kinds
+with both initial visibility flags. Fresh immutable roots retain one payload
+through unchanged, toggled, returned, and toggled visibility. The independent
+comparison derives visible keys from the flag and observes a real Solid render
+effect on the captured stable root. It also checks current keys, retained source
+descriptors, payload identity, and root identity at each settled host cut.
+
+Before the production edit, the extended owner rejected six object, array, and
+native-store histories at the intended enumeration assertion. Six scalar, null,
+and undefined controls passed. The repair compares against `unwrap(value)` in
+the existing visibility guard. This changes one line and lets the existing
+setter restore the exact admitted payload after its notification pulse.
+
+All 240 Solid tests pass without type errors. The old raw/proxy guard mutant
+again fails the six container histories at the same assertions, with six
+controls passing and no type errors. The source is restored afterward. Solid
+build, changed-file ESLint, `pnpm lint:changed`, and diff checks pass. Each of
+the twelve histories guards unchanged, hidden, visible, and restored visibility.
+The externalized hook now uses 4,792 minified / 2,024 gzip bytes at gzip level 9.
+The same command on the parent produces 4,789 / 2,026. The helper remains 136
+lines. Its new SHA-256 is
+`4041a16af2f55e47f952fba1979796e2410be6c90102c86d52556530eb5d3ed9`.
+Core's source hash is unchanged.
+
+Guide audit for this extension: ORC-001/002 use the internal descriptor invariant
+and independent visibility flag. ORC-003 keeps the model, grammar, driver, and
+limits beside the family. ORC-004 reconstructs both visibility directions and
+separates scalar controls from wrapped containers; accessor and mutable-source
+updates are excluded. ORC-005/014 claim only the real Solid helper boundary and
+record the absent public premise. ORC-006/013 use the six REDs and restored
+wrong-guard mutant. ORC-007 does not apply to finite enumeration. ORC-008 has no
+stateful reference change. ORC-009 uses existing terms. ORC-010 uses the existing
+failure-preserving lifetime. ORC-011 has no identified shared semantic fault:
+the visibility flag and JavaScript key enumeration are separate formulations.
+ORC-012 records exact source hashes and outcomes here. ORC-015 guards every
+declared state per history. ORC-016 runs one reusable comparison over the grammar.
+
+The reviewer found a valid internal edge case but did not establish a public
+receiving path. The suggested unconditional pulse is broader than necessary;
+the one-line unwrapped comparison preserves existing scalar behavior. Hire
+recommendation remains yes for useful source analysis, with that reach limit.
+This adds C1 as `fixed-now`: **29 items = 27 fixed-now + two accepted-design**.
+The earlier 28-item audit remains unchanged as historical evidence.

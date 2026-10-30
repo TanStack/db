@@ -6247,6 +6247,13 @@ must read the current nested path reactively: a captured old nested proxy does
 not follow replacement. Native stores supply getter tracking and notifications.
 Explicit root own-key admission handles inherited-name and own-undefined cases.
 The complete graph comparison checks mixed paths without imposing alias identity.
+Twelve additional controlled-helper histories vary descriptor visibility for
+undefined, null, scalar, object, array, and native-store payloads. They observe
+captured-root `Object.keys` consumers across unchanged, hidden, visible, and
+restored-visibility stages while retaining payload and root identity. The raw/proxy
+identity guard fails six container histories before repair. These histories
+test only the materializer's internal invariant. Core public row snapshots
+normalize root descriptors, so no public descriptor-admission claim follows.
 Valid derived array-wrapper prototypes retain source methods, and local-only
 original reach requires a nonempty actual receipt. See the
 [native revision review](oracle-reviews/2026-10-30-solid-native-store-review.md)

@@ -115,7 +115,7 @@ export function createRowStore<T extends object>(source: T) {
                       })
                     }
                   } else {
-                    if (visibility && current[key] === value)
+                    if (visibility && current[key] === unwrap(value))
                       draft[key] = value === null ? undefined : null
                     if (current[key] !== unwrap(value)) draft[key] = value
                     if (!existed || visibility)

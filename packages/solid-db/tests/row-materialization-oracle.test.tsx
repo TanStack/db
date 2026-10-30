@@ -21,6 +21,7 @@ import { For, createRenderEffect, createRoot, createSignal } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import { expect, it, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { createRowStore } from '../src/store-materialization'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -304,6 +305,108 @@ it.each([...histories()])(
 declareOracle({
   grammar: [histories],
   check: [compare, compareArray],
+})
+
+/**
+ * The materializer's own data-field boundary preserves descriptor visibility
+ * and supplies native shape notifications. This is a helper-only law: Core
+ * public row snapshots copy enumerable root fields before hook admission.
+ * These histories therefore establish no public descriptor-admission promise.
+ * The existing supplied-Collection shape test covers public field admission.
+ *
+ * The model retains only a descriptor's enumerable flag. An Object.keys
+ * consumer of the stable root must see that flag at every settled host cut.
+ * Payload identity, scalar value, and source descriptors remain unchanged.
+ * Accessors, symbols, frozen descriptors, and in-place source edits are outside
+ * this family. Each update admits a fresh root with an immutable payload.
+ */
+function* visibilityHistories() {
+  for (const kind of [
+    `undefined`,
+    `null`,
+    `scalar`,
+    `object`,
+    `array`,
+    `native`,
+  ] as const)
+    for (const initial of [false, true]) yield { kind, initial }
+}
+
+function compareVisibility(
+  observed: Array<string>,
+  current: object,
+  visible: boolean,
+) {
+  const expected = visible ? [`payload`] : []
+  expect(
+    observed,
+    `enumeration observer follows descriptor visibility`,
+  ).toEqual(expected)
+  expect(Object.keys(current), `current descriptor visibility`).toEqual(
+    expected,
+  )
+}
+
+it.each([...visibilityHistories()])(
+  `notifies helper visibility for $kind, initially=$initial`,
+  async ({ kind, initial }) => {
+    const reach = createOracleReach(
+      `solid.materialization.visibility.${kind}.${initial}`,
+      [`unchanged`, `hidden`, `visible`, `visibility-restored`],
+    )
+    reach.beginHistory()
+    const payload =
+      kind === `undefined`
+        ? undefined
+        : kind === `null`
+          ? null
+          : kind === `scalar`
+            ? 1
+            : kind === `array`
+              ? [1]
+              : kind === `native`
+                ? createStore({ value: 1 })[0]
+                : { value: 1 }
+    const sourceRow = (visible: boolean) =>
+      Object.defineProperty({ payload }, `payload`, { enumerable: visible })
+    const resources = new ScenarioLifetime()
+    await resources.run(async () => {
+      const original = sourceRow(initial)
+      const entry = createRowStore(original)
+      const row = entry.value
+      const admitted = row.payload
+      let observed: Array<string> = []
+      createRoot((dispose) => {
+        resources.defer(dispose)
+        createRenderEffect(() => {
+          observed = Object.keys(row)
+        })
+      })
+      compareVisibility(observed, row, initial)
+      for (const visible of [initial, !initial, initial, !initial]) {
+        entry.update(sourceRow(visible))
+        await new Promise<void>((resolve) => queueMicrotask(resolve))
+        compareVisibility(observed, row, visible)
+        expect(entry.value, `ordinary root identity`).toBe(row)
+        expect(row.payload, `visibility keeps the admitted payload`).toBe(
+          admitted,
+        )
+        expect(original.payload, `source payload remains borrowed`).toBe(
+          payload,
+        )
+        expect(Object.keys(original)).toEqual(initial ? [`payload`] : [])
+        reach.reach(visible ? `visible` : `hidden`)
+      }
+      reach.reach(`unchanged`)
+      reach.reach(`visibility-restored`)
+    })
+    reach.assertReached()
+  },
+)
+
+declareOracle({
+  grammar: [visibilityHistories],
+  check: [compareVisibility],
 })
 
 /**
