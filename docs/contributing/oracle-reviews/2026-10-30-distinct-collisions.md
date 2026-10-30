@@ -1,0 +1,364 @@
+# Distinct collision review — 2026-10-30
+
+Source: [issue 2306](https://github.com/TanStack/db/issues/2306), by CaliLuke.
+The issue has no comments. Reviewed baseline: `c351fc04d7f70dc59bf92ecbed310f899b9511cd`.
+Implementation: local changes on `codex/fix-distinct-hash-collisions`, based on
+fresh `origin/main`. No fix commit or pull request was pushed. This is a
+self-review of the repair, not an independent reviewer verdict.
+
+## Law, experiment, inference, and repair
+
+**Law.** Distinct returns one occurrence of each positively supported selected
+value. Unequal selections remain separate even when their hashes collide.
+The authority is [Distinct in the live-query guide](../../guides/live-queries.md#distinct)
+and the existing incrementalization owner's DBSP accumulation/difference law.
+The project glossary explicitly says a matching digest does not establish D2
+value identity. No new product law or maintainer decision is needed.
+
+**Existing enforcement.** The incrementalization owner recomputed reductions,
+joins, groups, and windows, but never constructed `distinct()`. Its model was
+not wrong about distinct; the production path and collision-value dimension
+were absent. The hash identity oracle promises equal values have equal digests,
+not that every unequal value has a different digest. It cannot discharge an
+operator's equality obligation.
+
+**Experiment.** Before any production edit, the new distinct extension used the
+existing incrementalization comparison with actual native-hash collisions.
+Both selected-value and default-tuple D2 paths failed the weighted delta check
+at checkpoint 2. Ordered and unordered public live-query Collections also
+failed their snapshot comparison at that checkpoint. These were value
+assertion failures, not setup failures or timeouts. A noncolliding anchor
+remained present in the failing observations.
+
+**Inference.** A digest selected the entire identity class and its count, and
+also became the output row key. These are two enforcement gaps. Buckets with
+independent counts alone still lose rows when downstream Collections receive
+one output key for two selections.
+
+**Repair.** Each hash bucket now checks D2 value equality before sharing a count.
+The first entry keeps the existing hash key; colliding entries receive numeric
+keys above the 32-bit hash range. An entry retains the representative it emitted,
+so a later retraction removes that same row. Zero-count entries are removed only
+after the whole graph batch, preserving cancellation and continuous support.
+The repair reuses `equalHashValues`, removes repeated hashing during emission,
+and preserves the existing sign-crossing rules. It does not rely on a larger
+probabilistic digest or a partial structural serializer.
+
+## Evidence block
+
+- **Reach:** Each of the fixed and random campaigns runs 100 generated histories
+  per path. The five declared conditions are colliding values together,
+  duplicate support, partial removal, last removal while a collision peer stays,
+  and reinsertion. Every condition was reached by 100 histories in each campaign
+  for selected-value D2, default-tuple D2, unordered public Collection, and
+  ordered public Collection. D2 checks both atomic and legal unit-split delivery
+  for each history. There are 800 generated histories, before counting that
+  second D2 delivery schedule.
+- **RED:** On unchanged production, the two commands below failed all four
+  generated tests in their respective files. The D2 checker calibration passed.
+  Public failure observations omitted a member of native collision pair
+  `item-42425` / `item-53868` in the recorded initial process. The issue's exact
+  seeded pair was subsequently checked against the restored original operator:
+  both digests were `2650141082`, and only `item-90754` remained. That last run
+  is supplemental original-operator calibration; the native receiving-path RED
+  runs supplied the pre-production-edit gate.
+- **GREEN:** The final commands below passed 20 D2 tests and 43 public-query
+  tests, including the exact reported pair. Both package TypeScript checks,
+  explicit ESLint, `pnpm lint:changed`, and `git diff --check` passed.
+- **Mutant:** Restoring the original operator fails at checkpoint 2. Equality
+  buckets that still emit the hash as every entry's key fail the public snapshot
+  comparison at checkpoint 2. Capping each equality entry's support at one
+  fails the D2 delta comparison at checkpoint 4, when partial removal must keep
+  a value present. Each mutant was removed; none is part of the final changes.
+- **Limits:** The generated payload domain is immutable string/integer records,
+  not the whole D2 value-identity domain. There is no claim about representative
+  choice among differing unselected fields, ordering semantics, intermediate
+  source-transaction publications, framework rendering, every hash seed, or
+  digest collision freedom. The public API tested here is re-exported unchanged
+  by React DB. Historical published package installations and Bun were not
+  independently rerun; current source reproduces the exact reported behavior.
+  There is no known remaining counterexample in the declared collision class.
+
+Initial RED commands:
+
+```sh
+pnpm --filter @tanstack/db-ivm exec vitest run tests/distinct-incrementalization-oracle.property.test.ts --coverage.enabled=false
+pnpm --filter @tanstack/db exec vitest run tests/query/distinct-collision-oracle.test.ts --coverage.enabled=false
+```
+
+Final GREEN commands:
+
+```sh
+pnpm --filter @tanstack/db-ivm exec vitest run tests/distinct-incrementalization-oracle.property.test.ts tests/incrementalization-law-oracle.property.test.ts tests/operators/distinct.test.ts --coverage.enabled=false
+pnpm --filter @tanstack/db exec vitest run tests/query/distinct-reported-collision.test.ts tests/query/distinct-collision-oracle.test.ts tests/query/distinct.test.ts --coverage.enabled=false
+pnpm --filter @tanstack/db-ivm typecheck
+pnpm --filter @tanstack/db exec tsc --noEmit -p tsconfig.test.json
+pnpm lint:changed
+```
+
+Direct replay was checked against both the original and repaired operators:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=ivm.distinct-collisions TANSTACK_DB_ORACLE_SEED=1041521789 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0 pnpm --filter @tanstack/db-ivm exec vitest run tests/distinct-incrementalization-oracle.property.test.ts -t 'tuple.*random' --coverage.enabled=false
+TANSTACK_DB_ORACLE_PROPERTY=query.distinct-collisions TANSTACK_DB_ORACLE_SEED=-1901465925 TANSTACK_DB_ORACLE_PATH=0:0:0 pnpm --filter @tanstack/db exec vitest run tests/query/distinct-collision-oracle.test.ts -t 'ordered=false.*random' --coverage.enabled=false
+```
+
+The guarded replay recorder confirmed the selected properties, seed, and path.
+Each original-operator replay rejected one history at checkpoint 2. On repaired
+production the replays passed; fast-check visited 40 and 23 histories while
+reconstructing their now-passing shrink paths. Fixed campaigns stood aside.
+Collision class labels reconstruct the semantic history; the fixture discovers
+an actual collision in each native hash session, so concrete row integers can
+vary between processes.
+
+## Lossless finding ledger
+
+| ID | Original claim and proposed action | Evidence and technical verdict | Action | Durable destination |
+| --- | --- | --- | --- | --- |
+| R1 | Hash-only multiplicities and output identity silently merge unequal selections. Reported with React DB 0.5.12 / DB 0.15.2 / IVM 0.2.0 and React DB 1.0.0-rc.1, Bun 1.4.4 on macOS arm64. With initialization random fixed at 0.5, selections `{id:'item-51277',value:51277}` and `{id:'item-90754',value:90754}` produce one row, missing 51277; expected two. Without distinct both survive. | Confirmed on current source: pre-edit native D2 and public RED, and exact seeded original-operator replay. Published versions and Bun were not reinstalled. Severity P1: silent data loss. | fixed-now | Shared recomputation model, generated collision histories, public receiving driver, and seeded replay. |
+| R2 | Without a fixed seed, sufficiently many unequal rows lose rows; the collision pair varies by process. | Confirmed mechanism with native randomized initialization: fixture search finds an unequal colliding pair and the public path loses a member. The persistent campaign uses that pair, not a large-input performance test. No throughput or cardinality threshold is claimed. Severity P1. | fixed-now | Native collision discovery in both D2 modes and the public driver; no production hash mock. |
+| R3 | Incremental insertion/deletion multiplicities can affect a different colliding logical row. | Confirmed shared-counter defect. Generated histories cross both insertion orders, duplicate support, partial and final removal, simultaneous replacement and reinsertion. Parent fails on insertion before later cuts; the capped-support mutant reaches and fails partial removal at checkpoint 4. Final output agrees at every cut. Severity P1. | fixed-now | Same law/grammar, with five declared reaches per receiving path, and the capped-support mutant calibration. |
+| R4 | Collision-safe equality buckets or structural identity are needed; a larger probabilistic hash only reduces frequency. | Correct. A finite digest cannot be an injective identity for this unbounded value domain. Existing structural identities are partial, so equality buckets are the direct complete fallback. Shared-output-key mutant proves the additional identity obligation. | fixed-now | Equality-checked entries and separate collision keys in `DistinctOperator`; retained noncollision keys and existing tests. |
+
+The original report has no footnotes, capped findings, deferred suggestions, or
+comments beyond these claims. The expected/actual pair, version/environment
+claims, no-distinct control, native-seed claim, multiplicity consequence, source
+location, both repair alternatives, and larger-hash caveat are all retained.
+No sibling defect remains open. No deferral, exclusion, or law narrowing was
+used to make the comparisons pass.
+
+## Reviewer assessment
+
+**Hire recommendation on this sample: yes.** The report is technically accurate,
+high signal, and correctly prioritizes silent corruption. Its isolated public
+reproduction, exact seed, two release families, negative control, and source
+explanation show strong debugging depth. The proposed repairs target equality
+rather than collision probability. The report also identifies incremental
+consequences; the repair adds the missing support-history evidence. One report
+cannot establish the reviewer's general performance. The useful addition is a
+generated oracle and a public output-key witness, rather than a correction to
+the report's diagnosis.
+
+## Oracle conformance self-audit
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001 | Unique-selection authority and limits are stated beside the model and above. |
+| ORC-002 | Expected results use named-field equality and full recomputation; production hashing only selects adversarial fixtures. |
+| ORC-003 | Shared module explains law, model and grammar; D2 and public files explain paths, observations and checkpoints. |
+| ORC-004 | Original pair is replayed. Both orders and together/separate insertion are generated; removing either loses a collision regime. Support 2–4 reaches duplicate and partial removal; tails have 0–12 worlds of 0–8 slots with labels 0–2. Slots construct legal unique source keys and exclude negative source support and invalid fixture labels. An anchor and net-zero D2 cancellation distinguish nearby unaffected cases. Larger counts need only range expansion. |
+| ORC-005 | Real D2 distinct and public select/distinct, ordered and unordered, are exercised. Comparisons preserve omissions and duplicates. Every source write is applied before its snapshot assertion; no concrete missing-source-information hypothesis was identified. |
+| ORC-006 | Three production mutants fail the intended value comparisons; bad snapshot controls also reject omissions, duplicates and substitutions. |
+| ORC-007 | Fixed seed 2306 and unseeded campaigns use identical grammar, budget, driver and comparison. Captured seed/path replays were checked. No commands arbitrary is used. |
+| ORC-008 | The reference recomputes from a complete input relation; it adds no incremental subsystem state. |
+| ORC-009 | Class labels are explicitly model-only; slots map to unique source row keys. |
+| ORC-010 | Existing public `withOracleCleanup` releases retention, query and source while preserving primary and secondary failures. D2 fixtures own no asynchronous resources. |
+| ORC-011 | No concrete shared semantic fault requiring a second formulation was identified. Fixture-defined named-field equality is independent of production equality. |
+| ORC-012 | This versioned record ties outcomes, commands, limits, and the source fingerprints below to the reviewed baseline. |
+| ORC-013 | Duplicate support followed by partial then last removal distinguishes boolean-presence counting; collision peers and an anchor distinguish shared-count and shared-key designs. |
+| ORC-014 | No controlled external-provider premise is claimed. Native-hash collisions reach the real public core API. React re-exports it; render scheduling remains outside this claim. |
+| ORC-015 | Five declared conditions each reach 100 histories in every fixed/random campaign, separately for each receiving path. |
+| ORC-016 | The seeded regression replays the same shared judgment; it has no hand-written expected result. Oracle files contain only reusable law executions/calibrations. |
+
+## Shipped bytes and final accounting
+
+`pnpm size:compare --packages db-ivm,db --files` compared the working source with
+`c351fc04d`: db-ivm grows **99 gzip / 86 brotli bytes**, db is unchanged, and
+the typical app grows **82 gzip / 157 brotli bytes**. Source minification adds
+185 bytes in distinct. The repair consolidates updates by entry and removes
+second hashing calls; collision equality, per-value counts and independent
+numeric identities require the remaining state. Hash enlargement cannot remove
+that state correctly. Replacing it with the partial structural identity would
+still require a collision-safe fallback. Tests add 432 lines; no production
+refactor was traded for a weaker comparison.
+
+Loss audit: **4 raw items = 4 fixed-now**. No confirmed-open, stale, refuted,
+accepted-design, deferred, design-decision, or duplicate item remains. Item
+accounting, implementation, and bounded oracle repair are complete. This is
+finite evidence, not a proof over every JavaScript value or history.
+
+**PR readiness: not assessed.** There is no fix PR or pushed fix commit, and
+remote CI was not run. The local repair and listed checks are complete.
+
+## Reviewed source fingerprints
+
+The baseline HEAD above plus these SHA-256 digests identifies the reviewed local tree.
+
+```text
+1f3f5c4d85c0bb1b9c3be57e5dca567a358d6e41a0191cc7fddae6bae5e170d9  packages/db-ivm/src/operators/distinct.ts
+789345c21ac3fa1d13b6af671686f9ba1cbfee2027479f0efd9849884b389a6e  packages/db-ivm/tests/distinct-incrementalization-oracle.ts
+c935d1ab1803f0bd3a81f86bee431f5237811ef3c148933f8fd64456ab74a8b4  packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts
+0ca0a116a74c239f4f4d09072604e14806967f9c0aa0c4721721e74f876c680c  packages/db/tests/query/distinct-collision-oracle.test.ts
+af173f3d6bd7f2f49ac7007c000874f0282772c2feb14373bbbca6b35f5169e3  packages/db/tests/query/distinct-reported-collision.test.ts
+570856fac722eb60e36da37208858300e181ee16011c86817746d34043a4fc49  packages/db/tests/oracle-config.ts
+```
+
+
+## Follow-up: reduce production weight
+
+The preceding evidence and fingerprints describe the initial repair. This
+follow-up supersedes its implementation, size, and final-check accounting;
+the law, model, grammar, observation cuts, comparisons, budgets, and limits
+remain unchanged.
+
+The final operator keeps a named tuple for each equality entry: selected
+identity, emitted row, support multiplicity, and prior visibility. A set of
+touched hashes replaces the separate map of pending entry multiplicities.
+Support accumulates in the entry, and one bucket pass decides visibility and
+removes zero-support entries after the entire batch. This removes the separate
+before/after count bookkeeping and duplicated sign-crossing branches while
+preserving cancellation. The constructor alone owns the default selector.
+Noncolliding output keys remain their original hashes. Collision entries now
+use decreasing negative keys, disjoint from unsigned hash digests; this
+supersedes the initial repair's increasing keys above the hash range.
+
+`output` and `tap` both invoke the callback once per message and forward that
+same message. `output.ts` now re-exports `TapOperator` and `tap` under the existing
+public names, removing the duplicate operator and graph construction. The
+existing output, graph and graph-work tests exercise this shared implementation.
+No tap-specific test file was run.
+
+The following alternatives were measured and discarded:
+
+| Alternative | db-ivm gzip / brotli delta | Typical app gzip / brotli delta | Reason |
+| --- | --- | --- | --- |
+| Reuse graph input construction in five factories | +88 / +100 | +72 / +105 | Repeated factory code already compresses well; raw savings did not improve the relevant totals enough. |
+| Shared unary factory helper | +86 / +90 | +61 / +167 | Added helper and call plumbing outweighed compressed savings. |
+| Derive per-input visibility deltas and consolidate | +30 / +20 | -5 / +87 | Removed stored visibility but added consolidation work and grew typical app brotli more. |
+
+Final command: `pnpm size:compare --packages db-ivm,db --files`, against the
+same `c351fc04d` baseline:
+
+| Target | gzip delta | brotli delta |
+| --- | --- | --- |
+| db-ivm package | +17 bytes | +10 bytes |
+| db package | 0 | 0 |
+| Typical app | -21 bytes | +17 bytes |
+
+Distinct adds 56 minified module bytes; sharing output/tap removes 300. The
+typical app is net negative in gzip, but this is **not** a net-negative result
+across both compression formats and package totals. Equality buckets and
+independent collision identities still require state that the defective
+hash-only implementation omitted. Further unrelated cleanup or code golf was
+not used to claim success. Comments, descriptive names, test comparisons and
+run budgets were preserved. Test additions remain 432 lines, separate from
+production bytes.
+
+Final validation passes 39 D2/operator/graph tests and 43 public-query tests.
+The same 800 generated histories reach all five conditions, separately for
+selected/default-tuple and ordered/unordered public paths, with no reduced
+budget. The exact seeded pair still has digest 2650141082 and both rows survive.
+Both package TypeScript checks pass. Restoring the original operator rejects
+checkpoint 2; forcing colliding entries to share output keys rejects the public
+snapshot at checkpoint 2; capping support at one rejects partial removal at
+checkpoint 4. Each mutant was removed and the final operator restored.
+
+The D2 GREEN command now additionally includes
+`tests/operators/output.test.ts tests/graph.test.ts tests/d2-work.test.ts`.
+The public GREEN command is unchanged. These measurements and tests establish
+the stated finite claim; they do not change the limits or PR-readiness verdict
+recorded above. All repair changes remain uncommitted and unpushed.
+
+Formatting, explicit ESLint, `pnpm lint:changed`, and `git diff --check`
+passed for this final tree. Final follow-up SHA-256 fingerprints:
+
+```text
+e11db3407cc67be12aedd954039ccb91bc8f69cfe551bb96cf3a7aaf9d965cd9  packages/db-ivm/src/operators/distinct.ts
+fde0fbe1a785eeff9873f9954528f1ceb162cfb4ff5ac64eb2ad9d39526938ca  packages/db-ivm/src/operators/output.ts
+789345c21ac3fa1d13b6af671686f9ba1cbfee2027479f0efd9849884b389a6e  packages/db-ivm/tests/distinct-incrementalization-oracle.ts
+c935d1ab1803f0bd3a81f86bee431f5237811ef3c148933f8fd64456ab74a8b4  packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts
+0ca0a116a74c239f4f4d09072604e14806967f9c0aa0c4721721e74f876c680c  packages/db/tests/query/distinct-collision-oracle.test.ts
+af173f3d6bd7f2f49ac7007c000874f0282772c2feb14373bbbca6b35f5169e3  packages/db/tests/query/distinct-reported-collision.test.ts
+570856fac722eb60e36da37208858300e181ee16011c86817746d34043a4fc49  packages/db/tests/oracle-config.ts
+```
+
+
+## Prep-PR independent review and evaluation
+
+The prep-pr workflow ran a separate simplification reviewer and five code-review
+angles against fresh `origin/main=c351fc04d`. The angles were instructions,
+obvious bugs, git history, prior PR comments, and contract/oracle integrity.
+The simplifier proposed no changes. The reviewers found no production defect.
+Their evidence questions were evaluated without a confidence cutoff; all raw
+candidates and historical remarks are retained below.
+
+**Law and experiment.** The unique-selection law and its authority remain
+unchanged. The fixture must establish the noncolliding anchor claimed by this
+record. Before the fixture edit, two scratch calibrations failed: a constant
+digest returned an anchor instead of rejecting setup, and a digest that collided
+at `-1` but differed at `-2` returned the wrong anchor. These are fixture-premise
+assertion failures, not native-seed product counterexamples. After the edit,
+both calibrations pass. The fixture now searches up to 500,000 negative record
+values for a digest-distinct anchor and rejects setup if none exists. The native
+D2 and public campaigns pass with the same model, histories, comparisons,
+checkpoints and budgets. The temporary calibration file was removed.
+
+**Inference and limits.** The review exposed an unverified fixture premise and
+an implicit finite bound, not another production violation. Executable prose
+and the coverage entry now explicitly state that generated histories exercise
+**two unequal members of one collision bucket**, plus the verified noncolliding
+anchor. The repair has no two-entry restriction. No three-or-more collision-member
+campaign is claimed; that broader domain remains a limit of the same
+incrementalization owner. This states the existing grammar, rather than narrowing
+it or excluding a previously exercised history. A nested-combination campaign
+would expand the current flat-record payload domain.
+
+| ID | Raw claim or historical suggestion | Evaluation and action | Durable value |
+| --- | --- | --- | --- |
+| I1 | P3/confidence 50: make collision cardinality explicit, or add a third-entry-discard mutant and four nested combinations of the native pair. | **fixed-now:** the existing two-member bound is explicit in executable prose, coverage and this record. There is no production cardinality cap; no broader campaign is claimed. No product RED is appropriate for the documentation claim. | Exact finite evidence and the proposed broader witness remain discoverable here. |
+| I2 | P3/confidence 50: `make(-1)` was called noncolliding without checking its digest. A supplied constant digest returned `[7,7,7]`; no native violating seed was found. | **fixed-now:** constructive anchor search and bounded setup rejection. Two helper RED assertions become GREEN, and native production paths remain GREEN. | The fixture now establishes the premise independently of the expected-row model. |
+| H1 | [Per-element multiplicity callback proposal](https://github.com/TanStack/db/pull/335#discussion_r2254882559), with [explicit maintainer deferral](https://github.com/TanStack/db/pull/335#discussion_r2272473062). | **accepted-design:** the linked decision leaves callbacks at whole-message granularity; each MultiSet preserves its weights. This repair does not reopen that API proposal. | Retain the historical decision when considering callback APIs. |
+| H2 | [Multiset-level batching proposal](https://github.com/TanStack/db/pull/335#discussion_r2281485169). | **already-fixed:** current tap/output callbacks receive and forward one whole message. | Preserve message granularity while sharing implementation. |
+| H3 | [Avoid large intermediate strings](https://github.com/TanStack/db/pull/491#issuecomment-3265962737). | **already-fixed:** this repair uses native hashing and equality, with no production structural serialization. | Retain the allocation guidance. |
+| H4 | [Unconsumed-stream retention leak](https://github.com/TanStack/db/pull/550#issuecomment-3290946939). | **already-fixed:** removed reader-retention machinery is not reintroduced by the alias. | Preserve stream ownership and the existing graph construction. |
+| H5 | [Old leftover logging remark](https://github.com/TanStack/db/pull/526#discussion_r2337124698). | **stale:** no corresponding production logging exists in this diff. Test-only diagnostic output records reach and fixture digests. | Keep production logging distinct from oracle evidence. |
+
+Historical source review also covered #330, #335, #491, #526, #550, #2108,
+and #2278. No contract requiring separate tap/output constructor identity or a
+particular unselected-field representative was found.
+
+**Reviewer assessment:** hire recommendation on this sample is yes. The reviewers
+kept fixture evidence separate from product corruption, followed source/history
+and authority, and preserved uncertainty. The simplifier avoided style-only
+rewrites and retained the meaningful removal of duplicate code. This judgment
+is limited to these reviews.
+
+**Validation:** the full db-ivm suite passes 48 files / 636 tests with
+`--maxWorkers=2`. After the fixture edit, its five D2 oracle tests and the public
+suite's 43 tests pass. Both scratch fixture calibrations pass. Every declared
+condition reaches 100 histories per campaign/path, totaling the same 800
+histories. The exact reported digests remain `2650141082`. Original-operator
+D2 and public campaigns reject checkpoint 2; shared-output-key mutation rejects
+public checkpoint 2; capped-support mutation rejects D2 checkpoint 4. All
+mutations were restored. Production source and its measured bytes are unchanged
+by this review. The four retained test files now total 442 lines.
+
+**Loss audit:** seven raw items = two fixed-now, one accepted-design, three
+already-fixed and one stale. The simplifier submitted no item or edit. No raw
+candidate, optional remark or historical comment was removed by a confidence
+threshold. Item accounting and authorized evidence repairs are complete; no
+production defect or law decision remains open in this review. Changeset,
+commit, PR creation and remote CI still await the prep-pr workflow's explicit
+confirmation gate. This is not a remote-CI or merge-readiness verdict.
+
+Final prep-review source fingerprints (SHA-256):
+
+```text
+e11db3407cc67be12aedd954039ccb91bc8f69cfe551bb96cf3a7aaf9d965cd9  packages/db-ivm/src/operators/distinct.ts
+fde0fbe1a785eeff9873f9954528f1ceb162cfb4ff5ac64eb2ad9d39526938ca  packages/db-ivm/src/operators/output.ts
+8885d30946aa35c15cdedde29ef3c57420f15f0db683f582566b54653d05885d  packages/db-ivm/tests/distinct-incrementalization-oracle.ts
+c935d1ab1803f0bd3a81f86bee431f5237811ef3c148933f8fd64456ab74a8b4  packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts
+0ca0a116a74c239f4f4d09072604e14806967f9c0aa0c4721721e74f876c680c  packages/db/tests/query/distinct-collision-oracle.test.ts
+af173f3d6bd7f2f49ac7007c000874f0282772c2feb14373bbbca6b35f5169e3  packages/db/tests/query/distinct-reported-collision.test.ts
+570856fac722eb60e36da37208858300e181ee16011c86817746d34043a4fc49  packages/db/tests/oracle-config.ts
+```
+
+
+## Publication approval
+
+The user approved the changeset, commit, push and PR-creation phase after the
+prep review. This supersedes the confirmation-pending status above. Both
+TypeScript checks, explicit ESLint, formatting, `pnpm lint:changed` and
+`git diff --check` pass for the prep-review tree. The source fingerprints above
+remain current. The published PR and CI will provide subsequent verification;
+the local evidence alone does not establish merge readiness.

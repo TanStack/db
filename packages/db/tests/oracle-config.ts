@@ -337,6 +337,8 @@ const staticOracleProperties = [
   `ivm.hash-mixed-graph`,
   `ivm.hash-value`,
   `ivm.incrementalization-law`,
+  `ivm.distinct-collisions`,
+  `query.distinct-collisions`,
   `ivm.topk-support-window`,
   `opfs.close`,
   `opfs.failure-cleanup`,

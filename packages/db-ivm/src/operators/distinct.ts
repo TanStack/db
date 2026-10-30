@@ -1,76 +1,89 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { hash } from '../hashing/index.js'
+import { equalHashValues } from '../hashing/hash.js'
 import { MultiSet } from '../multiset.js'
 import type { Hash } from '../hashing/index.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
-type Multiplicity = number
+type GetValue<T> = T extends KeyValue<unknown, infer V> ? V : never
 
-type GetValue<T> = T extends KeyValue<any, infer V> ? V : never
+// Keep the emitted row for its eventual retraction. Input representatives can
+// differ even when the selected identity is equal.
+type DistinctEntry<V> = [
+  identity: unknown,
+  row: KeyValue<number, V>,
+  multiplicity: number,
+  visible: boolean,
+]
 
 /**
  * Operator that removes duplicates
  */
 export class DistinctOperator<
-  T extends KeyValue<any, any>,
+  T extends KeyValue<unknown, unknown>,
 > extends UnaryOperator<T, KeyValue<number, GetValue<T>>> {
-  #by: (value: T) => any
-  #values: Map<Hash, Multiplicity> // keeps track of the number of times each value has been seen
+  #by: (value: T) => unknown
+  #values = new Map<Hash, Array<DistinctEntry<GetValue<T>>>>()
+  // Hash digests are unsigned. Negative keys give collisions a separate identity.
+  #nextCollisionKey = 0
 
   constructor(
     id: number,
     input: DifferenceStreamReader<T>,
     output: DifferenceStreamWriter<KeyValue<number, GetValue<T>>>,
-    by: (value: T) => any = (value: T) => value,
+    by: (value: T) => unknown = (value: T) => value,
   ) {
     super(id, input, output)
     this.#by = by
-    this.#values = new Map()
   }
 
   run(): void {
-    const updatedValues = new Map<Hash, [Multiplicity, T]>()
+    const updatedBuckets = new Set<Hash>()
 
     // Compute the new multiplicity for each value
     for (const message of this.inputMessages()) {
       for (const [value, diff] of message.getInner()) {
-        const hashedValue = hash(this.#by(value))
-
-        const oldMultiplicity =
-          updatedValues.get(hashedValue)?.[0] ??
-          this.#values.get(hashedValue) ??
-          0
-        const newMultiplicity = oldMultiplicity + diff
-        updatedValues.set(hashedValue, [newMultiplicity, value])
+        const identity = this.#by(value)
+        const hashedValue = hash(identity)
+        let bucket = this.#values.get(hashedValue)
+        if (!bucket) this.#values.set(hashedValue, (bucket = []))
+        let entry = bucket.find(([candidate]) =>
+          equalHashValues(candidate, identity),
+        )
+        if (!entry) {
+          entry = [
+            identity,
+            [
+              bucket.length ? --this.#nextCollisionKey : hashedValue,
+              value[1] as GetValue<T>,
+            ],
+            0,
+            false,
+          ]
+          bucket.push(entry)
+        }
+        updatedBuckets.add(hashedValue)
+        entry[2] += diff
       }
     }
 
     const result: Array<[KeyValue<number, GetValue<T>>, number]> = []
 
-    // Check which values became visible or disappeared
-    for (const [
-      hashedValue,
-      [newMultiplicity, value],
-    ] of updatedValues.entries()) {
-      const oldMultiplicity = this.#values.get(hashedValue) ?? 0
-
-      if (newMultiplicity === 0) {
-        this.#values.delete(hashedValue)
-      } else {
-        this.#values.set(hashedValue, newMultiplicity)
-      }
-
-      if (oldMultiplicity <= 0 && newMultiplicity > 0) {
-        // The value wasn't present in the stream
-        // but with this change it is now present in the stream
-        result.push([[hash(this.#by(value)), value[1]], 1])
-      } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
-        // The value was present in the stream
-        // but with this change it is no longer present in the stream
-        result.push([[hash(this.#by(value)), value[1]], -1])
-      }
+    // Decide visibility and remove zero support only after the whole batch.
+    // Cancelling changes must retain the same entry and output key.
+    for (const hashedValue of updatedBuckets) {
+      const bucket = this.#values.get(hashedValue)!
+      const retained = bucket.filter((entry) => {
+        const [, row, multiplicity, wasVisible] = entry
+        const visible = multiplicity > 0
+        if (visible !== wasVisible) result.push([row, visible ? 1 : -1])
+        entry[3] = visible
+        return multiplicity !== 0
+      })
+      if (retained.length) this.#values.set(hashedValue, retained)
+      else this.#values.delete(hashedValue)
     }
 
     if (result.length > 0) {
@@ -82,8 +95,8 @@ export class DistinctOperator<
 /**
  * Removes duplicate values
  */
-export function distinct<T extends KeyValue<any, any>>(
-  by: (value: T) => any = (value: T) => value,
+export function distinct<T extends KeyValue<unknown, unknown>>(
+  by?: (value: T) => unknown,
 ) {
   return (
     stream: IStreamBuilder<T>,
