@@ -235,3 +235,14 @@ explicit decision in [#2310](https://github.com/TanStack/db/issues/2310).
 This PR's Core change concerns selection, not publication expectations.
 Final pushed-head CI/review status belongs to the PR and is separate from these
 local verification results.
+
+## Integration with main
+
+Main advanced to `0531c50ad419a1b51ad3e27e3632e70be3c6bdb3` before publication.
+The merge conflict was confined to appended coverage-map sections. Both the
+framework/selection evidence and main's distinct-collision evidence remain.
+The production file hashes above are unchanged. The combined tree passes the
+Core/dependency build, 344 Core/query tests, all 228 Solid tests, and snapshot
+plus destination groups on all six adapters, without type errors. Changed-oracle
+lint and diff checks pass. This tests integration with main's Effect and D2
+changes without revising their laws or the separate counterexample owners.

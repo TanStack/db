@@ -1844,6 +1844,8 @@ const user = createLiveQueryCollection((q) =>
 
 Use `distinct` to remove duplicate rows from your query results based on the selected columns. The `distinct` operator ensures that each unique combination of selected values appears only once in the result set.
 
+Implicit result keys are not guaranteed to stay the same across query rebuilds. Configure `getKey` from the selected values when your application needs stable keys.
+
 > [!IMPORTANT]
 > The `distinct` operator requires a `select` clause. You cannot use `distinct` without specifying which columns to select.
 
@@ -2449,6 +2451,8 @@ interface DeltaEvent<TRow, TKey> {
 | `enter` | Row entered the query result | The new row | — |
 | `exit` | Row left the query result | The exiting row | — |
 | `update` | Row changed but stayed in the result | The new row | The row before the change |
+
+Unordered Effects classify graph deltas using result membership. They keep result keys without retaining projected rows or comparing projected values. A graph update can therefore notify handlers even when the projected fields compare equal. Ordered Effects retain the last coherent result for repair across graph runs and suppress equal-value updates. Callback presence does not change the delta values.
 
 ### Named Callbacks
 

@@ -260,7 +260,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/includes-oracle.property.test.ts`,
     `includes`,
-    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence`,
+    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence bucket-collisions`,
   ],
   [
     `db/tests/query/includes-query-shape-oracle.test.ts`,
@@ -609,6 +609,21 @@ const ownerGroups: ReadonlyArray<
     `incrementalization-law`,
   ],
   [
+    `db-ivm/tests/distinct-incrementalization-oracle.property.test.ts`,
+    `ivm`,
+    `distinct-collisions`,
+  ],
+  [
+    `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
+    `ivm`,
+    `distinct-representatives`,
+  ],
+  [
+    `db/tests/query/distinct-collision-oracle.test.ts`,
+    `query`,
+    `distinct-collisions`,
+  ],
+  [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
     `topk-support-window`,
@@ -729,6 +744,19 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
+  [
+    `ivm.distinct-representatives`,
+    `conserves full representative contributions.*random`,
+  ],
+  [
+    `includes.bucket-collisions`,
+    `preserves colliding active buckets.*(random|replay)`,
+  ],
+  [
+    `query.distinct-collisions`,
+    `preserves public distinct collision rows.*random`,
+  ],
   [
     `sqlite-resume.source-progress`,
     `preserves source progress evidence.*random or replayed`,
