@@ -764,7 +764,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
-  [`framework.window-history`, `(?:direct|nested) window histories \\(fresh\\)`],
+  [
+    `framework.window-history`,
+    `(?:direct|nested) window histories \\(fresh\\)`,
+  ],
   [`framework.pending-window-history`, `pending window histories \\(fresh\\)`],
   [
     `framework.publication-window-history`,
@@ -913,7 +916,9 @@ const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
   if (property.startsWith(`react.ssr-effects-`)) {
-    const [runtime, ...path] = property.slice(`react.ssr-effects-`.length).split(`-`)
+    const [runtime, ...path] = property
+      .slice(`react.ssr-effects-`.length)
+      .split(`-`)
     return `${runtime} ${path.join(`-`)} renders without client layout diagnostics \\(random\\)`
   }
   if (property === `replay.ordered-window-faults`)
