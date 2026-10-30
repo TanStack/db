@@ -47,6 +47,8 @@ Implement `EagerLiveSourceDriver`:
 - **`seed` and `fetchesBeforeListening`:** with `listen-before-fetch`, the provider holds backend rows set by `seed`, treats a batch before the first ready as a backend commit during the fetch, and counts fetches issued while its listener was not live (READY-8).
 - **`duplicateInsert`:** with `duplicate-key-delivery`, the law set's policy for an insert of a held key, `error` or `replace`.
 - **`valueKinds`:** the kinds of FID-1's `valueDomain` your backend represents; `jsonValueKinds` for a JSON backend. The driver delivers each value in the backend's own form and the Collection must show it decoded.
+- **Asynchronous steps and `settle`:** provider methods may return a promise, which the check awaits. A fixture whose deliveries reach the Collection later than a few event-loop turns supplies `settle()`, its law-set `propagationStep`, which the check awaits before every comparison.
+- **`source-failure-after-ready`:** declare it when your provider can fail terminally after the first ready (the law set's `terminal-source-end`, or an `errorMapping` that reports a terminal failure); otherwise `fail` is generated only before ready.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
 Declare only the capabilities your adapter supports; the grammar generates
@@ -71,6 +73,10 @@ reach counter, so the run fails when histories miss a state the laws need.
   until the adapter is updated, so it has its own config:
   `pnpm --filter @tanstack/db-adapter-conformance test:neon`.
 
+- **PowerSync** (`packages/powersync-db-collection/tests/conformance-driver.ts`):
+  the published adapter in eager mode over a real local PowerSync database,
+  with per-batch commits and a declared propagation step (`settle`). It runs
+  in that package's default `pnpm test`.
 - **TrailBase** (`packages/trailbase-db-collection/tests/conformance-driver.ts`):
   the published adapter in eager mode over a controlled `RecordApi`, with
   per-change commits and no optional capability. It runs in that package's

@@ -658,6 +658,11 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.eager-live-source`,
     `rxdb`,
   ],
+  [
+    `powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `powersync`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -744,7 +749,7 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
-  ...[`reference`, `neon-realtime`, `trailbase`, `rxdb`].map(
+  ...[`reference`, `neon-realtime`, `trailbase`, `rxdb`, `powersync`].map(
     (driver) =>
       [
         `adapter-conformance.eager-live-source.${driver}`,

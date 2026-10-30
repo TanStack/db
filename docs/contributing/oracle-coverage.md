@@ -6031,4 +6031,10 @@ two owners until this entry moves them. RxDB
 controlled RxCollection with RxDB's own query matcher and sort comparator,
 `listen-before-fetch`) is GREEN after a fix for a buffered insert that the
 initial read already reflects; `rxdb.test.ts` holds a receiving witness for
-it on memory storage.
+it on memory storage. PowerSync (`adapter-conformance.eager-live-source.powersync`,
+eager mode over a real local PowerSync database, per-batch commits, a
+database-side propagation step) is GREEN after a fix: a failed first load now
+releases the run's change watcher (LIFE-10). Its startup failures in
+on-demand mode, cleanup waiting on an unsettled `onLoad`, and post-ready
+change-handler errors are logged only; they belong to the on-demand and
+lifecycle families, which are not built.
