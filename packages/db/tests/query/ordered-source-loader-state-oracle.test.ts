@@ -6,19 +6,23 @@ import {
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
 import { createOracleReach } from '../oracle-reach.js'
-import { captureMicrotaskErrors } from '../utils.js'
+import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 import type {
   Observed,
   RequestOptions,
@@ -62,8 +66,8 @@ function tieValue(options: RequestOptions): unknown {
  * - **No stale step:** a repair chain whose ordering epoch moved is replaced
  *   before it issues another tie or refill.
  * - **Error identity:** a request that fails reports its own error through
- *   its participant, or a release's cleanup error. A read the loader starts
- *   while handling it cannot replace that error. A dead request's failure
+ *   its participant. Neither a release's cleanup error nor a read the loader
+ *   starts while handling it can replace that error. A dead request's failure
  *   belongs to its replay, and one a replay reacquired is absorbed.
  * - **Cost:** once loading is quiet and a bounded repair is available, an
  *   invalidation reads no full source, and it issues at most one chain (in
@@ -320,6 +324,9 @@ type AuthorityCase = {
   releaseReenters: boolean
   // The first release callback disposes the loader, as adapter cleanup can.
   releaseDisposes: boolean
+  // A source-order invalidation reenters the first retirement callback. Unlike a
+  // delete caused by retirement itself, it owes a new ordering repair.
+  releaseInvalidates?: boolean
   history: Array<AuthorityCommand>
 }
 
@@ -495,10 +502,207 @@ type AuthorityObservation = {
   costChecks: number
   hungRequests: number
   offsetWindows: number
+  releaseInvalidations: number
+  replayContinuationHandoffs: number
+  // Current failed requests whose participant reason reached the identity cut.
+  requestErrorChecks: number
+}
+
+// Retirement cannot pay an invalidation that happened after the covering read.
+// Both drivers supply only observed source events and subsequent request starts.
+// The comparison does not inspect the loader's work or debt representation.
+function checkRetirementProgress(
+  invalidations: number,
+  replaced: boolean,
+): void {
+  if (invalidations > 0 && !replaced) {
+    throw new Error(
+      `retirement invalidation: ${invalidations} adapter invalidation reached the release pass, but no new authoritative read followed it`,
+    )
+  }
+}
+
+type RetirementReceiverCase = {
+  indexed: boolean
+  limit: 1 | 2
+  synchronous: boolean
+}
+
+// This receiving driver supplies the controlled ledger's premise through the
+// actual Collection subscription: adapter unload changes a contributed row's
+// leading order value. A finite provider keeps a later row uninstalled. Moving
+// the current prefix behind it therefore requires a fresh authoritative read.
+// The shared progress judgment runs after requests and graph work drain. Public
+// rows are a second formulation: full provider sorting, without loader state.
+async function checkRetirementReceiver(
+  scenario: RetirementReceiverCase,
+  reached: () => void,
+): Promise<void> {
+  type Row = { id: number; rank: number }
+  const truth = new Map<number, Row>(
+    [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id }]),
+  )
+  const installed = new Map<number, Row>()
+  const calls: Array<LoadSubsetOptions> = []
+  let invalidations = 0
+  let invalidatedAt = -1
+  let armed = false
+  let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+  const source = createCollection<Row, number>({
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    autoIndex: scenario.indexed ? `eager` : `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: (options) => {
+            calls.push(options)
+            const deliver = () => {
+              if (options.signal?.aborted) return true
+              const matching = [...truth.values()]
+                .filter(
+                  (row) =>
+                    (!options.where ||
+                      evaluateReferenceExpression(options.where, row) ===
+                        true) &&
+                    (!options.cursor ||
+                      evaluateReferenceExpression(
+                        options.cursor.whereFrom,
+                        row,
+                      ) === true),
+                )
+                .sort((left, right) => left.rank - right.rank)
+              const offset = options.cursor ? 0 : (options.offset ?? 0)
+              const rows = matching.slice(
+                offset,
+                options.limit === undefined
+                  ? undefined
+                  : offset + options.limit,
+              )
+              operations.begin()
+              for (const value of rows) {
+                if (installed.get(value.id) === value) continue
+                operations.write({
+                  type: installed.has(value.id) ? `update` : `insert`,
+                  value,
+                })
+                installed.set(value.id, value)
+              }
+              return operations.commit()
+            }
+            return scenario.synchronous
+              ? deliver()
+              : Promise.resolve().then(async () => {
+                  await deliver()
+                })
+          },
+          unloadSubset: () => {
+            if (!armed || invalidations > 0) return
+            invalidations++
+            invalidatedAt = calls.length
+            reached()
+            // The first repair has read the next prefix. Move every row of
+            // that prefix after the provider's still-uninstalled next row.
+            operations.begin()
+            for (let id = 2; id <= scenario.limit + 1; id++) {
+              const value = { id, rank: 20 + id }
+              truth.set(id, value)
+              installed.set(id, value)
+              operations.write({ type: `update`, value })
+            }
+            operations.commit()
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank)
+      .limit(scenario.limit)
+      .select(({ row }) => ({ id: row.id, rank: row.rank })),
+  )
+  const publications: Array<Array<Row>> = []
+  const listener = live.subscribeChanges(
+    () => {
+      if (armed)
+        publications.push(live.toArray.map(({ id, rank }) => ({ id, rank })))
+    },
+    { includeInitialState: false },
+  )
+  try {
+    await live.preload()
+    armed = true
+    const moved = { id: 1, rank: 10 }
+    truth.set(1, moved)
+    installed.set(1, moved)
+    sync.begin()
+    sync.write({ type: `update`, value: moved })
+    await sync.commit()
+    await flushPromises()
+    expect(invalidations, `real subscription retirement was reached`).toBe(1)
+    const failures: Array<unknown> = []
+    try {
+      checkRetirementProgress(
+        invalidations,
+        calls
+          .slice(invalidatedAt)
+          .some(
+            (options) =>
+              options.refetch === true &&
+              options.where === undefined &&
+              options.cursor === undefined,
+          ),
+      )
+    } catch (error) {
+      failures.push(error)
+    }
+    const expected = [...truth.values()]
+      .sort((left, right) => left.rank - right.rank)
+      .slice(0, scenario.limit)
+    try {
+      expect(
+        live.toArray.map(({ id, rank }) => ({ id, rank })),
+        `settled public window after retirement invalidation`,
+      ).toEqual(expected)
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      // Both invalidations belong to one unfinished replacement. Publication
+      // cannot expose the first chain's rows after its retirement moved them.
+      expect(publications, `one complete replacement publication`).toEqual([
+        expected,
+      ])
+    } catch (error) {
+      failures.push(error)
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `retirement receiving comparisons: ${failures.map((error) => (error instanceof Error ? error.message : String(error))).join(`; `)}`,
+        { cause: failures[0] },
+      )
+    }
+  } finally {
+    armed = false
+    listener.unsubscribe()
+    await live.cleanup()
+    await source.cleanup()
+  }
 }
 
 async function checkAuthorityCase(
   testCase: AuthorityCase,
+  reached?: (
+    state: `release-invalidation` | `deferred-refill` | `reset-continuation`,
+  ) => void,
+  observeRejection?: (reason: unknown) => unknown,
+  observeRelease: (released: boolean) => boolean = (released) => released,
 ): Promise<AuthorityObservation> {
   const ledger: Array<LedgerRequest> = []
   const participants: Array<Promise<unknown>> = []
@@ -561,6 +765,7 @@ async function checkAuthorityCase(
   const retryStartThrew = () => startThrewDuringRetry
   let startThrows = 0
   let identityViolation: string | undefined
+  let requestErrorChecks = 0
   // A request may fail, but the loader's own transition table must never
   // reject a move: that is a broken rule, wherever it surfaces.
   let invariantViolation: string | undefined
@@ -591,6 +796,9 @@ async function checkAuthorityCase(
   let continuationOwed = false
   let invalidateNextPage = false
   let releaseFaults = 0
+  let releaseInvalidations = 0
+  let retirementInvalidationAt: number | undefined
+  let replayContinuationHandoffs = 0
   let syncRepairs = 0
   let invalidatingPages = 0
   // The rank each continuation's cursor starts after, so a read of its
@@ -754,6 +962,13 @@ async function checkAuthorityCase(
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
       }
       request.released = true
+      if (testCase.releaseInvalidates && releaseInvalidations === 0) {
+        releaseInvalidations++
+        reached?.(`release-invalidation`)
+        retirementInvalidationAt = ledger.length
+        repairOwed = true
+        loader.invalidateSourceOrdering()
+      }
       if (testCase.releaseDisposes && !disposed) {
         disposed = true
         disposals++
@@ -799,7 +1014,8 @@ async function checkAuthorityCase(
       } finally {
         settlingChainMember = settling
       }
-      if (ledger.length === before) continuationOwed = true
+      if (ledger.length === before && request.issuedTruncates === truncates)
+        continuationOwed = true
       return
     }
     if (invalidateNextPage && method === `limited` && !authoritative) {
@@ -863,7 +1079,12 @@ async function checkAuthorityCase(
       participants.push(result.catch(observe))
       if (request) {
         participantOf.set(request, result)
-        result.catch((reason: unknown) => rejections.set(request, reason))
+        result.catch((reason: unknown) =>
+          rejections.set(
+            request,
+            observeRejection ? observeRejection(reason) : reason,
+          ),
+        )
       }
     },
     () => testCase.retryTimer,
@@ -895,6 +1116,10 @@ async function checkAuthorityCase(
   let replaySettledAt = -1
   let replayCoverage = new Set<LedgerRequest>()
   const settleReplay = () => {
+    if (continuationOwed) {
+      replayContinuationHandoffs++
+      reached?.(`deferred-refill`)
+    }
     truncatePending = false
     replaySettledAt = ++clock
     for (const request of ledger) {
@@ -906,7 +1131,9 @@ async function checkAuthorityCase(
       ledger.filter((request) => request.fullSource && !request.released),
     )
     if (replayCoverage.size > 0) replayAuthority = ledger.length - 0.5
-    run(() => loader.settleFullSourceReplay())
+    // Replay settlement is not a graph pass. It can finish retirement while
+    // joined work still owns a staged continuation; only a pass consumes it.
+    run(() => loader.settleFullSourceReplay(), false)
   }
   let unexpressibleBoundaries = 0
   let joinedDeferrals = 0
@@ -965,7 +1192,7 @@ async function checkAuthorityCase(
   let sourceDeletes = 0
   let timerRetries = 0
   let shrinkingMoves = 0
-  const run = (work: () => unknown) => {
+  const run = (work: () => unknown, consumesContinuation = true) => {
     const before = ledger.length
     try {
       const result = work()
@@ -976,7 +1203,9 @@ async function checkAuthorityCase(
     }
     // A pass that issues nothing consumed or finished an owed continuation,
     // unless joined work deferred it.
-    if (ledger.length === before && !joinedPending) continuationOwed = false
+    if (consumesContinuation && ledger.length === before && !joinedPending) {
+      continuationOwed = false
+    }
   }
   const inflight = () =>
     ledger.filter(({ outcome, hung }) => outcome === `inflight` && !hung)
@@ -986,6 +1215,10 @@ async function checkAuthorityCase(
   const replayPending = () => truncatePending
   function truncate() {
     truncates++
+    // Reset discards any staged continuation. A later settlement may stage a
+    // new one only for a request issued in this replay generation.
+    if (continuationOwed) reached?.(`reset-continuation`)
+    continuationOwed = false
     // A second truncate while a replay is pending, possibly one that failed.
     if (truncatePending) {
       stackedTruncates++
@@ -1025,7 +1258,13 @@ async function checkAuthorityCase(
     if (!ok && participantOf.has(request)) {
       const reason = rejections.get(request)
       if (rejections.has(request)) {
-        if (reason !== request.error && !injectedCleanup(reason)) {
+        if (
+          request.issuedTruncates === truncates &&
+          !request.replayed &&
+          !isDisposed()
+        )
+          requestErrorChecks++
+        if (reason !== request.error) {
           identityViolation ??= `request ${request.index} failed with its own error, but its participant rejected with ${String(reason)}`
         }
       } else if (
@@ -1043,7 +1282,13 @@ async function checkAuthorityCase(
     settlingChainMember = false
     // An asynchronous settlement runs its continuation at once unless joined
     // work defers it; a settlement that issues nothing otherwise finished.
-    if (chainMember && ok && ledger.length === before && joinedPending) {
+    if (
+      chainMember &&
+      request.issuedTruncates === truncates &&
+      ok &&
+      ledger.length === before &&
+      joinedPending
+    ) {
       continuationOwed = true
     }
   }
@@ -1069,11 +1314,6 @@ async function checkAuthorityCase(
     )
   const lastAuthoritativeSuccess = () =>
     Math.max(lastAuthoritativeRead(), replayAuthority)
-  // A release callback's own error may replace a request's: cleanup failure
-  // is reported through the participant (ARCHITECTURE.md).
-  function injectedCleanup(reason: unknown) {
-    return reason instanceof Error && reason.message.startsWith(`release `)
-  }
   const checkHeld = (checkpoint: string) => {
     if (identityViolation) {
       throw new Error(`error identity ${checkpoint}: ${identityViolation}`)
@@ -1547,6 +1787,16 @@ async function checkAuthorityCase(
     }
     await drain()
     checkHeld(`after the drain`)
+    // An invalidation delivered by adapter code during retirement is newer
+    // than the repair it interrupted. Once quiet, another authoritative start
+    // must have paid that debt (ARCHITECTURE, ordered recovery). The focused
+    // grammar below has no failure, disposal, or further truncate to decide it.
+    if (testCase.releaseInvalidates && retirementInvalidationAt !== undefined) {
+      checkRetirementProgress(
+        releaseInvalidations,
+        ledger.slice(retirementInvalidationAt).some(startsAuthority),
+      )
+    }
     // A disposed loader owes nothing more; the drain above settled what it
     // had issued, and the dispose law has judged those settlements.
     if (!disposed) {
@@ -1612,7 +1862,7 @@ async function checkAuthorityCase(
       const leaked = ledger.filter(
         (request) =>
           request.outcome === `ok` &&
-          !request.released &&
+          !observeRelease(request.released) &&
           request.index >= replayOwnedBefore &&
           !replayCoverage.has(request) &&
           request.index < authority,
@@ -1800,6 +2050,9 @@ async function checkAuthorityCase(
     costChecks,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
+    releaseInvalidations,
+    replayContinuationHandoffs,
+    requestErrorChecks,
   }
 }
 
@@ -1830,11 +2083,61 @@ const authorityCampaigns =
 // the request ledger. The grammar is authorityCaseArbitrary, which the campaigns
 // and the calibration witnesses below read for coverage.
 declareOracle({
-  check: [checkAuthorityCase],
+  check: [checkAuthorityCase, checkRetirementProgress, checkRetirementReceiver],
   grammar: [authorityCaseArbitrary],
 })
 
 describe(`Ordered source request authority`, () => {
+  // Checker calibration changes only the recorded participant reason. Every
+  // case first executes the same legal current-failure history unmodified.
+  // Neither cleanup timing nor error text grants another value authority to
+  // replace that failure. The existing generated authority grammar contains
+  // these indexed/full-source, width, and throwing-release dimensions too.
+  it.each(
+    [false, true].flatMap((indexed) =>
+      ([1, 2] as const).flatMap((limit) =>
+        [false, true].flatMap((releaseFault) =>
+          [false, true].map((requiresFullSource) => ({
+            indexed,
+            limit,
+            releaseFault,
+            requiresFullSource,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `rejects substituted participant errors across current failures: %j`,
+    async (axes) => {
+      const testCase: AuthorityCase = {
+        ...ordinaryScenario,
+        ...axes,
+        settledFirst: false,
+        syncRepair: false,
+        history: [{ type: `settle`, pick: 0, ok: false }],
+      }
+      const genuine = await checkAuthorityCase(testCase)
+      if (axes.releaseFault) expect(genuine.releaseFaults).toBeGreaterThan(0)
+      for (const replacement of [
+        new Error(`release 0 failed`),
+        new Error(`another request failed`),
+        `release non-Error failure`,
+      ]) {
+        let substitutions = 0
+        try {
+          await expect(
+            checkAuthorityCase(testCase, undefined, () => {
+              substitutions++
+              return replacement
+            }),
+          ).rejects.toThrow(`error identity`)
+        } finally {
+          expect(substitutions).toBeGreaterThan(0)
+        }
+      }
+    },
+  )
+
   // The model's strand trace: a repair supersedes the in-flight tie and
   // finishes; a newer invalidation's reaction is deferred; the old tie fails.
   it(`recovers a superseded tie that fails after its repair finished (generated-lane replay)`, async () => {
@@ -2325,6 +2628,224 @@ describe(`Ordered source request authority`, () => {
     },
   )
 
+  // A replay's bookkeeping call is not a pass over the graph. In this trace,
+  // joined work staged a repair refill, then replay settlement retired older
+  // leases before the pass resumed that refill. It remains one repair chain.
+  // Source: https://github.com/TanStack/db/issues/2296
+  it(`keeps a deferred repair refill in its chain after replay retirement`, async () => {
+    await checkAuthorityCase({
+      indexed: false,
+      limit: 1,
+      settledFirst: true,
+      releaseFault: false,
+      syncRepair: true,
+      ...ordinaryScenario,
+      joined: true,
+      releaseTruncates: true,
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `report`, react: false },
+        { type: `move`, delta: -1 },
+        { type: `joinedBusy` },
+        { type: `settleNewest` },
+      ],
+    })
+  })
+
+  // The broad grammar already generated the source trace. This directed
+  // grammar makes its replay/continuation handoff frequent enough to measure,
+  // while index-free prefix size, local rows, joined deferral, synchronous
+  // answers, and release-triggered truncation vary independently. Without
+  // joined deferral there is no held continuation; without the release truncate
+  // there is no replay bookkeeping to distinguish from a graph pass.
+  const handoffProperty = `ordered-loader.replay-continuation`
+  const handoffCase = fc
+    .record({
+      limit: fc.constantFrom(1 as const, 2 as const),
+      snapshotRows: fc.constantFrom(1 as const, 3 as const),
+      syncRepair: fc.boolean(),
+      joined: fc.boolean(),
+      releaseTruncates: fc.boolean(),
+      reset: fc.constantFrom(
+        `none` as const,
+        `before-settle` as const,
+        `after-settle` as const,
+      ),
+    })
+    .map(({ reset, ...axes }): AuthorityCase => ({
+      ...ordinaryScenario,
+      indexed: false,
+      settledFirst: true,
+      releaseFault: false,
+      ...axes,
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `settle`, pick: 0, ok: true },
+        { type: `report`, react: false },
+        { type: `move`, delta: -1 },
+        { type: `joinedBusy` },
+        ...(reset === `before-settle` ? [{ type: `truncate` as const }] : []),
+        { type: `settleNewest` },
+        ...(reset === `after-settle` ? [{ type: `truncate` as const }] : []),
+      ],
+    }))
+  const handoffCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === handoffProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+  it.each(handoffCampaigns)(
+    `preserves repair continuation identity across replay bookkeeping (%s campaign)`,
+    async (campaign) => {
+      const reach = createOracleReach(
+        handoffProperty,
+        [`deferred-refill`, `reset-continuation`] as const,
+        { minimum: 5 },
+      )
+      await fc.assert(
+        fc.asyncProperty(handoffCase, async (testCase) => {
+          reach.beginHistory()
+          await checkAuthorityCase(testCase, (state) => {
+            if (state !== `release-invalidation`) reach.reach(state)
+          })
+        }),
+        campaign === `fixed`
+          ? { seed: 20261029, numRuns: oracleRuns(200) }
+          : oraclePropertyOptions(200, handoffProperty),
+      )
+      reach.assertReached()
+      process.stderr.write(
+        `${handoffProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    },
+  )
+
+  // An explicit invalidation in a release callback is new source information,
+  // unlike a replaced lease's own eviction deletes. It moves the ordering
+  // epoch while retirement still owns the repair slot. Both synchronous and
+  // asynchronous chains, indexed ties and unindexed growth must preserve it.
+  const retirementProperty = `ordered-loader.retirement-invalidation`
+  const retirementCase = fc
+    .record({
+      indexed: fc.boolean(),
+      limit: fc.constantFrom(1 as const, 2 as const),
+      syncRepair: fc.boolean(),
+      joined: fc.boolean(),
+      needsMore: fc.boolean(),
+    })
+    .map((axes): AuthorityCase => ({
+      ...ordinaryScenario,
+      ...axes,
+      settledFirst: true,
+      releaseFault: false,
+      releaseInvalidates: true,
+      history: [{ type: `invalidate`, react: true }],
+    }))
+  const retirementCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === retirementProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+  it.each(retirementCampaigns)(
+    `repairs an invalidation delivered during completed repair retirement (%s campaign)`,
+    async (campaign) => {
+      const reach = createOracleReach(
+        retirementProperty,
+        [`release-invalidation`] as const,
+        { minimum: 20 },
+      )
+      await fc.assert(
+        fc.asyncProperty(retirementCase, async (testCase) => {
+          reach.beginHistory()
+          await checkAuthorityCase(testCase, (state) => {
+            if (state === `release-invalidation`) reach.reach(state)
+          })
+        }),
+        campaign === `fixed`
+          ? { seed: 20261029, numRuns: oracleRuns(200) }
+          : oraclePropertyOptions(200, retirementProperty),
+      )
+      reach.assertReached()
+      process.stderr.write(
+        `${retirementProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    },
+  )
+
+  // This driver receives the same law through real subscription and graph
+  // callbacks. Index availability, window width, and literal/Promise provider
+  // settlement vary; each completed history must reach the adapter callback.
+  const retirementReceiverCase = fc.record({
+    indexed: fc.boolean(),
+    limit: fc.constantFrom(1 as const, 2 as const),
+    synchronous: fc.boolean(),
+  })
+  // A shrink path belongs to one arbitrary and driver. The receiving grammar
+  // has its own identity so replay never applies a controlled history's path.
+  const retirementReceiverProperty = `ordered-loader.retirement-receiver`
+  const retirementReceiverCampaigns =
+    authorityReplay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : authorityReplay.replayProperty === retirementReceiverProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+  it.each(retirementReceiverCampaigns)(
+    `repairs retirement invalidation through a real subscription (%s campaign)`,
+    async (campaign) => {
+      const reach = createOracleReach(
+        retirementReceiverProperty,
+        [`real-subscription-release`] as const,
+        { minimum: 20 },
+      )
+      await fc.assert(
+        fc.asyncProperty(retirementReceiverCase, async (scenario) => {
+          reach.beginHistory()
+          await checkRetirementReceiver(scenario, () =>
+            reach.reach(`real-subscription-release`),
+          )
+        }),
+        campaign === `fixed`
+          ? { seed: 20261029, numRuns: oracleRuns(200) }
+          : oraclePropertyOptions(200, retirementReceiverProperty),
+      )
+      reach.assertReached()
+      process.stderr.write(
+        `${retirementReceiverProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    },
+  )
+
+  // Calibrate the shared no-leak judgment with a retained-lease observation.
+  // The real release callbacks still run; only their recorded result changes
+  // at comparison. This works for source and minified builds without reading
+  // private members. The same history first proves the unmodified path agrees.
+  it(`rejects retained successful acquisition observations after a covering repair`, async () => {
+    const testCase: AuthorityCase = {
+      ...ordinaryScenario,
+      indexed: true,
+      limit: 1,
+      settledFirst: true,
+      releaseFault: false,
+      syncRepair: false,
+      history: [{ type: `invalidate`, react: true }],
+    }
+    await checkAuthorityCase(testCase)
+    let substitutions = 0
+    try {
+      await expect(
+        checkAuthorityCase(testCase, undefined, undefined, (released) => {
+          if (released) substitutions++
+          return false
+        }),
+      ).rejects.toThrow(`no leak`)
+    } finally {
+      expect(substitutions).toBeGreaterThan(0)
+    }
+  })
+
   it.each(authorityCampaigns)(
     `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
     async (campaign) => {
@@ -2336,6 +2857,10 @@ describe(`Ordered source request authority`, () => {
       let releaseFaults = 0
       let syncRepairs = 0
       let invalidatingPages = 0
+      const identityReach = createOracleReach(authorityProperty, [
+        `current-request-error`,
+        `cleanup-fault-current-request-error`,
+      ] as const)
       const later = {
         unexpressibleBoundaries: 0,
         joinedDeferrals: 0,
@@ -2361,7 +2886,13 @@ describe(`Ordered source request authority`, () => {
       }
       await fc.assert(
         fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
+          identityReach.beginHistory()
           const observation = await checkAuthorityCase(testCase)
+          if (observation.requestErrorChecks > 0) {
+            identityReach.reach(`current-request-error`)
+            if (observation.releaseFaults > 0)
+              identityReach.reach(`cleanup-fault-current-request-error`)
+          }
           supersededFailures += observation.supersededFailures
           staleSettlementsAfterRepair += observation.staleSettlementsAfterRepair
           supersededFailuresAfterRepair +=
@@ -2389,6 +2920,10 @@ describe(`Ordered source request authority`, () => {
       // departure, a source delete, a backoff retry that issues a read, and
       // a window that shrinks.
       if (campaign !== `replay`) {
+        identityReach.assertReached()
+        process.stderr.write(
+          `${authorityProperty} identity ${campaign} ${JSON.stringify(Object.fromEntries(identityReach.counts()))}\n`,
+        )
         expect(supersededFailures).toBeGreaterThan(0)
         expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
         expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
