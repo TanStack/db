@@ -1472,7 +1472,10 @@ cross public client cleanup, rematerialization and a new stream for the same
 hash. Old wait promises remain settled, a new stream obtains a fresh wait, and
 enabling the same open stream preserves its current pending demand. The sticky
 failure implementation and an unconditional reset each fail the corresponding
-checkpoint. Pending-result
+checkpoint. A disabled peer reader with a portable hash crosses every
+history; its hydration read must stay disabled while transport is open, after
+each terminal and on a fresh stream. The unconditional hydration wait suspends
+it while open and throws error 253 after close. Pending-result
 disposal during client cleanup and timestamp policy after record consumption
 are excluded from this grammar. The
 [SSR review audit](oracle-reviews/2026-10-23-ssr-review.md) records RED on unchanged
