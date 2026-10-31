@@ -7,7 +7,7 @@ title: pooledLiveQueries
 const pooledLiveQueries: object;
 ```
 
-Defined in: [packages/db/src/query/pooled-live-query.ts:878](https://github.com/TanStack/db/blob/main/packages/db/src/query/pooled-live-query.ts#L878)
+Defined in: [packages/db/src/query/pooled-live-query.ts:892](https://github.com/TanStack/db/blob/main/packages/db/src/query/pooled-live-query.ts#L892)
 
 Pooled live queries for framework hooks. Pass it as `pool` in a hook's
 query config to serve equality-filtered queries of one shape from a shared

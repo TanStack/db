@@ -6,10 +6,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:394](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L394)
+Defined in: [useLiveQuery.ts:359](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L359)
 
 Create a live query using a query function.
 
@@ -27,13 +27,9 @@ Create a live query using a query function.
 
 Query function that defines what data to fetch
 
-#### deps?
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -112,10 +108,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:406](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L406)
+Defined in: [useLiveQuery.ts:370](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L370)
 
 Create a live query using a query function.
 
@@ -133,13 +129,9 @@ Create a live query using a query function.
 
 Query function that defines what data to fetch
 
-#### deps?
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -218,10 +210,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:420](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L420)
+Defined in: [useLiveQuery.ts:383](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L383)
 
 Create a live query using a query function.
 
@@ -242,13 +234,9 @@ Create a live query using a query function.
 
 Query function that defines what data to fetch
 
-#### deps?
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -327,10 +315,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(queryFn, deps?): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TResult, TKey, TUtils>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:434](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L434)
+Defined in: [useLiveQuery.ts:396](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L396)
 
 Create a live query using a query function.
 
@@ -359,13 +347,9 @@ Create a live query using a query function.
 
 Query function that defines what data to fetch
 
-#### deps?
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -444,10 +428,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn, deps?): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:452](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L452)
+Defined in: [useLiveQuery.ts:413](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L413)
 
 Create a live query using a query function.
 
@@ -482,13 +466,9 @@ Create a live query using a query function.
 
 Query function that defines what data to fetch
 
-#### deps?
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -567,10 +547,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(config): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:515](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L515)
+Defined in: [useLiveQuery.ts:474](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L474)
 
 Create a live query using configuration object
 
@@ -589,6 +569,8 @@ Create a live query using configuration object
 Configuration object with query and options
 
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -630,10 +612,10 @@ return <div>{data.length} items loaded</div>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(config): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:526](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L526)
+Defined in: [useLiveQuery.ts:485](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L485)
 
 Create a live query using a query function.
 
@@ -651,109 +633,7 @@ Create a live query using a query function.
 
 ### Returns
 
-Object with reactive data, state, and status information
-
-### Examples
-
-```ts
-// Prefer config object syntax
-const { data, isLoading } = useLiveQuery({
-  query: (q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-})
-```
-
-```ts
-// Single result query
-const { data } = useLiveQuery({
-  query: (q) => q.from({ todos: todosCollection })
-         .where(({ todos }) => eq(todos.id, 1))
-         .findOne()
-})
-```
-
-```ts
-// Structured captured values are included in derived query identity
-const { data, state } = useLiveQuery({
-  query: (q) => q.from({ todos: todosCollection })
-         .where(({ todos }) => gt(todos.priority, minPriority)),
-})
-```
-
-```ts
-// Return undefined or null to disable a query
-const { data, isEnabled } = useLiveQuery({
-  query: (q) => {
-    if (!userId) return undefined
-    return q.from({ todos: todosCollection })
-            .where(({ todos }) => eq(todos.userId, userId))
-  },
-})
-```
-
-```ts
-// Join pattern
-const { data } = useLiveQuery({
-  query: (q) =>
-    q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
-       eq(issues.userId, persons.id)
-     )
-     .select(({ issues, persons }) => ({
-       id: issues.id,
-       title: issues.title,
-       userName: persons.name
-     }))
-})
-```
-
-```ts
-// Handle loading and error states
-const { data, isLoading, isLoadingError, status } = useLiveQuery({
-  query: (q) => q.from({ todos: todoCollection })
-})
-
-if (isLoading) return <div>Loading...</div>
-if (isLoadingError) return <div>Error: {status}</div>
-
-return (
-  <ul>
-    {data.map(todo => <li key={todo.id}>{todo.text}</li>)}
-  </ul>
-)
-```
-
-## Call Signature
-
-```ts
-function useLiveQuery<TContext>(config, deps?): object & LiveQueryStatusFlags & object;
-```
-
-Defined in: [useLiveQuery.ts:537](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L537)
-
-Create a live query using a query function.
-
-### Type Parameters
-
-#### TContext
-
-`TContext` *extends* `Context`
-
-### Parameters
-
-#### config
-
-`LiveQueryCollectionConfig`\<`TContext`\>
-
-#### deps?
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
-### Returns
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -832,114 +712,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config, deps): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:549](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L549)
-
-Create a live query using a query function.
-
-### Type Parameters
-
-#### TContext
-
-`TContext` *extends* `Context`
-
-### Parameters
-
-#### config
-
-[`ConditionalUseLiveQueryConfig`](../type-aliases/ConditionalUseLiveQueryConfig.md)\<`TContext`\>
-
-#### deps
-
-`unknown`[]
-
-Deprecated array of dependencies that trigger query re-execution when changed
-
-### Returns
-
-Object with reactive data, state, and status information
-
-### Examples
-
-```ts
-// Prefer config object syntax
-const { data, isLoading } = useLiveQuery({
-  query: (q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-})
-```
-
-```ts
-// Single result query
-const { data } = useLiveQuery({
-  query: (q) => q.from({ todos: todosCollection })
-         .where(({ todos }) => eq(todos.id, 1))
-         .findOne()
-})
-```
-
-```ts
-// Structured captured values are included in derived query identity
-const { data, state } = useLiveQuery({
-  query: (q) => q.from({ todos: todosCollection })
-         .where(({ todos }) => gt(todos.priority, minPriority)),
-})
-```
-
-```ts
-// Return undefined or null to disable a query
-const { data, isEnabled } = useLiveQuery({
-  query: (q) => {
-    if (!userId) return undefined
-    return q.from({ todos: todosCollection })
-            .where(({ todos }) => eq(todos.userId, userId))
-  },
-})
-```
-
-```ts
-// Join pattern
-const { data } = useLiveQuery({
-  query: (q) =>
-    q.from({ issues: issueCollection })
-     .join({ persons: personCollection }, ({ issues, persons }) =>
-       eq(issues.userId, persons.id)
-     )
-     .select(({ issues, persons }) => ({
-       id: issues.id,
-       title: issues.title,
-       userName: persons.name
-     }))
-})
-```
-
-```ts
-// Handle loading and error states
-const { data, isLoading, isLoadingError, status } = useLiveQuery({
-  query: (q) => q.from({ todos: todoCollection })
-})
-
-if (isLoading) return <div>Loading...</div>
-if (isLoadingError) return <div>Error: {status}</div>
-
-return (
-  <ul>
-    {data.map(todo => <li key={todo.id}>{todo.text}</li>)}
-  </ul>
-)
-```
-
-## Call Signature
-
-```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & LiveQueryStatusFlags & object;
-```
-
-Defined in: [useLiveQuery.ts:590](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L590)
+Defined in: [useLiveQuery.ts:525](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L525)
 
 Subscribe to an existing live query collection
 
@@ -966,6 +742,8 @@ Subscribe to an existing live query collection
 Pre-created live query collection to subscribe to
 
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 
@@ -1002,10 +780,10 @@ return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & LiveQueryStatusFlags & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:605](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L605)
+Defined in: [useLiveQuery.ts:540](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L540)
 
 Create a live query using a query function.
 
@@ -1030,6 +808,8 @@ Create a live query using a query function.
 `Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`
 
 ### Returns
+
+`object` & `LiveQueryStatusFlags`
 
 Object with reactive data, state, and status information
 

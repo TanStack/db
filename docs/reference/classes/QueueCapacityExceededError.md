@@ -3,7 +3,7 @@ id: QueueCapacityExceededError
 title: QueueCapacityExceededError
 ---
 
-Defined in: [packages/db/src/errors.ts:433](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L433)
+Defined in: [packages/db/src/errors.ts:438](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L438)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:433](https://github.com/TanStack/db/blob/
 new QueueCapacityExceededError(): QueueCapacityExceededError;
 ```
 
-Defined in: [packages/db/src/errors.ts:434](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L434)
+Defined in: [packages/db/src/errors.ts:439](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L439)
 
 #### Returns
 

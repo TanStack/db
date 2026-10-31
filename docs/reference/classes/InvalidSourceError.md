@@ -3,7 +3,7 @@ id: InvalidSourceError
 title: InvalidSourceError
 ---
 
-Defined in: [packages/db/src/errors.ts:633](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L633)
+Defined in: [packages/db/src/errors.ts:638](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L638)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:633](https://github.com/TanStack/db/blob/
 new InvalidSourceError(alias): InvalidSourceError;
 ```
 
-Defined in: [packages/db/src/errors.ts:634](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L634)
+Defined in: [packages/db/src/errors.ts:639](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L639)
 
 #### Parameters
 

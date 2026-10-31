@@ -3,7 +3,7 @@ id: UnsafeAliasPathError
 title: UnsafeAliasPathError
 ---
 
-Defined in: [packages/db/src/errors.ts:724](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L724)
+Defined in: [packages/db/src/errors.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L729)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:724](https://github.com/TanStack/db/blob/
 new UnsafeAliasPathError(segment): UnsafeAliasPathError;
 ```
 
-Defined in: [packages/db/src/errors.ts:725](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L725)
+Defined in: [packages/db/src/errors.ts:730](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L730)
 
 #### Parameters
 

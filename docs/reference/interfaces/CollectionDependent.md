@@ -3,7 +3,7 @@ id: CollectionDependent
 title: CollectionDependent
 ---
 
-Defined in: [packages/db/src/types.ts:1187](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1187)
+Defined in: [packages/db/src/types.ts:1218](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1218)
 
 Something that reads a Collection, as listed by `collection.subscribers`:
 a live query, an Effect, or a direct subscription.
@@ -16,7 +16,7 @@ a live query, an Effect, or a direct subscription.
 readonly active: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:1196](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1196)
+Defined in: [packages/db/src/types.ts:1227](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1227)
 
 Whether something still reads through this dependent: an Effect or a
 subscription always does; a live query does while it has a subscriber.
@@ -30,7 +30,7 @@ subscription always does; a live query does while it has a subscriber.
 readonly optional collection: Collection<any, any, any, any, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:1190](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1190)
+Defined in: [packages/db/src/types.ts:1221](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1221)
 
 A live query's Collection; a pooled live query has none.
 
@@ -42,7 +42,7 @@ A live query's Collection; a pooled live query has none.
 end: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:1201](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1201)
+Defined in: [packages/db/src/types.ts:1232](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1232)
 
 End this dependent: clean up the live query with its own dependents,
 dispose the Effect, or end the subscription.
@@ -59,4 +59,4 @@ dispose the Effect, or end the subscription.
 readonly kind: "live-query" | "effect" | "subscription";
 ```
 
-Defined in: [packages/db/src/types.ts:1188](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1188)
+Defined in: [packages/db/src/types.ts:1219](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1219)

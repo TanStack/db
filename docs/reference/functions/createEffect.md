@@ -7,7 +7,7 @@ title: createEffect
 function createEffect<TRow, TKey>(config): Effect;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L226)
+Defined in: [packages/db/src/query/effect.ts:227](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L227)
 
 ## Type Parameters
 

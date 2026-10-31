@@ -7,7 +7,7 @@ title: readLiveQueryWindowPageShape
 function readLiveQueryWindowPageShape(config): LiveQueryWindowPageShape;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L47)
+Defined in: [packages/db/src/live-query-window-binding.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L48)
 
 Read an infinite-query config's page shape. `getNextPageParam` is rejected:
 the hook widens an ordered live query and has no server cursor to advance.
