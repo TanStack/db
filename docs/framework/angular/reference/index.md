@@ -5,7 +5,6 @@ title: "@tanstack/angular-db"
 
 ## Interfaces
 
-- [InjectLiveQueryFlags](interfaces/InjectLiveQueryFlags.md)
 - [InjectLiveQueryResult](interfaces/InjectLiveQueryResult.md)
 - [InjectLiveQueryResultWithCollection](interfaces/InjectLiveQueryResultWithCollection.md)
 - [InjectLiveQueryResultWithSingleResultCollection](interfaces/InjectLiveQueryResultWithSingleResultCollection.md)
@@ -13,6 +12,7 @@ title: "@tanstack/angular-db"
 ## Type Aliases
 
 - [InjectConditionalLiveQueryResult](type-aliases/InjectConditionalLiveQueryResult.md)
+- [InjectLiveQueryFlags](type-aliases/InjectLiveQueryFlags.md)
 
 ## Functions
 

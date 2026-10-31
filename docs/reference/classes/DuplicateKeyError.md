@@ -3,7 +3,7 @@ id: DuplicateKeyError
 title: DuplicateKeyError
 ---
 
-Defined in: [packages/db/src/errors.ts:260](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L260)
+Defined in: [packages/db/src/errors.ts:265](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L265)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:260](https://github.com/TanStack/db/blob/
 new DuplicateKeyError(key): DuplicateKeyError;
 ```
 
-Defined in: [packages/db/src/errors.ts:261](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L261)
+Defined in: [packages/db/src/errors.ts:266](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L266)
 
 #### Parameters
 

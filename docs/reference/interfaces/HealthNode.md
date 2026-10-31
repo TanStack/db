@@ -3,7 +3,7 @@ id: HealthNode
 title: HealthNode
 ---
 
-Defined in: [packages/db/src/types.ts:813](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L813)
+Defined in: [packages/db/src/types.ts:856](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L856)
 
 One node of a health tree. A Collection's tree is one node; a live query's
 has one node for itself and one for each source alias in query order. The
@@ -22,7 +22,7 @@ crashed, or, on a live query's own node, a request for more data failed.
 readonly alias: string;
 ```
 
-Defined in: [packages/db/src/types.ts:815](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L815)
+Defined in: [packages/db/src/types.ts:858](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L858)
 
 The query alias, or `root` for the Collection the tree was read from.
 
@@ -34,27 +34,27 @@ The query alias, or `root` for the Collection the tree was read from.
 readonly collectionId: string;
 ```
 
-Defined in: [packages/db/src/types.ts:816](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L816)
+Defined in: [packages/db/src/types.ts:859](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L859)
 
 ***
 
 ### error
 
 ```ts
-readonly error: CollectionErrorInfo | null;
+readonly error: HealthProblem | null;
 ```
 
-Defined in: [packages/db/src/types.ts:823](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L823)
+Defined in: [packages/db/src/types.ts:866](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L866)
 
 ***
 
 ### failureReason
 
 ```ts
-readonly failureReason: CollectionErrorInfo | null;
+readonly failureReason: HealthProblem | null;
 ```
 
-Defined in: [packages/db/src/types.ts:822](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L822)
+Defined in: [packages/db/src/types.ts:865](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L865)
 
 ***
 
@@ -64,7 +64,7 @@ Defined in: [packages/db/src/types.ts:822](https://github.com/TanStack/db/blob/m
 readonly hasErrors: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:821](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L821)
+Defined in: [packages/db/src/types.ts:864](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L864)
 
 This node or any node below it has a `failureReason` or an `error`.
 
@@ -76,7 +76,7 @@ This node or any node below it has a `failureReason` or an `error`.
 readonly kind: "source" | "include" | "live-query";
 ```
 
-Defined in: [packages/db/src/types.ts:818](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L818)
+Defined in: [packages/db/src/types.ts:861](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L861)
 
 `include` is an include's source; its rows feed per-row child Collections.
 
@@ -88,7 +88,7 @@ Defined in: [packages/db/src/types.ts:818](https://github.com/TanStack/db/blob/m
 readonly reloading: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:828](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L828)
+Defined in: [packages/db/src/types.ts:871](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L871)
 
 A reload's new sync run is in flight: the rows, status, and problem shown
 are the previous run's until it commits or fails.
@@ -101,7 +101,7 @@ are the previous run's until it commits or fails.
 readonly sources: readonly HealthNode[];
 ```
 
-Defined in: [packages/db/src/types.ts:829](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L829)
+Defined in: [packages/db/src/types.ts:872](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L872)
 
 ***
 
@@ -111,4 +111,4 @@ Defined in: [packages/db/src/types.ts:829](https://github.com/TanStack/db/blob/m
 readonly status: CollectionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:819](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L819)
+Defined in: [packages/db/src/types.ts:862](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L862)

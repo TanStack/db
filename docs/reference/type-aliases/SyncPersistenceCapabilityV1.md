@@ -7,7 +7,7 @@ title: SyncPersistenceCapabilityV1
 type SyncPersistenceCapabilityV1<TKey> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:590](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L590)
+Defined in: [packages/db/src/types.ts:602](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L602)
 
 **`Internal`**
 
@@ -27,7 +27,7 @@ Unstable cross-package protocol for persistence-aware adapters.
 readonly hydrateBaseline: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:599](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L599)
+Defined in: [packages/db/src/types.ts:611](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L611)
 
 #### Returns
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/types.ts:599](https://github.com/TanStack/db/blob/m
 readonly optional managedCacheGeneration: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:596](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L596)
+Defined in: [packages/db/src/types.ts:608](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L608)
 
 This run owns a claimed on-demand cache generation.
 
@@ -53,7 +53,7 @@ This run owns a claimed on-demand cache generation.
 readonly protocol: "@tanstack/db/sync-persistence";
 ```
 
-Defined in: [packages/db/src/types.ts:593](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L593)
+Defined in: [packages/db/src/types.ts:605](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L605)
 
 ***
 
@@ -63,10 +63,23 @@ Defined in: [packages/db/src/types.ts:593](https://github.com/TanStack/db/blob/m
 readonly reserveCommitTurn: () => void;
 ```
 
-Defined in: [packages/db/src/types.ts:609](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L609)
+Defined in: [packages/db/src/types.ts:634](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L634)
 
-Reserve the open sync transaction's FIFO turn, so a subset hydration
-that starts before it commits waits for that commit.
+Reserve the open sync transaction's FIFO turn. Every persisted hydration
+that would start before it commits waits for that commit: a subset load,
+a reload or reset from a peer notice, and sequence-gap recovery. A subset
+load admitted while the turn is reserved also runs after the commit's
+durable write. The source must end the transaction: commit it, or abandon
+it by committing with an aborted signal. An abandon releases the waiting
+hydrations as a commit does, so they run. A peer reset abandons a
+reserved transaction that began before the reset: its commit rejects
+with `SyncTransactionAbortedError`, and the reset does not wait.
+Sequence-gap recovery counts as a hydration only from the point where it
+changes rows. A source that stops for good
+abandons it, or every later hydration keeps waiting. The source must not
+await a `hydrateBaseline` that it started before reserving while the
+reservation is open: that baseline waits for the commit. Calling
+`hydrateBaseline` while the reservation is open rejects.
 
 #### Returns
 
@@ -80,7 +93,7 @@ that starts before it commits waits for that commit.
 readonly resumeSnapshot: object;
 ```
 
-Defined in: [packages/db/src/types.ts:613](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L613)
+Defined in: [packages/db/src/types.ts:638](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L638)
 
 #### certify()
 
@@ -102,6 +115,36 @@ readonly expectCurrentCommit: () => void;
 
 `void`
 
+#### expectSourceProgress()?
+
+```ts
+readonly optional expectSourceProgress: (progress) => void;
+```
+
+Atomically compare the durable source token with this transaction's
+predecessor. The source stages its next opaque string token in collection
+metadata at `key`. A discontinuity invalidates source progress evidence
+until an authoritative truncate; rows and receipts still apply normally.
+Re-delivering the same complete source position must be idempotent; it
+preserves existing evidence, including an earlier incompatibility.
+Only adapters that implement the durable comparison expose this method.
+
+##### Parameters
+
+###### progress
+
+###### key
+
+`string`
+
+###### previous
+
+`string` \| `undefined`
+
+##### Returns
+
+`void`
+
 #### getKeySetEvidence()
 
 ```ts
@@ -115,6 +158,18 @@ readonly getKeySetEvidence: () =>
   \| [`SyncPersistenceKeySetEvidence`](SyncPersistenceKeySetEvidence.md)
   \| `undefined`
 
+#### getSourceProgressCompatible()?
+
+```ts
+readonly optional getSourceProgressCompatible: () => boolean | undefined;
+```
+
+Source progress evidence from the atomic persisted resume snapshot.
+
+##### Returns
+
+`boolean` \| `undefined`
+
 ***
 
 ### scanPersistedRows()
@@ -123,7 +178,7 @@ readonly getKeySetEvidence: () =>
 readonly scanPersistedRows: (options?) => Promise<SyncPersistenceScannedRow<TKey>[]>;
 ```
 
-Defined in: [packages/db/src/types.ts:610](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L610)
+Defined in: [packages/db/src/types.ts:635](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L635)
 
 #### Parameters
 
@@ -143,7 +198,7 @@ Defined in: [packages/db/src/types.ts:610](https://github.com/TanStack/db/blob/m
 readonly optional startScopedRecovery: (resetMetadata?) => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L601)
+Defined in: [packages/db/src/types.ts:613](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L613)
 
 Retire untrusted on-demand rows and retain the provider's reset metadata.
 
@@ -171,7 +226,7 @@ Retire untrusted on-demand rows and retain the provider's reset metadata.
 readonly optional startupCacheGenerationRotated: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:598](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L598)
+Defined in: [packages/db/src/types.ts:610](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L610)
 
 The on-demand cache generation rotated before the source sync run entered.
 
@@ -183,4 +238,4 @@ The on-demand cache generation rotated before the source sync run entered.
 readonly version: 1;
 ```
 
-Defined in: [packages/db/src/types.ts:594](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L594)
+Defined in: [packages/db/src/types.ts:606](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L606)

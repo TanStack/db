@@ -3,7 +3,7 @@ id: QueueDisposedError
 title: QueueDisposedError
 ---
 
-Defined in: [packages/db/src/errors.ts:444](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L444)
+Defined in: [packages/db/src/errors.ts:449](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L449)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:444](https://github.com/TanStack/db/blob/
 new QueueDisposedError(): QueueDisposedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:445](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L445)
+Defined in: [packages/db/src/errors.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L450)
 
 #### Returns
 

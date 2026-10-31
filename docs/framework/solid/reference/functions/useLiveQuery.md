@@ -6,10 +6,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:123](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L123)
+Defined in: [useLiveQuery.ts:117](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L117)
 
 Create a live query using a query function
 
@@ -29,6 +29,8 @@ Query function that defines what data to fetch
 
 ### Returns
 
+`Accessor`\<`InferResultType`\<`TContext`\>\> & `object` & `LiveQueryStatusFlags`
+
 Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
@@ -106,10 +108,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:137](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L137)
+Defined in: [useLiveQuery.ts:126](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L126)
 
 Create a live query using a query function
 
@@ -129,6 +131,8 @@ Query function that defines what data to fetch
 
 ### Returns
 
+`Accessor`\<`InferConditionalResultType`\<`TContext`\>\> & `object` & `LiveQueryStatusFlags`
+
 Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
@@ -206,10 +210,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags & object;
+function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L193)
+Defined in: [useLiveQuery.ts:177](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L177)
 
 Create a live query using configuration object
 
@@ -228,6 +232,8 @@ Create a live query using configuration object
 Configuration object with query and options
 
 ### Returns
+
+`Accessor`\<`InferResultType`\<`TContext`\>\> & `object` & `LiveQueryStatusFlags`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -275,10 +281,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object & LiveQueryStatusFlags & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:242](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L242)
+Defined in: [useLiveQuery.ts:221](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L221)
 
 Subscribe to an existing live query collection
 
@@ -305,6 +311,8 @@ Subscribe to an existing live query collection
 Pre-created live query collection to subscribe to
 
 ### Returns
+
+`Accessor`\<`TResult`[]\> & `object` & `LiveQueryStatusFlags`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 
@@ -347,10 +355,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object & LiveQueryStatusFlags & object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:262](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L262)
+Defined in: [useLiveQuery.ts:236](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L236)
 
 Create a live query using a query function
 
@@ -375,6 +383,8 @@ Create a live query using a query function
 `Accessor`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`\>
 
 ### Returns
+
+`Accessor`\<`TResult` \| `undefined`\> & `object` & `LiveQueryStatusFlags`
 
 Accessor that returns data with Suspense support, with state and status information as properties
 

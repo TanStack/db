@@ -3,13 +3,13 @@ id: UseConditionalLiveQueryResult
 title: UseConditionalLiveQueryResult
 ---
 
-Defined in: [useLiveQuery.ts:98](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L98)
+Defined in: [useLiveQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L86)
 
 The result of a live query whose callback can disable it.
 
 ## Extends
 
-- `LiveQueryResultFlags`
+- `LiveQueryStatusFlags`
 
 ## Type Parameters
 
@@ -37,7 +37,7 @@ The result of a live query whose callback can disable it.
 collection: TCollection | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:106](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L106)
+Defined in: [useLiveQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L94)
 
 ***
 
@@ -47,26 +47,7 @@ Defined in: [useLiveQuery.ts:106](https://github.com/TanStack/db/blob/main/packa
 data: TData | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:105](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L105)
-
-***
-
-### health
-
-```ts
-health: HealthNode | undefined;
-```
-
-Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L80)
-
-The health tree for the query and every Collection it depends on, or
-`undefined` for a disabled query.
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.health
-```
+Defined in: [useLiveQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L93)
 
 ***
 
@@ -76,25 +57,7 @@ LiveQueryResultFlags.health
 isEnabled: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:108](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L108)
-
-***
-
-### isSyncError
-
-```ts
-isSyncError: boolean;
-```
-
-Defined in: [useLiveQuery.ts:75](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L75)
-
-The data is shown, and a sync problem or failed request is in `health`.
-
-#### Inherited from
-
-```ts
-LiveQueryResultFlags.isSyncError
-```
+Defined in: [useLiveQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L96)
 
 ***
 
@@ -104,7 +67,7 @@ LiveQueryResultFlags.isSyncError
 state: ReadonlyMap<TKey, TResult> | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:104](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L104)
+Defined in: [useLiveQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L92)
 
 ***
 
@@ -114,4 +77,4 @@ Defined in: [useLiveQuery.ts:104](https://github.com/TanStack/db/blob/main/packa
 status: UseLiveQueryStatus;
 ```
 
-Defined in: [useLiveQuery.ts:107](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L107)
+Defined in: [useLiveQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L95)

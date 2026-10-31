@@ -7,7 +7,7 @@ title: convexCollectionOptions
 function convexCollectionOptions<TQuery, TItem, TKey, TSchema>(config): CollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils> & object & [TSchema] extends [never] ? unknown : object;
 ```
 
-Defined in: [index.ts:48](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/index.ts#L48)
+Defined in: [index.ts:48](https://github.com/TanStack/db/blob/main/packages/convex-db-collection/src/index.ts#L48)
 
 Mirror one authoritative Convex query result. Filters and joins run in DB.
 

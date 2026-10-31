@@ -7,7 +7,7 @@ title: ConditionalUseLiveQueryReturn
 type ConditionalUseLiveQueryReturn<TContext> = Omit<UseLiveQueryReturn<TContext>, "data" | "collection" | "status"> & object;
 ```
 
-Defined in: [useLiveQuery.ts:85](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L85)
+Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L78)
 
 ## Type Declaration
 

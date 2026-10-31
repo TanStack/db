@@ -3,7 +3,7 @@ id: MissingHandlerError
 title: MissingHandlerError
 ---
 
-Defined in: [packages/db/src/errors.ts:377](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L377)
+Defined in: [packages/db/src/errors.ts:382](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L382)
 
 ## Extends
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/errors.ts:377](https://github.com/TanStack/db/blob/
 new MissingHandlerError(message): MissingHandlerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:378](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L378)
+Defined in: [packages/db/src/errors.ts:383](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L383)
 
 #### Parameters
 

@@ -3,7 +3,7 @@ id: QueryOptimizerError
 title: QueryOptimizerError
 ---
 
-Defined in: [packages/db/src/errors.ts:1142](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1142)
+Defined in: [packages/db/src/errors.ts:1128](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1128)
 
 ## Extends
 
@@ -21,7 +21,7 @@ Defined in: [packages/db/src/errors.ts:1142](https://github.com/TanStack/db/blob
 new QueryOptimizerError(message): QueryOptimizerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1143](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1143)
+Defined in: [packages/db/src/errors.ts:1129](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1129)
 
 #### Parameters
 

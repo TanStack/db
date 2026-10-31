@@ -3,7 +3,7 @@ id: NoKeysPassedToDeleteError
 title: NoKeysPassedToDeleteError
 ---
 
-Defined in: [packages/db/src/errors.ts:356](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L356)
+Defined in: [packages/db/src/errors.ts:361](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L361)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:356](https://github.com/TanStack/db/blob/
 new NoKeysPassedToDeleteError(): NoKeysPassedToDeleteError;
 ```
 
-Defined in: [packages/db/src/errors.ts:357](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L357)
+Defined in: [packages/db/src/errors.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L362)
 
 #### Returns
 

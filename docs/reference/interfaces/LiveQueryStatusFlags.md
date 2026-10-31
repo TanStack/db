@@ -3,11 +3,25 @@ id: LiveQueryStatusFlags
 title: LiveQueryStatusFlags
 ---
 
-Defined in: [packages/db/src/live-query-primitives.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L51)
+Defined in: [packages/db/src/live-query-primitives.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L59)
 
-The derived boolean status flags every adapter exposes for a query.
+The derived flags and health every adapter exposes for a query, besides
+`status`, which each adapter reports as its own field.
 
 ## Properties
+
+### health
+
+```ts
+health: HealthNode | undefined;
+```
+
+Defined in: [packages/db/src/live-query-primitives.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L78)
+
+The health tree for the query and every Collection it depends on, or
+`undefined` for a disabled query.
+
+***
 
 ### isCleanedUp
 
@@ -15,7 +29,7 @@ The derived boolean status flags every adapter exposes for a query.
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L59)
+Defined in: [packages/db/src/live-query-primitives.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L67)
 
 ***
 
@@ -25,7 +39,7 @@ Defined in: [packages/db/src/live-query-primitives.ts:59](https://github.com/Tan
 isCrashed: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L58)
+Defined in: [packages/db/src/live-query-primitives.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L66)
 
 Local storage or an invariant broke. `status` is `crashed`.
 
@@ -37,7 +51,7 @@ Local storage or an invariant broke. `status` is `crashed`.
 isIdle: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L54)
+Defined in: [packages/db/src/live-query-primitives.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L62)
 
 ***
 
@@ -47,7 +61,7 @@ Defined in: [packages/db/src/live-query-primitives.ts:54](https://github.com/Tan
 isLoading: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L52)
+Defined in: [packages/db/src/live-query-primitives.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L60)
 
 ***
 
@@ -57,7 +71,7 @@ Defined in: [packages/db/src/live-query-primitives.ts:52](https://github.com/Tan
 isLoadingError: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L56)
+Defined in: [packages/db/src/live-query-primitives.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L64)
 
 The first load failed: there is nothing to show. `status` is `error`.
 
@@ -69,4 +83,18 @@ The first load failed: there is nothing to show. `status` is `error`.
 isReady: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-primitives.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L53)
+Defined in: [packages/db/src/live-query-primitives.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L61)
+
+***
+
+### isSyncError
+
+```ts
+isSyncError: boolean;
+```
+
+Defined in: [packages/db/src/live-query-primitives.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-primitives.ts#L73)
+
+The data is shown, and something keeps it from staying current: a sync
+problem or failed request somewhere in `health`. Set only while `status` is
+`ready`; a disabled query is never in a sync error.

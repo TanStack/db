@@ -7,7 +7,7 @@ title: InferCollectionType
 type InferCollectionType<T> = T extends CollectionImpl<infer TOutput, infer TKey, any, any, any> ? WithVirtualProps<TOutput, TKey> : T extends CollectionOptionsIdentity<infer TOutput, infer TKey, any, any, any> ? WithVirtualProps<TOutput, TKey> : never;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:109](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L109)
+Defined in: [packages/db/src/query/builder/types.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L106)
 
 InferCollectionType - Extracts the TypeScript type from a CollectionImpl
 

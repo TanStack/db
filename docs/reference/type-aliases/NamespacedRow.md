@@ -7,6 +7,6 @@ title: NamespacedRow
 type NamespacedRow = Record<string, Record<string, unknown>>;
 ```
 
-Defined in: [packages/db/src/types.ts:1168](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1168)
+Defined in: [packages/db/src/types.ts:1199](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1199)
 
 A namespaced row is a row withing a pipeline that had each table wrapped in its alias

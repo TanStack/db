@@ -34,7 +34,6 @@ title: "@tanstack/db"
 - [DeduplicatedLoadSubset](classes/DeduplicatedLoadSubset.md)
 - [DeleteKeyNotFoundError](classes/DeleteKeyNotFoundError.md)
 - [DistinctRequiresSelectError](classes/DistinctRequiresSelectError.md)
-- [~~DuplicateAliasInSubqueryError~~](classes/DuplicateAliasInSubqueryError.md)
 - [DuplicateDbInstanceError](classes/DuplicateDbInstanceError.md)
 - [DuplicateKeyError](classes/DuplicateKeyError.md)
 - [DuplicateKeySyncError](classes/DuplicateKeySyncError.md)
@@ -158,6 +157,7 @@ title: "@tanstack/db"
 - [EffectContext](interfaces/EffectContext.md)
 - [GroupKeys](interfaces/GroupKeys.md)
 - [HealthNode](interfaces/HealthNode.md)
+- [HealthProblem](interfaces/HealthProblem.md)
 - [IndexDevModeConfig](interfaces/IndexDevModeConfig.md)
 - [IndexedDBCollectionConfig](interfaces/IndexedDBCollectionConfig.md)
 - [IndexedDBCollectionUtils](interfaces/IndexedDBCollectionUtils.md)
@@ -348,6 +348,7 @@ title: "@tanstack/db"
 - [Query](variables/Query.md)
 - [SYNC\_PERSISTENCE\_PROTOCOL](variables/SYNC_PERSISTENCE_PROTOCOL.md)
 - [SYNC\_PERSISTENCE\_VERSION](variables/SYNC_PERSISTENCE_VERSION.md)
+- [syncWriteNamesWholeRow](variables/syncWriteNamesWholeRow.md)
 
 ## Functions
 
@@ -427,6 +428,7 @@ title: "@tanstack/db"
 - [isCollection](functions/isCollection.md)
 - [isCollectionOptions](functions/isCollectionOptions.md)
 - [isDevModeEnabled](functions/isDevModeEnabled.md)
+- [isFailedStatus](functions/isFailedStatus.md)
 - [isNull](functions/isNull.md)
 - [isSingleResultCollection](functions/isSingleResultCollection.md)
 - [isUndefined](functions/isUndefined.md)
@@ -457,7 +459,7 @@ title: "@tanstack/db"
 - [readLiveQueryWindowPageShape](functions/readLiveQueryWindowPageShape.md)
 - [rejectLiveQueryInput](functions/rejectLiveQueryInput.md)
 - [releaseDeferredOnReclaim](functions/releaseDeferredOnReclaim.md)
-- [resetWarnings](functions/resetWarnings.md)
+- [reportUncaught](functions/reportUncaught.md)
 - [resolveLiveQueryValue](functions/resolveLiveQueryValue.md)
 - [resumeDeferredLiveQueryCollections](functions/resumeDeferredLiveQueryCollections.md)
 - [safeRandomUUID](functions/safeRandomUUID.md)
@@ -471,7 +473,6 @@ title: "@tanstack/db"
 - [upper](functions/upper.md)
 - [validateSyncPersistenceCapability](functions/validateSyncPersistenceCapability.md)
 - [walkExpression](functions/walkExpression.md)
-- [warnOnce](functions/warnOnce.md)
 - [whenSyncAccepted](functions/whenSyncAccepted.md)
 - [withAcceptedReceipt](functions/withAcceptedReceipt.md)
 - [withArrayChangeTracking](functions/withArrayChangeTracking.md)

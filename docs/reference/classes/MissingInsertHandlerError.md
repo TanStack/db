@@ -3,7 +3,7 @@ id: MissingInsertHandlerError
 title: MissingInsertHandlerError
 ---
 
-Defined in: [packages/db/src/errors.ts:384](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L384)
+Defined in: [packages/db/src/errors.ts:389](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L389)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:384](https://github.com/TanStack/db/blob/
 new MissingInsertHandlerError(): MissingInsertHandlerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:385](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L385)
+Defined in: [packages/db/src/errors.ts:390](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L390)
 
 #### Returns
 

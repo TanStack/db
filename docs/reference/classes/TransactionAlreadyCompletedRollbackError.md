@@ -3,7 +3,7 @@ id: TransactionAlreadyCompletedRollbackError
 title: TransactionAlreadyCompletedRollbackError
 ---
 
-Defined in: [packages/db/src/errors.ts:508](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L508)
+Defined in: [packages/db/src/errors.ts:513](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L513)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:508](https://github.com/TanStack/db/blob/
 new TransactionAlreadyCompletedRollbackError(): TransactionAlreadyCompletedRollbackError;
 ```
 
-Defined in: [packages/db/src/errors.ts:509](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L509)
+Defined in: [packages/db/src/errors.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L514)
 
 #### Returns
 

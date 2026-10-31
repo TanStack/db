@@ -3,7 +3,7 @@ id: LocalOnlyCollectionUtils
 title: LocalOnlyCollectionUtils
 ---
 
-Defined in: [packages/db/src/local-only.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L42)
+Defined in: [packages/db/src/local-only.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L43)
 
 Local-only collection utilities type
 
@@ -25,7 +25,7 @@ Local-only collection utilities type
 acceptMutations: (transaction) => void;
 ```
 
-Defined in: [packages/db/src/local-only.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L60)
+Defined in: [packages/db/src/local-only.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L61)
 
 Accepts mutations from a transaction that belong to this collection and persists them.
 This should be called in your transaction's mutationFn to persist local-only data.
