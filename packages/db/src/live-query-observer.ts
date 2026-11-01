@@ -19,6 +19,7 @@ import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
  * query changes, so `useSyncExternalStore`-style consumers can compare by
  * reference. Each snapshot owns a captured view of `state`/`data`, so reading
  * an older snapshot cannot expose rows from a later revision.
+ * Metadata-only changes replace the snapshot while retaining its row containers.
  */
 export interface LiveQuerySnapshot<
   T extends object,
@@ -168,6 +169,13 @@ class LiveQueryObserverImpl<
   // Whether the cached snapshot was built for the hydration read.
   private cachedServerView = false
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
+  private cachedRows:
+    | {
+        entries: Array<[TKey, T]>
+        data: Array<T>
+        readonly state: Map<TKey, T>
+      }
+    | undefined
   private layoutRevision = 0
   private lastLayoutKeys: Array<TKey> | undefined
   private deliveredLayoutRevision: number | undefined
@@ -257,7 +265,19 @@ class LiveQueryObserverImpl<
 
     if (this.snapshotDirty) {
       const entries = this.getVisibleEntries(collection)
-      const data = entries.map(([, value]) => value)
+      // Capture each row revision once. Sharing this value across metadata
+      // snapshots keeps rows lazy and avoids retaining a chain of old snapshots.
+      let state: Map<TKey, T> | undefined
+      const rows =
+        this.cachedRows?.entries === entries
+          ? this.cachedRows
+          : (this.cachedRows = {
+              entries,
+              data: entries.map(([, value]) => value),
+              get state() {
+                return (state ??= new Map(entries))
+              },
+            })
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
       // The seed stands in only for a result that is still coming, so an
@@ -297,13 +317,11 @@ class LiveQueryObserverImpl<
       const health = this.publishedHealth
         ? this.publishedHealth.tree
         : (collection as { health?: HealthNode }).health
-      // Most consumers read only `data`; build the keyed view on first read.
-      let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
         get state() {
-          return (state ??= new Map(entries))
+          return rows.state
         },
-        data: singleResult ? data[0] : data,
+        data: singleResult ? rows.data[0] : rows.data,
         collection: getPublicCollection(collection),
         layoutRevision: this.layoutRevision,
         status,
@@ -390,12 +408,12 @@ class LiveQueryObserverImpl<
     revision: number | undefined,
   ): void {
     const changed =
-      revision !== undefined
-        ? this.cachedEntries === undefined ||
-          revision !== this.cachedCollectionRevision
-        : !this.entriesEqual(this.cachedEntries, entries)
+      (revision !== undefined && revision !== this.cachedCollectionRevision) ||
+      !this.entriesEqual(this.cachedEntries, entries)
 
-    this.cachedEntries = entries
+    // Keep identity on unchanged reattachment. Comparing entries when the row
+    // revision is equal also detects layout-only moves and revisionless inputs.
+    if (changed) this.cachedEntries = entries
     this.cachedCollectionRevision = revision
     if (changed) this.snapshotDirty = true
   }

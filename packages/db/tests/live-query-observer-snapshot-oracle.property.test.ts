@@ -6,10 +6,16 @@ import { getLiveQueryHash } from '../src/live-query-options.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { Query, createLiveQueryCollection } from '../src/query/index.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
-import type { HealthNode } from '../src/types.js'
+import { finishHistory } from './observer-history-cleanup.js'
+import type { HealthNode, SyncConfig } from '../src/types.js'
+import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
 
 /**
  * # Is a retained live-query snapshot point-in-time?
@@ -62,7 +68,9 @@ type Command =
   | { type: `delete`; id: string }
   | { type: `capture` }
 type Read = { snapshot: number; dataFirst: boolean }
-type Snapshot = ReturnType<ReturnType<typeof setup>[`observer`][`getSnapshot`]>
+// This projection observes row containers, whether a driver uses a source
+// Collection directly or query rows that also carry virtual metadata.
+type Snapshot = Pick<LiveQuerySnapshot<Row, string | number>, `data` | `state`>
 type Captured = {
   snapshot: Snapshot
   rows: Array<Row>
@@ -637,4 +645,200 @@ describe(`a snapshot shows the current health tree`, () => {
       { type: `read` },
     ])
   })
+})
+
+/**
+ * Metadata changes replace the full snapshot but retain its row containers.
+ * Authority: maintainer decision 2026-11-01, preserving point-in-time rows while
+ * preventing status/health changes from invalidating row-only consumers.
+ * A value write must still create fresh containers, even with the same keys.
+ *
+ * This extends the retained-snapshot owner with a direct Collection boundary:
+ * Every history first marks the source ready without writing rows; its suffix
+ * may then report health legally. These metadata actions do not write rows. The independent model
+ * is modelRows' key/version map; only `write` changes it. At every action the
+ * driver compares row values and container identities, then checks all retained
+ * snapshots again to reject a mutable shared Map. Attached/detached and both
+ * observer modes cross distinct cache paths. Empty and nonempty rows test lazy
+ * Map materialization. Query shapes and hydration handoff retain their existing
+ * owners above; this lane does not claim provider or framework scheduling.
+ */
+const containerHistory = fc.record({
+  mode: fc.constantFrom(`granular` as const, `wholesale` as const),
+  attached: fc.boolean(),
+  count: fc.integer({ min: 0, max: 3 }),
+  dataFirst: fc.boolean(),
+  commands: fc.array(fc.constantFrom(`report`, `healthy`, `ready`, `write`), {
+    minLength: 1,
+    maxLength: 12,
+  }),
+})
+type ContainerHistory =
+  typeof containerHistory extends fc.Arbitrary<infer T> ? T : never
+type ContainerReach =
+  | `attached`
+  | `detached`
+  | `granular`
+  | `wholesale`
+  | `empty`
+  | `health-only`
+  | `status-only`
+  | `value-only`
+
+async function checkContainerHistory(
+  scenario: ContainerHistory,
+  reach: ReturnType<typeof createOracleReach<ContainerReach>>,
+): Promise<void> {
+  const model = new Map<string, number>(
+    Array.from(
+      { length: scenario.count },
+      (_, index) => [String.fromCharCode(97 + index), 0] as const,
+    ),
+  )
+  let controls: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+  const source = createCollection<Row, string>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    startSync: true,
+    sync: {
+      sync: (params) => {
+        controls = params
+        params.begin()
+        for (const row of modelRows(model))
+          params.write({ type: `insert`, value: row })
+        params.commit()
+      },
+    },
+  })
+  const observer = createLiveQueryObserver(source, { mode: scenario.mode })
+  const stop = scenario.attached ? observer.subscribe(() => {}) : undefined
+  const retained: Array<Captured> = []
+  reach.reach(scenario.attached ? `attached` : `detached`)
+  reach.reach(scenario.mode)
+  if (model.size === 0) reach.reach(`empty`)
+  let failure: { error: unknown } | undefined
+  try {
+    let before = observer.getSnapshot()
+    let beforeRead = checkRead(
+      `ordered`,
+      { snapshot: before, rows: modelRows(model) },
+      scenario.dataFirst,
+      `initial`,
+    )
+    retained.push({ snapshot: before, rows: modelRows(model) })
+    for (const [index, step] of [
+      `ready` as const,
+      ...scenario.commands,
+    ].entries()) {
+      const input = controls!
+      if (step === `write`) {
+        const version = (model.get(`a`) ?? -1) + 1
+        input.begin()
+        input.write({
+          type: model.has(`a`) ? `update` : `insert`,
+          value: { id: `a`, version },
+        })
+        input.commit()
+        model.set(`a`, version)
+      } else if (step === `report`)
+        input.reportError(new Error(`problem ${index}`))
+      else if (step === `healthy`) input.reportHealthy()
+      else input.markReady()
+      const after = observer.getSnapshot()
+      const read = checkRead(
+        `ordered`,
+        { snapshot: after, rows: modelRows(model) },
+        scenario.dataFirst,
+        `step ${index}`,
+      )
+      if (step === `write`) {
+        expect(read.data, `value writes replace data`).not.toBe(beforeRead.data)
+        expect(read.state, `value writes replace state`).not.toBe(
+          beforeRead.state,
+        )
+        if (beforeRead.state?.has(`a`)) reach.reach(`value-only`)
+      } else {
+        expect(read.data, `metadata keeps data`).toBe(beforeRead.data)
+        expect(read.state, `metadata keeps state`).toBe(beforeRead.state)
+        if (after.status !== before.status) reach.reach(`status-only`)
+        if (after.health !== before.health) reach.reach(`health-only`)
+        if (after.status !== before.status || after.health !== before.health)
+          expect(after).not.toBe(before)
+      }
+      retained.push({ snapshot: after, rows: modelRows(model) })
+      before = after
+      beforeRead = read
+    }
+    for (const [index, captured] of retained.entries())
+      checkRead(`ordered`, captured, !scenario.dataFirst, `retained ${index}`)
+  } catch (error) {
+    failure = { error }
+  }
+  await finishHistory(
+    [() => stop?.(), () => observer.dispose(), () => source.cleanup()],
+    failure,
+  )
+}
+
+declareOracle({ check: [checkContainerHistory], grammar: [containerHistory] })
+
+describe(`metadata snapshots share immutable row containers`, () => {
+  const examples: Array<[ContainerHistory]> = (
+    [`granular`, `wholesale`] as const
+  ).flatMap((mode) =>
+    [false, true].flatMap((attached) =>
+      [0, 1, 3].map(
+        (count) =>
+          [
+            {
+              mode,
+              attached,
+              count,
+              dataFirst: count % 2 === 0,
+              commands: [`report`, `ready`, `write`, `healthy`, `write`],
+            },
+          ] as [ContainerHistory],
+      ),
+    ),
+  )
+  for (const campaign of [`fixed`, `random`] as const) {
+    oracleReplayTest(
+      it,
+      ...(campaign === `fixed`
+        ? []
+        : [`live-query-observer.row-container-sharing`]),
+    )(`reuses rows across metadata changes (${campaign})`, async () => {
+      const reach = createOracleReach<ContainerReach>(
+        `live-query-observer.row-container-sharing`,
+        [
+          `attached`,
+          `detached`,
+          `granular`,
+          `wholesale`,
+          `empty`,
+          `health-only`,
+          `status-only`,
+          `value-only`,
+        ],
+      )
+      await fc.assert(
+        fc.asyncProperty(containerHistory, async (scenario) => {
+          reach.beginHistory()
+          await checkContainerHistory(scenario, reach)
+        }),
+        {
+          ...oraclePropertyOptions(
+            40,
+            `live-query-observer.row-container-sharing`,
+            { examples },
+          ),
+          ...(campaign === `fixed` ? { seed: 1101 } : {}),
+        },
+      )
+      reach.assertReached()
+      process.stdout.write(
+        `observer row-container sharing ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    })
+  }
 })

@@ -28,6 +28,7 @@ const staticOracleProperties = [
   `live-query-observer.partial-attach`,
   `live-query-observer.release-failure`,
   `live-query-observer.hydration-error-timing`,
+  `live-query-observer.row-container-sharing`,
   `subscription-lifecycle.notification-error`,
   `live-query.start-handoff`,
   `react.descriptor-error-surface`,

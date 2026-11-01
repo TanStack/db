@@ -1502,6 +1502,20 @@ The separate `live-query-observer-snapshot-oracle.property.test.ts` owner checks
 unchanged getter identity with and without a completed DbClient query. It runs
 ordered/single-result and attached/detached histories through ordinary and server
 getters. It does not model provisional hydration replacement or host scheduling.
+Its `live-query-observer.row-container-sharing` lane also checks the maintainer's
+2026-11-01 metadata-sharing contract: loading-to-ready and health-only changes
+keep data/Map references, while value writes replace them and retained snapshots
+keep their old rows. Fixed and random histories cross attached/detached,
+granular/wholesale, zero through three rows, and data-first/state-first reads.
+Each begins with readiness before health reports; only writes change the
+independent key/version model. The original fresh-container implementation and
+same-cardinality reuse both fail the shared comparison. Existing hydration and
+observer/layout witnesses retain their scopes. This core-only lane adds no new
+framework scheduling promise. The independent Angular PR projects observer
+row-state identity before copying its Map; combined integration evidence is
+recorded separately from either branch's standalone validation.
+The [row-container evidence](oracle-reviews/2026-11-01-observer-row-containers.md)
+records RED/GREEN, declared reach, mutant rejection, size, and limits.
 Focused snapshot checks protect lazy state, one admission walk for an unchanged
 revision, explicit preload after a loading capture, JSON-compatible non-streaming
 transport, and pending-stream ownership. The observer history
