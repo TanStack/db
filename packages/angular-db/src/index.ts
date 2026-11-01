@@ -1,9 +1,7 @@
 import {
-  DestroyRef,
   assertInInjectionContext,
   computed,
   effect,
-  inject,
   signal,
 } from '@angular/core'
 import {
@@ -150,7 +148,6 @@ export function injectLiveQuery<
 ): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
-  const destroyRef = inject(DestroyRef)
 
   const collection = computed(() => {
     // Check if it's an existing collection
@@ -240,12 +237,6 @@ export function injectLiveQuery(opts: any) {
     health.set(snapshot.health)
   }
 
-  let unsub: (() => void) | null = null
-  const cleanup = () => {
-    unsub?.()
-    unsub = null
-  }
-
   effect((onCleanup) => {
     const currentCollection = collection()
 
@@ -255,11 +246,8 @@ export function injectLiveQuery(opts: any) {
       health.set(undefined)
       state.set(new Map())
       internalData.set([])
-      cleanup()
       return
     }
-
-    cleanup()
 
     // The shared observer owns sync start, subscription, the ready-race, and
     // status transitions; Angular re-reads the whole collection on each notify
@@ -273,18 +261,14 @@ export function injectLiveQuery(opts: any) {
     const unsubscribe = observer.subscribe(() => {
       syncDataFromCollection(currentCollection, observer)
     })
+    onCleanup(() => {
+      unsubscribe()
+      observer.dispose()
+    })
     // Wholesale attach suppresses listener calls raised by synchronous sync
     // startup. Read once after subscribe returns to capture that final state.
     syncDataFromCollection(currentCollection, observer)
-    unsub = () => {
-      unsubscribe()
-      observer.dispose()
-    }
-
-    onCleanup(cleanup)
   })
-
-  destroyRef.onDestroy(cleanup)
 
   return {
     state,
