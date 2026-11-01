@@ -299,6 +299,6 @@ Parameters
 
 Requirements
 
-- Angular 16+ (requires signals support)
+- Angular 20+
 - Must be called within an Angular injection context
 - Automatically handles cleanup when the injector is destroyed

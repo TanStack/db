@@ -52,7 +52,7 @@ export class TodoListComponent {
 
 **Note:** All return values (`data`, `isLoading`, `status`, etc.) are Angular signals, so call them with `()` in your template: `query.data()`, `query.isLoading()`.
 
-> **Template Syntax:** Examples use Angular 17+ control flow (`@if`, `@for`). For Angular 16, use `*ngIf` and `*ngFor` instead.
+> **Template Syntax:** Examples use Angular's built-in control flow (`@if`, `@for`).
 
 ### Reactive Parameters
 
@@ -115,7 +115,7 @@ import { eq, and } from '@tanstack/db'
   template: `<div>{{ query.data().length }} todos</div>`
 })
 export class TodoListComponent {
-  // Angular 16+ compatible input
+  // Required component input
   @Input({ required: true }) userId!: number
   status = signal('active')
 
