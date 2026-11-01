@@ -5,6 +5,7 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `angular.current-snapshot`,
   `lint.part-reach`,
   `oracle.declared-reach`,
   `scripts.lint-scope`,

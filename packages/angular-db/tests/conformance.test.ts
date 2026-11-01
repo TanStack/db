@@ -3,7 +3,7 @@
  *
  * `injectLiveQuery` needs an injection context, so each mount runs inside a
  * child `EnvironmentInjector` created off TestBed's; `unmount` calls
- * `injector.destroy()`, firing the `DestroyRef` cleanup. Result signals are read
+ * `injector.destroy()`, running the effect cleanup. Result signals are read
  * after settling. Controllable inputs use Angular's reactive `{ params, query }`
  * form driven by a signal.
  *

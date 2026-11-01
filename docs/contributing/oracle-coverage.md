@@ -2637,6 +2637,28 @@ Angular's JIT test environment. It does not exercise Angular's AOT compiler,
 older Angular runtimes, or every scheduler cut. The same driver checks that an
 explicitly disabled query reports `disabled` and ready before effects run.
 
+The [Angular snapshot conformance oracle](https://github.com/TanStack/db/blob/main/packages/angular-db/tests/snapshot-conformance-oracle.test.ts)
+extends the framework owner to synchronous reads before effects run (maintainer
+decision 2026-11-01, stated in the shared conformance contract). Generated
+histories cross callback, params, config, and precreated Collection inputs;
+list and `findOne` results; opt-in pooling through params; populated, empty,
+and disabled selections; and source writes before attachment and while mounted.
+An independent fixture-row filter judges selected rows. A refinement relation
+also checks keyed state, data shape, Collection rows, status, readiness, and
+health meaning at each read. Initial reads, input replacements before effects,
+and settled source updates use the same checker. The original copied-signal
+adapter fails at the first read; omitting post-subscribe invalidation fails
+after a source write between an early read and attachment. Declared reach
+measures those checkpoints, including direct Collection, single-result, and
+pooled receiving paths. The oracle does not compare pooled view health-node
+identities or Collection IDs with their lazily materialized public Collection:
+`getPublicCollection` represents these as different objects; it compares health
+meaning instead. This does not retire the shared suite's within-query health
+identity checks. Limits: synchronous eager sources in Angular's JIT TestBed;
+no browser rendering, SSR, asynchronous provider schedules, or new synchronous
+read promise for another framework. Existing shared conformance retains
+ownership of their settled behavior and teardown laws.
+
 The query identity owner generates both equal and unequal primitive string
 pairs. Its fixed pairs also check public `groupBy` rows after initial
 publication. End-to-end subset-demand reuse is still unproven: the demand-key

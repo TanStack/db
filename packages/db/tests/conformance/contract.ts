@@ -47,6 +47,15 @@
  * A `DbClient` matches queries by identity hash, so a binding backed by one
  * follows the comparing law; that boundary has its own receiving witnesses.
  *
+ * Angular synchronous reads (maintainer decision 2026-11-01). After a reactive
+ * input changes, a read before the subscription effect runs already describes
+ * the current query. Data, keyed state, Collection, status, and health come
+ * from its public snapshot. An empty loading result is legal; the previous
+ * input's rows are not. Subscription ownership still changes in the effect.
+ * Disabled queries expose Angular's empty-reactive representation immediately.
+ * The Angular snapshot conformance oracle owns this additional observation cut;
+ * other frameworks retain their drivers' documented scheduling cuts.
+ *
  * Rejection is observed at the adapter's native compile point. The driver
  * surfaces it as a throw from `mount*`, a rejected `setParam`, or a throw from
  * the next `current()` read. After a rejection, no later read exposes rows:
