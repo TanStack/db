@@ -1,8 +1,11 @@
-import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
+import { UnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
 import { MultiSet } from '../multiset.js'
 import { Index } from '../indexes.js'
-import type { DifferenceStreamReader } from '../graph.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
 /** The key identity of a Map: SameValueZero, so NaN equals NaN. */
@@ -162,19 +165,7 @@ export function reduce<
   f: (values: Array<[V1Type, number]>) => Array<[R, number]>,
   options?: ReduceOptions,
 ) {
-  return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<KType, R>> => {
-    const output = new StreamBuilder<KeyValue<KType, R>>(
-      stream.graph,
-      new DifferenceStreamWriter<KeyValue<KType, R>>(),
-    )
-    const operator = new ReduceOperator<KType, V1Type, R>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
-      output.writer,
-      f,
-      options,
-    )
-    stream.graph.addOperator(operator)
-    return output
-  }
+  return unaryOperator(ReduceOperator<KType, V1Type, R>, f, options) as (
+    stream: IStreamBuilder<T>,
+  ) => IStreamBuilder<KeyValue<KType, R>>
 }

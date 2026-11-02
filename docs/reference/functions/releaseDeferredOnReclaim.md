@@ -7,7 +7,7 @@ title: releaseDeferredOnReclaim
 function releaseDeferredOnReclaim(liveQuery, deferredCollections): () => void | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L93)
+Defined in: [packages/db/src/live-query-options.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L94)
 
 Release a render's deferred sync starts when the live query it built is
 reclaimed. A render that commits releases them first, when it subscribes.

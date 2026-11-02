@@ -9,7 +9,7 @@ title: collectionOptions
 function collectionOptions<T, TKey, TUtils>(options): CollectionOptions<InferSchemaOutput<T>, TKey, T, TUtils> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L214)
+Defined in: [packages/db/src/client.ts:222](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L222)
 
 ### Type Parameters
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/client.ts:214](https://github.com/TanStack/db/blob/
 function collectionOptions<T, TKey, TUtils>(options): CollectionOptions<InferSchemaOutput<T>, TKey, T, TUtils> & SingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L223)
+Defined in: [packages/db/src/client.ts:231](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L231)
 
 ### Type Parameters
 
@@ -73,7 +73,7 @@ Defined in: [packages/db/src/client.ts:223](https://github.com/TanStack/db/blob/
 function collectionOptions<T, TKey, TUtils>(options): CollectionOptions<T, TKey, never, TUtils> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L232)
+Defined in: [packages/db/src/client.ts:240](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L240)
 
 ### Type Parameters
 
@@ -105,7 +105,7 @@ Defined in: [packages/db/src/client.ts:232](https://github.com/TanStack/db/blob/
 function collectionOptions<T, TKey, TUtils>(options): CollectionOptions<T, TKey, never, TUtils> & SingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L241)
+Defined in: [packages/db/src/client.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L249)
 
 ### Type Parameters
 
@@ -137,7 +137,7 @@ Defined in: [packages/db/src/client.ts:241](https://github.com/TanStack/db/blob/
 function collectionOptions<TConfig>(id, factory): DescriptorFromConfig<TConfig>;
 ```
 
-Defined in: [packages/db/src/client.ts:250](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L250)
+Defined in: [packages/db/src/client.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L258)
 
 ### Type Parameters
 

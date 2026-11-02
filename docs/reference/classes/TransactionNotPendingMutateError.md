@@ -3,7 +3,7 @@ id: TransactionNotPendingMutateError
 title: TransactionNotPendingMutateError
 ---
 
-Defined in: [packages/db/src/errors.ts:498](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L498)
+Defined in: [packages/db/src/errors.ts:503](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L503)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:498](https://github.com/TanStack/db/blob/
 new TransactionNotPendingMutateError(): TransactionNotPendingMutateError;
 ```
 
-Defined in: [packages/db/src/errors.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L499)
+Defined in: [packages/db/src/errors.ts:504](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L504)
 
 #### Returns
 

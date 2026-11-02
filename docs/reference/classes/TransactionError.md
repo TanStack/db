@@ -3,7 +3,7 @@ id: TransactionError
 title: TransactionError
 ---
 
-Defined in: [packages/db/src/errors.ts:415](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L415)
+Defined in: [packages/db/src/errors.ts:420](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L420)
 
 ## Extends
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/errors.ts:415](https://github.com/TanStack/db/blob/
 new TransactionError(message): TransactionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:416](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L416)
+Defined in: [packages/db/src/errors.ts:421](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L421)
 
 #### Parameters
 

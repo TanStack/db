@@ -1,5 +1,14 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 1.0.0-rc.1.1
+
+### Patch Changes
+
+- Recover eager Electric collections from a fresh snapshot when interleaved source commits leave persisted rows inconsistent with the resume cursor. Keep cached rows visible while recovery restores the source state. ([#2298](https://github.com/TanStack/db/pull/2298))
+
+- Updated dependencies [[`bfd1da1`](https://github.com/TanStack/db/commit/bfd1da1a7e752d66fd667adfd3cdf54f60732b22), [`a2f3465`](https://github.com/TanStack/db/commit/a2f346596c34faa7e65211134194337bd2e0007d), [`9cfa11f`](https://github.com/TanStack/db/commit/9cfa11fc712866f8f276e85762865ebb8bd49cbe)]:
+  - @tanstack/db@1.0.0-rc.1.1
+
 ## 1.0.0-rc.1
 
 ### Major Changes

@@ -62,6 +62,8 @@ import { scenarioRegistry } from './registration'
 import { registerIndexingConfigScenarios } from './indexing-config-oracle'
 import { expectDisabledResult } from './disabled-laws'
 import { expectPublishedRows } from './publication-laws-oracle'
+import { runRowSnapshotHistories } from './row-snapshot-oracle'
+import { runPublicFieldHistories } from './public-field-oracle'
 import {
   expectKeyedRows,
   expectOrderedRows,
@@ -177,8 +179,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
   const driver: LiveQueryDriver = {
     ...rawDriver,
-    makeSource: (data, collectionId) =>
-      sources!.track(rawDriver.makeSource(data, collectionId)),
+    makeSource: (data, collectionId, options) =>
+      sources!.track(rawDriver.makeSource(data, collectionId, options)),
     makeDeferredSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
@@ -231,6 +233,21 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
   describe(`live-query conformance :: ${driver.name}`, () => {
     registerIndexingConfigScenarios(driver, scenario)
+    for (const input of [`callback`, `config`, `collection`] as const)
+      for (const writes of [`sync`, `optimistic`] as const)
+        scenario(
+          `row-snapshot-isolation-${input}-${writes}`,
+          `materialization preserves borrowed rows and immutable mutation snapshots`,
+          () => runRowSnapshotHistories(rawDriver, input, writes),
+          30000,
+        )
+    for (const input of [`callback`, `config`] as const)
+      scenario(
+        `public-field-destination-${input}`,
+        `nested source spreads preserve accepted inherited-name destinations`,
+        () => runPublicFieldHistories(rawDriver, input),
+        30000,
+      )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -2191,7 +2208,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(58)
+      expect(registry.size).toBe(66)
     })
   })
 }

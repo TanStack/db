@@ -1,5 +1,5 @@
-import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
+import { UnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
 import { MultiSet } from '../multiset.js'
 import {
   TopKState,
@@ -9,8 +9,11 @@ import {
 } from './topKState.js'
 import { TopKArray, createKeyedComparator } from './topKArray.js'
 import type { IndexedValue } from './topKArray.js'
-import type { DifferenceStreamReader } from '../graph.js'
-import type { IStreamBuilder, PipedOperator } from '../types.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
+import type { PipedOperator } from '../types.js'
 
 export interface TopKWithFractionalIndexOptions {
   limit?: number
@@ -117,23 +120,9 @@ export function topKWithFractionalIndex<KType extends string | number, T>(
   comparator: (a: T, b: T) => number,
   options?: TopKWithFractionalIndexOptions,
 ): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
-  const opts = options || {}
-
-  return (
-    stream: IStreamBuilder<[KType, T]>,
-  ): IStreamBuilder<[KType, IndexedValue<T>]> => {
-    const output = new StreamBuilder<[KType, IndexedValue<T>]>(
-      stream.graph,
-      new DifferenceStreamWriter<[KType, IndexedValue<T>]>(),
-    )
-    const operator = new TopKWithFractionalIndexOperator<KType, T>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader(),
-      output.writer,
-      comparator,
-      opts,
-    )
-    stream.graph.addOperator(operator)
-    return output
-  }
+  return unaryOperator(
+    TopKWithFractionalIndexOperator<KType, T>,
+    comparator,
+    options || {},
+  )
 }

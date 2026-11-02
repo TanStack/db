@@ -3,7 +3,7 @@ id: CreateLiveQueryWindowControllerOptions
 title: CreateLiveQueryWindowControllerOptions
 ---
 
-Defined in: [packages/db/src/live-query-window-controller.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L540)
+Defined in: [packages/db/src/live-query-window-controller.ts:543](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L543)
 
 **`Internal`**
 
@@ -17,7 +17,7 @@ This contract is unstable while RFC #1623 is being implemented.
 optional client: DbClient;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:541](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L541)
+Defined in: [packages/db/src/live-query-window-controller.ts:544](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L544)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:541](https://github
 optional initialPageCount: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L548)
+Defined in: [packages/db/src/live-query-window-controller.ts:551](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L551)
 
 Committed pages to preserve when a framework binding changes page shape.
 
@@ -39,7 +39,7 @@ Committed pages to preserve when a framework binding changes page shape.
 optional initialPageParam: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:546](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L546)
+Defined in: [packages/db/src/live-query-window-controller.ts:549](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L549)
 
 Value of the first page's `pageParam` (default 0).
 
@@ -51,7 +51,7 @@ Value of the first page's `pageParam` (default 0).
 optional pageSize: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:544](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L544)
+Defined in: [packages/db/src/live-query-window-controller.ts:547](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L547)
 
 Rows per page (default 20). Invalid values use the default.
 
@@ -63,4 +63,4 @@ Rows per page (default 20). Invalid values use the default.
 optional queryHash: string;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:542](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L542)
+Defined in: [packages/db/src/live-query-window-controller.ts:545](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L545)

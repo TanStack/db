@@ -3,7 +3,7 @@ id: PacedTransactionManualCommitError
 title: PacedTransactionManualCommitError
 ---
 
-Defined in: [packages/db/src/errors.ts:422](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L422)
+Defined in: [packages/db/src/errors.ts:427](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L427)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:422](https://github.com/TanStack/db/blob/
 new PacedTransactionManualCommitError(): PacedTransactionManualCommitError;
 ```
 
-Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L423)
+Defined in: [packages/db/src/errors.ts:428](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L428)
 
 #### Returns
 

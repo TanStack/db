@@ -105,9 +105,7 @@ If not provided, defaults to `live-query-${number}` with auto-incrementing numbe
 ### onDelete?
 
 ```ts
-optional onDelete: 
-  | DeleteMutationFn<TResult, string | number, UtilsRecord, void>
-| DeleteMutationFn<TResult, string | number, UtilsRecord, any>;
+optional onDelete: DeleteMutationFn<TResult, string | number, UtilsRecord>;
 ```
 
 Defined in: [packages/db/src/query/live/types.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L101)
@@ -117,9 +115,7 @@ Defined in: [packages/db/src/query/live/types.ts:101](https://github.com/TanStac
 ### onInsert?
 
 ```ts
-optional onInsert: 
-  | InsertMutationFn<TResult, string | number, UtilsRecord, void>
-| InsertMutationFn<TResult, string | number, UtilsRecord, any>;
+optional onInsert: InsertMutationFn<TResult, string | number, UtilsRecord>;
 ```
 
 Defined in: [packages/db/src/query/live/types.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L99)
@@ -131,9 +127,7 @@ Optional mutation handlers
 ### onUpdate?
 
 ```ts
-optional onUpdate: 
-  | UpdateMutationFn<TResult, string | number, UtilsRecord, void>
-| UpdateMutationFn<TResult, string | number, UtilsRecord, any>;
+optional onUpdate: UpdateMutationFn<TResult, string | number, UtilsRecord>;
 ```
 
 Defined in: [packages/db/src/query/live/types.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L100)
