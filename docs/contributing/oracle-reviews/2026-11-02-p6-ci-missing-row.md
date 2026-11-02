@@ -7,6 +7,9 @@ metadata. Same-key peer replacement, unknown-write observations, source deletes
 and source truncates retain their accepted meanings.
 
 Parent publication: `88641f0847975ed920fc44eb48e48f5a602c5206`.
+Semantic repair and test commit: `12558a9d380461eca6fc6b824788a3cf19e404bc`.
+All 22 source hashes below match after commit hooks. The following publication
+commit adds only this evidence binding and command detail.
 The source identities below bind the tested repair. This is a self-review,
 not independent review. The user authorized the production repair after the
 preliminary investigation, and retained the merge-when-green instruction.
@@ -127,6 +130,31 @@ Commands use Node 24.19.0, pnpm 11.1.0, Vitest 4.1.12, and
 The new campaigns use identical fixed/random budgets of eight, with fixed seed
 2220037. The normal random seeds were  -861738368 (controlled) and -836725301 (native).
 No existing budget, guard, comparison or test is removed or weakened.
+
+The scoped commands, from `packages/db-sqlite-persistence-core`, were:
+
+```sh
+pnpm exec vitest run tests/sync-metadata-missing-row.test.ts \
+  --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false
+pnpm exec vitest run tests/sync-metadata-session-persisted.test.ts \
+  tests/sync-metadata-session-sqlite.test.ts tests/sync-metadata-recovery.test.ts \
+  tests/sync-metadata-calibration.test.ts tests/persisted-oracle.test.ts \
+  --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false
+pnpm exec vitest run tests/sync-metadata-recovery-recorder.test.ts \
+  tests/sync-metadata-campaign-result.test.ts tests/sync-metadata-sqlite-driver.test.ts \
+  tests/sync-metadata-write-work.test.ts \
+  --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false
+```
+
+From `packages/db`, the core command selected
+`tests/sync-metadata-session-oracle.property.test.ts`,
+`tests/sync-metadata-session.test.ts`,
+`tests/collection-row-metadata-composition-oracle.test.ts`,
+`tests/oracle-config.test.ts` and `tests/oracle-replay.test.ts` with the same
+flags. Its literal-owner guard then passed separately with
+`-t 'maps literal owners'`. These commands establish 1,443 passing tests
+across the scopes, with 49 existing expected failures and one todo in the
+broad persisted owner. The full workspace command was not run locally.
 
 ## Hostile controls and replay
 
