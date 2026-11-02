@@ -5,6 +5,7 @@ import {
   createResource,
   createSignal,
   onCleanup,
+  untrack,
 } from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
 import {
@@ -12,8 +13,8 @@ import {
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
   getPublicCollection,
-  isCollection,
   isSingleResultCollection,
+  prepareLiveQueryValue,
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
@@ -254,34 +255,18 @@ export function useLiveQuery(
 ) {
   const collection = createMemo(
     () => {
-      if (configOrQueryOrCollection.length === 1) {
-        // This is a query function - check if it returns null/undefined
-        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-        const result = configOrQueryOrCollection(queryBuilder)
-
-        if (result === undefined || result === null) {
-          // Disabled query - return null
-          return null
-        }
-
-        return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
-      }
-
-      const innerCollection = configOrQueryOrCollection()
-
-      if (innerCollection === undefined || innerCollection === null) {
-        // Disabled query - return null
-        return null
-      }
-
-      if (isCollection(innerCollection)) {
-        innerCollection.startSyncImmediate()
-        return innerCollection as Collection
-      }
-
-      return resolveLiveQueryValue(innerCollection, {
-        gcTime: DEFAULT_GC_TIME_MS,
-      })
+      const value =
+        configOrQueryOrCollection.length === 1
+          ? configOrQueryOrCollection(
+              new BaseQueryBuilder() as InitialQueryBuilder,
+            )
+          : configOrQueryOrCollection()
+      // Query-input reads define binding dependencies. Compilation can drain
+      // source rows synchronously; those reads belong to the result instead.
+      const prepared = prepareLiveQueryValue(value, undefined)
+      return untrack(() =>
+        resolveLiveQueryValue(prepared, { gcTime: DEFAULT_GC_TIME_MS }),
+      )
     },
     undefined,
     { name: `TanstackDBCollectionMemo` },

@@ -104,8 +104,12 @@ describe(`Query2 Compiler`, () => {
       const collection = messages[0]!
       expect(collection.getInner()).toHaveLength(4)
 
-      // Check the structure of the results - should be the raw user objects in tuple format
-      const results = collection.getInner().map(([data]) => data)
+      // Check the row and ordering slots; later slots carry compiler context.
+      const results = collection
+        .getInner()
+        .map(
+          ([[key, [row, orderByIndex]]]) => [key, [row, orderByIndex]] as const,
+        )
       expect(results).toContainEqual([1, [sampleUsers[0], undefined]])
       expect(results).toContainEqual([2, [sampleUsers[1], undefined]])
       expect(results).toContainEqual([3, [sampleUsers[2], undefined]])
@@ -154,8 +158,12 @@ describe(`Query2 Compiler`, () => {
 
       graph.run()
 
-      // Check the structure of the results
-      const results = messages[0]!.getInner().map(([data]) => data)
+      // Check the row and ordering slots; later slots carry compiler context.
+      const results = messages[0]!
+        .getInner()
+        .map(
+          ([[key, [row, orderByIndex]]]) => [key, [row, orderByIndex]] as const,
+        )
 
       expect(results).toContainEqual([
         1,
