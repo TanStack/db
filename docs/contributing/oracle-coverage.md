@@ -1938,6 +1938,81 @@ ineligible index. The first-matching-index mutant fails at that reader check.
 Provider paging from an incomplete on-demand source and later updates remain
 outside this witness.
 
+The same owner now exhausts output-indexing configurations through
+`createLiveQueryCollection` and `createCollection(liveQueryCollectionOptions)`:
+omitted/off/eager modes, omitted/BasicIndex/BTreeIndex constructors, and eager
+admission without a constructor. It compares output config, constructor use,
+optimized snapshots, and independent sorted windows over two projected fields
+with both null placements, repeated consumers, and one source update. Each
+configuration requires distinct `rejected` or `output-read` reach; source
+settings remain unchanged. Admission/default policy comes from the shared
+indexing model. The ordered-index count derives from distinct requested
+specifications; calibration rejects extra indexes and inverted optimized-read
+availability.
+The [hook indexing handoff owner](https://github.com/TanStack/db/blob/main/packages/db/tests/conformance/indexing-config-oracle.ts)
+receives the nine configurations through the real React, Preact, Vue, Solid,
+Svelte, and Angular drivers after their settled flush cuts. It judges output
+config and downstream automatic/manual index creation. It does not judge
+rendering before flush or reactive adapters' option updates. Its
+[React Suspense receiver](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-indexing-config-oracle.test.tsx)
+exhausts two initial bindings across config pairs, derived/same/different keys,
+unscoped/client caches, and distinct same-name constructor references. It checks
+both admissions, each admitted output's settings, retained first settings, and
+compatible sharing and forbidden sharing between two admitted outputs.
+Its 582 histories retain the original 534 cases and add 24 omitted/explicit-
+undefined cases and 24 pending-source cases. They check first-option retention
+on rerender (528 admitted-first histories) and application after an actual
+`queryKey` change (480 histories with two valid declarations). Invalid admissions have no output
+identity to compare. Constructor labels use grammar roles, and equal function
+names cannot collapse registration keys. This protects local cache qualification
+without changing portable query identity or mounted first-option retention. The
+[evidence record](oracle-reviews/2026-10-30-live-query-indexing.md) gives each
+receiving path's pre-repair RED, repaired GREEN, calibration, and finite bounds.
+
+The [PR #2314 high-effort review record](oracle-reviews/2026-10-30-pr-2314-high-effort-review.md)
+adds the maintainer's independent-caller local-options law to the existing
+`live-query-cache-options-oracle.ts` owner. Its
+`packages/react-db/tests/suspense-local-options-oracle.test.tsx` receiver exhausts
+492 real Suspense histories: every non-indexing public Collection config field,
+independent absent/equal/different declarations, derived/same/different keys,
+and both client scopes. The public type inventory checks that new config
+fields cannot silently miss the driver. The shared indexing owner separately
+covers both indexing fields. Each history requires first output, second output
+and retained-first reach. Warm `cache-options-oracle.test.tsx` now receives
+144 histories through Suspense in addition to ordinary mounted and server
+rendering; rejection must preserve the original caller's rows. These are
+initial-binding and cached-result claims, not arbitrary SSR/hydration timing
+or semantic equality of separately allocated option objects. The authored query
+owns list/single result shape; the local-sharing check does not promise that a
+config annotation rewrites the query's shape.
+
+The [Suspense oracle follow-up](oracle-reviews/2026-11-02-pr-2314-suspense-oracles.md)
+adds omitted versus explicit undefined in both caller orders: 120 local-option
+histories and the 24 indexing histories above, across all three identity
+relations and both scopes. A key that retains undefined properties passes the
+old 882 receiver histories but fails 88 of the extended 1,074 histories at
+output-identity comparisons. Each receiver also adds 24 pending histories.
+The local owner uses equal/different callback and scalar declarations; the
+indexing owner crosses mode and constructor equality. Both hold source writes,
+require two distinct visible Suspense fallbacks before release, then use their
+existing output comparisons after delivery. Per-scope aggregate reach requires
+both-suspended, shared and separate outputs, plus each representative option
+dimension. A mutant that reuses and memoizes an unqualified pending entry passes
+the old 882 histories and fails 36 extended histories after the pending premise.
+These controlled eager-source schedules do not establish abandonment, rejection
+while pending, cleanup races, hydration, or arbitrary Suspense scheduling.
+
+The same decision requires eager/no-constructor admission to reject on every
+`DbClient.preloadLiveQuery` call, even when no new Collection is needed.
+`packages/db/tests/live-query-preload-indexing-oracle.test.ts` receives the
+shared indexing model across 459 histories: cold; eight prior valid configs
+with held or settled delivery; nine second declarations; and three key
+relations. Every history reaches admission; all 432 warm histories also check
+original-promise reuse. Original production accepts 32 invalid warm calls.
+This supersedes the construction-only limit in the earlier indexing record.
+Hydrated records, observer preload, SSR scheduling and malformed options
+outside the eager-constructor rule are not claimed by this receiver.
+
 The PR #2196 follow-up adds a direct `optimizedOnly` snapshot to the
 first-ineligible/second-eligible history. An eager-auto history starts with
 only an ineligible custom index and requires an eligible ordered reader after

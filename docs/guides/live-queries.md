@@ -108,6 +108,43 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 | `schema` | `Schema` (optional) | Optional schema for validation |
 | `startSync` | `boolean` (optional) | Whether to start the live query's sync run immediately. Defaults to `false`. A live query reads local memory: until it has a subscriber or a preload, it shows only rows its source collections already hold and starts no network work for them. |
 | `gcTime` | `number` (optional) | Garbage collection time in milliseconds. Defaults to `5000` (5 seconds). |
+| `autoIndex` | `'off' \| 'eager'` (optional) | Automatic indexing for this live-query collection's output. Defaults to `'off'`. Eager indexing requires `defaultIndexType`. |
+| `defaultIndexType` | `IndexConstructor` (optional) | Index implementation used for automatic indexes and `createIndex` calls that omit `indexType`, such as `BasicIndex` or `BTreeIndex`. |
+
+### Indexing Intermediate Results
+
+When another query reads a live-query collection, indexes on that collection
+can speed up downstream filters and ordered pages. Set the indexing options on
+the collection that holds the intermediate results:
+
+```ts
+import { BasicIndex, createLiveQueryCollection } from '@tanstack/db'
+
+const cachedUsers = createLiveQueryCollection({
+  query: (q) => q.from({ user: usersCollection })
+    .select(({ user }) => ({ id: user.id, name: user.name })),
+  autoIndex: 'eager',
+  defaultIndexType: BasicIndex,
+})
+
+const firstUsers = createLiveQueryCollection((q) =>
+  q.from({ user: cachedUsers })
+    .orderBy(({ user }) => user.name)
+    .limit(20)
+)
+```
+
+The downstream query creates a matching index on `cachedUsers` when needed.
+These options also work inside `liveQueryCollectionOptions` and framework hook
+config objects. Each live-query collection controls its own indexing policy;
+the options do not change its source collections. Setting `defaultIndexType`
+alone leaves automatic indexing off and supplies the type for manual indexes.
+React and Preact retain these options in a mounted binding until its query or
+nonempty `queryKey` changes. Independent React Suspense bindings share an
+output Collection only when their supplied Collection options agree; object
+and function options must use the same references. `DbClient.preloadLiveQuery`
+requires `defaultIndexType` for every eager declaration, even when rows are
+already cached.
 
 ### Convenience Function
 
@@ -2128,7 +2165,10 @@ function TodoRow({ listId }: { listId: string }) {
 
 Results are the same with or without pooling. Without `pool`, each query
 compiles its own live-query Collection, and the app does not bundle pooling.
-Suspense hooks and queries with a `DbClient` never pool.
+Suspense hooks and queries with a `DbClient` never pool. A pooled config can
+contain only `query`, `pool`, and `gcTime`. Any other option, including
+`autoIndex`, `defaultIndexType`, or an explicitly supplied `undefined` field,
+compiles its own Collection. Omit those fields when you want pooling.
 
 ## Composable Queries
 

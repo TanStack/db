@@ -59,6 +59,7 @@ import { createOracleReach } from '../oracle-reach'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
+import { registerIndexingConfigScenarios } from './indexing-config-oracle'
 import { expectDisabledResult } from './disabled-laws'
 import { expectPublishedRows } from './publication-laws-oracle'
 import { runRowSnapshotHistories } from './row-snapshot-oracle'
@@ -231,6 +232,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
+    registerIndexingConfigScenarios(driver, scenario)
     for (const input of [`callback`, `config`, `collection`] as const)
       for (const writes of [`sync`, `optimistic`] as const)
         scenario(
@@ -2206,7 +2208,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(57)
+      expect(registry.size).toBe(66)
     })
   })
 }
