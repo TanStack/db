@@ -27,9 +27,21 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
   fail: (error: unknown) => void,
 ): ConvexSubscription<FunctionReturnType<TQuery>> {
   let active = true
+  // The client serves a query's cached result to a new subscription at
+  // once. A cached error belongs to an earlier subscription, so this one
+  // waits for the server instead (maintainer decision).
+  let cachedError = false
   const stop = (unsubscribe: () => void) => () => {
     active = false
     unsubscribe()
+  }
+  const hasCachedError = (read: () => unknown) => {
+    try {
+      read()
+      return false
+    } catch {
+      return true
+    }
   }
   if (`disabled` in client && client.disabled === true) {
     throw new Error(`A disabled Convex client cannot sync a collection.`)
@@ -42,19 +54,26 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
       query,
       args,
       (value) => {
+        cachedError = false
         if (active) receive(value)
       },
       (error) => {
-        if (active) fail(error)
+        // The client's replay of the cached error.
+        if (cachedError) cachedError = false
+        else if (active) fail(error)
       },
     )
+    cachedError = hasCachedError(() => subscription.getCurrentValue())
     return {
-      getCurrentValue: () => subscription.getCurrentValue(),
+      getCurrentValue: () =>
+        cachedError ? undefined : subscription.getCurrentValue(),
       unsubscribe: stop(subscription),
     }
   }
   const watch = client.watchQuery(query, args)
+  cachedError = hasCachedError(() => watch.localQueryResult())
   const unsubscribe = watch.onUpdate(() => {
+    cachedError = false
     if (!active) return
     try {
       const result = watch.localQueryResult()
@@ -64,7 +83,7 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
     }
   })
   return {
-    getCurrentValue: () => watch.localQueryResult(),
+    getCurrentValue: () => (cachedError ? undefined : watch.localQueryResult()),
     unsubscribe: stop(unsubscribe),
   }
 }

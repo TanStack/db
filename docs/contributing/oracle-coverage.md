@@ -6109,7 +6109,12 @@ rejected delivery after ready (`rejectedDelivery: reported`, the law set's
 default `errorMapping`). Limits: no `awaitSync` evidence (the shared
 oracle's waits are txid waits), no transport reconnect, no on-demand or
 paginated mode, no deployment; the truncate on a restarted run's first
-result is not distinguished, because an eager restart starts empty; a
-restart before the server acknowledges the previous removal can receive the
-client's cached result, which the driver avoids by acknowledging at once
-(observation for a maintainer decision).
+result is not distinguished, because an eager restart starts empty. While
+the client's result is a failure, the driver acknowledges a query removal
+only with its next transition, so a restart finds the failed query's cached
+error: maintainer decision 2026-11-02, a cached error does not fail a new
+subscription, which waits for the server (reach `restart-after-failure`,
+both clients); a cached valid result served to a restarted run is accepted
+client-cache behavior and is not generated, because the model starts a
+restarted run empty. A fixed-seed campaign runs the React client
+(`watchQuery`).

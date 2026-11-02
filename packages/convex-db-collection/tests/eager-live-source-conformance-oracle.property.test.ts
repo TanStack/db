@@ -24,8 +24,9 @@ import { convexConformanceDriver } from './conformance-driver'
  * this file supplies only the Convex production driver in
  * `conformance-driver.ts` and the campaigns. It states no expected results.
  *
- * Convex runs here in eager mode over the real Convex JavaScript client,
- * whose WebSocket the driver answers with the sync protocol. Every delivery
+ * Convex runs here in eager mode over the real Convex JavaScript client, and
+ * in a fixed-seed campaign over the React client, whose WebSocket the driver
+ * answers with the sync protocol. Every delivery
  * is a complete query result. It declares `complete-snapshot`,
  * `delivery-error` (a `QueryFailed` after ready, cleared by the next
  * result), and `duplicate-key-delivery` with rejected deliveries reported
@@ -40,11 +41,15 @@ const historyArb = eagerLiveSourceHistoryArb(driver)
 const runs = 400
 const campaignTimeoutMs = 120_000
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
+async function campaign(
+  options: fc.Parameters<[unknown]>,
+  checked = driver,
+  name = property,
+) {
+  const reach = createOracleReach(name, reachStatesFor(checked), {
     minimum: 5,
   })
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
+  await fc.assert(eagerLiveSourceProperty(checked, reach), options)
   return reach
 }
 
@@ -62,6 +67,20 @@ describe(`eager live-source conformance: Convex`, () => {
     `conforms on a random campaign or a replayed seed`,
     async () => {
       const reach = await campaign(oraclePropertyOptions(runs, property))
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
+  // The React client reaches the adapter through `watchQuery`.
+  oracleReplayTest(it)(
+    `conforms over the React client on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        convexConformanceDriver({ client: `react` }),
+        `${property}.react`,
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,

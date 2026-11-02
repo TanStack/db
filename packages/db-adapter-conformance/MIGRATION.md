@@ -485,8 +485,16 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     the previous run's cached error. A result equal to the one the client
     holds sends no update, but after an error or a rejected result the
     valid result is a change.
-  - **Observed, for a decision:** a restart that comes before the server
-    acknowledges the previous run's removal receives the client's cached
-    result or error for the query at once (the client serves results by
-    query token).
-  - **Size:** convex-db-collection +26 gzip bytes.
+  - **Cached error (decided 2026-11-02):** a restart that comes before the
+    server acknowledges the previous run's removal receives the client's
+    cached result. A cached valid result is accepted client-cache behavior;
+    a cached error must not fail the new run, which waits for the server.
+    The driver now acknowledges a removal late while the client's result is
+    a failure; new shared reach state `restart-after-failure`. RED on
+    6aa2671da at `[fail, restart, fail]` (status `error`, law `loading`),
+    for both the JavaScript and React clients. Fix: `subscribeQuery` treats
+    an error the client holds at subscription as cached, reports no current
+    value, and skips the client's replay of it. Mutants that keep the
+    replay, or skip the check on the React path, are rejected. A fixed-seed
+    campaign now runs the React client.
+  - **Size:** convex-db-collection +26 gzip bytes for LIFE-10.

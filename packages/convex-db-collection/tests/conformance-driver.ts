@@ -30,7 +30,9 @@
  *   is the adapter's call to the returned unsubscribe (LIFE-2, LIFE-10),
  *   observed at the client boundary because the client may merge a removal
  *   with a later subscription on the wire. The driver acknowledges a removal
- *   at once, as a server does, which drops the client's cached result.
+ *   at once, as a server does, which drops the client's cached result; after
+ *   a failure it acknowledges it only with its next transition, so a restart
+ *   can find the failed query's cached error.
  *
  * Rows are Convex values: `note` absent is a missing field, and typed fields
  * hold the Convex kinds (no Date, which Convex values do not have). The
@@ -38,6 +40,7 @@
  */
 import { createCollection } from '@tanstack/db'
 import { ConvexClient } from 'convex/browser'
+import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import { convexToJson } from 'convex/values'
 import { convexCollectionOptions } from '../src/index'
@@ -73,7 +76,11 @@ const rowsQuery = makeFunctionReference<
 
 /** The WebSocket the Convex client opens; the driver plays the server. */
 class Socket {
-  static latest: Socket | undefined
+  /**
+   * The provider that the next socket serves. The React client opens its
+   * socket lazily, so a socket takes its provider when it is created.
+   */
+  static provider: { attach: (socket: Socket) => void } | undefined
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onclose: ((event: { code: number; reason: string }) => void) | null = null
@@ -81,7 +88,9 @@ class Socket {
   readonly sent: Array<Record<string, unknown>> = []
   onSend: ((message: Record<string, unknown>) => void) | undefined
   constructor(_url: string) {
-    Socket.latest = this
+    Socket.provider?.attach(this)
+    // The client sets its handlers after construction; then it connects.
+    queueMicrotask(() => this.onopen?.())
   }
   send(data: string) {
     const message = JSON.parse(data) as Record<string, unknown>
@@ -109,26 +118,30 @@ const hasDuplicateKey = (rows: ReadonlyArray<ConformanceRow>) =>
   new Set(rows.map((row) => row.id)).size !== rows.length
 
 class ConvexProvider implements ControlledProvider {
-  readonly client: ConvexClient
-  private readonly socket: Socket
+  readonly client: ConvexClient | ConvexReactClient
+  private socketOrUndefined: Socket | undefined
   private readonly registrations: Array<{ releases: number }> = []
   private rows = new Map<number, ConformanceRow>()
   private time = 0
   private querySet = 0
+  private ackLate = false
+  private pendingAcks: Array<unknown> = []
   // The result the client holds, encoded; undefined after a failure.
   private sent: string | undefined
 
-  constructor() {
-    this.client = new ConvexClient(`https://conformance.convex.cloud`, {
+  constructor(kind: ClientKind) {
+    Socket.provider = this
+    const options = {
       webSocketConstructor: Socket as unknown as typeof WebSocket,
       unsavedChangesWarning: false,
-      logger: false,
-    })
-    this.socket = Socket.latest!
-    this.socket.onopen?.()
-    // A server acknowledges a removal promptly, which drops the client's
-    // cached result for that query.
-    this.socket.onSend = (message) => {
+      logger: false as const,
+    }
+    const url = `https://conformance.convex.cloud`
+    this.client =
+      kind === `javascript`
+        ? new ConvexClient(url, options)
+        : new ConvexReactClient(url, options)
+    this.onSend = (message) => {
       const modifications = (message.modifications ?? []) as Array<{
         type: string
         queryId: number
@@ -140,29 +153,60 @@ class ConvexProvider implements ControlledProvider {
       ) {
         return
       }
-      queueMicrotask(() =>
-        this.transition(
-          modifications.map(({ queryId }) => ({
-            type: `QueryRemoved`,
-            queryId,
-          })),
-        ),
-      )
+      const removed = modifications.map(({ queryId }) => ({
+        type: `QueryRemoved`,
+        queryId,
+      }))
+      // While the client's result is a failure, the acknowledgement comes
+      // with the next transition, so a restart can come first: the client
+      // then holds the failed query's cached error. A server that re-runs
+      // the query may now succeed; a cached result, valid or rejected, is
+      // what it would send again.
+      if (this.ackLate) this.pendingAcks.push(...removed)
+      else queueMicrotask(() => this.transition(removed))
     }
-    // Count each `onUpdate` registration and the adapter's unsubscribe.
-    const onUpdate = this.client.onUpdate.bind(this.client)
-    this.client.onUpdate = ((...args: Parameters<typeof onUpdate>) => {
+    // Count each registration and the adapter's unsubscribe: `onUpdate`
+    // for the JavaScript client, a watch's `onUpdate` for the React one.
+    const counted = (unsubscribe: () => void) => {
       const registration = { releases: 0 }
       this.registrations.push(registration)
-      const subscription = onUpdate(...args)
-      return Object.assign(
-        () => {
-          registration.releases++
-          subscription()
-        },
-        { getCurrentValue: () => subscription.getCurrentValue() },
-      )
-    }) as typeof onUpdate
+      return () => {
+        registration.releases++
+        unsubscribe()
+      }
+    }
+    const client = this.client
+    if (client instanceof ConvexClient) {
+      const onUpdate = client.onUpdate.bind(client)
+      client.onUpdate = ((...args: Parameters<typeof onUpdate>) => {
+        const subscription = onUpdate(...args)
+        return Object.assign(counted(subscription), {
+          getCurrentValue: () => subscription.getCurrentValue(),
+        })
+      }) as typeof onUpdate
+    } else {
+      const watchQuery = client.watchQuery.bind(client) as (
+        ...args: Array<unknown>
+      ) => ReturnType<ConvexReactClient[`watchQuery`]>
+      client.watchQuery = ((...args: Array<unknown>) => {
+        const watch = watchQuery(...args)
+        const onUpdate = watch.onUpdate.bind(watch)
+        watch.onUpdate = (callback: () => void) => counted(onUpdate(callback))
+        return watch
+      }) as typeof watchQuery
+    }
+  }
+
+  private onSend: (message: Record<string, unknown>) => void = () => {}
+
+  attach(socket: Socket): void {
+    this.socketOrUndefined = socket
+    socket.onSend = (message) => this.onSend(message)
+  }
+
+  private get socket(): Socket {
+    if (!this.socketOrUndefined) throw new Error(`the client has no socket`)
+    return this.socketOrUndefined
   }
 
   /** The query the client subscribed most recently and has not removed. */
@@ -202,12 +246,13 @@ class ConvexProvider implements ControlledProvider {
         ts: timestamp(++this.time),
         identity: 0,
       },
-      modifications,
+      modifications: [...this.pendingAcks.splice(0), ...modifications],
     })
     this.querySet = version
   }
 
   private sendResult(rows: ReadonlyArray<ConformanceRow>): void {
+    this.ackLate = false
     this.sent = JSON.stringify(convexToJson(rows as unknown as Value))
     this.transition([
       {
@@ -258,7 +303,10 @@ class ConvexProvider implements ControlledProvider {
     this.sendResult(result)
   }
 
-  fail = (error: Error) => this.sendFailure(error)
+  fail = (error: Error) => {
+    this.ackLate = true
+    this.sendFailure(error)
+  }
 
   deliveryError = (error: Error) => this.sendFailure(error)
 
@@ -272,9 +320,14 @@ class ConvexProvider implements ControlledProvider {
 
 let sequence = 0
 
-export function convexConformanceDriver(): EagerLiveSourceDriver {
+type ClientKind = `javascript` | `react`
+
+/** `client` selects the Convex JavaScript client or the React client. */
+export function convexConformanceDriver({
+  client = `javascript`,
+}: { client?: ClientKind } = {}): EagerLiveSourceDriver {
   return {
-    adapter: `@tanstack/convex-db-collection (eager)`,
+    adapter: `@tanstack/convex-db-collection (eager, ${client} client)`,
     capabilities: new Set([
       `complete-snapshot`,
       `delivery-error`,
@@ -291,7 +344,7 @@ export function convexConformanceDriver(): EagerLiveSourceDriver {
     valueKinds: VALUE_KINDS,
     fieldKinds: VALUE_KINDS,
     create(): EagerLiveSourceFixture {
-      const provider = new ConvexProvider()
+      const provider = new ConvexProvider(client)
       const collection = createCollection(
         convexCollectionOptions({
           id: `convex-conformance-${++sequence}`,
