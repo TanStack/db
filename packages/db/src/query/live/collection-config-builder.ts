@@ -342,6 +342,8 @@ export class CollectionConfigBuilder<
       compare: this.compare,
       defaultStringCollation: this.compareOptions,
       gcTime: this.config.gcTime ?? 5000, // 5 seconds by default for live queries
+      autoIndex: this.config.autoIndex,
+      defaultIndexType: this.config.defaultIndexType,
       schema: this.config.schema,
       onInsert: this.config.onInsert,
       onUpdate: this.config.onUpdate,

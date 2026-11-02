@@ -2,13 +2,13 @@ import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
 import { collectionOptionsClaim } from '../collection-options.js'
 import {
-  CollectionConfigurationError,
   CollectionHasSubscribersError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
-import { codedMessage, devBuild } from '../error-message'
+import { devBuild } from '../error-message'
 import { getBuilderFromConfig } from '../query/live/collection-registry.js'
+import { validateCollectionIndexing } from './validate-indexing.js'
 import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
@@ -479,16 +479,7 @@ export class CollectionImpl<
     // during sync setup. Preserve the adapter's object identity by default.
     this.utils = collectionUtils
 
-    if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
-      throw new CollectionConfigurationError(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `autoIndex: 'eager' requires defaultIndexType to be set. ` +
-              `Import an index type and set it:\n` +
-              `  import { BasicIndex } from '@tanstack/db'\n` +
-              `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`
-          : codedMessage(206),
-      )
-    }
+    validateCollectionIndexing(config)
 
     // Collections are mutable handles, not structural rows. Downstream queries
     // must not hash their internal state or follow its ownership cycles.

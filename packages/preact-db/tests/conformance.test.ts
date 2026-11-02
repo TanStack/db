@@ -18,6 +18,8 @@
  */
 import { act } from 'preact/test-utils'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -173,11 +175,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: {
-    gcTime?: number
-    pool?: PooledLiveQueries
-    queryKey?: ReadonlyArray<unknown>
-  },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   return makeHandle(
     renderHook(() => useLiveQuery({ query: build as any, ...opts })),
@@ -255,6 +253,7 @@ const preactDriver: LiveQueryDriver = {
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
