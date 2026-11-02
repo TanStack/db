@@ -251,3 +251,12 @@ The four requested improvements are implemented. The additional finding is
 from this pass. The known receiving and observation limits above remain open;
 they are not removed from the contract by this accounting. The earlier ten-item
 review retains its independent `10 = 7 fixed-now + 3 refuted` accounting.
+
+
+### Commit binding
+
+Executable instrument revision: `60ace06b044e76fc9e57f2a6942a3c73593a2388`.
+All 18 TypeScript hashes above match after commit hooks. This binding appendix
+changes documentation only. The 279-test result, seven intended mutation
+rejections and direct replay result describe that executable revision.
+Final publication-head CI and third-party review remain separate obligations.
