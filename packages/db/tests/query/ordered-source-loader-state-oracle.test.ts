@@ -16,11 +16,13 @@ import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { createEffect } from '../../src/query/effect.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
+import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 import type {
@@ -238,6 +240,8 @@ function tieValue(options: RequestOptions): unknown {
  */
 type LedgerRequest = {
   index: number
+  issuedAt: number
+  issuedEpoch: number
   options: RequestOptions
   acquisition: LoadSubsetOptions
   deferred: ReturnType<typeof createDeferred>
@@ -447,6 +451,7 @@ const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
     { weight: 5, arbitrary: fc.constant(false) },
     { weight: 1, arbitrary: fc.constant(true) },
   ),
+  releaseInvalidates: fc.boolean(),
   history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
 })
 
@@ -503,21 +508,33 @@ type AuthorityObservation = {
   hungRequests: number
   offsetWindows: number
   releaseInvalidations: number
+  retirementSuccessorChains: number
   replayContinuationHandoffs: number
   // Current failed requests whose participant reason reached the identity cut.
   requestErrorChecks: number
 }
 
-// Retirement cannot pay an invalidation that happened after the covering read.
-// Both drivers supply only observed source events and subsequent request starts.
-// The comparison does not inspect the loader's work or debt representation.
+// ARCHITECTURE's ordered repair and publication laws: a read started before
+// an invalidation cannot pay it, and a later read must start before replacement
+// publication. Event order and epochs come only from observed source callbacks
+// and adapter requests. Dispatch may be deferred while the public gate holds.
+type RetirementEvent = { at: number; epoch: number }
 function checkRetirementProgress(
-  invalidations: number,
-  replaced: boolean,
+  invalidation: RetirementEvent | undefined,
+  starts: Array<RetirementEvent>,
+  publicationAt = Number.POSITIVE_INFINITY,
 ): void {
-  if (invalidations > 0 && !replaced) {
+  if (
+    invalidation &&
+    !starts.some(
+      (start) =>
+        start.at > invalidation.at &&
+        start.epoch >= invalidation.epoch &&
+        start.at < publicationAt,
+    )
+  ) {
     throw new Error(
-      `retirement invalidation: ${invalidations} adapter invalidation reached the release pass, but no new authoritative read followed it`,
+      `retirement invalidation: no newer-epoch authoritative read followed the adapter invalidation before publication`,
     )
   }
 }
@@ -526,26 +543,32 @@ type RetirementReceiverCase = {
   indexed: boolean
   limit: 1 | 2
   synchronous: boolean
+  kind: `collection` | `effect`
+  offset: 0 | 1
+  holdReplacement: boolean
 }
 
-// This receiving driver supplies the controlled ledger's premise through the
-// actual Collection subscription: adapter unload changes a contributed row's
-// leading order value. A finite provider keeps a later row uninstalled. Moving
-// the current prefix behind it therefore requires a fresh authoritative read.
-// The shared progress judgment runs after requests and graph work drain. Public
-// rows are a second formulation: full provider sorting, without loader state.
+// Both real consumers receive the same legal history and shared judgments.
+// The provider keeps the next row uninstalled, then unload moves the repaired
+// prefix behind it. No later external graph input is supplied. A held answer
+// separates request entry from provider application: reads/callbacks must keep
+// the prior complete snapshot until the newer repair completes.
 async function checkRetirementReceiver(
   scenario: RetirementReceiverCase,
-  reached: () => void,
+  reached: (cut: `release` | `held-answer`) => void,
 ): Promise<void> {
   type Row = { id: number; rank: number }
   const truth = new Map<number, Row>(
-    [1, 2, 3, 4, 5].map((id) => [id, { id, rank: id }]),
+    [1, 2, 3, 4, 5, 6, 7].map((id) => [id, { id, rank: id }]),
   )
   const installed = new Map<number, Row>()
-  const calls: Array<LoadSubsetOptions> = []
-  let invalidations = 0
-  let invalidatedAt = -1
+  const starts: Array<RetirementEvent> = []
+  const publications: Array<{ at: number; rows: Array<Row> }> = []
+  const effectRows = new Map<number, Row>()
+  const replacement = createDeferred()
+  let heldAnswers = 0
+  let clock = 0
+  let invalidation: RetirementEvent | undefined
   let armed = false
   let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const source = createCollection<Row, number>({
@@ -559,7 +582,13 @@ async function checkRetirementReceiver(
         operations.markReady()
         return {
           loadSubset: (options) => {
-            calls.push(options)
+            const at = ++clock
+            if (
+              options.refetch === true &&
+              options.where === undefined &&
+              options.cursor === undefined
+            )
+              starts.push({ at, epoch: invalidation ? 1 : 0 })
             const deliver = () => {
               if (options.signal?.aborted) return true
               const matching = [...truth.values()]
@@ -587,11 +616,17 @@ async function checkRetirementReceiver(
                 if (installed.get(value.id) === value) continue
                 operations.write({
                   type: installed.has(value.id) ? `update` : `insert`,
-                  value,
+                  value: { ...value },
                 })
                 installed.set(value.id, value)
               }
               return operations.commit()
+            }
+            if (invalidation && scenario.holdReplacement) {
+              heldAnswers++
+              return replacement.promise.then(async () => {
+                await deliver()
+              })
             }
             return scenario.synchronous
               ? deliver()
@@ -600,18 +635,15 @@ async function checkRetirementReceiver(
                 })
           },
           unloadSubset: () => {
-            if (!armed || invalidations > 0) return
-            invalidations++
-            invalidatedAt = calls.length
-            reached()
-            // The first repair has read the next prefix. Move every row of
-            // that prefix after the provider's still-uninstalled next row.
+            if (!armed || invalidation) return
+            invalidation = { at: ++clock, epoch: 1 }
+            reached(`release`)
             operations.begin()
-            for (let id = 2; id <= scenario.limit + 1; id++) {
+            for (let id = 2; id <= scenario.offset + scenario.limit + 1; id++) {
               const value = { id, rank: 20 + id }
               truth.set(id, value)
               installed.set(id, value)
-              operations.write({ type: `update`, value })
+              operations.write({ type: `update`, value: { ...value } })
             }
             operations.commit()
           },
@@ -619,23 +651,52 @@ async function checkRetirementReceiver(
       },
     },
   })
-  const live = createLiveQueryCollection((q) =>
+  const query = (q: InitialQueryBuilder) =>
     q
       .from({ row: source })
       .orderBy(({ row }) => row.rank)
+      .offset(scenario.offset)
       .limit(scenario.limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank })),
-  )
-  const publications: Array<Array<Row>> = []
-  const listener = live.subscribeChanges(
-    () => {
-      if (armed)
-        publications.push(live.toArray.map(({ id, rank }) => ({ id, rank })))
-    },
-    { includeInitialState: false },
-  )
+      .select(({ row }) => ({ id: row.id, rank: row.rank }))
+  const live =
+    scenario.kind === `collection`
+      ? createLiveQueryCollection({ query })
+      : undefined
+  const visible = () => {
+    const rows = (live ? live.toArray : [...effectRows.values()]).map(
+      ({ id, rank }) => ({ id, rank }),
+    )
+    return live ? rows : rows.sort((left, right) => left.rank - right.rank)
+  }
+  const recordPublication = () => {
+    if (armed) publications.push({ at: ++clock, rows: visible() })
+  }
+  const listener = live?.subscribeChanges(recordPublication, {
+    includeInitialState: false,
+  })
+  const effect =
+    scenario.kind === `effect`
+      ? createEffect<Row, number>({
+          query,
+          onBatch: (events) => {
+            for (const event of events) {
+              if (event.type === `exit`) effectRows.delete(event.key)
+              else effectRows.set(event.key, { ...event.value })
+            }
+            recordPublication()
+          },
+        })
+      : undefined
+  const expected = () =>
+    [...truth.values()]
+      .sort((left, right) => left.rank - right.rank)
+      .slice(scenario.offset, scenario.offset + scenario.limit)
+      .map((row) => ({ ...row }))
   try {
-    await live.preload()
+    if (live) await live.preload()
+    await flushPromises()
+    expect(visible(), `initial complete window`).toEqual(expected())
+    const prior = visible()
     armed = true
     const moved = { id: 1, rank: 10 }
     truth.set(1, moved)
@@ -644,54 +705,43 @@ async function checkRetirementReceiver(
     sync.write({ type: `update`, value: moved })
     await sync.commit()
     await flushPromises()
-    expect(invalidations, `real subscription retirement was reached`).toBe(1)
-    const failures: Array<unknown> = []
-    try {
-      checkRetirementProgress(
-        invalidations,
-        calls
-          .slice(invalidatedAt)
-          .some(
-            (options) =>
-              options.refetch === true &&
-              options.where === undefined &&
-              options.cursor === undefined,
-          ),
-      )
-    } catch (error) {
-      failures.push(error)
-    }
-    const expected = [...truth.values()]
-      .sort((left, right) => left.rank - right.rank)
-      .slice(0, scenario.limit)
-    try {
+    expect(
+      invalidation,
+      `real subscription retirement was reached`,
+    ).toBeDefined()
+    if (scenario.holdReplacement) {
       expect(
-        live.toArray.map(({ id, rank }) => ({ id, rank })),
-        `settled public window after retirement invalidation`,
-      ).toEqual(expected)
-    } catch (error) {
-      failures.push(error)
+        heldAnswers,
+        `replacement starts without later external graph input`,
+      ).toBeGreaterThan(0)
+      expect(
+        visible(),
+        `held replacement keeps the complete public window`,
+      ).toEqual(prior)
+      expect(
+        publications,
+        `held replacement publishes no partial window`,
+      ).toEqual([])
+      reached(`held-answer`)
+      replacement.resolve()
+      await flushPromises()
     }
-    try {
-      // Both invalidations belong to one unfinished replacement. Publication
-      // cannot expose the first chain's rows after its retirement moved them.
-      expect(publications, `one complete replacement publication`).toEqual([
-        expected,
-      ])
-    } catch (error) {
-      failures.push(error)
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(
-        failures,
-        `retirement receiving comparisons: ${failures.map((error) => (error instanceof Error ? error.message : String(error))).join(`; `)}`,
-        { cause: failures[0] },
-      )
-    }
+    checkRetirementProgress(invalidation, starts, publications[0]?.at)
+    expect(
+      visible(),
+      `settled public window after retirement invalidation`,
+    ).toEqual(expected())
+    expect(
+      publications.map(({ rows }) => rows),
+      `one complete replacement publication`,
+    ).toEqual([expected()])
+    expect(effect?.disposed ?? false, `Effect remains active`).toBe(false)
   } finally {
     armed = false
-    listener.unsubscribe()
-    await live.cleanup()
+    replacement.resolve()
+    listener?.unsubscribe()
+    effect?.dispose()
+    await live?.cleanup()
     await source.cleanup()
   }
 }
@@ -793,11 +843,16 @@ async function checkAuthorityCase(
   let reentrantPasses = 0
   let hungRequests = 0
   let settlingChainMember = false
+  // Model-only provenance for classifying the next request, not a loader
+  // completion flag. ARCHITECTURE, Ordered requests: a staged graph
+  // continuation survives bookkeeping, while cursor reset discards its
+  // boundary and every pre-reset request belongs to truncate replay.
   let continuationOwed = false
   let invalidateNextPage = false
   let releaseFaults = 0
   let releaseInvalidations = 0
-  let retirementInvalidationAt: number | undefined
+  let retirementInvalidation:
+    (RetirementEvent & { truncates: number }) | undefined
   let replayContinuationHandoffs = 0
   let syncRepairs = 0
   let invalidatingPages = 0
@@ -835,6 +890,8 @@ async function checkAuthorityCase(
     }
     const request: LedgerRequest = {
       index: ledger.length,
+      issuedAt: ++clock,
+      issuedEpoch: epochMoves,
       options,
       acquisition,
       deferred: createDeferred(),
@@ -956,7 +1013,9 @@ async function checkAuthorityCase(
       // a held successful full-source lease covers it.
       const coveredBySource = ledger.some(
         (other) =>
-          other.fullSource && other.outcome === `ok` && !other.released,
+          other.fullSource &&
+          (other.outcome === `ok` || other.replayed) &&
+          !other.released,
       )
       if (truncatePending && !explicitRetrying && !coveredBySource) {
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
@@ -965,9 +1024,14 @@ async function checkAuthorityCase(
       if (testCase.releaseInvalidates && releaseInvalidations === 0) {
         releaseInvalidations++
         reached?.(`release-invalidation`)
-        retirementInvalidationAt = ledger.length
         repairOwed = true
         loader.invalidateSourceOrdering()
+        // Complete full-source coverage absorbs ordering invalidation
+        // (ARCHITECTURE, authoritative work/debt coherence). Adapter live
+        // updates keep that source complete, so it owes no replacement read.
+        if (!coveredBySource) {
+          retirementInvalidation = { at: ++clock, epoch: epochMoves, truncates }
+        }
       }
       if (testCase.releaseDisposes && !disposed) {
         disposed = true
@@ -1491,6 +1555,7 @@ async function checkAuthorityCase(
             !testCase.releaseReenters &&
             !testCase.releaseTruncates &&
             !testCase.releaseDisposes &&
+            !testCase.releaseInvalidates &&
             !boundaryUnexpressible &&
             testCase.history.slice(0, step).every(quietCommand) &&
             ledger.every(({ outcome }) => outcome !== `failed`)
@@ -1787,16 +1852,6 @@ async function checkAuthorityCase(
     }
     await drain()
     checkHeld(`after the drain`)
-    // An invalidation delivered by adapter code during retirement is newer
-    // than the repair it interrupted. Once quiet, another authoritative start
-    // must have paid that debt (ARCHITECTURE, ordered recovery). The focused
-    // grammar below has no failure, disposal, or further truncate to decide it.
-    if (testCase.releaseInvalidates && retirementInvalidationAt !== undefined) {
-      checkRetirementProgress(
-        releaseInvalidations,
-        ledger.slice(retirementInvalidationAt).some(startsAuthority),
-      )
-    }
     // A disposed loader owes nothing more; the drain above settled what it
     // had issued, and the dispose law has judged those settlements.
     if (!disposed) {
@@ -1920,6 +1975,25 @@ async function checkAuthorityCase(
       const hungAuthority = ledger.some(
         (request) => request.hung && request.authoritative,
       )
+      // Reset/replay, full-source coverage, an unanswered authoritative read,
+      // and disposal have their own obligations above. Only a live finite
+      // repair still owing the callback's epoch requires a newer start here.
+      // Own failures have now received their explicit retry.
+      if (
+        retirementInvalidation &&
+        retirementInvalidation.truncates === truncates &&
+        !coveredByFullSource &&
+        !hungAuthority &&
+        !isDisposed()
+      ) {
+        checkRetirementProgress(
+          retirementInvalidation,
+          ledger.filter(startsAuthority).map(({ issuedAt, issuedEpoch }) => ({
+            at: issuedAt,
+            epoch: issuedEpoch,
+          })),
+        )
+      }
       if (!coveredByFullSource && !hungAuthority && !isDisposed()) {
         const before = ledger.length
         const movesBefore = epochMoves
@@ -2051,6 +2125,12 @@ async function checkAuthorityCase(
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
     releaseInvalidations,
+    retirementSuccessorChains: ledger.filter(
+      (request) =>
+        startsAuthority(request) &&
+        request.issuedAt >
+          (retirementInvalidation?.at ?? Number.POSITIVE_INFINITY),
+    ).length,
     replayContinuationHandoffs,
     requestErrorChecks,
   }
@@ -2722,6 +2802,10 @@ describe(`Ordered source request authority`, () => {
     },
   )
 
+  // Generated suffixes compose callback invalidation with release faults,
+  // replay/reset/disposal, retry timers, offsets, full-source plans, and later
+  // chains. Complete full-source coverage absorbs invalidation; reset and
+  // disposal retain their separately checked obligations.
   // An explicit invalidation in a release callback is new source information,
   // unlike a replaced lease's own eviction deletes. It moves the ordering
   // epoch while retirement still owns the repair slot. Both synchronous and
@@ -2734,14 +2818,21 @@ describe(`Ordered source request authority`, () => {
       syncRepair: fc.boolean(),
       joined: fc.boolean(),
       needsMore: fc.boolean(),
+      releaseFault: fc.boolean(),
+      releaseTruncates: fc.boolean(),
+      releaseDisposes: fc.boolean(),
+      releaseReenters: fc.boolean(),
+      retryTimer: fc.boolean(),
+      offset: fc.constantFrom(0 as const, 1 as const),
+      requiresFullSource: fc.boolean(),
+      suffix: fc.array(authorityCommand, { maxLength: 12 }),
     })
-    .map((axes): AuthorityCase => ({
+    .map(({ suffix, ...axes }): AuthorityCase => ({
       ...ordinaryScenario,
       ...axes,
       settledFirst: true,
-      releaseFault: false,
       releaseInvalidates: true,
-      history: [{ type: `invalidate`, react: true }],
+      history: [{ type: `invalidate`, react: true }, ...suffix],
     }))
   const retirementCampaigns =
     authorityReplay.replayPath === undefined
@@ -2775,13 +2866,19 @@ describe(`Ordered source request authority`, () => {
     },
   )
 
-  // This driver receives the same law through real subscription and graph
-  // callbacks. Index availability, window width, and literal/Promise provider
-  // settlement vary; each completed history must reach the adapter callback.
+  // Real Collection and Effect consumers share the same provider grammar,
+  // full-sort model, event-ordered progress relation, and publication check.
+  // Held replacement answers and offsets add timing and source-prefix cuts;
+  // every completed history must reach its consumer's adapter callback.
+  // Separate held-answer reach for each consumer requires generated histories
+  // to exercise the prior-snapshot and no-publication comparisons too.
   const retirementReceiverCase = fc.record({
     indexed: fc.boolean(),
     limit: fc.constantFrom(1 as const, 2 as const),
     synchronous: fc.boolean(),
+    kind: fc.constantFrom(`collection` as const, `effect` as const),
+    offset: fc.constantFrom(0 as const, 1 as const),
+    holdReplacement: fc.boolean(),
   })
   // A shrink path belongs to one arbitrary and driver. The receiving grammar
   // has its own identity so replay never applies a controlled history's path.
@@ -2797,14 +2894,19 @@ describe(`Ordered source request authority`, () => {
     async (campaign) => {
       const reach = createOracleReach(
         retirementReceiverProperty,
-        [`real-subscription-release`] as const,
+        [
+          `collection-release`,
+          `effect-release`,
+          `collection-held-answer`,
+          `effect-held-answer`,
+        ] as const,
         { minimum: 20 },
       )
       await fc.assert(
         fc.asyncProperty(retirementReceiverCase, async (scenario) => {
           reach.beginHistory()
-          await checkRetirementReceiver(scenario, () =>
-            reach.reach(`real-subscription-release`),
+          await checkRetirementReceiver(scenario, (cut) =>
+            reach.reach(`${scenario.kind}-${cut}`),
           )
         }),
         campaign === `fixed`
@@ -2814,6 +2916,48 @@ describe(`Ordered source request authority`, () => {
       reach.assertReached()
       process.stderr.write(
         `${retirementReceiverProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    },
+  )
+
+  // Fixed replays force a held answer in each real consumer. They use the
+  // same model and comparison as the generated receiving campaign, and keep
+  // hostile-mutant failure independent for the two publication paths.
+  it.each([`collection`, `effect`] as const)(
+    `receives retirement invalidation in a held %s replay`,
+    async (kind) => {
+      await checkRetirementReceiver(
+        {
+          indexed: false,
+          limit: 1,
+          synchronous: false,
+          offset: 0,
+          holdReplacement: true,
+          kind,
+        },
+        () => {},
+      )
+    },
+  )
+
+  // A start from the wrong epoch, before the invalidation, or after public
+  // replacement cannot discharge the debt. These adversarial observations
+  // calibrate the same relation used by both consumers and the request ledger.
+  it.each([`old-epoch`, `before-invalidation`, `after-publication`] as const)(
+    `rejects a retirement start observed %s`,
+    (fault) => {
+      const invalidation = { at: 2, epoch: 1 }
+      const start = {
+        at:
+          fault === `before-invalidation`
+            ? 1
+            : fault === `after-publication`
+              ? 4
+              : 3,
+        epoch: fault === `old-epoch` ? 0 : 1,
+      }
+      expect(() => checkRetirementProgress(invalidation, [start], 4)).toThrow(
+        `retirement invalidation`,
       )
     },
   )
@@ -2860,6 +3004,15 @@ describe(`Ordered source request authority`, () => {
       const identityReach = createOracleReach(authorityProperty, [
         `current-request-error`,
         `cleanup-fault-current-request-error`,
+        `retirement-invalidation`,
+        `retirement-with-release-fault`,
+        `retirement-with-truncate`,
+        `retirement-with-dispose`,
+        `retirement-with-reentrant-pass`,
+        `retirement-with-offset`,
+        `retirement-with-retry-timer`,
+        `retirement-with-full-source-plan`,
+        `retirement-with-later-chains`,
       ] as const)
       const later = {
         unexpressibleBoundaries: 0,
@@ -2888,6 +3041,25 @@ describe(`Ordered source request authority`, () => {
         fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
           identityReach.beginHistory()
           const observation = await checkAuthorityCase(testCase)
+          if (observation.releaseInvalidations > 0) {
+            identityReach.reach(`retirement-invalidation`)
+            if (observation.releaseFaults > 0)
+              identityReach.reach(`retirement-with-release-fault`)
+            if (observation.reentrantTruncates > 0)
+              identityReach.reach(`retirement-with-truncate`)
+            if (observation.disposals > 0)
+              identityReach.reach(`retirement-with-dispose`)
+            if (observation.reentrantPasses > 0)
+              identityReach.reach(`retirement-with-reentrant-pass`)
+            if (observation.offsetWindows > 0)
+              identityReach.reach(`retirement-with-offset`)
+            if (testCase.retryTimer)
+              identityReach.reach(`retirement-with-retry-timer`)
+            if (testCase.requiresFullSource)
+              identityReach.reach(`retirement-with-full-source-plan`)
+            if (observation.retirementSuccessorChains > 1)
+              identityReach.reach(`retirement-with-later-chains`)
+          }
           if (observation.requestErrorChecks > 0) {
             identityReach.reach(`current-request-error`)
             if (observation.releaseFaults > 0)
