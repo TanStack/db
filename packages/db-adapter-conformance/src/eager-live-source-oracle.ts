@@ -2048,13 +2048,8 @@ export async function checkEagerLiveSourceHistory(
       if (index === -1) {
         // FID-1: a publication that differs from a committed state only in
         // a value or typed field names the value law.
-        const valuesOnly = publishable.some(
-          (rows) =>
-            sameTitles(rows, publication) &&
-            rows.every(
-              ([, value], row) =>
-                rowHead(value) === rowHead(publication[row]![1]),
-            ),
+        const valuesOnly = publishable.some((rows) =>
+          sameRows(rows, publication, rowHead),
         )
         throw violation(
           valuesOnly ? `FID-1 (values)` : `${law} (publication)`,
@@ -2109,13 +2104,14 @@ export async function checkEagerLiveSourceHistory(
     )
     // FID-1: rows that differ only in a field, with the right keys and
     // titles, name the field law.
-    if (!sameRows(rows, expected.rows) && sameTitles(rows, expected.rows)) {
-      const valuesOnly = rows.every(
-        ([, value], index) =>
-          rowHead(value) === rowHead(expected.rows[index]![1]),
-      )
+    if (
+      !sameRows(rows, expected.rows) &&
+      sameRows(rows, expected.rows, rowTitle)
+    ) {
       throw violation(
-        valuesOnly ? `FID-1 (values)` : `FID-1 (fields)`,
+        sameRows(rows, expected.rows, rowHead)
+          ? `FID-1 (values)`
+          : `FID-1 (fields)`,
         stepIndex,
         expected.rows,
         rows,
@@ -2669,23 +2665,25 @@ function supports(
   }
 }
 
-/** Same keys and titles, whatever the other fields. */
-function sameTitles(a: RowState, b: RowState): boolean {
-  const title = (value: string) => rowHead(value).split(`/`)[0]
+/** A row's title, without its note and fields. */
+function rowTitle(value: string): string {
+  return rowHead(value).split(`/`)[0]!
+}
+
+/**
+ * Same keys in order, and rows equal under `project`: the whole row by
+ * default, `rowHead` for title and note, or `rowTitle`.
+ */
+function sameRows(
+  a: RowState,
+  b: RowState,
+  project: (value: string) => string = (value) => value,
+): boolean {
   return (
     a.length === b.length &&
     a.every(
       ([id, value], index) =>
-        b[index]![0] === id && title(b[index]![1]) === title(value),
-    )
-  )
-}
-
-function sameRows(a: RowState, b: RowState): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      ([id, title], index) => b[index]![0] === id && b[index]![1] === title,
+        b[index]![0] === id && project(b[index]![1]) === project(value),
     )
   )
 }

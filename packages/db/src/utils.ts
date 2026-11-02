@@ -102,7 +102,7 @@ export function deepEqualsInternal(
   rowValue: false | `row` | `publication` = false,
 ): boolean {
   // Handle strict equality (primitives, same reference)
-  if (rowValue ? Object.is(a, b) : a === b || Object.is(a, b)) return true
+  if ((!rowValue && a === b) || Object.is(a, b)) return true
 
   // Handle null/undefined
   if (a == null || b == null) return false

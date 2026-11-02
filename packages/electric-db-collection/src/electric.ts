@@ -130,6 +130,12 @@ function hasEvidence(evidence: ElectricLifecycleEvidence, txId: Txid): boolean {
   )
 }
 
+function clearEvidence(evidence: ElectricLifecycleEvidence): void {
+  evidence.seenTxids.clear()
+  evidence.seenSnapshots.length = 0
+  evidence.hydratedResumeState = undefined
+}
+
 type ElectricPendingMatch<T extends Row<unknown>> = {
   matchFn: (message: Message<T>) => boolean
   resolve: (value: boolean) => void
@@ -965,9 +971,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     for (const txid of this.evidence.seenTxids) this.retired.seenTxids.add(txid)
     this.retired.seenSnapshots.push(...this.evidence.seenSnapshots)
-    this.evidence.seenTxids.clear()
-    this.evidence.seenSnapshots.length = 0
-    this.evidence.hydratedResumeState = undefined
+    clearEvidence(this.evidence)
   }
 
   /** The run's first ready: retired evidence now counts (EVID-2). */
@@ -997,11 +1001,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
   }
 
   forgetEvidence(): void {
-    for (const evidence of [this.evidence, this.retired]) {
-      evidence.seenTxids.clear()
-      evidence.seenSnapshots.length = 0
-    }
-    this.evidence.hydratedResumeState = undefined
+    clearEvidence(this.evidence)
+    clearEvidence(this.retired)
   }
 
   exportMeta(): ElectricSyncMeta {
@@ -1700,10 +1701,7 @@ function createElectricSync<T extends Row<unknown>>(
       ready = true
       lifecycle.markReady(lifecycleEpoch)
       params.markReady()
-      if (gaveUpBeforeReady) {
-        gaveUp = true
-        fail(gaveUpBeforeReady.cause)
-      }
+      if (gaveUpBeforeReady) giveUp(gaveUpBeforeReady.cause)
     }
     // A failure ends the run's waits (EVID-2).
     const fail = (error: unknown) => {
@@ -1718,19 +1716,24 @@ function createElectricSync<T extends Row<unknown>>(
     // outage, clearing its failure (HEALTH-1, HEALTH-2, RETRY-1). A give-up
     // after ready ends health reports; the other failures abort the run.
     let failedAttempts = 0
-    let retrying: unknown
+    let outageFailure: unknown
     let gaveUp = false
+    // A give-up after ready fails the run and ends its health reports.
+    const giveUp = (cause: unknown) => {
+      gaveUp = true
+      fail(cause)
+    }
     const reportsHealth = () => ready && !gaveUp && isActiveLifecycle()
     const reportRetry = (cause: unknown) => {
       if (!reportsHealth() || abortController.signal.aborted) return
       if (++failedAttempts < 5) return
-      retrying ??= cause
-      params.reportError(retrying)
+      outageFailure ??= cause
+      params.reportError(outageFailure)
     }
     const endOutage = () => {
-      const recovered = retrying
+      const recovered = outageFailure
       failedAttempts = 0
-      retrying = undefined
+      outageFailure = undefined
       return () => {
         if (recovered !== undefined && reportsHealth()) {
           params.reportHealthy(recovered)
@@ -1963,10 +1966,8 @@ function createElectricSync<T extends Row<unknown>>(
         // a reload's run started on a ready Collection. The give-up is then
         // a post-ready failure; READY-9 defers only a first load's
         // (maintainer decision).
-        if (collection.status === `ready`) {
-          gaveUp = true
-          fail(cause)
-        } else gaveUpBeforeReady ??= { cause }
+        if (collection.status === `ready`) giveUp(cause)
+        else gaveUpBeforeReady ??= { cause }
         return
       }
       initialSyncFailedFinally = true
@@ -1988,10 +1989,11 @@ function createElectricSync<T extends Row<unknown>>(
     const forwardExternalAbort = () => {
       const active = isActiveLifecycle()
       abortController.abort()
-      if (active && ready) {
-        gaveUp = true
-        fail(new StreamAbortedError(collectionId))
-      } else if (active) failInitialSync(new StreamAbortedError(collectionId))
+      if (active) {
+        const error = new StreamAbortedError(collectionId)
+        if (ready) giveUp(error)
+        else failInitialSync(error)
+      }
       // A source that stops must end its reserved transaction. The initial
       // failure decides first: abandoning commits.
       abandonOpenTransaction()
@@ -2081,10 +2083,7 @@ function createElectricSync<T extends Row<unknown>>(
             // reject the client's own start unobserved, so the run fails
             // here and returning nothing stops the stream.
             failWaits(error)
-            if (ready) {
-              gaveUp = true
-              fail(error)
-            }
+            if (ready) giveUp(error)
             return
           }
           if (!retry || typeof retry !== `object`) failWaits(errorParams)
@@ -2797,10 +2796,7 @@ function createElectricSync<T extends Row<unknown>>(
         rejectFullSnapshot(error)
         if (isActiveLifecycle() && !abortController.signal.aborted) {
           if (!ready) failInitialSync(error)
-          else {
-            gaveUp = true
-            fail(error)
-          }
+          else giveUp(error)
         }
         // A source that stops must end its reserved transaction. The initial
         // failure decides first: abandoning commits.
