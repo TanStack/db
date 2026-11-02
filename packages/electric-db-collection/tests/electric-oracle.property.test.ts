@@ -3916,7 +3916,9 @@ describe(`Electric adapter laws`, () => {
     `late-wait-after-abort-after-ready`,
     `late-wait-during-deferred-abort`,
   ])
+  // Only the retry-decision campaigns owe this reach.
   afterAll(() => {
+    if (retryHistoryRun === 0) return
     retryReach.assertReached()
     console.info(
       `electric.retry-decision reach`,

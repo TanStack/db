@@ -74,7 +74,12 @@ const retentionReach = createOracleReach(
   [`sign-only-reinsert`],
   { minimum: 5 },
 )
-afterAll(() => retentionReach.assertReached())
+// Only the generated campaigns owe the reach; a focused run of a pinned
+// test checks nothing here.
+let generatedHistories = 0
+afterAll(() => {
+  if (generatedHistories > 0) retentionReach.assertReached()
+})
 
 function snapshotRetainedRow(row: RetainedRow): RetainedRow {
   return { id: row.id, value: row.value }
@@ -486,6 +491,7 @@ const retentionHistory = fc
 fcTest.prop([retentionHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
   `matches retained authoritative state with a fixed seed`,
   async (actions) => {
+    generatedHistories++
     await runRetentionHistory(actions)
   },
 )
@@ -495,6 +501,7 @@ fcTest.prop(
 )(
   `matches retained authoritative state with a random or replayed seed`,
   async (actions) => {
+    generatedHistories++
     await runRetentionHistory(actions)
   },
 )
