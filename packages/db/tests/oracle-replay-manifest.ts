@@ -13,6 +13,12 @@ import { registeredOracleProperties } from './oracle-config.js'
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `db/tests/query/pagination-oracle.property.test.ts`,
+    `pagination`,
+    `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
+    `db/tests/query/limit-admission-oracle.ts`,
+  ],
   ...[
     [`react`, `react-db/tests/conformance.test.tsx`],
     [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
@@ -975,6 +981,12 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`pagination.limit-admission-`)) {
+    const suffix = property.slice(`pagination.limit-admission-`.length)
+    const negative = suffix.endsWith(`-negative`)
+    const path = suffix.slice(0, -(negative ? `-negative` : `-valid`).length)
+    return `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} \\(random\\)`
+  }
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
       case `result-shape`:
