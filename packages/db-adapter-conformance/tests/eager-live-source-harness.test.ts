@@ -8,9 +8,7 @@ import type { EagerLiveSourceDriver } from '../src'
 // setup fails must leave all three as it found them, or later tests in the
 // worker lose their diagnostics (ORC-010).
 describe(`eager live-source check harness`, () => {
-  const failingSetup = (
-    stage: `create` | `seed`,
-  ): EagerLiveSourceDriver => {
+  const failingSetup = (stage: `create` | `seed`): EagerLiveSourceDriver => {
     const driver = referenceDriver()
     return {
       ...driver,

@@ -337,8 +337,7 @@ function referenceCollection(
         waiters = new Map()
         highestTxid = 0
         runReady = false
-        let replayExpected =
-          mutant === `swallows-prompt-failure` && runFailed
+        let replayExpected = mutant === `swallows-prompt-failure` && runFailed
         if (replayExpected) setTimeout(() => (replayExpected = false), 0)
         runFailed = false
         // Failed attempts after ready since the last delivery, and the value
