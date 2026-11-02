@@ -69,6 +69,10 @@ export type ReferenceMutant =
   | `reports-outage-early`
   /** HEALTH-1, threshold: a delivery does not reset the attempt count. */
   | `outage-count-survives-delivery`
+  /** HEALTH-1: a delivery error fails the sync run. */
+  | `delivery-error-is-fatal`
+  /** HEALTH-1, reported rejections: a rejected delivery fails the run. */
+  | `rejected-delivery-fails`
   /** RETRY-1, threshold: an empty response does not restart the count. */
   | `empty-response-keeps-count`
   /** HEALTH-2: an empty response clears a reported outage. */
@@ -120,6 +124,7 @@ type ProviderEvent =
   | { type: `transient`; error: Error }
   | { type: `transport`; connected: boolean }
   | { type: `empty` }
+  | { type: `delivery-error`; error: Error }
 
 interface ProviderSubscription {
   releases: number
@@ -192,6 +197,8 @@ class ControlledPushProvider implements ControlledProvider {
   }
   renewals = () => this.subscriptions.at(-1)?.renewed ?? 0
   emptyResponse = () => this.latest().listener({ type: `empty` })
+  deliveryError = (error: Error) =>
+    this.latest().listener({ type: `delivery-error`, error })
 }
 
 type Waiter = { resolve: () => void; reject: (error: Error) => void }
@@ -252,6 +259,11 @@ interface OutagePolicy {
    * client library's error would carry an HTTP failure.
    */
   clientValues: boolean
+  /**
+   * After ready, reports a delivery it rejects in `failureReason` and keeps
+   * the run, as the law set's default `errorMapping` does.
+   */
+  reportsRejected?: boolean
 }
 
 /** Builds the reference adapter's Collection over `provider`. */
@@ -434,6 +446,24 @@ function referenceCollection(
                   }
                 } catch (error) {
                   if (mutant === `commits-malformed-prefix`) void commit()
+                  if (
+                    ready &&
+                    policy.reportsRejected &&
+                    mutant !== `rejected-delivery-fails`
+                  ) {
+                    // The rejected delivery writes nothing: an aborted
+                    // commit discards its transaction.
+                    const discard = new AbortController()
+                    discard.abort()
+                    void commit(discard.signal)
+                    failing = true
+                    reportError(
+                      new Error(`reference rejected a delivery`, {
+                        cause: error,
+                      }),
+                    )
+                    return
+                  }
                   stop(subscription, error as Error)
                   return
                 }
@@ -473,6 +503,13 @@ function referenceCollection(
               if (receipt === true) settleWaits(event.txid)
               else void receipt.then(() => settleWaits(event.txid))
               delivered()
+            } else if (event.type === `delivery-error`) {
+              if (mutant === `delivery-error-is-fatal`) {
+                stop(subscription, event.error)
+                return
+              }
+              failing = true
+              reportError(wrap(event.error))
             } else if (event.type === `empty`) {
               // An accepted response ends the run of failed attempts.
               if (mutant !== `empty-response-keeps-count`) attempts = 0
@@ -595,12 +632,13 @@ export function referenceDriver(
   return {
     adapter: `reference${perChange ? ` per-change` : ``}${variant ? ` outage ${outage.reportAfter}` : ``}${mutant ? ` (${mutant})` : ``}`,
     retryReportAfter: outage.reportAfter,
+    rejectedDelivery: outage.reportsRejected ? `reported` : `fails`,
     // The adapter's error carries the provider's failure as `cause`.
     matchesFailure: outage.clientValues
       ? (reported, failure) =>
           reported instanceof Error &&
           reported.cause instanceof Error &&
-          reported.cause.message.endsWith(` failure ${failure}`)
+          reported.cause.message.endsWith(` ${failure}`)
       : undefined,
     // A threshold has no law across a reconnect or a renewal, so a driver
     // with one declares neither.
@@ -615,6 +653,7 @@ export function referenceDriver(
       `duplicate-key-delivery`,
       `source-failure-after-ready`,
       `empty-response`,
+      `delivery-error`,
     ]),
     // The same ten kinds as typed fields, one per row field.
     fieldKinds: [

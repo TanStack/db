@@ -94,6 +94,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`wraps-loading-failure`, `READY-4`],
     [`failure-clears-rows`, `HEALTH-1`],
     [`transient-is-fatal`, `HEALTH-1`],
+    [`delivery-error-is-fatal`, `HEALTH-1`],
     [`never-recovers`, `HEALTH-2`],
     [`transient-fails-loading`, `RETRY-1`],
     [`splits-batch`, `PUB-1`],
@@ -187,7 +188,7 @@ describe(`eager live-source conformance: per-change commits`, () => {
 // policy must conform, and each mutant of its outage reporting must be
 // rejected with its law.
 describe(`eager live-source conformance: outage threshold, client values`, () => {
-  const outage = { reportAfter: 3, clientValues: true }
+  const outage = { reportAfter: 3, clientValues: true, reportsRejected: true }
   const thresholdDriver = referenceDriver(undefined, { outage })
 
   oracleReplayTest(it)(
@@ -214,6 +215,7 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
     [`outage-count-survives-delivery`, `HEALTH-1`],
     [`empty-response-keeps-count`, `HEALTH-1`],
     [`empty-response-recovers`, `RETRY-1`],
+    [`rejected-delivery-fails`, `PUB-4`],
     [`wraps-loading-failure`, `READY-4`],
   ]
   oracleReplayTest(it).each(outageMutants)(

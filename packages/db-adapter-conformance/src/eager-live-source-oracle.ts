@@ -78,6 +78,12 @@
  *   `empty-response`, an accepted response that delivers nothing ends the
  *   run of failed attempts, so the count starts again, and leaves a
  *   reported outage in place (maintainer decision 2026-10-30).
+ * - **HEALTH-1, HEALTH-2** (capability `delivery-error`). After ready, an
+ *   error the source reports for its current result joins `failureReason`,
+ *   and the rows, status, and subscription stay; the next valid delivery
+ *   clears it. Under `rejectedDelivery: reported` (the law set's default
+ *   `errorMapping`), a delivery the adapter rejects after ready is reported
+ *   the same way, with the adapter's own error.
  * - **RECON-1** (capability `transport-reconnect`). A transport disconnect and
  *   reconnect keep status and rows, and later deliveries still apply.
  * - **RENEW-1** (capability `capability-renewal`). While the source's
@@ -194,6 +200,7 @@ export type EagerLiveSourceCapability =
   | `duplicate-key-delivery`
   | `source-failure-after-ready`
   | `empty-response`
+  | `delivery-error`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -254,6 +261,12 @@ export interface ControlledProvider {
    * live request (capability `empty-response`).
    */
   emptyResponse?: () => void | Promise<void>
+  /**
+   * After ready, the source reports `error` for its current result and keeps
+   * its subscription; its next valid delivery clears it (capability
+   * `delivery-error`).
+   */
+  deliveryError?: (error: Error) => void | Promise<void>
   /** Renewals the adapter completed on its latest subscription. */
   renewals?: () => number
   /**
@@ -319,6 +332,12 @@ export interface EagerLiveSourceDriver {
    * holds; required with `duplicate-key-delivery`.
    */
   readonly duplicateInsert?: `error` | `replace`
+  /**
+   * The law set's `errorMapping` for a delivery the adapter rejects after
+   * ready (PUB-4): `fails` the sync run (the default), or is `reported` in
+   * `failureReason` until the next valid delivery clears it.
+   */
+  readonly rejectedDelivery?: `fails` | `reported`
   /**
    * For an adapter whose client library creates the reported failure value,
    * such as an HTTP client's error for a failed response: whether `reported`
@@ -395,6 +414,8 @@ export interface EagerLiveSourceDriver {
  * - `disconnect`, `reconnect`: transport loss and return.
  * - `renew`: the adapter's renewal of an expiring capability completes. Legal
  *   once per sync run.
+ * - `delivery-error`: after ready, the source reports an error for its
+ *   current result and keeps its subscription.
  * - `empty-response`: the provider accepts a request and delivers nothing.
  *   Two outages below the threshold around one are generated as one
  *   element, so the reset it causes is reached.
@@ -442,6 +463,7 @@ export type EagerLiveSourceStep =
   | { readonly kind: `reconnect` }
   | { readonly kind: `renew` }
   | { readonly kind: `empty-response` }
+  | { readonly kind: `delivery-error` }
   | { readonly kind: `restart` }
 
 /**
@@ -571,6 +593,7 @@ export type GrammarDomain = Pick<
   | `excludesValue`
   | `retryReportAfter`
   | `transientVariants`
+  | `rejectedDelivery`
 >
 
 /** Generates histories whose steps use only the driver's declarations. */
@@ -715,6 +738,12 @@ export function eagerLiveSourceHistoryArb(
       arbitrary: fc.constant({ kind: `empty-response` as const }),
     })
   }
+  if (capabilities.has(`delivery-error`)) {
+    steps.push({
+      weight: 3,
+      arbitrary: fc.constant({ kind: `delivery-error` as const }),
+    })
+  }
   if (capabilities.has(`transport-reconnect`)) {
     steps.push(
       // A reconnect needs a ready run and a disconnect before it, so both
@@ -829,6 +858,9 @@ export function eagerLiveSourceHistoryArb(
  */
 type Phase = `loading` | `ready` | `loading-error` | `stopped`
 
+/** A listed failure: an injected failure's index, or the adapter's error. */
+type FailureEntry = number | `adapter`
+
 /** A wait's expected settlement. */
 type WaitExpectation = `pending` | `fulfilled` | `rejected`
 
@@ -854,7 +886,8 @@ interface ModelState {
    * A provider failure's index; `adapter` for the adapter's own error.
    */
   failure: number | `adapter` | undefined
-  transient: Array<number>
+  /** `adapter` for a rejected delivery reported under `reported`. */
+  transient: Array<FailureEntry>
   /** Consecutive failed attempts after ready in the current outage. */
   outage: number
   /** Each wait, and the law that rejects it when it must reject. */
@@ -873,7 +906,7 @@ export interface ExpectedObservation {
   /** Index of the failure the health node's `error` must carry, or none. */
   healthError: number | `adapter` | null
   /** Indices of the failures `failureReason.errors` must list, in order. */
-  failureReason: ReadonlyArray<number>
+  failureReason: ReadonlyArray<FailureEntry>
   preload: `pending` | `fulfilled` | { rejectedWith: number | `adapter` }
   waits: ReadonlyArray<WaitExpectation>
   /** Unreleased provider subscriptions: one while the provider runs. */
@@ -1190,6 +1223,7 @@ type AcceptedStep =
   | { kind: `reconnect` }
   | { kind: `renew` }
   | { kind: `empty-response`; resetOutage: boolean }
+  | { kind: `delivery-error`; failure: number }
   | { kind: `restart` }
 
 /**
@@ -1206,6 +1240,7 @@ interface ModelOptions {
   duplicateInsert: `error` | `replace`
   txidEvidence: `batch` | `change`
   retryReportAfter: number
+  rejectedDelivery: `fails` | `reported`
 }
 
 /** EVID-1: a wait for `txid` fulfills once its batch applied. */
@@ -1446,6 +1481,15 @@ function stepModel(
           publishable: [rowState(state.rows)],
         }
       }
+      if (afterReady && options.rejectedDelivery === `reported`) {
+        // HEALTH-1: a rejected delivery the next valid delivery can clear is
+        // the node's failure reason; the run and its rows stay.
+        state.transient.push(`adapter`)
+        return {
+          done: { kind: `malformed`, rows, afterReady, replaced: false },
+          publishable: [],
+        }
+      }
       state.failure = `adapter`
       state.phase = afterReady ? `stopped` : `loading-error`
       endOutage(state)
@@ -1493,6 +1537,14 @@ function stepModel(
       // RENEW-1: renewal changes neither rows nor status.
       state.renewed = true
       return { done: { kind: `renew` }, publishable: [] }
+    }
+    case `delivery-error`: {
+      if (!canDeliver(state) || state.phase !== `ready`) return undefined
+      const failure = failures.next++
+      // HEALTH-1, HEALTH-2: the error joins `failureReason` until the next
+      // valid delivery; status, rows, and the subscription stay.
+      state.transient.push(failure)
+      return { done: { kind: `delivery-error`, failure }, publishable: [] }
     }
     case `empty-response`: {
       if (!canDeliver(state) || state.phase !== `ready`) return undefined
@@ -1582,6 +1634,9 @@ export const eagerLiveSourceReachStates = [
   `outage-reported-after-batch`,
   `outage-reported-in-later-run`,
   `outage-count-reset`,
+  `delivery-error-reported`,
+  `delivery-error-recovered`,
+  `rejected-delivery-reported`,
   `transient-failure-recovered`,
   `reconnect`,
   `renewal`,
@@ -1622,6 +1677,9 @@ const capabilityOfState: Partial<
   'outage-reported-after-batch': `retry-policy`,
   'outage-reported-in-later-run': `retry-policy`,
   'outage-count-reset': `empty-response`,
+  'delivery-error-reported': `delivery-error`,
+  'delivery-error-recovered': `delivery-error`,
+  'rejected-delivery-reported': `duplicate-key-delivery`,
   'transient-failure-repeated': `retry-policy`,
   'transient-failure-recovered': `retry-policy`,
   reconnect: `transport-reconnect`,
@@ -1650,7 +1708,9 @@ export function reachStatesFor(
       (state !== `malformed-after-ready` ||
         domain.capabilities.has(`complete-snapshot`)) &&
       (state !== `transient-failure-below-threshold` ||
-        (domain.retryReportAfter ?? 1) > 1),
+        (domain.retryReportAfter ?? 1) > 1) &&
+      (state !== `rejected-delivery-reported` ||
+        domain.rejectedDelivery === `reported`),
   )
   const values = (domain.valueKinds ?? []).flatMap(
     (kind): Array<ValueReachState> => [
@@ -1763,6 +1823,8 @@ function lawFor(done: AcceptedStep, wasReady: boolean): string {
       return `RENEW-1`
     case `empty-response`:
       return `RETRY-1`
+    case `delivery-error`:
+      return `HEALTH-1`
     case `restart`:
       return `LIFE-2/LIFE-5`
   }
@@ -1822,6 +1884,7 @@ export async function checkEagerLiveSourceHistory(
     duplicateInsert: driver.duplicateInsert ?? `error`,
     txidEvidence: driver.txidEvidence ?? `batch`,
     retryReportAfter: driver.retryReportAfter ?? 1,
+    rejectedDelivery: driver.rejectedDelivery ?? `fails`,
   }
   if (
     driver.capabilities.has(`duplicate-key-delivery`) &&
@@ -1907,18 +1970,18 @@ export async function checkEagerLiveSourceHistory(
         (rows, commit) => commit > last && sameRows(rows, publication),
       )
       if (index === -1) {
-        // FID-1: a publication with a committed state's keys and titles
-        // that differs only in a field names the field law.
-        const near = publishable.find((rows) => sameTitles(rows, publication))
-        const valuesOnly = near?.every(
-          ([, value], row) => rowHead(value) === rowHead(publication[row]![1]),
+        // FID-1: a publication that differs from a committed state only in
+        // a value or typed field names the value law.
+        const valuesOnly = publishable.some(
+          (rows) =>
+            sameTitles(rows, publication) &&
+            rows.every(
+              ([, value], row) =>
+                rowHead(value) === rowHead(publication[row]![1]),
+            ),
         )
         throw violation(
-          near === undefined
-            ? `${law} (publication)`
-            : valuesOnly
-              ? `FID-1 (values)`
-              : `FID-1 (fields)`,
+          valuesOnly ? `FID-1 (values)` : `${law} (publication)`,
           stepIndex,
           publishable,
           publication,
@@ -2013,7 +2076,14 @@ export async function checkEagerLiveSourceHistory(
     }
     const reasons =
       health.failureReason?.errors.map((entry) => entry.cause) ?? []
-    const wantReasons = expected.failureReason.map(failure)
+    // `adapter`: the adapter's own error, not an injected failure value.
+    const matchesEntry = (cause: unknown, entry: FailureEntry) =>
+      entry === `adapter`
+        ? cause instanceof Error &&
+          failures.every((_, index) => !matches(cause, index))
+        : matches(cause, entry)
+    const describeEntry = (entry: FailureEntry) =>
+      entry === `adapter` ? `an adapter error` : failure(entry).message
     const reasonLaw = delivery ? `HEALTH-2` : law
     const checkReason = (ok: boolean, want: unknown, got: unknown) => {
       if (!ok)
@@ -2025,12 +2095,12 @@ export async function checkEagerLiveSourceHistory(
         )
     }
     if (!driver.matchesFailure) {
+      const want = expected.failureReason
       checkReason(
-        reasons.length === wantReasons.length &&
-          reasons.every((cause, index) => cause === wantReasons[index]) &&
-          (wantReasons.length === 0 ||
-            health.failureReason?.cause === wantReasons.at(-1)),
-        wantReasons.map((error) => error.message),
+        reasons.length === want.length &&
+          reasons.every((cause, index) => matchesEntry(cause, want[index]!)) &&
+          (want.length === 0 || health.failureReason?.cause === reasons.at(-1)),
+        want.map(describeEntry),
         reasons.map(String),
       )
     } else {
@@ -2039,14 +2109,14 @@ export async function checkEagerLiveSourceHistory(
       // attempts after it, in order. RETRY-1: a later attempt does not
       // replace that first failure.
       const want = expected.failureReason
-      if (want.length > 0 && !matches(reasons[0], want[0]!)) {
+      if (want.length > 0 && !matchesEntry(reasons[0], want[0]!)) {
         throw violation(
           reasons.length > 0 &&
-            want.slice(1).some((i) => matches(reasons[0], i))
+            want.slice(1).some((i) => matchesEntry(reasons[0], i))
             ? `RETRY-1 (health failureReason)`
             : `${reasonLaw} (health failureReason)`,
           stepIndex,
-          failure(want[0]!).message,
+          describeEntry(want[0]!),
           reasons.map(String),
         )
       }
@@ -2054,10 +2124,11 @@ export async function checkEagerLiveSourceHistory(
       checkReason(
         reasons.length <= want.length &&
           reasons.every((cause) => {
-            while (next < want.length && !matches(cause, want[next]!)) next++
+            while (next < want.length && !matchesEntry(cause, want[next]!))
+              next++
             return next++ < want.length
           }),
-        want.map((index) => failure(index).message),
+        want.map(describeEntry),
         reasons.map(String),
       )
     }
@@ -2153,6 +2224,14 @@ export async function checkEagerLiveSourceHistory(
 
   try {
     await compare(-1, `READY-2`)
+    // The kinds of failure open in the failure reason, which a delivery
+    // clears.
+    const open = new Set<`retried` | `delivery-error`>()
+    const reachRecovered = () => {
+      if (open.has(`retried`)) reach(`transient-failure-recovered`)
+      if (open.has(`delivery-error`)) reach(`delivery-error-recovered`)
+      open.clear()
+    }
     // Reported outages and applied live batches in the current run.
     let outagesThisRun = 0
     let batchesThisRun = 0
@@ -2191,7 +2270,7 @@ export async function checkEagerLiveSourceHistory(
           if (done.missed > 0) reach(`read-missed-change`)
           if (done.superseded) reach(`seen-change-superseded`)
           if (done.removesField) reach(`field-removed`)
-          if (transientBefore > 0) reach(`transient-failure-recovered`)
+          if (transientBefore > 0) reachRecovered()
           break
         case `changes`:
           await provider.deliverChanges(
@@ -2216,7 +2295,7 @@ export async function checkEagerLiveSourceHistory(
           if (done.removesField) reach(`field-removed`)
           if (done.flipped) reach(`zero-sign-flipped`)
           if (done.changes.length > 1) reach(`multi-change-batch`)
-          if (transientBefore > 0) reach(`transient-failure-recovered`)
+          if (transientBefore > 0) reachRecovered()
           if (
             state.waits.some(
               (wait, waitIndex) =>
@@ -2264,6 +2343,9 @@ export async function checkEagerLiveSourceHistory(
               ? `malformed-after-ready`
               : `malformed-before-ready`,
           )
+          if (done.afterReady && state.transient.at(-1) === `adapter`) {
+            reach(`rejected-delivery-reported`)
+          }
           break
         case `transient-failure`: {
           const error = new Error(
@@ -2274,6 +2356,7 @@ export async function checkEagerLiveSourceHistory(
           const kind = driver.transientVariants?.[done.variant]
           if (wasReady && kind !== undefined) reach(`transient:${kind}`)
           if (state.transient.at(-1) === done.failure) {
+            open.add(`retried`)
             reach(`transient-failure-reported`)
           } else if (wasReady) reach(`transient-failure-below-threshold`)
           // RETRY-1: a later attempt in the same outage.
@@ -2299,6 +2382,14 @@ export async function checkEagerLiveSourceHistory(
           await provider.completeRenewal!()
           reach(`renewal`)
           break
+        case `delivery-error`: {
+          const error = new Error(`conformance delivery error ${done.failure}`)
+          failures[done.failure] = error
+          await provider.deliveryError!(error)
+          reach(`delivery-error-reported`)
+          open.add(`delivery-error`)
+          break
+        }
         case `empty-response`:
           await provider.emptyResponse!()
           if (done.resetOutage) reach(`outage-count-reset`)
@@ -2316,6 +2407,7 @@ export async function checkEagerLiveSourceHistory(
           preload = recordSettlement(collection.preload())
           events = foldChanges(collection)
           reach(`restart`)
+          open.clear()
           outagesThisRun = 0
           batchesThisRun = 0
           if (pendingBefore) reach(`wait-rejected-at-retirement`)
@@ -2462,6 +2554,11 @@ function supports(
       return (
         driver.capabilities.has(`empty-response`) &&
         !!fixture.provider.emptyResponse
+      )
+    case `delivery-error`:
+      return (
+        driver.capabilities.has(`delivery-error`) &&
+        !!fixture.provider.deliveryError
       )
     default:
       return true
