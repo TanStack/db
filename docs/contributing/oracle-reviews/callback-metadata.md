@@ -1099,3 +1099,25 @@ The shared runtime, primary and browser hashes match the release amendment's
 final binding table. Compiler and Solid source/test paths remain exactly those
 of a2e75c3. The containing commit binds this port; full commit IDs and changed
 path hashes are retained in scratch final-binding.json and the PR body.
+
+
+## Final-catch-up provenance and deferred sibling resumption port (2026-11-02)
+
+The follow-up on callback parent `0b53825d4c19446fa3f346c1575820498804da9c`
+ports the oracle-only evaluation of CodeRabbit review 5738453581 from repair
+parent `b73f8e865bdda471df9dc77cc471e927143a41a9`. No shipped source changes.
+The shared [versioned amendment](2026-10-30-release-replay-retention.md#final-catch-up-provenance-and-deferred-sibling-resumption-review-2026-11-02)
+records authority, grammar controls, calibrations, all ORC outcomes and limits.
+
+The browser reach now distinguishes ordinary durable/server divergence from
+an actual older same-key commit over a newer peer. Fixed/random 80-history
+campaigns pass: final restart 36/38, divergence repair 63/66, actual overwrite
+repair 25/25, and reset-abandoned final recovery 16/18. Both final-delivery
+replays pass. The deferred-acquisition owner passes all 540 tests, including
+32 same-path sibling-resumption histories with reach one per history. Existing
+production finishes them; a retained parked participant fails readiness in all
+32 calibration cases on the shared runtime. The production-cycle finding is
+refuted, with its useful coverage retained. Historical final rewrite counts
+remain divergence measurements. Compiler, Solid, browser runtime, and core
+runtime sources stay exact to the parent. CI after this oracle commit remains
+pending; paused callback review at 8464 supplies no current-head review.

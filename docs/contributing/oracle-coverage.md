@@ -6611,3 +6611,28 @@ Final-restart and final-commit omissions fail the real SQLite/coordinator public
 comparisons. These are Node-host controlled-stream receiving histories, not real
 provider or browser-process claims. The core and browser path limits are unchanged.
 See the [nine-item review amendment](oracle-reviews/2026-10-30-release-replay-retention.md#first-demand-admission-and-terminal-grammar-review-2026-11-02).
+
+
+### Final-catch-up provenance and deferred sibling resumption (2026-11-02)
+
+The multi-tab Electric owner now separates durable/server divergence from an
+actual older same-key commit overwriting a newer peer commit. The old fixed
+campaign measured 58 divergence repairs, of which 57 lacked that overwrite
+premise and one had it (81 initiated/80 accepted histories). Earlier final
+"lagging rewrite" counts are historical divergence evidence. A fourth terminal
+regime constructs the actual overwrite. Original arbitrary/reset/stop regimes,
+24-step prefix, 8–24-step arbitrary tail, models, comparisons, known gaps,
+80-run budgets and minima remain. New lagging suffix length is 12/15 for two/three
+tabs. Final commit omission fails the ordinary durable/public comparison.
+
+The deferred-acquisition owner adds 32 finite histories over a real same-source
+LEFT self-join, crossing subscriber/preload, one/two rows, literal/Promise
+acquisitions, and settlement order. Every history requires an actual deferred
+joined demand, checks zero acquisitions before its own reader, and checks
+readiness and independently projected rows after successful coverage. Existing
+production passes; retaining the parked participant makes all 32 fail readiness.
+No production cycle was confirmed. Both full owners pass 540 tests. Browser
+fixed/random actual overwrite reaches are repair 25/18 and callback 25/25.
+These boundaries retain their controlled core and Node-host SQLite/Electric
+limits. No HTTP, framework, browser-process, or arbitrary-shape closure follows.
+See the [versioned amendment](oracle-reviews/2026-10-30-release-replay-retention.md#final-catch-up-provenance-and-deferred-sibling-resumption-review-2026-11-02).

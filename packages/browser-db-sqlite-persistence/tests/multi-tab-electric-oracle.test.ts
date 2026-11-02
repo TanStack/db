@@ -975,7 +975,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // of an initially absent key restore the original rows before the tail.
   // The prefix adds 24 steps to the unchanged 8–24-step arbitrary tail. An
   // ending dimension either leaves that final state untouched or adds a
-  // constructive reset/stop suffix of 4 + 2*tabCount steps (8 or 10). Removing
+  // reset/stop suffix of 4 + 2*tabCount steps (8 or 10), or a lagging-commit
+  // suffix of 6 + 3*tabCount steps (12 or 15). Removing
   // the open delivery, stop, or peer commit loses the law's premise; recovering
   // before the peer commit would test a different boundary. Existing pinned
   // histories still use the same driver without this prefix.
@@ -989,6 +990,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
         `arbitrary` as const,
         `reset` as const,
         `stop` as const,
+        `lagging` as const,
       ),
       stopOrder: fc.shuffledSubarray([0, 1, 2, 3], {
         minLength: 4,
@@ -1026,8 +1028,13 @@ describe(`multi-tab Electric over one persisted database`, () => {
             // without committing it. Reset abandons that reservation, so final
             // delivery judges its failure before recovery (Laws 2/5). Stop
             // instead leaves final catch-up to restart the stopped source.
-            // The source tab, key and two/three-tab host vary with this grammar.
-            // Removing advance or reset loses that premise; catching up here
+            // The lagging ending first establishes the key, then a peer commits
+            // two updates and the selected tab commits only the older one. It
+            // leaves that actual overwrite for final catch-up to repair. A
+            // server change alone establishes only durable/server divergence.
+            // Tab roles, key and two/three-tab host vary with this grammar.
+            // Removing either update or the partial commit loses the overwrite;
+            // removing advance or reset loses that premise; catching up here
             // would move the failure out of the final observation cut.
             ...(ending === `arbitrary`
               ? []
@@ -1040,11 +1047,26 @@ describe(`multi-tab Electric over one persisted database`, () => {
                       { kind: `catch up`, tab: index, pick: 0 },
                     ],
                   ).flat(),
-                  { kind: `server change` as const, key, pick: 0 },
-                  { kind: `advance` as const, tab, pick: 0 },
-                  ending === `reset`
-                    ? { kind: `peer reset` as const }
-                    : { kind: `stop` as const, tab, pick: stopOrder[0]! },
+                  ...(ending === `lagging`
+                    ? [
+                        { kind: `server change` as const, key, pick: 1 },
+                        ...Array.from({ length: tabCount }, (_, index) => ({
+                          kind: `catch up` as const,
+                          tab: index,
+                          pick: 0,
+                        })),
+                        { kind: `server change` as const, key, pick: 1 },
+                        { kind: `server change` as const, key, pick: 1 },
+                        { kind: `catch up` as const, tab: peer, pick: 0 },
+                        { kind: `catch up` as const, tab, pick: 1 },
+                      ]
+                    : [
+                        { kind: `server change` as const, key, pick: 0 },
+                        { kind: `advance` as const, tab, pick: 0 },
+                        ending === `reset`
+                          ? { kind: `peer reset` as const }
+                          : { kind: `stop` as const, tab, pick: stopOrder[0]! },
+                      ]),
                 ]),
           ],
         }
@@ -1162,13 +1184,52 @@ describe(`multi-tab Electric over one persisted database`, () => {
     let serverVersion = 0
     generatedReach.beginHistory()
 
+    // Reach provenance comes from the server messages the driver delivered,
+    // not merely a difference between durable rows and the current server.
+    // A newer peer commit must be overwritten by an older change to that key.
+    // This model-only provenance is a delivered message's server position and
+    // committing tab. Snapshot rows start at version zero of their handle;
+    // change messages retain their exact log version, including deletions.
+    const durableOrigins = new Map<
+      number,
+      {
+        tab: TabModel
+        handle: number | undefined
+        version: number
+      }
+    >()
+    const laggingOverwrites = new Set<number>()
     const commit = (model: TabModel) => {
-      if (model.truncates) durable.clear()
+      if (model.truncates) {
+        durable.clear()
+        durableOrigins.clear()
+        laggingOverwrites.clear()
+      }
       for (const message of model.open ?? []) {
         if (!(`key` in message)) continue
         const row = message.value
+        const version =
+          log.changes.find((change) => change.message === message)?.version ?? 0
+        const previous = durableOrigins.get(row.id)
+        const value =
+          message.headers.operation === `delete` ? undefined : row.label
+        if (
+          previous &&
+          previous.tab !== model &&
+          previous.handle === model.handle &&
+          previous.version > version &&
+          durable.get(row.id) !== value
+        )
+          laggingOverwrites.add(row.id)
         if (message.headers.operation === `delete`) durable.delete(row.id)
         else durable.set(row.id, row.label)
+        durableOrigins.set(row.id, {
+          tab: model,
+          handle: model.handle,
+          version,
+        })
+        if (durable.get(row.id) === log.rows.get(row.id))
+          laggingOverwrites.delete(row.id)
       }
       model.open = undefined
       model.truncates = false
@@ -1543,20 +1604,30 @@ describe(`multi-tab Electric over one persisted database`, () => {
         generatedReach.reach(`stopped source restarted during final catch-up`)
         await recover(index, `restart`)
       }
-      const laggingBeforeFinal =
+      const overwrittenBeforeFinal = [...laggingOverwrites]
+      const divergentBeforeFinal =
         rowsOf(durable).some(({ id, label }) => log.rows.get(id) !== label) ||
         rowsOf(log.rows).some(({ id, label }) => durable.get(id) !== label)
       await deliver(index, `all`, true)
-      if (
-        laggingBeforeFinal &&
-        !models[index]!.failedByReset &&
-        JSON.stringify(rowsOf(durable)) === JSON.stringify(rowsOf(log.rows))
-      )
-        generatedReach.reach(`lagging commit rewritten during final catch-up`)
       // A reset-abandoned transaction fails only when delivery tries to
       // commit it. Judge Law 5 at that cut before the restart establishes
       // Law 2's successful catch-up premise.
       await check(`after final delivery to tab ${tabs[index]!.tab}`)
+      if (
+        divergentBeforeFinal &&
+        !models[index]!.failedByReset &&
+        JSON.stringify(rowsOf(durable)) === JSON.stringify(rowsOf(log.rows))
+      )
+        generatedReach.reach(
+          `durable divergence repaired during final catch-up`,
+        )
+      if (
+        overwrittenBeforeFinal.some(
+          (id) =>
+            !laggingOverwrites.has(id) && durable.get(id) === log.rows.get(id),
+        )
+      )
+        generatedReach.reach(`lagging commit rewritten during final catch-up`)
       if (models[index]!.failedByReset) {
         await recover(index, `restart`)
         await deliver(index, `all`, true)
@@ -1741,6 +1812,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
 
   type GeneratedReach =
     | `stopped source restarted during final catch-up`
+    | `durable divergence repaired during final catch-up`
     | `lagging commit rewritten during final catch-up`
     | `must-refetch delivered`
     | `peer commit during an open reserved transaction`
@@ -1765,6 +1837,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   const createGeneratedReach = () =>
     createOracleReach<GeneratedReach>(`browser.multi-tab-reserved-history`, [
       `stopped source restarted during final catch-up`,
+      `durable divergence repaired during final catch-up`,
       `lagging commit rewritten during final catch-up`,
       `must-refetch delivered`,
       `peer commit during an open reserved transaction`,

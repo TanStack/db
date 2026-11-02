@@ -443,3 +443,167 @@ No raw review item is deferred. The remaining limitations are the owners'
 explicit controlled and finite boundaries, not a known reachable violation of
 the repaired admission law. Final pushed CI and repair integration with actual
 main remain separate readiness obligations. No merge authorization follows.
+
+
+## Final-catch-up provenance and deferred sibling resumption review (2026-11-02)
+
+This amendment evaluates CodeRabbit review **5738453581** on repair head
+`b73f8e865bdda471df9dc77cc471e927143a41a9`. Its callback port starts from
+`0b53825d4c19446fa3f346c1575820498804da9c`. The incremental run
+`9a64a058-a898-4ac9-8d4c-4ecc87fdea30` selected eight files and skipped five
+similar files. Selection does not establish eight fresh reviews. This is an
+author self-review of the resulting oracle changes. No product law or shipped
+source changes in this amendment.
+
+### Law, experiment, and inference
+
+**R1: eventual convergence needs an honest reach premise.** Browser owner Law 2
+and the coverage map promise the server head after every open stream catches
+up. Durable/server divergence alone does not show that an older tab overwrote
+a newer peer commit. Instrumenting the old grammar on unchanged production
+recorded 58 final divergence repairs: 57 had no older-over-newer peer overwrite,
+and one had it. The fixed campaign accepted 80 histories and initiated 81,
+because the existing known-gap classifier discarded one history. These are
+diagnostic counts, not a production RED or a new product defect.
+
+The owner now retains that old observation as `durable divergence repaired
+during final catch-up`. Separate provenance records the delivered message's
+server-log version, source handle, and committing tab. A differing older
+same-key change must overwrite a newer peer commit. The marker remains until
+the key reaches server head; a full snapshot resets this provenance. Final
+rewrite reach counts only after the existing real durable/public comparison
+passes. Provenance is independent model-side instrumentation over delivered
+messages, not a production coordinator classification.
+
+The terminal dimension adds `lagging` beside the existing arbitrary, reset,
+and stop endings. It starts a fresh handle, catches up every tab, establishes
+the chosen key, catches up every tab again, makes two updates, lets a peer
+commit both, and lets the selected tab commit only the older update. Final
+catch-up must repair that actual overwrite. The new suffix has `6 + 3*tabCount`
+steps (12 or 15). Reset/stop still add `4 + 2*tabCount` (8 or 10), and arbitrary
+adds zero. The original 24-step stop prefix, arbitrary 8–24-step tail, model
+predictions, comparisons, known gaps, 80-run budgets, and minima remain.
+
+The omission mutant suppresses only the final up-to-date commit while actual
+older-over-newer overwrite evidence remains. It fails the ordinary durable and
+public row comparison at `after final delivery to tab A` (v2 instead of v3).
+It is an intended assertion failure, not a setup error or timeout. The captured
+seed is `952051961`, shrink path `4:0:0:1:1:1:1:1:1:1:1:1:1:1:1:1`.
+The shared direct replay interface reproduces that same mismatch. The oracle
+file is restored after each temporary calibration.
+
+**R2: resumed deferred demand must progress after applied coverage.** Authority
+is ARCHITECTURE law 15 (no acquisition before an own subscriber/preload), law 9
+(shared replay publication), and Initial demand (readiness after coverage).
+The alleged completion cycle is refuted on its actual path. Existing
+`startTruncateReplayDemand` removes `parkedParticipant` and decrements its
+attempt before starting acquisition. The initial-result waiter can then wait
+for completion without participating in the completion it awaits.
+
+The deferred-acquisition owner adds a finite 32-history grammar over a real
+same-source LEFT self-join. It crosses subscriber/preload, one/two rows,
+literal/held-Promise root and sibling results, and oldest/newest settlement.
+The query starts its sync run without a reader and asserts zero acquisitions.
+Its first source acquisition writes synchronously. This creates demand in the
+second subscription while that subscription still defers acquisition and a
+sibling replacement holds publication. A request-entry spy measures the actual
+deferred-to-joined transition, with reach one required in every history.
+
+Held provider promises keep initial-query readiness pending. After controlled
+successes, the query must be ready, any preload must fulfill, and public rows
+must equal the independent self-join projection of input IDs. The driver allows
+no later truncate, abort, window move, or extra preload to rescue the history.
+All 32 pass against unchanged production on both branches. Leaving the parked
+participant installed makes all 32 fail the readiness assertion with `loading`
+instead of `ready`. Production bytes are restored afterward. The review's
+major production repair is unnecessary; its durable value is this coverage.
+
+### Executed GREEN and calibration evidence
+
+On each branch, the complete deferred-acquisition owner passes **540 tests**,
+including the new 32 histories. Both browser campaigns accept **80 histories**
+per branch. The two existing final-delivery replays pass on both branches.
+Repair ran its missing second replay separately after the first selector chose
+only three tests. Callback ran all four tests in one invocation.
+
+| Branch/campaign | Final stopped-source restart | Durable divergence repair | Actual older-peer overwrite repair | Reset-abandoned final recovery |
+| --- | ---: | ---: | ---: | ---: |
+| Repair fixed | 36 | 63 | 25 | 16 |
+| Repair random | 34 | 60 | 18 | 25 |
+| Callback fixed | 36 | 63 | 25 | 16 |
+| Callback random | 38 | 66 | 25 | 18 |
+
+Earlier records describing 46, 52, or 58-style final counts as lagging rewrites
+are historical divergence counters. They do not establish older-over-newer
+peer overwrite coverage. This correction preserves their original records and
+does not retroactively strengthen that evidence.
+
+Focused core/browser TypeScript, ESLint, formatting, whitespace, and
+`pnpm lint:changed` validate the follow-up. Callback's first browser TypeScript
+attempt lacked local module paths. Temporary links to already installed cached
+modules repair setup and are removed afterward. No dependency install, manifest
+or lockfile change occurs. Local Vitest is cached 3.2.4; CI uses 4.1.12. Full
+repository tests and builds are not run for this oracle-only amendment.
+
+### Grammar controls and oracle self-review
+
+Reconstruction: the old arbitrary/reset/stop regimes remain reconstructible.
+The lagging suffix reconstructs an actual older commit over a newer peer and
+leaves it for the final comparison. The deferred grammar reconstructs the
+reviewed parked demand during real sibling resumption. Ablation: remove either
+update, the peer commit, or the selected older commit and the overwrite premise
+is lost. Remove the deferred start or synchronous first delivery and the parked
+sibling path is lost. Promise axes distinguish pending readiness from literal
+completion; settlement order distinguishes the two active acquisition gates.
+
+Range: browser histories retain two/three tabs, keys 1–3, every existing stop
+kind and tail action, plus all four endings. Deferred histories bound one/two
+rows and two source subscriptions with both public initiating paths. Zero rows
+cannot create the reported keyed sibling demand and is outside this lane; the
+existing broad owner retains empty/no-provider regimes. Exclusion: the suffix
+commits an update only after establishing its key; it never fabricates an
+update to a missing row. The deferred lane never starts provider work before
+the first reader and never settles an acquisition that was not issued.
+
+| Requirement | Outcome for this amendment |
+| --- | --- |
+| ORC-001 | Existing Law 2 and ARCHITECTURE laws 9/10/15 authorize results. Limits below remain explicit. |
+| ORC-002 | Input-ID self-join recomputation and server-message commit provenance use no production semantic classifier. |
+| ORC-003 | Contract, model, histories, driver, and checkpoints remain visible beside executable code. |
+| ORC-004 | Reconstruction, ablation, range, and exclusion appear above. |
+| ORC-005 | Real core live-query Collection and real SQLite/coordinator paths compare readiness, rows, and durable/public state. Supplied messages contain the source facts needed at each cut. |
+| ORC-006 | Parked-participant and actual-final-commit omissions fail their intended assertions; neither is a setup failure. |
+| ORC-007 | Browser fixed/random campaigns use the same property, grammar, recorder, comparison, and 80-run budget. Direct seed/path mutant replay reproduces the row mismatch. The 32-case finite enumeration needs no random campaign. |
+| ORC-008 | Provenance is reach instrumentation, not a change to expected product state. Equal row divergence can have different commit origins, so provenance distinguishes which coverage claim applies. |
+| ORC-009 | Comments map provenance to delivered message position/tab/handle and distinguish demand from acquisition and completion. |
+| ORC-010 | Existing browser failure/cleanup handling remains. Calibration scripts restore exact bytes in finally. The deferred driver restores its spy, settles held gates, and cleans Collections. |
+| ORC-011 | No shared semantic-fault hypothesis needs a second formulation. The independent self-join result and explicit commit provenance address the two named hypotheses. |
+| ORC-012 | This versioned record binds the reviewed parent heads, evidence, dispositions, and every applicable requirement. |
+| ORC-013 | Divergence without an older overwrite is the neighboring false-positive case. Literal versus held results and both settlement orders distinguish readiness boundaries. |
+| ORC-014 | Claims stop at core controlled acquisition and Node SQLite/coordinator controlled Electric messages. No HTTP provider, framework, or browser-process handoff claim follows. |
+| ORC-015 | Browser reach requires each retained minimum plus honest divergence and actual overwrite states. Every deferred history requires one actual deferred joined demand. |
+| ORC-016 | Histories share independent projection/comparison or the existing generated driver. No standalone fixed expected rows or type assertions enter an oracle. |
+
+### Loss audit, reviewer assessment, and readiness
+
+The two inline findings are fully accounted: **one fixed-now** (R1 test
+integrity), **one refuted** (R2 production cycle), with its missing receiving
+history added. No deferral or open in-scope finding remains from this review.
+The raw audit also retains summary/risk duplicates, five related-issue links,
+the informational docstring metric (0%, one function, four files, four
+unsupported), run metadata, and generator/autofix suggestions. No boilerplate
+command runs. Related links do not establish issue closure.
+
+The reviewer earns a qualified hire recommendation for oracle scrutiny. R1
+correctly distinguishes a classifier's premise from ordinary convergence. R2
+identifies a useful lifecycle intersection but overlooks the existing participant
+removal, so its major severity and proposed production fix lack support. Use
+runtime witnesses before relying on this reviewer for lifecycle merge decisions.
+
+Evidence covers finite core resumption and controlled-stream Node persistence
+histories at named cuts. It does not prove arbitrary provider failures,
+framework schedules, browser processes, every join shape, or the existing
+excluded/pinned known gaps. No new product behavior or shipped source changes.
+Current-head CI after the oracle commits and actual-main repair integration
+remain separate readiness requirements. No merge or publication is authorized
+by this review.
