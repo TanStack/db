@@ -2974,14 +2974,21 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // carried row): the random grammar inserts source writes into green
   // lifecycle histories. The pinned zero-sign history below covers that path.
   it(`reaches a zero-sign source write in the fixed campaign`, async () => {
-    zeroSignWrites = 0
+    const reach = createOracleReach(
+      `lifecycle-publication.zero-sign`,
+      [`zero-sign-write`],
+      { minimum: 5 },
+    )
     for (const history of fc.sample(publicationCommandHistoryArbitrary, {
       seed: 1_657_005,
       numRuns: runs,
     })) {
+      reach.beginHistory()
+      const before = zeroSignWrites
       await runPublicationHistory(history)
+      if (zeroSignWrites > before) reach.reach(`zero-sign-write`)
     }
-    expect(zeroSignWrites).toBeGreaterThan(0)
+    reach.assertReached()
   }, 120_000)
   fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,

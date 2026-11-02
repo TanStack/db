@@ -9,7 +9,8 @@ const config = defineConfig({
     environment: `node`,
     // The Neon receiving driver runs a vendored adapter that targets an older
     // TanStack DB sync API. It has its own config and is expected to fail
-    // until that adapter is updated (see tests/neon/README.md).
+    // until that adapter is updated (see "Neon Realtime" under Drivers in
+    // README.md).
     exclude: [`**/node_modules/**`, `tests/neon/**`, `**/neon-*.test.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
   },
