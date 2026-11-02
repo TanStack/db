@@ -2048,13 +2048,16 @@ function createElectricSync<T extends Row<unknown>>(
             // also type-checks this source.
             const headers: Record<string, string> = {}
             response.headers.forEach((value, name) => (headers[name] = value))
+            // The client still reads the body, so the message names no text.
+            const url = String(input)
             reportRetry(
               new FetchError(
                 response.status,
                 undefined,
                 undefined,
                 headers,
-                String(input),
+                url,
+                `HTTP Error ${response.status} at ${url}`,
               ),
             )
           }

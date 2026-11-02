@@ -342,8 +342,16 @@ async function checkSnapshots(
     // 2026-10-30). Only the live stream's up-to-date ends it; a subset's
     // end does not.
     let outage = false
-    const sourceHealth = (label: string) =>
+    // HEALTH-4: the outage shows the client's error for a 503 response,
+    // which names the status and the request.
+    const sourceHealth = (label: string) => {
       expect(collection.health.failureReason !== null, label).toBe(outage)
+      if (outage) {
+        expect(collection.health.failureReason?.message, label).toMatch(
+          /^HTTP Error 503 at http\S+$/,
+        )
+      }
+    }
     const lowerBounds = [
       1,
       2,
