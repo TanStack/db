@@ -18,10 +18,10 @@ Production, dependencies, and the lockfile are unchanged relative to current mai
 **Law and authority:** The aggregate owner and the query guide retain their
 existing law: compilation follows the select/operator rules, and published
 rows equal independent group recomputation, including the documented locale
-order. ORC-015 requires declared premises to be reached. ORC-007 requires
-fixed/fresh campaign parity and direct replay. A fixed example cannot supply
-evidence about a generated history. Diagnostic seed selection is not execution
-proof; guarded replay witnesses retain that role.
+order. ORC-015 requires declared premises to be reached. ORC-007 requires parity
+between fixed and fresh campaigns. It also requires direct replay. A fixed
+example cannot supply evidence about a generated history. Diagnostic seed
+selection is not execution proof; guarded replay witnesses retain that role.
 
 **Repair:** Each campaign has a structural reach for the 21 initial premises
 and a separate generated reach for those same states plus seven successful
@@ -178,3 +178,25 @@ not every law after every mutation, route, or shape. A missed generated state
 fails; it is never silently supplied by structural coverage. All existing
 shape/type exclusions remain. No full repository campaign, release merge,
 publisher, or publication verification ran for this review.
+
+## CI configuration expectation follow-up
+
+At head `a0e323a7750a24621a2668a3c8f2a761865872d2`, CI run `41521949066`,
+job `125539942181`, found one stale configuration assertion in `utils.test.ts`.
+It expected ordinary options to omit the seed, although the reviewed helper
+change now selects one. The focused local reproduction failed at that same
+assertion: one failed test, 15 passed, and 116 stood aside under the selector.
+
+The assertion now expects a numeric seed. Exact object equality still rejects
+an unexpected path or reporter. The neighboring assertions retain the explicit
+seed for another property and the one-run shrink path for its named property.
+All 132 tests in `utils.test.ts` pass after this correction. The shared helpers,
+oracle models, generated histories, and production code are unchanged from
+`a0e323a`. Earlier oracle and mutant results remain source-identical evidence;
+they were not rerun for this assertion and wording correction. New-head CI
+remains required.
+
+CodeRabbit completed its review of `a0e323a` with 15 selected files and two
+similar files skipped. Its one additional comment requested clearer ORC-007
+wording above. That wording is corrected. This review did not supply executed
+oracle evidence, and its coverage does not establish review of a later head.
