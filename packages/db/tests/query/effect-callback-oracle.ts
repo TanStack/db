@@ -8,10 +8,15 @@
  * An authored scalar source version independently predicts each readable
  * payload. The real query projection creates classes/Sets. The driver invokes
  * production. The finite grammar crosses payload representation, callback profile and initial
- * suppression. Every history updates before and after callback replacement,
- * then exits, reenters and updates again. An update of an absent source is not
- * legal. These eager single-source histories do not cover ordered repairs or
- * arbitrary provider schedules. Both receiving drivers use this same judgment.
+ * suppression, and an unordered or an ordered query (`orderBy` with `limit`).
+ * Every history updates before and after callback replacement, then exits,
+ * reenters and updates again. An update of an absent source is not legal.
+ * An ordered Effect compares an update with its previous publication, so an
+ * update whose projection did not change is not delivered; a `signed-zero`
+ * payload alternates 0 and -0, which are distinct row values (maintainer
+ * decision 2026-10-29), so each of its updates is delivered in both orders.
+ * These eager single-source histories do not cover ordered repairs across
+ * windows or arbitrary provider schedules. Both receiving drivers use this same judgment.
  * The maintainer's 2026-10-30 decision preserves unordered notifications even
  * for equal projections and permits key-only membership tracking. A synthesized
  * Set counts leaf reads outside observation capture: these unordered Effects
@@ -26,17 +31,41 @@ import type { DeltaEvent, EffectConfig } from '../../src/query/effect.js'
 export type CallbackRow = { id: number; version: number }
 export type CallbackOutput = { id: number; payload: unknown }
 type Representation =
-  `scalar` | `opaque` | `private` | `prototype` | `set` | `equal`
+  | `scalar`
+  | `opaque`
+  | `private`
+  | `prototype`
+  | `set`
+  | `equal`
+  | `signed-zero`
 export const callbackHistories = (
-  [`scalar`, `opaque`, `private`, `prototype`, `set`, `equal`] as const
+  [
+    `scalar`,
+    `opaque`,
+    `private`,
+    `prototype`,
+    `set`,
+    `equal`,
+    `signed-zero`,
+  ] as const
 ).flatMap((representation) =>
   ([`all`, `enter`, `exit`, `late-update`, `late-batch`] as const).flatMap(
     (profile) =>
-      [false, true].map((skipInitial) => ({
-        representation,
-        profile,
-        skipInitial,
-      })),
+      [false, true].flatMap((skipInitial) =>
+        // Open: an ordered Effect compares an update by its enumerable fields,
+        // so it drops one whose change is private or non-enumerable state
+        // (coverage map, Effect callback delivery). Those pairs wait on the
+        // maintainer's decision about ordered equality.
+        (representation === `private` || representation === `prototype`
+          ? [false]
+          : [false, true]
+        ).map((ordered) => ({
+          representation,
+          profile,
+          skipInitial,
+          ordered,
+        })),
+      ),
   ),
 )
 export type CallbackHistory = (typeof callbackHistories)[number]
@@ -47,6 +76,8 @@ export type CallbackHandlers = Pick<
 export interface CallbackDriver {
   mount: (options: {
     skipInitial: boolean
+    /** The query orders by `id` with a limit, so the Effect is ordered. */
+    ordered: boolean
     project: (row: CallbackRow) => CallbackOutput
     handlers: CallbackHandlers
   }) => Promise<{
@@ -76,7 +107,7 @@ const cuts = [
   `disposed`,
 ]
 export function callbackHistoryId(h: CallbackHistory) {
-  return `${h.representation}/${h.profile}/${h.skipInitial}`
+  return `${h.representation}/${h.profile}/${h.skipInitial}/${h.ordered ? `ordered` : `unordered`}`
 }
 export function callbackReach(path: string) {
   return createOracleReach(
@@ -121,7 +152,11 @@ function expectedPayload(
     ? `0,0,${version}`
     : representation === `equal`
       ? `0`
-      : String(version)
+      : representation === `signed-zero`
+        ? version % 2 === 1
+          ? `-0`
+          : `0`
+        : String(version)
 }
 function readPayload(payload: unknown): string {
   if (payload instanceof PrivatePayload || payload instanceof PrototypePayload)
@@ -131,10 +166,11 @@ function readPayload(payload: unknown): string {
       .map((v: { value: number }) => v.value)
       .sort()
       .join(`,`)
-  return String(payload)
+  return Object.is(payload, -0) ? `-0` : String(payload)
 }
 function expectedDelivery(
   representation: Representation,
+  ordered: boolean,
   before: number | undefined,
   after: number | undefined,
   channels: ReadonlySet<string>,
@@ -143,6 +179,15 @@ function expectedDelivery(
   if (suppressed || before === after) return []
   const type =
     before === undefined ? `enter` : after === undefined ? `exit` : `update`
+  // An ordered Effect delivers an update only when its projection changed.
+  if (
+    ordered &&
+    type === `update` &&
+    expectedPayload(representation, before!) ===
+      expectedPayload(representation, after!)
+  ) {
+    return []
+  }
   const event = {
     type,
     value: expectedPayload(representation, after ?? before!),
@@ -216,6 +261,8 @@ export async function runCallbackHistory(
     if (history.representation === `private`)
       payload = new KeyedPrivatePayload(version)
     if (history.representation === `equal`) payload = 0
+    if (history.representation === `signed-zero`)
+      payload = version % 2 === 1 ? -0 : 0
     if (history.representation === `prototype`) {
       payload = new PrototypePayload(version)
     }
@@ -239,6 +286,7 @@ export async function runCallbackHistory(
         observed,
         expectedDelivery(
           history.representation,
+          history.ordered,
           before,
           after,
           channels,
@@ -255,6 +303,7 @@ export async function runCallbackHistory(
   await checkWithCleanup(async () => {
     handle = await driver.mount({
       skipInitial: history.skipInitial,
+      ordered: history.ordered,
       project,
       handlers: handlers(),
     })
@@ -288,10 +337,13 @@ export async function runCallbackHistory(
         callbackHistoryId(history),
         comparisonReads,
       )
-    try {
-      expect(comparisonReads, `unordered output leaf traversal`).toBe(0)
-    } catch (error) {
-      failures.push(error)
+    // An ordered Effect compares values, so it may read them.
+    if (!history.ordered) {
+      try {
+        expect(comparisonReads, `unordered output leaf traversal`).toBe(0)
+      } catch (error) {
+        failures.push(error)
+      }
     }
     if (failures.length)
       throw new AggregateError(failures, `Effect callback delivery failed`, {

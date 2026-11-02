@@ -3,7 +3,7 @@ import { createSourceRecord } from '../utils/source-record.js'
 import { createDeferred } from '../deferred.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
-import { deepEquals } from '../utils.js'
+import { sameRowValue } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { isFailedStatus } from '../live-query-primitives.js'
@@ -1346,10 +1346,11 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    (publishedRows instanceof Set || !deepEquals(previousValue, insertValue))
+    (publishedRows instanceof Set || !sameRowValue(previousValue, insertValue))
   ) {
     // Unordered Effects preserve all graph updates without comparing values.
-    // Ordered repairs compare with the preceding coherent publication.
+    // Ordered repairs compare with the preceding coherent publication; -0
+    // and 0 are distinct row values (FID-1).
     return {
       type: `update`,
       key,

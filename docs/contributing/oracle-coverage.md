@@ -6114,6 +6114,21 @@ sources and actual React hook commits; other providers/frameworks, arbitrary
 schedules and ordered repair semantics retain their existing limits. See the
 [key-only review evidence](oracle-reviews/effect-startup-delta.md#review-of-2b3dd8c2d-key-only-unordered-results).
 
+Ordered callback histories (2026-11-02): the callback-profile grammar now
+crosses an unordered and an ordered query (`orderBy` with `limit`) and adds a
+`signed-zero` payload that alternates 0 and -0, distinct row values (maintainer
+decision 2026-10-29); 120 histories on each path. An ordered Effect delivers an
+update only when its projection changed. On unchanged `f06ee8fdd` the ordered
+`signed-zero` histories fail (an update that flips only a zero's sign was
+dropped); comparing with `sameRowValue` repairs them. Open, for a maintainer
+decision: an ordered Effect compares an update by enumerable fields, so it
+drops an update whose change is private or non-enumerable state, and the
+consumer keeps a stale value. Trace: `private` or `prototype` payload,
+ordered, any profile, update version 0 to 1 at the `unobserved` cut, expected
+an update, received none; these 20 ordered pairs are not generated until the
+decision (owner: this callback-profile oracle; witness: the same histories
+with `ordered: true`).
+
 ### RC bound schema mutation receivers (2026-10-28)
 
 Owner: `packages/db/tests/live-query-bound-options-oracle.ts`; shared driver:
