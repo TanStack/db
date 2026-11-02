@@ -1031,11 +1031,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 // WHERE and HAVING admit bare boolean columns by converting their ref proxies.
 // Keep other values unchanged: JavaScript comparisons return primitives, which
 // must fail validation rather than becoming literal query expressions.
-function toCondition<T>(value: T): T | BasicExpression {
+function toCondition(value: BasicExpression): BasicExpression {
   const expression = isRefProxy(value) ? toExpression(value) : value
   if (!isExpressionLike(expression)) {
     throw new InvalidWhereExpressionError(
-      expression === null ? `null` : typeof expression,
+      // JavaScript callers can return null despite the callback's static type.
+      (expression as unknown) === null ? `null` : typeof expression,
     )
   }
   return expression

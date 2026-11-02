@@ -293,3 +293,147 @@ pnpm exec vitest run tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabl
 Changed-file lint and formatting pass. The published documentation review also
 removed an inaccessible local-ledger citation and a reviewer hiring remark;
 the technical findings and measured evidence remain above.
+
+## Ten-item follow-up review
+
+The review was evaluated against published head
+`56287b7f4956012fd65087a6e46db1d8854fe8bd`. Production admission behavior stayed
+unchanged. The public-entry, raw-IR and numeric-policy limits above still apply.
+
+| Item | Result and action |
+| --- | --- |
+| 1. Missing error 261 docs | Confirmed by `node scripts/generate-error-docs.mjs --check`. Regenerate the committed page and add a CLI integrity check of the repository page, alongside the existing fixture checks. Generation also refreshes error 206's stale source path. |
+| 2. RangeError precedence | Executed public probes confirm all three earlier guards. Document their precedence explicitly and list the reentrancy error. The changeset promises rejection before mutation; it does not promise a particular class before these guards. |
+| 3. Native error class | Keep the accepted RangeError contract. A new exported error class would add API surface. The existing error page explicitly distinguishes coded native errors from named TanStack error classes. |
+| 4. Raw IR and TopK | The exact negative-width counterexample remains in the coverage map outside the supported raw-operator law. A compiler-only guard cannot replace synchronous builder admission or window moves, which do not recompile. No compiler contract is added. |
+| 5. NaN and null | Executed probes confirm both can pass the runtime comparison. NaN policy remains undecided; null is outside the number-typed input. This negative-limit repair does not introduce general numeric-input validation. |
+| 6. Operation settlement | Confirmed instrument gap. Observe the exact admitted operation outcome before cleanup and compare it at a named settlement checkpoint. Generation corruption now gives a comparison failure with a replayable reduced history. |
+| 7. Corrupt settled window | The proposed settledWindow mutant already fails the original admission-return comparison: getWindow reads settledWindow. Preserve the distinct useful idea by adding failed held moves; a different rollback-currentWindow mutant survives the old grammar and fails the extension's partial-next-use check. |
+| 8. Rejected-value diagnostic | The omission is confirmed. Current coded diagnostics identify the invalid limit and code 261; no accepted contract promises its value. Retain this as a diagnostic design proposal without changing production message inputs or shipped bytes. |
+| 9. Condition return type | Constrain the internal helper's input and output to BasicExpression, the existing WHERE/HAVING IR condition type. Keep the runtime classifier and public callback signature unchanged. TypeScript validates the cleanup. |
+| 10. Shared source invariant | Executed FROM/JOIN probes reject empty and multi-source objects before use and admit single-source neighbors. Their literal contexts cannot take the union exception. Retain the shared invariant without restoring a redundant wrapper or assertion. |
+
+### Settlement law and experiments
+
+The accepted rejection-identity law includes the outcome of an operation that
+was already admitted. Atomic window publication also requires a failed move to
+keep the previous settled window and public rows. The extension records promise
+settlement before releasing controlled acquisitions. It compares fulfillment,
+rejection identity, window bounds and independently selected rows, then performs
+a partial retry and a source update. Every generated move-pending negative
+history executes both successful and failed acquisition schedules. Other pending
+receivers retain their successful schedules; this adds no initial-load or replay
+failure-policy claim.
+
+The unchanged original instrument passes all 24 admission campaigns. Its
+request-generation mutant produces an unmarked chaining-cycle failure for a
+held move and a timeout during replay. Those are not named-comparison kills.
+With the extended instrument, the same mutation fails the held-move and replay
+settlement comparisons. Guarded generated replay uses
+`pagination.limit-admission-replay-pending-negative`, seed `2291`, path `1`;
+the witness records one requested execution and a reduced failure at
+`replay-pending settled`.
+
+The settledWindow mutant fails the original `limit admission` return comparison
+on both held-move and replay paths. The distinct rollback mutant changes only
+`currentWindow = settledWindow` in the asynchronous rejection handler to an
+invalid width. It passes the original two negative fixed campaigns and fails
+the extension at `move-pending source update`, where the partial retry reports
+limit -2 instead of the original positive limit. These are separate outcomes.
+All temporary production mutations are restored.
+
+Two fresh agents used oracle-review for source inspection. One found that the
+first extension required completion after one timer turn. A control that defers
+successful settlement with `setTimeout(resolve, 0)` confirms that false rejection.
+The repair waits for the recorded completion, with an explicit one-second
+**diagnostic budget**, before comparing the observed outcome. It clears the
+deadline timer. The same task-scheduled control passes afterward. This is bounded
+progress evidence for the controlled fixture, not a product deadline or proof
+about arbitrary provider timing. The campaign allows 30 seconds so repeated
+bounded waits during shrinking can preserve a named failure. Seed, run count,
+fixed examples and random-campaign parity remain unchanged.
+
+ORC-001/002/003/005: the original sign and identity authority remains; the new
+outcome judgment derives from the injected acquisition result, independently
+of production generations. Prose distinguishes acquisition settlement from
+publication and names each comparison. ORC-004/008/009: both outcome schedules
+share every generated payload; removing failure loses the rollback distinction,
+and removing settlement observation loses the generation comparison. Existing
+rank and width bounds remain unchanged. The previous settled window is necessary
+because failure and success have different legal next observations.
+ORC-006/007/010/013/015: mutants and the legal scheduling control distinguish
+wrong state, a stalled operation and permitted asynchronous timing. Named
+comparisons preserve original/reduced traces and exact rejection identity;
+cleanup still releases held work. Declared successful/failed settlement reaches
+supplement the existing per-receiver reaches. Both campaigns keep 20 generated
+histories plus their shared example. ORC-011 introduces no second formulation:
+no shared semantic fault hypothesis needs another model. ORC-014 remains limited
+to controlled acquisition settlement, with no provider-delivery or framework
+claim. ORC-016 adds no unit examples to the oracle. The committed-page check is
+an ordinary CLI artifact-integrity test in its existing ordinary test file.
+
+
+### Final follow-up verification
+
+The tested tree is based on `56287b7f4956012fd65087a6e46db1d8854fe8bd`.
+The only production changes in this follow-up are the internal condition type
+and the error-precedence JSDoc. Neither changes emitted runtime behavior. All
+temporary mutations were restored before the final checks. The following
+SHA-256 values identify the tested production and instrument sources:
+
+| Source | SHA-256 |
+| --- | --- |
+| `packages/db/src/query/validate-limit.ts` | `f4838c2d3bedfffa869ef205dc2f16515183c17b8f6502feee7978a65d588014` |
+| `packages/db/src/query/builder/index.ts` | `2c88c4c32ae9dd7d84267248b29a7e17907bad3652f6a246e156913a8accb4ed` |
+| `packages/db/src/query/live/collection-config-builder.ts` | `31c7a438095ea7b23a0d09ce73f1d5c2089d20b5ec4b140aa3c9d5047e651175` |
+| `packages/db/tests/query/limit-admission-oracle.ts` | `433391cb0fd2c840e0fda53f7738e75dbe474154b7ede7fb1de74032d9c8375b` |
+| `packages/db/tests/generate-error-docs.test.ts` | `26efa3154b6f796aa661c290f93b8bdd34aea98b963ae4765e84428f5c077f29` |
+
+From `packages/db`, the final selected suite passes **772 tests in 22 files**,
+with no type errors:
+
+```sh
+TANSTACK_DB_ORACLE_STATISTICS=1 pnpm exec vitest run tests/query/builder tests/query/pagination-oracle.property.test.ts tests/query/pagination.test.ts tests/query/live-query-collection.test.ts tests/live-query-window-controller.test.ts tests/production-error-messages-oracle.test.ts tests/query/aggregate-select-oracle.property.test.ts tests/query/ir-stable-identity-oracle.test.ts tests/generate-error-docs.test.ts tests/error-docs-commands.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+The final guarded replay suite passes **82 tests**, with no type errors:
+
+```sh
+pnpm exec vitest run tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+The successful-settlement reach is 21 histories for each pending fixed/random
+campaign. Each negative move-pending campaign also reaches failed settlement
+in 21 histories. The generated generation-mutant replay fails the named
+settlement comparison and reduces to path `1:0:0:0:0:0:0:0:0:0:0:0`; it records
+one requested execution and finishes in 13.74 seconds without a CLI timeout
+override. The restored branch is GREEN. The distinct rollback mutant fails
+its next-use comparison. The valid task-scheduled settlement control passes.
+
+The committed-page control rejects the old page with the generator's
+`docs/errors.md is out of date` diagnostic. The regenerated page passes
+`node scripts/generate-error-docs.mjs --check`. Test TypeScript compilation,
+`pnpm lint:changed`, direct type-aware ESLint, formatting and `git diff --check` pass. No oracle run
+budget decreased. The complete root `pnpm test` was not run locally.
+
+Shipped size was remeasured against the exact merged baseline
+`30e85464ed2b9b12c5f10981a062427a1fc8daaa`:
+
+```sh
+pnpm size:compare --packages db --base 30e85464ed2b9b12c5f10981a062427a1fc8daaa --exact-base --files
+```
+
+The typical app remains **-6 gzip bytes** (96,323 to 96,317) and **-209 Brotli
+bytes**. Full db exports change by -21 gzip bytes and +27 Brotli bytes. All
+eight app scenarios decrease in gzip; Brotli varies by scenario. These results
+do not establish arbitrary provider timing, framework error timing, raw-IR
+admission, NaN policy, or negative-width IVM result semantics.
+
+
+The pre-commit type-aware lint found that the narrower helper input made the
+null diagnostic appear unreachable. The final helper keeps its runtime guard
+and widens only that diagnostic operand to unknown, because JavaScript callers
+can violate the callback's static type. This type assertion emits no code.
+The selected 772-test suite and type-aware lint pass again on that final source;
+the source table above includes it. The oracle source is unchanged from its
+82-test guarded replay run.

@@ -6713,6 +6713,15 @@ source replay; builder construction is a separate path. Rejected operations
 are followed by partial valid moves and source updates. Valid zero, -0,
 positive integer, Infinity and negative-offset neighbors use independent
 rank selection; every pending candidate has its own held fixture.
+The settlement recorder follows the admitted operation to fulfillment or
+rejection and compares its exact error at a named checkpoint. Each generated
+move-pending negative history also crosses successful and failed acquisitions;
+failure must retain the previous window and rows before a partial retry.
+Every pending campaign reaches successful settlement in 21 histories, and both
+negative move campaigns reach failed settlement in 21. A one-second diagnostic
+budget detects stalled controlled work without imposing a one-task product cut.
+Request-generation corruption fails the settlement comparison; corruption of
+the rollback window after a failed acquisition fails the partial-next-use check.
 
 This is a public admission contract for ordinary ordered list queries, not a
 negative-width result law for raw IVM operators. The original counterexample

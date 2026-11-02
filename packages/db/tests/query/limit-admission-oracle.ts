@@ -12,6 +12,9 @@
  * held promises control acquisition settlement, not row delivery. These checks
  * establish core admission, not provider pagination or framework error timing.
  * NaN and positive fractions are outside this decision.
+ * A rejected call also preserves an admitted operation's eventual outcome.
+ * Held moves settle both successfully and with a source failure; failed moves
+ * keep the previous window and rows (ARCHITECTURE.md, Atomic window publication).
  */
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
@@ -101,12 +104,60 @@ function attempt<T>(
   }
 }
 
+// Record fulfillment and rejection before releasing controlled acquisitions.
+// The completion promise lets the driver wait without prescribing a task cut.
+function settlement(operation: true | Promise<void>) {
+  const observation: {
+    value: `pending` | `fulfilled` | `rejected`
+    error?: unknown
+  } = { value: operation === true ? `fulfilled` : `pending` }
+  const done =
+    operation === true
+      ? Promise.resolve()
+      : operation.then(
+          () => {
+            observation.value = `fulfilled`
+          },
+          (error) => {
+            observation.value = `rejected`
+            observation.error = error
+          },
+        )
+  return { observation, done }
+}
+
+// One second is a diagnostic budget for this controlled fixture, not a product
+// deadline. On expiry the named comparison reports pending and retains its trace;
+// a task-scheduled implementation may complete at any point within that budget.
+async function waitForSettlement(
+  outcome: ReturnType<typeof settlement>,
+): Promise<void> {
+  const deadline = createDeferred<void>()
+  const timer = setTimeout(() => deadline.resolve(), 1000)
+  try {
+    await Promise.race([outcome.done, deadline.promise])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function checkSettlement(
+  { observation }: ReturnType<typeof settlement>,
+  error?: Error,
+): void {
+  expect(observation).toEqual(
+    error ? { value: `rejected`, error } : { value: `fulfilled` },
+  )
+  if (error) expect(observation.error).toBe(error)
+}
+
 async function runHistory(
   history: History,
   path: Path,
   negative: boolean,
   reached: (state: string) => void,
   candidate?: number,
+  rejectHeldMove = false,
 ): Promise<void> {
   let rows = history.ranks.map((rank, index) => ({ id: index + 1, rank }))
   const initialWindow = { offset: history.offset, limit: history.limit }
@@ -158,9 +209,11 @@ async function runHistory(
     query: builder.limit(initialWindow.limit).offset(initialWindow.offset),
   })
   let unsubscribe = () => {}
-  const release = async () => {
+  const release = async (error?: Error) => {
     hold = false
-    for (const deferred of pending) deferred.resolve()
+    for (const deferred of pending)
+      if (error) deferred.reject(error)
+      else deferred.resolve()
     await flushPromises()
   }
 
@@ -183,9 +236,7 @@ async function runHistory(
 
       const publications: Array<Array<Row>> = []
       let operation: true | Promise<void> = true
-      const operationOutcome: {
-        value: `none` | `pending` | `fulfilled` | `rejected`
-      } = { value: `none` }
+      let operationOutcome = settlement(operation)
       let expectedWindow = initialWindow
       if (path !== `unstarted`) {
         const subscription = live.subscribeChanges(() => {
@@ -209,22 +260,12 @@ async function runHistory(
           expectedWindow = { offset: 6, limit: history.limit + 1 }
           operation = live.utils.setWindow(expectedWindow)
         }
-        if (operation !== true) {
-          operationOutcome.value = `pending`
-          void operation.then(
-            () => {
-              operationOutcome.value = `fulfilled`
-            },
-            () => {
-              operationOutcome.value = `rejected`
-            },
-          )
-        }
+        operationOutcome = settlement(operation)
         await flushPromises()
         if (hold) {
           expect(pending.length, `held acquisition premise`).toBeGreaterThan(0)
           expect(operation).toBeInstanceOf(Promise)
-          expect(operationOutcome.value).toBe(`pending`)
+          expect(operationOutcome.observation.value).toBe(`pending`)
           reached(`held`)
         }
       }
@@ -235,7 +276,7 @@ async function runHistory(
         error: live.utils.lastSubsetError,
         publications: publications.map((batch) => [...batch]),
         events: [...events],
-        operationOutcome: operationOutcome.value,
+        operationOutcome: operationOutcome.observation.value,
       })
       for (const value of values) {
         const requests = negative
@@ -261,13 +302,17 @@ async function runHistory(
             },
           )
           if (admitted(value) && !outcome.threw) {
+            const candidateOutcome = settlement(outcome.result)
             await release()
-            await outcome.result
-            await live.preload()
+            const preloadOutcome = settlement(live.preload())
+            await waitForSettlement(candidateOutcome)
+            await waitForSettlement(preloadOutcome)
             atOracleCheckpoint(
               `accepted window`,
               `${path} candidate settled`,
               () => {
+                checkSettlement(candidateOutcome)
+                checkSettlement(preloadOutcome)
                 expect(live.utils.getWindow()).toEqual(expectedWindow)
                 expect(observe().rows).toEqual(selected(rows, expectedWindow))
               },
@@ -275,17 +320,27 @@ async function runHistory(
           }
         }
       }
-      await release()
-      await operation
-      await live.preload()
+      const loadError = rejectHeldMove
+        ? new Error(`held move failed`)
+        : undefined
+      await release(loadError)
+      if (rejectHeldMove) expectedWindow = initialWindow
+      if (path === `unstarted`) {
+        operationOutcome = settlement(live.preload())
+      }
+      await waitForSettlement(operationOutcome)
       atOracleCheckpoint(
         `rejection preserves window`,
         `${path} settled`,
         () => {
+          checkSettlement(operationOutcome, loadError)
           expect(live.utils.getWindow()).toEqual(expectedWindow)
           expect(observe().rows).toEqual(selected(rows, expectedWindow))
+          if (loadError) expect(live.utils.lastSubsetError).toBe(loadError)
         },
       )
+      if (path.endsWith(`pending`))
+        reached(rejectHeldMove ? `failed-settlement` : `successful-settlement`)
       // A partial move detects an invisible mutation of requested bounds; then
       // a source change checks that rejection left the graph usable.
       expectedWindow = { offset: 1, limit: expectedWindow.limit }
@@ -306,7 +361,7 @@ async function runHistory(
 }
 
 declareOracle({
-  check: [checkAdmission],
+  check: [checkAdmission, checkSettlement],
   model: [admitted, selected],
   grammar: [historyArbitrary],
 })
@@ -335,6 +390,10 @@ export function registerLimitAdmissionOracle(): void {
                 negative ? `negative` : `valid`,
                 ...(path === `builder` ? [] : [`next-use`]),
                 ...(path.endsWith(`pending`) ? [`held`] : []),
+                ...(path.endsWith(`pending`) ? [`successful-settlement`] : []),
+                ...(negative && path === `move-pending`
+                  ? [`failed-settlement`]
+                  : []),
               ]
               const reach = createOracleReach(property, states, {
                 fixedHistories: 1,
@@ -353,13 +412,20 @@ export function registerLimitAdmissionOracle(): void {
                       for (const candidate of negative
                         ? [undefined]
                         : [0, -0, history.limit, Infinity]) {
-                        await runHistory(
-                          history,
-                          path,
-                          negative,
-                          (state) => reach.reach(state),
-                          candidate,
-                        )
+                        // Each generated payload crosses both legal outcomes
+                        // of an admitted move. Rejection must preserve either.
+                        for (const rejectHeldMove of negative &&
+                        path === `move-pending`
+                          ? [false, true]
+                          : [false])
+                          await runHistory(
+                            history,
+                            path,
+                            negative,
+                            (state) => reach.reach(state),
+                            candidate,
+                            rejectHeldMove,
+                          )
                       }
                     })
                   }),
@@ -378,6 +444,9 @@ export function registerLimitAdmissionOracle(): void {
                 )
               }
             },
+            // Shrinking a stalled operation can spend the diagnostic budget
+            // on several candidates before reporting its named comparison.
+            30_000,
           )
         }
       }

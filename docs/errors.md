@@ -2188,7 +2188,7 @@ Failed to get item with key "${String(key)}" from object store "${objectStore.na
 
 <a id="error-206"></a>
 
-## Error 206: `collection/index.ts`
+## Error 206: `collection/validate-indexing.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2628,4 +2628,14 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 Source collection '${collectionId}' failed its first load
+```
+
+<a id="error-261"></a>
+
+## Error 261: `query/validate-limit.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+limit must be nonnegative
 ```
