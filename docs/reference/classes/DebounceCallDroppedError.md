@@ -3,7 +3,7 @@ id: DebounceCallDroppedError
 title: DebounceCallDroppedError
 ---
 
-Defined in: [packages/db/src/errors.ts:466](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L466)
+Defined in: [packages/db/src/errors.ts:471](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L471)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:466](https://github.com/TanStack/db/blob/
 new DebounceCallDroppedError(): DebounceCallDroppedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:467](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L467)
+Defined in: [packages/db/src/errors.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L472)
 
 #### Returns
 

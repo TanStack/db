@@ -4,14 +4,14 @@ title: ConvexCollectionConfig
 ---
 
 ```ts
-type ConvexCollectionConfig<TQuery, TItem, TKey, TSchema> = Omit<BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils, unknown>, "syncMode" | "utils" | "schema"> & object & [TSchema] extends [never] ? object : object & 
+type ConvexCollectionConfig<TQuery, TItem, TKey, TSchema> = Omit<BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils>, "syncMode" | "utils" | "schema"> & object & [TSchema] extends [never] ? object : object & 
   | {
   select: (result) => ReadonlyArray<TItem>;
 }
   | FunctionReturnType<TQuery> extends ReadonlyArray<TItem> ? object : never;
 ```
 
-Defined in: [index.ts:21](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/index.ts#L21)
+Defined in: [index.ts:21](https://github.com/TanStack/db/blob/main/packages/convex-db-collection/src/index.ts#L21)
 
 ## Type Declaration
 

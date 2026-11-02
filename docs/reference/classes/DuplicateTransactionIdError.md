@@ -3,7 +3,7 @@ id: DuplicateTransactionIdError
 title: DuplicateTransactionIdError
 ---
 
-Defined in: [packages/db/src/errors.ts:518](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L518)
+Defined in: [packages/db/src/errors.ts:523](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L523)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:518](https://github.com/TanStack/db/blob/
 new DuplicateTransactionIdError(id): DuplicateTransactionIdError;
 ```
 
-Defined in: [packages/db/src/errors.ts:519](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L519)
+Defined in: [packages/db/src/errors.ts:524](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L524)
 
 #### Parameters
 

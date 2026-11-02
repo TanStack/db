@@ -7,7 +7,7 @@ title: DehydratedLiveQueryResult
 type DehydratedLiveQueryResult<T, TKey> = object;
 ```
 
-Defined in: [packages/db/src/client.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L150)
+Defined in: [packages/db/src/client.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L157)
 
 ## Type Parameters
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/client.ts:150](https://github.com/TanStack/db/blob/
 rows: DehydratedCollectionRow<T, TKey>[];
 ```
 
-Defined in: [packages/db/src/client.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L154)
+Defined in: [packages/db/src/client.ts:161](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L161)
 
 ***
 
@@ -37,6 +37,6 @@ Defined in: [packages/db/src/client.ts:154](https://github.com/TanStack/db/blob/
 optional status: "loading" | "error";
 ```
 
-Defined in: [packages/db/src/client.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L156)
+Defined in: [packages/db/src/client.ts:163](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L163)
 
 An initial SSR view may precede query readiness. Omitted means ready.

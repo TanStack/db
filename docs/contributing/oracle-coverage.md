@@ -1938,6 +1938,81 @@ ineligible index. The first-matching-index mutant fails at that reader check.
 Provider paging from an incomplete on-demand source and later updates remain
 outside this witness.
 
+The same owner now exhausts output-indexing configurations through
+`createLiveQueryCollection` and `createCollection(liveQueryCollectionOptions)`:
+omitted/off/eager modes, omitted/BasicIndex/BTreeIndex constructors, and eager
+admission without a constructor. It compares output config, constructor use,
+optimized snapshots, and independent sorted windows over two projected fields
+with both null placements, repeated consumers, and one source update. Each
+configuration requires distinct `rejected` or `output-read` reach; source
+settings remain unchanged. Admission/default policy comes from the shared
+indexing model. The ordered-index count derives from distinct requested
+specifications; calibration rejects extra indexes and inverted optimized-read
+availability.
+The [hook indexing handoff owner](https://github.com/TanStack/db/blob/main/packages/db/tests/conformance/indexing-config-oracle.ts)
+receives the nine configurations through the real React, Preact, Vue, Solid,
+Svelte, and Angular drivers after their settled flush cuts. It judges output
+config and downstream automatic/manual index creation. It does not judge
+rendering before flush or reactive adapters' option updates. Its
+[React Suspense receiver](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-indexing-config-oracle.test.tsx)
+exhausts two initial bindings across config pairs, derived/same/different keys,
+unscoped/client caches, and distinct same-name constructor references. It checks
+both admissions, each admitted output's settings, retained first settings, and
+compatible sharing and forbidden sharing between two admitted outputs.
+Its 582 histories retain the original 534 cases and add 24 omitted/explicit-
+undefined cases and 24 pending-source cases. They check first-option retention
+on rerender (528 admitted-first histories) and application after an actual
+`queryKey` change (480 histories with two valid declarations). Invalid admissions have no output
+identity to compare. Constructor labels use grammar roles, and equal function
+names cannot collapse registration keys. This protects local cache qualification
+without changing portable query identity or mounted first-option retention. The
+[evidence record](oracle-reviews/2026-10-30-live-query-indexing.md) gives each
+receiving path's pre-repair RED, repaired GREEN, calibration, and finite bounds.
+
+The [PR #2314 high-effort review record](oracle-reviews/2026-10-30-pr-2314-high-effort-review.md)
+adds the maintainer's independent-caller local-options law to the existing
+`live-query-cache-options-oracle.ts` owner. Its
+`packages/react-db/tests/suspense-local-options-oracle.test.tsx` receiver exhausts
+492 real Suspense histories: every non-indexing public Collection config field,
+independent absent/equal/different declarations, derived/same/different keys,
+and both client scopes. The public type inventory checks that new config
+fields cannot silently miss the driver. The shared indexing owner separately
+covers both indexing fields. Each history requires first output, second output
+and retained-first reach. Warm `cache-options-oracle.test.tsx` now receives
+144 histories through Suspense in addition to ordinary mounted and server
+rendering; rejection must preserve the original caller's rows. These are
+initial-binding and cached-result claims, not arbitrary SSR/hydration timing
+or semantic equality of separately allocated option objects. The authored query
+owns list/single result shape; the local-sharing check does not promise that a
+config annotation rewrites the query's shape.
+
+The [Suspense oracle follow-up](oracle-reviews/2026-11-02-pr-2314-suspense-oracles.md)
+adds omitted versus explicit undefined in both caller orders: 120 local-option
+histories and the 24 indexing histories above, across all three identity
+relations and both scopes. A key that retains undefined properties passes the
+old 882 receiver histories but fails 88 of the extended 1,074 histories at
+output-identity comparisons. Each receiver also adds 24 pending histories.
+The local owner uses equal/different callback and scalar declarations; the
+indexing owner crosses mode and constructor equality. Both hold source writes,
+require two distinct visible Suspense fallbacks before release, then use their
+existing output comparisons after delivery. Per-scope aggregate reach requires
+both-suspended, shared and separate outputs, plus each representative option
+dimension. A mutant that reuses and memoizes an unqualified pending entry passes
+the old 882 histories and fails 36 extended histories after the pending premise.
+These controlled eager-source schedules do not establish abandonment, rejection
+while pending, cleanup races, hydration, or arbitrary Suspense scheduling.
+
+The same decision requires eager/no-constructor admission to reject on every
+`DbClient.preloadLiveQuery` call, even when no new Collection is needed.
+`packages/db/tests/live-query-preload-indexing-oracle.test.ts` receives the
+shared indexing model across 459 histories: cold; eight prior valid configs
+with held or settled delivery; nine second declarations; and three key
+relations. Every history reaches admission; all 432 warm histories also check
+original-promise reuse. Original production accepts 32 invalid warm calls.
+This supersedes the construction-only limit in the earlier indexing record.
+Hydrated records, observer preload, SSR scheduling and malformed options
+outside the eager-constructor rule are not claimed by this receiver.
+
 The PR #2196 follow-up adds a direct `optimizedOnly` snapshot to the
 first-ineligible/second-eligible history. An eager-auto history starts with
 only an ineligible custom index and requires an eligible ordered reader after
@@ -6228,6 +6303,155 @@ controls are separate files. The [chunk 26 record](oracle-reviews/2026-10-28-pr-
 retains exact source/evidence hashes and all ORC outcomes. Actual production
 bundle erasure, Typedoc generation, tooling GREEN and restored-old-tooling
 mutants remain required receiving checks. Generated docs remain CI-owned.
+
+
+### Framework row snapshot isolation
+
+The **Frameworks** owner judges preservation of borrowed Collection values at
+actual framework boundaries. Authority is immutable updates,
+`PendingMutation.original`, `ChangeMessage.previousValue`, and the shared
+`packages/db/tests/conformance/contract.ts` result law. The shared executable
+owner is `packages/db/tests/conformance/row-snapshot-oracle.ts`. Core supplies
+admitted source facts before materialization. This relational comparison judges
+adapter preservation, not Core draft normalization or prototype policy.
+
+Nine common shapes cross one/two keys, callback/config/supplied Collection
+inputs, and sync/optimistic writes: 108 histories per common driver. Solid adds
+native stores for 120 histories, plus 60 real local-only histories. React has two
+registrations of its derived-identity API, labelled `react` and
+`react (dependency list)`; neither is a DbClient receiving driver. Two-key
+histories share initial containers and alternate updates. Actual mutable sharing
+is asserted before crediting cross-row alias reach: eight common histories and
+nine Solid histories per group. The later-object shape starts at null and gets
+no mutable-alias credit. Three updates per key distinguish initial and later
+admissions, alias split/merge, hidden string data, inherited-name shadows, and
+own-undefined/omission. The grammar contains 828 history slots across 45 group tests, including the
+duplicate React API registration.
+
+Every receiving group asserts its own reach. The shared comparison checks
+complete current framework and source values, retained initial `get()` and
+admitted `change.value` references, `previousValue`, and actual transaction
+`original` references at every existing cut. Optimistic handlers also have a
+held cut. Three isolated source-corruption controls reject damage limited to
+current, initial, or newly admitted values. A real Solid fault injection is
+rejected at the current-source comparison, even when its detached output is
+correct. The local-only driver returns actual mutation receipts.
+Alternative legal source-shape policy is accepted. Original-only corruption and
+cross-row caching mutants distinguish the extended owner from its predecessor.
+
+Solid's separate receiving owner,
+`packages/solid-db/tests/row-materialization-oracle.test.tsx`, judges nested
+identity, binding lifetime, current array membership, live nested getters, and
+bounded shared-graph work. Its original 85 finite histories include real `For` and effect
+consumers, native-store-only writes, reorder, growth/shrink/empty arrays, getter
+admission/replacement/omission/readmission, and crossed old/new graph sharing.
+The maintainer chose live getters and efficient shared acyclic graphs on
+2026-10-30, with cyclic support decided separately. Work counts source and owned
+container enumerations against an unchanged 32-per-distinct-container budget.
+This is a bounded regression check, not a public SLO or a complexity proof.
+
+The native-store revision skips unchanged source rows and memoizes immutable,
+detached nested stores by source identity within each row. Solid setters update
+the ordinary stable root row and replace changed nested containers. Consumers
+must read the current nested path reactively: a captured old nested proxy does
+not follow replacement. Native stores supply getter tracking and notifications.
+Explicit root own-key admission handles inherited-name and own-undefined cases.
+The complete graph comparison checks mixed paths without imposing alias identity.
+Twelve additional controlled-helper histories vary descriptor visibility for
+undefined, null, scalar, object, array, and native-store payloads. They observe
+captured-root `Object.keys` consumers across unchanged, hidden, visible, and
+restored-visibility stages while retaining payload and root identity. The raw/proxy
+identity guard fails six container histories before repair. These histories
+test only the materializer's internal invariant. Core public row snapshots
+normalize root descriptors, so no public descriptor-admission claim follows.
+Valid derived array-wrapper prototypes retain source methods, and local-only
+original reach requires a nonempty actual receipt. See the
+[native revision review](oracle-reviews/2026-10-30-solid-native-store-review.md)
+and the historical [materialization](oracle-reviews/2026-10-30-solid-row-materialization-review.md)
+and [snapshot](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md) records.
+
+**Core source-field and destination preservation:** the maintainer authorized
+fixing the sibling Core boundary in this PR. The existing context-transport
+owner now imports its public-field model/grammar from
+`packages/db/tests/conformance/public-field-oracle.ts`. Sixty histories cross
+six source keys, root/nested location, four selection forms, five stages, and
+ordinary/inherited nested destinations. Root Collection and three correlated
+forms supply 1,200 path/stage observations; the original 819 observations remain.
+The source admission check precedes result comparisons. Five restored wrong
+merge/destination designs fail intended own-field assertions. Real framework
+callback/config receivers reuse the same models and comparison for twelve
+new destination cells per input. Fourteen groups across seven registrations
+supply 168 histories / 840 comparisons. Core creates own enumerable data fields
+and own destination containers; unsafe authored alias paths retain rejection.
+The final [review record](oracle-reviews/2026-10-30-solid-native-store-review.md)
+records RED, GREEN, mutant classifications, reviewer outcomes, and exact code.
+
+The second independent review extends the same public-field owner with thirty
+overlap cells. Twenty-four legal expression cells reach every framework input;
+six functional controls supply a second Core formulation. A prior outer spread
+borrows the destination before a nested spread, literal field, or dotted alias
+writes it. Ordinary, inherited-name, and deeper destinations cross writable
+configurable/nonconfigurable source data. Authored nested objects replace their
+field; dotted aliases preserve siblings without writing through source objects.
+The four Core paths supply 120 path histories and 360 result cuts. Fourteen real
+framework groups supply another 336 histories and 1,008 result cuts. All compare
+current and retained source rows and require the actual source descriptor at
+all three stages. Existing 819 and 1,200 observations and the earlier receiving
+histories remain. Unkeyed functional projections are not legal derived-identity
+framework inputs, so they receive no framework handoff credit. Legal fresh-object
+expression controls provide those neighboring receiving comparisons instead.
+See the [second review record](oracle-reviews/2026-10-30-solid-oracle-review-round-two.md)
+for complete intake, RED gates, GREEN, hostile variants, and bounded closure.
+
+The same review adds six ordinary/subclass-array overlap cells. Dotted writes
+select lengths zero, one, and two while current and retained source arrays keep
+length three. Core now has 36 overlap cells / 144 path histories / 432 selected
+cuts. The fourteen real receiving groups each run thirty cells: 420 histories
+and 1,260 selected cuts. Each history independently requires all twelve declared
+checkpoints. Post-admission mount errors are recorded and later stages retry
+mounting; they cannot escape the shared comparison or supply false reach.
+
+Solid adds 93 actual receiving histories to its original 85: 24 native-parent
+identity transitions, 33 tracked callable data/getter histories, eighteen
+reserved-field histories, and eighteen inherited array-method histories. All
+three public inputs supply their own source admission and tracked consumers.
+The reorder comparison now checks complete current/rendered values and every
+element identity. A canonical backing-node memo preserves unchanged children
+across ordinary/native parent changes; a read facade retains live accessors and
+prototype methods while native nodes/setters supply updates. Original-code,
+missing-node, accessor/method, and reordered-tail mutants distinguish these
+repairs. No output alias topology or public elapsed-time budget is imposed.
+
+The local-only draft driver does not claim top-level symbol-write admission.
+Its shared preservation comparison still checks every field actually admitted,
+including nested symbols and all actual mutation originals. The proxy-revert
+owner excludes top-level symbol writes explicitly; **Drafts and native values**
+and [#1820](https://github.com/TanStack/db/issues/1820) own that support decision.
+The minimal trace assigns a fresh enumerable root symbol and nested symbol
+through `Collection.update`: the root is absent from the modified/source row,
+the nested symbol survives. Current and clean-main traces agree. Initial data
+admits both. No adapter or Core-selection claim extends through this missing
+source premise.
+
+Limits: the stated finite histories and real hosts' settled/held-handler cuts.
+Core normalization, arbitrary cycles, arbitrary getter/setter bodies, hidden
+symbols, all descriptor-visibility notification combinations, callback atomicity,
+other settlement schedules, and real browser rendering are not established.
+Core may evaluate root getters before the adapter receives them. The live
+getter claim covers nested accessors actually admitted to Solid. Cycle policy
+remains a separate maintainer decision, as explicitly requested. Existing
+framework, includes, and optimistic-history owners retain other responsibilities.
+
+The **Drafts and native values** owner retains an unresolved Core boundary:
+assigning a native Solid store through `Collection.update` can promote hidden
+host bookkeeping symbols during Core detachment. Support policy for that
+host-proxy assignment needs a maintainer decision before classification as a
+product-law violation. The needed receiving witness is actual `createStore`
+into `Collection.update`, distinguishing user keys from wrapper metadata in
+stored and retained values. Local-only histories use ordinary replacements
+after initial admission. Controlled sync histories admit native stores on
+every update and cover direct adapter input.
+
 
 
 ### Distinct collision review extension (2026-10-30)

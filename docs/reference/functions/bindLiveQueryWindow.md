@@ -10,7 +10,7 @@ function bindLiveQueryWindow(
    uncommitted?): LiveQueryWindowBinding;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L120)
+Defined in: [packages/db/src/live-query-window-binding.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L119)
 
 Bind an infinite-query update. Returns `previous` when it still serves the
 update; otherwise returns a new binding whose controller the adapter

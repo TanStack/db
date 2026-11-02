@@ -3,7 +3,7 @@ id: MissingDeleteHandlerError
 title: MissingDeleteHandlerError
 ---
 
-Defined in: [packages/db/src/errors.ts:404](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L404)
+Defined in: [packages/db/src/errors.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L409)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:404](https://github.com/TanStack/db/blob/
 new MissingDeleteHandlerError(): MissingDeleteHandlerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:405](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L405)
+Defined in: [packages/db/src/errors.ts:410](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L410)
 
 #### Returns
 

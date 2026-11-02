@@ -111,6 +111,18 @@ export interface LiveQueryCollectionConfig<
   gcTime?: number
 
   /**
+   * Automatic indexing for this live-query Collection's output. Defaults to
+   * 'off'. Eager indexing requires defaultIndexType.
+   */
+  autoIndex?: CollectionConfig<TResult>[`autoIndex`]
+
+  /**
+   * Index implementation for this Collection's automatic and manual indexes.
+   * Setting it alone does not enable automatic indexing.
+   */
+  defaultIndexType?: CollectionConfig<TResult>[`defaultIndexType`]
+
+  /**
    * If enabled the collection will return a single object instead of an array
    */
   singleResult?: true

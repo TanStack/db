@@ -3,7 +3,7 @@ id: UnsupportedFnSelectResultError
 title: UnsupportedFnSelectResultError
 ---
 
-Defined in: [packages/db/src/errors.ts:769](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L769)
+Defined in: [packages/db/src/errors.ts:774](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L774)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:769](https://github.com/TanStack/db/blob/
 new UnsupportedFnSelectResultError(valueDescription): UnsupportedFnSelectResultError;
 ```
 
-Defined in: [packages/db/src/errors.ts:770](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L770)
+Defined in: [packages/db/src/errors.ts:775](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L775)
 
 #### Parameters
 
