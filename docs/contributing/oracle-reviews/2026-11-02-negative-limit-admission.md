@@ -257,15 +257,39 @@ R1, the missing runtime error-class comparison. It is confirmed and fixed.
 The simplifier's S1 clone merge, S2 dead-operation save, S3 redundant source
 wrapper and S4 shared condition validation were evaluated separately and applied.
 S5, the redundant type-description helper, was found during implementation and
-independently reviewed. Each item remains separately recorded in the local
-append-only ledger; no finding or optional alternative was dropped.
+independently reviewed. The sections above record each repair and its evidence.
 
 The final production and comparison changes received another source review;
 both delegated reviewers used oracle-review. No new findings remained. Their
-inspection does not substitute for the executed results above. Hire
-recommendation: yes; the reviewers identified a precise enforcement gap and
-justified the simplifications while leaving byte savings to measurement.
+inspection does not substitute for the executed results above. The reviewers
+identified a precise enforcement gap and justified the simplifications while
+leaving byte savings to measurement.
 
 No known in-scope counterexample remains. The earlier provider, framework,
 raw-IR and numeric-policy limits remain. Local validation is complete; whole-PR
 readiness still requires creating the new follow-up PR and checking its CI.
+
+## Published replay-manifest repair
+
+PR #2333 CI found that the source-name integrity test treated the admission
+family as literal names. At head `7fd0d09ef`, the focused command from
+`packages/db` failed at the source-mapping comparison:
+
+```sh
+pnpm exec vitest run tests/oracle-replay.test.ts -t 'maps literal owners' --maxWorkers=2 --coverage.enabled=false
+```
+
+The repair validates the six receiver names, both admission names, and the
+computed source template, following the existing computed-family checks.
+All twelve admission names also enter the existing guarded direct-replay
+comparison, which requires exactly one executed property. No name is exempted
+from source validation; no oracle model, comparison, production code or run
+budget changed. The full command passes all 82 tests without type errors:
+
+```sh
+pnpm exec vitest run tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+Changed-file lint and formatting pass. The published documentation review also
+removed an inaccessible local-ledger citation and a reviewer hiring remark;
+the technical findings and measured evidence remain above.
