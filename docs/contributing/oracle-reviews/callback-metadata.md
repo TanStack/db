@@ -1069,3 +1069,33 @@ CI for integration head `fa5df11a85342ad6fee373aedb3b7391e7b25630` exposed eight
 **Replays and evidence:** scratch logs and task-local configs are under `/private/tmp/callback-metadata/solid-integration-20261102`. `pre-edit-binding.json` predates the production edit. `extended-parent-red.log`, `green.log`, `solid-suite-green.log`, `original-mutant.log`, and `over-untracked-mutant.log` retain the actual results. The focused runner commands use `pnpm_config_verify_deps_before_run=false pnpm exec vitest run --config <config>` with at most two workers. The RED and restored-hook campaigns select `lifetime`; the over-untracked campaign selects `reactive=true`. `config.mjs` runs the primary owner, `full.config.mjs` runs the eight runtime files, and the two mutant configs substitute only the hook under test. `tsconfig.json` supplies cached dependency paths for focused TypeScript and ESLint checks. These mappings are scratch artifacts and do not change package configuration.
 
 **Limits:** finite histories on the actual Solid host at its settled cut. The change does not specify native-source-only value liveness, arbitrary query callbacks that intentionally read live row data as parameters, every asynchronous source-start schedule, other framework adapters, or real browser rendering. Runtime suite counts exclude type-only test registration. Focused TypeScript passes separately. Whole-repository `pnpm test` and builds were not run. This is author self-review. External CodeRabbit coverage remains paused on an older commit and supplies no current-head review.
+
+
+## Shared replay first-demand admission port (2026-11-02)
+
+The nine-item review of PR 2318 also exposes the admission gap in this branch.
+Before production changed from `a2e75c30402deb815abd01783ea816a2edfe3ea8`, the
+extended primary owner's 48 settlement histories fail the public retention
+comparison. Row 6 publishes while the model requires the empty retained result.
+The source and new oracle are bound separately in the review scratch record.
+
+The shared runtime/oracle/browser repair and its limits are documented in the
+[release review amendment](2026-10-30-release-replay-retention.md#first-demand-admission-and-terminal-grammar-review-2026-11-02).
+This port preserves the callback compiler, joined-source gates and Solid input
+preparation fix. It changes no callback metadata law. The latest external
+CodeRabbit review remains paused at historical commit 8464; it supplies no
+review of this semantic port. Tests and current CI are recorded separately.
+
+
+The final port passes 46 primary tests, 21 neighboring tests and four browser
+tests (both 80-history campaigns plus both final-delivery replays). Its final
+browser restart/rewrite/reset-recovery reaches are 53/58/22 fixed and 46/58/31
+random. Focused core/browser TypeScript, ESLint (zero errors, two existing
+warnings), formatting, whitespace and changed-file lint pass. Earlier callback
+browser attempts were module-resolution/mock setup failures and supply no
+behavioral RED. The final scratch mapping uses one installed Electric module
+for both the controlled stream and adapter. No dependencies were installed.
+The shared runtime, primary and browser hashes match the release amendment's
+final binding table. Compiler and Solid source/test paths remain exactly those
+of a2e75c3. The containing commit binds this port; full commit IDs and changed
+path hashes are retained in scratch final-binding.json and the PR body.

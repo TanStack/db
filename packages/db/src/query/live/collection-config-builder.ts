@@ -598,8 +598,8 @@ export class CollectionConfigBuilder<
       // it, and ordered work must not wait for a load that already ended.
       // Output held for this demand publishes now, unless a replay of this
       // source still holds publication: the failure then holds this
-      // subscription's publication too, so retiring the other replay's
-      // failed demand cannot publish without this demand's rows.
+      // subscription's publication too. Neither sibling settlement nor
+      // retirement of its failed demand may publish without these rows.
       demand.settled = true
       if (
         this.collectionSources.some(

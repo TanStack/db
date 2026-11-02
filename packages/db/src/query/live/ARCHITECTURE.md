@@ -1565,7 +1565,9 @@ still has replay work, so demand that any of them starts meanwhile joins its
 own open replay. While a replay of any of them still holds publication, a
 lazy demand of any of them that fails after initial-query readiness fails its
 own subscription's replacement too. This includes a subscription that held no
-demand at truncate. Settling a sibling's replay or retiring its failed demand
+demand at truncate. Such a subscription joins the barrier when its first
+acquisition starts, before adapter code can reenter; its current work still
+holds publication after the sibling settles. Settling a sibling's replay or retiring its failed demand
 cannot publish the window without this demand's rows. It holds until
 every demand load that joins it loads, a later replay of the source succeeds,
 or the subscription's last demand retires. The query retries the failed demand

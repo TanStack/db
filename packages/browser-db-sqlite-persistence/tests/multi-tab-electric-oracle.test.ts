@@ -973,7 +973,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // Every stop kind occurs in a generated order, with a distinct running
   // peer. Recovery and catch-up separate the blocks. Four membership toggles
   // of an initially absent key restore the original rows before the tail.
-  // This adds 24 steps to the unchanged 8–24-step arbitrary tail. Removing
+  // The prefix adds 24 steps to the unchanged 8–24-step arbitrary tail. An
+  // ending dimension either leaves that final state untouched or adds a
+  // constructive reset/stop suffix of 4 + 2*tabCount steps (8 or 10). Removing
   // the open delivery, stop, or peer commit loses the law's premise; recovering
   // before the peer commit would test a different boundary. Existing pinned
   // histories still use the same driver without this prefix.
@@ -983,6 +985,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
       source: fc.nat(2),
       key: fc.constantFrom(3, 4),
       recovery: fc.nat(1),
+      ending: fc.constantFrom(
+        `arbitrary` as const,
+        `reset` as const,
+        `stop` as const,
+      ),
       stopOrder: fc.shuffledSubarray([0, 1, 2, 3], {
         minLength: 4,
         maxLength: 4,
@@ -995,6 +1002,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
         source,
         key,
         recovery,
+        ending,
         stopOrder,
         steps,
       }): GeneratedHistory => {
@@ -1012,26 +1020,32 @@ describe(`multi-tab Electric over one persisted database`, () => {
               { kind: `catch up`, tab, pick: 0 },
             ]),
             ...steps,
-            // Final catch-up must encounter an abandoned reservation in every
-            // generated history. Start a fresh handle, recover every tab, and
-            // deliver one new change without committing it. Reset then abandons
-            // that reservation. No later history step commits or recovers it;
-            // the existing final-delivery comparison must observe its failure
-            // before the existing recovery establishes convergence (Laws 2/5).
+            // Preserve arbitrary final states as well as constructing the rare
+            // final-reset and stopped-tab boundaries. The constructive endings
+            // start a fresh handle, recover every tab, then deliver one change
+            // without committing it. Reset abandons that reservation, so final
+            // delivery judges its failure before recovery (Laws 2/5). Stop
+            // instead leaves final catch-up to restart the stopped source.
             // The source tab, key and two/three-tab host vary with this grammar.
             // Removing advance or reset loses that premise; catching up here
             // would move the failure out of the final observation cut.
-            { kind: `deploy` },
-            ...Array.from(
-              { length: tabCount },
-              (_, index): Array<HistoryStep> => [
-                { kind: `recover`, tab: index, pick: recovery },
-                { kind: `catch up`, tab: index, pick: 0 },
-              ],
-            ).flat(),
-            { kind: `server change`, key, pick: 0 },
-            { kind: `advance`, tab, pick: 0 },
-            { kind: `peer reset` },
+            ...(ending === `arbitrary`
+              ? []
+              : [
+                  { kind: `deploy` as const },
+                  ...Array.from(
+                    { length: tabCount },
+                    (_, index): Array<HistoryStep> => [
+                      { kind: `recover`, tab: index, pick: recovery },
+                      { kind: `catch up`, tab: index, pick: 0 },
+                    ],
+                  ).flat(),
+                  { kind: `server change` as const, key, pick: 0 },
+                  { kind: `advance` as const, tab, pick: 0 },
+                  ending === `reset`
+                    ? { kind: `peer reset` as const }
+                    : { kind: `stop` as const, tab, pick: stopOrder[0]! },
+                ]),
           ],
         }
       },
@@ -1526,9 +1540,19 @@ describe(`multi-tab Electric over one persisted database`, () => {
         models[index]!.stopped !== undefined ||
         models[index]!.failedByReset
       ) {
+        generatedReach.reach(`stopped source restarted during final catch-up`)
         await recover(index, `restart`)
       }
+      const laggingBeforeFinal =
+        rowsOf(durable).some(({ id, label }) => log.rows.get(id) !== label) ||
+        rowsOf(log.rows).some(({ id, label }) => durable.get(id) !== label)
       await deliver(index, `all`, true)
+      if (
+        laggingBeforeFinal &&
+        !models[index]!.failedByReset &&
+        JSON.stringify(rowsOf(durable)) === JSON.stringify(rowsOf(log.rows))
+      )
+        generatedReach.reach(`lagging commit rewritten during final catch-up`)
       // A reset-abandoned transaction fails only when delivery tries to
       // commit it. Judge Law 5 at that cut before the restart establishes
       // Law 2's successful catch-up premise.
@@ -1716,6 +1740,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
   )
 
   type GeneratedReach =
+    | `stopped source restarted during final catch-up`
+    | `lagging commit rewritten during final catch-up`
     | `must-refetch delivered`
     | `peer commit during an open reserved transaction`
     | `source stopped with an open transaction`
@@ -1738,6 +1764,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
 
   const createGeneratedReach = () =>
     createOracleReach<GeneratedReach>(`browser.multi-tab-reserved-history`, [
+      `stopped source restarted during final catch-up`,
+      `lagging commit rewritten during final catch-up`,
       `must-refetch delivered`,
       `peer commit during an open reserved transaction`,
       `source stopped with an open transaction`,

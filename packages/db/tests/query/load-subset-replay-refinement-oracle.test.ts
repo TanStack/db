@@ -179,7 +179,14 @@ type OrderedCommand =
   // while the next stays pending. `newest` settles the most recently held
   // load instead of the oldest, so a later load can settle before an earlier
   // one, as independent provider requests may.
-  | { type: `settle`; ok: boolean; keepHolding?: boolean; newest?: boolean }
+  | {
+      type: `settle`
+      ok: boolean
+      keepHolding?: boolean
+      newest?: boolean
+      // Settle a new sibling demand, or drain other adapter work while it stays held.
+      target?: `new-sibling` | `other`
+    }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
@@ -322,6 +329,8 @@ type OrderedReach = {
   siblingSuccessfulCoverage: number
   // Owed request-error comparisons after another subscription asked for its keys.
   siblingRequestErrorChecks: number
+  lateSiblingSettlements: number
+  retryWhileSiblingLoads: number
   newSiblingReplayFailures: number
   newSiblingReplayRetirements: number
   newSiblingReplayRecoveries: number
@@ -477,10 +486,12 @@ async function checkOrderedReplay(
     // This subscription held no acquisition at truncate, then started demand
     // during its sibling replay. Measured only from adapter receipts.
     newSiblingReplay?: boolean
+    markerTruncate?: number
     keys?: Set<number>
     ordered?: boolean
   }
   const loads: Array<Load> = []
+  const receiptOptions = new Map<Load, LoadSubsetOptions>()
   // Retention model. Each source with an open or failed replay has a
   // barrier. `pending` holds the loads that still hold its publication: the
   // loads started while it is up, and work an older replay started. `own`
@@ -499,8 +510,6 @@ async function checkOrderedReplay(
     ambiguous: boolean
     pending: Map<Load, LoadSubsetOptions>
     own: Set<Load>
-    // Acquisition receipts held at truncate, used only for declared reach.
-    subscriptionsAtTruncate: Set<LoadSubsetOptions[`subscription`]>
   }
   const barriers = new Map<BarrierSource, Barrier>()
   // Every barrier this history raised, in raise order.
@@ -530,18 +539,6 @@ async function checkOrderedReplay(
       ambiguous: [...barriers.values()].some(({ ambiguous }) => ambiguous),
       pending: new Map(barriers.get(source)?.pending),
       own: new Set(),
-      subscriptionsAtTruncate: new Set(
-        [...acquired].flatMap(([options, count]) =>
-          count > 0 &&
-          loads.some(
-            (load) =>
-              load.source === source &&
-              load.subscription === options.subscription,
-          )
-            ? [options.subscription]
-            : [],
-        ),
-      ),
     }
     barriers.set(source, barrier)
     raisedBarriers.push(barrier)
@@ -568,7 +565,6 @@ async function checkOrderedReplay(
     barrier.own.add(load)
     return true
   }
-  let replayScopeViolation: string | undefined
   const settleParticipant = (
     source: BarrierSource,
     load: Load,
@@ -590,13 +586,6 @@ async function checkOrderedReplay(
       barrier.own.has(load) &&
       !options.signal?.aborted
     ) {
-      if (
-        load.newSiblingReplay &&
-        [...barrier.pending.values()].some(
-          (pending) => pending.subscription !== options.subscription,
-        )
-      )
-        reach.newSiblingReplayFailures++
       barrier.failures.set(load, options)
       barrier.history.push(load)
     }
@@ -605,12 +594,9 @@ async function checkOrderedReplay(
     // failure no longer fails the replay (ARCHITECTURE.md law 17: a failure
     // counts for a key no later held load loaded).
     if (ok && barrier?.pending.has(load) && !options.signal?.aborted) {
-      // Calibration of the replay account: a successful sibling can supply the
-      // same source keys without deciding another subscription's verdict.
-      // Preserve those failure identities independently of the mutation below.
-      const siblingFailures = [...barrier.failures.keys()].filter(
-        (failed) => failed.subscription !== load.subscription,
-      )
+      // Sibling success cannot decide another subscription's failure.
+      // The public request-error comparison below enforces that distinction;
+      // model self-consistency is not production calibration evidence.
       for (const failed of barrier.failures.keys()) {
         if (
           failed.subscription !== load.subscription &&
@@ -630,8 +616,6 @@ async function checkOrderedReplay(
           barrier.failures.delete(failed)
         }
       }
-      if (siblingFailures.some((failed) => !barrier.failures.has(failed)))
-        replayScopeViolation ??= `successful sibling removed another subscription's replay failure`
     }
     barrier?.pending.delete(load)
     // A replay completes when its last participant settles, so demand that
@@ -649,8 +633,6 @@ async function checkOrderedReplay(
     for (const owned of [barrier.pending, barrier.failures]) {
       for (const [load, held] of owned) {
         if (held === options) {
-          if (owned === barrier.failures && load.newSiblingReplay)
-            reach.newSiblingReplayRetirements++
           owned.delete(load)
         }
       }
@@ -667,6 +649,46 @@ async function checkOrderedReplay(
   const oneSubscription = (_source: BarrierSource) => !scenario.peer
   const acquired = new Map<LoadSubsetOptions, number>()
   const held: Array<(ok: boolean) => void> = []
+  const heldReceipts = new Map<(ok: boolean) => void, Load>()
+  const holdLoad = (load: Load) =>
+    new Promise<boolean>((resolve) => {
+      held.push(resolve)
+      heldReceipts.set(resolve, load)
+    })
+  // Driver receipts at the actual truncate, independent of model membership.
+  // These select legal settlement orders and measure reach only.
+  let markerSubscriptionsAtTruncate = new Set<
+    LoadSubsetOptions[`subscription`]
+  >()
+  const hasPendingReplaySibling = (
+    subscription: LoadSubsetOptions[`subscription`],
+  ) =>
+    loads.some(
+      (load) =>
+        load.source === `markers` &&
+        load.outcome === `pending` &&
+        load.subscription !== subscription &&
+        markerSubscriptionsAtTruncate.has(load.subscription) &&
+        !receiptOptions.get(load)?.signal?.aborted &&
+        (acquired.get(receiptOptions.get(load)!) ?? 0) > 0,
+    )
+  const isNewSiblingReplayLoad = (options: LoadSubsetOptions) =>
+    markerTruncates > 0 &&
+    !markerSubscriptionsAtTruncate.has(options.subscription) &&
+    ((markerCommitting &&
+      [...markerSubscriptionsAtTruncate].some(
+        (subscription) => subscription !== options.subscription,
+      )) ||
+      hasPendingReplaySibling(options.subscription))
+  const noteNewSiblingFailure = (load: Load, options: LoadSubsetOptions) => {
+    if (
+      load.newSiblingReplay &&
+      !options.signal?.aborted &&
+      hasPendingReplaySibling(options.subscription)
+    )
+      reach.newSiblingReplayFailures++
+  }
+  let observingHistory = false
   let holding = false
   let truncates = 0
   let throwNextUnload = false
@@ -974,6 +996,8 @@ async function checkOrderedReplay(
     siblingReplayFailureComparisons: 0,
     siblingSuccessfulCoverage: 0,
     siblingRequestErrorChecks: 0,
+    lateSiblingSettlements: 0,
+    retryWhileSiblingLoads: 0,
     newSiblingReplayFailures: 0,
     newSiblingReplayRetirements: 0,
     newSiblingReplayRecoveries: 0,
@@ -1035,14 +1059,23 @@ async function checkOrderedReplay(
                 source: `markers`,
                 keys: requestedKeys(`markers`, options),
               }
-              load.newSiblingReplay =
-                barriers.get(`markers`) !== undefined &&
-                !barriers
-                  .get(`markers`)!
-                  .subscriptionsAtTruncate.has(options.subscription) &&
-                [...(barriers.get(`markers`)?.pending.values() ?? [])].some(
-                  (pending) => pending.subscription !== options.subscription,
+              load.markerTruncate = markerTruncates
+              load.newSiblingReplay = isNewSiblingReplayLoad(options)
+              receiptOptions.set(load, options)
+              // This retry premise is measured when the real adapter receives
+              // another load of a failed demand while its sibling still loads.
+              if (
+                load.newSiblingReplay &&
+                loads.some(
+                  (earlier) =>
+                    earlier.subscription === load.subscription &&
+                    earlier.outcome === `failed` &&
+                    [...(earlier.keys ?? [])].every((key) =>
+                      load.keys?.has(key),
+                    ),
                 )
+              )
+                reach.retryWhileSiblingLoads++
               loads.push(load)
               reach.markerLoads++
               // The throw happens while the subscription registers the
@@ -1064,6 +1097,7 @@ async function checkOrderedReplay(
               const recovery =
                 belongsToRecovery(options, markerTruncates, markerCommitting) ||
                 (participant && oneSubscription(`markers`))
+              noteNewSiblingFailure(load, options)
               settleParticipant(`markers`, load, options, false)
               // A load that threw acquired nothing, so the adapter never sees
               // its demand retire, and any graph run can retire it. The
@@ -1092,14 +1126,23 @@ async function checkOrderedReplay(
                 source: `markers`,
                 keys: requestedKeys(`markers`, options),
               }
-              load.newSiblingReplay =
-                barriers.get(`markers`) !== undefined &&
-                !barriers
-                  .get(`markers`)!
-                  .subscriptionsAtTruncate.has(options.subscription) &&
-                [...(barriers.get(`markers`)?.pending.values() ?? [])].some(
-                  (pending) => pending.subscription !== options.subscription,
+              load.markerTruncate = markerTruncates
+              load.newSiblingReplay = isNewSiblingReplayLoad(options)
+              receiptOptions.set(load, options)
+              // This retry premise is measured when the real adapter receives
+              // another load of a failed demand while its sibling still loads.
+              if (
+                load.newSiblingReplay &&
+                loads.some(
+                  (earlier) =>
+                    earlier.subscription === load.subscription &&
+                    earlier.outcome === `failed` &&
+                    [...(earlier.keys ?? [])].every((key) =>
+                      load.keys?.has(key),
+                    ),
                 )
+              )
+                reach.retryWhileSiblingLoads++
               loads.push(load)
               reach.markerLoads++
               const participant = joinBarrier(`markers`, load, options)
@@ -1119,14 +1162,13 @@ async function checkOrderedReplay(
               const newDemandDuringReplay =
                 !reload && markerCommitting && isDemand(options)
               if (holding) {
-                const ok = await new Promise<boolean>((resolve) =>
-                  held.push(resolve),
-                )
+                const ok = await holdLoad(load)
                 if (!ok) {
                   // The source's replay had already failed and still holds
                   // publication when this load fails.
                   const barrierFailed =
                     (barriers.get(`markers`)?.failures.size ?? 0) > 0
+                  noteNewSiblingFailure(load, options)
                   const replayLoading = settleParticipant(
                     `markers`,
                     load,
@@ -1224,6 +1266,20 @@ async function checkOrderedReplay(
             })()
           },
           unloadSubset: (options) => {
+            // During commands, same-truncate unload retires a failed demand;
+            // final cleanup and a newer replay's acquisition renewal do not
+            // supply this reach witness.
+            if (
+              observingHistory &&
+              loads.some(
+                (load) =>
+                  receiptOptions.get(load) === options &&
+                  load.newSiblingReplay &&
+                  load.outcome === `failed` &&
+                  load.markerTruncate === markerTruncates,
+              )
+            )
+              reach.newSiblingReplayRetirements++
             unloaded.add(options)
             retireParticipants(`markers`, options)
             const count = acquired.get(options) ?? 0
@@ -1262,9 +1318,7 @@ async function checkOrderedReplay(
             const participant = joinBarrier(`rows`, load, options)
             belongsToRecovery(options, truncates, truncating)
             if (holding) {
-              const ok = await new Promise<boolean>((resolve) =>
-                held.push(resolve),
-              )
+              const ok = await holdLoad(load)
               if (!ok) {
                 const replayLoading = settleParticipant(
                   `rows`,
@@ -1600,6 +1654,7 @@ async function checkOrderedReplay(
       await flushPromises()
       const next = held.shift()
       if (!next) return
+      heldReceipts.delete(next)
       next(true)
     }
     throw new Error(`held loads did not drain`)
@@ -1624,6 +1679,19 @@ async function checkOrderedReplay(
   // An eager marker source rewrites its rows; an on-demand one replays the
   // demand it retains.
   const truncateMarkers = async () => {
+    markerSubscriptionsAtTruncate = new Set(
+      [...acquired].flatMap(([options, count]) =>
+        count > 0 &&
+        !options.signal?.aborted &&
+        loads.some(
+          (load) =>
+            load.source === `markers` &&
+            load.subscription === options.subscription,
+        )
+          ? [options.subscription]
+          : [],
+      ),
+    )
     installedMarkers.clear()
     raiseBarrier(`markers`)
     markerSync.begin()
@@ -1652,6 +1720,7 @@ async function checkOrderedReplay(
   try {
     if (!scenario.historyDuringPreload) await preload
     let sawRequestError = false
+    observingHistory = true
     for (const command of history) {
       try {
         switch (command.type) {
@@ -1684,7 +1753,40 @@ async function checkOrderedReplay(
             break
           case `settle`: {
             holding = command.keepHolding === true && holding
-            ;(command.newest === true ? held.pop() : held.shift())?.(command.ok)
+            const candidates = held.filter((resolve) => {
+              const receipt = heldReceipts.get(resolve)!
+              const activeNewSibling =
+                receipt.source === `markers` &&
+                !markerSubscriptionsAtTruncate.has(receipt.subscription) &&
+                !receiptOptions.get(receipt)?.signal?.aborted
+              return (
+                command.target === undefined ||
+                (command.target === `new-sibling`
+                  ? activeNewSibling
+                  : !activeNewSibling)
+              )
+            })
+            const selected = command.newest ? candidates.at(-1) : candidates[0]
+            if (selected) {
+              held.splice(held.indexOf(selected), 1)
+              const receipt = heldReceipts.get(selected)!
+              if (
+                receipt.source === `markers` &&
+                !markerSubscriptionsAtTruncate.has(receipt.subscription) &&
+                !loads.some(
+                  (other) =>
+                    other !== receipt &&
+                    other.source === `markers` &&
+                    other.subscription !== receipt.subscription &&
+                    other.outcome === `pending` &&
+                    !receiptOptions.get(other)?.signal?.aborted,
+                ) &&
+                !receiptOptions.get(receipt)?.signal?.aborted
+              )
+                reach.lateSiblingSettlements++
+              heldReceipts.delete(selected)
+              selected(command.ok)
+            }
             break
           }
           case `truncate`:
@@ -1821,6 +1923,7 @@ async function checkOrderedReplay(
         sawRequestError = true
     }
     if (sawRequestError) reach.requestErrors++
+    observingHistory = false
     holding = false
     throwNextUnload = false
     // The drain is the checkpoint, where recovery loads succeed, so an
@@ -1841,8 +1944,6 @@ async function checkOrderedReplay(
     if (moveOrderViolation) {
       throw new Error(`newest move wins: ${moveOrderViolation}`)
     }
-    if (replayScopeViolation)
-      throw new Error(`replay account scope: ${replayScopeViolation}`)
     if (moveErrorViolation) {
       throw new Error(`replay error identity: ${moveErrorViolation}`)
     }
@@ -1899,6 +2000,7 @@ async function checkOrderedReplay(
       }
     }
   } finally {
+    observingHistory = false
     holding = false
     for (const resolve of held.splice(0)) resolve(true)
     for (const subscription of subscriptions) subscription.unsubscribe()
@@ -2644,6 +2746,99 @@ describe(`Ordered windows across truncate replays`, () => {
     declared.assertReached()
   }, 120_000)
 
+  // Law 9 keeps late include demand private after its sibling settles.
+  // A waiting move distinguishes publication retention from replay verdicts:
+  // Atomic window publication allows rejection despite a later retry.
+  it(`keeps publication across sibling and include settlement orders`, async () => {
+    const states = [`lateSiblingSettlements`, `retryWhileSiblingLoads`] as const
+    const declared = createOracleReach(
+      `replay.sibling-settlement-order`,
+      states,
+    )
+    const failures: Array<unknown> = []
+    for (const direction of [`asc`, `desc`] as const) {
+      for (const limit of [1, 2, 3] as const) {
+        for (const includeFirst of [false, true]) {
+          for (const ok of [false, true]) {
+            for (const waitingMove of [false, true]) {
+              declared.beginHistory()
+              try {
+                const receipt = await checkOrderedReplay(
+                  [
+                    { type: `hold` },
+                    { type: `truncateMarkers` },
+                    { type: `move`, id: 6, rank: direction === `asc` ? 60 : 1 },
+                    {
+                      type: `settle`,
+                      ok: true,
+                      keepHolding: true,
+                      target: `other`,
+                    },
+                    ...(waitingMove
+                      ? [{ type: `window` as const, offset: 0 as const, limit }]
+                      : []),
+                    ...(includeFirst
+                      ? [
+                          {
+                            type: `settle` as const,
+                            ok,
+                            keepHolding: true,
+                            target: `new-sibling` as const,
+                          },
+                        ]
+                      : []),
+                    // Twelve settlements exceed the other receipts in this
+                    // six-row domain; selected new demand stays held throughout.
+                    ...Array.from({ length: 12 }, () => ({
+                      type: `settle` as const,
+                      ok: true,
+                      keepHolding: true,
+                      target: `other` as const,
+                    })),
+                    ...(!includeFirst
+                      ? [
+                          {
+                            type: `settle` as const,
+                            ok,
+                            keepHolding: true,
+                            target: `new-sibling` as const,
+                          },
+                        ]
+                      : []),
+                  ],
+                  {
+                    ...ordinaryOrderedScenario,
+                    direction,
+                    offset: 1,
+                    limit,
+                    joined: `none`,
+                    includes: true,
+                    markerMode: `on-demand`,
+                  },
+                )
+                for (const state of states)
+                  if (receipt[state] > 0) declared.reach(state)
+              } catch (error) {
+                failures.push(error)
+              }
+            }
+          }
+        }
+      }
+    }
+    console.info(
+      `replay.sibling-settlement-order`,
+      Object.fromEntries(declared.counts()),
+    )
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        `${failures.length} settlement histories violated shared publication`,
+        { cause: failures[0] },
+      )
+    declared.assertReached()
+  }, 120_000)
+
   // This finite history grammar varies which source replays, the order of
   // two load failures, join form, direction and window width. Join plus include
   // gives sibling subscriptions; the root replay gives same-subscription
@@ -2793,6 +2988,8 @@ describe(`Ordered windows across truncate replays`, () => {
         siblingReplayFailureComparisons: 0,
         siblingSuccessfulCoverage: 0,
         siblingRequestErrorChecks: 0,
+        lateSiblingSettlements: 0,
+        retryWhileSiblingLoads: 0,
         newSiblingReplayFailures: 0,
         newSiblingReplayRetirements: 0,
         newSiblingReplayRecoveries: 0,
@@ -2838,6 +3035,9 @@ describe(`Ordered windows across truncate replays`, () => {
         `siblingReplayFailureComparisons`,
         `siblingSuccessfulCoverage`,
         `siblingRequestErrorChecks`,
+        // The constructive settlement-order grammar declares these premises.
+        `lateSiblingSettlements`,
+        `retryWhileSiblingLoads`,
         // The constructive new-sibling grammar declares these rare premises.
         `newSiblingReplayFailures`,
         `newSiblingReplayRetirements`,
