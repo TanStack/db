@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import {
   UnhashableQueryIRError,
   createLiveQueryObserver,
@@ -45,6 +45,11 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 
+// Use the client layout commit to schedule window moves. Server rendering has
+// no commit; React18 diagnoses a layout effect there even when it is empty.
+const useWindowCommitEffect =
+  typeof window === `undefined` ? useEffect : useLayoutEffect
+
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 // Suspense renders can be abandoned before React subscribes. Keep their
 // collection briefly so a nearby retry can commit without starting over.
@@ -61,9 +66,9 @@ type SuspenseCollectionEntry = {
   removeStatusListeners: Array<() => void>
 }
 
-const unscopedSuspenseCollections = new Map<string, SuspenseCollectionEntry>()
+const unscopedSuspenseScope = {}
 const suspenseCollectionsByClient = new WeakMap<
-  DbClient,
+  object,
   Map<string, SuspenseCollectionEntry>
 >()
 function getSourceQualifiedSuspenseKey(
@@ -101,11 +106,11 @@ function getSourceQualifiedSuspenseKey(
 function getSuspenseCollections(
   client: DbClient | undefined,
 ): Map<string, SuspenseCollectionEntry> {
-  if (!client) return unscopedSuspenseCollections
-  let collections = suspenseCollectionsByClient.get(client)
+  const scope = client ?? unscopedSuspenseScope
+  let collections = suspenseCollectionsByClient.get(scope)
   if (!collections) {
     collections = new Map()
-    suspenseCollectionsByClient.set(client, collections)
+    suspenseCollectionsByClient.set(scope, collections)
   }
   return collections
 }
@@ -268,7 +273,9 @@ export function prepareDerivedQuery(
 ): DerivedQueryPreparation {
   const shouldProfile =
     profiler !== undefined &&
-    shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+    /* @__PURE__ */ shouldWarnInDevelopment(
+      `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
+    )
   // Keep literal build guards at both timing sites so production bundlers can
   // erase the timer and warning machinery, as well as the profiler initializer.
   const start =
@@ -571,25 +578,22 @@ export function useLiveQueryForSuspense(configOrQueryOrCollection: unknown) {
   return useLiveQueryImpl(configOrQueryOrCollection, true)
 }
 
-// What one hook instance keeps across renders. It lives in a single ref
-// slot, so a render neither looks up nor allocates more.
-function createHookInstance() {
-  return {
-    collection: null as Collection<object, string | number, {}> | null,
-    identityDeps: null as Array<unknown> | null,
-    config: null as unknown,
-    client: undefined as DbClient | undefined,
-    derivedIdentityProfiler: createDerivedIdentityProfiler(),
-    deferredCollections: new Set<
-      CollectionImpl<any, string | number, any, any, any>
-    >(),
-    sourceIds: createLiveQuerySourceIdClaims(),
-    cancelReclaimRelease: undefined as (() => void) | undefined,
-    observer: null as LiveQueryObserver<object, string | number> | null,
-    queryHash: undefined as string | undefined,
-    identityError: undefined as UnhashableQueryIRError | undefined,
-    subscribe: null as ((onStoreChange: () => void) => () => void) | null,
-  }
+// What one hook instance keeps across renders. Fields produced by resolution
+// are installed with their first value, rather than initialized and overwritten
+// in the same render.
+type HookInstance = {
+  collection: Collection<object, string | number, {}> | null
+  identityDeps: Array<unknown> | null
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>
+  sourceIds: LiveQuerySourceIdClaims
+  config?: unknown
+  client?: DbClient
+  derivedIdentityProfiler?: DerivedIdentityProfiler
+  cancelReclaimRelease?: () => void
+  observer?: LiveQueryObserver<object, string | number>
+  queryHash?: string
+  identityError?: UnhashableQueryIRError
+  subscribe?: (onStoreChange: () => void) => () => void
 }
 
 type LiveQueryResult = ReturnType<
@@ -618,8 +622,14 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       ? undefined
       : configOrQueryOrCollection?.client) ?? contextDbClient
 
-  const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
-  const instance = (instanceRef.current ??= createHookInstance())
+  const instanceRef = useRef<HookInstance | null>(null)
+  const instance: HookInstance = (instanceRef.current ??= {
+    collection: null,
+    identityDeps: null,
+    derivedIdentityProfiler: createDerivedIdentityProfiler(),
+    deferredCollections: new Set(),
+    sourceIds: createLiveQuerySourceIdClaims(),
+  })
   // A commit releases the starts itself, so it drops the reclaim listener.
   const resumeDeferredCollections = () => {
     instance.cancelReclaimRelease?.()
@@ -661,16 +671,13 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
     try {
       queryHash = getStableValueHash(streamIdentity, `queryKey`)
     } catch (error) {
-      if (error instanceof UnhashableQueryIRError) {
-        if (queryKey !== undefined) throw error
-        identityError = error
-      } else {
+      if (!(error instanceof UnhashableQueryIRError) || queryKey !== undefined)
         throw error
-      }
+      identityError = error
     }
 
     // Check if we need to create/recreate the collection
-    const needsNewCollection =
+    let needsNewCollection =
       !instance.collection ||
       (inputIsCollection
         ? instance.config !== configOrQueryOrCollection
@@ -689,20 +696,19 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       )
     }
 
+    let commitWindow: (() => void) | undefined
     if (needsNewCollection) {
       if (inputIsCollection) {
         // Warn when passing a collection directly with on-demand sync mode
         // In on-demand mode, data is only loaded when queries with predicates request it
         // Passing the collection directly doesn't provide any predicates, so no data loads
-        const syncMode = (
-          configOrQueryOrCollection as { config?: { syncMode?: string } }
-        ).config?.syncMode
         if (
-          syncMode === `on-demand` &&
-          shouldWarnInDevelopment(
+          /* @__PURE__ */ shouldWarnInDevelopment(
             `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
           ) &&
-          process.env.NODE_ENV !== `production`
+          process.env.NODE_ENV !== `production` &&
+          (configOrQueryOrCollection as { config?: { syncMode?: string } })
+            .config?.syncMode === `on-demand`
         ) {
           console.warn(
             `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
@@ -748,6 +754,12 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
             // Hydration and Suspense key the live-query Collection by identity,
             // so they never pool, even when the config passes a pool.
             pool: forSuspense || dbClient ? false : undefined,
+            previousCollection:
+              forSuspense || dbClient ? undefined : instance.collection,
+            windowOwner: instance,
+            onWindowChange: (move) => {
+              commitWindow = move
+            },
             // Without a DbClient, Suspense starts it through a preload below.
             startSync: !forSuspense || dbClient !== undefined,
           }) as SuspenseCollection | null
@@ -783,13 +795,25 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
             })
           }
         }
-        instance.identityDeps = [...identityDeps]
+        // An abandoned render must leave invalidation pending. Its retry or
+        // urgent replacement still prepares and commits the requested move.
+        if (!commitWindow) instance.identityDeps = [...identityDeps]
       }
       instance.config = configOrQueryOrCollection
       instance.client = dbClient
       instance.queryHash = queryHash
       instance.identityError = identityError
+    }
 
+    if (commitWindow) needsNewCollection = false
+    useWindowCommitEffect(() => {
+      if (commitWindow) {
+        instance.identityDeps = [...identityDeps]
+        commitWindow()
+      }
+    })
+
+    if (needsNewCollection) {
       // Recreate the observer when the underlying collection changes. The observer
       // is not disposed explicitly here or on unmount: `useSyncExternalStore`
       // unsubscribes it when the subscribe changes or the component unmounts, which
