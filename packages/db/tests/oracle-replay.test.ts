@@ -139,6 +139,23 @@ describe(`guarded oracle replay`, () => {
       `tests/query/pagination-oracle.property.test.ts`,
       1,
     ],
+    ...[
+      `builder`,
+      `unstarted`,
+      `ready`,
+      `initial-pending`,
+      `move-pending`,
+      `replay-pending`,
+    ].flatMap((path) =>
+      [`negative`, `valid`].map(
+        (admission) =>
+          [
+            `pagination.limit-admission-${path}-${admission}`,
+            `tests/query/pagination-oracle.property.test.ts`,
+            1,
+          ] as const,
+      ),
+    ),
   ] as const)(
     `selects only the requested %s replay lane`,
     (property, file, expectedTests) => {
@@ -505,6 +522,27 @@ describe(`named oracle replay manifest`, () => {
         // These oracles number their properties in file order.
         const [family] = entry.property.split(`.`)
         expect(source).toContain(`\`${family}.\${id}\``)
+      } else if (entry.property.startsWith(`pagination.limit-admission-`)) {
+        const suffix = entry.property.slice(
+          `pagination.limit-admission-`.length,
+        )
+        const separator = suffix.lastIndexOf(`-`)
+        const path = suffix.slice(0, separator)
+        const admission = suffix.slice(separator + 1)
+        expect([
+          `builder`,
+          `unstarted`,
+          `ready`,
+          `initial-pending`,
+          `move-pending`,
+          `replay-pending`,
+        ]).toContain(path)
+        expect([`negative`, `valid`]).toContain(admission)
+        expect(source).toContain(`\`${path}\``)
+        expect(source).toContain(`for (const negative of [false, true])`)
+        expect(source).toContain(
+          'pagination.limit-admission-${path}-${negative ? `negative` : `valid`}',
+        )
       } else if (entry.property.startsWith(`pagination.matrix.`)) {
         const [, , familyCell] = entry.property.split(`.`)
         const [family, cell] = familyCell!.split(`-`)
