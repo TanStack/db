@@ -1128,7 +1128,7 @@ fences the chain. If another qualifying mutation arrives before it finishes,
 core starts a replacement repair before releasing the publication barrier and
 before the obsolete chain can issue another tie or refill. A qualifying change
 that a retirement release delivers after the chain succeeds belongs to the
-same fence: the repair keeps that newer debt, the next ordered pass starts its
+same fence, including a delete of a row before its boundary: the repair keeps that newer debt, the next ordered pass starts its
 replacement before the barrier releases, and a window move waiting for the
 chain stays pending until the replacement settles. A repeated prefix or
 page fixed point ends the repair when no more data is needed; it cannot leave a

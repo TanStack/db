@@ -229,9 +229,17 @@ export class OrderedSourceLoader {
     let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
-      // A finished repair holds every row through its boundary, so releasing
-      // what it superseded removes only rows outside its coverage.
-      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
+      // A finished repair holds every row before its boundary, so releasing
+      // what it superseded removes only rows from the boundary on, such as a
+      // tie only an old tie request held. Deleting a sent row before the
+      // boundary is new source information.
+      if (
+        change.type === `delete` &&
+        this.retiringSupersededAcquisitions &&
+        (previous === undefined ||
+          this.settledSourceBoundary === undefined ||
+          this.info.comparator(previous, this.settledSourceBoundary) >= 0)
+      ) {
         continue
       }
       // A sent row that leaves or moves. An optimistic overlay may still
