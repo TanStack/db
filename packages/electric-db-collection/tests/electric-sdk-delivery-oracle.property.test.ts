@@ -136,6 +136,8 @@ declareOracle({
   model: [createRetryModel, applyRetryModel, expectedRetryObservation],
 })
 
+const campaignTimeoutMs = 30_000
+
 function sdkCampaigns(
   propertyId: string,
   name: string,
@@ -153,8 +155,18 @@ function sdkCampaigns(
   }
   // A path replay of the property runs only the random campaign, from its
   // path. The fixed campaign stands aside during every path replay.
-  oracleReplayTest(it)(`${name} (fixed)`, () => runCampaign(fixedSeed))
-  oracleReplayTest(it, propertyId)(`${name} (random)`, () => runCampaign())
+  // A campaign answers dozens of histories over real client backoff, so it
+  // can outlast the default timeout on a loaded runner.
+  oracleReplayTest(it)(
+    `${name} (fixed)`,
+    () => runCampaign(fixedSeed),
+    campaignTimeoutMs,
+  )
+  oracleReplayTest(it, propertyId)(
+    `${name} (random)`,
+    () => runCampaign(),
+    campaignTimeoutMs,
+  )
 }
 
 function violationCheckpoint(error: unknown): string {
@@ -226,12 +238,14 @@ type SnapshotReachState =
   | `subset-attempts-past-threshold`
   | `live-pauses-past-threshold`
   | `live-outage`
+  | `live-outage-with-synchronous-throws`
   | `retired-evidence-after-restart`
 const createSnapshotReach = () =>
   createOracleReach<SnapshotReachState>(`electric.sdk-snapshot-delivery`, [
     `subset-attempts-past-threshold`,
     `live-pauses-past-threshold`,
     `live-outage`,
+    `live-outage-with-synchronous-throws`,
     `retired-evidence-after-restart`,
   ])
 // Each campaign declares its own reach.
@@ -247,6 +261,11 @@ type SubsetRetries = {
   extraLoads: number
   /** HTTP 503 responses to the live request after the first load. */
   liveFailures?: number
+  /**
+   * After the first of those 503s, the app's `fetchClient` throws
+   * synchronously on this many live attempts: a failed attempt too.
+   */
+  liveThrows?: number
 }
 
 async function checkSnapshots(
@@ -259,6 +278,7 @@ async function checkSnapshots(
 ) {
   snapshotReach.beginHistory()
   const http = controlledHttp()
+  let liveThrows = 0
   const batches: Array<Array<Message<Item>>> = []
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
@@ -302,7 +322,14 @@ async function checkSnapshots(
         shapeOptions: {
           url: `http://test-url/snapshot-${sequence}`,
           params: { table: `rows` },
-          fetchClient: http.fetchClient,
+          // A live attempt can throw before it returns a request.
+          fetchClient: (input, init) => {
+            if (liveThrows > 0 && init?.signal) {
+              liveThrows--
+              throw new TypeError(`offline`)
+            }
+            return http.fetchClient(input, init)
+          },
           backoffOptions: { initialDelay: 1, maxDelay: 2, multiplier: 1 },
         },
         syncMode: `on-demand`,
@@ -453,10 +480,15 @@ async function checkSnapshots(
         let live = await atCheckpoint(http.take(), `resumed live request`)
         for (let attempt = 0; attempt < retries.liveFailures!; attempt++) {
           live.respond(new Response(`transient`, { status: 503 }))
+          if (attempt === 0) liveThrows = retries.liveThrows ?? 0
           live = await atCheckpoint(http.take(), `retried live request`)
         }
-        outage = retries.liveFailures! >= 5
+        const attempts = retries.liveFailures! + (retries.liveThrows ?? 0)
+        outage = attempts >= 5
         if (outage) snapshotReach.reach(`live-outage`)
+        if (outage && retries.liveFailures! < 5) {
+          snapshotReach.reach(`live-outage-with-synchronous-throws`)
+        }
         sourceHealth(`source health after live attempts`)
       }
     }
@@ -603,6 +635,7 @@ const snapshotProperty = fc.asyncProperty(
     failures: fc.array(fc.nat(7), { maxLength: 6 }),
     extraLoads: fc.nat(3),
     liveFailures: fc.nat(6),
+    liveThrows: fc.nat(3),
   }),
   (width, name, retries) =>
     snapshotViolation.check({ width, name, retries }, () =>

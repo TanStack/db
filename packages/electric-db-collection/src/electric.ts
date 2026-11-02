@@ -2045,10 +2045,14 @@ function createElectricSync<T extends Row<unknown>>(
       // catch-up prefetches carry one, and count (maintainer decision
       // 2026-11-02).
       fetchClient: async (input, init) => {
-        const request = (shapeOptions.fetchClient ?? fetch)(input, init)
-        if (!init?.signal) return request
+        if (!init?.signal)
+          return (shapeOptions.fetchClient ?? fetch)(input, init)
         try {
-          const response = await request
+          // A fetch that throws before it returns is a failed attempt too.
+          const response = await (shapeOptions.fetchClient ?? fetch)(
+            input,
+            init,
+          )
           if (response.ok || response.status === 409) failedAttempts = 0
           else {
             // Not `Object.fromEntries`: a DOM lib without iterable Headers
