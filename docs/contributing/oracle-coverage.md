@@ -7018,15 +7018,23 @@ values and typed fields) is GREEN after a fix: a failed first load now
 releases the query subscription (LIFE-10). It declares `delivery-error` (a
 `QueryFailed` after ready, cleared by the next result) and reports a
 rejected delivery after ready (`rejectedDelivery: reported`, the law set's
-default `errorMapping`). Limits: no `awaitSync` evidence (the shared
-oracle's waits are txid waits), no transport reconnect, no on-demand or
+default `errorMapping`). Limits: no transport reconnect, no on-demand or
 paginated mode, no deployment; the truncate on a restarted run's first
 result is not distinguished, because an eager restart starts empty. While
 the client's result is a failure, the driver acknowledges a query removal
 only with its next transition, so a restart finds the failed query's cached
 error: maintainer decision 2026-11-02, a cached error does not fail a new
 subscription, which waits for the server (reach `restart-after-failure`,
-both clients); a cached valid result served to a restarted run is accepted
+both clients). With `prompt-after-restart`, the new run's first transition
+can arrive before the client's replay of that cached error (reach
+`prompt-failure-after-failed-run`, 36 of 400 histories per client at seed
+2118). Skipping the first error after a cached one lost a fresh failure
+there: RED `READY-4 (status)` at `[fail, prompt restart, fail]`, status
+`loading` and not `error`. The adapter now names the cached result by the
+identity of its log lines, read through the base client, because the
+`onUpdate` handle's `getQueryLogs` looks up the wrong query in Convex
+1.47.0; a version that skips nothing fails `LIFE-2/LIFE-5 (status)` at
+`[fail, restart, changes]`. A cached valid result served to a restarted run is accepted
 client-cache behavior and is not generated, because the model starts a
 restarted run empty. A fixed-seed campaign runs the React client
 (`watchQuery`).

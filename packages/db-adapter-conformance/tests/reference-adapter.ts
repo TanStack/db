@@ -45,6 +45,11 @@ export type ReferenceMutant =
   | `leaks-subscription`
   /** LIFE-5: a new sync run starts from the previous run's rows. */
   | `restart-replays-rows`
+  /**
+   * READY-4, after a failed run: the new run skips one failure that comes
+   * before its first turn, taking it for a cached failure's replay.
+   */
+  | `swallows-prompt-failure`
   /** LIFE-10: a failed provider's subscription stays open until cleanup. */
   | `keeps-failed-source`
   /** LIFE-10: a failed provider's subscription is released twice. */
@@ -332,6 +337,9 @@ function referenceCollection(
         waiters = new Map()
         highestTxid = 0
         runReady = false
+        let replayExpected =
+          mutant === `swallows-prompt-failure` && runFailed
+        if (replayExpected) setTimeout(() => (replayExpected = false), 0)
         runFailed = false
         // Failed attempts after ready since the last delivery, and the value
         // that reports the outage.
@@ -549,6 +557,10 @@ function referenceCollection(
                 reportError(outage)
               }
             } else if (!ready) {
+              if (replayExpected) {
+                replayExpected = false
+                return
+              }
               stop(
                 subscription,
                 mutant === `wraps-loading-failure`
@@ -654,6 +666,7 @@ export function referenceDriver(
       `source-failure-after-ready`,
       `empty-response`,
       `delivery-error`,
+      `prompt-after-restart`,
     ]),
     // The same ten kinds as typed fields, one per row field.
     fieldKinds: [

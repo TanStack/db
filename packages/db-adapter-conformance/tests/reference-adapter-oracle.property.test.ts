@@ -104,11 +104,14 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`snapshot-merges`, /PUB-7|PUB-4/],
     [`leaks-subscription`, `LIFE-2`],
     [`restart-replays-rows`, `LIFE-5`],
+    [`swallows-prompt-failure`, `READY-4`],
     [`keeps-failed-source`, `LIFE-10`],
     [`double-release`, `LIFE-10`],
     [`detached-rejection`, `HEALTH-5`],
     [`logs-failure`, `HEALTH-5`],
-    [`wait-off-by-one`, `EVID-1`],
+    // Its early fulfillment also answers a wait for a retired run's txid
+    // before the new run is ready.
+    [`wait-off-by-one`, /EVID-1|EVID-2/],
     [`retired-evidence-before-ready`, `EVID-2`],
     [`forgets-retired-evidence`, `EVID-2`],
     [`leaks-waits-after-fail`, `EVID-2`],

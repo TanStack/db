@@ -44,7 +44,13 @@
  *   replaces the rows: keys it omits are gone.
  * - **LIFE-2, LIFE-5.** Cleanup releases the provider subscription. A restart
  *   is a fresh sync run: one new provider subscription, status `loading`, and
- *   no rows until its own first delivery.
+ *   no rows until its own first delivery. With capability
+ *   `prompt-after-restart`, the provider's next step can come in the same
+ *   task as the restart, before any event-loop turn, as an answer already
+ *   queued when the new subscription opens does. The new run still owes that
+ *   step's law: a failure fails it (READY-4) and a delivery applies. A result
+ *   a client cached for the retired run, which the client may replay on a
+ *   later turn, does not take the step's place.
  * - **LIFE-10.** A provider that fails ends its source: the adapter releases
  *   that subscription at the failure, and releases each subscription at most
  *   once across that end and the later cleanup.
@@ -209,6 +215,7 @@ export type EagerLiveSourceCapability =
   | `empty-response`
   | `delivery-error`
   | `await-sync`
+  | `prompt-after-restart`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -432,7 +439,12 @@ export interface EagerLiveSourceDriver {
  * - `empty-response`: the provider accepts a request and delivers nothing.
  *   Two outages below the threshold around one are generated as one
  *   element, so the reset it causes is reached.
- * - `restart`: cleanup, then `preload()` starts a new sync run.
+ * - `restart`: cleanup, then `preload()` starts a new sync run. With
+ *   `prompt-after-restart`, half the restarts are `prompt`: the next step
+ *   runs in the same task as `preload()`, and no checkpoint comes between
+ *   them. One history in six with this capability starts with a failure, a
+ *   prompt restart, and a failure or a complete delivery, because random
+ *   steps rarely put a failed run's restart next to a failure.
  *
  * Keys range over 1..5 and titles over three values, so batches revisit
  * keys, deletes hit live rows, and complete deliveries omit held keys. A row
@@ -478,7 +490,7 @@ export type EagerLiveSourceStep =
   | { readonly kind: `empty-response` }
   | { readonly kind: `delivery-error` }
   | { readonly kind: `sync-wait` }
-  | { readonly kind: `restart` }
+  | { readonly kind: `restart`; readonly prompt?: boolean }
 
 /**
  * A change in a generated batch. `retouch` re-delivers a row the source
@@ -656,7 +668,12 @@ export function eagerLiveSourceHistoryArb(
         .map((changes) => ({ kind: `changes` as const, changes })),
     },
     { weight: 2, arbitrary: fc.constant({ kind: `fail` as const }) },
-    { weight: 1, arbitrary: fc.constant({ kind: `restart` as const }) },
+    {
+      weight: 1,
+      arbitrary: capabilities.has(`prompt-after-restart`)
+        ? fc.boolean().map((prompt) => ({ kind: `restart` as const, prompt }))
+        : fc.constant({ kind: `restart` as const }),
+    },
   ]
   if (capabilities.has(`duplicate-key-delivery`)) {
     steps.push({
@@ -822,6 +839,18 @@ export function eagerLiveSourceHistoryArb(
           { kind: `changes`, changes },
           { kind: `restart` },
           { kind: `wait`, ahead: 0, timeout },
+        ]),
+    )
+  }
+  if (capabilities.has(`prompt-after-restart`)) {
+    // A failed run, its prompt restart, and the new run's first step.
+    scenarios.push(
+      fc
+        .oneof(fc.constant({ kind: `fail` as const }), snapshot)
+        .map((next): Array<EagerLiveSourceStep> => [
+          { kind: `fail` },
+          { kind: `restart`, prompt: true },
+          next,
         ]),
     )
   }
@@ -1274,7 +1303,7 @@ type AcceptedStep =
   | { kind: `empty-response`; resetOutage: boolean }
   | { kind: `delivery-error`; failure: number }
   | { kind: `sync-wait` }
-  | { kind: `restart` }
+  | { kind: `restart`; prompt: boolean }
 
 /**
  * Applies one step to the model. Returns the accepted step and the row
@@ -1641,7 +1670,10 @@ function stepModel(
       state.renewed = false
       state.failure = undefined
       endOutage(state)
-      return { done: { kind: `restart` }, publishable: [] }
+      return {
+        done: { kind: `restart`, prompt: step.prompt === true },
+        publishable: [],
+      }
     }
   }
 }
@@ -1692,6 +1724,8 @@ export const eagerLiveSourceReachStates = [
   `failure-after-ready`,
   `restart`,
   `restart-after-failure`,
+  `prompt-restart`,
+  `prompt-failure-after-failed-run`,
   `wait-before-evidence-fulfilled`,
   `wait-timed-out`,
   `wait-rejected-at-retirement`,
@@ -1738,6 +1772,8 @@ const capabilityOfState: Partial<
   Record<(typeof eagerLiveSourceReachStates)[number], EagerLiveSourceCapability>
 > = {
   'replacing-snapshot': `complete-snapshot`,
+  'prompt-restart': `prompt-after-restart`,
+  'prompt-failure-after-failed-run': `prompt-after-restart`,
   'wait-before-evidence-fulfilled': `await-evidence`,
   'wait-timed-out': `await-evidence`,
   'wait-rejected-at-retirement': `await-evidence`,
@@ -2319,6 +2355,9 @@ export async function checkEagerLiveSourceHistory(
     // Reported outages and applied live batches in the current run.
     let outagesThisRun = 0
     let batchesThisRun = 0
+    // A prompt restart whose checkpoint waits for the next accepted step,
+    // which runs in the same task.
+    let prompt: { index: number; afterFailure: boolean } | undefined
     for (const [index, step] of history.entries()) {
       const wasReady = state.phase === `ready`
       const phaseBefore = state.phase
@@ -2340,6 +2379,10 @@ export async function checkEagerLiveSourceHistory(
       }
       accepted++
       const { done, publishable } = result
+      if (prompt?.afterFailure && done.kind === `fail`) {
+        reach(`prompt-failure-after-failed-run`)
+      }
+      prompt = undefined
       switch (done.kind) {
         case `snapshot`:
           await provider.deliverSnapshot(structuredClone(done.rows))
@@ -2505,10 +2548,17 @@ export async function checkEagerLiveSourceHistory(
           events = foldChanges(collection)
           reach(`restart`)
           if (failedBefore) reach(`restart-after-failure`)
+          if (done.prompt) reach(`prompt-restart`)
           open.clear()
           outagesThisRun = 0
           batchesThisRun = 0
           if (pendingBefore) reach(`wait-rejected-at-retirement`)
+          if (done.prompt) {
+            // No turn before the next step: its checkpoint covers this one.
+            events.take()
+            prompt = { index, afterFailure: failedBefore }
+            continue
+          }
           break
         }
       }
@@ -2534,6 +2584,8 @@ export async function checkEagerLiveSourceHistory(
         events.take()
       }
     }
+    // A prompt restart with no later accepted step still has its checkpoint.
+    if (prompt) await compare(prompt.index, `LIFE-2/LIFE-5`)
   } catch (error) {
     primary = error
   }

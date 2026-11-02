@@ -1,3 +1,4 @@
+import { getFunctionName } from 'convex/server'
 import type { LoadSubsetFn, UnloadSubsetFn } from '@tanstack/db'
 import type { ConvexClient } from 'convex/browser'
 import type { ConvexReactClient } from 'convex/react'
@@ -19,6 +20,11 @@ export interface ConvexSubscription<T> {
   waitForCurrent?: () => Promise<void>
 }
 
+/** The clients' untyped accessor for a query result's log lines. */
+type Logged<TArgs extends Array<unknown>> = {
+  localQueryLogs?: (...args: TArgs) => unknown
+}
+
 export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
   client: ConvexCollectionClient,
   query: TQuery,
@@ -28,12 +34,17 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
 ): ConvexSubscription<FunctionReturnType<TQuery>> {
   let active = true
   // The client serves a query's cached result to a new subscription at
-  // once. A cached error belongs to an earlier subscription, so this one
-  // waits for the server instead (maintainer decision): until the server's
-  // first callback it has no current value, and the client's replay of the
-  // cached error is skipped once.
-  let cachedError = false
-  let replay = false
+  // once, and replays it on a later turn. A cached error belongs to an
+  // earlier subscription, so this one waits for the server instead
+  // (maintainer decision): while the client still holds that result, the
+  // subscription has no current value and ignores its replay. The client
+  // stores a new result object for each server answer, and the result's log
+  // lines belong to that object, so they name the cached result, also when
+  // the server answers before the replay. The log accessors are untyped, and
+  // the `onUpdate` handle's own one looks up the wrong query, so the
+  // JavaScript client's base client is read. Without them nothing is skipped.
+  let cached: unknown
+  const isCached = (logs: unknown) => cached !== undefined && logs === cached
   const stop = (unsubscribe: () => void) => () => {
     active = false
     unsubscribe()
@@ -57,30 +68,27 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
       query,
       args,
       (value) => {
-        cachedError = replay = false
         if (active) receive(value)
       },
       (error) => {
-        if (replay) {
-          replay = false
-          return
-        }
-        cachedError = false
-        if (active) fail(error)
+        if (active && !isCached(logs())) fail(error)
       },
     )
-    cachedError = replay = hasCachedError(() => subscription.getCurrentValue())
+    const base = (client as { client?: Logged<[string, unknown]> }).client
+    const name = getFunctionName(query)
+    const logs = () => base?.localQueryLogs?.(name, args)
+    if (hasCachedError(() => subscription.getCurrentValue())) cached = logs()
     return {
       getCurrentValue: () =>
-        cachedError ? undefined : subscription.getCurrentValue(),
+        isCached(logs()) ? undefined : subscription.getCurrentValue(),
       unsubscribe: stop(subscription),
     }
   }
   const watch = client.watchQuery(query, args)
-  cachedError = hasCachedError(() => watch.localQueryResult())
+  const logs = () => (watch as Logged<[]>).localQueryLogs?.()
+  if (hasCachedError(() => watch.localQueryResult())) cached = logs()
   const unsubscribe = watch.onUpdate(() => {
-    cachedError = false
-    if (!active) return
+    if (!active || isCached(logs())) return
     try {
       const result = watch.localQueryResult()
       if (result !== undefined) receive(result)
@@ -89,7 +97,8 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
     }
   })
   return {
-    getCurrentValue: () => (cachedError ? undefined : watch.localQueryResult()),
+    getCurrentValue: () =>
+      isCached(logs()) ? undefined : watch.localQueryResult(),
     unsubscribe: stop(unsubscribe),
   }
 }

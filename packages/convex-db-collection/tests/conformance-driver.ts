@@ -37,6 +37,10 @@
  * `awaitSync` is the adapter's wait for the query's current result
  * (`await-sync`).
  *
+ * A prompt restart (`prompt-after-restart`) sends the new run's first
+ * transition before the client's `setTimeout` replay of a cached result, as
+ * a server answer that is already queued on the socket arrives first.
+ *
  * Rows are Convex values: `note` absent is a missing field, and typed fields
  * hold the Convex kinds (no Date, which Convex values do not have). The
  * driver never reads the Collection.
@@ -183,9 +187,9 @@ class ConvexProvider implements ControlledProvider {
       const onUpdate = client.onUpdate.bind(client)
       client.onUpdate = ((...args: Parameters<typeof onUpdate>) => {
         const subscription = onUpdate(...args)
-        return Object.assign(counted(subscription), {
-          getCurrentValue: () => subscription.getCurrentValue(),
-        })
+        const release = counted(subscription)
+        // The handle keeps its own fields; only its release is counted.
+        return Object.assign(release, subscription, { unsubscribe: release })
       }) as typeof onUpdate
     } else {
       const watchQuery = client.watchQuery.bind(client) as (
@@ -336,6 +340,7 @@ export function convexConformanceDriver({
       `delivery-error`,
       `duplicate-key-delivery`,
       `await-sync`,
+      `prompt-after-restart`,
     ]),
     changeCommits: `per-batch`,
     duplicateInsert: `error`,
