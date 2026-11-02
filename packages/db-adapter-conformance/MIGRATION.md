@@ -444,4 +444,10 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
   - **GREEN:** Electric 1243 passed (4 skipped); conformance 79/79;
     TrailBase 151, RxDB 23, PowerSync 195.
   - **Size:** Electric +443 gzip bytes over the merge base, +28 for READY-9.
-  - **Open:** health after an external abort after ready has no law.
+  - **External abort after ready (decided 2026-11-02):** deliberate or
+    not, an aborted stream no longer syncs, so it is the source node's
+    `error`. The retry-decision model now expects it, also for an abort
+    while the first snapshot's acceptance is pending once it is accepted.
+    RED on 2dd5f0e75 at `[demand, hold, up-to-date, abort, release]`
+    (health none); the adapter now fails the run on an external abort
+    after ready.

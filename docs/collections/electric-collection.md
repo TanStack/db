@@ -450,7 +450,10 @@ belongs to the live query that requested it. When the stream gives up, it
 calls `fail()` with the error, or with the error your `onError` threw: a
 failed first load before readiness, or the source node's `error` after it. A give-up while a persistence wrapper is
 still accepting the first snapshot fails the Collection once that acceptance
-makes it ready. Complete updates from an explicit `replica: 'full'` stream remain valid.
+makes it ready. Aborting `shapeOptions.signal` stops the stream for
+good: before readiness the first load fails, and after it the source node
+shows an `error`, because the Collection no longer syncs, whether or not the
+abort was deliberate. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
 Outside scoped recovery, complete rows published by persistence reloads or

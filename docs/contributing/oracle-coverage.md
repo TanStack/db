@@ -6088,12 +6088,13 @@ outage, and that restart. The retry-decision model
 observes an `awaitTxId` and an `awaitMatch` that reject when the run fails
 or is cleaned up, and the source node's `error` while ready (READY-9: a
 give-up while the first snapshot's acceptance is pending is a post-ready
-failure once it is accepted). Its controlled driver now reports a give-up
+failure once it is accepted). An external abort after ready is the
+source node's `error` too (maintainer decision 2026-11-02: deliberate or
+not, an aborted stream no longer syncs). Its controlled driver now reports a give-up
 decision to the subscriber, as the installed client does; before, a
 give-up after ready never reached the adapter's failure path in that lane.
 Limits: no persisted resume or held commit receipt in the eager lane; no
-real Electric server; health after an external abort after ready has no
-law yet and is not compared; without an app `onError`, the driver detects a
+real Electric server;  without an app `onError`, the driver detects a
 give-up from the adapter's log, so an adapter that stops logging times out
 rather than failing a law. The shared check refuses `retryReportAfter`
 above 1 with `transport-reconnect` or `capability-renewal`: no law fixes

@@ -1950,11 +1950,16 @@ function createElectricSync<T extends Row<unknown>>(
       } else markReady()
     }
     // An external abort stops the source for good. Before the first ready,
-    // that is the final initial failure; cleanup aborts internally instead.
+    // that is the final initial failure; after it, deliberate or not, the
+    // source no longer syncs, so it is the source's error (maintainer
+    // decision). Cleanup aborts internally instead.
     const forwardExternalAbort = () => {
-      const fails = isActiveLifecycle() && !ready
+      const active = isActiveLifecycle()
       abortController.abort()
-      if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      if (active && ready) {
+        gaveUp = true
+        fail(new StreamAbortedError(collectionId))
+      } else if (active) failInitialSync(new StreamAbortedError(collectionId))
       // A source that stops must end its reserved transaction. The initial
       // failure decides first: abandoning commits.
       abandonOpenTransaction()

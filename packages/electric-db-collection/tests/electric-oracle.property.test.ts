@@ -4019,7 +4019,7 @@ describe(`Electric adapter laws`, () => {
             ? `pending`
             : (`one of two rejected` as never),
       health:
-        trace.collection.status === `ready` && !controller.signal.aborted
+        trace.collection.status === `ready`
           ? trace.collection.health.error
             ? `error`
             : `none`
