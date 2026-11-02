@@ -6700,17 +6700,27 @@ multiple groups, varying prefix predicates and downstream acquisition remain
 outside this lane; existing support/numeric budgets and their prior evidence
 remain unchanged.
 
-Review5740133634 raises an adjacent negative-width contract question. The
-support-window owner above is the location for a future maintainer decision and
-its witness. With `TopKArray(5, -2)`, install ordered values0/4/6/8/10, then insert2
-at rank1. Both maina3c4d0676 and the integrated branch emit moveIn10/moveOut6 while
-reporting size0. The executable same-source probe is recorded in the
-[second-main integration review](oracle-reviews/2026-11-02-removal-oracle-gaps.md#second-main-integration--a3c4d0676).
-The accepted rank-selection law in this change covers nonnegative widths.
-No negative-width empty-result law is claimed. Defining that behavior needs a
-maintainer decision before extending generated moves and source-edit histories.
-The adapter reuse path requires nonnegative target bounds and cannot take this
-negative-width input as an eligible page-window move.
+The negative-width question has a maintainer decision (2026-11-02): public
+`.limit(negative)` and `utils.setWindow({ limit: negative })` must throw
+synchronously before changing the authored query or live window. The pagination
+owner's [limit admission companion](../../packages/db/tests/query/limit-admission-oracle.ts)
+checks that sign law and unchanged rows, bounds, status, request errors,
+publications, acquisitions, releases, aborts and prior operation outcome. Each
+generated history exercises limit-only and combined moves before startup,
+after readiness, during initial loading, during an unfinished move and during
+source replay; builder construction is a separate path. Rejected operations
+are followed by partial valid moves and source updates. Valid zero, -0,
+positive integer, Infinity and negative-offset neighbors use independent
+rank selection; every pending candidate has its own held fixture.
+
+This is a public admission contract for ordinary ordered list queries, not a
+negative-width result law for raw IVM operators. The original counterexample
+remains: `TopKArray(5, -2)`, installed values 0/4/6/8/10, then insertion of 2,
+emits moveIn 10/moveOut 6 while reporting size 0. It remains outside the raw
+operator's supported nonnegative-width law. NaN, positive fractional widths,
+raw authored IR, framework error timing and provider delivery are outside the
+new admission evidence. Existing findOne, order and reentrancy error precedence
+remains separate. See the [admission evidence](oracle-reviews/2026-11-02-negative-limit-admission.md).
 
 **Repaired operator defects:** negative-window rows, size, source edits and
 return moves now agree with absolute ranks on all three paths. Each path's
