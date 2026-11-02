@@ -20,22 +20,17 @@ import type {
 // React can discard a render that suspends, including its refs. Keep the
 // initial-render failure across retries, scoped by client because streamed
 // preloads of the same collection can fail independently.
+const unscopedErrorScope = {}
 const initialRenderErrors = new WeakMap<
   Collection<any, any, any>,
-  {
-    byClient: WeakMap<DbClient, { error: unknown; clientQuery?: object }>
-    unscoped?: { error: unknown; clientQuery?: object }
-  }
+  WeakMap<object, { error: unknown; clientQuery?: object }>
 >()
 
 function clearInitialRenderError(
   collection: Collection<any, any, any>,
   client: DbClient | undefined,
 ) {
-  const entry = initialRenderErrors.get(collection)
-  if (!entry) return
-  if (client) entry.byClient.delete(client)
-  else delete entry.unscoped
+  initialRenderErrors.get(collection)?.delete(client ?? unscopedErrorScope)
 }
 
 function rememberInitialRenderError(
@@ -47,14 +42,13 @@ function rememberInitialRenderError(
   if (collection.status === `cleaned-up`) return
   let entry = initialRenderErrors.get(collection)
   if (!entry) {
-    entry = { byClient: new WeakMap() }
+    entry = new WeakMap()
     collection.once(`status:cleaned-up`, () => {
       initialRenderErrors.delete(collection)
     })
     initialRenderErrors.set(collection, entry)
   }
-  if (client) entry.byClient.set(client, { error, clientQuery })
-  else entry.unscoped = { error }
+  entry.set(client ?? unscopedErrorScope, { error, clientQuery })
 }
 
 /**
@@ -270,10 +264,9 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
         `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
       )
     }
-    const errorEntry = initialRenderErrors.get(collection)
-    const initialRenderError = client
-      ? errorEntry?.byClient.get(client)
-      : errorEntry?.unscoped
+    const initialRenderError = initialRenderErrors
+      .get(collection)
+      ?.get(client ?? unscopedErrorScope)
     // A replacement client query must not inherit the prior request's error.
     if (
       initialRenderError?.clientQuery !== undefined &&

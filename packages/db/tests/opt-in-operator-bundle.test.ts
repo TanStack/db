@@ -96,7 +96,6 @@ const coreValues = [
 // adapter app bundles these whatever operators it imports, so none of them may
 // bring an operator's code. `adapterImports()` below keeps this list current.
 const adapterValues = [
-  `BaseQueryBuilder`,
   `UnhashableQueryIRError`,
   `bindLiveQueryWindow`,
   `configPool`,
