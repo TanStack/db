@@ -580,7 +580,7 @@ the first reader and never settles an acquisition that was not issued.
 | ORC-011 | No shared semantic-fault hypothesis needs a second formulation. The independent self-join result and explicit commit provenance address the two named hypotheses. |
 | ORC-012 | This versioned record binds the reviewed parent heads, evidence, dispositions, and every applicable requirement. |
 | ORC-013 | Divergence without an older overwrite is the neighboring false-positive case. Literal versus held results and both settlement orders distinguish readiness boundaries. |
-| ORC-014 | Claims stop at core controlled acquisition and Node SQLite/coordinator controlled Electric messages. No HTTP provider, framework, or browser-process handoff claim follows. |
+| ORC-014 | Claims cover controlled core acquisition. The SQLite/coordinator tests run in Node with controlled Electric messages. No HTTP provider, framework, or browser-process handoff claim follows. |
 | ORC-015 | Browser reach requires each retained minimum plus honest divergence and actual overwrite states. Every deferred history requires one actual deferred joined demand. |
 | ORC-016 | Histories share independent projection/comparison or the existing generated driver. No standalone fixed expected rows or type assertions enter an oracle. |
 
