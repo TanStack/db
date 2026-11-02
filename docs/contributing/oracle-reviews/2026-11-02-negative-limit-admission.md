@@ -161,3 +161,10 @@ settlement, partial-bound inheritance and subsequent source updates. This is
 bounded evidence, not a proof for every history. The limits above remain;
 in particular no raw-operator negative-width result law or additional numeric
 validation policy is claimed. There is no known in-scope counterexample.
+
+
+## Reviewed production head
+
+The tested production head is `46058c58c36d26d8dcdc921f5d70b008a4d5fe65`.
+Its `packages/db/src` tree is `476f38cff16ffc97a67ce103f7d73789fe4e1ef1`.
+The subsequent evidence/changeset commit changes no production source or oracle.
