@@ -332,7 +332,7 @@ An old model expectation or open coverage note cannot supersede that decision.
 | --- | --- | --- |
 | An implicit keep does not write metadata; an explicit write does (D9/D18; 1, 4, 6). | The supplied nested bare-seed trace passed on both hosts in all three lanes, restoring cached M0 under D15 as independently predicted. A materialization mutant made an incorrect first durable write, then an explicit write repaired it; the old settlement-only runner passed. Seed 46 also produced eight old batches without a reload; reload-only corruption survived all 96 histories. | The authority accusation is false, but action-level durable comparison and guaranteed reload reach were missing. Both receiving paths now compare completed durable metadata before a later action can hide it. The controlled path also compares a transaction trace across held releases. Every constructive batch includes all three notice variants. |
 | Only completed storage observations advance the model, at their actual order (D15; 2, 3). | The old runner consumed inputs after its first authored action. The six actual factories recorded zero setup inputs, so no existing setup metadata failure was demonstrated. A separate runner-order witness supplies a setup input. | The recorder now withholds qualifying raw responses until hydration completes a storage read and application. Undrained responses fail a guard. Setup observations are consumed before authored actions; expected metadata still comes only from independent model storage. |
-| Constructive histories execute their declared actions; fixture transactions preserve scope (5, 7, 8). | All 3,000 sampled sibling lane histories had no skipped actions. The caught-inner-failure SQL probe committed row 2 incorrectly; a root query remained queued behind its own callback. Empty housekeeping commits under two open authored transactions preserved source metadata, consumer rows, receipts and durable metadata. | The reach count mismatch requires illegal actions the constructive grammar excludes; a new guard makes that premise explicit. SQL nested scopes now use savepoints and async-context root reentry, while unrelated callers retain serialized admission. Empty quiescence commits remain a stuttering abstraction; maxDepth bounds authored histories, not the runtime API. |
+| Constructive histories execute their declared actions; fixture transactions preserve scope (5, 7, 8). | All 3,000 sampled sibling lane histories had no skipped actions. The caught-inner-failure SQL probe committed row 2 incorrectly; a root query remained queued behind its own callback. Empty housekeeping commits preserved source metadata, consumer rows, receipts and durable metadata while two authored transactions remained open. | The reach count mismatch requires illegal actions the constructive grammar excludes; a new guard makes that premise explicit. SQL nested scopes now use savepoints and async-context root reentry, while unrelated callers retain serialized admission. Empty quiescence commits remain a stuttering abstraction; maxDepth bounds authored histories, not the runtime API. |
 
 The primary law, model and comparison remain in
 `packages/db/tests/sync-metadata-session-oracle.ts`. The controlled persisted
@@ -509,3 +509,27 @@ semantic test/instrument repairs. The new pushed head needs its own checks and
 review coverage before a readiness verdict. This evaluation's accounting and
 authorized repairs are complete within the stated receiving boundary. It does
 not close #2281, #2272 or #2317/P8, or establish whole-library correctness.
+
+
+## Current-head CodeRabbit wording follow-up
+
+Review `5742229429` covers `adf6a07f97b26116933ad68e3d5e1b2f6fe5093f`.
+It contains one additional minor wording item and no inline comments.
+`META-CR-5742229429-001` is **fixed-now**: the fixture evidence now says
+“while two authored transactions remained open.” This uses the reviewer's
+first suggestion and preserves the tested premise. The proposed hyphenated
+term would imply a new transaction category and was not suitable.
+
+This is a clarity improvement, not a correctness defect. Direct comparison
+of the sentence and its replacement, formatting, diff checks and unchanged
+TypeScript hashes validate it. No product law, model, history or observation
+changes, so no new RED test or mutant applies. The 253-test result and controls
+above still describe the executable tree. The raw review was reread after the
+edit: **1 = 1 fixed-now**, with no omitted suggestion or open item.
+
+Hire this reviewer for assisted documentation cleanup. The suggestion is
+precise and low priority, but this sample supplies no new behavioral evidence.
+The mutable summary now covers `adf6a07f9`, reports 100% docstring coverage
+and no blocking issue, and notes that it skipped the coverage map as similar
+to earlier changes. Final publication-head CI remains pending. This wording
+follow-up adds no unreviewed executable change.
