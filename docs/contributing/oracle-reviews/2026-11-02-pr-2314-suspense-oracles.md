@@ -89,16 +89,18 @@ models a permissive pending-cache fallback that memoizes the first loading
 entry under another caller's exact key:
 
 ```ts
-const exact = suspenseCollections?.get(suspenseKey!)
-if (exact) return exact.collection
-if (!suspenseCollections || !suspenseKey ||
-    !getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
-      .some((source) => source.status === `loading`)) return undefined
-const pending = [...suspenseCollections.values()].find(
-  ({ collection }) => collection.status === `loading`,
-)
-if (pending) suspenseCollections.set(suspenseKey, pending)
-return pending?.collection
+function getCachedCollection() {
+  const exact = suspenseCollections?.get(suspenseKey!)
+  if (exact) return exact.collection
+  if (!suspenseCollections || !suspenseKey ||
+      !getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
+        .some((source) => source.status === `loading`)) return undefined
+  const pending = [...suspenseCollections.values()].find(
+    ({ collection }) => collection.status === `loading`,
+  )
+  if (pending) suspenseCollections.set(suspenseKey, pending)
+  return pending?.collection
+}
 ```
 
 Instrumentation recorded 36 executions of the wrong pending-alias decision.
