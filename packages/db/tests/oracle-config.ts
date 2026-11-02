@@ -5,6 +5,18 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `pagination.limit-admission-replay-pending-negative`,
+  `pagination.limit-admission-replay-pending-valid`,
+  `pagination.limit-admission-builder-negative`,
+  `pagination.limit-admission-builder-valid`,
+  `pagination.limit-admission-unstarted-negative`,
+  `pagination.limit-admission-unstarted-valid`,
+  `pagination.limit-admission-ready-negative`,
+  `pagination.limit-admission-ready-valid`,
+  `pagination.limit-admission-initial-pending-negative`,
+  `pagination.limit-admission-initial-pending-valid`,
+  `pagination.limit-admission-move-pending-negative`,
+  `pagination.limit-admission-move-pending-valid`,
   `framework.react.result-shape`,
   `framework.react-dependency-list.result-shape`,
   `framework.preact.result-shape`,

@@ -986,5 +986,10 @@
     "file": "query/live/collection-config-builder.ts",
     "template": "Source collection '${collectionId}' failed its first load",
     "literals": ["Source collection '", "' failed its first load"]
+  },
+  "261": {
+    "file": "query/validate-limit.ts",
+    "template": "limit must be nonnegative",
+    "literals": ["limit must be nonnegative"]
   }
 }

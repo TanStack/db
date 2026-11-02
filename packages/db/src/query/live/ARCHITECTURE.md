@@ -1821,7 +1821,11 @@ custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
 A windowed query has an `orderBy`; its window is the ordered view, by offset
-and limit, that `setWindow` moves. A `findOne` is bounded by a top-K too: it
+and limit, that `setWindow` moves. A negative limit throws synchronously at
+`.limit()` or `setWindow()` admission, before changing the authored query,
+window or demand (maintainer decision, 2026-11-02). Zero, including -0, stays
+valid. Negative offsets retain their absolute-rank selection semantics.
+A `findOne` is bounded by a top-K too: it
 keeps its compiled limit (1, or 0 for `.limit(0).findOne()`), and `setWindow`
 throws `SetWindowFindOneLimitError` for any other limit. An ordered `findOne`
 has a movable window. An unordered `findOne` is a fixed one-row result that
