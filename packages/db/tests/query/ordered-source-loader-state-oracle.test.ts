@@ -565,8 +565,17 @@ type RetirementReceiverCase = {
   // The unload moves the repaired prefix, deletes its rows before the
   // boundary, or deletes the boundary row itself: each is new source
   // information. Or it evicts a sent row past the boundary that only a
-  // replaced acquisition held, which is not a source-order change.
-  unloadChange: `move` | `delete` | `delete-boundary` | `evict`
+  // replaced acquisition held, which is not a source-order change: row 1
+  // after it moved, or the boundary's tie.
+  // `delete-tie` deletes only a prefix row that ties with the boundary row,
+  // which the repair also holds.
+  unloadChange:
+    `move` | `delete` | `delete-boundary` | `delete-tie` | `evict` | `evict-tie`
+  // A row that ties with the repair's boundary row. Ties order by key
+  // (ARCHITECTURE, pooled live queries publish what the live-query Collection
+  // would), so row 0 sorts before the boundary row, inside the prefix, and
+  // row 9 sorts after it, outside. They differ from the boundary only by key.
+  boundaryTie: `none` | `before` | `after`
 }
 
 // Both real consumers receive the same legal history and shared judgments.
@@ -586,7 +595,10 @@ async function checkRetirementReceiver(
       | `delete-release`
       | `delete-held-answer`
       | `delete-boundary-release`
-      | `evict-release`,
+      | `tie-delete-boundary`
+      | `delete-tie-release`
+      | `evict-release`
+      | `evict-tie-release`,
   ) => void,
 ): Promise<void> {
   type Row = { id: number; rank: number }
@@ -597,6 +609,18 @@ async function checkRetirementReceiver(
   const truth = new Map<number, Row>(
     [1, 2, 3, 4, 5, 6, 7].map((id) => [id, { id, rank: id }]),
   )
+  // The repair reads the current window's prefix. After row 1 moves, rows 2
+  // onward fill it, so its last row ranks prefixSize + 1, or prefixSize when
+  // row 0 joins it before that boundary row.
+  const prefixSize = windowOffset + scenario.limit
+  if (scenario.boundaryTie === `after`) {
+    truth.set(9, { id: 9, rank: prefixSize + 1 })
+  }
+  if (scenario.boundaryTie === `before`) {
+    truth.set(0, { id: 0, rank: prefixSize })
+  }
+  const byOrder = (left: Row, right: Row) =>
+    left.rank - right.rank || left.id - right.id
   const installed = new Map<number, Row>()
   const starts: Array<number> = []
   const publications: Array<{ at: number; rows: Array<Row> }> = []
@@ -645,7 +669,7 @@ async function checkRetirementReceiver(
                         row,
                       ) === true),
                 )
-                .sort((left, right) => left.rank - right.rank)
+                .sort(byOrder)
               const offset = options.cursor ? 0 : (options.offset ?? 0)
               const rows = matching.slice(
                 offset,
@@ -680,37 +704,64 @@ async function checkRetirementReceiver(
             if (!armed || unloaded !== undefined) return
             unloaded = ++clock
             reached(`release`)
-            if (scenario.unloadChange !== `move`) {
+            if (
+              scenario.unloadChange !== `move` &&
+              scenario.unloadChange !== `evict-tie`
+            ) {
               reached(`${scenario.unloadChange}-release`)
             }
+            if (
+              scenario.boundaryTie !== `none` &&
+              scenario.unloadChange === `delete-boundary`
+            ) {
+              reached(`tie-delete-boundary`)
+            }
+            const prefix = [...truth.values()]
+              .sort(byOrder)
+              .slice(0, prefixSize)
+            const boundary = prefix.at(-1)!
+            const ties = [...truth.values()].filter(
+              (row) => row !== boundary && row.rank === boundary.rank,
+            )
             operations.begin()
-            if (scenario.unloadChange === `evict`) {
-              // Row 1 now ranks after the repaired prefix; the provider keeps it.
-              installed.delete(1)
-              operations.write({ type: `delete`, value: { ...truth.get(1)! } })
+            if (
+              scenario.unloadChange === `evict` ||
+              scenario.unloadChange === `evict-tie`
+            ) {
+              // Row 1 now ranks after the prefix, and the after-tie after its
+              // boundary row; the provider keeps both.
+              const evicted =
+                scenario.unloadChange === `evict`
+                  ? truth.get(1)!
+                  : ties.find((row) => !prefix.includes(row))
+              if (evicted && installed.delete(evicted.id)) {
+                if (scenario.unloadChange === `evict-tie`) {
+                  reached(`evict-tie-release`)
+                }
+                operations.write({ type: `delete`, value: { ...evicted } })
+              }
               operations.commit()
               return
             }
             invalidation = unloaded
-            // The repair's prefix is rows 2 through offset + limit + 1; the
-            // last of them is its boundary.
-            for (let id = 2; id <= scenario.offset + scenario.limit + 1; id++) {
-              if (
-                scenario.unloadChange === `delete` ||
-                scenario.unloadChange === `delete-boundary`
-              ) {
-                const boundary = id === scenario.offset + scenario.limit + 1
-                if (boundary !== (scenario.unloadChange === `delete-boundary`))
-                  continue
-                const value = truth.get(id)!
-                truth.delete(id)
-                installed.delete(id)
-                operations.write({ type: `delete`, value: { ...value } })
+            const changed =
+              scenario.unloadChange === `move`
+                ? prefix
+                : scenario.unloadChange === `delete`
+                  ? prefix.slice(0, -1)
+                  : scenario.unloadChange === `delete-boundary`
+                    ? [boundary]
+                    : ties.filter((row) => prefix.includes(row))
+            for (const row of changed) {
+              if (scenario.unloadChange !== `move`) {
+                truth.delete(row.id)
+                installed.delete(row.id)
+                operations.write({ type: `delete`, value: { ...row } })
                 continue
               }
-              const value = { id, rank: 20 + id }
-              truth.set(id, value)
-              installed.set(id, value)
+              const value = { id: row.id, rank: 20 + row.id }
+              truth.set(row.id, value)
+              installed.set(row.id, value)
               operations.write({ type: `update`, value: { ...value } })
             }
             operations.commit()
@@ -736,7 +787,7 @@ async function checkRetirementReceiver(
     const rows = (live ? live.toArray : [...effectRows.values()]).map(
       ({ id, rank }) => ({ id, rank }),
     )
-    return live ? rows : rows.sort((left, right) => left.rank - right.rank)
+    return live ? rows : rows.sort(byOrder)
   }
   const recordPublication = () => {
     if (armed) publications.push({ at: ++clock, rows: visible() })
@@ -759,7 +810,7 @@ async function checkRetirementReceiver(
       : undefined
   const expected = (offset = windowOffset) =>
     [...truth.values()]
-      .sort((left, right) => left.rank - right.rank)
+      .sort(byOrder)
       .slice(offset, offset + scenario.limit)
       .map((row) => ({ ...row }))
   const settleMove = () => {
@@ -814,12 +865,15 @@ async function checkRetirementReceiver(
         )
       }
       reached(`held-answer`)
-      if (scenario.unloadChange === `delete`) reached(`delete-held-answer`)
+      // Every delete unload owes the replacement this held answer delays.
+      if (scenario.unloadChange.startsWith(`delete`)) {
+        reached(`delete-held-answer`)
+      }
       replacement.resolve()
       await flushPromises()
     }
     checkRetirementProgress(invalidation, starts, publications[0]?.at)
-    if (scenario.unloadChange === `evict`) {
+    if (invalidation === undefined) {
       expect(
         starts.filter((at) => at > unloaded!),
         `an eviction during retirement keeps the repair's boundary`,
@@ -3037,10 +3091,13 @@ describe(`Ordered source request authority`, () => {
 
   // Real Collection and Effect consumers share the same provider grammar,
   // full-sort model, event-ordered progress relation, and publication check.
-  // Four adapter unloads cross them: moving the repaired prefix, deleting its
+  // Five adapter unloads cross them: moving the repaired prefix, deleting its
   // rows before the boundary, or deleting the boundary row owes a replacement;
-  // evicting a row past its boundary owes none. Each
-  // grammar runs 300 histories so held answers stay above their minimum.
+  // evicting a row past its boundary, including the boundary's tie, owes none.
+  // A tie with the boundary row makes the boundary row and its tie differ
+  // only by key. Each
+  // grammar runs 400 histories so held answers and ties stay above their
+  // minimum.
   // A Collection window move in the same turn as the ordering write must
   // wait for the replacement before it reports success.
   // Held replacement answers and offsets add timing and source-prefix cuts;
@@ -3067,15 +3124,54 @@ describe(`Ordered source request authority`, () => {
         `move` as const,
         `delete` as const,
         `delete-boundary` as const,
+        `delete-tie` as const,
         `evict` as const,
+        `evict-tie` as const,
+      ),
+      // Ties need the deterministic prefix of the other kinds, so they are
+      // drawn more often than no tie.
+      boundaryTie: fc.oneof(
+        { weight: 1, arbitrary: fc.constant(`none` as const) },
+        { weight: 2, arbitrary: fc.constant(`before` as const) },
+        { weight: 2, arbitrary: fc.constant(`after` as const) },
       ),
     })
-    // A delete before the boundary needs a prefix of at least two rows.
-    .map((scenario): RetirementReceiverCase =>
-      scenario.unloadChange === `delete` && scenario.offset + scenario.limit < 2
-        ? { ...scenario, limit: 2 }
-        : scenario,
-    )
+    // Deleting the tie needs the before-tie, and evicting it the after-tie. A
+    // delete before the boundary and a before-tie both need a two-row prefix.
+    // A same-turn window move may repair either window's prefix, so it keeps
+    // the unloads that do not name that prefix: a move and row 1's eviction.
+    .map((drawn): RetirementReceiverCase => {
+      const generated =
+        drawn.kind === `collection-window`
+          ? {
+              ...drawn,
+              boundaryTie: `none` as const,
+              unloadChange:
+                drawn.unloadChange === `evict`
+                  ? (`evict` as const)
+                  : (`move` as const),
+            }
+          : drawn
+      const boundaryTie =
+        generated.unloadChange === `delete-tie`
+          ? (`before` as const)
+          : generated.unloadChange === `evict-tie`
+            ? (`after` as const)
+            : generated.boundaryTie
+      const windowOffset =
+        generated.kind === `collection-window`
+          ? 1 - generated.offset
+          : generated.offset
+      const needsTwo =
+        generated.unloadChange === `delete` || boundaryTie === `before`
+      return {
+        ...generated,
+        boundaryTie,
+        ...(needsTwo && windowOffset + generated.limit < 2
+          ? { limit: 2 as const }
+          : {}),
+      }
+    })
   // A shrink path belongs to one arbitrary and driver. The receiving grammar
   // has its own identity so replay never applies a controlled history's path.
   const retirementReceiverProperty = `ordered-loader.retirement-receiver`
@@ -3100,7 +3196,10 @@ describe(`Ordered source request authority`, () => {
           `delete-release`,
           `delete-held-answer`,
           `delete-boundary-release`,
+          `tie-delete-boundary`,
+          `delete-tie-release`,
           `evict-release`,
+          `evict-tie-release`,
         ] as const,
         { minimum: 20 },
       )
@@ -3116,8 +3215,8 @@ describe(`Ordered source request authority`, () => {
           )
         }),
         campaign === `fixed`
-          ? { seed: 20261029, numRuns: oracleRuns(300) }
-          : oraclePropertyOptions(300, retirementReceiverProperty),
+          ? { seed: 20261029, numRuns: oracleRuns(400) }
+          : oraclePropertyOptions(400, retirementReceiverProperty),
       )
       reach.assertReached()
       process.stderr.write(
@@ -3135,19 +3234,29 @@ describe(`Ordered source request authority`, () => {
     [`effect`, `move`],
     [`collection`, `delete`],
     [`collection`, `delete-boundary`],
+    [`collection`, `delete-tie`],
     [`collection`, `evict`],
+    [`collection`, `evict-tie`],
   ] as const)(
     `receives retirement invalidation in a held %s replay (unload: %s)`,
     async (kind, unloadChange) => {
       await checkRetirementReceiver(
         {
           indexed: false,
-          limit: unloadChange === `delete` ? 2 : 1,
+          limit:
+            unloadChange === `delete` || unloadChange === `delete-tie` ? 2 : 1,
           synchronous: false,
           offset: 0,
           holdReplacement: true,
           kind,
           unloadChange,
+          boundaryTie:
+            unloadChange === `delete-tie`
+              ? `before`
+              : unloadChange === `delete-boundary` ||
+                  unloadChange === `evict-tie`
+                ? `after`
+                : `none`,
         },
         () => {},
       )

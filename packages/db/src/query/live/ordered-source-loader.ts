@@ -78,8 +78,11 @@ export class OrderedSourceLoader {
   // completion sets it again, so it never needs clearing.
   private hasSettledSourceRequest = false
   private settledSourceBoundary: Record<string, unknown> | undefined
-  // The boundary row's key: a tie with the boundary is not the boundary row.
-  private settledSourceBoundaryKey: string | number | undefined
+  // The settled prefix ending at that boundary: a row that ties with the
+  // boundary but is not among these rows lies outside the prefix.
+  private settledSourcePrefix: ReadonlyArray<
+    ChangeMessage<Record<string, unknown>, string | number>
+  > = []
   // Independent of ordinary finite success. A live delete or order-changing
   // update owes a bounded repair: unlike a failed request it cannot have
   // partially written unknown rows, so re-reading the exact ordered prefix is
@@ -231,10 +234,10 @@ export class OrderedSourceLoader {
     let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
-      // A finished repair holds every row through its boundary row, so
-      // releasing what it superseded removes only rows after it, such as a tie
-      // only an old tie request held. Deleting a sent row through the boundary
-      // row is new source information.
+      // A finished repair holds every row of its prefix, so releasing what it
+      // superseded removes only rows after it, such as a tie only an old tie
+      // request held. Deleting a sent row of the prefix is new source
+      // information.
       if (change.type === `delete` && this.retiringSupersededAcquisitions) {
         const order =
           previous === undefined || this.settledSourceBoundary === undefined
@@ -242,7 +245,8 @@ export class OrderedSourceLoader {
             : this.info.comparator(previous, this.settledSourceBoundary)
         if (
           order > 0 ||
-          (order === 0 && change.key !== this.settledSourceBoundaryKey)
+          (order === 0 &&
+            this.settledSourcePrefix.every(({ key }) => key !== change.key))
         )
           continue
       }
@@ -1239,17 +1243,16 @@ export class OrderedSourceLoader {
               }
               if (!isFullSource && options.orderBy) {
                 try {
-                  const boundary = this.subscription
-                    .readOrderedSnapshot({
-                      ...options,
-                      // Provider limits include optimistic headroom. Those
-                      // extra local ranks do not prove a source boundary.
-                      limit: requestedCount ?? options.limit,
-                    })
-                    .at(-1)
+                  const prefix = this.subscription.readOrderedSnapshot({
+                    ...options,
+                    // Provider limits include optimistic headroom. Those
+                    // extra local ranks do not prove a source boundary.
+                    limit: requestedCount ?? options.limit,
+                  })
+                  const boundary = prefix.at(-1)?.value
                   if (boundary) {
-                    this.settledSourceBoundary = boundary.value
-                    this.settledSourceBoundaryKey = boundary.key
+                    this.settledSourceBoundary = boundary
+                    this.settledSourcePrefix = prefix
                   }
                 } catch (error) {
                   if (canSettleSynchronously) {
