@@ -36,7 +36,11 @@ import {
   NonAggregateExpressionNotInGroupByError,
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { declareOracle } from '../oracle-declaration.js'
 
@@ -162,7 +166,10 @@ import { declareOracle } from '../oracle-declaration.js'
  * with an orderBy rarely compile, so one history in four takes ordered
  * shapes from a grammar whose shapes compile. The source starts with a row
  * whose key `A` sorts between `a` and `b`, where locale and code-unit order
- * differ.
+ * differ. Each campaign first replays structural histories through this same
+ * model, driver, and comparison. They cover every declared state independently
+ * of the seed, including string ordering. The 160 generated histories then
+ * explore the full grammar without depending on chance for structural reach.
  *
  * Limits: one parent field (`x`) and one source field (`v`); groups by one,
  * two, or three keys; numbers and string keys only. A boolean, Date, `NaN`,
@@ -1130,6 +1137,7 @@ async function runHistory(
   bareKeys = false,
   stripped: Stripped = `none`,
   alone = false,
+  fixed = false,
 ): Promise<void> {
   const grouped = grouping !== `none`
   // Most generated shapes throw on their own; a runtime-stripped history
@@ -1152,7 +1160,7 @@ async function runHistory(
       first?.by === `agg` ? first : { by: `agg`, fn: `sum`, dir: `asc` }
     top = { fields: { f0: { k: `agg`, fn: term.fn } }, orderBy: [term] }
   }
-  reach?.beginHistory()
+  reach?.beginHistory({ fixed })
   if (stripped === `runtime`) reach?.reach(`include runtime stripped`)
   for (const s of [top, nested]) {
     if (s.include?.wrap === `bare`)
@@ -1524,6 +1532,7 @@ const historyFor = (
     fc.boolean(),
     stripped,
     alone,
+    fc.constant(false),
   )
 
 // Half the histories are generated; three in six of those build their IR by
@@ -1531,9 +1540,8 @@ const historyFor = (
 // the grouping compiler, everywhere or from orderBy only, and takes the
 // forced shape, for one or several groups chosen in turn. One in four takes
 // ordered shapes that compile, at the top level and in the include query,
-// and in one of three strips the orderBy aggregates' compiler. About 40
-// histories of each kind per campaign of 160 make each reach state certain
-// in practice: a campaign misses the rarest one about once in 1,500 seeds.
+// and in one of three strips the orderBy aggregates' compiler. These weights
+// explore the grammar; the structural histories below guarantee reach.
 const history = fc.oneof(
   {
     weight: 2,
@@ -1584,6 +1592,72 @@ const history = fc.oneof(
   },
 )
 
+/**
+ * Structural histories use the same model and comparison as the generated
+ * grammar. They force each law's premise before the random suffix: sampling
+ * an ordered shape alone does not ensure its terms ever use a string field.
+ * No history has a separate expected answer.
+ */
+const countShape: Shape = { fields: { f0: { k: `agg`, fn: `count` } } }
+const keyShape: Shape = { fields: { f0: { k: `key` } } }
+const fixedHistory = (
+  top: Shape,
+  nested: Shape = top,
+  grouping: Grouping = `key`,
+  stripped: Stripped = `none`,
+  bareKeys = false,
+): Required<Parameters<typeof runHistory>> => [
+  top,
+  nested,
+  grouping,
+  false,
+  [],
+  false,
+  bareKeys,
+  stripped,
+  false,
+  true,
+]
+const structuralHistories = [
+  ...([`field`, `nested`, `case`] as const).map((at) =>
+    fixedHistory({ ...countShape, include: { wrap: `bare`, at } }),
+  ),
+  fixedHistory({ ...countShape, include: { wrap: `toArray`, at: `case` } }),
+  ...([`include`, `materialize`] as const).map((wrap) =>
+    fixedHistory({ ...countShape, include: { wrap, at: `field` } }),
+  ),
+  fixedHistory(countShape, keyShape, `key`, `none`, true),
+  fixedHistory(countShape, countShape, `key`, `grouping`),
+  fixedHistory(
+    { ...countShape, having: { part: { k: `agg`, fn: `count` }, lit: 2 } },
+    countShape,
+    `none`,
+    `grouping`,
+  ),
+  fixedHistory(countShape, countShape, `key`, `runtime`),
+  fixedHistory(
+    {
+      fields: { f0: { k: `agg`, fn: `sum` } },
+      orderBy: [
+        { by: `agg`, fn: `sum`, dir: `desc` },
+        { by: `selected`, field: `f0`, kind: `number`, dir: `asc` },
+      ],
+    },
+    undefined,
+    `pair`,
+    `orderBy`,
+  ),
+  fixedHistory(
+    {
+      ...keyShape,
+      orderBy: [{ by: `selected`, field: `f0`, kind: `string`, dir: `asc` }],
+    },
+    undefined,
+    `triple`,
+  ),
+]
+const examples = structuralHistories.map((entry) => [entry] as [typeof entry])
+
 /** The states the operator laws need; each campaign must reach all of them. */
 const reachStates = [
   `bare include: field`,
@@ -1618,81 +1692,60 @@ let reach:
 declareOracle({
   check: [runHistory],
   model: [modelGroup, modelError],
+  grammar: [history],
 })
 
 describe(`aggregate select shapes`, () => {
-  it(`match the model across generated shapes (fixed campaign)`, async () => {
-    // A repeatable baseline. Seed 2094 is arbitrary.
-    reach = createOracleReach(`${PROPERTY} (fixed)`, reachStates)
-    await fc.assert(
-      fc.asyncProperty(
-        history,
-        ([
-          top,
-          nested,
-          grouping,
-          shadow,
-          steps,
-          union,
-          bareKeys,
-          stripped,
-          alone,
-        ]) =>
-          runHistory(
-            top,
-            nested,
-            grouping,
-            shadow,
-            steps,
-            union,
-            bareKeys,
-            stripped,
-            alone,
-          ),
-      ),
-      { numRuns: oracleRuns(160), seed: 2094 },
-    )
-    reach.assertReached()
-    reach = undefined
-  })
+  oracleReplayTest(it)(
+    `match the model across generated shapes (fixed campaign)`,
+    async () => {
+      // A repeatable baseline. Seed 2094 is arbitrary.
+      reach = createOracleReach(`${PROPERTY} (fixed)`, reachStates, {
+        fixedHistories: structuralHistories.length,
+      })
+      const options = { numRuns: oracleRuns(160), seed: 2094 }
+      await fc.assert(
+        fc.asyncProperty(history, (entry) => runHistory(...entry)),
+        // Fast-check counts examples in numRuns; keep them above the base budget.
+        { ...options, numRuns: options.numRuns + examples.length, examples },
+      )
+      reach.assertReached()
+      if (process.env.TANSTACK_DB_ORACLE_STATISTICS)
+        console.info(
+          JSON.stringify({
+            property: PROPERTY,
+            reach: Object.fromEntries(reach.counts()),
+          }),
+        )
+      reach = undefined
+    },
+  )
 
-  it(`match the model across generated shapes (random or replayed)`, async () => {
-    reach = createOracleReach(`${PROPERTY} (random)`, reachStates)
-    await fc.assert(
-      fc.asyncProperty(
-        history,
-        ([
-          top,
-          nested,
-          grouping,
-          shadow,
-          steps,
-          union,
-          bareKeys,
-          stripped,
-          alone,
-        ]) =>
-          runHistory(
-            top,
-            nested,
-            grouping,
-            shadow,
-            steps,
-            union,
-            bareKeys,
-            stripped,
-            alone,
-          ),
-      ),
-      oraclePropertyOptions(160, PROPERTY),
-    )
-    reach.assertReached()
-    reach = undefined
-  })
+  oracleReplayTest(it, PROPERTY)(
+    `match the model across generated shapes (random or replayed)`,
+    async () => {
+      reach = createOracleReach(`${PROPERTY} (random)`, reachStates, {
+        fixedHistories: structuralHistories.length,
+      })
+      await fc.assert(
+        fc.asyncProperty(history, (entry) => runHistory(...entry)),
+        oraclePropertyOptions(160, PROPERTY, { examples }),
+      )
+      reach.assertReached()
+      if (process.env.TANSTACK_DB_ORACLE_STATISTICS)
+        console.info(
+          JSON.stringify({
+            property: PROPERTY,
+            reach: Object.fromEntries(reach.counts()),
+          }),
+        )
+      reach = undefined
+    },
+  )
 
   // Pinned replay of a review counterexample: a grouped select value that
   // holds the group key inside a function must read the group's key.
-  it(`reads the group key inside a function`, async () => {
+  oracleReplayTest(it)(`reads the group key inside a function`, async () => {
     await runHistory(
       { fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } } },
       { fields: { f0: { k: `agg`, fn: `count` } } },
@@ -1704,7 +1757,7 @@ describe(`aggregate select shapes`, () => {
 
   // Pinned replay: a published row keeps the select's field order, also
   // when a group key comes before a plain aggregate.
-  it(`keeps the select's field order`, async () => {
+  oracleReplayTest(it)(`keeps the select's field order`, async () => {
     await runHistory(
       {
         fields: {
@@ -1721,40 +1774,50 @@ describe(`aggregate select shapes`, () => {
 
   // Pinned replay of a generated counterexample: an aggregate query without
   // groupBy whose select wraps its only aggregate still accepts HAVING.
-  it(`accepts HAVING beside a wrapped aggregate without groupBy`, async () => {
-    await runHistory(
-      {
-        fields: {
-          f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `lit`, n: 1 } },
+  oracleReplayTest(it)(
+    `accepts HAVING beside a wrapped aggregate without groupBy`,
+    async () => {
+      await runHistory(
+        {
+          fields: {
+            f0: {
+              k: `add`,
+              a: { k: `agg`, fn: `count` },
+              b: { k: `lit`, n: 1 },
+            },
+          },
+          having: { part: { k: `lit`, n: 0 }, lit: 0 },
         },
-        having: { part: { k: `lit`, n: 0 }, lit: 0 },
-      },
-      {
-        fields: {
-          f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `parent` } },
+        {
+          fields: {
+            f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `parent` } },
+          },
+          having: { part: { k: `parent` }, lit: 1 },
         },
-        having: { part: { k: `parent` }, lit: 1 },
-      },
-      `none`,
-      false,
-      [],
-    )
-  })
+        `none`,
+        false,
+        [],
+      )
+    },
+  )
 
   // Pinned replay: a parent field stays legal when the include's source
   // shadows the parent alias.
-  it(`reads a parent field under a shadowing child alias`, async () => {
-    await runHistory(
-      { fields: { f0: { k: `agg`, fn: `count` } } },
-      {
-        fields: {
-          f0: { k: `parent` },
-          f1: { k: `agg`, fn: `count` },
+  oracleReplayTest(it)(
+    `reads a parent field under a shadowing child alias`,
+    async () => {
+      await runHistory(
+        { fields: { f0: { k: `agg`, fn: `count` } } },
+        {
+          fields: {
+            f0: { k: `parent` },
+            f1: { k: `agg`, fn: `count` },
+          },
         },
-      },
-      `none`,
-      true,
-      [],
-    )
-  })
+        `none`,
+        true,
+        [],
+      )
+    },
+  )
 })
