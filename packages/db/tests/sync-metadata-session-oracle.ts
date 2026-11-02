@@ -63,6 +63,10 @@ import { declareOracle } from './oracle-declaration.js'
  *   a seed supplied it is an insert. Among seeds of a row that no source
  *   write has written, the latest seed wins whole, metadata included
  *   (`db-client-hydration-authority-oracle.test.ts`).
+ * - Keeping metadata is not writing it (D9 and D18). Updates and equal
+ *   re-inserts without explicit metadata leave durable metadata alone. A
+ *   named current-run write is source-written (D11); under unknown writes,
+ *   differing stored metadata may become source-written (D15 and D18).
  *
  * Authority: maintainer decisions of 2026-10-22 to borrow standard theory and
  * to place seeds beneath source writes (D4, D5, and its clarification "b");
@@ -71,6 +75,8 @@ import { declareOracle } from './oracle-declaration.js'
  * share the sync API with the source; the glossary
  * entries for accepted sync transactions and the exposed authoritative base;
  * and the row-metadata write rules of 2026-10-05 for implicit metadata.
+ * Decisions 9, 11, 14, 15 and 18 are recorded in
+ * `docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md`.
  *
  * ## Limits
  *
@@ -87,6 +93,12 @@ import { declareOracle } from './oracle-declaration.js'
  * source update of an absent row is not a legal history (the change-message
  * protocol), so it is not generated; it arises only when an inner
  * transaction's update commits ahead of the enclosing write it relied on.
+ * The native receiver also records actual successful pull responses without
+ * replay details. It completes each source commit's correlated notice and
+ * recovery before the next authored action, then compares the same model's
+ * D15 storage observation. Arbitrary response/application interleavings,
+ * recovery during cleanup, and the necessity of gap detection are outside
+ * this bounded schedule.
  */
 
 // ---------------------------------------------------------------------------
@@ -583,6 +595,162 @@ export function sessionHistoryArbitrary(
 }
 
 /**
+ * A source insert can be visible to an inner transaction before it commits.
+ * The inner equal re-insert keeps metadata without writing it (D9 and D18).
+ * A later named or unknown-author reload follows its own rules (D11, D15 and
+ * D18); keeping a value in this tab does not make that value durable.
+ *
+ * This constructive subgrammar rebuilds the #2281 metadata prefix and varies
+ * both keys, seed shape/metadata and arrival, explicit metadata, repeated
+ * re-inserts, a core hold, the enclosing transaction's ending, and named
+ * versus full-reload notices. Every action is legal in the peer lanes. Store
+ * and read holds are excluded because their pending work blocks peer notices.
+ * The general session grammar continues to cover their independent laws.
+ */
+export const seedReinsertReloadHistoryArbitrary: fc.Arbitrary<
+  Array<SessionAction>
+> = fc
+  .record({
+    key: fc.constantFrom(...sessionRowKeys),
+    bare: fc.boolean(),
+    narrow: fc.boolean(),
+    seedInside: fc.boolean(),
+    outerMetadata: fc.boolean(),
+    innerMetadata: fc.boolean(),
+    repeats: fc.integer({ min: 1, max: 3 }),
+    hold: fc.boolean(),
+    ending: fc.constantFrom(`open`, `commit`, `cancel`),
+    notice: fc.constantFrom(`row` as const, `reload` as const),
+  })
+  .map((input): Array<SessionAction> => {
+    const seed: SessionAction = {
+      type: `seed`,
+      key: input.key,
+      bare: input.bare,
+      narrow: input.narrow,
+    }
+    return [
+      ...(input.hold ? [{ type: `hold` as const }] : []),
+      ...(input.seedInside
+        ? [{ type: `begin` as const }, seed]
+        : [seed, { type: `begin` as const }]),
+      { type: `insertOverSeed`, key: input.key, metadata: input.outerMetadata },
+      { type: `begin` },
+      ...Array.from({ length: input.repeats }, (): SessionAction => ({
+        type: `reinsert`,
+        key: input.key,
+        metadata: input.innerMetadata,
+      })),
+      { type: `commit` },
+      ...(input.ending === `open`
+        ? []
+        : [{ type: input.ending } as SessionAction]),
+      { type: `peer`, key: input.key === 1 ? 2 : 1, notice: input.notice },
+    ]
+  })
+
+/** The source report is input to the same model and comparison as generation. */
+export const seedReinsertReloadReplay: Array<SessionAction> = [
+  { type: `begin` },
+  { type: `seed`, key: 1, narrow: false, bare: true },
+  { type: `insertOverSeed`, key: 1, metadata: false },
+  { type: `begin` },
+  { type: `reinsert`, key: 1, metadata: false },
+  { type: `commit` },
+  { type: `peer`, key: 2, notice: `reload` },
+]
+
+/**
+ * D9 separates keeping metadata in this tab from writing it. D18 says that
+ * storing a row over a DbClient seed stores only the row; D15 lets an unknown
+ * reload expose differing durable metadata. Cross updates and equal re-inserts
+ * with implicit keeps and explicit writes before that later reload can erase
+ * the distinction. Every generated batch contains each conditional premise;
+ * the seed shape, timing, repeats, and final notice still vary.
+ */
+export const keptMetadataDurabilityHistoriesArbitrary = fc
+  .record({
+    narrow: fc.boolean(),
+    seedInside: fc.boolean(),
+    repeats: fc.integer({ min: 1, max: 3 }),
+    notice: fc.constantFrom<PeerNotice | `none`>(`none`, `row`, `reload`),
+  })
+  .map((input) =>
+    ([`update`, `reinsert`, `inner-reinsert`] as const).flatMap((write) =>
+      [false, true].flatMap((bare) =>
+        [false, true].map((metadata) => {
+          const seed: SessionAction = {
+            type: `seed`,
+            key: 1,
+            bare,
+            narrow: input.narrow,
+          }
+          const history: Array<SessionAction> = [
+            ...(input.seedInside
+              ? [{ type: `begin` as const }, seed]
+              : [seed, { type: `begin` as const }]),
+            {
+              type: write === `inner-reinsert` ? `insertOverSeed` : `upsert`,
+              key: 1,
+              metadata: false,
+            },
+          ]
+          if (write !== `update`) {
+            if (write === `reinsert`) history.push({ type: `commit` })
+            history.push({ type: `begin` })
+            for (let index = 0; index < input.repeats; index++)
+              history.push({ type: `reinsert`, key: 1, metadata })
+          } else if (metadata) history.push({ type: `rowSet`, key: 1 })
+          history.push({ type: `commit` })
+          if (input.notice !== `none`)
+            history.push({ type: `peer`, key: 2, notice: input.notice })
+          return { write, bare, metadata, history }
+        }),
+      ),
+    ),
+  )
+
+/**
+ * This classifier records a completed implicit re-insert across a full reload
+ * while the enclosing write remains unaccepted. "Kept" names that implicit
+ * operation, not a promise to promote its metadata into storage. The shared
+ * model separately judges unknown-author observations under D15. This reach
+ * classifier uses only the grammar and completed comparison, never production
+ * metadata values.
+ * Only key 1 starts with cached metadata, so only its bare seed distinguishes
+ * a stale cache value from absence. Both receiving drivers use these premises.
+ */
+export function completedSeedReinsertReloadRegime(
+  history: ReadonlyArray<SessionAction>,
+  result: { mismatch: SessionMismatch | undefined; steps: number },
+):
+  | `completed kept bare seed reload`
+  | `completed kept non-bare seed reload`
+  | undefined {
+  const last = history.at(-1)!
+  const seed = history.find((action) => action.type === `seed`)
+  const keptSeedReload =
+    last.type === `peer` &&
+    last.notice === `reload` &&
+    history.some((action) => action.type === `reinsert`) &&
+    history.every(
+      (action) => action.type !== `reinsert` || action.metadata === false,
+    ) &&
+    history.filter((action) => action.type === `commit`).length === 1
+  if (
+    !result.mismatch &&
+    result.steps === history.length &&
+    keptSeedReload &&
+    seed?.type === `seed`
+  ) {
+    if (seed.bare === true && seed.key === 1)
+      return `completed kept bare seed reload`
+    if (seed.bare === false) return `completed kept non-bare seed reload`
+  }
+  return undefined
+}
+
+/**
  * The regimes that a legal history reaches, read from the model as it
  * replays. The campaign reach test requires each law's premise.
  */
@@ -1060,9 +1228,9 @@ export class SessionModel {
   }
 
   /**
-   * A committed transaction stores, for every row it wrote or truncated, the
-   * row and metadata this tab now shows; for a row whose metadata alone it
-   * wrote, that metadata.
+   * A committed transaction stores the row it wrote or truncated and only
+   * metadata that it wrote. An equal re-insert keeps metadata without writing
+   * it (D9), as an update does (D18); its kind stays fixed at commit (D14).
    */
   private store(frame: number): void {
     const truncates = this.truncates(frame)
@@ -1083,7 +1251,7 @@ export class SessionModel {
           (event) =>
             !event.truncate &&
             (event.store === `rowMetadata` ||
-              event.rowWrite === `insert` ||
+              (event.rowWrite === `insert` && event.kind !== `reinsert`) ||
               !event.value.present),
         )
       if (!writesRow && !writesMetadata) continue
@@ -1242,6 +1410,16 @@ export class SessionModel {
       )
       return
     }
+    this.observeUnknownStorage()
+  }
+
+  /**
+   * D15: a storage observation without transaction authorship can establish
+   * differing durable objects as source writes. A recovery response with no
+   * replay details supplies the same information gap as an unnamed notice;
+   * it performs no peer write. The fold uses only this model's storage.
+   */
+  observeUnknownStorage(): void {
     // A held seed keeps the peer's write from this tab until a notice names
     // the row; a write of the row by this tab stores this tab's row over it
     // (decision 17).
@@ -1392,6 +1570,20 @@ export class SessionModel {
   storedRows(): Record<string, unknown> {
     return Object.fromEntries(
       sessionRowKeys.map((key) => [key, encode(this.storedRow(key))]),
+    )
+  }
+
+  /** Only metadata attached to a durable row survives a restart (D16). */
+  storedRowMetadata(): Record<string, unknown> {
+    return Object.fromEntries(
+      sessionRowKeys.map((key) => [
+        key,
+        encode(
+          this.storedRow(key).present
+            ? this.storage.get(key)!.metadata
+            : absent,
+        ),
+      ]),
     )
   }
 
@@ -1733,7 +1925,7 @@ function encode(value: ModelValue): unknown {
  */
 export type SessionDriver = {
   begin: () => void
-  commit: () => void
+  commit: () => void | Promise<void>
   cancel: () => void
   rowSet: (key: SessionRowKey, value: unknown) => void
   rowDelete: (key: SessionRowKey) => void
@@ -1775,6 +1967,10 @@ export type SessionDriver = {
    * reads them back into this tab.
    */
   storedRows?: () => Record<string, unknown>
+  /** Durable metadata, distinct from the source's tab-local seed reads. */
+  storedRowMetadata?: () => Record<string, unknown>
+  /** Actual host recovery inputs since the previous completed comparison. */
+  takeRecoveryInputs?: () => Array<SessionRecoveryInput>
   /** Lets receipt continuations run before an observation. */
   flush: () => Promise<void>
   /** Ends any hold and resolves every receipt; returns unexpected rejections. */
@@ -1789,12 +1985,24 @@ export type SessionDriver = {
   cleanup: () => Promise<void>
 }
 
+/**
+ * Model abstraction: a successful pull response lacks transaction authorship.
+ * This records the provider input, not production's reload classification or
+ * observed metadata. Drivers must finish its application before returning it.
+ */
+export type SessionRecoveryInput = {
+  type: `unknown-storage-observation`
+  fromRowVersion: number
+  latestRowVersion: number
+}
+
 export type SessionMismatch = {
   step: number
   action: SessionAction | `settle`
   law: string
   expected: unknown
   actual: unknown
+  recoveryInputs?: ReadonlyArray<SessionRecoveryInput>
 }
 
 // ---------------------------------------------------------------------------
@@ -1827,12 +2035,23 @@ export async function runSessionHistory(
   lane: SessionLane,
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
-): Promise<{ mismatch: SessionMismatch | undefined; steps: number }> {
+): Promise<{
+  mismatch: SessionMismatch | undefined
+  steps: number
+  recoveryInputs: ReadonlyArray<SessionRecoveryInput>
+}> {
   const model = createSessionModel(lane)
   const driver = await createDriver()
   let mismatch: SessionMismatch | undefined
   let steps = 0
   let primary: unknown
+  const recoveryInputs: Array<SessionRecoveryInput> = []
+  const applyRecoveryInputs = () => {
+    for (const input of driver.takeRecoveryInputs?.() ?? []) {
+      recoveryInputs.push(input)
+      model.observeUnknownStorage()
+    }
+  }
   try {
     for (const [step, action] of history.entries()) {
       if (!isLegal(lane, model, action)) continue
@@ -1857,6 +2076,7 @@ export async function runSessionHistory(
         break
       }
       await driver.flush()
+      applyRecoveryInputs()
       mismatch = compare(
         step,
         action,
@@ -1870,6 +2090,7 @@ export async function runSessionHistory(
       const rejections = await driver.settle()
       if (model.isHolding) model.release()
       while (model.depth > 0) model.cancel()
+      applyRecoveryInputs()
       if (rejections.length > 0)
         mismatch = {
           step: history.length,
@@ -1897,10 +2118,24 @@ export async function runSessionHistory(
             actual,
           }
       }
+      if (!mismatch && lane.peers === true && driver.storedRowMetadata) {
+        const expected = model.storedRowMetadata()
+        const actual = driver.storedRowMetadata()
+        if (canonical(expected) !== canonical(actual))
+          mismatch = {
+            step: history.length,
+            action: `settle`,
+            law: `keeping metadata does not write it to durable storage (decisions 9 and 18)`,
+            expected,
+            actual,
+          }
+      }
     }
   } catch (error) {
     primary = error
   }
+  if (mismatch && recoveryInputs.length)
+    mismatch.recoveryInputs = recoveryInputs
   let cleanupFailure: unknown
   try {
     await driver.cleanup()
@@ -1922,7 +2157,7 @@ export async function runSessionHistory(
     )
   }
   if (primary !== undefined) throw primary
-  return { mismatch, steps }
+  return { mismatch, steps, recoveryInputs }
 }
 
 /**
@@ -2511,6 +2746,9 @@ export function describeMismatch(
     `history: ${trace}`,
     `expected: ${JSON.stringify(mismatch.expected)}`,
     `actual:   ${JSON.stringify(mismatch.actual)}`,
+    ...(mismatch.recoveryInputs?.length
+      ? [`host recovery inputs: ${JSON.stringify(mismatch.recoveryInputs)}`]
+      : []),
   ].join(`\n`)
 }
 
@@ -2525,5 +2763,12 @@ declareOracle({
     runSeedOrderInvariance,
   ],
   model: [SessionModel, createSessionModel, modelCheckpoints],
-  grammar: [sessionActionArbitrary, sessionHistoryArbitrary, historyRegimes],
+  grammar: [
+    sessionActionArbitrary,
+    sessionHistoryArbitrary,
+    historyRegimes,
+    seedReinsertReloadHistoryArbitrary,
+    completedSeedReinsertReloadRegime,
+    keptMetadataDurabilityHistoriesArbitrary,
+  ],
 })
