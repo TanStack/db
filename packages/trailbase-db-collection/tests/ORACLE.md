@@ -257,7 +257,9 @@ No service-backed E2E run is claimed.
 live-source oracle from `packages/db-adapter-conformance` through
 `conformance-driver.ts`, with the same controlled RecordApi. It checks
 READY-2/3/4, HEALTH-1, PUB-1 (per-change commits), PUB-2/3, FID-1/4,
-LIFE-2/5/10, and HEALTH-5 in eager mode. TrailBase declares no optional
-capability, so it is not checked for PUB-7, waits, retried failures,
-reconnect, or renewal. This file's
+LIFE-2/5/10, and HEALTH-5 in eager mode. TrailBase declares
+`duplicate-key-delivery` (PUB-3 under `duplicateInsert: replace`) and
+`source-failure-after-ready` (HEALTH-1), and no other optional capability,
+so it is not checked for PUB-7, waits, retried failures, reconnect, or
+renewal. This file's
 lifecycle oracle keeps its own laws; see `packages/db-adapter-conformance/MIGRATION.md`.

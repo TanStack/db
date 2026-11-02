@@ -99,103 +99,133 @@ from `packages/db/tests/oracle-reach.ts`.
   in that package's default `pnpm test`.
 - **TrailBase** (`packages/trailbase-db-collection/tests/conformance-driver.ts`):
   the published adapter in eager mode over a controlled `RecordApi`, with
-  per-change commits and no optional capability. It runs in that package's
-  default `pnpm test`.
+  per-change commits, `duplicate-key-delivery` (a paged list can return one
+  record twice; the later row wins), and `source-failure-after-ready` (the
+  change stream can error after ready). It runs in that package's default
+  `pnpm test`.
 
-## Evidence (2026-10-29)
+## Evidence (2026-11-02)
 
 - **Law:** the table above. Authority: the sync callback contract in
   `packages/db/src/types.ts`, the status and health terms in
-  `docs/contributing/glossary.md`, and the adapter law set v18.
+  `docs/contributing/glossary.md`, the adapter law set v18, and the
+  maintainer decisions recorded in `MIGRATION.md` and the coverage map.
 - **Reach:** in the fixed campaign (seed 2118, 600 histories) on the reference
   adapter, the histories that reached each declared state:
 
-  | Declared state                 | Histories |
-  | ------------------------------ | --------- |
-  | first-ready                    | 248       |
-  | replacing-snapshot             | 77        |
-  | change-batch                   | 97        |
-  | multi-change-batch             | 327       |
-  | failure-before-ready           | 124       |
-  | failure-after-ready            | 64        |
-  | restart                        | 116       |
-  | wait-before-evidence-fulfilled | 48        |
-  | wait-timed-out                 | 75        |
-  | wait-rejected-at-retirement    | 188       |
-  | transient-failure-reported     | 67        |
-  | transient-failure-recovered    | 33        |
-  | reconnect                      | 62        |
-  | renewal                        | 141       |
-  | change-before-ready            | 514       |
-  | read-missed-change             | 101       |
-  | seen-change-superseded         | 26        |
-  | field-removed                  | 27        |
-  | value:string:load              | 66        |
-  | value:string:change            | 95        |
-  | value:integer:load             | 85        |
-  | value:integer:change           | 130       |
-  | value:float:load               | 49        |
-  | value:float:change             | 61        |
-  | value:negative-zero:load       | 54        |
-  | value:negative-zero:change     | 103       |
-  | value:boolean:load             | 64        |
-  | value:boolean:change           | 104       |
-  | value:null:load                | 62        |
-  | value:null:change              | 95        |
-  | value:date:load                | 51        |
-  | value:date:change              | 93        |
-  | value:bigint:load              | 74        |
-  | value:bigint:change            | 91        |
-  | value:array:load               | 71        |
-  | value:array:change             | 99        |
-  | value:object:load              | 56        |
-  | value:object:change            | 99        |
-  | zero-sign-flipped              | 74        |
+  | Declared state                  | Histories |
+  | ------------------------------- | --------- |
+  | first-ready                     | 291       |
+  | replacing-snapshot              | 54        |
+  | change-batch                    | 169       |
+  | multi-change-batch              | 332       |
+  | failure-before-ready            | 172       |
+  | failure-after-ready             | 36        |
+  | restart                         | 238       |
+  | restart-after-failure           | 101       |
+  | prompt-restart                  | 124       |
+  | prompt-failure-after-failed-run | 40        |
+  | wait-before-evidence-fulfilled  | 32        |
+  | wait-timed-out                  | 130       |
+  | wait-rejected-at-retirement     | 148       |
+  | wait-on-retired-evidence        | 92        |
+  | transient-failure-reported      | 71        |
+  | transient-failure-repeated      | 56        |
+  | outage-reported-again           | 28        |
+  | outage-reported-after-batch     | 39        |
+  | outage-reported-in-later-run    | 27        |
+  | outage-count-reset              | 21        |
+  | delivery-error-reported         | 50        |
+  | delivery-error-recovered        | 18        |
+  | transient-failure-recovered     | 39        |
+  | reconnect                       | 52        |
+  | renewal                         | 129       |
+  | change-before-ready             | 494       |
+  | read-missed-change              | 103       |
+  | seen-change-superseded          | 24        |
+  | field-removed                   | 22        |
+  | malformed-before-ready          | 43        |
+  | malformed-after-ready           | 23        |
+  | zero-sign-flipped               | 79        |
 
-  Each campaign fails when a state is reached fewer than five times. Across
-  20 other seeds, the lowest count for any state was 12 (`field-removed`), across 12 seeds.
+  Each value kind, as a row's `value` and as a typed field, on the initial
+  load and on a live change:
 
-- **GREEN:** `pnpm exec vitest run tests/reference-adapter-oracle.property.test.ts`:
-  68 tests pass (both campaigns, the per-change pair, 32 calibrations, and the
-  grammar controls). TrailBase: its full suite, 151 tests, passes.
-- **Mutants:** the fixed campaign rejects each with the law it breaks:
+  | Kind          | Value, load | Value, change | Field, load | Field, change |
+  | ------------- | ----------- | ------------- | ----------- | ------------- |
+  | string        | 70          | 82            | 256         | 446           |
+  | integer       | 73          | 118           | 256         | 446           |
+  | float         | 43          | 63            | 256         | 446           |
+  | negative-zero | 48          | 94            | 256         | 446           |
+  | boolean       | 82          | 86            | 256         | 446           |
+  | null          | 66          | 105           | 256         | 446           |
+  | date          | 49          | 75            | 256         | 446           |
+  | bigint        | 52          | 100           | 256         | 446           |
+  | array         | 66          | 102           | 256         | 446           |
+  | object        | 64          | 85            | 256         | 446           |
+  | float-array   | 65          | 94            | 256         | 446           |
 
-  | Mutant                                          | Law                        |
-  | ----------------------------------------------- | -------------------------- |
-  | `ready-before-delivery`                         | READY-2                    |
-  | `wraps-loading-failure`                         | READY-4                    |
-  | `failure-clears-rows`                           | HEALTH-1                   |
-  | `transient-is-fatal`                            | HEALTH-1                   |
-  | `never-recovers`                                | HEALTH-2                   |
-  | `transient-fails-loading`                       | RETRY-1                    |
-  | `splits-batch`                                  | PUB-1                      |
-  | `reverses-batch` (per-change)                   | PUB-1                      |
-  | `drops-deletes`                                 | PUB-3                      |
-  | `snapshot-merges`                               | PUB-7                      |
-  | `leaks-subscription`                            | LIFE-2                     |
-  | `restart-replays-rows`                          | LIFE-5                     |
-  | `keeps-failed-source`                           | LIFE-10                    |
-  | `double-release`                                | LIFE-10                    |
-  | `detached-rejection`                            | HEALTH-5                   |
-  | `logs-failure`                                  | HEALTH-5                   |
-  | `wait-off-by-one`                               | EVID-1                     |
-  | `wait-ignores-timeout`                          | EVID-3                     |
-  | `disconnect-fails`                              | RECON-1                    |
-  | `renew-resubscribes`                            | RENEW-1                    |
-  | `drops-buffered`                                | READY-10                   |
-  | `buffer-before-rows`                            | READY-10                   |
-  | `replays-per-batch`                             | PUB-5                      |
-  | `ready-before-buffer`                           | READY-10 (rows when ready) |
-  | `merges-updates`                                | FID-1                      |
-  | `relabels-inserts` (checker calibration)        | PUB-2                      |
-  | `dates-as-strings` (live changes only)          | FID-1 (values)             |
-  | `bigints-as-numbers` (initial load only)        | FID-1 (values)             |
-  | `drops-nulls`                                   | FID-1 (values)             |
-  | `loses-negative-zero`                           | FID-1 (values)             |
-  | `typed-booleans-as-numbers` (live changes only) | FID-1 (values)             |
-  | `commits-malformed-prefix`                      | PUB-4                      |
-  | `ignores-malformed`                             | PUB-4                      |
-  | `shows-buffered`                                | READY-10/PUB-9             |
+  Each campaign fails when a state is reached fewer than five times. The
+  lowest count above is 18.
+
+- **GREEN:** `pnpm exec vitest run` in this package: 84 tests pass. The
+  reference oracle file holds 82: both campaigns, the per-change pair, the
+  outage-threshold campaign, 47 mutant calibrations, and the grammar
+  controls. `tests/eager-live-source-harness.test.ts` holds 2 ordinary tests
+  of the check's own setup cleanup.
+- **Mutants:** the fixed campaign rejects each with the law it breaks. Where
+  two laws are listed, the mutant breaks both, and the shrunk history shows
+  either:
+
+  | Mutant                                                        | Law                        |
+  | ------------------------------------------------------------- | -------------------------- |
+  | `ready-before-delivery`                                       | READY-2                    |
+  | `wraps-loading-failure`                                       | READY-4                    |
+  | `failure-clears-rows`                                         | HEALTH-1                   |
+  | `transient-is-fatal`                                          | HEALTH-1                   |
+  | `delivery-error-is-fatal`                                     | HEALTH-1                   |
+  | `never-recovers`                                              | HEALTH-2                   |
+  | `transient-fails-loading`                                     | RETRY-1                    |
+  | `splits-batch`                                                | PUB-1                      |
+  | `drops-deletes`                                               | PUB-3                      |
+  | `snapshot-merges`                                             | PUB-7 or PUB-4             |
+  | `leaks-subscription`                                          | LIFE-2                     |
+  | `restart-replays-rows`                                        | LIFE-5                     |
+  | `swallows-prompt-failure`                                     | READY-4                    |
+  | `keeps-failed-source`                                         | LIFE-10                    |
+  | `double-release`                                              | LIFE-10                    |
+  | `detached-rejection`                                          | HEALTH-5                   |
+  | `logs-failure`                                                | HEALTH-5                   |
+  | `wait-off-by-one`                                             | EVID-1 or EVID-2           |
+  | `retired-evidence-before-ready`                               | EVID-2                     |
+  | `forgets-retired-evidence`                                    | EVID-2                     |
+  | `leaks-waits-after-fail`                                      | EVID-2                     |
+  | `wait-ignores-timeout`                                        | EVID-3                     |
+  | `disconnect-fails`                                            | RECON-1                    |
+  | `renew-resubscribes`                                          | RENEW-1                    |
+  | `drops-buffered`                                              | READY-10                   |
+  | `buffer-before-rows`                                          | PUB-9 or PUB-4             |
+  | `replays-per-batch`                                           | PUB-5                      |
+  | `ready-before-buffer`                                         | READY-10 (rows when ready) |
+  | `shows-buffered`                                              | READY-10/PUB-9             |
+  | `merges-updates`                                              | FID-1                      |
+  | `dates-as-strings`                                            | FID-1 (values)             |
+  | `bigints-as-numbers`                                          | FID-1 (values)             |
+  | `drops-nulls`                                                 | FID-1 (values)             |
+  | `loses-negative-zero`                                         | FID-1 (values)             |
+  | `typed-booleans-as-numbers`                                   | FID-1 (values)             |
+  | `commits-malformed-prefix`                                    | PUB-4                      |
+  | `ignores-malformed`                                           | PUB-4                      |
+  | `relabels-inserts`                                            | PUB-2                      |
+  | `reverses-batch` (per-change)                                 | PUB-1                      |
+  | `stale-outage-value` (threshold 3, client values)             | HEALTH-1 or HEALTH-2       |
+  | `replaces-outage-value` (threshold 3, client values)          | RETRY-1                    |
+  | `reports-outage-early` (threshold 3, client values)           | HEALTH-1                   |
+  | `outage-count-survives-delivery` (threshold 3, client values) | HEALTH-1                   |
+  | `empty-response-keeps-count` (threshold 3, client values)     | HEALTH-1                   |
+  | `empty-response-recovers` (threshold 3, client values)        | RETRY-1                    |
+  | `rejected-delivery-fails` (threshold 3, client values)        | PUB-4                      |
+  | `wraps-loading-failure` (threshold 3, client values)          | READY-4                    |
 
   `reverses-batch` reverses only batches of distinct keys, so its final rows
   are right and only the intermediate publications are wrong. An earlier
@@ -237,9 +267,10 @@ from `packages/db/tests/oracle-reach.ts`.
     timed wait settles within its own step, so no evidence arrives during
     it. An adapter that rejects a timed wait at once, before its timeout,
     is not distinguished from one that waits.
-  - FID-1 generates ten value kinds (string, integer, float, `-0`, boolean,
-    `null`, Date, bigint, array, plain object). Temporal values, Map, Set,
-    typed arrays, and class instances are not generated, and a stored
+  - FID-1 generates eleven value kinds (string, integer, float, `-0`,
+    boolean, `null`, Date, bigint, array, plain object, and a
+    `Float64Array`). Temporal values, Map, Set, other typed arrays, and class
+    instances are not generated, and a stored
     field's reference identity is not checked.
   - PUB-4 covers one malformed shape, two rows with one key in a complete
     delivery. A malformed key, a row the adapter cannot decode, and an

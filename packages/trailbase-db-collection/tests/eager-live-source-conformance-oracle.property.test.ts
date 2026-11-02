@@ -25,9 +25,12 @@ import { trailBaseConformanceDriver } from './conformance-driver'
  * TrailBase production driver in `conformance-driver.ts` and the campaigns;
  * it states no expected results.
  *
- * TrailBase declares none of the oracle's optional capabilities: it lists
- * once per sync run, carries no txid, and does not resubscribe. Those laws
- * stay with `lifecycle-oracle.property.test.ts`, which also owns on-demand
+ * TrailBase declares two of the oracle's optional capabilities:
+ * `duplicate-key-delivery`, because a paged list can return one record twice
+ * (PUB-3 under `duplicateInsert: replace`), and `source-failure-after-ready`,
+ * because the change stream can error after ready (HEALTH-1). It declares no
+ * other: it lists once per sync run, carries no txid, and does not
+ * resubscribe. Those laws stay with `lifecycle-oracle.property.test.ts`, which also owns on-demand
  * loading, page and event fencing, cancellation, and timers. The claim is
  * limited to the controlled RecordApi.
  */
