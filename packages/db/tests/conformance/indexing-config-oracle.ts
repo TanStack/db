@@ -79,6 +79,16 @@ export function indexConfigurationPairs(
   )
 }
 
+// Presence is a separate grammar dimension from effective settings. For each
+// field, compare omission with explicit undefined in both caller orders.
+export function indexOptionAbsencePairs() {
+  return ([`autoIndex`, `defaultIndexType`] as const).flatMap((option) =>
+    indexConfigurationPairs([{}, { [option]: undefined }]).filter(
+      ({ first, second }) => first !== second,
+    ),
+  )
+}
+
 export function expectIndexingAdmission(
   admission: { rejected: boolean; error?: unknown },
   settings: IndexSettings,
@@ -152,7 +162,11 @@ function expectIndexing(
 }
 
 declareOracle({
-  grammar: [indexConfigurations, indexConfigurationPairs],
+  grammar: [
+    indexConfigurations,
+    indexConfigurationPairs,
+    indexOptionAbsencePairs,
+  ],
   model: [expectedIndexing, expectedIndexingReuse],
   check: [
     expectIndexing,

@@ -191,6 +191,9 @@ export function checkCacheOptionPublications(
  * query identity and mounted first-options retention remain separate laws.
  * Declaration names abstract absent or exact runtime references/scalar values.
  * Each option varies alone, so a combined-option guard cannot hide a gap.
+ * Omission and explicit undefined both declare absence (the same decision).
+ * Their two orders retain the property-presence distinction in the driver,
+ * while the model judges their effective declarations as equal.
  */
 export const localOptionHistories = [
   `getKey`,
@@ -205,8 +208,12 @@ export const localOptionHistories = [
   `defaultStringCollation`,
 ] as const
 export const localOptionPairs = localOptionHistories.flatMap((option) =>
-  declarations
-    .filter((pair) => option !== `singleResult` || !pair.includes(`other`))
+  ([...declarations, [`absent`, `undefined`], [`undefined`, `absent`]] as const)
+    .filter(
+      (pair) =>
+        option !== `singleResult` ||
+        (pair[0] !== `other` && pair[1] !== `other`),
+    )
     .flatMap((pair) =>
       ([`derived`, `same-key`, `different-key`] as const).map((identity) => ({
         option,
@@ -217,10 +224,10 @@ export const localOptionPairs = localOptionHistories.flatMap((option) =>
 )
 export type LocalOptionHistory = (typeof localOptionPairs)[number]
 export function compatibleLocalOptions(history: LocalOptionHistory) {
-  return (
-    history.identity !== `different-key` &&
-    history.declarations[0] === history.declarations[1]
+  const effective = history.declarations.map((declaration) =>
+    declaration === `undefined` ? `absent` : declaration,
   )
+  return history.identity !== `different-key` && effective[0] === effective[1]
 }
 export function checkLocalOptionSharing(
   left: object,

@@ -14,10 +14,21 @@
  * rejects a cache repair that overwrites a retained Collection's settings.
  * Both unscoped and DbProvider-scoped caches receive the same histories. A
  * second lane uses distinct constructor references with the same class name;
- * names cannot replace the declared constructor reference. This driver judges
- * no hydration or server render.
+ * names cannot replace the declared constructor reference. A presence lane
+ * compares omitted fields with explicit undefined in both orders.
+ * A focused pending lane holds source writes while two separate boundaries
+ * show fallbacks, then checks the same output law after delivery. It crosses
+ * mode/constructor equality and both cache scopes, without multiplying the
+ * entire ready matrix. This driver judges no hydration, abandoned render,
+ * rejection while pending, or server render.
  */
-import { cleanup, renderHook, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { Suspense } from 'react'
 import {
   BTreeIndex,
@@ -25,7 +36,7 @@ import {
   DbClient,
   createCollection,
 } from '@tanstack/db'
-import { expect, test, vi } from 'vitest'
+import { afterAll, expect, test, vi } from 'vitest'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { DbProvider } from '../src/DbProvider'
 import {
@@ -36,21 +47,19 @@ import {
   expectedIndexingReuse,
   indexConfigurationPairs,
   indexConfigurations,
+  indexOptionAbsencePairs,
 } from '../../db/tests/conformance/indexing-config-oracle'
 import { expectUnorderedRows } from '../../db/tests/conformance/result-laws'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
-import {
-  mockSyncCollectionOptions,
-  withOracleCleanup,
-} from '../../db/tests/utils'
+import { withOracleCleanup } from '../../db/tests/utils'
 import type { InitialQueryBuilder } from '@tanstack/db'
 import type { ReactNode } from 'react'
 import type { IndexSettings } from '../../db/tests/conformance/indexing-config-oracle'
 import type { Row } from '../../db/tests/conformance/contract'
 
 declareOracle({
-  grammar: [indexConfigurationPairs],
+  grammar: [indexConfigurationPairs, indexOptionAbsencePairs],
   model: [expectedIndexing, expectedIndexingReuse],
   check: [
     expectIndexingAdmission,
@@ -74,6 +83,10 @@ const namedConfigurations = ([`off`, `eager`] as const).flatMap((autoIndex) =>
   })),
 )
 const pairs = [
+  ...indexOptionAbsencePairs().map((history) => ({
+    ...history,
+    lane: `presence`,
+  })),
   ...indexConfigurationPairs(configurations).map((history) => ({
     ...history,
     lane: `built-in`,
@@ -85,11 +98,22 @@ const pairs = [
     .map((history) => ({ ...history, lane: `same-name` })),
 ]
 const histories = pairs.flatMap((history, cell) =>
-  ([`unscoped`, `client`] as const).map((scope) => ({
-    ...history,
-    cell,
-    scope,
-  })),
+  (history.first.autoIndex === `off` &&
+  history.first.defaultIndexType === BasicIndex &&
+  (history.second.autoIndex === `off` ||
+    history.second.autoIndex === `eager`) &&
+  (history.second.defaultIndexType === BasicIndex ||
+    history.second.defaultIndexType === BTreeIndex)
+    ? ([`ready`, `pending`] as const)
+    : ([`ready`] as const)
+  ).flatMap((phase) =>
+    ([`unscoped`, `client`] as const).map((scope) => ({
+      ...history,
+      cell,
+      scope,
+      phase,
+    })),
+  ),
 )
 
 type ObservedOutput = {
@@ -97,15 +121,44 @@ type ObservedOutput = {
   cleanup: (options?: { dependents?: boolean }) => Promise<void>
 }
 
+// These receiving paths owe pending peers even if a later grammar edit drops
+// every pending case. A per-history conditional tag alone would miss that loss.
+const pendingReaches = Object.fromEntries(
+  ([`unscoped`, `client`] as const).map((scope) => [
+    scope,
+    createOracleReach(`Suspense indexing pending/${scope}`, [
+      `both-suspended`,
+      `shared-output`,
+      `separate-outputs`,
+      `mode-change`,
+      `constructor-change`,
+    ]),
+  ]),
+)
+afterAll(() => {
+  for (const reach of Object.values(pendingReaches)) reach.assertReached()
+  if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+    console.info(
+      `Suspense indexing pending reach`,
+      Object.fromEntries(
+        Object.entries(pendingReaches).map(([scope, reach]) => [
+          scope,
+          Object.fromEntries(reach.counts()),
+        ]),
+      ),
+    )
+})
+
 test.each(histories)(
   `each initial Suspense binding keeps its indexing settings: %j`,
-  async ({ first, second, identity, cell, scope, lane }) => {
+  async ({ first, second, identity, cell, scope, lane, phase }) => {
     const reach = createOracleReach(
-      `React Suspense indexing/${scope}/${lane}/${identity}/${cell}`,
+      `React Suspense indexing/${scope}/${phase}/${lane}/${identity}/${cell}`,
       [
         `first-admission`,
         `second-admission`,
         `retained-first`,
+        ...(phase === `pending` ? [`both-suspended`] : []),
         ...(!expectedIndexing(first).rejects ? [`retained-options`] : []),
         ...(!expectedIndexing(first).rejects &&
         !expectedIndexing(second).rejects
@@ -114,6 +167,9 @@ test.each(histories)(
       ],
     )
     reach.beginHistory()
+    const pendingReach =
+      phase === `pending` ? pendingReaches[scope]! : undefined
+    pendingReach?.beginHistory()
     if (lane === `same-name`) {
       expect(first.defaultIndexType).not.toBe(second.defaultIndexType)
       expect(first.defaultIndexType?.name).toBe(second.defaultIndexType?.name)
@@ -122,17 +178,41 @@ test.each(histories)(
       { id: `1`, name: `Alice`, age: 30, team: `a` },
       { id: `2`, name: `Bob`, age: 25, team: `b` },
     ]
-    const source = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `suspense-indexing-${scope}-${cell}`,
-        getKey: (row) => row.id,
-        initialData: rows.map((row) => ({ ...row })),
-      }),
-    )
+    let starts = 0
+    let deliver = () => {}
+    const source = createCollection<Row>({
+      id: `suspense-indexing-${scope}-${cell}`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          starts++
+          let delivered = false
+          deliver = () => {
+            if (delivered) return
+            delivered = true
+            begin()
+            for (const row of rows) write({ type: `insert`, value: { ...row } })
+            commit()
+            markReady()
+          }
+          if (phase === `ready`) deliver()
+        },
+      },
+    })
     const client = scope === `client` ? new DbClient() : undefined
-    function Wrapper({ children }: { children: ReactNode }) {
+    function Wrapper({
+      children,
+      binding,
+    }: {
+      children: ReactNode
+      binding: number
+    }) {
       const suspense = (
-        <Suspense fallback={<div>Loading</div>}>{children}</Suspense>
+        <Suspense
+          fallback={<div data-testid={`pending-${binding}`}>Loading</div>}
+        >
+          {children}
+        </Suspense>
       )
       return client ? (
         <DbProvider client={client}>{suspense}</DbProvider>
@@ -147,7 +227,7 @@ test.each(histories)(
     // React reports an expected rejected render to console.error as well as
     // throwing it from renderHook. The admission observation keeps the error.
     const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const mount = async (settings: IndexSettings, binding: 0 | 1) => {
+    const mount = (settings: IndexSettings, binding: 0 | 1) => {
       const queryKey =
         identity === `derived`
           ? undefined
@@ -157,6 +237,7 @@ test.each(histories)(
       }
       let read:
         (() => { data: Array<Row>; collection: ObservedOutput }) | undefined
+      let initialOutput: ObservedOutput | undefined
       try {
         const rendered = renderHook(
           ({ declaration, rebind }) =>
@@ -166,7 +247,9 @@ test.each(histories)(
               ...declaration,
             }),
           {
-            wrapper: Wrapper,
+            wrapper: ({ children }) => (
+              <Wrapper binding={binding}>{children}</Wrapper>
+            ),
             initialProps: { declaration: settings, rebind: false },
           },
         )
@@ -180,7 +263,7 @@ test.each(histories)(
             const output = rendered.result.current.collection
             outputs.add(output)
             expectIndexingConfiguration(output, rebind ? declaration : settings)
-            if (!rebind) expect(output).toBe(result.collection)
+            if (!rebind) expect(output).toBe(initialOutput)
           }
       } catch (error) {
         admission.rejected = true
@@ -188,21 +271,45 @@ test.each(histories)(
       }
       expectIndexingAdmission(admission, settings)
       if (expectedIndexing(settings).rejects) return undefined
-      await waitFor(() => expect(read!().data).toHaveLength(rows.length))
-      const result = read!()
-      outputs.add(result.collection)
-      expectUnorderedRows(result.data, rows)
-      expectIndexingConfiguration(result.collection, settings)
-      return result.collection
+      return async () => {
+        await waitFor(() => expect(read!().data).toHaveLength(rows.length))
+        const result = read!()
+        outputs.add(result.collection)
+        initialOutput = result.collection
+        expectUnorderedRows(result.data, rows)
+        expectIndexingConfiguration(result.collection, settings)
+        return result.collection
+      }
     }
     await withOracleCleanup(async () => {
-      await source.preload()
-      const firstOutput = await mount(first, 0)
+      if (phase === `ready`) await source.preload()
+      const readFirst = mount(first, 0)
+      const readyFirst = phase === `ready` ? await readFirst?.() : undefined
       reach.reach(`first-admission`)
-      const secondOutput = await mount(second, 1)
+      const readSecond = mount(second, 1)
       reach.reach(`second-admission`)
+      if (phase === `pending`) {
+        await waitFor(() => expect(starts).toBe(1))
+        expect(screen.getByTestId(`pending-0`)).toBeTruthy()
+        expect(screen.getByTestId(`pending-1`)).toBeTruthy()
+        expect(source.status).toBe(`loading`)
+        reach.reach(`both-suspended`)
+        pendingReach!.reach(`both-suspended`)
+        if (first.autoIndex !== second.autoIndex)
+          pendingReach!.reach(`mode-change`)
+        if (first.defaultIndexType !== second.defaultIndexType)
+          pendingReach!.reach(`constructor-change`)
+        await act(() => deliver())
+      }
+      const firstOutput = readyFirst ?? (await readFirst?.())
+      const secondOutput = await readSecond?.()
       if (firstOutput) expectIndexingConfiguration(firstOutput, first)
       expectIndexingReuse(firstOutput, secondOutput, first, second, identity)
+      pendingReach?.reach(
+        expectedIndexingReuse(first, second, identity)
+          ? `shared-output`
+          : `separate-outputs`,
+      )
       reach.reach(`retained-first`)
       if (firstOutput) {
         await reconfigureFirst!(second, false)
@@ -214,6 +321,7 @@ test.each(histories)(
       }
       reach.assertReached()
     }, [
+      () => deliver(),
       () => cleanup(),
       () =>
         withOracleCleanup(
