@@ -597,7 +597,7 @@ function publicationCampaigns(baseRuns: number, property: string) {
   if (replay.replayPath !== undefined && replay.replayProperty !== property)
     return []
   const options = oraclePropertyOptions(baseRuns, property)
-  if (options.seed !== undefined) return [{ name: `replay`, options }]
+  if (replay.replaySeed !== undefined) return [{ name: `replay`, options }]
   return [
     {
       name: `fixed seed ${fixedPublicationSeed}`,

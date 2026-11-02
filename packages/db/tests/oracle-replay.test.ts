@@ -329,9 +329,12 @@ describe(`oracle replay reporting`, () => {
     directory = undefined
   })
 
-  it(`leaves ordinary seeded and random options unchanged`, () => {
+  it(`preserves explicit seeds and supplies a fresh seed for ordinary runs`, () => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
-    expect(oracleRandomParameters(5, undefined)).toEqual({ numRuns: 5 })
+    expect(oracleRandomParameters(5, undefined)).toEqual({
+      numRuns: 5,
+      seed: expect.any(Number),
+    })
     expect(oracleRandomParameters(5, 42)).toEqual({ numRuns: 5, seed: 42 })
     expect(oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)).toEqual(
       {},

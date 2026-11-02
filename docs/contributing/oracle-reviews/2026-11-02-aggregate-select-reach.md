@@ -1,5 +1,12 @@
 # Aggregate select structural reach, 2026-11-02
 
+This is the historical record for source `bf90c7266c23765220384d5a027de1810bb01b09bfc7409f4d70d264b3329ad4`.
+The [nine-item review record](2026-11-02-aggregate-select-review.md) supersedes
+its coverage claims and private verification commands. Its combined counts do
+not establish generated-only reach. The TypeScript hash below identifies an
+empty output file, not a standalone proof of the command or its exit status.
+The original source and logs remain historical evidence, not final-head evidence.
+
 ## Binding and diagnosis
 
 Base: `a3c4d0676621cc7df4d242bdfe31815509add734`, the exact main commit
@@ -124,7 +131,7 @@ This is a self-review, not a fresh external review.
 **Limits:** This establishes stable reach of existing declared states. It does
 not prove all possible shapes, all mutations or all comparator behaviors.
 The original owner still excludes raw-expression ordering and boolean, Date,
-NaN and object order fields. The structural prefix has no mutations; the
+NaN and object order fields. The complete structural histories have no mutations; the
 unchanged generated histories vary updates, deletes, routes, shadowing,
 operator removal and shape expressions. Direction and multi-term sensitivity
 outside this collation calibration retain the owner's historical evidence.

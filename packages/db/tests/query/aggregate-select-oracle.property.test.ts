@@ -38,6 +38,7 @@ import {
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
   oraclePropertyOptions,
+  oracleRandomParameters,
   oracleReplayTest,
   oracleRuns,
 } from '../oracle-config.js'
@@ -142,8 +143,8 @@ import { declareOracle } from '../oracle-declaration.js'
  * top-level query a select of `count()` alone, with an aggregate HAVING when
  * the generated shape has one. One history in four is such a forced
  * history: it strips the grouping compiler everywhere or from orderBy only,
- * with no grouping, one key, or two keys, in turn, so every campaign reaches
- * each path whatever its seed. A model error set of exactly
+ * with no grouping, one key, or two keys, to sample each compiler path. A
+ * model error set of exactly
  * `groupingRequired` then witnesses each path, grouped, one implicit group,
  * and HAVING, where no other error can hide the missing compiler. The
  * property declares the states these laws need with `createOracleReach` and
@@ -166,10 +167,13 @@ import { declareOracle } from '../oracle-declaration.js'
  * with an orderBy rarely compile, so one history in four takes ordered
  * shapes from a grammar whose shapes compile. The source starts with a row
  * whose key `A` sorts between `a` and `b`, where locale and code-unit order
- * differ. Each campaign first replays structural histories through this same
- * model, driver, and comparison. They cover every declared state independently
- * of the seed, including string ordering. The 160 generated histories then
- * explore the full grammar without depending on chance for structural reach.
+ * differ. Each campaign first runs twelve complete structural histories through
+ * this same model, driver, and comparison. They guarantee the 21 initial
+ * premises, including string ordering, independently of the seed, with no
+ * mutations, shadowed alias, or union. A separate reach requires the 160
+ * generated histories themselves to enter those states and the mutation and
+ * route checkpoints below. Their coverage is sampled: a miss fails with the
+ * selected campaign seed and counts, rather than borrowing structural reach.
  *
  * Limits: one parent field (`x`) and one source field (`v`); groups by one,
  * two, or three keys; numbers and string keys only. A boolean, Date, `NaN`,
@@ -1127,18 +1131,31 @@ function withoutOrderByGrouping(ir: any): any {
   }
 }
 
-async function runHistory(
-  top: Shape,
-  nested: Shape,
-  grouping: Grouping,
-  shadow: boolean,
-  steps: ReadonlyArray<Step>,
+// History provenance belongs to the campaign, not to the generated input.
+// Named options keep routing and operator-removal choices distinct.
+type History = {
+  top: Shape
+  nested: Shape
+  grouping: Grouping
+  shadow?: boolean
+  steps?: ReadonlyArray<Step>
+  union?: boolean
+  bareKeys?: boolean
+  stripped?: Stripped
+  alone?: boolean
+}
+
+async function runHistory({
+  top,
+  nested,
+  grouping,
+  shadow = false,
+  steps = [],
   union = false,
   bareKeys = false,
-  stripped: Stripped = `none`,
+  stripped = `none`,
   alone = false,
-  fixed = false,
-): Promise<void> {
+}: History): Promise<void> {
   const grouped = grouping !== `none`
   // Most generated shapes throw on their own; a runtime-stripped history
   // needs an include that only the missing runtime can fail.
@@ -1160,7 +1177,6 @@ async function runHistory(
       first?.by === `agg` ? first : { by: `agg`, fn: `sum`, dir: `asc` }
     top = { fields: { f0: { k: `agg`, fn: term.fn } }, orderBy: [term] }
   }
-  reach?.beginHistory({ fixed })
   if (stripped === `runtime`) reach?.reach(`include runtime stripped`)
   for (const s of [top, nested]) {
     if (s.include?.wrap === `bare`)
@@ -1466,7 +1482,11 @@ async function runHistory(
       }
     }
     check(`initial`)
+    if (shadow && includeQuery.ok)
+      reach?.reach(`a shadowed child alias publishes rows`)
+    if (union && topQuery.ok) reach?.reach(`a union source publishes rows`)
     for (const [index, s] of steps.entries()) {
+      let routeMoved = false
       if (s.t === `parent`) {
         const next = { ...issues.find((i) => i.id === s.id)!, x: s.x }
         issues = issues.map((i) => (i.id === s.id ? next : i))
@@ -1484,6 +1504,7 @@ async function runHistory(
         const target = comments[s.pick % comments.length]!
         if (s.t === `update`) {
           const row = { ...target, v: s.v, k: s.k ?? target.k }
+          routeMoved = row.k !== target.k
           comments = comments.map((c) => (c.id === target.id ? row : c))
           commentSource.utils.begin()
           commentSource.utils.write({ type: `update`, value: row })
@@ -1497,6 +1518,17 @@ async function runHistory(
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
       check(`step ${index} ${JSON.stringify(s)}`)
+      if (topQuery.ok || includeQuery.ok) {
+        const checkpoint = {
+          parent: `published after a parent update`,
+          insert: `published after a source insert`,
+          update: `published after a source update`,
+          delete: `published after a source delete`,
+        } as const
+        reach?.reach(checkpoint[s.t])
+        if (routeMoved && includeQuery.ok)
+          reach?.reach(`published after a source route move`)
+      }
     }
   } finally {
     for (const query of live) await query.cleanup()
@@ -1522,18 +1554,17 @@ const historyFor = (
   alone: fc.Arbitrary<boolean>,
   shapes: typeof shape = shape,
 ) =>
-  fc.tuple(
-    shapes(false, grouping),
-    shapes(true, grouping),
-    fc.constant(grouping),
-    fc.boolean(),
-    fc.array(step, { maxLength: 6 }),
-    fc.boolean(),
-    fc.boolean(),
+  fc.record({
+    top: shapes(false, grouping),
+    nested: shapes(true, grouping),
+    grouping: fc.constant(grouping),
+    shadow: fc.boolean(),
+    steps: fc.array(step, { maxLength: 6 }),
+    union: fc.boolean(),
+    bareKeys: fc.boolean(),
     stripped,
     alone,
-    fc.constant(false),
-  )
+  })
 
 // Half the histories are generated; three in six of those build their IR by
 // hand without one kind of operator code. One history in four instead strips
@@ -1541,7 +1572,8 @@ const historyFor = (
 // forced shape, for one or several groups chosen in turn. One in four takes
 // ordered shapes that compile, at the top level and in the include query,
 // and in one of three strips the orderBy aggregates' compiler. These weights
-// explore the grammar; the structural histories below guarantee reach.
+// explore the grammar. Structural histories guarantee initial premises only;
+// they never count toward the generated campaign's reach.
 const history = fc.oneof(
   {
     weight: 2,
@@ -1594,7 +1626,8 @@ const history = fc.oneof(
 
 /**
  * Structural histories use the same model and comparison as the generated
- * grammar. They force each law's premise before the random suffix: sampling
+ * grammar. These complete, fixed histories have no mutations and force each
+ * law's initial-publication premise: sampling
  * an ordered shape alone does not ensure its terms ever use a string field.
  * No history has a separate expected answer.
  */
@@ -1606,18 +1639,7 @@ const fixedHistory = (
   grouping: Grouping = `key`,
   stripped: Stripped = `none`,
   bareKeys = false,
-): Required<Parameters<typeof runHistory>> => [
-  top,
-  nested,
-  grouping,
-  false,
-  [],
-  false,
-  bareKeys,
-  stripped,
-  false,
-  true,
-]
+): History => ({ top, nested, grouping, stripped, bareKeys })
 const structuralHistories = [
   ...([`field`, `nested`, `case`] as const).map((at) =>
     fixedHistory({ ...countShape, include: { wrap: `bare`, at } }),
@@ -1656,7 +1678,8 @@ const structuralHistories = [
     `triple`,
   ),
 ]
-const examples = structuralHistories.map((entry) => [entry] as [typeof entry])
+const examples = structuralHistories.map((entry) => [entry] as [History])
+const structuralInputs = new Set(structuralHistories)
 
 /** The states the operator laws need; each campaign must reach all of them. */
 const reachStates = [
@@ -1682,13 +1705,69 @@ const reachStates = [
   `two group keys publish several groups`,
   `three group keys publish several groups`,
 ] as const
-let reach:
-  ReturnType<typeof createOracleReach<(typeof reachStates)[number]>> | undefined
+// These checkpoints count only successful public comparisons from generated
+// histories. Structural initial histories cannot discharge a mutation or route.
+const generatedCheckpoints = [
+  `published after a parent update`,
+  `published after a source insert`,
+  `published after a source update`,
+  `published after a source delete`,
+  `published after a source route move`,
+  `a shadowed child alias publishes rows`,
+  `a union source publishes rows`,
+] as const
+type ReachState =
+  (typeof reachStates)[number] | (typeof generatedCheckpoints)[number]
+let reach: ReturnType<typeof createOracleReach<ReachState>> | undefined
+
+async function runCampaign(
+  campaign: string,
+  parameters: ReturnType<typeof oraclePropertyOptions<[History]>>,
+): Promise<void> {
+  const structuralReach = createOracleReach<ReachState>(
+    `${PROPERTY} (${campaign}, structural)`,
+    reachStates,
+    {
+      fixedHistories: structuralHistories.length,
+    },
+  )
+  const generatedReach = createOracleReach<ReachState>(
+    `${PROPERTY} (${campaign}, generated)`,
+    [...reachStates, ...generatedCheckpoints],
+  )
+  try {
+    await fc.assert(
+      fc.asyncProperty(history, async (entry) => {
+        const fixed = structuralInputs.has(entry)
+        reach = fixed ? structuralReach : generatedReach
+        reach.beginHistory({ fixed })
+        await runHistory(entry)
+      }),
+      parameters,
+    )
+    structuralReach.assertReached()
+    generatedReach.assertReached()
+  } finally {
+    // Print before unwinding a comparison or reach failure, then clear the
+    // campaign pointer so another test cannot enter a failed campaign's reach.
+    if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+      console.info(
+        JSON.stringify({
+          property: PROPERTY,
+          campaign,
+          seed: parameters.seed,
+          structural: Object.fromEntries(structuralReach.counts()),
+          generated: Object.fromEntries(generatedReach.counts()),
+        }),
+      )
+    reach = undefined
+  }
+}
 
 // The check is `runHistory`: it runs each generated history, and after every
 // step it compares the published rows and the compile outcome with
-// `modelGroup` and `modelError`. The generated properties and the pinned
-// replays above reach it.
+// `modelGroup` and `modelError`. Generated histories, structural examples, and
+// existing model replays use this same check.
 declareOracle({
   check: [runHistory],
   model: [modelGroup, modelError],
@@ -1699,77 +1778,55 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `match the model across generated shapes (fixed campaign)`,
     async () => {
-      // A repeatable baseline. Seed 2094 is arbitrary.
-      reach = createOracleReach(`${PROPERTY} (fixed)`, reachStates, {
-        fixedHistories: structuralHistories.length,
-      })
+      // Keep the literal budget/seed binding visible to the run-budget audit.
       const options = { numRuns: oracleRuns(160), seed: 2094 }
-      await fc.assert(
-        fc.asyncProperty(history, (entry) => runHistory(...entry)),
-        // Fast-check counts examples in numRuns; keep them above the base budget.
-        { ...options, numRuns: options.numRuns + examples.length, examples },
+      await runCampaign(
+        `fixed`,
+        oracleRandomParameters(
+          options.numRuns,
+          options.seed,
+          undefined,
+          examples,
+        ),
       )
-      reach.assertReached()
-      if (process.env.TANSTACK_DB_ORACLE_STATISTICS)
-        console.info(
-          JSON.stringify({
-            property: PROPERTY,
-            reach: Object.fromEntries(reach.counts()),
-          }),
-        )
-      reach = undefined
     },
   )
 
   oracleReplayTest(it, PROPERTY)(
     `match the model across generated shapes (random or replayed)`,
     async () => {
-      reach = createOracleReach(`${PROPERTY} (random)`, reachStates, {
-        fixedHistories: structuralHistories.length,
-      })
-      await fc.assert(
-        fc.asyncProperty(history, (entry) => runHistory(...entry)),
+      await runCampaign(
+        `random`,
         oraclePropertyOptions(160, PROPERTY, { examples }),
       )
-      reach.assertReached()
-      if (process.env.TANSTACK_DB_ORACLE_STATISTICS)
-        console.info(
-          JSON.stringify({
-            property: PROPERTY,
-            reach: Object.fromEntries(reach.counts()),
-          }),
-        )
-      reach = undefined
     },
   )
 
   // Pinned replay of a review counterexample: a grouped select value that
   // holds the group key inside a function must read the group's key.
   oracleReplayTest(it)(`reads the group key inside a function`, async () => {
-    await runHistory(
-      { fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } } },
-      { fields: { f0: { k: `agg`, fn: `count` } } },
-      `key`,
-      false,
-      [],
-    )
+    await runHistory({
+      top: {
+        fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } },
+      },
+      nested: { fields: { f0: { k: `agg`, fn: `count` } } },
+      grouping: `key`,
+    })
   })
 
   // Pinned replay: a published row keeps the select's field order, also
   // when a group key comes before a plain aggregate.
   oracleReplayTest(it)(`keeps the select's field order`, async () => {
-    await runHistory(
-      {
+    await runHistory({
+      top: {
         fields: {
           f0: { k: `key` },
           f1: { k: `agg`, fn: `count` },
         },
       },
-      { fields: { f0: { k: `agg`, fn: `count` } } },
-      `key`,
-      false,
-      [],
-    )
+      nested: { fields: { f0: { k: `agg`, fn: `count` } } },
+      grouping: `key`,
+    })
   })
 
   // Pinned replay of a generated counterexample: an aggregate query without
@@ -1777,8 +1834,8 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `accepts HAVING beside a wrapped aggregate without groupBy`,
     async () => {
-      await runHistory(
-        {
+      await runHistory({
+        top: {
           fields: {
             f0: {
               k: `add`,
@@ -1788,16 +1845,14 @@ describe(`aggregate select shapes`, () => {
           },
           having: { part: { k: `lit`, n: 0 }, lit: 0 },
         },
-        {
+        nested: {
           fields: {
             f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `parent` } },
           },
           having: { part: { k: `parent` }, lit: 1 },
         },
-        `none`,
-        false,
-        [],
-      )
+        grouping: `none`,
+      })
     },
   )
 
@@ -1806,18 +1861,17 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `reads a parent field under a shadowing child alias`,
     async () => {
-      await runHistory(
-        { fields: { f0: { k: `agg`, fn: `count` } } },
-        {
+      await runHistory({
+        top: { fields: { f0: { k: `agg`, fn: `count` } } },
+        nested: {
           fields: {
             f0: { k: `parent` },
             f1: { k: `agg`, fn: `count` },
           },
         },
-        `none`,
-        true,
-        [],
-      )
+        grouping: `none`,
+        shadow: true,
+      })
     },
   )
 })
