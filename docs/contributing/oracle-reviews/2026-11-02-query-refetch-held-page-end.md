@@ -127,6 +127,32 @@ logs are `final-guarded-new-replay.log` and `final-guarded-ci-replay.log`.
 Local Vitest is 3.2.4. CI uses 4.1.12. No dependency installation or override
 was used. Full local `pnpm test` was not run.
 
+The local owner runs use the saved `repair-vitest.config.mjs` in the evidence
+directory. It selects the named owner, aliases workspace sources, and uses one
+worker. With `E` set to that evidence directory, the GREEN command is:
+
+```sh
+pnpm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run --config "$E/repair-vitest.config.mjs"
+```
+
+The pre-edit RED command selects the retained history and new campaigns with
+the same configuration and unchanged production:
+
+```sh
+pnpm_config_verify_deps_before_run=false node node_modules/vitest/vitest.mjs run --config "$E/repair-vitest.config.mjs" -t 'keeps coverage when a held page|generated same-key page shifts'
+```
+
+The guarded replay command uses the property, seed, and path above:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=query-db.refetch-held-page-end TANSTACK_DB_ORACLE_SEED=20261102 TANSTACK_DB_ORACLE_PATH=0:0:1:1 node --import tsx packages/db/tests/oracle-replay.ts --config "$E/repair-vitest.config.mjs"
+```
+
+Focused types use `tsc --project "$E/repair-tsconfig.json"`. Oracle lint uses
+`pnpm lint:changed`. These configurations and all bound logs remain in the
+evidence directory. The standard package runner in CI supplies its own
+workspace resolution and Vitest version.
+
 Production size used `pnpm size:compare --base 30e85464e --exact-base
 --packages query-db-collection --files` with production gzip-9/Brotli-11.
 The first guard-only form grew package gzip by 16 B and typical-app gzip by
