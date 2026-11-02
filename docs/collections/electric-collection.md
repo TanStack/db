@@ -74,8 +74,9 @@ rollback or a terminal source failure before dispatch prevents the write.
 This preparation waits for stream evidence, not for source rows to become
 visible. A handler must still await its transaction ID or match, and must not
 wait for an on-demand query whose publication is held by its own transaction.
-Cold writes require sync connectivity. If confirmation fails after the handler
-has sent a write, the backend may already have committed it; the library does
+Persisted collections also wait for persistence startup to finish before
+dispatch. This does not wait for row visibility. Cold writes require sync
+connectivity. If confirmation fails after the handler has sent a write, the backend may already have committed it; the library does
 not automatically repeat the handler.
 
 ### 1. Using Txid (Recommended)

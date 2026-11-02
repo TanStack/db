@@ -1,9 +1,17 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
-import { IR, createCollection, createTransaction } from '@tanstack/db'
+import {
+  BasicIndex,
+  IR,
+  createCollection,
+  createTransaction,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { createDeferred } from '../../db/src/deferred'
-import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import {
+  SingleProcessCoordinator,
+  persistedCollectionOptions,
+} from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
@@ -1645,7 +1653,8 @@ sdkCampaigns(
 // Grammar varies payload and release order; every history crosses direct,
 // manual, derived-descriptor, persisted startup, multi-collection reset/retirement,
 // rollback, and abort paths. The persisted driver holds metadata before source
-// entry, then succeeds, fails, or cleans up. Its storage is controlled, not native
+// entry, then succeeds, fails, or cleans up. A coordinator index can remain
+// pending after metadata and the Electric baseline arrive. Its storage is controlled, not native
 // SQLite; cleanup is observed after releasing storage, not as prompt I/O abort.
 // Removing the second collection loses the all-participants law; removing the held echo loses the
 // distinction between admitting a write and confirming it. It excludes backend
@@ -1657,6 +1666,7 @@ const mutationStartupStates = [
   `materialized`,
   `persisted`,
   `persisted-failure`,
+  `persisted-index`,
   `persisted-cleanup`,
   `multi`,
   `reset`,
@@ -1683,6 +1693,18 @@ async function checkMutationStartup(
         const metadataEntered = deferred<void>()
         const releaseMetadata = createDeferred<void>()
         const persistence = managedTagPersistence()
+        const indexEntered = deferred<void>()
+        const releaseIndex = createDeferred<void>()
+        const coordinator = new SingleProcessCoordinator()
+        const ensureIndex =
+          coordinator.requestEnsurePersistedIndex.bind(coordinator)
+        coordinator.requestEnsurePersistedIndex = async (...args) => {
+          if (mode === `persisted-index`) {
+            indexEntered.resolve()
+            await releaseIndex.promise
+          }
+          return ensureIndex(...args)
+        }
         const loadResumeSnapshot = persistence.adapter.loadResumeSnapshot
         persistence.adapter.loadResumeSnapshot = async (...args) => {
           metadataEntered.resolve()
@@ -1712,10 +1734,13 @@ async function checkMutationStartup(
             : mode.startsWith(`persisted`)
               ? persistedCollectionOptions({
                   ...options,
-                  persistence: { adapter: persistence.adapter },
+                  persistence: { adapter: persistence.adapter, coordinator },
                 })
               : options,
         )
+        if (mode === `persisted-index`) {
+          collection.createIndex((row) => row.name, { indexType: BasicIndex })
+        }
         const retiredFromReady = createDeferred<void>()
         if (mode === `ready-cleanup`) {
           collection.onFirstReady(() => {
@@ -1726,6 +1751,8 @@ async function checkMutationStartup(
         }
         return {
           retiredFromReady,
+          indexEntered,
+          releaseIndex,
           original,
           metadataEntered,
           releaseMetadata,
@@ -1878,6 +1905,20 @@ async function checkMutationStartup(
         expect(writeCount()).toBe(0)
         return
       }
+      if (mode === `persisted-index`) {
+        const source = sources[0]!
+        await atCheckpoint(
+          source.indexEntered.promise,
+          `coordinator index startup`,
+        )
+        // Source position alone cannot authorize a write while persisted startup
+        // is still pending. The same generated payload must dispatch after it.
+        expect(
+          writeCount(),
+          `no write before persisted startup completes`,
+        ).toBe(0)
+        source.releaseIndex.resolve()
+      }
       if (replacement) {
         expect(writeCount(), `replacement cursor still held`).toBe(0)
         replacement.respond(
@@ -1925,6 +1966,7 @@ async function checkMutationStartup(
         expect(source.collection.get(1)?.name).toBe(name)
     }, [
       ...sources.map((source) => () => source.releaseMetadata.resolve()),
+      ...sources.map((source) => () => source.releaseIndex.resolve()),
       ...sources.map((source) => () => source.collection.cleanup()),
       ...sources.map((source) => () => source.http.close()),
       async () => {

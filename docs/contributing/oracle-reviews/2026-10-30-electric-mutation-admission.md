@@ -112,3 +112,50 @@ The existing shared checker now runs twelve paths in each of8 fixed and8 random
 histories, with declared reach. Payload and participant-release order remain the
 same generated dimensions. The contract and evidence limits above remain;
 this adds one synchronous reentry boundary, not arbitrary stale callbacks.
+
+
+## November 2: upstream merge and complete persisted startup
+
+Merged upstream main `d9d0a8e` in `4911f7b`, preserving both coverage-map
+additions. The only merge conflict was that shared documentation append.
+
+- Law: the proposed mutation-preparation contract waits for persistence startup
+  as well as current Electric stream positions, without waiting for row visibility.
+  The Electric collection guide now states this composition explicitly.
+- Reach: the existing startup grammar adds `persisted-index`. A real Collection
+  index causes coordinator startup work to remain held after metadata and the
+  installed SDK's baseline arrive. All thirteen paths reach eight times in each
+  fixed/random campaign; payload and participant order still vary.
+- RED: the focused startup command above fails both campaigns before the source
+  change. Seed20261030, path0:0 observes one handler invocation where zero is
+  required at `no write before persisted startup completes`.
+- Repair: after source entry, mutation preparation also awaits the runtime's
+  existing `ensureStarted()` promise. Source entry keeps its existing metadata
+  boundary; no startup queue or readiness state is added.
+- GREEN: the same campaigns pass. The four affected adapter suites pass408
+  runtime/type tests with no type errors; persistence `tsc --noEmit` passes.
+- Mutant: removing only the added startup wait reproduces the same assertion
+  failure in direct seed20261030/path0:0 replay. Restoring it passes that replay.
+- Limits: the new receiving path uses controlled coordinator scheduling and
+  managed storage plus the installed Electric SDK. It establishes held-versus-
+  released startup ordering, not a new native-SQLite or arbitrary-failure claim.
+
+The original oracle missed this boundary because its persistence paths held
+metadata only; none left coordinator startup pending after source entry.
+CodeRabbit's broader claim about late index failures was not reproduced: index
+request failures are currently caught by persistence. This repair addresses the
+verified premature-dispatch boundary and adopts full startup promise rejection
+without changing index failure policy.
+
+Self-review: ORC-001–007 and ORC-013–016 retain the prior contract, shared checker,
+installed-SDK path, campaign parity, replay, and cleanup limits. The new held
+coordinator request distinguishes source-entry-only admission from complete
+startup admission. ORC-008 adds no model state; ORC-009 uses the existing terms.
+ORC-010 cleanup releases the new held index before cleaning up the Collection.
+ORC-011 identified no separate shared-semantic-fault hypothesis. This record
+supplies ORC-012 evidence for the bounded added path; it is not an exhaustive
+audit of unrelated upstream changes.
+
+Reviewed packages/db-sqlite-persistence-core/src/persisted.ts SHA256: `7445fdf60921cd04feb1f1aa22415b3f637545b084223ba2b7af9f19328194ab`.
+
+Reviewed packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts SHA256: `cf58a63b38f465d3c558d55e3b62daf5984a7c6035615c26fc44803e84e781e7`.

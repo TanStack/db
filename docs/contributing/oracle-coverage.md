@@ -6427,7 +6427,9 @@ before the source enters. A twelfth path retires the run from its readiness
 callback after an active batch was accepted: its transaction evidence remains
 available, but its optimistic write is never dispatched. This is distinct from
 a callback entering after retirement, which has no publication authority.
-Every history reaches all twelve declared paths.
+Every history reaches all thirteen declared paths, including a coordinator
+index held after metadata and the Electric baseline arrive. Mutation dispatch
+waits for that remaining persistence startup work to settle.
 At each held baseline the mutation handler has not run; after all live source
 positions are established it runs once and stays persisting until its txid echo.
 The payload and release order vary in equal fixed/random campaigns. This owner

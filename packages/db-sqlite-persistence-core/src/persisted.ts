@@ -6232,6 +6232,7 @@ function createWrappedSyncConfig<
     beforeMutation: sourceSyncConfig.beforeMutation
       ? async (collection) => {
           await sourceStartup
+          await runtime.ensureStarted()
           return sourceSyncConfig.beforeMutation!(collection)
         }
       : undefined,
