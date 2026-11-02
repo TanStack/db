@@ -1257,24 +1257,21 @@ export function queryCollectionOptions(
       const end = previous.last.value
       const endMovedEarlier =
         next.last === undefined || next.compare(next.last.value, end) < 0
-      // The page has a later page when another page with its predicate and
-      // order ends deeper in the order. An empty page counts: it continues
-      // from where an earlier page ended.
+      // Another page with the same predicate and order ends deeper in the
+      // order. An empty page counts: it continues from an earlier page's end.
+      const hasLaterPage = () =>
+        [...state.observers.values()].some((observer) => {
+          const other = orderedPageResults.get(observer.getCurrentQuery())
+          return (
+            other !== undefined &&
+            other !== next &&
+            other.readKey === next.readKey &&
+            (other.last === undefined ||
+              next.compare(other.last.value, end) > 0)
+          )
+        })
       // One report per burst of refetched pages, after their rows apply.
-      if (
-        endMovedEarlier ||
-        (previous.keys !== next.keys &&
-          [...state.observers.values()].some((observer) => {
-            const other = orderedPageResults.get(observer.getCurrentQuery())
-            return (
-              other !== undefined &&
-              other !== next &&
-              other.readKey === next.readKey &&
-              (other.last === undefined ||
-                next.compare(other.last.value, end) > 0)
-            )
-          }))
-      ) {
+      if (endMovedEarlier || (previous.keys !== next.keys && hasLaterPage())) {
         invalidationTimer = setTimeout(() => {
           invalidationTimer = undefined
           if (activeSyncSession === syncSession) invalidateLoadedSubsets()

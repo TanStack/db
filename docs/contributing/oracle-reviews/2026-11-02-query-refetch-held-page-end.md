@@ -5,6 +5,10 @@ This is an author self-review, not an independent external review. The base is
 review to the executable change in this commit. Later semantic edits need a
 new review entry.
 
+This entry records the original 03a7 implementation. The
+[nine-item review](2026-11-02-query-refetch-nine-item-review.md) supersedes its
+report-reason classifier, constructive grammar, reach claim, and local commands.
+
 ## Law and repair boundary
 
 After an autonomous ordered Query refetch or Query invalidation reaches its
@@ -104,8 +108,10 @@ the initial grammar also generated locale-string order. That path uses
 full-source acquisition and cannot reach the finite-page premise. The new
 grammar now constructs numeric order only. The general campaigns retain
 locale strings. `first-green.log` records that intermediate reach failure,
-and `reach-debug.log` records the diagnosis. No comparison, reach minimum,
-existing grammar, or existing run budget was weakened.
+and `reach-debug.log` records the diagnosis. Public row comparisons, reach
+minima, the existing grammar, and existing run budgets stayed unchanged. The
+report-reason classifier did broaden from changed keys to any changed value.
+The nine-item review identifies and repairs that separate false-green gap.
 
 Final results on the inline production form:
 
@@ -127,7 +133,7 @@ logs are `final-guarded-new-replay.log` and `final-guarded-ci-replay.log`.
 Local Vitest is 3.2.4. CI uses 4.1.12. No dependency installation or override
 was used. Full local `pnpm test` was not run.
 
-The local owner runs use the saved `repair-vitest.config.mjs` in the evidence
+The historical local owner runs use the saved `repair-vitest.config.mjs` in the evidence
 directory. It selects the named owner, aliases workspace sources, and uses one
 worker. With `E` set to that evidence directory, the GREEN command is:
 
@@ -151,7 +157,8 @@ TANSTACK_DB_ORACLE_PROPERTY=query-db.refetch-held-page-end TANSTACK_DB_ORACLE_SE
 Focused types use `tsc --project "$E/repair-tsconfig.json"`. Oracle lint uses
 `pnpm lint:changed`. These configurations and all bound logs remain in the
 evidence directory. The standard package runner in CI supplies its own
-workspace resolution and Vitest version.
+workspace resolution and Vitest version. Current reproducible commands use
+repository-owned configurations in the nine-item review.
 
 Production size used `pnpm size:compare --base 30e85464e --exact-base
 --packages query-db-collection --files` with production gzip-9/Brotli-11.
