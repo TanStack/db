@@ -420,7 +420,7 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix`,
+    `refetch-ordered-prefix refetch-held-page-end`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
@@ -817,6 +817,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `query-db.refetch-held-page-end`,
+    `generated same-key page shifts.*replay campaign`,
+  ],
   [`react.window-render`, `window changes at React commit.*fresh`],
   [`preact.window-render`, `window changes at Preact commit.*fresh`],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],

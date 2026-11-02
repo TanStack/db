@@ -97,6 +97,7 @@ const staticOracleProperties = [
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
   `query-db.refetch-ordered-prefix`,
+  `query-db.refetch-held-page-end`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
   `replay.ordered-window-faults`,
