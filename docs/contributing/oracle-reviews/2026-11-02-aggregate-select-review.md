@@ -200,3 +200,18 @@ CodeRabbit completed its review of `a0e323a` with 15 selected files and two
 similar files skipped. Its one additional comment requested clearer ORC-007
 wording above. That wording is corrected. This review did not supply executed
 oracle evidence, and its coverage does not establish review of a later head.
+
+
+## Native adapter CI expectation follow-up
+
+The `ee13953af78832537b63f16649bba17bf4ced01d` PR workflow, attempt 1, failed the `Test (sqlite-adapters)` job `125548643697`. The ordinary test `op-sqlite-driver.test.ts:328` expected only `{ numRuns: 50 }`. The approved fresh-seed contract also returns a numeric `seed`. This is another stale option assertion, not an observed driver mismatch or reach failure.
+
+The unchanged source reproduces that assertion failure locally: one test fails and 92 tests are filtered. An initial dependency setup failure is retained separately. The repaired assertion compares the complete object with `{ numRuns: runs, seed: expect.any(Number) }`. It still rejects an unexpected path or reporter. The test name now describes fresh seed selection and the unchanged campaign budget. The neighboring explicit-seed and named-path assertions remain unchanged.
+
+All 93 ordinary tests in `op-sqlite-driver.test.ts` pass after the edit. The local run uses cached Vitest 3.2.4, Node SQLite fixtures, and the existing mobile setup file. CI uses Vitest 4.1.12. No mobile runtime or new oracle campaign ran. The alias oracle, shared seed helpers, models, generators, production, dependencies, and lockfile remain unchanged from `ee13953`. The earlier bounded oracle evidence remains source-bound historical evidence.
+
+A repository search of direct option assertions finds no other expectation that omits the selected seed. This search does not prove every indirect consumer contract. The existing shared diagnostic oracle and its earlier calibration remain unchanged. This repair updates an ordinary configuration expectation under the already accepted seed contract.
+
+Local reproduction uses `pnpm exec vitest run --config /private/tmp/callback-metadata/2331-native-ci-expectation-20261102/native.vitest.config.mjs`. The normal repository package command remains `pnpm --filter @tanstack/react-native-db-sqlite-persistence test`. The scratch configuration selects the ordinary file and existing source aliases with one worker. It does not establish complete package-suite or mobile-runtime coverage.
+
+Full command, exit, source, and log bindings remain under `/private/tmp/callback-metadata/2331-native-ci-expectation-20261102`. The complete authoritative job log has SHA-256 `ba29458721937e64a447133ba4bdc0c66b74ad631763d5ea866bdccb5930f71f`. The workflow was still active when its run object was fetched. The failed job is decisive, but its status is not a final workflow conclusion. No CI retry ran. Final pushed-head CI remains required.
