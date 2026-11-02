@@ -4757,16 +4757,17 @@ row or its metadata; an equal re-insert keeps metadata without writing it.
 In the persisted wrapper an insert replaces whatever row it lands on. A
 peer's notice of a write in this run counts as a source write, and writes
 during a storage read follow the same rules, the last write for a key
-winning. When a stored row's author is unknown, a seed this tab holds stays
-unless storage changed it, and other stored rows count as source writes
-(decisions 13 and 15). Reloads keep metadata of a missing row (decision 16),
+winning. When a stored row's author is unknown, a DbClient seed this tab holds stays,
+and other differing stored rows count as source writes (decisions 13 and 15). Reloads keep metadata of a missing row (decision 16),
 a write over a seed stores the row this tab shows (decision 17), and a
 reload after a named notice keeps a seed's metadata (decision 18).
 
 | Owner | Production paths | Observations and checkpoint |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` lanes) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer lanes, the stored rows after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer lanes, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
+| [native SQLite/coordinator receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts) | two real Collections and coordinators, node:sqlite, BroadcastChannel and Web Locks; partial/full/on-demand lanes | shared model and source reads after correlated commit/notice/recovery cuts; rows, metadata and applied receipts after settlement; direct durable metadata after each correlated action and durable rows after settlement |
+| [recovery schedules](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-recovery-oracle.ts) using the same session model and native receiver | response delivery, storage reading and captured-row application held separately; bare/non-bare seeds, a second tab's source write, or cleanup during one recovery on demand | source metadata before application, after the interruption and after completion; stale source reads at cleanup start and after late work; direct durable metadata after completion |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested lanes | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
 | [hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts) | `DbClient` initialData, hydration chunks, and an adapter sync transaction (inserts, updates, deletes, truncates, and metadata-only writes) in full and partial row modes | public rows, the synced store, and row metadata through `client.dehydrate()` after each action; D5 per object |
@@ -4808,24 +4809,140 @@ must equal the model's, which a restart would read.
 `persisted-peers-full` repeats the lane under full row updates, where an
 update replaces its row in storage too; `persisted-peers-on-demand` repeats
 it on demand with a demand for every row. A reset over metadata of a missing
-row is too rare in generated histories to declare; a replay pins it. A
-random CI campaign (seed `654774679`) found a `persisted-peers-full` history
-that reproduces on `main`: an outer transaction inserts over a bare seed, an
-inner one re-inserts the row and commits, and a peer's full reload leaves the
-row with the cached seed's metadata, where the model expects none (law:
-the source reads its row metadata). The maintainer chose to leave it open,
-tracked with #2281; an `it.fails` replay through the same model, driver, and
-comparison pins its shrunk prefix, and the random campaign can still draw it.
-Owner: this oracle. A reset
-may rewrite its rows, which its reload then applies as source writes.
+row is too rare in generated histories to declare; a replay pins it.
+
+An equal source re-insert keeps metadata without writing it (decisions 9 and
+14). As with an update, that keep neither makes a DbClient seed durable nor
+sends it to peers (decision 18). Direct durable metadata is compared separately
+from this tab's source reads. The constructive durability grammar includes all
+36 update/equal-reinsert/inner-reinsert × bare/non-bare seed × implicit/explicit
+metadata × no-notice/named-notice/full-reload cases in each generated batch. Its partial/full/on-demand lanes run
+through both the controlled persisted adapter and the real SQLite/coordinator
+receiver, with 108 declared case/lane/notice states per host, each reached eight times
+in both fixed and random campaigns. Seed row shape, seed timing and repeat
+count vary; no campaign can omit the full reload. Explicit metadata writes are the
+neighboring control. The original seed/re-insert/reload grammar, fixed/random
+40 budgets and its completed fixed-branch guards remain; the new constructive
+batch supplies guaranteed bare-key-1 implicit histories independently of seed.
+Both hosts share the 40-run sibling and 8-run durability campaign mechanics in
+`sync-metadata-session-campaign.ts`; production setup, recovery observations
+and direct replay selection remain in their receiving files.
+
+The native on-demand path can receive a successful recovery response that
+crosses an earlier cache version without transaction replay details. The shared
+model then applies the existing unknown-write rule (decision 15) to its own
+independent durable storage. The recorder withholds that transport input until its hydration task completes
+a storage read and application. A discarded response fails a guard instead of
+advancing the model. Setup inputs are consumed before authored actions. No
+expected metadata comes from a production reload classifier. A named current-run write
+still follows decision 11; a previous-run cached row initially remains a seed.
+The native driver finishes each source commit's correlated notice and recovery
+before admitting the next authored action. It compares source reads and durable metadata after that cut, and consumers,
+receipts and stored rows after settlement. The controlled driver waits for
+acceptance before comparing durable metadata; store/read holds postpone that
+cut until release. A later explicit write cannot hide an earlier wrong keep.
+The controlled adapter also records every completed durable metadata snapshot,
+so queued commits drained by one release cannot hide a wrong write. The
+comparison preserves the sequence of changes and permits repeated identical
+snapshots from empty commits. A constructive immediate/store-held ×
+bare/metadata-bearing repair campaign declares all four regimes, eight times
+each. Native commits are individually awaited, so its action cuts already
+separate these writes. No claim covers intermediate SQL statements.
+The ordinary campaigns retain this serialized schedule. A separate fixed/random
+recovery campaign constructs all 18 response/read/application × seed/peer/cleanup
+× bare/non-bare states per batch. Every state reaches its held source comparison
+eight times in each normal campaign. The application hold captures the rows
+before returning them to the wrapper; it does not delay only an already-applied
+promise. Peer writes can complete before a held response is delivered; while a
+hydration scope owns SQLite admission they wait until that scope ends. Cleanup
+invalidates the sync run before the held work is released. The recorder discards
+its inputs, including a hydration task that finishes after invalidation. The
+shared model still derives every metadata expectation from its own storage.
+Expiry, persisted cache generation rotation, arbitrary overlapping recoveries,
+restart and the necessity of gap detection remain outside these schedules.
+
+Permanent [calibration controls](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-calibration.test.ts)
+feed wrong intermediate durable snapshots, reload-only wrong reads, temporary
+wrong reads at every held recovery cut and stale reads after cleanup through
+the same comparisons. Recorder controls cover failed tasks, missing reads,
+late responses and invalidation. A real fast-check obsolete-path control
+demonstrates zero-history GREEN and verifies the shared execution guard rejects
+it. These are checker and fixture evidence, not new product oracles or a
+production mutation score. The
+[instrument audit](oracle-reviews/2026-11-02-p6-instrument-calibration.md)
+connects each claim to authority, history, receiving path, checkpoint and control.
+
+The receiver serializes every root SQL call with transaction admission on its
+one physical connection, while scoped transaction calls stay inside that
+admission. Nested scopes use savepoints; same-transaction async root reentry
+uses that scope. Nested rollback/root-reentry and cross-adapter isolation
+witnesses reject missing savepoints and unqueued root calls. The reusable SQL
+fixture conformance suite checks both transaction entry points, caught inner
+rollback, successful inner scopes followed by outer rollback, deeper scopes,
+root reentry, unrelated-caller isolation, detached callbacks from completed
+transactions, and reuse after failure. A detached callback loses root reentry
+when its transaction ends, so it cannot read or join a later unrelated scope.
+The new witness failed before this fixture correction. The suite certifies
+this native fixture, without lending that result to every shipped SQL driver.
+The driver waits for actual correlated notices, remote ensure replies
+and accepted empty source commits through the wrapper's apply lock, rather than
+a quiet-time polling interval. It covers two real Browser coordinators over
+Node BroadcastChannel/Web Locks and native SQLite in one process. Chromium
+OPFS, Electron IPC, transport loss, leadership turnover, every partial-notice
+shape and every shared session grammar remain outside it. The constructive
+receiver uses core holds; broad controlled histories retain store/read holds.
+Owner: this sync metadata session oracle. A reset may rewrite its rows, which
+its reload then applies as source writes. The
+[kept-metadata review](oracle-reviews/2026-10-30-kept-metadata-durability.md)
+records the D9/D18 durable comparison, the D15 model-input correction, measured
+reach, calibration and combined-tree evidence.
+The [P6 current-main revalidation](oracle-reviews/2026-11-02-p6-metadata-closeout.md)
+keeps the withdrawn production diagnosis distinct from the replacement test/model
+patch. The source-facing metadata failure in [#2317](https://github.com/TanStack/db/issues/2317)
+remains separate and open under this owner, with P8 investigating: property
+`sync-metadata-session.persisted-peers`, seed `346038028`, path
+`36:2:4:6:10:14:16:14:14:13:13:13`. P6's durability evidence does not close that
+controlled-notice witness or the broader #2281 persistence reports.
+
+Remaining observation work under this owner: the read-hold and abandonment
+lanes retain source-facing comparisons but do not provide the peer lanes'
+direct durable transaction trace. A receiving witness must stage a wrong
+durable write followed by repair while a read hold buffers a commit, including
+abandonment, and reject it at the appropriate durable boundary. These additions
+do not retire that obligation. Cross-host recovery schedules still need actual
+Chromium OPFS and Electron IPC receiving witnesses; their owner remains this
+session oracle with the broader receiving work tracked by #2272.
+
+Repaired counterexample, **META-CI-051-S001**: an enclosing update reads a
+cached row, an inner transaction deletes that row and sets its metadata while
+missing, then both commit. A named peer notice for another key drops the
+retained metadata in the on-demand receiver, with and without a core hold.
+Both the controlled adapter and native SQLite reproduce this source-read
+failure under D16 before the production repair. The model correction separates
+this run-only metadata from durable metadata when the outer update recreates the
+row; the old model's false durable expectation masks the later source failure.
+Owner: this session oracle. The generated
+`sync-metadata-session.{persisted,sqlite}-missing-row-metadata` campaigns
+cover twelve cases in all three peer lanes: implicit/explicit metadata,
+immediate/core-held application, a prior source truncate, same-key peer row or
+metadata replacement, unknown-write reloads, peer/source delete and source
+truncate. All 36 case/lane states reach eight times in each fixed/random campaign
+on both hosts. The wrapper distinguishes local metadata from a named peer
+replacement, preserving D16 without defeating D11 or D15. Three wrong retention
+policies fail the same source-read comparisons. The
+[CI investigation](oracle-reviews/2026-11-02-p6-ci-missing-row.md)
+records the pre-edit receiving RED, repaired GREEN, controls and bounded class
+claim. This does not determine that the separate #2317/P8 witness has the same
+cause or close its broader scope.
+
 `persisted-reads-seeds` crosses read holds with seeds and the cached row and
 aborts a buffered commit's signal, which abandons it at the read's end
 (decision 21); a seed that arrived after it stays judged against it
 (decision 22). Dependent suffixes of an abandoned transaction belong to the
-abort-graph oracle. The peer is the driver, not a second
-Collection, so the claim stops at the controlled coordinator; a second
-production driver with two real coordinators is the open receiving
-witness (issue #2272). Missed notices and notices over the targeted key limit are not
+abort-graph oracle. The broad peer grammar uses a controlled coordinator. The new constructive
+seed/re-insert/reload receiver uses two real Collections and coordinators for
+the bounded metadata law above; it does not close the broader host and transport
+receiving scope of issue #2272. Missed notices and notices over the targeted key limit are not
 generated; the persisted oracle's grids cover them. Two held-cleanup
 Query retention witnesses race on CI; the maintainer deferred the race until
 a failure reports the timer trace these witnesses now print, and the review

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
+import {
+  createSessionModel,
+  persistedPeerLane,
+  runSessionHistory,
+} from './sync-metadata-session-oracle.js'
+import type { SessionDriver } from './sync-metadata-session-oracle.js'
 import type { SyncConfig } from '../src/types.js'
 
 // Fixed boundaries of the sync metadata session. The session law itself is
@@ -8,6 +14,55 @@ import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; v: unknown }
 type SyncActions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
+
+// This tests runner ordering, rather than introducing another product model.
+it(`consumes completed setup inputs before authored actions`, async () => {
+  const order: Array<string> = []
+  let setup = true
+  const observation = createSessionModel(persistedPeerLane).observe()
+  const driver: SessionDriver = {
+    begin: () => {
+      order.push(`action`)
+    },
+    commit: () => {},
+    cancel: () => {},
+    rowSet: () => {},
+    rowDelete: () => {},
+    insert: () => {},
+    update: () => {},
+    delete: () => {},
+    truncate: () => {},
+    collectionSet: () => {},
+    collectionDelete: () => {},
+    hold: () => {},
+    release: () => Promise.resolve(),
+    flush: () => Promise.resolve(),
+    settle: () => Promise.resolve([]),
+    cleanup: () => Promise.resolve(),
+    observe: () => observation,
+    takeRecoveryInputs: () => {
+      order.push(`recovery`)
+      if (!setup) return []
+      setup = false
+      return [
+        {
+          type: `unknown-storage-observation`,
+          fromRowVersion: 0,
+          latestRowVersion: 1,
+        },
+      ]
+    },
+  }
+  const result = await runSessionHistory(
+    persistedPeerLane,
+    [{ type: `begin` }],
+    () => Promise.resolve(driver),
+  )
+  expect(result.mismatch).toBeUndefined()
+  expect(order[0]).toBe(`recovery`)
+  expect(order[1]).toBe(`action`)
+  expect(result.recoveryInputs).toHaveLength(1)
+})
 
 /**
  * Boundary witnesses for P11. A sync run that cleanup has ended reads nothing
