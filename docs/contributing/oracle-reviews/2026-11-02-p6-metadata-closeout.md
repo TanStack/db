@@ -45,7 +45,8 @@ Update the existing PR with ordinary follow-up history: merge current main,
 replace its net diff with this validated candidate, remove the obsolete
 materialization and release note, and rewrite the body around D9/D18 and the
 bounded receiving evidence. Preserve main's source-progress changes. No force
-push or new package release is needed. This session has not updated the PR.
+push or new package release is needed. This snapshot predates the approved
+publication preparation recorded below.
 
 - **#2281:** open. Withdraw the old metadata product-repair claim; the row-loss
   and resurrection reports remain separate.
@@ -226,3 +227,60 @@ map and replay configuration as well as other subsystems; integrate it before
 publishing the replacement. The persistence production source and shared
 metadata model are unchanged between those main commits. The results above
 do not claim validation of the future integrated head.
+
+## Approved publication preparation
+
+The maintainer approved the commit and PR-documentation gate on November 2.
+Commit `a04d85519` contains the reviewed candidate. Merge `ea43b47c4` integrates
+main at `30e85464ed2b9b12c5f10981a062427a1fc8daaa`. Merge
+`41f8d99e975aa56ee18d6bca46b7193c602ca287` preserves the published #2303 ancestry
+while keeping the corrected candidate tree. It supersedes the withdrawn
+materialization and release note. No published history is rewritten.
+
+The following results test the production/test tree at
+`41f8d99e975aa56ee18d6bca46b7193c602ca287`, before this documentation update:
+
+| Integrated check | Result |
+| --- | --- |
+| Complete controlled persisted receiver | 74 passed, 284.31 seconds |
+| Native receiver, SQL fixture and emitted-work files | 12 passed, 4.53 seconds |
+| Core session, boundary, row-metadata composition and replay-registry files | 162 passed, 178.37 seconds |
+| Scoped TypeScript and changed-oracle lint | Passed |
+| General ESLint | Zero errors, 12 warnings |
+| Shared campaign direct replay | One requested history passed per host, seed `527962096`, path `0` |
+
+The core command adds `tests/oracle-replay.test.ts` to the three core files
+listed above. This exercises the merged registry and replay configuration.
+The paired constructive campaigns again reached every one of the 36
+case/lane states eight times. Native prior-cache recovery reached 96 histories
+in each campaign. Fixed seed remains `2220031`; random seeds are `-985340019`
+for the controlled receiver and `622373113` for native SQLite.
+
+Both 40-run fixed campaigns retain seed `527962096` and the same per-lane
+reach: 40 inner commits, 21 named notices, 19 full reloads and two completed
+bare and non-bare kept-seed states each. Controlled random seed `570739933`
+reached 40 inner commits, 19 named notices, 21 reloads, one completed bare
+state and five non-bare states per lane. Native random seed `-237872140`
+reached 40 inner commits, 21 named notices, 19 reloads, zero completed bare
+states and two non-bare states per lane. That scarce random branch remains
+measured; the fixed guards and constructive matrix supply guaranteed reach.
+
+The dependency refresh used the frozen main lockfile and the public npm
+registry after the sandbox blocked registry downloads. It required no version
+override or local manifest/lockfile change. Against the integrated main,
+production source, manifests, the lockfile and release notes have zero delta.
+No package release or changeset is appropriate for this test-only result.
+
+Integrated logs use the `integrated-` prefix in the same scratch directory.
+`integrated-code-freeze.json` records the tested head and changed-file hashes;
+`integrated-reach.json` retains every measured state count. The native
+receiving limits and separate #2317/P8 witness remain unchanged.
+
+All five calibration controls were repeated on the integrated tree. They
+failed at the same intended assertions listed above, with no setup failure or
+timeout. Both restored durability replays passed at seed `2220031`, path
+`0:0:0`. The model, production serializer and SQL fixture were restored
+byte-for-byte. The `integrated-calibration/` directory retains exact commands,
+mutated/restored hashes and assertion classifications. All 248 integrated
+tests, replay checks and controls preserve the earlier bounded conclusion.
+Final published-head CI and review remain a separate publication check.
