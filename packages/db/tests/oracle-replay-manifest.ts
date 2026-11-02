@@ -14,6 +14,85 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `db/tests/query/pagination-oracle.property.test.ts`,
+    `pagination`,
+    `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
+    `db/tests/query/limit-admission-oracle.ts`,
+  ],
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`vue`, `vue-db/tests/conformance.test.ts`],
+    [`solid`, `solid-db/tests/conformance.test.tsx`],
+    [`angular`, `angular-db/tests/conformance.test.ts`],
+    [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `result-shape`,
+        `db/tests/conformance/result-shape-oracle.ts`,
+      ] as const,
+  ),
+  [
+    `react-db/tests/conformance.test.tsx`,
+    `framework.react`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `react-db/tests/conformance.test.tsx`,
+    `framework.react-dependency-list`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `preact-db/tests/conformance.test.ts`,
+    `framework.preact`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `vue-db/tests/conformance.test.ts`,
+    `framework.vue`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `solid-db/tests/conformance.test.tsx`,
+    `framework.solid`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `angular-db/tests/conformance.test.ts`,
+    `framework.angular`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [
+    `svelte-db/tests/conformance.svelte.test.ts`,
+    `framework.svelte`,
+    `window-history pending-window-history publication-window-history`,
+    `db/tests/conformance/window-history-oracle.ts`,
+  ],
+  [`react-db/tests/window-render-oracle.test.tsx`, `react`, `window-render`],
+  [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
+  [
+    `react-db/tests/ssr-effects-oracle.test.ts`,
+    `react`,
+    [
+      `ssr-effects-react18-ordinary-provider ssr-effects-react18-ordinary-explicit`,
+      `ssr-effects-react18-suspense-provider ssr-effects-react18-suspense-explicit`,
+      `ssr-effects-react18-standalone ssr-effects-react18-supplied`,
+      `ssr-effects-current-ordinary-provider ssr-effects-current-ordinary-explicit`,
+      `ssr-effects-current-suspense-provider ssr-effects-current-suspense-explicit`,
+      `ssr-effects-current-standalone ssr-effects-current-supplied`,
+    ].join(` `),
+  ],
+  [
     `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
     `lint`,
     `part-reach`,
@@ -347,7 +426,7 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix`,
+    `refetch-ordered-prefix refetch-held-page-end`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
@@ -626,7 +705,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
-    `topk-support-window`,
+    `topk-support-window topk-numeric-window topk-negative-window-array topk-negative-window-grouped topk-negative-window-orderBy`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,
@@ -794,6 +873,25 @@ const replayTestNames = new Map([
         `conforms on a random campaign or a replayed seed`,
       ] as const,
   ),
+  [
+    `query-db.refetch-held-page-end`,
+    `generated same-key page shifts.*replay campaign`,
+  ],
+  [`react.window-render`, `window changes at React commit.*fresh`],
+  [`preact.window-render`, `window changes at Preact commit.*fresh`],
+  [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
+  [
+    `ivm.topk-negative-window-array`,
+    `Absolute-rank negative window oracle:.*array.*random`,
+  ],
+  [
+    `ivm.topk-negative-window-grouped`,
+    `Absolute-rank negative window oracle:.*grouped.*random`,
+  ],
+  [
+    `ivm.topk-negative-window-orderBy`,
+    `Absolute-rank negative window oracle:.*orderBy.*random`,
+  ],
   [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
   [
     `ivm.distinct-representatives`,
@@ -933,6 +1031,30 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`pagination.limit-admission-`)) {
+    const suffix = property.slice(`pagination.limit-admission-`.length)
+    const negative = suffix.endsWith(`-negative`)
+    const path = suffix.slice(0, -(negative ? `-negative` : `-valid`).length)
+    return `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} \\(random\\)`
+  }
+  if (property.startsWith(`framework.`)) {
+    switch (property.split(`.`).at(-1)) {
+      case `result-shape`:
+        return `query projection histories \\(random\\)`
+      case `window-history`:
+        return `(?:direct|nested) window histories \\(fresh\\)`
+      case `pending-window-history`:
+        return `pending window histories \\(fresh\\)`
+      case `publication-window-history`:
+        return `publication callback window histories \\(fresh\\)`
+    }
+  }
+  if (property.startsWith(`react.ssr-effects-`)) {
+    const [runtime, ...path] = property
+      .slice(`react.ssr-effects-`.length)
+      .split(`-`)
+    return `${runtime} ${path.join(`-`)} renders without client layout diagnostics \\(random\\)`
+  }
   if (property === `replay.ordered-window-faults`)
     return `keeps the ordered window under load and release faults \\(replay campaign\\)`
   if (property === `replay.ordered-failed-replay`)

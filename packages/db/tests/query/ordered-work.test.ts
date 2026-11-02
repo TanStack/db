@@ -207,7 +207,7 @@ describe(`ordered source work oracle`, () => {
         const builder = getCollectionBuilder(live)!
         expect(
           Object.values(builder.optimizableOrderByCollections).some(
-            (info) => info.joinedFilterSourceId !== undefined,
+            (info) => (info.joinedFilterSourceIds?.length ?? 0) > 0,
           ),
         ).toBe(true)
         const scheduled = vi.spyOn(builder, `scheduleGraphRun`)

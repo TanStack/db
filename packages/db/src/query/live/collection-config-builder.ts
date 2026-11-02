@@ -1,5 +1,6 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { compileCollectionQuery } from '../compiler/index.js'
+import { validateLimit } from '../validate-limit.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
@@ -72,9 +73,13 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * and an unordered one is a fixed one-row result that accepts only its
    * compiled limit at offset 0.
    *
+   * Existing query-shape and reentrancy guards run before limit validation.
+   *
    * @throws `SetWindowRequiresOrderByError` if the query is neither windowed
    * nor a `findOne`, or an unordered `findOne` would move its offset.
    * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
+   * @throws `SetWindowReentrancyError` during synchronous graph or source work.
+   * @throws RangeError if the supplied limit is negative and those guards pass.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -391,6 +396,8 @@ export class CollectionConfigBuilder<
       throw new SetWindowReentrancyError()
     }
 
+    validateLimit(options.limit)
+
     // Keep caller-owned objects out of the long-lived query state. A caller may
     // reuse and mutate its options object after this operation settles.
     const baseWindow =
@@ -452,16 +459,15 @@ export class CollectionConfigBuilder<
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     for (const info of Object.values(this.optimizableOrderByCollections)) {
-      if (!info.joinedFilterSourceId) continue
-      for (const plan of this.lazySourcesCallbacks[info.joinedFilterSourceId]
-        ?.plans ?? []) {
-        const participant = this.activeDemands.get(plan.id)?.participant
-        if (participant?.isPending()) {
-          this.trackSubsetLoadOperationPromise(participant.promise)
+      for (const sourceId of info.joinedFilterSourceIds ?? []) {
+        for (const plan of this.lazySourcesCallbacks[sourceId]?.plans ?? []) {
+          const participant = this.activeDemands.get(plan.id)?.participant
+          if (participant?.isPending()) {
+            this.trackSubsetLoadOperationPromise(participant.promise)
+          }
         }
       }
     }
-    const previousOperation = this.activeWindowOperation
     const operation: {
       generation: number
       failed: boolean
@@ -488,7 +494,7 @@ export class CollectionConfigBuilder<
       loadOperation?.cancel()
       throw error
     } finally {
-      this.activeWindowOperation = previousOperation
+      this.activeWindowOperation = undefined
     }
 
     const settlement = loadOperation?.wait() ?? true
@@ -598,16 +604,16 @@ export class CollectionConfigBuilder<
     if (this.liveQueryCollection?._lifecycle.status === `ready`) {
       // The failure settles the demand: the request errors of its keys show
       // it, and ordered work must not wait for a load that already ended.
-      // Output held for this demand publishes now, unless a failed replay of
-      // this source holds publication: the failure then holds this
-      // subscription's publication too, so retiring the other replay's
-      // failed demand cannot publish without this demand's rows.
+      // Output held for this demand publishes now, unless a replay of this
+      // source still holds publication: the failure then holds this
+      // subscription's publication too. Neither sibling settlement nor
+      // retirement of its failed demand may publish without these rows.
       demand.settled = true
       if (
         this.collectionSources.some(
           (source) =>
             source.collection === collection &&
-            this.subscriptions[source.sourceId]?.hasFailedTruncateReplacement,
+            this.subscriptions[source.sourceId]?.hasPendingTruncateReplacement,
         )
       )
         subscription.failReplacement(normalized)
@@ -1211,10 +1217,10 @@ export class CollectionConfigBuilder<
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
         this.pendingOrderedLoads.size > 0 ||
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) =>
-            info.joinedFilterSourceId !== undefined &&
-            this.hasPendingJoinedWork(info.joinedFilterSourceId),
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.some((sourceId) =>
+            this.hasPendingJoinedWork(sourceId),
+          ),
         )
       ) {
         return
@@ -1411,8 +1417,8 @@ export class CollectionConfigBuilder<
 
     if (status === `ready`) {
       if (
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) => info.joinedFilterSourceId === sourceId,
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.includes(sourceId),
         )
       ) {
         this.maybeRunGraphFn?.()

@@ -1,6 +1,7 @@
 import { topKWithFractionalIndex } from './topKWithFractionalIndex.js'
-import { consolidate } from './consolidate.js'
+import { orderedWindow } from './ordered-window.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
+import type { OrderedTopK } from './ordered-window.js'
 import type { SetSizeCallback } from './topKWithFractionalIndex.js'
 
 export interface OrderByOptions<Ve> {
@@ -37,34 +38,11 @@ export function orderByWithFractionalIndex<
   type KeyType = T extends KeyValue<infer K, unknown> ? K : never
   type ValueType = T extends KeyValue<unknown, infer V> ? V : never
 
-  const limit = options?.limit ?? Infinity
-  const offset = options?.offset ?? 0
-  const setSizeCallback = options?.setSizeCallback
-  const setWindowFn = options?.setWindowFn
-  const comparator =
-    options?.comparator ??
-    ((a, b) => {
-      // Default to JS like ordering
-      if (a === b) return 0
-      if (a < b) return -1
-      return 1
-    })
-
-  return (
+  return orderedWindow<T, Ve>(
+    valueExtractor,
+    options,
+    topKWithFractionalIndex as OrderedTopK<T>,
+  ) as (
     stream: IStreamBuilder<T>,
-  ): IStreamBuilder<[KeyType, [ValueType, string]]> => {
-    return stream.pipe(
-      topKWithFractionalIndex(
-        (a: ValueType, b: ValueType) =>
-          comparator(valueExtractor(a), valueExtractor(b)),
-        {
-          limit,
-          offset,
-          setSizeCallback,
-          setWindowFn,
-        },
-      ),
-      consolidate(),
-    )
-  }
+  ) => IStreamBuilder<[KeyType, [ValueType, string]]>
 }

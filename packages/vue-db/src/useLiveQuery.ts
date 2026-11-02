@@ -1,15 +1,5 @@
+import { computed, reactive, ref, shallowRef, toValue, watchEffect } from 'vue'
 import {
-  computed,
-  getCurrentInstance,
-  onUnmounted,
-  reactive,
-  ref,
-  shallowRef,
-  toValue,
-  watchEffect,
-} from 'vue'
-import {
-  BaseQueryBuilder,
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
   getPublicCollection,
@@ -275,20 +265,22 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection,
+      windowOwner: resolveNext,
+    }))
   const resolveInput = () => {
-    // First check if the original parameter might be a ref/getter
-    // by seeing if toValue returns something different than the original
+    // Unwrap refs before preparing the query.
     // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
     let unwrappedParam = configOrQueryOrCollection
     if (typeof configOrQueryOrCollection !== `function`) {
       try {
-        const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
-        if (potentiallyUnwrapped !== configOrQueryOrCollection) {
-          unwrappedParam = potentiallyUnwrapped
-        }
+        unwrappedParam = toValue(configOrQueryOrCollection)
       } catch {
-        // If toValue fails, use original parameter
-        unwrappedParam = configOrQueryOrCollection
+        // Use the original input if unwrapping fails.
       }
     }
 
@@ -315,24 +307,15 @@ export function useLiveQuery(
       if (unwrappedParam.status === `idle`) {
         unwrappedParam.startSyncImmediate()
       }
+      previousCollection = null
       return unwrappedParam
     }
 
     // Reference deps to make computed reactive to them
     deps.forEach((dep) => toValue(dep))
 
-    // Ensure we always start sync for Vue hooks
-    if (typeof unwrappedParam === `function`) {
-      // A query function returning null or undefined disables the query.
-      return resolveLiveQueryValue(
-        unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
-        { gcTime: DEFAULT_GC_TIME_MS },
-      )
-    } else {
-      return resolveLiveQueryValue(unwrappedParam, {
-        gcTime: DEFAULT_GC_TIME_MS,
-      })
-    }
+    // The shared resolver prepares query callbacks and disabled inputs.
+    return resolveNext(unwrappedParam)
   }
   // The input's live-query Collection, or the error resolving it threw. A
   // Vue computed that throws serves its previous value on the next read, so
@@ -380,8 +363,6 @@ export function useLiveQuery(
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
-  let currentObserver: LiveQueryObserver<any, any> | null = null
-
   const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
@@ -391,11 +372,9 @@ export function useLiveQuery(
 
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
-    // Tear down any previous observer and its rows first: a query that fails
-    // to compile throws below, and Vue's computed then serves the previous
-    // collection, whose rows must not stay visible.
-    currentObserver?.dispose()
-    currentObserver = null
+    // watchEffect runs the previous observer's cleanup before this callback.
+    // Clear its rows before resolving: a compile rejection must not leave them
+    // visible through Vue's cached computed value.
     state.clear()
     internalData.value = []
 
@@ -414,48 +393,36 @@ export function useLiveQuery(
     // Initial rows arrive as the observer's first delta (includeInitialState);
     // apply them and every subsequent delta granularly to the reactive map.
     const observer = createLiveQueryObserver(currentCollection)
-    currentObserver = observer
-
-    const unsubscribe = observer.subscribe(
-      (changes: Array<ChangeMessage<any>> | undefined) => {
-        if (changes) {
-          for (const change of changes) {
-            switch (change.type) {
-              case `insert`:
-              case `update`:
-                state.set(change.key, change.value)
-                break
-              case `delete`:
-                state.delete(change.key)
-                break
-            }
-          }
-        } else {
-          // Cleanup and other status-only publications carry no row deltas.
-          // Rebuild the keyed view so it cannot diverge from ordered data.
-          state.clear()
-          for (const [key, value] of observer.getSnapshot().state ?? []) {
-            state.set(key, value)
+    observer.subscribe((changes: Array<ChangeMessage<any>> | undefined) => {
+      if (changes) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
+            case `update`:
+              state.set(change.key, change.value)
+              break
+            case `delete`:
+              state.delete(change.key)
+              break
           }
         }
-        syncFromObserver(observer)
-      },
-    )
+      } else {
+        // Cleanup and other status-only publications carry no row deltas.
+        // Rebuild the keyed view so it cannot diverge from ordered data.
+        state.clear()
+        for (const [key, value] of observer.getSnapshot().state ?? []) {
+          state.set(key, value)
+        }
+      }
+      syncFromObserver(observer)
+    })
     syncFromObserver(observer)
 
     // Cleanup when effect is invalidated
     onInvalidate(() => {
-      unsubscribe()
       observer.dispose()
-      currentObserver = null
     })
   })
-
-  // Cleanup on unmount (only if we're in a component context)
-  const instance = getCurrentInstance()
-  if (instance) {
-    onUnmounted(() => currentObserver?.dispose())
-  }
 
   return {
     state: computed(() => state),
