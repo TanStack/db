@@ -2447,7 +2447,7 @@ Development builds show this message, with `${...}` replaced by values:
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.
+DbClient cannot reuse live query "${queryHash}" with different source Collections or getKey/schema options. Use the same Collection objects and options, or a distinct query key.
 ```
 
 <a id="error-235"></a>

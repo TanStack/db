@@ -3,11 +3,15 @@ id: CollectionErrorInfo
 title: CollectionErrorInfo
 ---
 
-Defined in: [packages/db/src/types.ts:794](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L794)
+Defined in: [packages/db/src/types.ts:822](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L822)
 
 Detail about a Collection problem. Every field except `cause` is plain data,
 so the value can be logged or sent as JSON; `cause` keeps the original value
 and is omitted from JSON.
+
+## Extended by
+
+- [`HealthProblem`](HealthProblem.md)
 
 ## Properties
 
@@ -17,7 +21,7 @@ and is omitted from JSON.
 readonly at: number;
 ```
 
-Defined in: [packages/db/src/types.ts:799](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L799)
+Defined in: [packages/db/src/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L827)
 
 Epoch milliseconds when the problem was reported.
 
@@ -29,7 +33,7 @@ Epoch milliseconds when the problem was reported.
 readonly cause: unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:800](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L800)
+Defined in: [packages/db/src/types.ts:828](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L828)
 
 ***
 
@@ -39,7 +43,7 @@ Defined in: [packages/db/src/types.ts:800](https://github.com/TanStack/db/blob/m
 readonly optional code: string;
 ```
 
-Defined in: [packages/db/src/types.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L797)
+Defined in: [packages/db/src/types.ts:825](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L825)
 
 ***
 
@@ -49,7 +53,7 @@ Defined in: [packages/db/src/types.ts:797](https://github.com/TanStack/db/blob/m
 readonly message: string;
 ```
 
-Defined in: [packages/db/src/types.ts:796](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L796)
+Defined in: [packages/db/src/types.ts:824](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L824)
 
 ***
 
@@ -59,4 +63,4 @@ Defined in: [packages/db/src/types.ts:796](https://github.com/TanStack/db/blob/m
 readonly name: string;
 ```
 
-Defined in: [packages/db/src/types.ts:795](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L795)
+Defined in: [packages/db/src/types.ts:823](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L823)

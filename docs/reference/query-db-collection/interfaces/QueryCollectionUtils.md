@@ -3,7 +3,7 @@ id: QueryCollectionUtils
 title: QueryCollectionUtils
 ---
 
-Defined in: [packages/query-db-collection/src/query.ts:301](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L301)
+Defined in: [packages/query-db-collection/src/query.ts:335](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L335)
 
 Utility methods available on Query Collections for direct writes and manual operations.
 Direct writes bypass optimistic mutations and write to the synced data store.
@@ -46,7 +46,7 @@ The type accepted for insert operations
 dataUpdatedAt: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:334](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L334)
+Defined in: [packages/query-db-collection/src/query.ts:368](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L368)
 
 Get timestamp of last successful data update (in milliseconds)
 
@@ -58,7 +58,7 @@ Get timestamp of last successful data update (in milliseconds)
 fetchStatus: "idle" | "fetching" | "paused";
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:340](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L340)
+Defined in: [packages/query-db-collection/src/query.ts:374](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L374)
 
 Get the aggregate observer fetch status. Returns `fetching` if any
 observer is fetching, otherwise `paused` if any observer is paused, and
@@ -72,7 +72,7 @@ observer is fetching, otherwise `paused` if any observer is paused, and
 isFetching: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:328](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L328)
+Defined in: [packages/query-db-collection/src/query.ts:362](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L362)
 
 Check if query is currently fetching (initial or background)
 
@@ -84,7 +84,7 @@ Check if query is currently fetching (initial or background)
 isLoading: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:332](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L332)
+Defined in: [packages/query-db-collection/src/query.ts:366](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L366)
 
 Check if query is loading for the first time (no data yet)
 
@@ -96,7 +96,7 @@ Check if query is loading for the first time (no data yet)
 isRefetching: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:330](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L330)
+Defined in: [packages/query-db-collection/src/query.ts:364](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L364)
 
 Check if query is refetching in background (not initial fetch)
 
@@ -108,7 +108,7 @@ Check if query is refetching in background (not initial fetch)
 refetch: RefetchFn;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:311](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L311)
+Defined in: [packages/query-db-collection/src/query.ts:345](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L345)
 
 Manually refetch and await the applicable fetch or application boundary.
 
@@ -120,7 +120,7 @@ Manually refetch and await the applicable fetch or application boundary.
 writeBatch: (callback) => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:323](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L323)
+Defined in: [packages/query-db-collection/src/query.ts:357](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L357)
 
 Execute direct writes as one atomic batch. Resolves when the sync commit applies.
 
@@ -142,7 +142,7 @@ Execute direct writes as one atomic batch. Resolves when the sync commit applies
 writeDelete: (keys) => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:319](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L319)
+Defined in: [packages/query-db-collection/src/query.ts:353](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L353)
 
 Delete items without an optimistic update. Resolves when the sync commit applies.
 
@@ -164,7 +164,7 @@ Delete items without an optimistic update. Resolves when the sync commit applies
 writeInsert: (data) => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:313](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L313)
+Defined in: [packages/query-db-collection/src/query.ts:347](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L347)
 
 Insert items without an optimistic update. Resolves when the sync commit applies.
 
@@ -186,7 +186,7 @@ Insert items without an optimistic update. Resolves when the sync commit applies
 writeUpdate: (updates) => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:315](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L315)
+Defined in: [packages/query-db-collection/src/query.ts:349](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L349)
 
 Update items without an optimistic update. Resolves when the sync commit applies.
 
@@ -208,7 +208,7 @@ Update items without an optimistic update. Resolves when the sync commit applies
 writeUpsert: (data) => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:321](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L321)
+Defined in: [packages/query-db-collection/src/query.ts:355](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L355)
 
 Insert or update items without an optimistic update. Resolves when the sync commit applies.
 

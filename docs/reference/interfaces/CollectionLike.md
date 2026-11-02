@@ -30,7 +30,7 @@ for the change events system to work
 compareOptions: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:939](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L939)
+Defined in: [packages/db/src/collection/index.ts:930](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L930)
 
 #### Inherited from
 
@@ -58,7 +58,7 @@ Defined in: [packages/db/src/collection/index.ts:407](https://github.com/TanStac
 indexes: Map<number, BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:924](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L924)
+Defined in: [packages/db/src/collection/index.ts:915](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L915)
 
 #### Inherited from
 
@@ -74,7 +74,7 @@ Pick.indexes
 entries(): IterableIterator<[TKey, WithVirtualProps<T, TKey>]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:815](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L815)
+Defined in: [packages/db/src/collection/index.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L806)
 
 Get all entries (virtual derived state)
 
@@ -98,7 +98,7 @@ get(key):
   | undefined;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:755](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L755)
+Defined in: [packages/db/src/collection/index.ts:746](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L746)
 
 Get the current value for a key (virtual derived state)
 
@@ -127,7 +127,7 @@ Pick.get
 has(key): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:762](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L762)
+Defined in: [packages/db/src/collection/index.ts:753](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L753)
 
 Check if a key exists in the collection (virtual derived state)
 

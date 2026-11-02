@@ -7,7 +7,7 @@ title: UnloadSubsetFn
 type UnloadSubsetFn = (options) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L417)
+Defined in: [packages/db/src/types.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L418)
 
 Releases the exact acquisition created for `options`.
 

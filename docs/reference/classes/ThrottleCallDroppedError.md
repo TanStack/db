@@ -3,7 +3,7 @@ id: ThrottleCallDroppedError
 title: ThrottleCallDroppedError
 ---
 
-Defined in: [packages/db/src/errors.ts:455](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L455)
+Defined in: [packages/db/src/errors.ts:460](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L460)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:455](https://github.com/TanStack/db/blob/
 new ThrottleCallDroppedError(): ThrottleCallDroppedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:456](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L456)
+Defined in: [packages/db/src/errors.ts:461](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L461)
 
 #### Returns
 
