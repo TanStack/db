@@ -219,11 +219,12 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(next: P) {
+    async setParam(next: P, observe?: () => void) {
       param = next
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       flushSync()
+      observe?.()
       published.record(query.data, query.state)
       await settle()
     },
@@ -232,6 +233,7 @@ function mountControllable<P>(
 
 const svelteDriver: LiveQueryDriver = {
   name: `svelte`,
+  parameterObservationCut: `flushSync before a later task`,
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,

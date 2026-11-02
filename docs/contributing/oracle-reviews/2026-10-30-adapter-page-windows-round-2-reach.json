@@ -1,0 +1,1894 @@
+[
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "pending reach react/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "pending reach react/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "publication callback reach react/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "publication callback reach react/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 5,
+      "limit requested in callback": 8,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/changing/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/changing/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/stable/direct/fixed ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/stable/direct/fresh ",
+    "counts": {
+      "source write": 10,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/opaque/direct/fixed ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/opaque/direct/fresh ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/changing/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/changing/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/stable/nested/fixed ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/stable/nested/fresh ",
+    "counts": {
+      "source write": 12,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/opaque/nested/fixed ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react/opaque/nested/fresh ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "pending reach react (dependency list)/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "pending reach react (dependency list)/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "publication callback reach react (dependency list)/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "publication callback reach react (dependency list)/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 6,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/changing/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/changing/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/stable/direct/fixed ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/stable/direct/fresh ",
+    "counts": {
+      "source write": 12,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/opaque/direct/fixed ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/opaque/direct/fresh ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/changing/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/changing/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/stable/nested/fixed ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/stable/nested/fresh ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/opaque/nested/fixed ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-react.log",
+    "path": "window reach react (dependency list)/opaque/nested/fresh ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "pending reach preact/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "pending reach preact/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "publication callback reach preact/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "publication callback reach preact/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 6,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/changing/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/changing/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/stable/direct/fixed ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/stable/direct/fresh ",
+    "counts": {
+      "source write": 11,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/opaque/direct/fixed ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/opaque/direct/fresh ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/changing/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/changing/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/stable/nested/fixed ",
+    "counts": {
+      "source write": 13,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/stable/nested/fresh ",
+    "counts": {
+      "source write": 11,
+      "stable key": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/opaque/nested/fixed ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-preact.log",
+    "path": "window reach preact/opaque/nested/fresh ",
+    "counts": {
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "source write": 13,
+      "source growth": 13,
+      "opaque key change": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "pending reach vue/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "pending reach vue/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "publication callback reach vue/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "publication callback reach vue/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 6,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "window reach vue/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "window reach vue/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "window reach vue/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-vue.log",
+    "path": "window reach vue/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "pending reach solid/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "pending reach solid/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "publication callback reach solid/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "publication callback reach solid/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 5,
+      "limit requested in callback": 7,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "window reach solid/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "window reach solid/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "window reach solid/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-solid.log",
+    "path": "window reach solid/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "pending reach angular/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "pending reach angular/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "publication callback reach angular/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "publication callback reach angular/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "window reach angular/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "window reach angular/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "window reach angular/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-angular.log",
+    "path": "window reach angular/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "pending reach svelte/fixed ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "pending reach svelte/fresh ",
+    "counts": {
+      "initial loading move": 7,
+      "initial oldest settled while latest pending": 7,
+      "initial ready": 7,
+      "overlap pending": 7,
+      "oldest settled while latest pending": 7,
+      "settled latest": 7,
+      "unmounted pending": 7
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "publication callback reach svelte/fixed ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 6,
+      "limit requested in callback": 5,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "publication callback reach svelte/fresh ",
+    "counts": {
+      "publication callback entered": 9,
+      "offset requested in callback": 4,
+      "limit requested in callback": 7,
+      "callback update settled": 9
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "window reach svelte/derived/direct/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "window reach svelte/derived/direct/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "window reach svelte/derived/nested/fixed ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/round2-final-svelte.log",
+    "path": "window reach svelte/derived/nested/fresh ",
+    "counts": {
+      "offset move": 13,
+      "limit move": 13,
+      "large offset move": 13,
+      "large limit move": 13,
+      "filter change": 13,
+      "order change": 13,
+      "nested window change": 13,
+      "source change": 13,
+      "projection change": 13,
+      "Collection option change": 13,
+      "source write": 13,
+      "source growth": 13
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/false/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/false/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/false/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/false/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/false/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/false/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/false/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/false/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/false/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/false/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/false/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/false/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/true/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/true/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/true/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/true/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/true/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/true/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/true/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/true/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/true/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/true/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach false/true/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach false/true/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/false/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/false/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/false/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/false/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/false/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/false/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/false/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/false/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/false/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/false/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/false/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/false/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/true/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/true/offset/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/true/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/true/offset/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/true/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/true/limit/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/true/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/true/limit/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/true/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/true/both/fixed ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "render reach true/true/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-react-finalized-green.log",
+    "path": "window render reach true/true/both/fresh ",
+    "counts": {
+      "suspended move": 7,
+      "cancelled move": 7,
+      "committed move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/false/offset/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/false/offset/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/false/limit/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/false/limit/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/false/both/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/false/both/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/true/offset/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/true/offset/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/true/limit/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/true/limit/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/true/both/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach false/true/both/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/false/offset/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/false/offset/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/false/limit/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/false/limit/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/false/both/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/false/both/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/true/offset/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/true/offset/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/true/limit/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/true/limit/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/true/both/fixed ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  },
+  {
+    "log": "review-2291/fresh-receiving-preact-finalized-green.log",
+    "path": "preact render reach true/true/both/fresh ",
+    "counts": {
+      "committed move": 7,
+      "aborted move": 7
+    }
+  }
+]

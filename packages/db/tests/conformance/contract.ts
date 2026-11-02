@@ -22,8 +22,24 @@
  * Query identity (1.0 law, maintainer decisions 2026-10-22 and 2026-10-23).
  * The law depends on how a binding decides to compile again.
  *
- * A binding that compares query identity re-runs its query input and compiles
- * again only when the input's identity changed. React and Preact compare it
+ * A binding that compares query identity invalidates its authored input only
+ * when the input's identity changed. Invalidation does not always compile:
+ * an adapter-owned ordered list query whose stable structured plan changes only
+ * its finite outer limit/offset moves the existing window and retains its
+ * live-query Collection and upstream subscriptions (maintainer decision,
+ * 2026-10-30, #2291). For an invalidated input, changed source objects,
+ * projections, predicates, order, nested windows and Collection options still
+ * require compilation. An unchanged
+ * explicit key keeps its authored input, and changed opaque keyed inputs compile.
+ * DbClient and Suspense result sharing retain their identity-based behavior;
+ * they are outside this adapter-owned optimization.
+ *
+ * A window move requires a committed host update and runs after any current
+ * Collection publication. A speculative React or Preact render cannot move the
+ * committed window or start acquisition. Pending moves follow core's atomic
+ * window publication and latest-window rules.
+ *
+ * React and Preact compare it
  * on every render. Such a binding compiles an input that has no `queryKey`
  * only when the query IR has a stable identity; otherwise it throws
  * `UnhashableQueryIRError`. The identity names each source by its Collection
@@ -39,7 +55,7 @@
  *
  * A binding that compiles again whenever its reactive reads change (Vue,
  * Solid, Angular, and Svelte without a `DbClient`) compares no identity. It
- * compiles any query input, including one without a stable IR identity, and
+ * accepts any query input, including one without a stable IR identity, and
  * its rows follow the current input: after a source swap under the same
  * Collection ID, every value it publishes holds only the new source's rows
  * (or none while it loads) and never the old ones,
@@ -130,6 +146,8 @@ export interface LaggingSourceHandle<
   loadStarted: () => boolean
   /** Settle every pending subset request. */
   settle: () => void
+  /** Settle the oldest request, leaving later requests pending. */
+  settleNext: () => void
 }
 
 /**
@@ -239,7 +257,7 @@ export interface LiveQueryHandle {
  */
 export interface ControllableHandle<P> extends LiveQueryHandle {
   /** Rejects when the adapter rejects the reconfigured query input. */
-  setParam: (param: P) => Promise<void>
+  setParam: (param: P, observe?: () => void) => Promise<void>
   /**
    * The `data` value the binding left published at the end of each
    * synchronous turn since mount, in order. Drivers record at their
@@ -268,9 +286,20 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
  * defines the observation cut after framework updates and core sync settle.
  * The runtime suite observes public result data, state, and status. Framework
  * type inference and framework scheduler internals are outside this contract.
+ * The result-shape oracle also reads raw data at parameterObservationCut via
+ * setParam's observation callback. Shape follows the current query there;
+ * this earlier cut does not require rows to be fresh before the final flush.
  */
 export interface LiveQueryDriver {
   name: string
+  /**
+   * Native cut where setParam invokes its optional synchronous observation.
+   * The callback reads the real handle; it runs before setParam's final settle.
+   * Angular exposes synchronous Signal reads before effects, Vue nextTick,
+   * Solid synchronous propagation, Svelte flushSync, and React/Preact a
+   * committed synchronous rerender. These cuts are not interchangeable.
+   */
+  parameterObservationCut: string
   /** Public disabled data/state policy, not inferred from observed output. */
   disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */

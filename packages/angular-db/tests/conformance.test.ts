@@ -4,7 +4,8 @@
  * `injectLiveQuery` needs an injection context, so each mount runs inside a
  * child `EnvironmentInjector` created off TestBed's; `unmount` calls
  * `injector.destroy()`, firing the `DestroyRef` cleanup. Result signals are read
- * after settling. Controllable inputs use Angular's reactive `{ params, query }`
+ * after settling, and the shared shape oracle also reads them synchronously
+ * after a parameter change before effects. Controllable inputs use `{ params, query }`
  * form driven by a signal.
  *
  * All registered laws must pass; the driver has no whole-test waivers.
@@ -281,8 +282,11 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(next: P) {
+    async setParam(next: P, observe?: () => void) {
       param.set(next)
+      // Public Signal reads can compile the new input before effects run.
+      // Do not tick or await before the shared oracle makes these reads.
+      observe?.()
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       TestBed.tick()
@@ -294,6 +298,7 @@ function mountControllable<P>(
 
 const angularDriver: LiveQueryDriver = {
   name: `angular`,
+  parameterObservationCut: `synchronous Signal read before effects`,
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
