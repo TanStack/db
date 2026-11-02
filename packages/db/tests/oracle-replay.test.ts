@@ -402,7 +402,8 @@ describe(`named oracle replay manifest`, () => {
         `window-history`,
         `pending-window-history`,
         `publication-window-history`,
-      ].map((family) => [`framework.${driver}.${family}`, owner]),
+        `result-shape`,
+      ].map((family) => [`framework.${driver}.${family}`, owner] as const),
     ),
   )(`keeps the originating driver for %s`, (property, owner) => {
     const entry = oracleReplayManifest.find(
@@ -411,7 +412,7 @@ describe(`named oracle replay manifest`, () => {
     expect(entry, property).toMatchObject({
       file: `packages/${owner}`,
       status: `assertion`,
-      source: `packages/db/tests/conformance/window-history-oracle.ts`,
+      source: `packages/db/tests/conformance/${property.endsWith(`.result-shape`) ? `result-shape-oracle` : `window-history-oracle`}.ts`,
     })
   })
 
@@ -486,7 +487,12 @@ describe(`named oracle replay manifest`, () => {
             ? `react (dependency list)`
             : driver
         expect(driverSource).toContain(`name: \`${driverName}\``)
-        expect(source).toContain(`windowHistoryProperty(driver, \`${family}\`)`)
+        if (family === `result-shape`)
+          expect(source).toContain(`framework.\${id}.result-shape`)
+        else
+          expect(source).toContain(
+            `windowHistoryProperty(driver, \`${family}\`)`,
+          )
       } else if (entry.property.startsWith(`react.ssr-effects-`)) {
         const [runtime, ...parts] = entry.property
           .slice(`react.ssr-effects-`.length)

@@ -243,8 +243,9 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(next: P) {
+    async setParam(next: P, observe?: () => void) {
       setParam(() => next)
+      observe?.()
       // The first paint after the change: the framework ran its reactive
       // work synchronously, but no later task has run.
       published.record(getResult()(), getResult().state)
@@ -255,6 +256,7 @@ function mountControllable<P>(
 
 const solidDriver: LiveQueryDriver = {
   name: `solid`,
+  parameterObservationCut: `synchronous reactive propagation`,
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,

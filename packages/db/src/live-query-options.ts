@@ -17,7 +17,6 @@ import { getStringCollationIdentity } from './query/runtime-reference-identity.j
 import { codedMessage, devBuild } from './error-message.js'
 import { InvalidPoolOptionError, UnhashableQueryIRError } from './errors.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
-import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
 import type { PooledLiveQueries } from './query/pooled-live-query.js'
 import type {
@@ -149,32 +148,6 @@ type PreparedLiveQueryConfigInput = Omit<
   client?: DbClient
 }
 
-function createInitialQueryBuilder(): InitialQueryBuilder {
-  // Query construction does not materialize descriptor Collections.
-  return new BaseQueryBuilder() as InitialQueryBuilder
-}
-
-function createCollectionResolver(
-  dbClient: DbClient | undefined,
-  deferredCollections?: DeferredLiveQueryCollections,
-) {
-  if (!dbClient) return undefined
-  return (
-    options: CollectionOptionsIdentity<any, string | number, any, any, any>,
-  ): CollectionImpl<any, string | number, any, any, any> => {
-    if (!deferredCollections) {
-      return dbClient.collection(
-        options as CollectionOptions<any, string | number, any, any>,
-      ) as CollectionImpl<any, string | number, any, any, any>
-    }
-    const collection = dbClient._materializeCollectionForRender(
-      options as CollectionOptions<any, string | number, any, any>,
-    ) as CollectionImpl<any, string | number, any, any, any>
-    if (collection._deferSyncStart()) deferredCollections.add(collection)
-    return collection
-  }
-}
-
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
@@ -182,7 +155,7 @@ export function prepareLiveQueryValue(
 ): unknown {
   if (typeof value === `function`) {
     return prepareLiveQueryValue(
-      value(createInitialQueryBuilder()),
+      value(new BaseQueryBuilder() as InitialQueryBuilder),
       dbClient,
       deferredCollections,
     )
@@ -190,7 +163,24 @@ export function prepareLiveQueryValue(
 
   if (value instanceof BaseQueryBuilder) {
     return value._bindCollectionSources(
-      createCollectionResolver(dbClient, deferredCollections),
+      dbClient
+        ? (options) => {
+            const config = options as CollectionOptions<
+              any,
+              string | number,
+              any,
+              any
+            >
+            const collection = (
+              deferredCollections
+                ? dbClient._materializeCollectionForRender(config)
+                : dbClient.collection(config)
+            ) as CollectionImpl<any, string | number, any, any, any>
+            if (deferredCollections && collection._deferSyncStart())
+              deferredCollections.add(collection)
+            return collection
+          }
+        : undefined,
     )
   }
 
@@ -240,11 +230,9 @@ export function getPreparedLiveQuerySources(
   const query = queryConfig(value)?.query ?? value
   if (query instanceof BaseQueryBuilder) {
     return collectSourceRefs(query._getQuery()).map((source) =>
-      source.type === `descriptorRef`
-        ? onUnboundDescriptor
-          ? onUnboundDescriptor(source.alias)
-          : requireCollectionSource(source)
-        : source.collection,
+      source.type === `descriptorRef` && onUnboundDescriptor
+        ? onUnboundDescriptor(source.alias)
+        : requireCollectionSource(source),
     )
   }
   return isCollection(query) ? [query] : []
@@ -310,11 +298,10 @@ export function getLiveQueryHash(
       : query instanceof BaseQueryBuilder
         ? query._getQuery()
         : undefined
-    const window =
-      ir && (ir.limit !== undefined || (ir.offset ?? 0) !== 0)
-        ? [{ limit: ir.limit, offset: ir.offset ?? 0 }]
-        : []
-    return getStableValueHash([`queryKey`, queryKey, ...window], `queryKey`)
+    const identity: Array<unknown> = [`queryKey`, queryKey]
+    if (ir && (ir.limit !== undefined || (ir.offset ?? 0) !== 0))
+      identity.push({ limit: ir.limit, offset: ir.offset ?? 0 })
+    return getStableValueHash(identity, `queryKey`)
   }
   const identity = isCollection(preparedValue)
     ? [`collection`, preparedValue.id]
@@ -327,7 +314,7 @@ export function getLiveQueryHash(
 // Collections retain their result identity and are never movable by a peer.
 const resolvedQueryValues = new WeakMap<
   object,
-  { collection: object; value: unknown }
+  { collection: object; config: NonNullable<ReturnType<typeof queryConfig>> }
 >()
 
 function queryConfig(
@@ -341,17 +328,20 @@ function queryConfig(
 }
 
 function moveExistingWindow(
-  value: unknown,
-  previous: Collection<object, string | number, {}> | null,
+  after: ReturnType<typeof queryConfig>,
+  previous: Collection<object, string | number, {}> | null | undefined,
   owner: object | undefined,
 ) {
-  if (!previous || ![`ready`, `loading`].includes(previous.status)) return
+  if (
+    !previous ||
+    (previous.status !== `ready` && previous.status !== `loading`)
+  )
+    return
   const retained = owner && resolvedQueryValues.get(owner)
   if (!retained || retained.collection !== previous) return
-  const before = queryConfig(retained.value)
-  const after = queryConfig(value)
+  const before = retained.config
   if (
-    !(before?.query instanceof BaseQueryBuilder) ||
+    !(before.query instanceof BaseQueryBuilder) ||
     !(after?.query instanceof BaseQueryBuilder)
   )
     return
@@ -448,21 +438,20 @@ export function resolveLiveQueryValue(
     onWindowChange?: (move: () => void) => void
   } = {},
 ): Collection<any, any, any> | null {
-  if (previousCollection !== undefined) {
+  if (previousCollection !== undefined)
     value = prepareLiveQueryValue(value, undefined)
-    const move = moveExistingWindow(value, previousCollection, windowOwner)
-    if (move) {
-      if (onWindowChange) onWindowChange(move)
-      else move()
-      return previousCollection!
-    }
+  const input = queryConfig(value)
+  const move = moveExistingWindow(input, previousCollection, windowOwner)
+  if (move) {
+    if (onWindowChange) onWindowChange(move)
+    else move()
+    return previousCollection!
   }
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
     value.startSyncImmediate()
     return value
   }
-  const input = queryConfig(value)
   if (input) {
     const requested = configPool(input)
     const { pool: _pool, ...given } = input as LiveQueryHookConfig<any>
@@ -471,7 +460,7 @@ export function resolveLiveQueryValue(
     // compile the same builder if the partition cannot serve it.
     const built =
       pooling && typeof given.query === `function`
-        ? given.query(createInitialQueryBuilder())
+        ? given.query(new BaseQueryBuilder() as InitialQueryBuilder)
         : undefined
     const config =
       built instanceof BaseQueryBuilder ? { ...given, query: built } : given
@@ -492,7 +481,7 @@ export function resolveLiveQueryValue(
         gcTime: config.gcTime ?? gcTime,
       })
     if (previousCollection !== undefined && windowOwner)
-      resolvedQueryValues.set(windowOwner, { collection, value })
+      resolvedQueryValues.set(windowOwner, { collection, config: input })
     return collection
   }
   throw new Error(

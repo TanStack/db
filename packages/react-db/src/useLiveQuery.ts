@@ -11,7 +11,7 @@ import {
   getStableValueHash,
   identifyLiveQuery,
   isCollection,
-  prepareLiveQueryValue,
+  prepareLiveQueryValue as prepareQueryValue,
   rejectLiveQueryInput,
   releaseDeferredOnReclaim,
   resolveLiveQueryValue,
@@ -63,12 +63,12 @@ const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 type SuspenseCollection = Collection<object, string | number, {}>
 type SuspenseCollectionEntry = {
   collection: SuspenseCollection
-  removeStatusListeners: () => void
+  statusCleanups: Array<() => void>
 }
 
-const unscopedSuspenseCollections = new Map<string, SuspenseCollectionEntry>()
+const unscopedSuspenseScope = {}
 const suspenseCollectionsByClient = new WeakMap<
-  DbClient,
+  object,
   Map<string, SuspenseCollectionEntry>
 >()
 function getSourceQualifiedSuspenseKey(
@@ -88,11 +88,11 @@ function getSourceQualifiedSuspenseKey(
 function getSuspenseCollections(
   client: DbClient | undefined,
 ): Map<string, SuspenseCollectionEntry> {
-  if (!client) return unscopedSuspenseCollections
-  let collections = suspenseCollectionsByClient.get(client)
+  const scope = client ?? unscopedSuspenseScope
+  let collections = suspenseCollectionsByClient.get(scope)
   if (!collections) {
     collections = new Map()
-    suspenseCollectionsByClient.set(client, collections)
+    suspenseCollectionsByClient.set(scope, collections)
   }
   return collections
 }
@@ -105,7 +105,7 @@ function releaseSuspenseCollection(
   const entry = collections.get(queryHash)
   if (entry?.collection !== collection) return
   collections.delete(queryHash)
-  entry.removeStatusListeners()
+  for (const remove of entry.statusCleanups) remove()
 }
 
 export type DerivedIdentityProfiler = {
@@ -218,19 +218,7 @@ function warnDerivedIdentityHotPath(
   )
 }
 
-function getExplicitDbClient(value: unknown): DbClient | undefined {
-  return value && typeof value === `object`
-    ? (value as { client?: DbClient }).client
-    : undefined
-}
-
-export function prepareQueryValue(
-  value: unknown,
-  dbClient: DbClient | undefined,
-  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
-): unknown {
-  return prepareLiveQueryValue(value, dbClient, deferredCollections)
-}
+export { prepareQueryValue }
 
 type DerivedQueryPreparation = {
   value: unknown
@@ -567,15 +555,37 @@ export function useLiveQueryForSuspense(configOrQueryOrCollection: any) {
   return useLiveQueryImpl(configOrQueryOrCollection, true)
 }
 
-// What one hook instance keeps across renders. It lives in a single ref
-// slot, so a render neither looks up nor allocates more.
-function createHookInstance(dbClient: DbClient | undefined) {
-  let derivedIdentityProfiler: DerivedIdentityProfiler | undefined
+// What one hook instance keeps across renders. Fields produced by resolution
+// are installed with their first value, rather than initialized and overwritten
+// in the same render.
+type HookInstance = {
+  collection: Collection<object, string | number, {}> | null
+  identityDeps: Array<unknown> | null
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>
+  sourceIds: LiveQuerySourceIdClaims
+  config?: unknown
+  client?: DbClient
+  derivedIdentityProfiler?: DerivedIdentityProfiler
+  cancelReclaimRelease?: () => void
+  observer?: LiveQueryObserver<object, string | number>
+  queryHash?: string
+  suspenseKey?: string
+  identityError?: UnhashableQueryIRError
+  subscribe?: (onStoreChange: () => void) => () => void
+}
+
+function createHookInstance(): HookInstance {
+  const instance: HookInstance = {
+    collection: null,
+    identityDeps: null,
+    deferredCollections: new Set(),
+    sourceIds: createLiveQuerySourceIdClaims(),
+  }
   // Unbundled browsers can have no process global. Bundled development builds
   // inline NODE_ENV and keep diagnostics even without that global.
   try {
     if (process.env.NODE_ENV !== `production`) {
-      derivedIdentityProfiler = {
+      instance.derivedIdentityProfiler = {
         renderCount: 0,
         totalMs: 0,
         maxMs: 0,
@@ -585,23 +595,7 @@ function createHookInstance(dbClient: DbClient | undefined) {
   } catch {
     // Without an environment, development diagnostics stay off.
   }
-  return {
-    collection: null as Collection<object, string | number, {}> | null,
-    identityDeps: null as Array<unknown> | null,
-    config: null as unknown,
-    client: dbClient,
-    derivedIdentityProfiler,
-    deferredCollections: new Set<
-      CollectionImpl<any, string | number, any, any, any>
-    >(),
-    sourceIds: createLiveQuerySourceIdClaims(),
-    cancelReclaimRelease: undefined as (() => void) | undefined,
-    observer: null as LiveQueryObserver<object, string | number> | null,
-    queryHash: undefined as string | undefined,
-    suspenseKey: undefined as string | undefined,
-    identityError: undefined as UnhashableQueryIRError | undefined,
-    subscribe: null as ((onStoreChange: () => void) => () => void) | null,
-  }
+  return instance
 }
 
 function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
@@ -610,10 +604,13 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
   const inputIsCollection = isCollection(configOrQueryOrCollection)
   const dbClient = inputIsCollection
     ? contextDbClient
-    : (getExplicitDbClient(configOrQueryOrCollection) ?? contextDbClient)
+    : ((configOrQueryOrCollection &&
+      typeof configOrQueryOrCollection === `object`
+        ? (configOrQueryOrCollection.client as DbClient | undefined)
+        : undefined) ?? contextDbClient)
 
-  const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
-  const instance = (instanceRef.current ??= createHookInstance(dbClient))
+  const instanceRef = useRef<HookInstance | null>(null)
+  const instance = (instanceRef.current ??= createHookInstance())
   // A commit releases the starts itself, so it drops the reclaim listener.
   const resumeDeferredCollections = () => {
     instance.cancelReclaimRelease?.()
@@ -655,56 +652,49 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
     try {
       queryHash = getStableValueHash(streamIdentity, `queryKey`)
     } catch (error) {
-      if (error instanceof UnhashableQueryIRError) {
-        if (queryKey !== undefined) throw error
-        identityError = error
-      } else {
+      if (!(error instanceof UnhashableQueryIRError) || queryKey !== undefined)
         throw error
-      }
+      identityError = error
     }
 
+    const suspenseQuery = forSuspense && !inputIsCollection
     const canReuseSuspenseKey =
-      forSuspense &&
-      !inputIsCollection &&
-      queryHash !== undefined &&
       instance.collection !== null &&
       instance.client === dbClient &&
       instance.queryHash === queryHash &&
       instance.suspenseKey !== undefined
 
-    if (
-      forSuspense &&
-      !inputIsCollection &&
-      queryHash &&
-      !canReuseSuspenseKey &&
-      preparedQueryValue === unpreparedQueryValue
-    ) {
-      preparedQueryValue = prepareQueryValue(
-        configOrQueryOrCollection,
-        dbClient,
-        instance.deferredCollections,
-      )
+    // Keyed and Suspense paths need the same prepared input. Prepare it once,
+    // only when a new source-qualified key or Collection actually needs it.
+    const getPreparedQueryValue = () => {
+      if (preparedQueryValue === unpreparedQueryValue) {
+        preparedQueryValue = prepareQueryValue(
+          configOrQueryOrCollection,
+          dbClient,
+          instance.deferredCollections,
+        )
+      }
+      return preparedQueryValue
     }
 
     const suspenseKey =
-      queryHash && forSuspense && !inputIsCollection
+      queryHash && suspenseQuery
         ? canReuseSuspenseKey
           ? instance.suspenseKey
           : getSourceQualifiedSuspenseKey(
-              preparedQueryValue,
+              getPreparedQueryValue(),
               queryHash,
               dbClient,
             )
         : queryHash
 
     const suspenseCollections =
-      forSuspense && !inputIsCollection && suspenseKey
+      suspenseQuery && suspenseKey
         ? getSuspenseCollections(dbClient)
         : undefined
-    const suspenseEntry = suspenseKey
-      ? suspenseCollections?.get(suspenseKey)
+    const suspenseCollection = suspenseKey
+      ? suspenseCollections?.get(suspenseKey)?.collection
       : undefined
-    const suspenseCollection = suspenseEntry?.collection
 
     const identityChanged =
       instance.identityDeps === null ||
@@ -717,7 +707,6 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       (!inputIsCollection && (instance.client !== dbClient || identityChanged))
 
     let commitWindow: (() => void) | undefined
-    const previousCollection = instance.collection
     if (needsNewCollection) {
       if (inputIsCollection) {
         // Warn when passing a collection directly with on-demand sync mode
@@ -742,15 +731,8 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
         // It's already a collection, ensure sync is started for React hooks
         configOrQueryOrCollection.startSyncImmediate()
         instance.collection = configOrQueryOrCollection
-        instance.config = configOrQueryOrCollection
       } else {
-        if (preparedQueryValue === unpreparedQueryValue) {
-          preparedQueryValue = prepareQueryValue(
-            configOrQueryOrCollection,
-            dbClient,
-            instance.deferredCollections,
-          )
-        }
+        getPreparedQueryValue()
 
         if (suspenseCollection) {
           instance.collection = suspenseCollection
@@ -768,7 +750,7 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
             // so they never pool, even when the config passes a pool.
             pool: forSuspense || dbClient ? false : undefined,
             previousCollection:
-              forSuspense || dbClient ? undefined : previousCollection,
+              forSuspense || dbClient ? undefined : instance.collection,
             windowOwner: instance,
             onWindowChange: (move) => {
               commitWindow = move
@@ -798,33 +780,28 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
             // retry so the hook can throw its actual error to an ErrorBoundary.
             // Retire it afterward so a later boundary reset starts fresh.
             const retireAfterRetry = () => setTimeout(retire, 0)
-            const removeStatusListeners = [
-              collection.on(`status:cleaned-up`, retire),
-              collection.on(`status:error`, retireAfterRetry),
-              collection.on(`status:crashed`, retireAfterRetry),
-            ]
-            const entry: SuspenseCollectionEntry = {
+            suspenseCollections.set(suspenseKey, {
               collection,
-              removeStatusListeners: () => {
-                for (const remove of removeStatusListeners) remove()
-              },
-            }
-            suspenseCollections.set(suspenseKey, entry)
+              statusCleanups: [
+                collection.on(`status:cleaned-up`, retire),
+                collection.on(`status:error`, retireAfterRetry),
+                collection.on(`status:crashed`, retireAfterRetry),
+              ],
+            })
           }
         }
-        instance.config = configOrQueryOrCollection
         // An abandoned render must leave invalidation pending. Its retry or
         // urgent replacement still prepares and commits the requested move.
         if (!commitWindow) instance.identityDeps = [...identityDeps]
       }
+      instance.config = configOrQueryOrCollection
       instance.client = dbClient
       instance.queryHash = queryHash
       instance.suspenseKey = suspenseKey
       instance.identityError = identityError
     }
 
-    if (commitWindow && instance.collection === previousCollection)
-      needsNewCollection = false
+    if (commitWindow) needsNewCollection = false
     useWindowCommitEffect(() => {
       if (commitWindow) {
         instance.identityDeps = [...identityDeps]
@@ -845,13 +822,19 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       // hook's pre-observer loading policy, and — because wholesale delivers
       // nothing synchronously during subscribe — never notifies
       // useSyncExternalStore inside its own subscribe call.
-      instance.observer = createLiveQueryObserver(instance.collection, {
+      const observer = createLiveQueryObserver(instance.collection, {
         mode: `wholesale`,
         client: dbClient,
         queryHash: instance.queryHash,
         onPreload: resumeDeferredCollections,
         suspendUntilReady: forSuspense,
       })
+      instance.observer = observer
+      instance.subscribe = (onStoreChange: () => void) => {
+        const unsubscribe = observer.subscribe(onStoreChange)
+        resumeDeferredCollections()
+        return unsubscribe
+      }
     }
     const observer = instance.observer!
     // A Suspense render asks for its data. Preloading starts the sync run, so a
@@ -867,18 +850,8 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
       observer.preload().catch(() => {})
     }
 
-    // Stable subscribe bound to the current observer; the observer owns the
-    // subscription, ready-race, and disposal.
-    if (!instance.subscribe || needsNewCollection) {
-      instance.subscribe = (onStoreChange: () => void) => {
-        const unsubscribe = observer.subscribe(onStoreChange)
-        resumeDeferredCollections()
-        return unsubscribe
-      }
-    }
-
     const returned = useSyncExternalStore(
-      instance.subscribe,
+      instance.subscribe!,
       () => observer.getSnapshot(),
       () => observer.getServerSnapshot(forSuspense),
     )

@@ -9,4 +9,4 @@
 '@tanstack/svelte-db': patch
 ---
 
-Keep adapter-owned live queries and their source subscriptions when only the ordered query's finite `.limit()` or `.offset()` changes. Preserve exact requested bounds when moving page windows, and avoid React 18 layout-effect warnings during server rendering.
+Keep adapter-owned live queries and their source subscriptions when only the ordered query's finite `.limit()` or `.offset()` changes. Preserve exact requested bounds and select only installed ranks when page windows include negative offsets. Keep Angular's list/findOne result shape consistent with the current query during reactive changes, and avoid React 18 layout-effect warnings during server rendering.

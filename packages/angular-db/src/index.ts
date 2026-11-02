@@ -1,14 +1,11 @@
 import {
-  DestroyRef,
   assertInInjectionContext,
   computed,
   effect,
-  inject,
   signal,
   untracked,
 } from '@angular/core'
 import {
-  BaseQueryBuilder,
   configPool,
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
@@ -150,7 +147,6 @@ export function injectLiveQuery<
 ): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
-  const destroyRef = inject(DestroyRef)
 
   let pendingWindow: (() => void) | undefined
   let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
@@ -175,28 +171,18 @@ export function injectLiveQuery(opts: any) {
       return resolveNext(opts)
     }
 
-    // Check if it's reactive query options
-    const isReactiveQueryOptions =
-      opts &&
-      typeof opts === `object` &&
-      typeof opts.query === `function` &&
-      typeof opts.params === `function`
-
-    if (isReactiveQueryOptions) {
-      // The pool is checked first, so a disabled query rejects it too.
-      const pool = configPool(opts)
-      // A query function returning null or undefined disables the query.
-      const result = opts.query({
-        params: opts.params(),
-        q: new BaseQueryBuilder() as InitialQueryBuilder,
-      })
-      return resolveNext(result, pool)
-    }
-
     // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
     // match the query-fn and reactive-options paths, but let an explicit value
     // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
+      if (typeof opts.params === `function`) {
+        // The pool is checked first, so a disabled query rejects it too.
+        const pool = configPool(opts)
+        return resolveNext(
+          (q: InitialQueryBuilder) => opts.query({ params: opts.params(), q }),
+          pool,
+        )
+      }
       return resolveNext(opts)
     }
 
@@ -232,37 +218,35 @@ export function injectLiveQuery(opts: any) {
     getLiveQueryStatusFlags(status() as CollectionStatus, health()),
   )
 
-  // The snapshot already applies findOne's single-result projection. Before
-  // the observer attaches, preserve Angular's empty array/undefined defaults.
+  // Between input resolution and observer attachment, the snapshot can belong
+  // to the previous query. Reapply the current query's projection to its rows.
   const data = computed(() => {
     // Read the current input even when a snapshot exists: a compile rejection
     // must propagate instead of exposing the previous query's rows.
     const currentCollection = collection()
-    return (
-      snapshot()?.data ??
-      (currentCollection && isSingleResultCollection(currentCollection)
-        ? undefined
-        : [])
+    const currentSnapshot = snapshot()
+    if (
+      currentSnapshot &&
+      currentSnapshot.collection === getPublicCollection(currentCollection)
     )
+      return currentSnapshot.data
+    // Public pooled Collections materialize when their properties are read.
+    // The captured keyed rows let us reproject without inspecting that facade.
+    const rows = Array.from(currentSnapshot?.state?.values() ?? [])
+    return currentCollection && isSingleResultCollection(currentCollection)
+      ? rows[0]
+      : rows
   })
 
-  let unsub: (() => void) | null = null
-  const cleanup = () => {
-    unsub?.()
-    unsub = null
-  }
-
+  // The effect owns this observer through reruns and injector destruction.
   effect((onCleanup) => {
     const currentCollection = collection()
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
       snapshot.set(null)
-      cleanup()
       return
     }
-
-    cleanup()
 
     // Wholesale mode preserves Angular's loading policy: attaching requests no
     // initial-state snapshot from the source.
@@ -275,12 +259,8 @@ export function injectLiveQuery(opts: any) {
     // Wholesale attach suppresses listener calls raised by synchronous sync
     // startup. Read once after subscribe returns to capture that final state.
     syncSnapshot()
-    unsub = () => observer.dispose()
-
-    onCleanup(cleanup)
+    onCleanup(() => observer.dispose())
   })
-
-  destroyRef.onDestroy(cleanup)
 
   return {
     state,

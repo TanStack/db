@@ -6,6 +6,7 @@ import { MultiSet } from '../../src/multiset.js'
 import { output } from '../../src/operators/index.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
+import { orderByWithFractionalIndex } from '../../src/operators/orderBy.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
@@ -13,7 +14,12 @@ import {
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { createOracleReach } from '../../../db/tests/oracle-reach.js'
+import {
+  atOracleCheckpoint,
+  createOracleFailureFidelity,
+} from '../../../db/tests/oracle-failure-fidelity.js'
 import { TopKRelation } from './topk-relation-oracle.js'
+import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
 
 declareOracle({
   check: [TopKRelation, checkNumericWindow],
@@ -506,6 +512,300 @@ describe.each([
     }
   }
 })
+
+/**
+ * Negative offsets still name absolute ranks. Existing public top-K and
+ * orderBy tests select nothing when the whole interval precedes rank zero
+ * (topKWithFractionalIndex.test.ts and orderByWithFractionalIndex.test.ts).
+ * The maintainer accepted the absolute-rank oracle proposal on 2026-11-02,
+ * including negative offsets, crossing zero and nonnegative widths. The older
+ * examples alone establish only the wholly-before-zero part of that decision.
+ * The same rank-membership rule above intersects a crossing-zero interval
+ * with installed ranks; clamping its offset before applying width changes it.
+ * Negative limits and fractional bounds have no authority here and stay out.
+ *
+ * This lane adds the missing offset domain without replacing the support or
+ * large-numeric campaigns. Installed cardinality, negative depth, width and gap
+ * distinguish absolute intervals from JavaScript's end-relative slice indices.
+ * A legal support tail adds nearby edits and moves. A constructive prefix
+ * reaches empty-to-empty movement, both sides of zero, partial moves, return
+ * moves and source edits while a negative window is active in every history.
+ * All comparisons retain signed residue, row values, order and reported size.
+ *
+ * The three real D2 paths use the same model and comparison: direct top-K,
+ * one-group top-K and the public orderBy wrapper. Where the public size getter
+ * accepts a predicate, an always-true predicate must count the same selected
+ * rows. Multiple groups, varying prefix predicates and downstream acquisition
+ * remain outside this lane. Mismatches
+ * accumulate through the history so a size defect cannot hide row movement or
+ * a source-edit defect. A runtime interruption remains a separate failure.
+ */
+type NegativeWindowHistory = {
+  installed: number
+  depth: number
+  width: number
+  gap: number
+  tail: Array<Step>
+}
+const negativeWindowHistory = fc.record({
+  installed: fc.integer({ min: 3, max: keys.length }),
+  depth: fc.integer({ min: 2, max: 4 }),
+  width: fc.integer({ min: 1, max: 2 }),
+  gap: fc.integer({ min: 1, max: 3 }),
+  tail: fc.array(
+    fc.record({
+      slot: fc.integer({ min: 0, max: keys.length - 1 }),
+      support: fc.integer({ min: 0, max: 3 }),
+      offset: fc.integer({ min: -6, max: 6 }),
+      limit: fc.integer({ min: 0, max: 6 }),
+    }),
+    { maxLength: 12 },
+  ),
+})
+const negativeWindowExamples: Array<[NegativeWindowHistory]> = [
+  [
+    {
+      installed: 3,
+      depth: 2,
+      width: 1,
+      gap: 2,
+      tail: [],
+    },
+  ],
+]
+const negativeStates = [
+  `empty to wholly negative window`,
+  `negative zero width`,
+  `crossed rank zero`,
+  `source deletion under negative offset`,
+  `source insertion under negative offset`,
+  `returned to nonnegative window`,
+  `offset below negative cardinality`,
+  `partial move retained width`,
+] as const
+const ordered: typeof topKWithFractionalIndex = <K extends string | number, T>(
+  compare: (a: T, b: T) => number,
+  options?: TopKWithFractionalIndexOptions,
+) =>
+  orderByWithFractionalIndex<[K, T], T>((row) => row, {
+    ...options,
+    comparator: compare,
+  })
+
+function checkNegativeWindowHistory(
+  operator: typeof topKWithFractionalIndex,
+  generated: NegativeWindowHistory,
+  reach: ReturnType<typeof createOracleReach<(typeof negativeStates)[number]>>,
+  countsLeading: boolean,
+) {
+  const graph = new D2()
+  const input = graph.newInput<[Key, Row]>()
+  const relation = new TopKRelation<Key>()
+  const counts = new Map<Key, number>()
+  let window: Window = {
+    offset: generated.installed + generated.gap,
+    limit: generated.width,
+  }
+  let size!: (counts?: (value: unknown) => boolean) => number
+  let move!: (options: Partial<Window>) => void
+  const rowFor = (key: Key): Row => ({
+    id: 10 - keys.indexOf(key),
+    value: `tie`,
+  })
+  input.pipe(
+    operator(() => 0, {
+      ...window,
+      setSizeCallback: (getSize) => {
+        size = getSize
+      },
+      setWindowFn: (setWindow) => {
+        move = setWindow
+      },
+    }),
+    output((message) => relation.add(message.getInner())),
+  )
+  graph.finalize()
+  const failures: Array<unknown> = []
+  const compare = (law: string, checkpoint: string, check: () => void) => {
+    try {
+      atOracleCheckpoint(law, checkpoint, check)
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  const check = (checkpoint: string) => {
+    const present = orderedKeys.filter((key) => (counts.get(key) ?? 0) > 0)
+    const selected = selectedWindowKeys(present, window)
+    compare(`absolute-rank rows`, checkpoint, () =>
+      relation.expectRows(selected.map((key) => [key, rowFor(key).id, `tie`])),
+    )
+    compare(`selected window size`, checkpoint, () =>
+      expect(size()).toBe(selected.length),
+    )
+    if (countsLeading)
+      compare(`leading window size`, checkpoint, () =>
+        expect(size(() => true)).toBe(selected.length),
+      )
+  }
+  const setSupport = (key: Key, support: number, checkpoint: string) => {
+    const weight = support - (counts.get(key) ?? 0)
+    counts.set(key, support)
+    input.sendData(new MultiSet([[[key, rowFor(key)], weight]]))
+    graph.run()
+    check(checkpoint)
+  }
+  try {
+    for (const key of orderedKeys.slice(0, generated.installed))
+      setSupport(key, 1, `initial installed rows`)
+
+    const depth = Math.min(generated.depth, generated.installed - 1)
+    const width = Math.min(generated.width, depth - 1)
+    const moveAt = (
+      options: Partial<Window>,
+      state: (typeof negativeStates)[number],
+    ) => {
+      window = { ...window, ...options }
+      move(options)
+      graph.run()
+      reach.reach(state)
+      check(state)
+    }
+    moveAt({ offset: -depth, limit: width }, `empty to wholly negative window`)
+    moveAt({ limit: 0 }, `negative zero width`)
+    moveAt({ offset: -1, limit: 2 }, `crossed rank zero`)
+    setSupport(orderedKeys[0], 0, `source deletion under negative offset`)
+    reach.reach(`source deletion under negative offset`)
+    setSupport(orderedKeys[0], 1, `source insertion under negative offset`)
+    reach.reach(`source insertion under negative offset`)
+    moveAt({ offset: 0 }, `partial move retained width`)
+    reach.reach(`returned to nonnegative window`)
+    moveAt(
+      { offset: -generated.installed - generated.gap, limit: 1 },
+      `offset below negative cardinality`,
+    )
+    moveAt(
+      { offset: 0, limit: generated.width },
+      `returned to nonnegative window`,
+    )
+    for (const action of generated.tail) {
+      setSupport(keys[action.slot]!, action.support, `generated source edit`)
+      window = { offset: action.offset, limit: action.limit }
+      move(window)
+      graph.run()
+      check(`generated move`)
+    }
+  } catch (error) {
+    // Retain a later graph/runtime interruption after the original comparison.
+    failures.push(error)
+  }
+  if (failures.length)
+    throw new AggregateError(failures, failures.map(String).join(`\n`), {
+      cause: failures[0],
+    })
+}
+
+declareOracle({
+  grammar: [negativeWindowHistory],
+  check: [checkNegativeWindowHistory],
+})
+
+// Rival interpretations must disagree with the rank predicate. Feed their
+// wrong rows to the same signed-output checker; no production helper supplies
+// the expected answer, and no output normalization removes the distinction.
+it(`rejects end-relative slicing and offset-first clamping`, () => {
+  const present = orderedKeys.slice(0, 3)
+  for (const window of [
+    { offset: -2, limit: 1 },
+    { offset: -1, limit: 2 },
+  ]) {
+    const expected = selectedWindowKeys(present, window).map(
+      (key): [Key, number, string] => [key, 10 - keys.indexOf(key), `tie`],
+    )
+    const wrong =
+      window.limit === 1
+        ? present.slice(window.offset, window.offset + window.limit)
+        : present.slice(0, window.limit)
+    const relation = new TopKRelation<Key>()
+    relation.add(
+      wrong.map((key, index) => [
+        [key, [{ id: 10 - keys.indexOf(key), value: `tie` }, `a${index}`]],
+        1,
+      ]),
+    )
+    expect(() => relation.expectRows(expected)).toThrow()
+  }
+})
+
+describe.each([
+  {
+    name: `array`,
+    operator: topKWithFractionalIndex,
+    property: `ivm.topk-negative-window-array`,
+  },
+  {
+    name: `grouped`,
+    operator: grouped,
+    property: `ivm.topk-negative-window-grouped`,
+  },
+  {
+    name: `orderBy`,
+    operator: ordered,
+    property: `ivm.topk-negative-window-orderBy`,
+  },
+])(
+  `Absolute-rank negative window oracle: $name`,
+  ({ name, operator, property }) => {
+    for (const campaign of [`fixed`, `random`] as const) {
+      const test =
+        campaign === `fixed`
+          ? oracleReplayTest(it)
+          : oracleReplayTest(it, property)
+      test(`preserves rank intersections and source edits (${campaign})`, async () => {
+        const reach = createOracleReach(
+          `${property}/${name}/${campaign}`,
+          negativeStates,
+          { fixedHistories: negativeWindowExamples.length },
+        )
+        const fidelity = createOracleFailureFidelity<NegativeWindowHistory>()
+        let begun = 0
+        try {
+          await fidelity.assert(() =>
+            fc.assert(
+              fc.asyncProperty(negativeWindowHistory, async (history) => {
+                reach.beginHistory({
+                  fixed: begun++ < negativeWindowExamples.length,
+                })
+                await fidelity.run(history, () =>
+                  checkNegativeWindowHistory(
+                    operator,
+                    history,
+                    reach,
+                    name !== `grouped`,
+                  ),
+                )
+              }),
+              campaign === `fixed`
+                ? {
+                    seed: 2316,
+                    numRuns: oracleRuns(100) + negativeWindowExamples.length,
+                    examples: negativeWindowExamples,
+                  }
+                : oraclePropertyOptions(100, property, {
+                    examples: negativeWindowExamples,
+                  }),
+            ),
+          )
+          reach.assertReached()
+        } finally {
+          console.info(
+            `negative window reach ${name}/${campaign}`,
+            Object.fromEntries(reach.counts()),
+          )
+        }
+      })
+    }
+  },
+)
 
 it.each([-2, 2])(
   `rejects excess signed weight %s across a moved window`,

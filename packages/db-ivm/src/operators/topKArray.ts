@@ -84,14 +84,16 @@ export class TopKArray<V> implements TopK<V> {
   get size(): number {
     return Math.max(
       0,
-      Math.min(this.#topKLimit, this.#sortedValues.length - this.#topKStart),
+      Math.min(this.#topKEnd, this.#sortedValues.length) -
+        Math.max(0, this.#topKStart),
     )
   }
 
   countLeadingInWindow(predicate: (value: V) => boolean): number {
     let count = 0
-    const end = this.#topKStart + this.size
-    for (let index = this.#topKStart; index < end; index++) {
+    const start = Math.max(0, this.#topKStart)
+    const end = start + this.size
+    for (let index = start; index < end; index++) {
       if (!predicate(this.#sortedValues[index]![0])) break
       count++
     }
@@ -115,17 +117,20 @@ export class TopKArray<V> implements TopK<V> {
     this.#topKLimit = limit ?? oldLimit
 
     // A window minus another window has at most two intervals. Slice the rows
-    // directly: slice clamps to installed ranks without enumerating absent ones.
+    // directly, clamping negative endpoints to rank zero rather than letting
+    // slice interpret them relative to the end of the array.
     // Keep authored bounds exact for future inserts and partial moves.
+    const slice = (start: number, end: number) =>
+      this.#sortedValues.slice(Math.max(0, start), Math.max(0, end))
     const outside = (
       start: number,
       end: number,
       otherStart: number,
       otherEnd: number,
     ) =>
-      this.#sortedValues
-        .slice(start, Math.min(end, otherStart))
-        .concat(this.#sortedValues.slice(Math.max(start, otherEnd), end))
+      slice(start, Math.min(end, otherStart)).concat(
+        slice(Math.max(start, otherEnd), end),
+      )
     const moveIns = outside(this.#topKStart, this.#topKEnd, oldOffset, oldEnd)
     const moveOuts = outside(oldOffset, oldEnd, this.#topKStart, this.#topKEnd)
 
@@ -141,7 +146,7 @@ export class TopKArray<V> implements TopK<V> {
 
   insert(value: V): TopKChanges<V> {
     // Lookup insert position
-    const index = this.#findIndex(value)
+    const index = binarySearch(this.#sortedValues, value, this.#comparator)
     // Generate fractional index based on the fractional indices of the elements before and after it
     const fractionalIndex = generateKeyBetween(
       this.#sortedValues[index - 1]?.[1] ?? null,
@@ -164,7 +169,7 @@ export class TopKArray<V> implements TopK<V> {
    */
   delete(value: V): TopKChanges<V> {
     // Lookup delete position
-    const index = this.#findIndex(value)
+    const index = binarySearch(this.#sortedValues, value, this.#comparator)
     // Remove the value at that position
     const [removedElem] = this.#sortedValues.splice(index, 1)
 
@@ -192,9 +197,5 @@ export class TopKArray<V> implements TopK<V> {
         ? this.#sortedValues[start - 1]
         : removed
     return { moveIn, moveOut: moveOut ?? null }
-  }
-
-  #findIndex(value: V): number {
-    return binarySearch(this.#sortedValues, value, this.#comparator)
   }
 }

@@ -209,8 +209,9 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(param: P) {
+    async setParam(param: P, observe?: () => void) {
       hook.rerender({ param })
+      observe?.()
       await settle()
     },
   }
@@ -240,8 +241,9 @@ function mountKeyedControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(param: P) {
+    async setParam(param: P, observe?: () => void) {
       hook.rerender({ param })
+      observe?.()
       await settle()
     },
   }
@@ -249,6 +251,7 @@ function mountKeyedControllable<P>(
 
 const preactDriver: LiveQueryDriver = {
   name: `preact`,
+  parameterObservationCut: `committed synchronous rerender`,
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,

@@ -1,13 +1,4 @@
-import {
-  computed,
-  getCurrentInstance,
-  onUnmounted,
-  reactive,
-  ref,
-  shallowRef,
-  toValue,
-  watchEffect,
-} from 'vue'
+import { computed, reactive, ref, shallowRef, toValue, watchEffect } from 'vue'
 import {
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
@@ -282,19 +273,14 @@ export function useLiveQuery(
       windowOwner: resolveNext,
     }))
   const resolveInput = () => {
-    // First check if the original parameter might be a ref/getter
-    // by seeing if toValue returns something different than the original
+    // Unwrap refs before preparing the query.
     // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
     let unwrappedParam = configOrQueryOrCollection
     if (typeof configOrQueryOrCollection !== `function`) {
       try {
-        const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
-        if (potentiallyUnwrapped !== configOrQueryOrCollection) {
-          unwrappedParam = potentiallyUnwrapped
-        }
+        unwrappedParam = toValue(configOrQueryOrCollection)
       } catch {
-        // If toValue fails, use original parameter
-        unwrappedParam = configOrQueryOrCollection
+        // Use the original input if unwrapping fails.
       }
     }
 
@@ -377,8 +363,6 @@ export function useLiveQuery(
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
-  let currentObserver: LiveQueryObserver<any, any> | null = null
-
   const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
@@ -388,11 +372,9 @@ export function useLiveQuery(
 
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
-    // Tear down any previous observer and its rows first: a query that fails
-    // to compile throws below, and Vue's computed then serves the previous
-    // collection, whose rows must not stay visible.
-    currentObserver?.dispose()
-    currentObserver = null
+    // watchEffect runs the previous observer's cleanup before this callback.
+    // Clear its rows before resolving: a compile rejection must not leave them
+    // visible through Vue's cached computed value.
     state.clear()
     internalData.value = []
 
@@ -411,48 +393,36 @@ export function useLiveQuery(
     // Initial rows arrive as the observer's first delta (includeInitialState);
     // apply them and every subsequent delta granularly to the reactive map.
     const observer = createLiveQueryObserver(currentCollection)
-    currentObserver = observer
-
-    const unsubscribe = observer.subscribe(
-      (changes: Array<ChangeMessage<any>> | undefined) => {
-        if (changes) {
-          for (const change of changes) {
-            switch (change.type) {
-              case `insert`:
-              case `update`:
-                state.set(change.key, change.value)
-                break
-              case `delete`:
-                state.delete(change.key)
-                break
-            }
-          }
-        } else {
-          // Cleanup and other status-only publications carry no row deltas.
-          // Rebuild the keyed view so it cannot diverge from ordered data.
-          state.clear()
-          for (const [key, value] of observer.getSnapshot().state ?? []) {
-            state.set(key, value)
+    observer.subscribe((changes: Array<ChangeMessage<any>> | undefined) => {
+      if (changes) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
+            case `update`:
+              state.set(change.key, change.value)
+              break
+            case `delete`:
+              state.delete(change.key)
+              break
           }
         }
-        syncFromObserver(observer)
-      },
-    )
+      } else {
+        // Cleanup and other status-only publications carry no row deltas.
+        // Rebuild the keyed view so it cannot diverge from ordered data.
+        state.clear()
+        for (const [key, value] of observer.getSnapshot().state ?? []) {
+          state.set(key, value)
+        }
+      }
+      syncFromObserver(observer)
+    })
     syncFromObserver(observer)
 
     // Cleanup when effect is invalidated
     onInvalidate(() => {
-      unsubscribe()
       observer.dispose()
-      currentObserver = null
     })
   })
-
-  // Cleanup on unmount (only if we're in a component context)
-  const instance = getCurrentInstance()
-  if (instance) {
-    onUnmounted(() => currentObserver?.dispose())
-  }
 
   return {
     state: computed(() => state),

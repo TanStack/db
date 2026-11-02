@@ -245,7 +245,7 @@ export interface LiveQueryHandle {
  */
 export interface ControllableHandle<P> extends LiveQueryHandle {
   /** Rejects when the adapter rejects the reconfigured query input. */
-  setParam: (param: P) => Promise<void>
+  setParam: (param: P, observe?: () => void) => Promise<void>
   /**
    * The `data` value the binding left published at the end of each
    * synchronous turn since mount, in order. Drivers record at their
@@ -274,9 +274,20 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
  * defines the observation cut after framework updates and core sync settle.
  * The runtime suite observes public result data, state, and status. Framework
  * type inference and framework scheduler internals are outside this contract.
+ * The result-shape oracle also reads raw data at parameterObservationCut via
+ * setParam's observation callback. Shape follows the current query there;
+ * this earlier cut does not require rows to be fresh before the final flush.
  */
 export interface LiveQueryDriver {
   name: string
+  /**
+   * Native cut where setParam invokes its optional synchronous observation.
+   * The callback reads the real handle; it runs before setParam's final settle.
+   * Angular exposes synchronous Signal reads before effects, Vue nextTick,
+   * Solid synchronous propagation, Svelte flushSync, and React/Preact a
+   * committed synchronous rerender. These cuts are not interchangeable.
+   */
+  parameterObservationCut: string
   /** Public disabled data/state policy, not inferred from observed output. */
   disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */

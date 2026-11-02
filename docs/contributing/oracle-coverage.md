@@ -6316,3 +6316,70 @@ Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes a
 The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.
 
 The existing [top-K support-window owner](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts) also has a numeric-window lane for safe-integer maximum offsets and widths, exact omitted-bound inheritance on partial moves, and required demand messages when installed ranges are empty. It permits additional messages. It observes one-group settled operator rows, size and demand signals; real framework source growth belongs to the shared receiving owner above. [Numeric evidence](oracle-reviews/2026-10-30-topk-numeric-windows.md) records RED, GREEN, reach, replay and mutants.
+
+### Projection and negative-window gaps from removal review (2026-11-02)
+
+The shared framework owner now includes
+[result-shape-oracle.ts](../../packages/db/tests/conformance/result-shape-oracle.ts).
+One independent authored-source model and generated grammar run through React
+(both registrations), Preact, Vue, Solid, Svelte and Angular. List/findOne
+transitions, repeated modes, return transitions, empty/single/multiple source
+rows and both data-first/Collection-first reads are checked at each driver's
+native parameter cut, then after settlement. Finite singleton queries retain
+identical offset/limit across projection changes, including positive offsets.
+Native cuts require raw shape; settled cuts also compare selected values and
+keyed state. This does not promise synchronous row freshness or identical host
+scheduling. Disabled inputs, errors, supplied Collections, DbClient and broad
+host/AOT behavior remain outside this lane.
+
+**Repaired receiving defect:** Angular previously returned the old query's raw
+projection at its synchronous Signal read before effects. Both directions
+failed even though the new input reached the callback and later settlement
+passed. It now reprojects captured rows through the current query while keeping
+the normal snapshot path and pooled-query laziness. All six frameworks complete
+their fixed/random campaigns; restoring the defect fails the native comparison.
+Generated guarded replay seed 2316,
+property `framework.angular.result-shape`, path `28` reproduces the defect;
+finite paths `1` and `25` preserve nonempty offset-0/offset-1 evidence.
+
+The existing top-K support-window owner adds a negative-offset grammar through
+direct array top-K, one-group top-K and public orderBy. Under the maintainer's
+2026-11-02 absolute-rank decision, nonnegative widths select the installed ranks
+in `[offset, offset + limit)`, including intervals crossing zero. Generated
+histories reach wholly negative/zero-width/crossing-zero windows, negative
+source edits, partial moves, nonnegative returns and offsets below negative
+cardinality. Signed rows, order, values, multiplicity and size remain observed.
+The direct and orderBy size getters also count with an always-true predicate,
+which must equal the selected row count. Negative widths, fractional bounds,
+multiple groups, varying prefix predicates and downstream acquisition remain
+outside this lane; existing support/numeric budgets and their prior evidence
+remain unchanged.
+
+**Repaired operator defects:** negative-window rows, size, source edits and
+return moves now agree with absolute ranks on all three paths. Each path's
+fixed/random campaign reaches all eight declared states in 101 histories
+(one example and 100 generated). Restoring relative slicing, the old size rule
+or the old leading-count start separately fails the corresponding observation.
+Each property `ivm.topk-negative-window-array`,
+`ivm.topk-negative-window-grouped` and `ivm.topk-negative-window-orderBy` has a
+guarded generated RED on the original code at seed 2316, path `1`, and a GREEN
+on the repair. This closes the recorded negative-window defects within the
+declared grammar, D2 paths and graph-drain cuts. Exact original/reduced traces,
+declared reach, receiving cuts, calibrations and independent review outcomes
+are in the [oracle extension record](oracle-reviews/2026-11-02-removal-oracle-gaps.md).
+Its [production repair entry](oracle-reviews/2026-11-02-removal-oracle-gaps.md#production-repairs-2026-11-02)
+records completed GREEN reach, isolated mutants and the rejected intermediate
+Angular pooling regression. The earlier page-window oracle-first qualification
+remains unchanged.
+
+**Open test-mechanics gap from the repair run:** the guarded replay owner
+(`packages/db/tests/oracle-replay.test.ts`, Small structures and test mechanics)
+does not enforce singleton execution for a successful shrink-chain path.
+With seed 2316 on the repaired code, `framework.angular.result-shape` at
+`28:0:0:0:0:0:0` reports one registration but two histories, and each
+`ivm.topk-negative-window-*` at `1:0:0:0` reports one registration but eight
+histories, although `randomParameters` requests `numRuns: 1`. Original
+one-segment paths and failing shrink paths report one history. Add a generated
+passing shrink-path receiving witness and constrain continuation before claiming
+one-history replay for that case. These extra GREEN executions are recorded
+accurately in the repair entry and are not used as singleton product evidence.

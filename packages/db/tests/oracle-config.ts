@@ -5,6 +5,16 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `framework.react.result-shape`,
+  `framework.react-dependency-list.result-shape`,
+  `framework.preact.result-shape`,
+  `framework.vue.result-shape`,
+  `framework.solid.result-shape`,
+  `framework.angular.result-shape`,
+  `framework.svelte.result-shape`,
+  `ivm.topk-negative-window-array`,
+  `ivm.topk-negative-window-grouped`,
+  `ivm.topk-negative-window-orderBy`,
   `framework.react.window-history`,
   `framework.react.pending-window-history`,
   `framework.react.publication-window-history`,

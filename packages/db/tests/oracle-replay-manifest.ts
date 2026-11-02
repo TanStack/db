@@ -13,6 +13,23 @@ import { registeredOracleProperties } from './oracle-config.js'
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`vue`, `vue-db/tests/conformance.test.ts`],
+    [`solid`, `solid-db/tests/conformance.test.tsx`],
+    [`angular`, `angular-db/tests/conformance.test.ts`],
+    [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `result-shape`,
+        `db/tests/conformance/result-shape-oracle.ts`,
+      ] as const,
+  ),
   [
     `react-db/tests/conformance.test.tsx`,
     `framework.react`,
@@ -682,7 +699,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
-    `topk-support-window topk-numeric-window`,
+    `topk-support-window topk-numeric-window topk-negative-window-array topk-negative-window-grouped topk-negative-window-orderBy`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,
@@ -803,6 +820,18 @@ const replayTestNames = new Map([
   [`react.window-render`, `window changes at React commit.*fresh`],
   [`preact.window-render`, `window changes at Preact commit.*fresh`],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
+  [
+    `ivm.topk-negative-window-array`,
+    `Absolute-rank negative window oracle:.*array.*random`,
+  ],
+  [
+    `ivm.topk-negative-window-grouped`,
+    `Absolute-rank negative window oracle:.*grouped.*random`,
+  ],
+  [
+    `ivm.topk-negative-window-orderBy`,
+    `Absolute-rank negative window oracle:.*orderBy.*random`,
+  ],
   [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
   [
     `ivm.distinct-representatives`,
@@ -944,6 +973,8 @@ const seedReplayProperties = new Set([`evaluators.like`])
 function directReplayTestName(property: string): string | undefined {
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
+      case `result-shape`:
+        return `query projection histories \\(random\\)`
       case `window-history`:
         return `(?:direct|nested) window histories \\(fresh\\)`
       case `pending-window-history`:
