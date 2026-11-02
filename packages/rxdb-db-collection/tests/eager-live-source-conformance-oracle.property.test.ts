@@ -44,13 +44,9 @@ const runs = 400
 const campaignTimeoutMs = 120_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(
-    property,
-    reachStatesFor(driver),
-    {
-      minimum: 5,
-    },
-  )
+  const reach = createOracleReach(property, reachStatesFor(driver), {
+    minimum: 5,
+  })
   await fc.assert(eagerLiveSourceProperty(driver, reach), options)
   return reach
 }
