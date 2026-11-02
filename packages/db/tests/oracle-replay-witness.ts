@@ -95,16 +95,15 @@ export function oracleReplayReporter(
     appendWitness(channel, property, details)
   const rethrow = <T>(details: RunDetails<T>, message: string | undefined) => {
     // A custom reporter replaces fast-check's throw. Preserve its public
-    // formatter and errorWithCause policy, including precondition failures.
+    // formatter and its cause, which fast-check 4 always attaches, including
+    // for precondition failures.
     if (message === undefined) return
     const error = new Error(message)
-    if (details.runConfiguration.errorWithCause) {
-      Object.defineProperty(error, `cause`, {
-        value: details.errorInstance,
-        configurable: true,
-        writable: true,
-      })
-    }
+    Object.defineProperty(error, `cause`, {
+      value: details.errorInstance,
+      configurable: true,
+      writable: true,
+    })
     throw error
   }
   // fast-check accepts an async reporter only for an async property. When a

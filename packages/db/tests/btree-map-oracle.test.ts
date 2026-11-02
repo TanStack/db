@@ -354,7 +354,7 @@ describe(`BTree Map oracle`, () => {
         numRuns: 100,
       })
       expect(failed.failed).toBe(true)
-      expect(failed.error).toMatch(/expected/)
+      expect(String(failed.errorInstance)).toMatch(/expected/)
       if (failed.counterexamplePath === null)
         throw new Error(`Missing Map mismatch replay path`)
       const replay = fc.check(mapHistoryProperty, {
@@ -363,7 +363,7 @@ describe(`BTree Map oracle`, () => {
         numRuns: 1,
       })
       expect(replay.failed).toBe(true)
-      expect(replay.error).toMatch(/expected/)
+      expect(String(replay.errorInstance)).toMatch(/expected/)
       expect(replay.counterexample).toEqual(failed.counterexample)
     } finally {
       wrongScan.mockRestore()
@@ -501,7 +501,7 @@ describe(`BTree Map oracle`, () => {
     )
     const failed = fc.check(property, { seed: 303102, numRuns: 1 })
     expect(failed.failed).toBe(true)
-    expect(failed.error).toMatch(/expected/)
+    expect(String(failed.errorInstance)).toMatch(/expected/)
     expect(failed.counterexample?.[0].length).toBeGreaterThan(0)
     if (failed.counterexamplePath === null)
       throw new Error(`Missing calibration replay path`)
@@ -512,7 +512,7 @@ describe(`BTree Map oracle`, () => {
       endOnFailure: true,
     })
     expect(replay.failed).toBe(true)
-    expect(replay.error).toMatch(/expected/)
+    expect(String(replay.errorInstance)).toMatch(/expected/)
     expect(replay.counterexample).toEqual(failed.counterexample)
   })
 })

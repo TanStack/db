@@ -660,7 +660,7 @@ const sourceBatch = fc.record({
   }),
   // The source may also delete keys, including keys it does not hold.
   deletes: fc.oneof(
-    { weight: 3, arbitrary: fc.constant([]) },
+    { weight: 3, arbitrary: fc.constant<Array<number>>([]) },
     {
       weight: 1,
       arbitrary: fc.uniqueArray(fc.integer({ min: 1, max: 3 }), {

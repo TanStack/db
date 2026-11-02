@@ -297,7 +297,7 @@ describe(`mixed-carrier structural graph laws`, () => {
     })
     expect(failed.failed).toBe(true)
     expect(failed.counterexamplePath).not.toBeNull()
-    expect(failed.error).toContain(`reachable cycle`)
+    expect(String(failed.errorInstance)).toContain(`reachable cycle`)
     if (failed.counterexamplePath === null)
       throw new Error(`Missing mixed graph replay path`)
     const replay = fc.check(mixedGraphProperty(acceptsCycles), {
@@ -308,7 +308,7 @@ describe(`mixed-carrier structural graph laws`, () => {
     })
     expect(replay.failed).toBe(true)
     expect(replay.counterexample).toEqual(failed.counterexample)
-    expect(replay.error).toContain(`reachable cycle`)
+    expect(String(replay.errorInstance)).toContain(`reachable cycle`)
   })
 
   it(`rejects unequal DAG and unfolding output and preserves the witness on replay`, () => {

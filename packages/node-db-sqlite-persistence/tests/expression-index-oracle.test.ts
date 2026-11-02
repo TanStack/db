@@ -1144,13 +1144,15 @@ describe(`SQLite expression-index oracle`, () => {
       const evidence = JSON.stringify({
         seed: details.seed,
         path: details.counterexamplePath,
-        error: details.error,
+        error: String(details.errorInstance),
       })
 
       expect(details.failed, evidence).toBe(true)
       expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED)
       expect(details.counterexamplePath, evidence).not.toBeNull()
-      expect(details.error, evidence).toContain(`missing=${kind}`)
+      expect(String(details.errorInstance), evidence).toContain(
+        `missing=${kind}`,
+      )
     },
   )
 
@@ -1190,14 +1192,18 @@ describe(`SQLite expression-index oracle`, () => {
       const evidence = JSON.stringify({
         seed: details.seed,
         path: details.counterexamplePath,
-        error: details.error,
+        error: String(details.errorInstance),
       })
 
       expect(details.failed, evidence).toBe(true)
       expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED)
       expect(details.counterexamplePath, evidence).not.toBeNull()
-      expect(details.error ?? ``, evidence).not.toContain(`did not reach`)
-      expect(details.error, evidence).toContain(`"kind": "${kind}"`)
+      expect(String(details.errorInstance ?? ``), evidence).not.toContain(
+        `did not reach`,
+      )
+      expect(String(details.errorInstance), evidence).toContain(
+        `"kind": "${kind}"`,
+      )
 
       if (details.counterexamplePath === null) {
         throw new Error(`${kind} wrong-answer control did not shrink to a path`)
@@ -1215,11 +1221,15 @@ describe(`SQLite expression-index oracle`, () => {
         seed: replay.seed,
         requestedPath: details.counterexamplePath,
         replayPath: replay.counterexamplePath,
-        error: replay.error,
+        error: String(replay.errorInstance),
       })
       expect(replay.failed, replayEvidence).toBe(true)
-      expect(replay.error ?? ``, replayEvidence).not.toContain(`did not reach`)
-      expect(replay.error, replayEvidence).toContain(`"kind": "${kind}"`)
+      expect(String(replay.errorInstance ?? ``), replayEvidence).not.toContain(
+        `did not reach`,
+      )
+      expect(String(replay.errorInstance), replayEvidence).toContain(
+        `"kind": "${kind}"`,
+      )
     },
   )
 })

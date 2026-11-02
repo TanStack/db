@@ -150,7 +150,7 @@ function assertComparisonProperty<T>(
     `${label}: ${original.checkpoint} failed at the function-return checkpoint; ` +
       `reduction ${reduced.checkpoint === original.checkpoint ? `kept` : `changed`} the original violation; ` +
       `seed ${result.seed}, path ${result.counterexamplePath}; ` +
-      `direct replay ${reproduced ? `reproduced` : `did not reproduce`} that violation.\n${result.error}`,
+      `direct replay ${reproduced ? `reproduced` : `did not reproduce`} that violation.\n${String(result.errorInstance)}`,
     { cause: original.error },
   )
 }
@@ -517,7 +517,7 @@ describe(`comparison law controls`, () => {
       })
       const failure = fc.check(property, { seed: 20260911, numRuns: 20 })
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(
+      expect(String(failure.errorInstance)).toContain(
         `comparator result must be a number other than NaN`,
       )
       expect(failure.counterexample).toEqual([0])
@@ -531,7 +531,7 @@ describe(`comparison law controls`, () => {
         endOnFailure: true,
       })
       expect(replay.failed).toBe(true)
-      expect(replay.error).toContain(
+      expect(String(replay.errorInstance)).toContain(
         `comparator result must be a number other than NaN`,
       )
       expect(replay.counterexample).toEqual(failure.counterexample)
@@ -913,8 +913,8 @@ describe(`makeComparator property-based tests`, () => {
     `makeComparator produces valid comparator for any options (same types)`,
     ([a, b], direction, nulls) => {
       const opts: CompareOptions = {
-        direction: direction as `asc` | `desc`,
-        nulls: nulls as `first` | `last`,
+        direction: direction,
+        nulls: nulls,
         stringSort: `locale`,
       }
       const comparator = makeComparator(opts)

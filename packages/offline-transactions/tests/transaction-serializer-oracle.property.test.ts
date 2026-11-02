@@ -567,7 +567,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     })
     expect(captured.failed).toBe(true)
     expect(captured.errorInstance).toMatchObject({ name: `AssertionError` })
-    expect(captured.error).toContain(`mutation wire checkpoint`)
+    expect(String(captured.errorInstance)).toContain(`mutation wire checkpoint`)
     if (replay.seed !== undefined) return
 
     expect(captured.numShrinks).toBeGreaterThan(0)
@@ -581,7 +581,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     })
     expect(original.failed).toBe(true)
     expect(original.errorInstance).toMatchObject({ name: `AssertionError` })
-    expect(original.error).toContain(`mutation wire checkpoint`)
+    expect(String(original.errorInstance)).toContain(`mutation wire checkpoint`)
     const replayed = await fc.check(property, {
       seed: captured.seed,
       path: capturedPath,
@@ -590,7 +590,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     expect(replayed.failed).toBe(true)
     expect(replayed.counterexample).toEqual(captured.counterexample)
     expect(replayed.errorInstance).toMatchObject({ name: `AssertionError` })
-    expect(replayed.error).toContain(`mutation wire checkpoint`)
+    expect(String(replayed.errorInstance)).toContain(`mutation wire checkpoint`)
   },
 )
 

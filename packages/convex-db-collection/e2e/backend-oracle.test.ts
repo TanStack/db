@@ -384,7 +384,7 @@ it.each([`insert`, `update`, `delete`] as const)(
             draft(
               fc
                 .uint8Array({ maxLength: 12 })
-                .map((bytes) => bytes.buffer as ArrayBuffer),
+                .map((bytes) => bytes.buffer),
             ),
           )
     const histories = fc.record({
@@ -420,9 +420,11 @@ it.each([`insert`, `update`, `delete`] as const)(
               uncertainFirst,
               !uncertainFirst,
             ]) {
-              for (const { text, rank, payload } of lostAcknowledgement
-                ? uncertain
-                : known) {
+              // The two payload tuples have different lengths, so the loop
+              // reads either one as an array of its drafts.
+              const drafts: ReadonlyArray<(typeof known)[number]> =
+                lostAcknowledgement ? uncertain : known
+              for (const { text, rank, payload } of drafts) {
                 reach.beginHistory()
                 await durableHistory(
                   {

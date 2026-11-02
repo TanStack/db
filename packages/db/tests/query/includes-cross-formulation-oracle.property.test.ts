@@ -1440,7 +1440,7 @@ describe(`includes cross-formulation oracle`, () => {
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658004
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
   // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
@@ -1469,17 +1469,23 @@ describe(`includes cross-formulation oracle`, () => {
           : { seed: 1_658_004, numRuns: oracleRuns(8) },
       )
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(`cross-formulation checkpoint`)
-      expect(failure.error).toContain(`checkpoint":0`)
+      expect(String(failure.errorInstance)).toContain(
+        `cross-formulation checkpoint`,
+      )
+      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
         expect(failure.seed).toBe(replay.replaySeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(replay.replayPath).toBe(
+          `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        )
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`missing-parent mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+      expect(failure.counterexamplePath).toBe(
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+      )
       const replayResult = await fc.check(property, {
         seed: failure.seed,
         path: failure.counterexamplePath,
@@ -1487,15 +1493,17 @@ describe(`includes cross-formulation oracle`, () => {
         endOnFailure: true,
       })
       expect(replayResult.failed).toBe(true)
-      expect(replayResult.error).toContain(`cross-formulation checkpoint`)
-      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(String(replayResult.errorInstance)).toContain(
+        `cross-formulation checkpoint`,
+      )
+      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
       expect(replayResult.counterexample).toEqual(failure.counterexample)
     },
   )
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658005
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
   // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
@@ -1534,18 +1542,20 @@ describe(`includes cross-formulation oracle`, () => {
           : { seed: 1_658_005, numRuns: oracleRuns(12) },
       )
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(`ordered-window checkpoint`)
-      expect(failure.error).toContain(`checkpoint":0`)
+      expect(String(failure.errorInstance)).toContain(
+        `ordered-window checkpoint`,
+      )
+      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
         expect(failure.seed).toBe(replay.replaySeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`extra-child mutant did not produce a replay path`)
       expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
       )
       const replayResult = await fc.check(property, {
         seed: failure.seed,
@@ -1554,8 +1564,10 @@ describe(`includes cross-formulation oracle`, () => {
         endOnFailure: true,
       })
       expect(replayResult.failed).toBe(true)
-      expect(replayResult.error).toContain(`ordered-window checkpoint`)
-      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(String(replayResult.errorInstance)).toContain(
+        `ordered-window checkpoint`,
+      )
+      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
       expect(replayResult.counterexample).toEqual(failure.counterexample)
     },
   )

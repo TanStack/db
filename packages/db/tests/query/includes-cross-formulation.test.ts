@@ -376,7 +376,9 @@ describe(`includes cross-formulation oracle`, () => {
     const failure = fc.check(property, { seed: 1_658_002, numRuns: 4 })
     expect(failure.failed).toBe(true)
     expect(failure.numShrinks).toBeGreaterThan(0)
-    expect(failure.error).toContain(`reference route checkpoint`)
+    expect(String(failure.errorInstance)).toContain(
+      `reference route checkpoint`,
+    )
     if (failure.counterexamplePath === null)
       throw new Error(`reference-route mutant did not produce a replay path`)
     const replayResult = fc.check(property, {
@@ -386,7 +388,9 @@ describe(`includes cross-formulation oracle`, () => {
       endOnFailure: true,
     })
     expect(replayResult.failed).toBe(true)
-    expect(replayResult.error).toContain(`reference route checkpoint`)
+    expect(String(replayResult.errorInstance)).toContain(
+      `reference route checkpoint`,
+    )
     expect(replayResult.counterexample).toEqual(failure.counterexample)
   })
 
@@ -406,7 +410,7 @@ describe(`includes cross-formulation oracle`, () => {
     const failure = fc.check(property, { seed: 1_658_003, numRuns: 4 })
     expect(failure.failed).toBe(true)
     expect(failure.numShrinks).toBeGreaterThan(0)
-    expect(failure.error).toContain(`group-route checkpoint`)
+    expect(String(failure.errorInstance)).toContain(`group-route checkpoint`)
     if (failure.counterexamplePath === null)
       throw new Error(`symbol-group mutant did not produce a replay path`)
     const replayResult = fc.check(property, {
@@ -416,7 +420,9 @@ describe(`includes cross-formulation oracle`, () => {
       endOnFailure: true,
     })
     expect(replayResult.failed).toBe(true)
-    expect(replayResult.error).toContain(`group-route checkpoint`)
+    expect(String(replayResult.errorInstance)).toContain(
+      `group-route checkpoint`,
+    )
     expect(replayResult.counterexample).toEqual(failure.counterexample)
   })
 

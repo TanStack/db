@@ -1014,7 +1014,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         )
       expect(
         details.failed,
-        `${label}: seed=${details.seed} path=${details.counterexamplePath ?? ``} first=${firstFailure?.kind ?? ``}@${firstFailure?.checkpoint ?? ``} reduced=${reducedProblem?.kind ?? ``}@${reducedProblem?.checkpoint ?? ``} sameViolation=${sameViolation}; ${details.error ?? ``}`,
+        `${label}: seed=${details.seed} path=${details.counterexamplePath ?? ``} first=${firstFailure?.kind ?? ``}@${firstFailure?.checkpoint ?? ``} reduced=${reducedProblem?.kind ?? ``}@${reducedProblem?.checkpoint ?? ``} sameViolation=${sameViolation}; ${String(details.errorInstance ?? ``)}`,
       ).toBe(false)
     }
 

@@ -272,12 +272,12 @@ describe(`in evaluator`, () => {
       value === null || value === undefined
         ? null
         : list.some((entry) => entry === value)
-    expect(() =>
-      fc.assert(
-        fc.property(inCase, (testCase) => check(raw, testCase)),
-        { numRuns: 500, seed: 0x2029 },
-      ),
-    ).toThrow(/in mismatch/)
+    const details = fc.check(
+      fc.property(inCase, (testCase) => check(raw, testCase)),
+      { numRuns: 500, seed: 0x2029 },
+    )
+    expect(details.failed).toBe(true)
+    expect(String(details.errorInstance)).toMatch(/in mismatch/)
   })
 
   it(`rejects display-text equality for equivalent Duration forms`, () => {

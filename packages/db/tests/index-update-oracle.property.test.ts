@@ -1974,7 +1974,7 @@ test(`retired-identity calibration shrinks and replays the same semantic failure
   )
   const failed = fc.check(property, { seed: 303108, numRuns: 1 })
   expect(failed.failed).toBe(true)
-  expect(failed.error).toMatch(/expected/)
+  expect(String(failed.errorInstance)).toMatch(/expected/)
   expect(failed.counterexample).toEqual([[0]])
   expect(failed.counterexamplePath).toBe(`0:0:0`)
   if (failed.counterexamplePath === null)
@@ -1986,7 +1986,7 @@ test(`retired-identity calibration shrinks and replays the same semantic failure
     endOnFailure: true,
   })
   expect(replay.failed).toBe(true)
-  expect(replay.error).toMatch(/expected/)
+  expect(String(replay.errorInstance)).toMatch(/expected/)
   expect(replay.counterexample).toEqual(failed.counterexample)
 })
 

@@ -238,7 +238,9 @@ it('replays a generated intentional mismatch at its original law and checkpoint'
     premiseReached: replay.numRuns > 0,
     sameFailure:
       replay.failed &&
-      String(replay.error).includes('public rows at replay calibration'),
+      String(String(replay.errorInstance)).includes(
+        'public rows at replay calibration',
+      ),
   })
 })
 

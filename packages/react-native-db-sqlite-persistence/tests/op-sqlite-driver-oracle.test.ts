@@ -433,7 +433,7 @@ it(`reserved-alias checker shrinks and replays the same row-law violation`, () =
     numRuns: 20,
   })
   expect(original.failed).toBe(true)
-  expect(original.error).toContain(
+  expect(String(original.errorInstance)).toContain(
     `op-sqlite reserved-alias exact-row law violated`,
   )
   if (original.counterexamplePath === null) {
@@ -446,7 +446,7 @@ it(`reserved-alias checker shrinks and replays the same row-law violation`, () =
     endOnFailure: true,
   })
   expect(reduced.failed).toBe(true)
-  expect(reduced.error).toContain(
+  expect(String(reduced.errorInstance)).toContain(
     `op-sqlite reserved-alias exact-row law violated`,
   )
   expect(reduced.counterexample).toEqual(original.counterexample)

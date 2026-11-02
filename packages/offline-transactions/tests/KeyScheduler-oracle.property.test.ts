@@ -617,8 +617,8 @@ describe(`KeyScheduler generated lifecycle`, () => {
     })
     const first = fc.check(wrongCount, { seed: FIXED_SEED, numRuns: RUNS })
     expect(first.failed).toBe(true)
-    expect(first.error).toContain(`AssertionError:`)
-    expect(first.error).toContain(`"commandIndex":`)
+    expect(String(first.errorInstance)).toContain(`AssertionError:`)
+    expect(String(first.errorInstance)).toContain(`"commandIndex":`)
     const replayPath = first.counterexamplePath
     if (replayPath === null) throw new Error(`Missing shrink path`)
 
@@ -629,7 +629,9 @@ describe(`KeyScheduler generated lifecycle`, () => {
     })
     expect(replay.failed).toBe(true)
     expect(replay.counterexample).toEqual(first.counterexample)
-    expect(replay.error?.split(`\n`)[0]).toEqual(first.error.split(`\n`)[0])
+    expect(String(replay.errorInstance).split(`\n`)[0]).toEqual(
+      String(first.errorInstance).split(`\n`)[0],
+    )
   })
 
   it(`executes every modeled transition in a fixed replay`, () => {
