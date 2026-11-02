@@ -21,6 +21,11 @@ const ownerGroups: ReadonlyArray<
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [
+    `db/tests/declared-reach-oracle.property.test.ts`,
+    `oracle`,
+    `declared-reach`,
+  ],
+  [
     `../scripts/release-history-oracle.property.test.js`,
     `scripts`,
     `release-version release-seed-failure`,
@@ -190,7 +195,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `publication-history`,
+    `publication-history restart-publication`,
   ],
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
@@ -230,7 +235,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
-    `startup-generation`,
+    `startup-generation source-progress`,
   ],
   [
     `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
@@ -255,7 +260,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/includes-oracle.property.test.ts`,
     `includes`,
-    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence`,
+    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence bucket-collisions`,
   ],
   [
     `db/tests/query/includes-query-shape-oracle.test.ts`,
@@ -410,7 +415,7 @@ const ownerGroups: ReadonlyArray<
   [
     `browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts`,
     `browser`,
-    `multi-tab-reserved-history`,
+    `multi-tab-reserved-history electric-source-prefix`,
   ],
   [
     `electron-db-sqlite-persistence/tests/reload-class-oracle.test.ts`,
@@ -604,6 +609,21 @@ const ownerGroups: ReadonlyArray<
     `incrementalization-law`,
   ],
   [
+    `db-ivm/tests/distinct-incrementalization-oracle.property.test.ts`,
+    `ivm`,
+    `distinct-collisions`,
+  ],
+  [
+    `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
+    `ivm`,
+    `distinct-representatives`,
+  ],
+  [
+    `db/tests/query/distinct-collision-oracle.test.ts`,
+    `query`,
+    `distinct-collisions`,
+  ],
+  [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
     `topk-support-window`,
@@ -774,6 +794,27 @@ const replayTestNames = new Map([
         `conforms on a random campaign or a replayed seed`,
       ] as const,
   ),
+  [`ivm.distinct-collisions`, `preserves distinct collisions.*random`],
+  [
+    `ivm.distinct-representatives`,
+    `conserves full representative contributions.*random`,
+  ],
+  [
+    `includes.bucket-collisions`,
+    `preserves colliding active buckets.*(random|replay)`,
+  ],
+  [
+    `query.distinct-collisions`,
+    `preserves public distinct collision rows.*random`,
+  ],
+  [
+    `sqlite-resume.source-progress`,
+    `preserves source progress evidence.*random or replayed`,
+  ],
+  [
+    `browser.electric-source-prefix`,
+    `converges after interleaved source prefixes.*random or replayed`,
+  ],
   [
     `source-health.required-history`,
     `required histories refine the model.*random`,

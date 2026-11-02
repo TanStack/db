@@ -7,7 +7,7 @@ title: CollectionOptions
 type CollectionOptions<T, TKey, TSchema, TUtils> = CollectionOptionsIdentity<T, TKey, TSchema, TUtils, DbClient>;
 ```
 
-Defined in: [packages/db/src/client.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L47)
+Defined in: [packages/db/src/client.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L54)
 
 ## Type Parameters
 

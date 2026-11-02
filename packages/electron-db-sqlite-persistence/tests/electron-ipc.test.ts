@@ -491,6 +491,7 @@ describe(`electron sqlite persistence bridge`, () => {
         },
       ],
       keySet: { status: `consistent` },
+      sourceProgressCompatible: true,
       collectionMetadata: [
         {
           key: `resume:test`,

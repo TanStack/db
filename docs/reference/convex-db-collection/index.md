@@ -12,6 +12,7 @@ title: "@tanstack/convex-db-collection"
 - [ConvexCollectionClient](type-aliases/ConvexCollectionClient.md)
 - [ConvexCollectionConfig](type-aliases/ConvexCollectionConfig.md)
 - [ConvexPaginatedCollectionConfig](type-aliases/ConvexPaginatedCollectionConfig.md)
+- [ConvexQueryOrder](type-aliases/ConvexQueryOrder.md)
 
 ## Functions
 

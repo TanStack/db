@@ -26,7 +26,21 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 The `useLiveQuery` hook creates a live query that automatically updates your component when data changes:
 
 ```tsx
-import { eq, useLiveQuery } from '@tanstack/preact-db'
+import { createCollection, eq, localOnlyCollectionOptions } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/preact-db'
+
+type Todo = {
+  id: string
+  text: string
+  completed: boolean
+}
+
+const todoCollection = createCollection(
+  localOnlyCollectionOptions<Todo>({
+    getKey: (todo) => todo.id,
+    initialData: [],
+  }),
+)
 
 function TodoList() {
   const { data, isLoading } = useLiveQuery((q) =>

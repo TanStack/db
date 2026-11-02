@@ -3,7 +3,7 @@ id: LiveQueryWindowUpdate
 title: LiveQueryWindowUpdate
 ---
 
-Defined in: [packages/db/src/live-query-window-binding.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L76)
+Defined in: [packages/db/src/live-query-window-binding.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L75)
 
 Validated infinite-query page shape.
 
@@ -19,7 +19,7 @@ Validated infinite-query page shape.
 optional client: DbClient;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L88)
+Defined in: [packages/db/src/live-query-window-binding.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L87)
 
 Hydration identity for a client-backed window.
 
@@ -31,7 +31,7 @@ Hydration identity for a client-backed window.
 optional dependencies: readonly unknown[];
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L84)
+Defined in: [packages/db/src/live-query-window-binding.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L83)
 
 The query input's identity dependencies.
 
@@ -43,7 +43,7 @@ The query input's identity dependencies.
 initialPageParam: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:40](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L40)
+Defined in: [packages/db/src/live-query-window-binding.ts:41](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L41)
 
 First result-page label, not a server cursor or remote offset.
 
@@ -59,7 +59,7 @@ First result-page label, not a server cursor or remote offset.
 input: unknown;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L82)
+Defined in: [packages/db/src/live-query-window-binding.ts:81](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L81)
 
 A supplied live-query Collection, or a callback that returns the query.
 The binding calls the callback only when it compiles a new window
@@ -73,7 +73,7 @@ collection, except in `always` mode, where it calls it on every update.
 pageSize: number;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L38)
+Defined in: [packages/db/src/live-query-window-binding.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L39)
 
 #### Inherited from
 
@@ -87,7 +87,7 @@ Defined in: [packages/db/src/live-query-window-binding.ts:38](https://github.com
 optional queryKey: LiveQueryKey;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L89)
+Defined in: [packages/db/src/live-query-window-binding.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L88)
 
 ***
 
@@ -97,7 +97,7 @@ Defined in: [packages/db/src/live-query-window-binding.ts:89](https://github.com
 recompile: LiveQueryWindowRecompile;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L90)
+Defined in: [packages/db/src/live-query-window-binding.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L89)
 
 ***
 
@@ -107,6 +107,6 @@ Defined in: [packages/db/src/live-query-window-binding.ts:90](https://github.com
 optional scope: unknown;
 ```
 
-Defined in: [packages/db/src/live-query-window-binding.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L86)
+Defined in: [packages/db/src/live-query-window-binding.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-binding.ts#L85)
 
 Context compared by reference, such as the `DbClient` a query binds to.

@@ -4,11 +4,16 @@ import {
   concat,
   createLiveQueryCollection,
   eq,
+  include,
   materialize,
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
-import { flushPromises, withExpectedRejection } from '../utils.js'
+import {
+  flushPromises,
+  withExpectedRejection,
+  withOracleCleanup,
+} from '../utils.js'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
@@ -16,6 +21,15 @@ import {
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { createOracleReach } from '../oracle-reach.js'
+import { hash } from '../../../db-ivm/src/hashing/hash.js'
+import {
+  DISTINCT_REACH_STATES,
+  distinctHistory,
+  distinctReachStates,
+} from '../../../db-ivm/tests/distinct-incrementalization-oracle.js'
+import { routeKey } from '../../src/query/live/public-key-reduction.js'
+import { createValueIdentity } from '../../src/query/equality-value-identity.js'
 import { runTrace } from '../trace-runner.js'
 import {
   cleanupPendingWork,
@@ -4899,3 +4913,133 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
     )
   }
 })
+
+// A real active-bucket receiving lane extends this owner's numeric route
+// domain with native route-string collisions. The same full-tree recompute
+// judges inline arrays and Collection facades after each source transaction.
+// The fixture proves only the collision premise; it computes no expected rows.
+function collidingRouteGroups(): Array<number> {
+  const identity = createValueIdentity()
+  const seen = new Map<number, number>()
+  for (let group = 0; group < 500_000; group++) {
+    const digest = hash(routeKey(group, null, identity))
+    const previous = seen.get(digest)
+    if (previous !== undefined) {
+      for (let anchor = -1; anchor > -100; anchor--)
+        if (hash(routeKey(anchor, null, identity)) !== digest)
+          return [previous, group, anchor]
+    }
+    seen.set(digest, group)
+  }
+  throw new Error(`Include route collision search exhausted`)
+}
+
+for (const campaign of generatedCampaigns(
+  100,
+  `includes.bucket-collisions`,
+  2309,
+))
+  for (const form of [`inline`, `collection`] as const)
+    fcTest(
+      `preserves colliding active buckets ${form} (${campaign.label})`,
+      async () => {
+        const groups = collidingRouteGroups()
+        const reach = createOracleReach(
+          `includes.bucket-collisions`,
+          DISTINCT_REACH_STATES,
+        )
+        await fc.assert(
+          fc.asyncProperty(distinctHistory, async (worlds) => {
+            reach.beginHistory()
+            const sources = createSources()
+            const children = new Map(
+              groups.map((group, id) => [id, batchChild(id, group)]),
+            )
+            const roots = new Map<number, RootRow>()
+            const live =
+              form === `inline`
+                ? createIncrementalQuery(1, sources)
+                : createLiveQueryCollection((q) =>
+                    q
+                      .from({ root: sources.roots.collection })
+                      .orderBy(({ root }) => root.position)
+                      .orderBy(({ root }) => root.id)
+                      .select(({ root }) => ({
+                        id: root.id,
+                        group: root.group,
+                        value: root.value,
+                        position: root.position,
+                        children: include(
+                          q
+                            .from({ child: sources.levels[0].collection })
+                            .where(({ child }) =>
+                              eq(child.parentGroup, root.group),
+                            )
+                            .orderBy(({ child }) => child.position)
+                            .orderBy(({ child }) => child.id)
+                            .select(({ child }) => ({
+                              id: child.id,
+                              group: child.group,
+                              value: child.value,
+                              position: child.position,
+                            })),
+                        ),
+                      })),
+                  )
+            await withOracleCleanup(async () => {
+              await live.preload()
+              sources.levels[0].writeBatch(
+                [...children.values()].map((value) => ({
+                  type: `insert`,
+                  value,
+                })),
+              )
+              for (const [checkpoint, world] of worlds.entries()) {
+                const next = new Map(
+                  world.map((label, id) => [id, batchRoot(id, groups[label]!)]),
+                )
+                const changes: Array<{
+                  type: `delete` | `insert` | `update`
+                  value: RootRow
+                }> = []
+                for (const [id, value] of roots)
+                  if (!next.has(id)) changes.push({ type: `delete`, value })
+                for (const [id, value] of next)
+                  changes.push({
+                    type: roots.has(id) ? `update` : `insert`,
+                    value,
+                  })
+                sources.roots.writeBatch(changes)
+                roots.clear()
+                for (const [id, value] of next) roots.set(id, value)
+                const observed = live.toArray.map((row) => ({
+                  ...row,
+                  children: Array.isArray(row.children)
+                    ? row.children
+                    : row.children.toArray,
+                }))
+                expect(
+                  stripVirtualProperties(observed),
+                  `${form} checkpoint ${checkpoint}`,
+                ).toEqual(recompute(roots, [children], 1))
+              }
+              for (const state of distinctReachStates(worlds))
+                reach.reach(state)
+            }, [
+              () => live.cleanup(),
+              () => sources.roots.collection.cleanup(),
+              ...sources.levels.map(
+                ({ collection }) =>
+                  () =>
+                    collection.cleanup(),
+              ),
+            ])
+          }),
+          campaign.options,
+        )
+        reach.assertReached()
+        process.stdout.write(
+          `includes bucket ${form} ${campaign.label} reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+        )
+      },
+    )

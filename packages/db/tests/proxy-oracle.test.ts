@@ -273,9 +273,12 @@ describe(`native array callback oracle`, () => {
   )
 
   // -0 joins the values and deltas, so `-0 += 0` writes 0: a change of a
-  // zero's sign alone, which a draft must record like any other write.
+  // zero's sign alone, which a draft must record like any other write. 0
+  // has its own weight too: with -0 alone, one random seed in 40 reached
+  // that write fewer than five times in 200 histories; with both, the
+  // lowest of 40 seeds reached it 29 times.
   const signedInteger = (min: number, max: number) =>
-    fc.oneof(fc.integer({ min, max }), fc.constant(-0))
+    fc.oneof(fc.integer({ min, max }), fc.constant(-0), fc.constant(0))
   const step = fc.record({
     method: fc.constantFrom(...callbackMethods),
     target: fc.integer({ min: 0, max: 5 }),

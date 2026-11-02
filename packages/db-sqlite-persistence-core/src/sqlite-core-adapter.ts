@@ -1653,6 +1653,7 @@ function buildIndexName(collectionId: string, signature: string): string {
 }
 
 export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
+  readonly supportsSourceProgress = true
   private readonly driver: SQLiteDriver
   private readonly schedulingIdentitySource: SQLiteDriver
   private scheduler: SharedPersistenceScheduler | undefined
@@ -2346,6 +2347,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       metadata?: unknown
     }>
     keySet: PersistedKeySetEvidence
+    sourceProgressCompatible: boolean
     collectionMetadata: Array<{ key: string; value: unknown }>
     latestTerm: number
     latestSeq: number
@@ -2393,10 +2395,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       const rows = includeRows
         ? await this.loadSubsetInternal(tableMapping, {}, transactionDriver)
         : []
-      const { latestRowVersion, keySet } = await this.readKeySetEvidence(
-        collectionId,
-        transactionDriver,
-      )
+      const { latestRowVersion, keySet, sourceProgressCompatible } =
+        await this.readResumeEvidence(collectionId, transactionDriver)
       const collectionMetadataRows = await transactionDriver.query<{
         key: string
         value: string
@@ -2425,6 +2425,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           metadata: row.metadata,
         })),
         keySet,
+        sourceProgressCompatible,
         collectionMetadata: collectionMetadataRows.map((row) => ({
           key: row.key,
           value: deserializePersistedRowValue(row.value),
@@ -2599,6 +2600,33 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       const currentRowVersion = version.latest_row_version
       const nextRowVersion = Math.max(currentRowVersion + 1, tx.rowVersion)
       const replacesPersistedBaseline = tx.truncate === true
+      const collectionMetadataMutations = lastMetadataByKey(
+        tx.collectionMetadataMutations ?? [],
+        (mutation) => mutation.key,
+      )
+      // A source may commit from a different prefix than the shared baseline.
+      // Keep accepting its rows, but never certify the resulting baseline for a
+      // resume past changes that this composition can have lost. Only a full
+      // replacement can establish complete evidence again.
+      let sourceProgressDiscontinuous = false
+      if (tx.sourceProgress && !replacesPersistedBaseline) {
+        const progress = await transactionDriver.query<{ value: string }>(
+          `SELECT value FROM collection_metadata WHERE collection_id = ? AND key = ?`,
+          [collectionId, tx.sourceProgress.key],
+        )
+        const next = collectionMetadataMutations.find(
+          (mutation) => mutation.key === tx.sourceProgress!.key,
+        )
+        sourceProgressDiscontinuous =
+          progress[0]?.value !==
+            (tx.sourceProgress.previous === undefined
+              ? undefined
+              : serializePersistedRowValue(tx.sourceProgress.previous)) &&
+          // Delivering a complete source position twice is idempotent. It
+          // neither breaks a coherent baseline nor repairs a previous gap.
+          (next?.type !== `set` ||
+            progress[0]?.value !== serializePersistedRowValue(next.value))
+      }
       const tracksPersistedKeySet =
         version.key_set_evidence_available === 1 || replacesPersistedBaseline
       const replayDelta: ReplayableTxDelta | null = replacesPersistedBaseline
@@ -2816,10 +2844,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       }
 
       for (const batch of batches(
-        lastMetadataByKey(
-          tx.collectionMetadataMutations ?? [],
-          (mutation) => mutation.key,
-        ),
+        collectionMetadataMutations,
         this.replacementBatchSize,
       )) {
         const deletes = batch.filter((mutation) => mutation.type === `delete`)
@@ -2857,12 +2882,19 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
              key_set_evidence_incompatible = CASE
                WHEN ? = 1 THEN 0
                ELSE key_set_evidence_incompatible
+             END,
+             source_progress_incompatible = CASE
+               WHEN ? = 1 THEN 0
+               WHEN ? = 1 THEN 1
+               ELSE source_progress_incompatible
              END
          WHERE collection_id = ?`,
         [
           nextRowVersion,
           replacesPersistedBaseline ? 1 : 0,
           replacesPersistedBaseline ? 1 : 0,
+          replacesPersistedBaseline ? 1 : 0,
+          sourceProgressDiscontinuous ? 1 : 0,
           collectionId,
         ],
       )
@@ -3383,22 +3415,25 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  private async readKeySetEvidence(
+  private async readResumeEvidence(
     collectionId: string,
     driver: SQLiteDriver,
   ): Promise<{
     latestRowVersion: number
     keySet: PersistedKeySetEvidence
+    sourceProgressCompatible: boolean
   }> {
     const versionRows = await driver.query<{
       latest_row_version: number
       key_set_evidence_available: number
       key_set_incompatible: number
+      source_progress_incompatible: number
     }>(
       `SELECT
          latest_row_version,
          key_set_evidence_available,
-         key_set_evidence_incompatible AS key_set_incompatible
+         key_set_evidence_incompatible AS key_set_incompatible,
+         source_progress_incompatible
        FROM collection_version
        WHERE collection_id = ?
        LIMIT 1`,
@@ -3408,6 +3443,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
     return {
       latestRowVersion: version?.latest_row_version ?? 0,
+      sourceProgressCompatible: version?.source_progress_incompatible === 0,
       keySet: {
         status:
           version?.key_set_evidence_available !== 1
@@ -4179,7 +4215,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          ON CONFLICT(collection_id) DO UPDATE SET
            latest_row_version = 0,
            key_set_evidence_available = 1,
-           key_set_evidence_incompatible = 0`,
+           key_set_evidence_incompatible = 0,
+           source_progress_incompatible = 0`,
         [collectionId],
       )
       await transactionDriver.run(
@@ -4230,7 +4267,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          AND EXISTS (SELECT 1 FROM sqlite_master
                      WHERE name = 'collection_version'
                        AND sql LIKE '%key_set_evidence_available%'
-                       AND sql LIKE '%key_set_evidence_incompatible%')
+                       AND sql LIKE '%key_set_evidence_incompatible%'
+                       AND sql LIKE '%source_progress_incompatible%')
          AS complete`,
     )
     return rows[0]?.complete === 1
@@ -4343,17 +4381,19 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          collection_id TEXT PRIMARY KEY,
          latest_row_version INTEGER NOT NULL,
          key_set_evidence_available INTEGER NOT NULL DEFAULT 0,
-         key_set_evidence_incompatible INTEGER NOT NULL DEFAULT 0
+         key_set_evidence_incompatible INTEGER NOT NULL DEFAULT 0,
+         source_progress_incompatible INTEGER NOT NULL DEFAULT 0
        )`,
     )
     const collectionVersionColumns = await this.driver.query<{ name: string }>(
       `PRAGMA table_info(collection_version)`,
     )
-    const keyEvidenceColumns = [
+    const versionEvidenceColumns = [
       `key_set_evidence_available`,
       `key_set_evidence_incompatible`,
+      `source_progress_incompatible`,
     ] as const
-    for (const columnName of keyEvidenceColumns) {
+    for (const columnName of versionEvidenceColumns) {
       if (collectionVersionColumns.some(({ name }) => name === columnName)) {
         continue
       }

@@ -6,7 +6,7 @@
  * runs its own Electric stream, and all of them store through one SQLite
  * database and one elected leader. Tabs coordinate only through durable
  * commits and the notices those commits broadcast. This file is the Browser
- * host owner for three laws about that arrangement.
+ * host owner for five laws about that arrangement.
  *
  * Law 1, reserved commits survive a refetch storm. Authority:
  * SyncPersistenceCapabilityV1 `reserveCommitTurn` (packages/db/src/types.ts),
@@ -103,6 +103,7 @@ import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
@@ -110,6 +111,7 @@ import { electricCollectionOptions } from '../../electric-db-collection/src/elec
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import { createBrowserWASQLitePersistence } from '../src/browser-persistence'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
+import { sourceHeadViolation } from './electric-convergence-oracle'
 import type {
   Message,
   Row,
@@ -117,6 +119,11 @@ import type {
 import type { ElectricCollectionUtils } from '../../electric-db-collection/src/electric'
 
 type Item = Row & { id: number; label: string }
+type CallerCursor = `none` | `initial-offset` | `handle` | `resume` | `now`
+type ExplicitPosition = {
+  handle?: string
+  offset?: `${number}_${number}` | `-1` | `now`
+}
 
 // ---------------------------------------------------------------------------
 // Controlled Electric SDK boundary. Each stream records the position Electric
@@ -214,6 +221,19 @@ const update = (row: Item): Message<Item> => ({
 
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
+// Attempt every cleanup, preserving failures after all resources are released.
+async function closeAll(actions: Array<() => unknown>) {
+  const failures: Array<unknown> = []
+  for (const action of actions) {
+    try {
+      await action()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, `host cleanup failed`)
+}
+
 // ---------------------------------------------------------------------------
 // Browser host: one database file, one coordinator and persistence per tab.
 // ---------------------------------------------------------------------------
@@ -252,7 +272,11 @@ function openHost() {
     }
   }
 
-  const openTab = (tab: string, syncMode: SyncMode) => {
+  const openTab = (
+    tab: string,
+    syncMode: SyncMode,
+    callerPosition: ExplicitPosition = {},
+  ) => {
     const database = createWASQLiteTestDatabase({ filename, timeout: 0 })
     const execute = database.execute.bind(database)
     database.execute = async <TRow>(
@@ -273,6 +297,7 @@ function openHost() {
     // The application's signal, which can stop the stream from outside.
     let external = new AbortController()
     const shapeOptions = {
+      ...callerPosition,
       url: `http://electric.test/v1/shape`,
       params: { table: `items` },
       headers: { 'x-tab': tab },
@@ -303,9 +328,11 @@ function openHost() {
     const close = async () => {
       if (!open) return
       open = false
-      await collection.cleanup().catch(() => undefined)
-      coordinator.dispose()
-      await database.close?.()
+      await closeAll([
+        () => collection.cleanup(),
+        () => coordinator.dispose(),
+        () => database.close?.(),
+      ])
     }
     closers.push(close)
     const stream = () => {
@@ -351,10 +378,11 @@ function openHost() {
       // The application's recovery: clean up and start the Collection again.
       // A signal that already aborted would stop the new stream too, so the
       // restarted session gets a fresh signal.
-      restart: async () => {
+      restart: async (nextPosition: ExplicitPosition = {}) => {
         await collection.cleanup()
         external = new AbortController()
         shapeOptions.signal = external.signal
+        Object.assign(shapeOptions, nextPosition)
         void collection.preload().catch(() => undefined)
       },
       publicRows: () =>
@@ -386,6 +414,48 @@ function openHost() {
     openTab,
     quiesce,
     commitNotices: () => commitNotices,
+    hasResetMarker: async () => {
+      observer ??= createWASQLiteTestDatabase({ filename, timeout: 1000 })
+      const records = await observer.execute<{ value: string }>(
+        `SELECT value FROM collection_metadata WHERE collection_id = ? AND key = ?`,
+        [`items`, `electric:resume`],
+      )
+      const value: unknown = JSON.parse(records[0]?.value ?? `null`)
+      return (
+        value !== null &&
+        typeof value === `object` &&
+        `kind` in value &&
+        value.kind === `reset`
+      )
+    },
+    // A pre-protocol cache or mismatched provenance record still has rows
+    // and an Electric cursor. Reopen must not trust that cursor blindly.
+    rewriteSourceProgress: async (format: `missing` | `foreign`) => {
+      observer ??= createWASQLiteTestDatabase({ filename, timeout: 1000 })
+      // The old format's key ledger followed arrival-order row writes and
+      // therefore certified these wrong rows. Reconstruct that baseline;
+      // merely deleting a token from an already incompatible cache would
+      // not distinguish the startup provenance check.
+      await observer.execute(
+        `UPDATE collection_version SET source_progress_incompatible = 0 WHERE collection_id = ?`,
+        [`items`],
+      )
+      if (format === `missing`) {
+        await observer.execute(
+          `DELETE FROM collection_metadata WHERE collection_id = ? AND key = ?`,
+          [`items`, `electric:source-progress`],
+        )
+      } else {
+        await observer.execute(
+          `UPDATE collection_metadata SET value = ? WHERE collection_id = ? AND key = ?`,
+          [
+            JSON.stringify(`foreign-position`),
+            `items`,
+            `electric:source-progress`,
+          ],
+        )
+      }
+    },
     // A peer tab's collection reset, posted on the tabs' coordinator channel
     // as a peer would post it. No shipped host sends this notice yet, so
     // the premise is controlled; the tabs, their coordinators, and Electric
@@ -426,10 +496,12 @@ function openHost() {
         .sort((left, right) => left.id - right.id)
     },
     close: async () => {
-      await observer?.close?.()
-      for (const close of closers.reverse()) await close()
-      channel.close()
-      rmSync(directory, { recursive: true, force: true })
+      await closeAll([
+        () => observer?.close?.(),
+        ...closers.reverse(),
+        () => channel.close(),
+        () => rmSync(directory, { recursive: true, force: true }),
+      ])
     },
   }
 }
@@ -505,11 +577,28 @@ const afterDeploy: Array<Item> = [
 
 describe(`multi-tab Electric over one persisted database`, () => {
   let host: Host | undefined
-  afterEach(async () => {
-    await host?.close()
-    host = undefined
-    streams.length = 0
-  })
+  // Shrinking must retain the violated law even when releasing the host fails.
+  // AggregateError keeps the primary mismatch as cause and cleanup separately.
+  const finishHistory = async (primary?: { error: unknown }) => {
+    const failures: Array<unknown> = []
+    if (primary) failures.push(primary.error)
+    try {
+      await host?.close()
+    } catch (error) {
+      failures.push(error)
+    } finally {
+      host = undefined
+      streams.length = 0
+    }
+    if (primary && failures.length > 1)
+      throw new AggregateError(
+        failures,
+        `${String(primary.error)}; secondary host cleanup failure`,
+        { cause: primary.error },
+      )
+    if (failures.length) throw failures[0]
+  }
+  afterEach(() => finishHistory())
 
   // Law 1 grammar. Dimensions: two or three tabs; eager or on-demand
   // Collections; which tab finishes its refetch first; whether every tab's
@@ -820,7 +909,12 @@ describe(`multi-tab Electric over one persisted database`, () => {
     // only the pinned #2209 replay does (see below).
     | { kind: `close`; tab: number }
     | { kind: `stop`; tab: number; pick: number }
-    | { kind: `recover`; tab: number; pick: number }
+    | {
+        kind: `recover`
+        tab: number
+        pick: number
+        callerCursor?: CallerCursor
+      }
   const historyStep: fc.Arbitrary<HistoryStep> = fc.oneof(
     {
       weight: 3,
@@ -873,10 +967,46 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }),
     },
   )
-  const generatedHistory = fc.record({
-    tabCount: fc.integer({ min: 2, max: 3 }),
-    steps: fc.array(historyStep, { minLength: 8, maxLength: 24 }),
-  })
+  // Construct stop/peer boundaries before the arbitrary interleavings. A
+  // partial delivery opens the source's reservation; its stop must abandon
+  // that reservation so the peer's next commit can apply (Laws 1 and 3).
+  // Every stop kind occurs in a generated order, with a distinct running
+  // peer. Recovery and catch-up separate the blocks. Four membership toggles
+  // of an initially absent key restore the original rows before the tail.
+  // This adds 24 steps to the unchanged 8–24-step arbitrary tail. Removing
+  // the open delivery, stop, or peer commit loses the law's premise; recovering
+  // before the peer commit would test a different boundary. Existing pinned
+  // histories still use the same driver without this prefix.
+  const generatedHistory = fc
+    .record({
+      tabCount: fc.integer({ min: 2, max: 3 }),
+      source: fc.nat(2),
+      key: fc.constantFrom(3, 4),
+      recovery: fc.nat(1),
+      stopOrder: fc.shuffledSubarray([0, 1, 2, 3], {
+        minLength: 4,
+        maxLength: 4,
+      }),
+      steps: fc.array(historyStep, { minLength: 8, maxLength: 24 }),
+    })
+    .map(({ tabCount, source, key, recovery, stopOrder, steps }) => {
+      const tab = source % tabCount
+      const peer = (tab + 1) % tabCount
+      return {
+        tabCount,
+        steps: [
+          ...stopOrder.flatMap((pick): Array<HistoryStep> => [
+            { kind: `server change`, key, pick: 0 },
+            { kind: `advance`, tab, pick: 0 },
+            { kind: `stop`, tab, pick },
+            { kind: `catch up`, tab: peer, pick: 0 },
+            { kind: `recover`, tab, pick: recovery },
+            { kind: `catch up`, tab, pick: 0 },
+          ]),
+          ...steps,
+        ],
+      }
+    })
   type GeneratedHistory = { tabCount: number; steps: Array<HistoryStep> }
 
   type ServerLog = {
@@ -935,6 +1065,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
     startedAt: { handle: string | undefined; offset: string },
     log: ServerLog,
   ): Pick<TabModel, `handle` | `version`> => {
+    // Electric's legal `now` request begins at the current source head and
+    // supplies no baseline rows, even when no handle was specified.
+    if (startedAt.offset === `now`) {
+      return { handle: log.handle, version: log.changes.at(-1)?.version ?? 0 }
+    }
     if (startedAt.handle === undefined || startedAt.offset === `-1`) {
       return { handle: undefined, version: -1 }
     }
@@ -948,6 +1083,14 @@ describe(`multi-tab Electric over one persisted database`, () => {
   const runGeneratedHistory = async (
     { tabCount, steps }: GeneratedHistory,
     onKnownGap: () => void,
+    onRecovery?: (
+      divergentBeforeRecovery: boolean,
+      how: `restart` | `reload`,
+      cursor: CallerCursor,
+      hadResetMarker: boolean,
+    ) => void,
+    progressFormat: `current` | `missing` | `foreign` = `current`,
+    callerCursor: CallerCursor = `none`,
   ) => {
     host = openHost()
     const activeHost = host
@@ -1079,15 +1222,43 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }
       await activeHost.quiesce(`tab ${tab.tab} delivered`)
     }
-    const recover = async (index: number, how: `restart` | `reload`) => {
+    const recover = async (
+      index: number,
+      how: `restart` | `reload`,
+      cursor = callerCursor,
+    ) => {
+      if (progressFormat !== `current`) {
+        await activeHost.rewriteSourceProgress(progressFormat)
+        progressFormat = `current`
+      }
+      const divergentBeforeRecovery =
+        JSON.stringify(rowsOf(durable)) !== JSON.stringify(rowsOf(log.rows))
+      const hadResetMarker = await activeHost.hasResetMarker()
       const stopped = tabs[index]!
       const streamsBefore = stopped.streamCount()
+      // A caller can repeat the current source position, but that position
+      // supplies no missing rows. Initial-offset and handle-only requests
+      // are legal full-snapshot neighbors of the explicit resumed request.
+      const head = position(log, serverVersion)
+      const callerPosition: ExplicitPosition =
+        cursor === `resume`
+          ? {
+              handle: head.handle,
+              offset: head.offset as `${number}_${number}`,
+            }
+          : cursor === `handle`
+            ? { handle: head.handle }
+            : cursor === `initial-offset`
+              ? { offset: `-1` }
+              : cursor === `now`
+                ? { offset: `now` }
+                : {}
       let recovered = stopped
-      if (how === `restart`) await stopped.restart()
+      if (how === `restart`) await stopped.restart(callerPosition)
       else {
         await stopped.close()
         await activeHost.quiesce(`tab ${stopped.tab} closed`)
-        recovered = activeHost.openTab(stopped.tab, `eager`)
+        recovered = activeHost.openTab(stopped.tab, `eager`, callerPosition)
         tabs[index] = recovered
       }
       abandon(models[index]!)
@@ -1105,6 +1276,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
         ...requested,
       })
       await activeHost.quiesce(`tab ${recovered.tab} recovered`)
+      onRecovery?.(divergentBeforeRecovery, how, cursor, hadResetMarker)
     }
 
     const check = async (label: string, head?: Array<Item>) => {
@@ -1254,7 +1426,11 @@ describe(`multi-tab Electric over one persisted database`, () => {
             (step.kind === `recover` && step.pick === 1)
               ? `reload`
               : `restart`
-          await recover(index, how)
+          await recover(
+            index,
+            how,
+            step.kind === `recover` ? step.callerCursor : undefined,
+          )
         } else if (step.kind === `stop`) {
           const how = stops[step.pick % stops.length]!
           if (model.open !== undefined) {
@@ -1324,9 +1500,191 @@ describe(`multi-tab Electric over one persisted database`, () => {
         await recover(index, `restart`)
       }
       await deliver(index, `all`, true)
+      // A reset-abandoned transaction fails only when delivery tries to
+      // commit it. Judge Law 5 at that cut before the restart establishes
+      // Law 2's successful catch-up premise.
+      await check(`after final delivery to tab ${tabs[index]!.tab}`)
+      if (models[index]!.failedByReset) {
+        await recover(index, `restart`)
+        await deliver(index, `all`, true)
+        await check(`after reset recovery of tab ${tabs[index]!.tab}`)
+        generatedReach.reach(
+          `reset-abandoned source recovered during final catch-up`,
+        )
+      }
     }
     await check(`after every tab caught up`, rowsOf(log.rows))
+    if (models.every((model) => !model.closed)) {
+      expect(
+        sourceHeadViolation(rowsOf(log.rows), {
+          durableRows: await activeHost.durableRows(),
+          tabs: tabs.map((tab) => ({
+            status: tab.collection.status,
+            rows: tab.publicRows(),
+          })),
+        }),
+      ).toBeUndefined()
+    }
   }
+
+  // Construct the missing interaction instead of waiting for an unconstrained
+  // shuffle to draw it. One stream commits an even number of membership
+  // changes, its peer commits only the first, then the faster stream commits
+  // either no rows or a disjoint update. Reopening the lagging peer must still
+  // reach the source head. Swapping tabs, both initial memberships, repeated
+  // toggles, and draining before recovery distinguish nearby legal histories.
+  // Recovery 0 stops the source and restarts the same Collection; recovery 1
+  // reloads the tab, closing its Collection and opening a new one. The reach
+  // callback records the driver's actual recovery branch, not the input pick.
+  // Removing the lagging commit or the later advancement loses the defect;
+  // draining is the neighboring non-divergent control. A prefix longer than
+  // the source log is excluded by construction.
+  // Explicit offset/handle options select a provider position, not a cache
+  // certificate. The source-head law is unchanged across caller cursor forms.
+  const sourcePrefixHistory = fc.record({
+    key: fc.constantFrom(1, 3),
+    pairs: fc.integer({ min: 1, max: 3 }),
+    fastTab: fc.integer({ min: 0, max: 1 }),
+    advancingBatch: fc.constantFrom(`empty` as const, `disjoint` as const),
+    drain: fc.boolean(),
+    recovery: fc.integer({ min: 0, max: 1 }),
+    progressFormat: fc.constantFrom(
+      `current` as const,
+      `missing` as const,
+      `foreign` as const,
+    ),
+    callerCursor: fc.constantFrom<CallerCursor>(
+      `none`,
+      `initial-offset`,
+      `handle`,
+      `resume`,
+      `now`,
+    ),
+  })
+  const runSourcePrefixCampaign = async (
+    parameters: ReturnType<typeof oraclePropertyOptions>,
+  ) => {
+    const states = [
+      `present/empty`,
+      `present/disjoint`,
+      `absent/empty`,
+      `absent/disjoint`,
+      `drained before recovery`,
+      `missing progress at recovery`,
+      `foreign progress at recovery`,
+      `divergent source restart`,
+      `divergent source reload`,
+      `explicit resume at divergent recovery`,
+      `explicit now at divergent recovery`,
+      `explicit initial offset at recovery`,
+      `explicit handle at recovery`,
+      `interrupted reset before explicit resume recovery`,
+      `interrupted reset before explicit now recovery`,
+    ] as const
+    const reach = createOracleReach(`browser.electric-source-prefix`, states)
+    await fc.assert(
+      fc.asyncProperty(sourcePrefixHistory, async (history) => {
+        const slowTab = 1 - history.fastTab
+        // Keep every original history, then repeat it with a recovery that
+        // stops before its first source delivery. The first start writes its
+        // reset marker through production; the second must still recover.
+        // Pairing both paths preserves the uninterrupted domain and gives
+        // every generated cursor form an interrupted neighbor.
+        for (const interrupted of [false, true]) {
+          reach.beginHistory()
+          const steps: Array<HistoryStep> = [
+            ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
+              kind: `server change`,
+              key: history.key,
+              pick: 0,
+            })),
+            { kind: `catch up`, tab: history.fastTab, pick: 0 },
+            { kind: `catch up`, tab: slowTab, pick: 1 },
+            ...(history.advancingBatch === `disjoint`
+              ? [{ kind: `server change` as const, key: 2, pick: 1 }]
+              : []),
+            { kind: `catch up`, tab: history.fastTab, pick: 0 },
+            ...(history.drain
+              ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
+              : []),
+            ...(history.recovery === 0
+              ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
+              : []),
+            ...(interrupted
+              ? [
+                  {
+                    kind: `recover` as const,
+                    tab: slowTab,
+                    pick: history.recovery,
+                    callerCursor: `none` as const,
+                  },
+                  { kind: `stop` as const, tab: slowTab, pick: 0 },
+                ]
+              : []),
+            { kind: `recover`, tab: slowTab, pick: history.recovery },
+          ]
+          let primary: { error: unknown } | undefined
+          try {
+            await runGeneratedHistory(
+              { tabCount: 2, steps },
+              () => fc.pre(false),
+              (divergent, how, cursor, hadResetMarker) => {
+                if (history.drain && !divergent)
+                  reach.reach(`drained before recovery`)
+                if (!history.drain && divergent) {
+                  if (cursor === `resume`)
+                    reach.reach(`explicit resume at divergent recovery`)
+                  if (cursor === `now`)
+                    reach.reach(`explicit now at divergent recovery`)
+                  if (
+                    interrupted &&
+                    hadResetMarker &&
+                    (cursor === `resume` || cursor === `now`)
+                  )
+                    reach.reach(
+                      `interrupted reset before explicit ${cursor} recovery`,
+                    )
+                  reach.reach(`divergent source ${how}`)
+                  reach.reach(
+                    `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
+                  )
+                }
+                if (history.progressFormat !== `current`) {
+                  reach.reach(`${history.progressFormat} progress at recovery`)
+                }
+                if (cursor === `initial-offset`)
+                  reach.reach(`explicit initial offset at recovery`)
+                if (cursor === `handle`)
+                  reach.reach(`explicit handle at recovery`)
+              },
+              history.progressFormat,
+              history.callerCursor,
+            )
+          } catch (error) {
+            primary = { error }
+          } finally {
+            await finishHistory(primary)
+          }
+        }
+      }),
+      parameters,
+    )
+    console.info(`source prefix reach`, Object.fromEntries(reach.counts()))
+    reach.assertReached()
+  }
+  it.skipIf(oracleReplayRequested())(
+    `converges after interleaved source prefixes (fixed seed)`,
+    () => runSourcePrefixCampaign({ numRuns: oracleRuns(80), seed: 2281 }),
+    600_000,
+  )
+  oracleReplayTest(it, `browser.electric-source-prefix`)(
+    `converges after interleaved source prefixes (random or replayed)`,
+    () =>
+      runSourcePrefixCampaign(
+        oraclePropertyOptions(80, `browser.electric-source-prefix`),
+      ),
+    600_000,
+  )
 
   type GeneratedReach =
     | `must-refetch delivered`
@@ -1340,12 +1698,13 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | `peer commit after signal aborted mid-transaction`
     | `peer reset abandoned an open transaction`
     | `reset-abandoned commit put the Collection in error`
+    | `reset-abandoned source recovered during final catch-up`
   // The storm driver and the generated-history driver are the checks; the
   // generated driver folds committed batches into its own model of durable
   // rows. The storm cells and the generated-history arbitrary are the grammar.
   declareOracle({
     check: [runStormHistory, runGeneratedHistory],
-    grammar: [stormHistories, generatedHistory],
+    grammar: [stormHistories, generatedHistory, sourcePrefixHistory],
   })
 
   const createGeneratedReach = () =>
@@ -1361,6 +1720,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `peer commit after signal aborted mid-transaction`,
       `peer reset abandoned an open transaction`,
       `reset-abandoned commit put the Collection in error`,
+      `reset-abandoned source recovered during final catch-up`,
     ])
   let generatedReach = createGeneratedReach()
 
@@ -1370,13 +1730,14 @@ describe(`multi-tab Electric over one persisted database`, () => {
     generatedReach = createGeneratedReach()
     await fc.assert(
       fc.asyncProperty(generatedHistory, async (history) => {
+        let primary: { error: unknown } | undefined
         try {
           // fc.pre discards a history that reaches the known gap.
           await runGeneratedHistory(history, () => fc.pre(false))
+        } catch (error) {
+          primary = { error }
         } finally {
-          await host?.close()
-          host = undefined
-          streams.length = 0
+          await finishHistory(primary)
         }
       }),
       parameters,
@@ -1396,7 +1757,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       }),
     600_000,
   )
-  it(
+  oracleReplayTest(it, GENERATED_PROPERTY)(
     `keeps reserved commits lawful across generated multi-tab histories (random or replayed)`,
     () =>
       runGeneratedCampaign(
@@ -1421,6 +1782,88 @@ describe(`multi-tab Electric over one persisted database`, () => {
             { kind: `server change`, key: 2, pick: 1 },
             { kind: `server change`, key: 1, pick: 0 },
             { kind: `server change`, key: 2, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `advance`, tab: 0, pick: 0 },
+          ],
+        },
+        () => undefined,
+      ),
+    60_000,
+  )
+
+  // The final delivery can be the first attempt to commit a transaction
+  // abandoned by the reset. The driver must observe its failure, recover,
+  // and only then judge convergence. This replays the original issue trace.
+  it(
+    `recovers a reset-abandoned source that fails during final catch-up`,
+    () =>
+      runGeneratedHistory(
+        {
+          tabCount: 2,
+          steps: [
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `advance`, tab: 1, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `advance`, tab: 0, pick: 0 },
+            { kind: `peer reset` },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `deploy` },
+            { kind: `deploy` },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+          ],
+        },
+        () => undefined,
+      ),
+    60_000,
+  )
+
+  // The later no-deploy reset trace reaches the same final-delivery failure
+  // from a reloaded tab. Recovery must happen after that failed commit too.
+  // Seed -1371495859, path 75:0:0:0:0:0:0:1:1:0:0.
+  it(
+    `recovers a reloaded source whose final commit was abandoned by a peer reset`,
+    () =>
+      runGeneratedHistory(
+        {
+          tabCount: 2,
+          steps: [
+            { kind: `recover`, tab: 0, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `advance`, tab: 0, pick: 0 },
+            { kind: `advance`, tab: 1, pick: 0 },
+            { kind: `advance`, tab: 0, pick: 0 },
+            { kind: `peer reset` },
+            { kind: `advance`, tab: 0, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+          ],
+        },
+        () => undefined,
+      ),
+    60_000,
+  )
+
+  // A discontinuous source prefix does not corrupt the cached key set. Keep
+  // durable rows visible during reload while a fresh source snapshot repairs
+  // continuation. This is a reduced random history, replayed by the same law.
+  it(
+    `keeps cached rows visible while recovering a discontinuous source`,
+    () =>
+      runGeneratedHistory(
+        {
+          tabCount: 2,
+          steps: [
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `catch up`, tab: 1, pick: 1 },
+            { kind: `catch up`, tab: 0, pick: 0 },
+            { kind: `recover`, tab: 0, pick: 0 },
+            { kind: `recover`, tab: 0, pick: 0 },
+            { kind: `stop`, tab: 0, pick: 0 },
+            { kind: `peer reset` },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `server change`, key: 1, pick: 0 },
+            { kind: `catch up`, tab: 0, pick: 0 },
             { kind: `server change`, key: 1, pick: 0 },
             { kind: `advance`, tab: 0, pick: 0 },
           ],
@@ -1456,14 +1899,14 @@ describe(`multi-tab Electric over one persisted database`, () => {
     60_000,
   )
 
-  // Known gap, pinned from the random campaign (seed -1660880085, path
+  // Regression from the random campaign (seed -1660880085, path
   // 55:0:1:4:4:4:1:1:1:1:3:4:4:4:4): row 1 reaches v2 on the server and both
   // tabs catch up, but after tab B stops, tab A catches up, and tab A stops,
   // the durable rows lose row 1. Law 2 expects every open tab and the durable
-  // rows to show the head. This reproduces on main and is tracked with #2281.
+  // rows to show the head. The source-progress repair forces a fresh snapshot.
   // It replays through the same driver and checks with the known-gap detector
-  // off. Remove `fails` when the durable row survives the stops.
-  it.fails(
+  // off. The generated source-prefix campaign extends this same law.
+  it(
     `keeps a durable row after both tabs catch up to it and then stop`,
     () =>
       runGeneratedHistory(
@@ -1485,4 +1928,71 @@ describe(`multi-tab Electric over one persisted database`, () => {
       ),
     60_000,
   )
+
+  // Issue #2281 reduces to the same six-step history for both membership
+  // directions. A stores two server changes; B stores only the first. A's
+  // next up-to-date stores its newer cursor without restoring the second
+  // change. B then reopens from that cursor and never receives the missing
+  // change. Law 2 still requires the server head at the final checkpoint.
+  // These regressions replay the same model and comparison as the generated
+  // source-prefix campaign above.
+  for (const { key, behavior } of [
+    { key: 1, behavior: `keeps a reinserted row` },
+    { key: 3, behavior: `keeps a deleted row absent` },
+  ]) {
+    const stalePrefix: Array<HistoryStep> = [
+      { kind: `server change`, key, pick: 0 },
+      { kind: `server change`, key, pick: 0 },
+      { kind: `catch up`, tab: 0, pick: 0 },
+      { kind: `catch up`, tab: 1, pick: 1 },
+    ]
+    const publishCursor: HistoryStep = { kind: `catch up`, tab: 0, pick: 0 }
+    const reopenPeer: HistoryStep = { kind: `recover`, tab: 1, pick: 0 }
+
+    // Keeping only the maximum cursor does not repair these rows.
+    it(
+      `${behavior} after a cursor-only commit and a lagging tab reload`,
+      () =>
+        runGeneratedHistory(
+          {
+            tabCount: 2,
+            steps: [...stalePrefix, publishCursor, reopenPeer],
+          },
+          () => undefined,
+        ),
+      60_000,
+    )
+
+    // A peer that drains its backlog supplies the missing change itself.
+    it(
+      `${behavior} when the lagging stream drains before reloading`,
+      () =>
+        runGeneratedHistory(
+          {
+            tabCount: 2,
+            steps: [
+              ...stalePrefix,
+              publishCursor,
+              { kind: `catch up`, tab: 1, pick: 0 },
+              reopenPeer,
+            ],
+          },
+          () => undefined,
+        ),
+      60_000,
+    )
+
+    // Without A's cursor-only commit, B resumes from its older position and
+    // receives the missing change. This distinguishes cursor advancement
+    // from reload or lag alone as the cause of the permanent mismatch.
+    it(
+      `${behavior} when the lagging tab reloads before the cursor advances`,
+      () =>
+        runGeneratedHistory(
+          { tabCount: 2, steps: [...stalePrefix, reopenPeer] },
+          () => undefined,
+        ),
+      60_000,
+    )
+  }
 })

@@ -5,7 +5,9 @@ import { createOracleReach } from './oracle-reach'
  * owns its property, grammar, recorder, comparison, and run budget; only seed
  * selection changes between the two calls. Counts are histories, not events:
  * call beginHistory once and reach only after observing the named checkpoint.
- * A direct prefix SEED/PATH replay runs immediately without campaign minima.
+ * A prefix SEED replay runs one campaign at the callback's full budget, and
+ * checks its reach. A SEED/PATH replay runs one recorded history and checks
+ * no reach. `declared-reach-oracle.property.test.ts` owns this rule.
  * This is runner support, not an independent product judgment.
  */
 export async function runOracleCampaign<TState extends string>(
@@ -50,7 +52,7 @@ export async function runOracleCampaign<TState extends string>(
         ]
   for (const campaign of campaigns) {
     const reach = createOracleReach(prefix, states, {
-      replaying: seed !== undefined,
+      replaying: path !== undefined,
     })
     await run(reach, campaign.parameters)
     reach.assertReached()
@@ -58,7 +60,7 @@ export async function runOracleCampaign<TState extends string>(
       `ORACLE_REACH ${JSON.stringify({
         property: prefix,
         campaign: campaign.name,
-        minimum: seed === undefined ? 1 : null,
+        minimum: path === undefined ? 1 : null,
         counts: Object.fromEntries(reach.counts()),
       })}`,
     )

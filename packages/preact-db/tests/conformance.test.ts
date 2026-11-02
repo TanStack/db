@@ -18,6 +18,8 @@
  */
 import { act } from 'preact/test-utils'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -65,12 +67,14 @@ function writer<T extends { id: string }>(collection: any) {
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
   collectionId?: string,
+  options?: { rowUpdateMode?: `full` },
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: collectionId ?? `conformance-preact-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
+      rowUpdateMode: options?.rowUpdateMode,
     }),
   )
   const write = writer<T>(collection)
@@ -171,11 +175,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: {
-    gcTime?: number
-    pool?: PooledLiveQueries
-    queryKey?: ReadonlyArray<unknown>
-  },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   return makeHandle(
     renderHook(() => useLiveQuery({ query: build as any, ...opts })),
@@ -253,6 +253,7 @@ const preactDriver: LiveQueryDriver = {
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

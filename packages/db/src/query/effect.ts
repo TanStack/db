@@ -483,9 +483,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
-  // Callback-visible result. Held repair deltas are classified against this
-  // last coherent membership rather than their net multiplicity alone.
-  private readonly publishedRows = new Map<unknown, TRow>()
+  // Unordered deltas need prior membership, not retained values. Ordered
+  // repairs additionally need the preceding coherent values across graph runs.
+  private publishedRows: Set<unknown> | Map<unknown, TRow> = new Set()
 
   // skipInitial state
   private readonly skipInitial: boolean
@@ -742,6 +742,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
+        this.publishedRows = new Map()
         const loader = new OrderedSourceLoader(
           orderByInfo,
           subscription,
@@ -1059,7 +1060,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     const shouldPublish = !this.skipInitial || this.initialLoadComplete
-    const tracksPublishedRows = this.orderedLoaders.size > 0
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
@@ -1067,13 +1067,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const event = classifyDelta<TRow, TKey>(
         key as TKey,
         changes,
-        tracksPublishedRows ? this.publishedRows : undefined,
+        this.publishedRows,
       )
       if (event) {
-        if (tracksPublishedRows) {
-          if (event.type === `exit`) this.publishedRows.delete(key)
-          else this.publishedRows.set(key, event.value)
-        }
+        if (event.type === `exit`) this.publishedRows.delete(key)
+        else if (this.publishedRows instanceof Map)
+          this.publishedRows.set(key, event.value)
+        else this.publishedRows.add(key)
         if (shouldPublish) events.push(event)
       }
     }
@@ -1319,18 +1319,17 @@ function accumulateEffectChanges<T>(
   return acc
 }
 
-/** Interpret a D2 batch against callback-visible state when a window holds it. */
+/** Interpret a D2 batch against the preceding coherent result membership. */
 function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
-  publishedRows?: ReadonlyMap<unknown, TRow>,
+  publishedRows: ReadonlySet<unknown> | ReadonlyMap<unknown, TRow>,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
-  const wasPresent = publishedRows ? publishedRows.has(key) : deletes > 0
-  const previousValue = publishedRows?.get(key) ?? deleteValue
-  const isPresent = publishedRows
-    ? Number(wasPresent) + inserts - deletes > 0
-    : inserts > 0
+  const wasPresent = publishedRows.has(key)
+  const previousValue =
+    publishedRows instanceof Map ? publishedRows.get(key) : deleteValue
+  const isPresent = Number(wasPresent) + inserts - deletes > 0
 
   if (!wasPresent && isPresent) {
     // Row entered the query result
@@ -1340,16 +1339,17 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
   if (wasPresent && !isPresent) {
     // Row exited the query result — value is the exiting value,
     // previousValue is omitted (it would be identical to value)
-    return { type: `exit`, key, value: previousValue ?? deleteValue! }
+    return { type: `exit`, key, value: previousValue! }
   }
 
   if (
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    (!publishedRows || !deepEquals(previousValue, insertValue))
+    (publishedRows instanceof Set || !deepEquals(previousValue, insertValue))
   ) {
-    // Row updated within the query result
+    // Unordered Effects preserve all graph updates without comparing values.
+    // Ordered repairs compare with the preceding coherent publication.
     return {
       type: `update`,
       key,
@@ -1358,8 +1358,7 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     }
   }
 
-  // The row was absent both before and after the held delta, or its final
-  // value is equal to the last callback-visible value.
+  // The row was absent at both cuts, or an ordered repair kept an equal value.
   return undefined
 }
 

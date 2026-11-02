@@ -3,7 +3,7 @@ id: KeyUpdateNotAllowedError
 title: KeyUpdateNotAllowedError
 ---
 
-Defined in: [packages/db/src/errors.ts:346](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L346)
+Defined in: [packages/db/src/errors.ts:351](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L351)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:346](https://github.com/TanStack/db/blob/
 new KeyUpdateNotAllowedError(originalKey, newKey): KeyUpdateNotAllowedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:347](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L347)
+Defined in: [packages/db/src/errors.ts:352](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L352)
 
 #### Parameters
 

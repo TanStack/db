@@ -9,4 +9,4 @@ type ConvexCollectionClient =
 | Pick<ConvexReactClient, "watchQuery">;
 ```
 
-Defined in: [subscription.ts:9](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/subscription.ts#L9)
+Defined in: [subscription.ts:10](https://github.com/TanStack/db/blob/main/packages/convex-db-collection/src/subscription.ts#L10)
