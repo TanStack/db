@@ -2041,7 +2041,9 @@ function createElectricSync<T extends Row<unknown>>(
       // The client retries a failed network attempt, 429, or 5xx itself, and
       // onError decides another 4xx; each is a failed attempt. A subset
       // snapshot request carries no abort signal: its attempts belong to its
-      // demand, not to the source (glossary, request error).
+      // demand, not to the source (glossary, request error). The client's
+      // catch-up prefetches carry one, and count (maintainer decision
+      // 2026-11-02).
       fetchClient: async (input, init) => {
         const request = (shapeOptions.fetchClient ?? fetch)(input, init)
         if (!init?.signal) return request

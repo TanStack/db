@@ -7006,7 +7006,10 @@ must accept no txid the source does not accept then: the export carried the
 retired run's txids before the restarted run was ready (RED: txid 25
 accepted after import), and a mutant that never exports them fails after
 ready. The metadata format carries txids only, so snapshot evidence is not
-exported, as on `main`; it declares reach
+exported, as on `main`. Maintainer decision 2026-11-02: a failed catch-up
+prefetch attempt counts toward the outage threshold, as any failed
+shape-log request does; no driver response spans several chunks, so no
+history prefetches. It declares reach
 for a subset request's five retried attempts, five live pauses, a live
 outage, and that restart. The retry-decision model
 (`electric-retry-decision-model.ts`, shared by the controlled lane of

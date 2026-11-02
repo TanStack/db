@@ -453,7 +453,10 @@ attempts take from under a second to about 15 seconds, because each retry
 waits a random part of a doubling delay. A source that keeps failing five
 times and then succeeding once shows and clears the outage each time. A
 subset snapshot request that the client retries does not count: its failure
-belongs to the live query that requested it. When the stream gives up, it
+belongs to the live query that requested it. While the stream catches up on
+a log that spans several responses, such as after a `must-refetch`, the
+client also prefetches the next responses, and each failed prefetch attempt
+counts too, so the outage can show sooner than five rounds of retries. When the stream gives up, it
 calls `fail()` with the error, or with the error your `onError` threw: a
 failed first load before readiness, or the source node's `error` after it. A give-up while a persistence wrapper is
 still accepting the first snapshot fails the Collection once that acceptance
