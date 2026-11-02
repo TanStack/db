@@ -168,9 +168,9 @@ from `packages/db/tests/oracle-reach.ts`.
   Each campaign fails when a state is reached fewer than five times. The
   lowest count above is 18.
 
-- **GREEN:** `pnpm exec vitest run` in this package: 84 tests pass. The
-  reference oracle file holds 82: both campaigns, the per-change pair, the
-  outage-threshold campaign, 47 mutant calibrations, and the grammar
+- **GREEN:** `pnpm exec vitest run` in this package: 85 tests pass. The
+  reference oracle file holds 83: both campaigns, the per-change pair, the
+  outage-threshold campaign, 48 mutant calibrations, and the grammar
   controls. `tests/eager-live-source-harness.test.ts` holds 2 ordinary tests
   of the check's own setup cleanup.
 - **Mutants:** the fixed campaign rejects each with the law it breaks. Where
@@ -192,6 +192,7 @@ from `packages/db/tests/oracle-reach.ts`.
   | `leaks-subscription`                                          | LIFE-2                     |
   | `restart-replays-rows`                                        | LIFE-5                     |
   | `swallows-prompt-failure`                                     | READY-4                    |
+  | `ready-at-restart`                                            | LIFE-5                     |
   | `keeps-failed-source`                                         | LIFE-10                    |
   | `double-release`                                              | LIFE-10                    |
   | `detached-rejection`                                          | HEALTH-5                   |

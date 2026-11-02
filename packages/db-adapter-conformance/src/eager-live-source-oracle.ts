@@ -441,8 +441,8 @@ export interface EagerLiveSourceDriver {
  *   element, so the reset it causes is reached.
  * - `restart`: cleanup, then `preload()` starts a new sync run. With
  *   `prompt-after-restart`, half the restarts are `prompt`: the next step
- *   runs in the same task as `preload()`, and no checkpoint comes between
- *   them. One history in six with this capability starts with a failure, a
+ *   runs in the same task as `preload()`, and only a synchronous check of
+ *   LIFE-5 (status `loading`, no rows) comes between them. One history in six with this capability starts with a failure, a
  *   prompt restart, and a failure or a complete delivery, because random
  *   steps rarely put a failed run's restart next to a failure.
  *
@@ -2555,6 +2555,22 @@ export async function checkEagerLiveSourceHistory(
           watchReady()
           preload = recordSettlement(collection.preload())
           events = foldChanges(collection)
+          // LIFE-5 at a prompt restart's own cut: no turn passes before the
+          // next step, which may otherwise hide an early ready.
+          if (done.prompt) {
+            const restarted = {
+              status: collection.status,
+              rows: observedRows(collection),
+            }
+            if (restarted.status !== `loading` || restarted.rows.length > 0) {
+              throw violation(
+                `LIFE-5 (prompt restart)`,
+                index,
+                { status: `loading`, rows: [] },
+                restarted,
+              )
+            }
+          }
           reach(`restart`)
           if (failedBefore) reach(`restart-after-failure`)
           if (done.prompt) reach(`prompt-restart`)

@@ -45,6 +45,8 @@ export type ReferenceMutant =
   | `leaks-subscription`
   /** LIFE-5: a new sync run starts from the previous run's rows. */
   | `restart-replays-rows`
+  /** LIFE-5: a restarted sync run reports ready at its start. */
+  | `ready-at-restart`
   /**
    * READY-4, after a failed run: the new run skips one failure that comes
    * before its first turn, taking it for a cached failure's replay.
@@ -299,6 +301,7 @@ function referenceCollection(
       mutant !== `forgets-retired-evidence`)
   // Only the `restart-replays-rows` mutant reads this across sync runs.
   let previousRows: ReadonlyArray<ConformanceRow> = []
+  let runs = 0
 
   const settleWaits = (txid: string) => {
     applied.add(txid)
@@ -367,6 +370,7 @@ function referenceCollection(
           keys = new Set(previousRows.map((row) => row.id))
         }
         if (mutant === `ready-before-delivery`) becomeReady()
+        if (mutant === `ready-at-restart` && ++runs > 1) becomeReady()
 
         const writeChange = (change: ProviderChange) => {
           if (change.type === `upsert`) {

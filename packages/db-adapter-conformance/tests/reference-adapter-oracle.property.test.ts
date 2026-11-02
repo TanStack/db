@@ -105,6 +105,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`leaks-subscription`, `LIFE-2`],
     [`restart-replays-rows`, `LIFE-5`],
     [`swallows-prompt-failure`, `READY-4`],
+    [`ready-at-restart`, `LIFE-5`],
     [`keeps-failed-source`, `LIFE-10`],
     [`double-release`, `LIFE-10`],
     [`detached-rejection`, `HEALTH-5`],
