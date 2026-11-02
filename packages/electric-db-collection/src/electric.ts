@@ -1008,14 +1008,19 @@ class ElectricLifecycle<T extends Row<unknown>> {
     clearEvidence(this.retired)
   }
 
+  /** Exported txids are those `awaitTxId` accepts now (EVID-2). */
   exportMeta(): ElectricSyncMeta {
-    return exportElectricSyncMeta({
-      ...this.evidence,
-      seenTxids: new Set([
-        ...this.retired.seenTxids,
-        ...this.evidence.seenTxids,
-      ]),
-    })
+    return exportElectricSyncMeta(
+      this.runReady
+        ? {
+            ...this.evidence,
+            seenTxids: new Set([
+              ...this.retired.seenTxids,
+              ...this.evidence.seenTxids,
+            ]),
+          }
+        : this.evidence,
+    )
   }
 
   importMeta(meta: unknown): void {

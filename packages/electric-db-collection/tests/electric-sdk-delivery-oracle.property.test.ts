@@ -496,6 +496,38 @@ async function checkSnapshots(
       retired.map((wait) => wait.settled),
       `retired evidence before the restarted run is ready`,
     ).toEqual([`pending`, `pending`])
+    // META-1 with EVID-2: exported sync metadata claims a txid only when
+    // this Collection's `awaitTxId` accepts it now, and claims each accepted
+    // txid evidence, so a Collection that imports it, as hydration does,
+    // accepts no more. The format carries txids only, so snapshot evidence
+    // (txid 5) is not exported.
+    const acceptedAfterImport = async () => {
+      const fresh = createCollection(
+        electricCollectionOptions<Item>({
+          id: `snapshot-meta-import-${++sequence}`,
+          shapeOptions: {
+            url: `http://test-url/unused`,
+            params: { table: `rows` },
+          },
+          getKey: (row) => row.id,
+        }),
+      )
+      fresh.config.sync.importSyncMeta?.(
+        collection.config.sync.exportSyncMeta?.(),
+      )
+      return Promise.all(
+        [5, 25].map((txid) =>
+          fresh.utils.awaitTxId(txid, 20).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      )
+    }
+    expect(
+      await acceptedAfterImport(),
+      `exported evidence before the restarted run is ready`,
+    ).toEqual([false, false])
     // The restarted run becomes ready on its live up-to-date, which carries
     // no evidence for either txid: only the retired evidence can fulfill
     // the waits.
@@ -515,6 +547,10 @@ async function checkSnapshots(
       retired.map((wait) => wait.settled),
       `retired evidence once the restarted run is ready`,
     ).toEqual([`fulfilled`, `fulfilled`])
+    expect(
+      (await acceptedAfterImport())[1],
+      `exported txid evidence once the restarted run is ready`,
+    ).toBe(true)
     snapshotReach.reach(`retired-evidence-after-restart`)
   }, [
     { label: `snapshot collection`, release: () => collection.cleanup() },

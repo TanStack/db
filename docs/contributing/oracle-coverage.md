@@ -7000,7 +7000,13 @@ throwing, and a second campaign runs the default configuration without an
 app `onError`, declaring the adapter's give-up log. The on-demand lane also
 restarts the Collection and checks that a retired run's snapshot-boundary
 evidence (txid 5 below `xmin` 10) and imported sync metadata (txid 25) stay
-pending until the restarted run is ready, then fulfill; it declares reach
+pending until the restarted run is ready, then fulfill. At both cuts a
+fresh Collection imports the exported sync metadata, as hydration does, and
+must accept no txid the source does not accept then: the export carried the
+retired run's txids before the restarted run was ready (RED: txid 25
+accepted after import), and a mutant that never exports them fails after
+ready. The metadata format carries txids only, so snapshot evidence is not
+exported, as on `main`; it declares reach
 for a subset request's five retried attempts, five live pauses, a live
 outage, and that restart. The retry-decision model
 (`electric-retry-decision-model.ts`, shared by the controlled lane of
