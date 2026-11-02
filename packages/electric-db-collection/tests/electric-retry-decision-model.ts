@@ -48,6 +48,9 @@ export type RetryObservation = {
   // An `awaitTxId` and an `awaitMatch` that no evidence satisfies, started
   // with the history: both `pending`, or both `rejected`.
   waits?: `pending` | `rejected`
+  // The same pair started at this checkpoint, after the step. Not compared
+  // after cleanup, when a later run could still supply the evidence.
+  lateWaits?: `pending` | `rejected`
   // While `ready`, whether the source node shows an `error`.
   health?: `error` | `none`
 }
@@ -233,6 +236,8 @@ export function expectedRetryObservation(
   cleanupRequested: boolean,
 ): RetryObservation {
   const cleanedUp = cleanupRequested || model.cleanedUp
+  const stopped =
+    model.failed !== undefined || model.gaveUpAfterReady || model.aborted
   return {
     preload: cleanedUp
       ? undefined
@@ -260,14 +265,10 @@ export function expectedRetryObservation(
     ),
     rowVisible: !cleanedUp && model.visible,
     // EVID-2: a sync run retires when it fails or is cleaned up, and its
-    // pending waits reject then (maintainer decision 2026-10-30).
-    waits:
-      cleanedUp ||
-      model.failed !== undefined ||
-      model.gaveUpAfterReady ||
-      model.aborted
-        ? `rejected`
-        : `pending`,
+    // pending waits reject then (maintainer decision 2026-10-30). A wait
+    // started after the failure rejects as well: no evidence can arrive.
+    waits: cleanedUp || stopped ? `rejected` : `pending`,
+    lateWaits: cleanedUp ? undefined : stopped ? `rejected` : `pending`,
     health:
       !cleanedUp && model.ready && model.failed === undefined
         ? model.gaveUpAfterReady

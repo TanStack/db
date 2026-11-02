@@ -27,7 +27,11 @@ import {
   mutationConfirmationHistories,
   mutationConfirmationInputs,
 } from '../../db/tests/mutation-confirmation-oracle'
-import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import {
+  atCheckpoint,
+  startUnmetWaits,
+  withElectricCleanup,
+} from './electric-oracle-lifecycle'
 import { createMockStream } from './electric-stream-mock'
 import {
   applyRetryModel,
@@ -72,6 +76,7 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 import type {
   RetryDecision,
   RetryHistory,
+  RetryModel,
   RetryObservation,
   RetrySettlement,
   RetryStep,
@@ -3839,7 +3844,13 @@ describe(`Electric adapter laws`, () => {
    * The driver runs the real adapter and Collection behind the controlled
    * ShapeStream. After each step and a timer turn it compares the status,
    * every demand's settlement and cause, a readiness wait's settlement and
-   * cause, and whether the snapshot's row is visible. The model lives in `electric-retry-decision-model.ts`. An
+   * cause, whether the snapshot's row is visible, and two pairs of waits
+   * that no evidence satisfies: one started with the history and one
+   * started at that checkpoint. A sync run that stopped, by a failure, a
+   * give-up, or an external abort, rejects both pairs, also while READY-9
+   * defers the Collection's failure (EVID-2; maintainer decisions
+   * 2026-10-30 and 2026-11-02). After cleanup a later run could supply the
+   * evidence, so the late pair is not compared then. The model lives in `electric-retry-decision-model.ts`. An
    * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
    * drives the same model through the real Electric client and HTTP.
    */
@@ -3896,6 +3907,34 @@ describe(`Electric adapter laws`, () => {
       }
       return { wait, hasOnError, abortedAtStart, cleanupOnError, steps: legal }
     })
+
+  // EVID-2: a wait started after the run stopped rejects. The states name
+  // each way the model stops a run before cleanup.
+  const retryReach = createOracleReach(`electric.retry-decision`, [
+    `late-wait-after-loading-failure`,
+    `late-wait-after-ready-give-up`,
+    `late-wait-after-abort-after-ready`,
+    `late-wait-during-deferred-abort`,
+  ])
+  afterAll(() => {
+    retryReach.assertReached()
+    console.info(
+      `electric.retry-decision reach`,
+      Object.fromEntries(retryReach.counts()),
+    )
+  })
+  const reachLateWait = (model: RetryModel) => {
+    if (model.cleanedUp) return
+    if (model.failed !== undefined) {
+      retryReach.reach(`late-wait-after-loading-failure`)
+    } else if (model.aborted && !model.ready && model.committed) {
+      retryReach.reach(`late-wait-during-deferred-abort`)
+    } else if (model.aborted && model.ready) {
+      retryReach.reach(`late-wait-after-abort-after-ready`)
+    } else if (model.gaveUpAfterReady) {
+      retryReach.reach(`late-wait-after-ready-give-up`)
+    }
+  }
 
   function retrySettlementTag(error: unknown, tags: Map<unknown, string>) {
     const tag = tags.get(error)
@@ -3995,29 +4034,19 @@ describe(`Electric adapter laws`, () => {
         preload = `rejected:${retrySettlementTag(reason, tags)}`
       },
     )
-    // An `awaitTxId` and an `awaitMatch` that no evidence satisfies.
-    let waitsRejected = 0
-    for (const wait of [
-      trace.collection.utils.awaitTxId(2_000_000_000, 2_000_000_000),
-      trace.collection.utils.awaitMatch(() => false, 2_000_000_000),
-    ]) {
-      void wait.then(
-        () => undefined,
-        () => waitsRejected++,
-      )
-    }
+    // Waits that no evidence satisfies: one pair started with the history,
+    // and one started at each checkpoint, after its step.
+    const waits = startUnmetWaits(trace.collection.utils)
+    let lateWaits = waits
     const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
     const observe = (): RetryObservation => ({
       status: trace.collection.status,
       demands: [...settlements],
       rowVisible: trace.collection.has(1),
       preload: trace.collection.status === `cleaned-up` ? undefined : preload,
-      waits:
-        waitsRejected === 2
-          ? `rejected`
-          : waitsRejected === 0
-            ? `pending`
-            : (`one of two rejected` as never),
+      waits: waits(),
+      lateWaits:
+        trace.collection.status === `cleaned-up` ? undefined : lateWaits(),
       health:
         trace.collection.status === `ready`
           ? trace.collection.health.error
@@ -4123,6 +4152,9 @@ describe(`Electric adapter laws`, () => {
         applyRetryModel(model, step, history.hasOnError, tag)
         await turn()
         await turn()
+        lateWaits = startUnmetWaits(trace.collection.utils)
+        reachLateWait(model)
+        await turn()
         expect(
           observe(),
           `after ${JSON.stringify(history.steps.slice(0, index + 1))}`,
@@ -4156,6 +4188,7 @@ describe(`Electric adapter laws`, () => {
       const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
       try {
         resetElectricOracleMocks()
+        retryReach.beginHistory()
         await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
       } finally {
         consoleError.mockRestore()

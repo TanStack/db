@@ -6998,6 +6998,20 @@ source node's `error` too (maintainer decision 2026-11-02: deliberate or
 not, an aborted stream no longer syncs). Its controlled driver now reports a give-up
 decision to the subscriber, as the installed client does; before, a
 give-up after ready never reached the adapter's failure path in that lane.
+Both lanes also start a second pair of those waits at every checkpoint,
+after its step: a run that stopped rejects them too (EVID-2), except after
+cleanup. Reach (`electric.retry-decision`, fixed and random campaigns
+together): a loading failure 16, a give-up after ready 14, an external
+abort after ready 4, and an abort while READY-9 defers the failure 2, the
+last two from named examples. An abort retired the run before its failure
+was recorded, so a later wait waited for its timeout: RED at
+`[demand, hold, up-to-date, abort]` (late waits `pending`). Two mutants
+fail it: a retirement that advances the run's epoch again (abort after
+ready), and an abort that does not record the failure for the waits
+(`[demand, hold-acceptance, up-to-date, abort, accept]`). The other paths
+that abort before failing, a rejected applied receipt and a rejected or
+invalidated resume, share the repaired lifecycle rule; no generated history
+reaches them.
 Limits: no persisted resume or held commit receipt in the eager lane; no
 real Electric server;  without an app `onError`, the driver detects a
 give-up from the adapter's log, so an adapter that stops logging times out

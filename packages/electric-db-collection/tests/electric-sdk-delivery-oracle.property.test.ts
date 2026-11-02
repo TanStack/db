@@ -18,6 +18,7 @@ import {
 } from './electric-sdk-delivery-support'
 import {
   atCheckpoint,
+  startUnmetWaits,
   withElectricCleanup,
   withElectricSetup,
 } from './electric-oracle-lifecycle'
@@ -882,7 +883,9 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * first ready, so its demand is the readiness wait (`preload()`).
  *
  * At each checkpoint the lane compares the Collection status, each demand's
- * settlement, and whether the snapshot's row is visible with the model:
+ * settlement, whether the snapshot's row is visible, and two pairs of waits
+ * that no evidence satisfies, one started with the history and one started
+ * at the checkpoint, with the model:
  * after the first error reaches `onError`, after an asynchronous decision,
  * after the outcome, and after the later demand. It also checks that a
  * full-log Collection requests the full log, and that a client that gave up
@@ -913,6 +916,7 @@ function clientObservation(observation: RetryObservation): RetryObservation {
     status: observation.status,
     rowVisible: observation.rowVisible,
     waits: observation.waits,
+    lateWaits: observation.lateWaits,
     health: observation.health,
     demands: observation.demands.map((settlement) =>
       settlement.startsWith(`rejected`) ? `rejected:any` : settlement,
@@ -970,17 +974,9 @@ async function runClientRetryCell(
         : originalSync,
   })
   const model: RetryModel = createRetryModel(false)
-  // An `awaitTxId` and an `awaitMatch` that no evidence satisfies.
-  let waitsRejected = 0
-  for (const wait of [
-    collection.utils.awaitTxId(2_000_000_000, 2_000_000_000),
-    collection.utils.awaitMatch(() => false, 2_000_000_000),
-  ]) {
-    void wait.then(
-      () => undefined,
-      () => waitsRejected++,
-    )
-  }
+  // Waits that no evidence satisfies: one pair started with the history,
+  // and one started at each checkpoint, after its step.
+  const waits = startUnmetWaits(collection.utils)
   const settlements: Array<`pending` | `fulfilled` | `rejected:any`> = []
   const track = (result: unknown) => {
     const slot = settlements.push(`pending`) - 1
@@ -1004,17 +1000,15 @@ async function runClientRetryCell(
   const check = async (label: string) => {
     await turn()
     await turn()
+    const lateWaits = startUnmetWaits(collection.utils)
+    await turn()
     expect(
       clientObservation({
         status: collection.status,
         demands: [...settlements],
         rowVisible: collection.has(1),
-        waits:
-          waitsRejected === 2
-            ? `rejected`
-            : waitsRejected === 0
-              ? `pending`
-              : (`one of two rejected` as never),
+        waits: waits(),
+        lateWaits: lateWaits(),
         health:
           collection.status === `ready`
             ? collection.health.error

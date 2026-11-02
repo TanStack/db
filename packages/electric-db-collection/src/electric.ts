@@ -966,7 +966,6 @@ class ElectricLifecycle<T extends Row<unknown>> {
   retire(epoch?: number): void {
     if (epoch !== undefined && !this.isActive(epoch)) return
     this.active = false
-    this.epoch++
     this.rejectWaits(new StreamAbortedError(this.collectionId))
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     for (const txid of this.evidence.seenTxids) this.retired.seenTxids.add(txid)
@@ -981,9 +980,13 @@ class ElectricLifecycle<T extends Row<unknown>> {
     this.resolveTxidWaiters()
   }
 
-  /** The run failed: its pending waits reject, as later unmet ones do. */
+  /**
+   * The run failed: its pending waits reject, as later unmet ones do. An
+   * abort that stops the run can retire it first; the failure still counts
+   * until the next run starts.
+   */
   fail(epoch: number, error: unknown): void {
-    if (!this.isActive(epoch)) return
+    if (epoch !== this.epoch) return
     this.failure ??= { error }
     this.rejectWaits(error)
   }
@@ -1726,9 +1729,7 @@ function createElectricSync<T extends Row<unknown>>(
     const reportsHealth = () => ready && !gaveUp && isActiveLifecycle()
     const reportRetry = (cause: unknown) => {
       if (!reportsHealth() || abortController.signal.aborted) return
-      if (++failedAttempts < 5) return
-      outageFailure ??= cause
-      params.reportError(outageFailure)
+      if (++failedAttempts === 5) params.reportError((outageFailure ??= cause))
     }
     const endOutage = () => {
       const recovered = outageFailure
@@ -1991,6 +1992,9 @@ function createElectricSync<T extends Row<unknown>>(
       abortController.abort()
       if (active) {
         const error = new StreamAbortedError(collectionId)
+        // The waits end with the stream, also while READY-9 defers the
+        // Collection's failure.
+        lifecycle.fail(lifecycleEpoch, error)
         if (ready) giveUp(error)
         else failInitialSync(error)
       }
