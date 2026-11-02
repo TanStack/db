@@ -3096,8 +3096,8 @@ describe(`Ordered source request authority`, () => {
   // evicting a row past its boundary, including the boundary's tie, owes none.
   // A tie with the boundary row makes the boundary row and its tie differ
   // only by key. Each
-  // grammar runs 400 histories so held answers and ties stay above their
-  // minimum.
+  // grammar runs 600 histories so held answers and ties stay well above
+  // their minimum.
   // A Collection window move in the same turn as the ordering write must
   // wait for the replacement before it reports success.
   // Held replacement answers and offsets add timing and source-prefix cuts;
@@ -3120,13 +3120,15 @@ describe(`Ordered source request authority`, () => {
         { weight: 2, arbitrary: fc.constant(true) },
         { weight: 1, arbitrary: fc.constant(false) },
       ),
-      unloadChange: fc.constantFrom(
-        `move` as const,
-        `delete` as const,
-        `delete-boundary` as const,
-        `delete-tie` as const,
-        `evict` as const,
-        `evict-tie` as const,
+      // The boundary-row delete also needs a tie to reach its tie state, so
+      // it is drawn twice as often as each other unload.
+      unloadChange: fc.oneof(
+        { weight: 1, arbitrary: fc.constant(`move` as const) },
+        { weight: 1, arbitrary: fc.constant(`delete` as const) },
+        { weight: 2, arbitrary: fc.constant(`delete-boundary` as const) },
+        { weight: 1, arbitrary: fc.constant(`delete-tie` as const) },
+        { weight: 1, arbitrary: fc.constant(`evict` as const) },
+        { weight: 1, arbitrary: fc.constant(`evict-tie` as const) },
       ),
       // Ties need the deterministic prefix of the other kinds, so they are
       // drawn more often than no tie.
@@ -3215,8 +3217,8 @@ describe(`Ordered source request authority`, () => {
           )
         }),
         campaign === `fixed`
-          ? { seed: 20261029, numRuns: oracleRuns(400) }
-          : oraclePropertyOptions(400, retirementReceiverProperty),
+          ? { seed: 20261029, numRuns: oracleRuns(600) }
+          : oraclePropertyOptions(600, retirementReceiverProperty),
       )
       reach.assertReached()
       process.stderr.write(
