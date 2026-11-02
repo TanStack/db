@@ -533,3 +533,12 @@ The mutable summary now covers `adf6a07f9`, reports 100% docstring coverage
 and no blocking issue, and notes that it skipped the coverage map as similar
 to earlier changes. Final publication-head CI remains pending. This wording
 follow-up adds no unreviewed executable change.
+
+## Subsequent instrument improvements
+
+The maintainer requested permanent calibration, controlled recovery schedules,
+reusable SQL fixture conformance and a coverage-chain audit after this closeout.
+[The instrument calibration record](2026-11-02-p6-instrument-calibration.md)
+records that follow-up against this report's publication head `ef5c66ed2`.
+Earlier test results and review coverage above remain tied to their recorded
+revisions; they do not establish CI or third-party review for the additions.

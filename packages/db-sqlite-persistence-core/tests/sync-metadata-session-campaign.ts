@@ -14,6 +14,7 @@ import {
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import { requireExecutedHistory } from './sync-metadata-campaign-result'
 import type {
   SessionAction,
   SessionLane,
@@ -86,8 +87,7 @@ export async function runSeedReinsertReloadCampaign({
       : oraclePropertyOptions(40, property),
   )
   recordOracleReplay(property, result)
-  if (result.numRuns === 0)
-    throw new Error(`oracle replay executed no history: ${property}`)
+  requireExecutedHistory(property, result)
   console.info(
     `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, shrinks: result.numShrinks, completedBranchGuards: campaign === `fixed` ? `enforced` : `measured`, counts: Object.fromEntries([...reach.counts(), ...completedReach.counts()]) })}`,
   )
@@ -183,8 +183,7 @@ export async function runKeptMetadataDurabilityCampaign({
       : oraclePropertyOptions(8, property),
   )
   recordOracleReplay(property, result)
-  if (result.numRuns === 0)
-    throw new Error(`oracle replay executed no history: ${property}`)
+  requireExecutedHistory(property, result)
   console.info(
     `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
   )

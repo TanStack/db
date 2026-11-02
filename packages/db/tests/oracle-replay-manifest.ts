@@ -736,6 +736,11 @@ const ownerGroups: ReadonlyArray<
     `sync-metadata-session`,
     `sqlite-seed-reinsert-reload sqlite-kept-metadata-durability`,
   ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-recovery.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-recovery-schedules`,
+  ],
 ]
 
 const owners = new Map<string, string>()

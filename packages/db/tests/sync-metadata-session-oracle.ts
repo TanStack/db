@@ -98,9 +98,12 @@ import { declareOracle } from './oracle-declaration.js'
  * only after their hydration task completes a storage read and application.
  * It completes each source commit's correlated notice and
  * recovery before the next authored action, then compares the same model's
- * D15 storage observation. Arbitrary response/application interleavings,
- * recovery during cleanup, and the necessity of gap detection are outside
- * this bounded schedule.
+ * D15 storage observation. The companion `sync-metadata-recovery-oracle.ts`
+ * uses this same model and source comparison for held response, storage-read
+ * and captured-row application cuts, crossed with seeds, peer writes and
+ * cleanup. Arbitrary overlapping recoveries, cache claim expiry, persisted
+ * cache generation rotation and the necessity of gap detection remain outside
+ * these bounded schedules.
  */
 
 // ---------------------------------------------------------------------------
@@ -1421,19 +1424,7 @@ export class SessionModel {
       this.reset(rewrites)
       return
     }
-    // The peer's write reaches storage before its notice.
-    const previous = this.storage.get(key) ?? {
-      row: absent,
-      metadata: absent,
-    }
-    this.storage.set(
-      key,
-      notice === `metadata`
-        ? { row: previous.row, metadata }
-        : notice === `delete`
-          ? { row: absent, metadata: absent }
-          : { row, metadata },
-    )
+    this.stagePeerWrite(key, notice, value, rowValue)
     // After a reset, a notice in the reset's term may predate it, so this
     // tab reloads storage instead (the reset fence); the peer keeps one term.
     if (notice !== `reload` && !this.fenced) {
@@ -1453,6 +1444,34 @@ export class SessionModel {
       return
     }
     this.observeUnknownStorage()
+  }
+
+  /**
+   * Model projection of a peer's durable write before its notice is delivered.
+   * Separating these events permits a recovery read between them. The usual
+   * peer action above still performs both in one authored step.
+   */
+  stagePeerWrite(
+    key: SessionRowKey,
+    notice: Exclude<PeerNotice, `reset`>,
+    value: unknown,
+    rowValue: unknown = value,
+  ): void {
+    const row: ModelValue = { present: true, value: { id: key, v: rowValue } }
+    const metadata: ModelValue = { present: true, value: { peer: value } }
+    // The peer's write reaches storage before its notice.
+    const previous = this.storage.get(key) ?? {
+      row: absent,
+      metadata: absent,
+    }
+    this.storage.set(
+      key,
+      notice === `metadata`
+        ? { row: previous.row, metadata }
+        : notice === `delete`
+          ? { row: absent, metadata: absent }
+          : { row, metadata },
+    )
   }
 
   /**
@@ -2570,7 +2589,7 @@ type DriverCall = (driver: SessionDriver) => void | Promise<void>
  * Advances the model by one legal action and returns the matching driver
  * call. The model decides once; the call can be replayed on several drivers.
  */
-function planAction(
+export function planAction(
   model: SessionModel,
   action: SessionAction,
   value: unknown,
@@ -2793,9 +2812,9 @@ function canonical(value: unknown): string {
   )
 }
 
-function compareSource(
+export function compareSource(
   step: number,
-  action: SessionAction,
+  action: SessionAction | `settle`,
   expected: SessionObservation,
   actual: SessionObservation,
 ): SessionMismatch | undefined {

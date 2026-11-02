@@ -8,10 +8,11 @@ import type { SQLiteDriver } from '../src'
  * cannot observe it before commit or become part of its rollback.
  * Nested scopes use savepoints. Root calls in the transaction's async context
  * reenter its scope, rather than queue behind the callback that awaits them.
+ * A detached callback loses that privilege when its owning transaction ends.
  */
 export function createMetadataSQLiteDriver(database: DatabaseSync) {
   let queue: Promise<unknown> = Promise.resolve()
-  const context = new AsyncLocalStorage<boolean>()
+  const context = new AsyncLocalStorage<{ active: boolean }>()
   let nextSavepoint = 0
   const enqueue = <T>(work: () => Promise<T>): Promise<T> => {
     const next = queue.then(work)
@@ -42,28 +43,33 @@ export function createMetadataSQLiteDriver(database: DatabaseSync) {
     },
   }
   const transaction: SQLiteDriver[`transaction`] = (work) =>
-    context.getStore()
+    context.getStore()?.active
       ? scoped.transaction(work)
       : enqueue(async () => {
           database.exec(`BEGIN IMMEDIATE`)
+          const scope = { active: true }
           try {
-            const result = await context.run(true, () => work(scoped))
+            const result = await context.run(scope, () => work(scoped))
             database.exec(`COMMIT`)
             return result
           } catch (error) {
             database.exec(`ROLLBACK`)
             throw error
+          } finally {
+            scope.active = false
           }
         })
   const driver: SQLiteDriver = {
     exec: (sql) =>
-      context.getStore() ? scoped.exec(sql) : enqueue(() => scoped.exec(sql)),
+      context.getStore()?.active
+        ? scoped.exec(sql)
+        : enqueue(() => scoped.exec(sql)),
     query: <T>(sql: string, params?: ReadonlyArray<unknown>) =>
-      context.getStore()
+      context.getStore()?.active
         ? scoped.query<T>(sql, params)
         : enqueue(() => scoped.query<T>(sql, params)),
     run: (sql, params) =>
-      context.getStore()
+      context.getStore()?.active
         ? scoped.run(sql, params)
         : enqueue(() => scoped.run(sql, params)),
     transaction,
