@@ -44,9 +44,10 @@ reviewed change.
 ## Suggested order
 
 1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode, done), and Convex (eager mode, done). Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
-2. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN.
-3. **The mutations family.** It applies to every adapter except the storage hosts.
-4. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
+2. **Retire duplicated adapter tests (separate PR, maintainer decision 2026-11-02).** For each adapter on the eager family, classify its existing eager-mode tests and oracles against what the shared oracle generates and observes: remove a test only when the shared family checks the same law, history, path, and observation; narrow one it covers in part; keep the rest. Known overlap: TrailBase's lifecycle oracle and the shared family both own eager startup failure and stream-end health.
+3. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN. Publishing the package for drivers outside this repository (a public package, `@tanstack/db` as a peer dependency, an exported reach counter) is deferred (maintainer decision 2026-11-02).
+4. **The mutations family.** It applies to every adapter except the storage hosts.
+5. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
 
 ## Migration log
 
