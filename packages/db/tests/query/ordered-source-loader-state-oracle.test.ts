@@ -421,7 +421,17 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
   },
 )
 
-const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
+// Only an on-demand source answers a release with an adapter unload. A
+// synchronous repair answer reads an eager source, whose subset loads and
+// releases bypass the adapter (CollectionSyncManager.unloadSubset), so no
+// release callback can deliver that source's ordering invalidation.
+function legalReleaseInvalidation(testCase: AuthorityCase): AuthorityCase {
+  return testCase.syncRepair
+    ? { ...testCase, releaseInvalidates: false }
+    : testCase
+}
+
+const authorityCaseFields = fc.record({
   indexed: fc.boolean(),
   limit: fc.constantFrom(1 as const, 2 as const),
   settledFirst: fc.boolean(),
@@ -451,9 +461,16 @@ const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
     { weight: 5, arbitrary: fc.constant(false) },
     { weight: 1, arbitrary: fc.constant(true) },
   ),
-  releaseInvalidates: fc.boolean(),
+  // Rarer than not, like the other release reactions: an invalidating release
+  // leaves the quiet report laws, so an even split would halve their reach.
+  releaseInvalidates: fc.oneof(
+    { weight: 5, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
   history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
 })
+const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> =
+  authorityCaseFields.map(legalReleaseInvalidation)
 
 type AuthorityObservation = {
   supersededFailures: number
@@ -543,7 +560,9 @@ type RetirementReceiverCase = {
   indexed: boolean
   limit: 1 | 2
   synchronous: boolean
-  kind: `collection` | `effect`
+  // `collection-window` moves the live-query Collection's window in the same
+  // turn as the ordering write, so the move's operation spans retirement.
+  kind: `collection` | `collection-window` | `effect`
   offset: 0 | 1
   holdReplacement: boolean
 }
@@ -552,7 +571,10 @@ type RetirementReceiverCase = {
 // The provider keeps the next row uninstalled, then unload moves the repaired
 // prefix behind it. No later external graph input is supplied. A held answer
 // separates request entry from provider application: reads/callbacks must keep
-// the prior complete snapshot until the newer repair completes.
+// the prior complete snapshot until the newer repair completes. A window move
+// cannot report success until its chosen window is visible (ARCHITECTURE.md,
+// Atomic window publication), so it stays pending behind a held replacement
+// and settles with the moved window installed.
 async function checkRetirementReceiver(
   scenario: RetirementReceiverCase,
   reached: (cut: `release` | `held-answer`) => void,
@@ -659,9 +681,14 @@ async function checkRetirementReceiver(
       .limit(scenario.limit)
       .select(({ row }) => ({ id: row.id, rank: row.rank }))
   const live =
-    scenario.kind === `collection`
-      ? createLiveQueryCollection({ query })
-      : undefined
+    scenario.kind === `effect`
+      ? undefined
+      : createLiveQueryCollection({ query })
+  const windowOffset =
+    scenario.kind === `collection-window`
+      ? 1 - scenario.offset
+      : scenario.offset
+  let move: { at: number; rows: Array<Row> } | `pending` | undefined
   const visible = () => {
     const rows = (live ? live.toArray : [...effectRows.values()]).map(
       ({ id, rank }) => ({ id, rank }),
@@ -687,15 +714,20 @@ async function checkRetirementReceiver(
           },
         })
       : undefined
-  const expected = () =>
+  const expected = (offset = windowOffset) =>
     [...truth.values()]
       .sort((left, right) => left.rank - right.rank)
-      .slice(scenario.offset, scenario.offset + scenario.limit)
+      .slice(offset, offset + scenario.limit)
       .map((row) => ({ ...row }))
+  const settleMove = () => {
+    move = { at: ++clock, rows: visible() }
+  }
   try {
     if (live) await live.preload()
     await flushPromises()
-    expect(visible(), `initial complete window`).toEqual(expected())
+    expect(visible(), `initial complete window`).toEqual(
+      expected(scenario.offset),
+    )
     const prior = visible()
     armed = true
     const moved = { id: 1, rank: 10 }
@@ -703,7 +735,22 @@ async function checkRetirementReceiver(
     installed.set(1, moved)
     sync.begin()
     sync.write({ type: `update`, value: moved })
-    await sync.commit()
+    const committed = sync.commit()
+    if (live && scenario.kind === `collection-window`) {
+      const settled = live.utils.setWindow({
+        offset: windowOffset,
+        limit: scenario.limit,
+      })
+      if (settled === true) settleMove()
+      else {
+        move = `pending`
+        void settled.then(settleMove, (error: unknown) => {
+          move = { at: ++clock, rows: [] }
+          throw error
+        })
+      }
+    }
+    await committed
     await flushPromises()
     expect(
       invalidation,
@@ -722,6 +769,11 @@ async function checkRetirementReceiver(
         publications,
         `held replacement publishes no partial window`,
       ).toEqual([])
+      if (move !== undefined) {
+        expect(move, `held replacement keeps the window move pending`).toBe(
+          `pending`,
+        )
+      }
       reached(`held-answer`)
       replacement.resolve()
       await flushPromises()
@@ -735,6 +787,12 @@ async function checkRetirementReceiver(
       publications.map(({ rows }) => rows),
       `one complete replacement publication`,
     ).toEqual([expected()])
+    if (move !== undefined) {
+      expect(
+        move,
+        `the window move settles with its chosen window visible`,
+      ).toEqual({ at: expect.any(Number), rows: expected() })
+    }
     expect(effect?.disposed ?? false, `Effect remains active`).toBe(false)
   } finally {
     armed = false
@@ -749,7 +807,11 @@ async function checkRetirementReceiver(
 async function checkAuthorityCase(
   testCase: AuthorityCase,
   reached?: (
-    state: `release-invalidation` | `deferred-refill` | `reset-continuation`,
+    state:
+      | `release-invalidation`
+      | `completed-repair-release`
+      | `deferred-refill`
+      | `reset-continuation`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -809,6 +871,9 @@ async function checkAuthorityCase(
   let throwNextStart = false
   let startThrewDuringRetry = false
   let settlingFailure = false
+  // A successful repair-chain answer is settling: retirement of the
+  // acquisitions that chain replaces runs inside this window.
+  let answeringRepair = false
   let startThrowsDuringFailure = 0
   let costChecks = 0
   // The start-throw branch sets the flag, so read it through a call.
@@ -1025,12 +1090,18 @@ async function checkAuthorityCase(
         releaseInvalidations++
         reached?.(`release-invalidation`)
         repairOwed = true
+        // The unload's writes are new graph input: a live-query Collection or
+        // Effect graph loop runs its loaders again before it publishes.
+        revision++
         loader.invalidateSourceOrdering()
         // Complete full-source coverage absorbs ordering invalidation
         // (ARCHITECTURE, authoritative work/debt coherence). Adapter live
         // updates keep that source complete, so it owes no replacement read.
         if (!coveredBySource) {
           retirementInvalidation = { at: ++clock, epoch: epochMoves, truncates }
+          if (answeringRepair && !explicitRetrying) {
+            reached?.(`completed-repair-release`)
+          }
         }
       }
       if (testCase.releaseDisposes && !disposed) {
@@ -1315,8 +1386,10 @@ async function checkAuthorityCase(
       request.deferred.reject(request.error)
     }
     settlingFailure = !ok
+    answeringRepair = ok && chainMember
     await flush()
     settlingFailure = false
+    answeringRepair = false
     // A failed request's participant reports that request's own error; a
     // read the loader starts while handling it cannot replace it.
     if (!ok && participantOf.has(request)) {
@@ -1455,10 +1528,12 @@ async function checkAuthorityCase(
         continue
       }
       const before = ledger.length
+      const inputBefore = revision
       run(() => loader.loadMore())
       await flush()
       if (
         ledger.length === before &&
+        revision === inputBefore &&
         inflight().length === 0 &&
         !truncatePending
       )
@@ -2739,6 +2814,12 @@ describe(`Ordered source request authority`, () => {
   // answers, and release-triggered truncation vary independently. Without
   // joined deferral there is no held continuation; without the release truncate
   // there is no replay bookkeeping to distinguish from a graph pass.
+  // `deferred-refill` needs a synchronous answer and a release-triggered
+  // truncate together: 6 of the 96 inputs. An eager source never reaches its
+  // adapter on release, so production cannot pair them; the lane calibrates
+  // the driver's continuation provenance rather than a reachable product state.
+  // Random draws run twice the fixed count so that rare state stays above its
+  // minimum (expected 25 of 400).
   const handoffProperty = `ordered-loader.replay-continuation`
   const handoffCase = fc
     .record({
@@ -2788,12 +2869,13 @@ describe(`Ordered source request authority`, () => {
         fc.asyncProperty(handoffCase, async (testCase) => {
           reach.beginHistory()
           await checkAuthorityCase(testCase, (state) => {
-            if (state !== `release-invalidation`) reach.reach(state)
+            if (state === `deferred-refill` || state === `reset-continuation`)
+              reach.reach(state)
           })
         }),
         campaign === `fixed`
           ? { seed: 20261029, numRuns: oracleRuns(200) }
-          : oraclePropertyOptions(200, handoffProperty),
+          : oraclePropertyOptions(400, handoffProperty),
       )
       reach.assertReached()
       process.stderr.write(
@@ -2808,14 +2890,17 @@ describe(`Ordered source request authority`, () => {
   // disposal retain their separately checked obligations.
   // An explicit invalidation in a release callback is new source information,
   // unlike a replaced lease's own eviction deletes. It moves the ordering
-  // epoch while retirement still owns the repair slot. Both synchronous and
-  // asynchronous chains, indexed ties and unindexed growth must preserve it.
+  // epoch while retirement still owns the repair slot. Indexed ties and
+  // unindexed growth must preserve it. Only an on-demand source's release
+  // reaches an adapter unload, so these chains answer asynchronously: the
+  // synchronous answer of an eager source cannot meet this callback. Up to
+  // four settled answers first let the repair chain complete, so the release
+  // usually retires that chain; `completed-repair-release` measures it.
   const retirementProperty = `ordered-loader.retirement-invalidation`
   const retirementCase = fc
     .record({
       indexed: fc.boolean(),
       limit: fc.constantFrom(1 as const, 2 as const),
-      syncRepair: fc.boolean(),
       joined: fc.boolean(),
       needsMore: fc.boolean(),
       releaseFault: fc.boolean(),
@@ -2825,14 +2910,22 @@ describe(`Ordered source request authority`, () => {
       retryTimer: fc.boolean(),
       offset: fc.constantFrom(0 as const, 1 as const),
       requiresFullSource: fc.boolean(),
+      settles: fc.integer({ min: 0, max: 4 }),
       suffix: fc.array(authorityCommand, { maxLength: 12 }),
     })
-    .map(({ suffix, ...axes }): AuthorityCase => ({
+    .map(({ settles, suffix, ...axes }): AuthorityCase => ({
       ...ordinaryScenario,
       ...axes,
       settledFirst: true,
+      syncRepair: false,
       releaseInvalidates: true,
-      history: [{ type: `invalidate`, react: true }, ...suffix],
+      history: [
+        { type: `invalidate`, react: true },
+        ...Array.from({ length: settles }, () => ({
+          type: `settleNewest` as const,
+        })),
+        ...suffix,
+      ],
     }))
   const retirementCampaigns =
     authorityReplay.replayPath === undefined
@@ -2845,14 +2938,18 @@ describe(`Ordered source request authority`, () => {
     async (campaign) => {
       const reach = createOracleReach(
         retirementProperty,
-        [`release-invalidation`] as const,
+        [`release-invalidation`, `completed-repair-release`] as const,
         { minimum: 20 },
       )
       await fc.assert(
         fc.asyncProperty(retirementCase, async (testCase) => {
           reach.beginHistory()
           await checkAuthorityCase(testCase, (state) => {
-            if (state === `release-invalidation`) reach.reach(state)
+            if (
+              state === `release-invalidation` ||
+              state === `completed-repair-release`
+            )
+              reach.reach(state)
           })
         }),
         campaign === `fixed`
@@ -2868,6 +2965,8 @@ describe(`Ordered source request authority`, () => {
 
   // Real Collection and Effect consumers share the same provider grammar,
   // full-sort model, event-ordered progress relation, and publication check.
+  // A Collection window move in the same turn as the ordering write must
+  // wait for the replacement before it reports success.
   // Held replacement answers and offsets add timing and source-prefix cuts;
   // every completed history must reach its consumer's adapter callback.
   // Separate held-answer reach for each consumer requires generated histories
@@ -2876,7 +2975,11 @@ describe(`Ordered source request authority`, () => {
     indexed: fc.boolean(),
     limit: fc.constantFrom(1 as const, 2 as const),
     synchronous: fc.boolean(),
-    kind: fc.constantFrom(`collection` as const, `effect` as const),
+    kind: fc.constantFrom(
+      `collection` as const,
+      `collection-window` as const,
+      `effect` as const,
+    ),
     offset: fc.constantFrom(0 as const, 1 as const),
     holdReplacement: fc.boolean(),
   })
@@ -2896,8 +2999,10 @@ describe(`Ordered source request authority`, () => {
         retirementReceiverProperty,
         [
           `collection-release`,
+          `collection-window-release`,
           `effect-release`,
           `collection-held-answer`,
+          `collection-window-held-answer`,
           `effect-held-answer`,
         ] as const,
         { minimum: 20 },
@@ -2923,7 +3028,7 @@ describe(`Ordered source request authority`, () => {
   // Fixed replays force a held answer in each real consumer. They use the
   // same model and comparison as the generated receiving campaign, and keep
   // hostile-mutant failure independent for the two publication paths.
-  it.each([`collection`, `effect`] as const)(
+  it.each([`collection`, `collection-window`, `effect`] as const)(
     `receives retirement invalidation in a held %s replay`,
     async (kind) => {
       await checkRetirementReceiver(
