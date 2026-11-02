@@ -168,3 +168,104 @@ validation policy is claimed. There is no known in-scope counterexample.
 The tested production head is `46058c58c36d26d8dcdc921f5d70b008a4d5fe65`.
 Its `packages/db/src` tree is `476f38cff16ffc97a67ce103f7d73789fe4e1ef1`.
 The subsequent evidence/changeset commit changes no production source or oracle.
+
+## Size and review follow-up (2026-11-02)
+
+This entry supersedes the earlier size result. Reviewed and tested head:
+`e7957c56a6b80b314fdbdcfded6f308284e81c4d`.
+Its `packages/db/src` tree is `400ef43d38f69b6347fa32bb3526c30be32373b6`.
+The admission companion blob is `1d85c87b2e0266b7b5b68ddb35dfccb0f9d192f1`.
+
+### Law, experiment and inference
+
+The existing builder and window contracts remain fixed. Negative limits still
+throw synchronously before mutation; valid neighbors and existing guard
+precedence remain unchanged. The builder and window utility JSDoc additionally
+promise RangeError. The shared admission comparison previously checked only
+whether the operation threw, discarding the recorded error value.
+
+The oracle comparison was strengthened before the production refactor. It now
+checks the complete discriminated outcome and requires RangeError on rejection.
+Unchanged production passed all 24 admission campaigns. Replacing RangeError
+with Error, and separately throwing undefined, each failed all 12 negative
+campaigns at the intended error-class comparison. Neither failed during setup,
+crashed, timed out or survived. Both mutations were restored. This is a checker
+repair: the original production class was already correct, so its baseline is
+GREEN rather than a claimed production RED.
+
+The same six receivers, grammar, budgets, sign model and observation cuts
+remain. Each campaign reaches admission in 21 histories; the five window
+receivers also reach next use in 21; each pending receiver reaches its held
+premise in 21. No assertion, input dimension, path or run budget was removed.
+The original oracle-first RED and eight earlier mutant results remain recorded
+above. ORC-001 through ORC-016 retain their earlier accounting; the new class
+comparison supplies additional ORC-005/006 enforcement without changing the
+independent model, history grammar or scope.
+
+### Production reductions
+
+All reductions preserve existing behavior for constructed immutable queries:
+
+- Merge query clauses once in the private clone helper, replacing 16 repeated
+  spreads. Explicit undefined still clears regular or functional selection.
+- Delete the single-source wrapper's duplicate cardinality check. Its surviving
+  validator already requires exactly one key for both FROM and JOIN before
+  reading source values, then creates exactly one reference or throws.
+- Remove the dead saved active window operation. The existing reentrancy guard
+  rejects an active operation; the synchronous operation still clears in finally.
+- Share WHERE/HAVING reference conversion and expression validation. Conversion
+  remains conditional, so invalid primitive callback results remain rejected.
+- Inline the one remaining type-description use, retaining null's special name
+  and deleting branches that duplicated typeof's result.
+
+The removed private wrapper's stale mangle entry was deleted. Other mangle
+assignments, lifecycle guards, errors and recovery paths remain unchanged.
+Injected mutable accessors through internal query IR or the internal owned
+constructor path are outside the query-construction equivalence claim.
+
+### Validation and shipped weight
+
+From `packages/db`:
+
+```sh
+TANSTACK_DB_ORACLE_STATISTICS=1 pnpm exec vitest run tests/query/builder tests/query/pagination-oracle.property.test.ts tests/query/pagination.test.ts tests/query/live-query-collection.test.ts tests/live-query-window-controller.test.ts tests/production-error-messages-oracle.test.ts tests/query/aggregate-select-oracle.property.test.ts tests/query/ir-stable-identity-oracle.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+All 754 tests in 20 files pass, with no type errors. Test TypeScript compilation,
+changed-file lint, the private-mangle check, formatting and diff checks pass.
+The consumer error check verifies 264 literals, including 22 shared literals,
+are erased in production and retained in development for ESM and CommonJS.
+
+The exact-baseline command in the earlier size section reports:
+
+| Bundle | Gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| Typical app | -6 bytes (96,323 to 96,317) | -209 bytes |
+| Full db exports | -21 bytes | +27 bytes |
+
+All eight app scenarios shrink in gzip. Brotli varies by scenario; Effect,
+includes, join and local-storage scenarios still grow. This claims a net
+reduction for the typical app in both compression formats, not every bundle.
+The builder contributes 352 fewer minified bytes; the validator adds 59 and
+the live builder adds 7, for 286 fewer minified app bytes overall. Names,
+comments and formatting were not shortened to obtain these results.
+
+### Review evaluation and loss audit
+
+The comprehensive review and two delegated oracle reviewers found one item:
+R1, the missing runtime error-class comparison. It is confirmed and fixed.
+The simplifier's S1 clone merge, S2 dead-operation save, S3 redundant source
+wrapper and S4 shared condition validation were evaluated separately and applied.
+S5, the redundant type-description helper, was found during implementation and
+independently reviewed. Each item remains separately recorded in the local
+append-only ledger; no finding or optional alternative was dropped.
+
+The final production and comparison changes received another source review;
+both delegated reviewers used oracle-review. No new findings remained. Their
+inspection does not substitute for the executed results above. Hire
+recommendation: yes; the reviewers identified a precise enforcement gap and
+justified the simplifications while leaving byte savings to measurement.
+
+No known in-scope counterexample remains. The earlier provider, framework,
+raw-IR and numeric-policy limits remain. Local validation is complete; whole-PR
+readiness still requires creating the new follow-up PR and checking its CI.
