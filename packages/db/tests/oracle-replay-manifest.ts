@@ -352,7 +352,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
     `ordered-loader`,
-    `request-authority unproven-report`,
+    `request-authority unproven-report replay-continuation retirement-invalidation retirement-receiver`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
