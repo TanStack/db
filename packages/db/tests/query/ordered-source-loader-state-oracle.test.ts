@@ -516,7 +516,7 @@ async function checkAuthorityCase(
     // A synchronous repair answer reads installed rows: an eager source.
     ...(testCase.syncRepair ? { sourceHoldsAllRows: true } : {}),
     requiresFullSource: testCase.requiresFullSource,
-    ...(testCase.joined ? { joinedFilterSourceId: `markers` } : {}),
+    ...(testCase.joined ? { joinedFilterSourceIds: [`markers`] } : {}),
     // A window that needs more always needs one row, as behind a joined
     // filter that drops rows. Otherwise it needs the window's rows that do
     // not sort at or before the loaded boundary.

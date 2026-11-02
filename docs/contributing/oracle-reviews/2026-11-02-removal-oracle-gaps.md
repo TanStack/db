@@ -227,7 +227,7 @@ instrument defect. Product REDs remain open with the owners below.
 | ORC-004 | Domains, reconstruction, axis ablations and excluded adjacent inputs are recorded above. |
 | ORC-005 | Real six-framework bindings and three D2 paths execute native/drained comparisons. Query-callback input receipt is checked; no concrete missing-input hypothesis remains for shape. |
 | ORC-006 | Previous projection, end-relative slice and offset-first clamp are rejected. Unchanged-production REDs fail intended assertions. |
-| ORC-007 | Fixed/unseeded parity, budgets, manifest routes and guarded original/reduced replays are recorded. No commands arbitrary is used. Failing campaigns remain incomplete. |
+| ORC-007 | Fixed/unseeded parity, budgets, manifest routes and guarded original/reduced replays are recorded. The property does not use `fc.commands`. Failing campaigns remain incomplete. |
 | ORC-008 | Shape is stateless recomputation. Top-K retains support and window: a source edit distinguishes equal current outputs with different support, and a partial move distinguishes different stored bounds. No new production-shaped state machine. |
 | ORC-009 | `single` denotes public findOne projection; window/rank/support retain owner meanings; native/settled cuts map to each driver above. |
 | ORC-010 | Shared fidelity plus accumulated causes preserve primary mismatch, reductions, interruptions and cleanup diagnostics. Exact shrink replays retain the law/checkpoint. |
@@ -648,3 +648,89 @@ replacements; the 66 registration cells remain identical after formatting.
 Direct workspace binaries supplied these checks because pnpm's version bootstrap
 hit the configured npm proxy allowlist. No dependency override or local install
 workaround enters this merge.
+
+
+## Second main integration — a3c4d0676
+
+The next main commit merged callback metadata, loading-sibling replay retention,
+and Solid query-input tracking. The coverage-map resolution retains both
+appendices. Solid prepares authored inputs while tracked, then starts supplied
+Collections or resolves adapter-owned windows inside `untrack`. A supplied
+Collection clears `previousCollection` after startup. The retained window owner
+and borrowed `findOne` row projection remain. Two independent source reviews
+found no supported-contract integration regression.
+
+The combined core selection passes13,715 tests, including new callback-metadata,
+ordered-work, pagination, replay-refinement and deferred-acquisition owners.
+Full Solid passes358 tests. React conformance/window-render passes301, Preact160,
+Vue131 and Angular86. All seven TypeScript package checks pass: core, IVM, React,
+Preact, Vue, Solid and Angular. The Preact command is
+`node node_modules/typescript/bin/tsc --noEmit --project packages/preact-db/tsconfig.json`;
+it includes source, tests and Vite configuration. These checks overlap prior
+campaigns and are not a unique aggregate.
+
+### Current size supersedes the earlier current-main table
+
+The exact baseline is now `a3c4d0676`, with the same production build, external
+dependencies and gzip9/Brotli11 settings. The new main changes compression
+interactions. The package total is no longer negative.
+
+| Package | Gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| db-ivm | -349 | -297 |
+| db | +335 | +276 |
+| react-db | -3 | -5 |
+| preact-db | +75 | +71 |
+| vue-db | -58 | -58 |
+| solid-db | +28 | +20 |
+| angular-db | 0 | +11 |
+| svelte-db | +42 | +31 |
+| All eight | **+70** | **+49** |
+| Typical tree-shaken React app | **-12** | **+145** |
+
+The seven-package command is
+`node scripts/size-compare.mjs --base a3c4d0676 --exact-base --packages db-ivm,db,react-db,preact-db,vue-db,solid-db,angular-db`.
+Other app scenarios range from-22 to+31 gzip bytes and-15 to+162 Brotli bytes.
+Svelte's independent same-toolchain comparison remains+42/+31. These figures
+replace the earlier claim of a one-byte aggregate gzip reduction.
+
+### Review5740133634 and previous-head CI
+
+This review covers `4d9929159`. Every raw follow-up and inline item remains
+separate in the lossless scratch ledger and raw review capture.
+
+1. The negative-width follow-up identifies `offset:5, limit:-2`, followed by
+   insertion at rank1. A same-source executable probe installs0/4/6/8/10 and
+   inserts2. Both maina3c4d0676 and the merged branch emit moveIn10/moveOut6,
+   with reported size0. The mechanism is real on both revisions. The accepted
+   absolute-rank oracle decision covers nonnegative widths and explicitly
+   excludes negative widths. Whether negative limits promise empty output
+   remains a maintainer law question, not a newly assumed oracle expectation.
+   Its proposed `end<=start` guard must also be checked against movement between
+   reversed and positive windows before any class-closure claim.
+2. The Preact typecheck omission is fixed by the successful command above.
+3. Inline4445182486 correctly flags unclear ORC-007 grammar. The record now
+   states exactly that the property does not use `fc.commands`; the suggested
+   phrase “arbitrary commands” would obscure the technical distinction.
+
+The reviewer identified a real adjacent mechanism and two useful evidence
+corrections. Its one-line negative-width repair does not establish authority or
+cover movement interactions, so the repair is not adopted without that decision.
+The bot's default docstring threshold changed to45.45% over44 functions in37files.
+CR-META-DOC-1's prior disposition remains: that default is not a repository rule,
+and this metric identifies no additional concrete missing contract prose.
+
+The previous-head db-1 job has one failed assertion among10,659 tests: the
+opt-in bundle inventory still listed `BaseQueryBuilder` after every adapter
+stopped importing it. The inventory removes that stale entry. Production exports
+and all operator-isolation bundle checks remain. Its isolated GREEN result is
+recorded below after execution. This is a mechanical test inventory correction.
+
+The isolated opt-in bundle suite passes19 tests after the inventory correction.
+Svelte conformance passes128. Vitest commands ran serially with at most two
+workers. Final changed-source ESLint and formatting pass. The resolved Solid
+source SHA-256 remains
+`862a1362a4997d2e2161be4a84b41ebf1104dd5369ee18931ff2a891b9142d49`.
+The sorted changed-package path/content snapshot relative to maina3c4d0676 is
+`3490f7ad553bdb4398576906a93d38723e665e3d0efed39e27c3336e1949e6d5` (NUL separates each path and content).
+No oracle model, history, comparison or run budget changed during this merge.

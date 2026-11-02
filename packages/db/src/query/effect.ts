@@ -717,8 +717,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.unsubscribeCallbacks.add(unsubscribe)
 
       if (
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) => info.joinedFilterSourceId === sourceId,
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.includes(sourceId),
         )
       ) {
         this.unsubscribeCallbacks.add(
@@ -764,8 +764,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           () => false,
           undefined,
           () =>
-            orderByInfo.joinedFilterSourceId !== undefined &&
-            this.hasPendingJoinedWork(orderByInfo.joinedFilterSourceId),
+            orderByInfo.joinedFilterSourceIds?.some((joinedSourceId) =>
+              this.hasPendingJoinedWork(joinedSourceId),
+            ) ?? false,
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
@@ -1143,10 +1144,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private hasPendingJoinedFilterWork(): boolean {
-    return Object.values(this.optimizableOrderByCollections).some(
-      (info) =>
-        info.joinedFilterSourceId !== undefined &&
-        this.hasPendingJoinedWork(info.joinedFilterSourceId),
+    return Object.values(this.optimizableOrderByCollections).some((info) =>
+      info.joinedFilterSourceIds?.some((sourceId) =>
+        this.hasPendingJoinedWork(sourceId),
+      ),
     )
   }
 

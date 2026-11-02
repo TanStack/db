@@ -5,6 +5,7 @@ import {
   createResource,
   createSignal,
   onCleanup,
+  untrack,
 } from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
 import {
@@ -13,6 +14,7 @@ import {
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  prepareLiveQueryValue,
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
@@ -260,18 +262,21 @@ export function useLiveQuery(
     }))
   const collection = createMemo(
     () => {
-      const innerCollection =
+      const value =
         configOrQueryOrCollection.length === 1
           ? configOrQueryOrCollection
           : configOrQueryOrCollection()
-
-      if (isCollection(innerCollection)) {
-        innerCollection.startSyncImmediate()
-        previousCollection = null
-        return innerCollection as Collection
-      }
-
-      return resolveNext(innerCollection)
+      // Query-input reads define binding dependencies. Compilation can drain
+      // source rows synchronously; those reads belong to the result instead.
+      const prepared = prepareLiveQueryValue(value, undefined)
+      return untrack(() => {
+        if (isCollection(prepared)) {
+          prepared.startSyncImmediate()
+          previousCollection = null
+          return prepared as Collection
+        }
+        return resolveNext(prepared)
+      })
     },
     undefined,
     { name: `TanstackDBCollectionMemo` },

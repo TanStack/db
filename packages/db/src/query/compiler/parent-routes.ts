@@ -11,13 +11,17 @@ export function crossJoinParentRoutes(
     row: unknown,
     correlationKey: unknown,
     parentContext: unknown,
+    callbackValue?: unknown,
   ) => [unknown, unknown],
 ): KeyedStream {
   // Recursive sources need their route before a correlation field is always
   // available. The constant key intentionally creates one copy of each input
   // row per active route; callers filter those copies once the field is visible.
   const rows: any = input.pipe(
-    map(([rowKey, row]) => [PARENT_ROUTE_CROSS_KEY, [rowKey, row]]),
+    map(([rowKey, row, callbackValue]: [unknown, unknown, unknown?]) => [
+      PARENT_ROUTE_CROSS_KEY,
+      [rowKey, row, callbackValue],
+    ]),
   )
   const routes: any = parentKeyStream.pipe(
     map(([correlationKey, parentContext]) => [
@@ -32,9 +36,9 @@ export function crossJoinParentRoutes(
       Boolean(rowSide != null && routeSide != null),
     ),
     map(([, [rowSide, routeSide]]: any) => {
-      const [rowKey, row] = rowSide
+      const [rowKey, row, callbackValue] = rowSide
       const [correlationKey, parentContext] = routeSide
-      return assemble(rowKey, row, correlationKey, parentContext)
+      return assemble(rowKey, row, correlationKey, parentContext, callbackValue)
     }),
   ) as KeyedStream
 }

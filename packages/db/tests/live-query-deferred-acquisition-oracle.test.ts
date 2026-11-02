@@ -41,18 +41,25 @@
  * Its admission releases that deferral. A failed sync start remains an error
  * in that run; releasing the old render handle does not implicitly retry it.
  *
- * Limits: source Collections load synchronously, so every checkpoint is
- * settled. The grammar crosses seven source states, two query shapes, and one or
+ * Limits: the broad grammar uses synchronous source loads and settled
+ * checkpoints. It crosses seven source states, two query shapes, and one or
  * two live-query levels, with one peer consumer and one truncate before the
- * first subscriber. It does not generate source failure, asynchronous loads,
- * or several live-query consumers; the subscription lifecycle oracle owns
- * those once acquisition has resumed. Pinned blocks cover pooled views,
+ * first subscriber. The separate sibling-resumption grammar below uses
+ * controlled asynchronous loads. The broad grammar does not generate source
+ * failure, asynchronous loads, or several live-query consumers. The
+ * subscription lifecycle oracle owns those once acquisition has resumed. Pinned blocks cover pooled views,
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { createCollection } from '../src'
+import {
+  BTreeIndex,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '../src'
+import { CollectionSubscription } from '../src/collection/subscription.js'
 import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
@@ -435,8 +442,13 @@ describe(`live-query deferred acquisition`, () => {
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
 declareOracle({
-  check: [runAcquisitionHistory, runPooledHistory],
-  model: [initialModel, applyModel, expectedReplacementRun],
+  check: [runAcquisitionHistory, runPooledHistory, runDeferredSiblingHistory],
+  model: [
+    initialModel,
+    applyModel,
+    expectedReplacementRun,
+    deferredSiblingRows,
+  ],
 })
 
 async function runPooledHistory(
@@ -746,4 +758,169 @@ describe(`render sync-start handoff error provenance`, () => {
       )
     })
   }
+})
+
+/**
+ * A first subscriber resumes source subscriptions in registration order. The
+ * first source load can synchronously deliver rows that create a lazy demand
+ * in another, still-deferred subscription to that same source. Law 15 keeps
+ * that demand detached until its own resumption; laws 9 and 10 require the
+ * completed query once every resumed load has applied. A sibling's publication
+ * and the initial-query waiter must not wait for one another in a cycle.
+ *
+ * This finite grammar crosses subscriber/preload, one/two rows, and literal or
+ * held Promise results for each acquisition, and both settlement orders.
+ * It uses the real self-join builder, without a supplied publication-control
+ * callback. Request instrumentation records the
+ * actual deferred-to-joined transition; it supplies no expected row values.
+ * The independent self-join law below retains each input row exactly once.
+ * No provider or framework scheduling promise follows from this core path.
+ */
+type DeferredSiblingHistory = {
+  reader: `subscribe` | `preload`
+  rowCount: 1 | 2
+  rootAsync: boolean
+  siblingAsync: boolean
+  newestFirst: boolean
+}
+const deferredSiblingHistories: Array<DeferredSiblingHistory> = (
+  [`subscribe`, `preload`] as const
+).flatMap((reader) =>
+  ([1, 2] as const).flatMap((rowCount) =>
+    [false, true].flatMap((rootAsync) =>
+      [false, true].flatMap((siblingAsync) =>
+        [false, true].map((newestFirst) => ({
+          reader,
+          rowCount,
+          rootAsync,
+          siblingAsync,
+          newestFirst,
+        })),
+      ),
+    ),
+  ),
+)
+function deferredSiblingRows(rows: ReadonlyArray<{ id: string }>) {
+  return rows.map(({ id }) => ({ id, peer: id }))
+}
+async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
+  const rows = Array.from({ length: history.rowCount }, (_, i) => ({
+    id: `row-${i}`,
+  }))
+  const gates: Array<() => void> = []
+  let loads = 0
+  let wrote = false
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    gcTime: 0,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            loads++
+            if (!wrote) {
+              wrote = true
+              begin()
+              for (const row of rows)
+                write({ type: `insert`, value: { ...row } })
+              commit()
+            }
+            if (!(loads === 1 ? history.rootAsync : history.siblingAsync))
+              return true
+            return new Promise<void>((resolve) => gates.push(resolve))
+          },
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ left: source })
+        .leftJoin({ right: source }, ({ left, right }) => eq(left.id, right.id))
+        .select(({ left, right }) => ({ id: left.id, peer: right.id })),
+    gcTime: 0,
+  })
+  const reach = createOracleReach(`deferred-sibling`, [
+    `deferred joined demand`,
+  ])
+  reach.beginHistory()
+  const original = CollectionSubscription.prototype.requestSnapshot
+  const spy = vi
+    .spyOn(CollectionSubscription.prototype, `requestSnapshot`)
+    .mockImplementation(function (this: CollectionSubscription, ...args) {
+      const deferred = this.isDeferringAcquisition()
+      const isPending = () => this.hasPendingTruncateReplacement
+      const before = isPending()
+      const result = original.apply(this, args)
+      if (deferred && !before && isPending())
+        reach.reach(`deferred joined demand`)
+      return result
+    })
+  let subscription: ReturnType<typeof query.subscribeChanges> | undefined
+  let preloadSettled = false
+  let preloadFailure: unknown
+  try {
+    query.startSyncImmediate()
+    await settle()
+    expect(loads, `deferred query starts no acquisition`).toBe(0)
+    if (history.reader === `subscribe`)
+      subscription = query.subscribeChanges(() => {})
+    else
+      void query.preload().then(
+        () => {
+          preloadSettled = true
+        },
+        (error: unknown) => {
+          preloadFailure = error
+        },
+      )
+    // The provider promises are semantic gates. Drain every issued gate,
+    // including any continuation produced by their settlement. No truncate,
+    // abort, window move or extra preload is allowed to repair this history.
+    await settle()
+    if (history.rootAsync || history.siblingAsync) {
+      expect(query.status, `held acquisition gates initial readiness`).toBe(
+        `loading`,
+      )
+      expect(preloadSettled).toBe(false)
+    }
+    for (let turn = 0; turn < 12; turn++) {
+      const resolve = history.newestFirst ? gates.pop() : gates.shift()
+      resolve?.()
+      await settle()
+    }
+    console.info(
+      `deferred-sibling reach`,
+      history,
+      Object.fromEntries(reach.counts()),
+    )
+    reach.assertReached()
+    expect(loads, `each source subscription acquires once`).toBe(2)
+    expect(query.status, `resumed sibling replay must finish`).toBe(`ready`)
+    if (history.reader === `preload`) {
+      expect(preloadFailure).toBeUndefined()
+      expect(preloadSettled).toBe(true)
+    }
+    expect(
+      query.toArray
+        .map(({ id, peer }) => ({ id, peer }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual(deferredSiblingRows(rows))
+  } finally {
+    spy.mockRestore()
+    for (const resolve of gates.splice(0)) resolve()
+    subscription?.unsubscribe()
+    await query.cleanup()
+    await source.cleanup()
+  }
+}
+describe(`deferred demand joining a sibling replay`, () => {
+  for (const history of deferredSiblingHistories)
+    it(`finishes after resumption: ${JSON.stringify(history)}`, () =>
+      runDeferredSiblingHistory(history))
 })
