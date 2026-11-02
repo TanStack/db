@@ -2025,14 +2025,23 @@ export async function checkEagerLiveSourceHistory(
     return []
   }
   const detached = watchDetachedFailures(driver)
-  const fixture = driver.create()
+  let fixture: EagerLiveSourceFixture
+  try {
+    fixture = driver.create()
+    if (listenBeforeFetch) {
+      await fixture.provider.seed?.(structuredClone(seedFrom(0)))
+    }
+  } catch (error) {
+    // A setup failure leaves no console or rejection patch behind (ORC-010).
+    detached.stop()
+    throw error
+  }
   const { collection, provider } = fixture
   const state = initialModel(seedFrom(0))
   const failures: Array<Error> = []
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
   const syncWaits: Array<{ current: Settlement }> = []
-  if (listenBeforeFetch) await provider.seed?.(structuredClone(seedFrom(0)))
   // READY-3, READY-10: the rows at the moment status becomes `ready`.
   let readyRows: RowState | undefined
   const watchReady = () =>
