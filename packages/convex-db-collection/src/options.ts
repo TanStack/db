@@ -178,7 +178,10 @@ export function createConvexOptions<
             }
           }, fail)
       }
+      // The latest result the source delivered, accepted or rejected.
+      let received: TResult | undefined
       const receive = (result: TResult): void => {
+        received = result
         try {
           accept(result)
         } catch (error) {
@@ -204,10 +207,24 @@ export function createConvexOptions<
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           if (!active)
             throw new Error(`Convex sync ended before source acceptance.`)
-          const value = subscription.getCurrentValue()
-          if (value !== undefined) accept(value)
+          let value: TResult | undefined
+          try {
+            value = subscription.getCurrentValue()
+          } catch (error) {
+            // The latest result is a failure already reported: the client
+            // builds a new error on each read, so reject with the reported
+            // one rather than report it again (EVID-1, HEALTH-2).
+            if (syncError !== undefined) throw syncError
+            throw error
+          }
+          // A result already received is not delivered again: a rejected one
+          // keeps its reported failure.
+          if (value !== undefined && value !== received) {
+            received = value
+            accept(value)
+          }
         } catch (error) {
-          fail(error)
+          if (error !== syncError) fail(error)
           throw error
         }
         if (!initialized) await firstResult

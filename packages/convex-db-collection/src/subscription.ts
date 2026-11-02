@@ -29,8 +29,11 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
   let active = true
   // The client serves a query's cached result to a new subscription at
   // once. A cached error belongs to an earlier subscription, so this one
-  // waits for the server instead (maintainer decision).
+  // waits for the server instead (maintainer decision): until the server's
+  // first callback it has no current value, and the client's replay of the
+  // cached error is skipped once.
   let cachedError = false
+  let replay = false
   const stop = (unsubscribe: () => void) => () => {
     active = false
     unsubscribe()
@@ -54,16 +57,19 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
       query,
       args,
       (value) => {
-        cachedError = false
+        cachedError = replay = false
         if (active) receive(value)
       },
       (error) => {
-        // The client's replay of the cached error.
-        if (cachedError) cachedError = false
-        else if (active) fail(error)
+        if (replay) {
+          replay = false
+          return
+        }
+        cachedError = false
+        if (active) fail(error)
       },
     )
-    cachedError = hasCachedError(() => subscription.getCurrentValue())
+    cachedError = replay = hasCachedError(() => subscription.getCurrentValue())
     return {
       getCurrentValue: () =>
         cachedError ? undefined : subscription.getCurrentValue(),

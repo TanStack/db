@@ -34,6 +34,9 @@
  *   a failure it acknowledges it only with its next transition, so a restart
  *   can find the failed query's cached error.
  *
+ * `awaitSync` is the adapter's wait for the query's current result
+ * (`await-sync`).
+ *
  * Rows are Convex values: `note` absent is a missing field, and typed fields
  * hold the Convex kinds (no Date, which Convex values do not have). The
  * driver never reads the Collection.
@@ -332,6 +335,7 @@ export function convexConformanceDriver({
       `complete-snapshot`,
       `delivery-error`,
       `duplicate-key-delivery`,
+      `await-sync`,
     ]),
     changeCommits: `per-batch`,
     duplicateInsert: `error`,
@@ -360,6 +364,7 @@ export function convexConformanceDriver({
           key: (key) => key as number,
         }),
         provider,
+        awaitSync: () => collection.utils.awaitSync(),
         settle: provider.settle,
         dispose: provider.dispose,
       }

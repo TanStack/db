@@ -84,6 +84,11 @@
  *   clears it. Under `rejectedDelivery: reported` (the law set's default
  *   `errorMapping`), a delivery the adapter rejects after ready is reported
  *   the same way, with the adapter's own error.
+ * - **EVID-1** (capability `await-sync`). An `awaitSync` call waits for the
+ *   run's first accepted result, fulfills while the latest result is
+ *   accepted, and rejects while it is a failure, after the run failed, or
+ *   when the run retires. A result the client cached for an earlier
+ *   subscription, such as a failed run's error, is not the new run's.
  * - **RECON-1** (capability `transport-reconnect`). A transport disconnect and
  *   reconnect keep status and rows, and later deliveries still apply.
  * - **RENEW-1** (capability `capability-renewal`). While the source's
@@ -201,6 +206,7 @@ export type EagerLiveSourceCapability =
   | `source-failure-after-ready`
   | `empty-response`
   | `delivery-error`
+  | `await-sync`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -287,6 +293,11 @@ export interface EagerLiveSourceFixture {
   readonly provider: ControlledProvider
   /** The adapter's `awaitTxId` utility (capability `await-evidence`). */
   awaitTxId?: (txid: string, timeout?: number) => Promise<unknown>
+  /**
+   * The adapter's wait for its source's current result to be accepted
+   * (capability `await-sync`), such as Convex's `awaitSync`.
+   */
+  awaitSync?: () => Promise<unknown>
   /** Releases fixture resources after the history's final cleanup. */
   dispose?: () => void | Promise<void>
   /**
@@ -464,6 +475,7 @@ export type EagerLiveSourceStep =
   | { readonly kind: `renew` }
   | { readonly kind: `empty-response` }
   | { readonly kind: `delivery-error` }
+  | { readonly kind: `sync-wait` }
   | { readonly kind: `restart` }
 
 /**
@@ -738,6 +750,12 @@ export function eagerLiveSourceHistoryArb(
       arbitrary: fc.constant({ kind: `empty-response` as const }),
     })
   }
+  if (capabilities.has(`await-sync`)) {
+    steps.push({
+      weight: 2,
+      arbitrary: fc.constant({ kind: `sync-wait` as const }),
+    })
+  }
   if (capabilities.has(`delivery-error`)) {
     steps.push({
       weight: 3,
@@ -890,6 +908,8 @@ interface ModelState {
   transient: Array<FailureEntry>
   /** Consecutive failed attempts after ready in the current outage. */
   outage: number
+  /** Each `awaitSync` call and its expected settlement, across sync runs. */
+  syncWaits: Array<{ run: number; expected: WaitExpectation }>
   /** Each wait, and the law that rejects it when it must reject. */
   waits: Array<{
     run: number
@@ -909,6 +929,7 @@ export interface ExpectedObservation {
   failureReason: ReadonlyArray<FailureEntry>
   preload: `pending` | `fulfilled` | { rejectedWith: number | `adapter` }
   waits: ReadonlyArray<WaitExpectation>
+  syncWaits: ReadonlyArray<WaitExpectation>
   /** Unreleased provider subscriptions: one while the provider runs. */
   /** Undefined when no law fixes it: after the adapter rejected a delivery. */
   openSubscriptions: number | undefined
@@ -1050,6 +1071,7 @@ function initialModel(seed: ReadonlyArray<ConformanceRow> = []): ModelState {
     transient: [],
     outage: 0,
     waits: [],
+    syncWaits: [],
   }
 }
 
@@ -1079,6 +1101,11 @@ function retireWaits(state: ModelState): void {
       wait.rejectLaw = `EVID-2`
     }
   }
+  for (const wait of state.syncWaits) {
+    if (wait.run === state.run && wait.expected === `pending`) {
+      wait.expected = `rejected`
+    }
+  }
 }
 
 /**
@@ -1094,6 +1121,12 @@ function openGate(state: ModelState): void {
       wait.expected === `pending` &&
       state.retiredEvidence.has(wait.txid)
     ) {
+      wait.expected = `fulfilled`
+    }
+  }
+  // EVID-1: the first accepted result fulfills the run's `awaitSync` waits.
+  for (const wait of state.syncWaits) {
+    if (wait.run === state.run && wait.expected === `pending`) {
       wait.expected = `fulfilled`
     }
   }
@@ -1224,6 +1257,7 @@ type AcceptedStep =
   | { kind: `renew` }
   | { kind: `empty-response`; resetOutage: boolean }
   | { kind: `delivery-error`; failure: number }
+  | { kind: `sync-wait` }
   | { kind: `restart` }
 
 /**
@@ -1538,6 +1572,23 @@ function stepModel(
       state.renewed = true
       return { done: { kind: `renew` }, publishable: [] }
     }
+    case `sync-wait`: {
+      // EVID-1 (`awaitSync`): while the run's latest source result is a
+      // failure the wait rejects with it; it fulfills after an accepted
+      // result, so before the first one it waits. A result the client
+      // cached for an earlier subscription is not this run's (maintainer
+      // decision 2026-11-02).
+      state.syncWaits.push({
+        run: state.run,
+        expected:
+          state.phase === `loading`
+            ? `pending`
+            : state.phase === `ready` && state.transient.length === 0
+              ? `fulfilled`
+              : `rejected`,
+      })
+      return { done: { kind: `sync-wait` }, publishable: [] }
+    }
     case `delivery-error`: {
       if (!canDeliver(state) || state.phase !== `ready`) return undefined
       const failure = failures.next++
@@ -1599,6 +1650,7 @@ function expectedObservation(state: ModelState): ExpectedObservation {
           ? { rejectedWith: state.failure! }
           : `fulfilled`,
     waits: state.waits.map((wait) => wait.expected),
+    syncWaits: state.syncWaits.map((wait) => wait.expected),
     // LIFE-10: a failed provider's source is released at its end.
     openSubscriptions: running
       ? 1
@@ -1638,6 +1690,8 @@ export const eagerLiveSourceReachStates = [
   `delivery-error-reported`,
   `delivery-error-recovered`,
   `rejected-delivery-reported`,
+  `sync-wait-pending`,
+  `sync-wait-on-failure`,
   `transient-failure-recovered`,
   `reconnect`,
   `renewal`,
@@ -1681,6 +1735,8 @@ const capabilityOfState: Partial<
   'delivery-error-reported': `delivery-error`,
   'delivery-error-recovered': `delivery-error`,
   'rejected-delivery-reported': `duplicate-key-delivery`,
+  'sync-wait-pending': `await-sync`,
+  'sync-wait-on-failure': `await-sync`,
   'transient-failure-repeated': `retry-policy`,
   'transient-failure-recovered': `retry-policy`,
   reconnect: `transport-reconnect`,
@@ -1811,6 +1867,8 @@ function lawFor(done: AcceptedStep, wasReady: boolean): string {
       return done.beforeReady ? `READY-10/PUB-9` : `PUB-3/FID-4`
     case `wait`:
       return done.timeout ? `EVID-3` : `EVID-1`
+    case `sync-wait`:
+      return `EVID-1`
     case `fail`:
       return wasReady ? `HEALTH-1` : `READY-4`
     case `malformed`:
@@ -1921,6 +1979,7 @@ export async function checkEagerLiveSourceHistory(
   const failures: Array<Error> = []
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
+  const syncWaits: Array<{ current: Settlement }> = []
   if (listenBeforeFetch) await provider.seed?.(structuredClone(seedFrom(0)))
   // READY-3, READY-10: the rows at the moment status becomes `ready`.
   let readyRows: RowState | undefined
@@ -2145,6 +2204,18 @@ export async function checkEagerLiveSourceHistory(
       want,
       typeof got === `object` ? { rejected: String(got.rejected) } : got,
     )
+    expected.syncWaits.forEach((wantWait, index) => {
+      const settled = syncWaits[index]!.current
+      const gotKind = typeof settled === `object` ? `rejected` : settled
+      if (gotKind !== wantWait) {
+        throw violation(
+          `EVID-1 (awaitSync ${index})`,
+          stepIndex,
+          wantWait,
+          gotKind,
+        )
+      }
+    })
     expected.waits.forEach((wantWait, index) => {
       const gotWait = waits[index]!.current
       const gotKind = typeof gotWait === `object` ? `rejected` : gotWait
@@ -2309,6 +2380,15 @@ export async function checkEagerLiveSourceHistory(
             reach(`wait-before-evidence-fulfilled`)
           }
           break
+        case `sync-wait`: {
+          syncWaits.push(recordSettlement(fixture.awaitSync!()))
+          if (state.syncWaits.at(-1)!.expected === `pending`) {
+            reach(`sync-wait-pending`)
+          } else if (state.syncWaits.at(-1)!.expected === `rejected`) {
+            reach(`sync-wait-on-failure`)
+          }
+          break
+        }
         case `wait`: {
           const pending = fixture.awaitTxId!(
             String(done.txid),
@@ -2546,6 +2626,8 @@ function supports(
       )
     case `wait`:
       return driver.capabilities.has(`await-evidence`) && !!fixture.awaitTxId
+    case `sync-wait`:
+      return driver.capabilities.has(`await-sync`) && !!fixture.awaitSync
     case `transient-failure`:
       return (
         driver.capabilities.has(`retry-policy`) &&
