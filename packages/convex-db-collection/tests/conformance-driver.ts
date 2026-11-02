@@ -83,7 +83,7 @@ class Socket {
    * The provider that the next socket serves. The React client opens its
    * socket lazily, so a socket takes its provider when it is created.
    */
-  static provider: { attach: (socket: Socket) => void } | undefined
+  static provider: { bindSocket: (socket: Socket) => void } | undefined
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onclose: ((event: { code: number; reason: string }) => void) | null = null
@@ -91,7 +91,7 @@ class Socket {
   readonly sent: Array<Record<string, unknown>> = []
   onSend: ((message: Record<string, unknown>) => void) | undefined
   constructor(_url: string) {
-    Socket.provider?.attach(this)
+    Socket.provider?.bindSocket(this)
     // The client sets its handlers after construction; then it connects.
     queueMicrotask(() => this.onopen?.())
   }
@@ -202,7 +202,7 @@ class ConvexProvider implements ControlledProvider {
 
   private onSend: (message: Record<string, unknown>) => void = () => {}
 
-  attach(socket: Socket): void {
+  bindSocket(socket: Socket): void {
     this.socketOrUndefined = socket
     socket.onSend = (message) => this.onSend(message)
   }

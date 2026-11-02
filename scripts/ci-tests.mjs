@@ -36,6 +36,7 @@ const groups = {
     `@tanstack/rxdb-db-collection`,
     `@tanstack/trailbase-db-collection`,
     `@tanstack/db-collection-e2e`,
+    `@tanstack/db-adapter-conformance`,
   ],
 }
 
