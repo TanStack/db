@@ -1959,9 +1959,10 @@ exhausts two initial bindings across config pairs, derived/same/different keys,
 unscoped/client caches, and distinct same-name constructor references. It checks
 both admissions, each admitted output's settings, retained first settings, and
 compatible sharing and forbidden sharing between two admitted outputs.
-The same 534 histories now check first-option retention on rerender (480
-admitted-first histories) and application after an actual `queryKey` change
-(432 histories with two valid declarations). Invalid admissions have no output
+Its 582 histories retain the original 534 cases and add 24 omitted/explicit-
+undefined cases and 24 pending-source cases. They check first-option retention
+on rerender (528 admitted-first histories) and application after an actual
+`queryKey` change (480 histories with two valid declarations). Invalid admissions have no output
 identity to compare. Constructor labels use grammar roles, and equal function
 names cannot collapse registration keys. This protects local cache qualification
 without changing portable query identity or mounted first-option retention. The
@@ -1972,7 +1973,7 @@ The [PR #2314 high-effort review record](oracle-reviews/2026-10-30-pr-2314-high-
 adds the maintainer's independent-caller local-options law to the existing
 `live-query-cache-options-oracle.ts` owner. Its
 `packages/react-db/tests/suspense-local-options-oracle.test.tsx` receiver exhausts
-348 real Suspense histories: every non-indexing public Collection config field,
+492 real Suspense histories: every non-indexing public Collection config field,
 independent absent/equal/different declarations, derived/same/different keys,
 and both client scopes. The public type inventory checks that new config
 fields cannot silently miss the driver. The shared indexing owner separately
@@ -1984,6 +1985,22 @@ initial-binding and cached-result claims, not arbitrary SSR/hydration timing
 or semantic equality of separately allocated option objects. The authored query
 owns list/single result shape; the local-sharing check does not promise that a
 config annotation rewrites the query's shape.
+
+The [Suspense oracle follow-up](oracle-reviews/2026-11-02-pr-2314-suspense-oracles.md)
+adds omitted versus explicit undefined in both caller orders: 120 local-option
+histories and the 24 indexing histories above, across all three identity
+relations and both scopes. A key that retains undefined properties passes the
+old 882 receiver histories but fails 88 of the extended 1,074 histories at
+output-identity comparisons. Each receiver also adds 24 pending histories.
+The local owner uses equal/different callback and scalar declarations; the
+indexing owner crosses mode and constructor equality. Both hold source writes,
+require two distinct visible Suspense fallbacks before release, then use their
+existing output comparisons after delivery. Per-scope aggregate reach requires
+both-suspended, shared and separate outputs, plus each representative option
+dimension. A mutant that reuses and memoizes an unqualified pending entry passes
+the old 882 histories and fails 36 extended histories after the pending premise.
+These controlled eager-source schedules do not establish abandonment, rejection
+while pending, cleanup races, hydration, or arbitrary Suspense scheduling.
 
 The same decision requires eager/no-constructor admission to reject on every
 `DbClient.preloadLiveQuery` call, even when no new Collection is needed.
