@@ -12,6 +12,13 @@
  * that registers tests of its own gets one report for the call, unless the
  * helper's module is linted on its own.
  *
+ * A call to `oracleProperty` from the framework module `oracle-property` is
+ * an oracle property: it registers oracle tests whose parts are the functions
+ * it is given. With an object-literal options argument that has a `check`, it
+ * reaches a part and is neither a unit test nor an imported registration. Any
+ * other call to it gets an `incompleteProperty` report. An `oracleProperty`
+ * from any other module is an ordinary helper that registers its own tests.
+ *
  * A binding is reached however it is bound: a named, namespace, or default
  * import; a `let` that a hook assigns; or a `for...of` loop variable, which
  * runs one test per element, so every element must reach. A helper that
@@ -25,7 +32,8 @@
  * reach rules and the report rules, and its laws L1 (reports are a pure
  * function of the source files), L2 (every registration form is checked), L3
  * (every declared part counts), and L6 (an oracle file registers only oracle
- * tests, including tests that its imported functions register);
+ * tests, including tests that its imported functions register), and its
+ * oracle-property paragraph (maintainer decision, 2026-11-02);
  * docs/contributing/oracle-rubric.md "Name oracle files consistently", which
  * says that an oracle-named helper "is linted on its own"; and AGENTS.md "Name
  * Oracle Files for Discovery". `export *` does not re-export a default export
@@ -37,7 +45,9 @@
  * built from other models, a `let` assigned more than once, a `for...of` over
  * a named array, or a predicate or arbitrary from a package. It builds at most
  * three companion modules, three functions per module, and six registrations
- * per oracle file. The receiving paths are a long-lived ESLint instance, a
+ * per oracle file. Oracle-property options are an inline literal or a const
+ * name; a spread of options, a computed `check` key, and a default import of
+ * the framework are not generated. The receiving paths are a long-lived ESLint instance, a
  * single-file Linter call, the lint CLI on changed files, and the CLI's
  * edit-hook form. The CLI lints only files inside its repository, so its paths
  * write scratch files in `part-reach-scratch-*` directories there, which git
@@ -169,6 +179,7 @@ const FORMS = [
   `prop-named`,
   `let-driver`,
   `for-of`,
+  `framework-property`,
 ]
 
 // How a caller-passed-body helper registers the body: as its argument, with a
@@ -203,6 +214,9 @@ const registrationSkeleton = fc.record({
   readsInput: fc.boolean(),
   // The functions that a `for...of` driver runs, one test each.
   elements: fc.array(fc.nat({ max: 9 }), { minLength: 1, maxLength: 2 }),
+  // An oracle property's options: a literal with a check and a model, with a
+  // check only, with no check, or a const name that the rule cannot read.
+  frameworkOptions: fc.constantFrom(`check-model`, `check`, `model`, `name`),
 })
 
 const programSkeleton = fc.record({
@@ -218,6 +232,16 @@ const programSkeleton = fc.record({
     `oracle-reg-helper.ts`,
   ),
   helperImport: fc.constantFrom(`named`, `namespace`),
+  // The framework module, and modules that export a function of the same
+  // name: another `oracle-` machinery module, an ordinary module, and an
+  // oracle-named module, which is linted on its own.
+  frameworkName: fc.constantFrom(
+    `oracle-property.ts`,
+    `oracle-propertyx.ts`,
+    `property.ts`,
+    `property-oracle.ts`,
+  ),
+  frameworkImport: fc.constantFrom(`named`, `namespace`),
   oracle: fc.record({
     module: moduleSkeleton,
     objectRefs: fc.array(refSkeleton, { maxLength: REFS }),
@@ -242,6 +266,8 @@ const BASE = {
   helperNames: false,
   spreads: false,
   jsCompanions: false,
+  // Off: every oracle property comes from the framework module, by name.
+  frameworkNames: false,
 }
 const ALL = {
   companions: true,
@@ -256,11 +282,16 @@ const ALL = {
   helperNames: true,
   spreads: true,
   jsCompanions: true,
+  frameworkNames: true,
 }
 
 /** A module that the lint selection lints as an oracle file. */
 const lintedOnItsOwn = (file) =>
   file.includes(`oracle`) && !file.startsWith(`oracle-`)
+
+/** The framework module, whose `oracleProperty` calls are oracle properties. */
+const isFrameworkModule = (file) =>
+  file !== undefined && file.replace(/\.(ts|js)$/, ``) === `oracle-property`
 
 function programArbitrary(features) {
   return programSkeleton.map((skeleton) => buildProgram(skeleton, features))
@@ -445,6 +476,20 @@ function buildProgram(skeleton, features) {
       }),
     )
   }
+  // The module that exports `oracleProperty`: the framework, or a lookalike.
+  let frameworkFile
+  if (tests.some((test) => test.framework !== undefined)) {
+    frameworkFile = features.frameworkNames
+      ? skeleton.frameworkName
+      : `oracle-property.ts`
+    const form = features.importForms ? skeleton.frameworkImport : `named`
+    oracle.imports.set(`oracleProperty`, {
+      from: frameworkFile,
+      imported: `oracleProperty`,
+      form,
+    })
+    modules.set(frameworkFile, emptyModule(frameworkFile, `framework`))
+  }
   // The module that exports the imported predicates, which read their input
   // or ignore it.
   if (tests.some((test) => test.property?.predicate === `imported`)) {
@@ -474,7 +519,7 @@ function buildProgram(skeleton, features) {
       })
     }
   }
-  return { oracle: ORACLE, modules, tests, calls, helperFile }
+  return { oracle: ORACLE, modules, tests, calls, helperFile, frameworkFile }
 }
 
 // The helper module's exports, in the order HELPER_TEXT defines them.
@@ -713,6 +758,9 @@ function buildRegistration(skeleton, index, context) {
       readsInput: skeleton.readsInput ?? true,
     }
     test.body = { kind: `arrow`, refs: [] }
+  } else if (form === `framework-property`) {
+    test.framework = { options: skeleton.frameworkOptions ?? `check-model` }
+    test.body = { kind: `arrow`, refs: [] }
   } else if (form === `let-driver`) {
     test.driver = { kind: `let`, refs }
     test.body = { kind: `arrow`, refs: [] }
@@ -784,6 +832,10 @@ function buildRegistration(skeleton, index, context) {
 // - It runs a `let` driver, which reaches when the value assigned to it does.
 // - It runs inside a `for...of` loop, which registers one test per element,
 //   so every element must reach (rubric: every test uses a declared part).
+//
+// - It is an oracle property: a call to `oracleProperty` from the framework
+//   module whose options are a literal with a `check`. The property is its
+//   own declaration, so the call reaches by construction.
 //
 // The predicted report list follows the rule's contract. Each unreached
 // registration is a unit test. A file with no declared part and no reaching
@@ -889,13 +941,24 @@ function predictReports(program) {
       )
     return bodyReaches || tableReaches
   }
+  // Oracle-property calls are judged by their own rule, below.
   const judged = program.tests.filter(
-    (test) => test.helper === undefined || !lintedOnItsOwn(program.helperFile),
+    (test) =>
+      test.framework === undefined &&
+      (test.helper === undefined || !lintedOnItsOwn(program.helperFile)),
   )
+  const frameworkTests = program.tests.filter(
+    (test) => test.framework !== undefined,
+  )
+  const fromFramework = isFrameworkModule(program.frameworkFile)
+  const hasCheck = (test) =>
+    [`check-model`, `check`].includes(test.framework.options)
   const unreached = judged
     .filter((test) => !reachesPart(test))
     .map((test) => test.title)
-  const anyReached = unreached.length < judged.length
+  const anyReached =
+    unreached.length < judged.length ||
+    (fromFramework && frameworkTests.some(hasCheck))
   const declaresParts = oracle.parts.size > 0 || oracle.typeNames.length > 0
 
   const keys = []
@@ -910,6 +973,14 @@ function predictReports(program) {
   for (const call of program.calls) {
     if (!lintedOnItsOwn(call.file)) keys.push(`imported:${call.alias}`)
   }
+  for (const test of frameworkTests) {
+    if (fromFramework) {
+      if (!hasCheck(test)) keys.push(`incomplete:${test.title}`)
+    } else if (!lintedOnItsOwn(program.frameworkFile)) {
+      // A lookalike registers its own test, as any imported helper does.
+      keys.push(`imported:oracleProperty`)
+    }
+  }
   return keys.sort()
 }
 
@@ -922,6 +993,9 @@ function predictReports(program) {
 
 const REGISTRAR_TEXT = `import { it } from 'vitest'\nexport function regAll() { it('reg inner', () => { void 0 }) }\nexport default regAll\n`
 const BROKEN_TEXT = `export function brokenFn() {\n`
+// The framework's and each lookalike's `oracleProperty` registers a test of its
+// own, as the real framework does.
+const FRAMEWORK_TEXT = `import { it } from 'vitest'\nexport function oracleProperty(options) {\n  it(options.id, () => {\n    void options\n  })\n}\n`
 const PRED_TEXT = `export function predReads(value) {\n  void value\n}\nexport function predIgnores(value) {\n  void 0\n}\n`
 
 /**
@@ -979,6 +1053,8 @@ function renderProgram(program) {
       files.set(file, helperText(module))
     } else if (module.role === `pred`) {
       files.set(file, PRED_TEXT)
+    } else if (module.role === `framework`) {
+      files.set(file, FRAMEWORK_TEXT)
     } else {
       const rendered = renderModule(module, program)
       files.set(file, rendered.text)
@@ -1124,6 +1200,11 @@ function renderTest(test, push, use) {
     push(test.property.readsInput ? `  void value` : `  void 0`)
     push(`}`)
   }
+  if (test.framework?.options === `name`) {
+    push(
+      `const opts${test.title} = { id: '${test.title}', check: () => {\n  void 0\n} }`,
+    )
+  }
   if (test.driver?.kind === `let`) {
     push(`let drv${test.title}`)
     push(`beforeAll(() => {`)
@@ -1140,7 +1221,15 @@ function renderTest(test, push, use) {
   text.forEach((line, offset) => {
     push(
       line,
-      offset === 0 ? { id: test.title, helper: callHelper(test) } : undefined,
+      offset === 0
+        ? {
+            id: test.title,
+            helper:
+              test.framework !== undefined
+                ? `oracleProperty`
+                : callHelper(test),
+          }
+        : undefined,
     )
   })
   if (test.wrapped) push(`})`)
@@ -1195,6 +1284,16 @@ function registrationText(test, use) {
       `    fc.assert(fc.property(${arbitrary}, ${predicate}))`,
       `  })`,
     ]
+  }
+  if (test.framework !== undefined) {
+    const call = use(`oracleProperty`)
+    if (test.framework.options === `name`) return [`${call}(opts${title})`]
+    const fields = [`id: '${title}'`]
+    if (test.framework.options !== `model`)
+      fields.push(`check: () => {\n    void 0\n  }`)
+    if (test.framework.options !== `check`)
+      fields.push(`model: () => {\n    void 0\n  }`)
+    return [`${call}({ ${fields.join(`, `)} })`]
   }
   if (test.driver?.kind === `let`) {
     return [`it('${title}', () => {`, `    drv${title}.run()`, `  })`]
@@ -1257,6 +1356,7 @@ function keyOf(message, subjects) {
   if (id === `unknownTypeModel`) return `typeModel:${subject.id}`
   if (id === `importedRegistration`)
     return `imported:${subject.helper ?? subject.id}`
+  if (id === `incompleteProperty`) return `incomplete:${subject.id}`
   return `other:${id}@${message.line}`
 }
 
@@ -1269,6 +1369,7 @@ const CLI_IDS = [
   ],
   [`This typeModel name is not a type alias`, `unknownTypeModel`],
   [`This oracle file calls a helper`, `importedRegistration`],
+  [`This oracleProperty call`, `incompleteProperty`],
 ]
 
 /**
@@ -1489,6 +1590,15 @@ const STATES = [
   `named-constant-arbitrary`,
   `imported-predicate`,
   `predicate-ignores-input`,
+  // Oracle properties: a complete one, one without a check, options the rule
+  // cannot read, a namespace import of the framework, and each lookalike.
+  `oracle-property-complete`,
+  `oracle-property-without-check`,
+  `oracle-property-named-options`,
+  `oracle-property-namespace-import`,
+  `oracle-property-machinery-lookalike`,
+  `oracle-property-ordinary-lookalike`,
+  `oracle-property-oracle-named-lookalike`,
 ]
 const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
 
@@ -1624,6 +1734,27 @@ function recordStates(program) {
       if (reaching.includes(true) && reaching.includes(false))
         states.add(`for-of-mixed-elements`)
     }
+  }
+  const frameworkTests = program.tests.filter(
+    (test) => test.framework !== undefined,
+  )
+  if (frameworkTests.length > 0) {
+    const file = program.frameworkFile
+    if (isFrameworkModule(file)) {
+      for (const test of frameworkTests) {
+        const { options } = test.framework
+        if (options === `name`) states.add(`oracle-property-named-options`)
+        else if (options === `model`)
+          states.add(`oracle-property-without-check`)
+        else states.add(`oracle-property-complete`)
+      }
+    } else if (file.startsWith(`oracle-`)) {
+      states.add(`oracle-property-machinery-lookalike`)
+    } else if (lintedOnItsOwn(file)) {
+      states.add(`oracle-property-oracle-named-lookalike`)
+    } else states.add(`oracle-property-ordinary-lookalike`)
+    if (oracle.imports.get(`oracleProperty`)?.form === `namespace`)
+      states.add(`oracle-property-namespace-import`)
   }
   for (const state of states) reach.reach(state)
 }
@@ -1773,6 +1904,19 @@ describe(`declared reach in oracle files`, () => {
     ...BASE,
     forms: [...BASE.forms, `property`, `prop-named`, `helper-prop`],
   })
+  // The framework module and its lookalikes need the module-name and
+  // import-form gates together.
+  campaign(
+    `oracle properties`,
+    {
+      ...BASE,
+      forms: [...BASE.forms, `framework-property`],
+      frameworkNames: true,
+      importForms: true,
+    },
+    IN_PROCESS,
+    200,
+  )
   campaign(`all families`, ALL)
 })
 

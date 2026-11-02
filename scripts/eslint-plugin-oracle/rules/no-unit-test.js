@@ -43,6 +43,19 @@ import {
  * or in a test module that the file imports. One that the rule cannot read, as
  * from a package, counts.
  *
+ * An oracle property is its own declaration. A call to `oracleProperty`,
+ * imported from the framework module `oracle-property`, registers oracle tests
+ * whose parts are the functions it is given:
+ *
+ *   oracleProperty({ id, law, histories, driver, model, check })
+ *
+ * The call counts as a test that reaches a part when its options are an object
+ * literal with a `check` property. Any other call to it is reported as an
+ * incomplete property, because the rule cannot see that the property has a
+ * check. A function named `oracleProperty` from any other module is an ordinary
+ * helper and is judged like one. (Maintainer decision, oracle-framework slice,
+ * 2026-11-02.)
+ *
  * A test reaches a part when its body uses the part, or uses a function or
  * value that reaches it. The rule follows bindings through the file and
  * through relative imports of other test modules, so a driver in a companion
@@ -175,6 +188,38 @@ function importedHelperShape(node, file, sourceCode, session) {
   const module = resolveTestModule(file, target.source, session)
   if (module === undefined || lintedOnItsOwn(module)) return undefined
   return loadModule(module, session)?.registrationShape(target.name)
+}
+
+/** The framework module, whose `oracleProperty` calls are oracle properties. */
+const frameworkModule = `oracle-property`
+const frameworkExport = `oracleProperty`
+
+/**
+ * A call to the framework's `oracleProperty`, as `{ complete }`, or undefined
+ * for any other call. A complete call passes an object literal with a `check`
+ * property, so the property names its own check.
+ */
+function oraclePropertyCall(node, file, sourceCode, session) {
+  const target = importedTarget(node.callee, sourceCode.getScope(node))
+  if (target?.name !== frameworkExport) return undefined
+  const module = resolveTestModule(file, target.source, session)
+  if (
+    module === undefined ||
+    basename(module).replace(/\.[cm]?[jt]sx?$/, ``) !== frameworkModule
+  )
+    return undefined
+  const [options] = node.arguments
+  const complete =
+    options?.type === `ObjectExpression` &&
+    options.properties.some(
+      (property) =>
+        property.type === `Property` &&
+        !property.computed &&
+        (property.key.type === `Identifier`
+          ? property.key.name === `check`
+          : property.key.value === `check`),
+    )
+  return { complete }
 }
 
 /**
@@ -1227,6 +1272,7 @@ export default {
     messages: {
       unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model pin uses the declared model, and a grammar calibration uses the declared grammar.`,
       unknownTypeModel: `This typeModel name is not a type alias or interface in this file. A type model is the expected type that type-level tests compare with, so it must be declared here.`,
+      incompleteProperty: `This oracleProperty call does not pass an object literal with a check, so the rule cannot see that the property has one. Pass its options inline as \`oracleProperty({ id, law, histories, driver, model, check })\`.`,
       importedRegistration: `This oracle file calls a helper that registers tests. An oracle file registers only oracle tests, so register those tests from an ordinary test file and keep this file to its checks and model.`,
       undeclared: `This oracle file registers tests and declares no oracle part. Name its check, model, and grammar with \`declareOracle({ check: [...], model: [...], grammar: [...] })\` from oracle-declaration. Then move each test that reaches none of them to an ordinary test file.`,
     },
@@ -1252,6 +1298,16 @@ export default {
         const outermost = !(
           node.parent.type === `CallExpression` && node.parent.callee === node
         )
+        // An oracle property is its own declaration: it reaches by construction
+        // when it names its check.
+        const property = outermost
+          ? oraclePropertyCall(node, context.filename, sourceCode, session)
+          : undefined
+        if (property !== undefined) {
+          if (property.complete) anyReached = true
+          else context.report({ node, messageId: `incompleteProperty` })
+          return
+        }
         const helper = outermost
           ? importedHelperShape(node, context.filename, sourceCode, session)
           : undefined
