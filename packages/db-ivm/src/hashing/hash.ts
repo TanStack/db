@@ -237,6 +237,11 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
   return compareHashValues(left, right)
 }
 
+/** @internal `equalHashValues` for row values, which tell -0 from 0. */
+export function equalRowValues(left: unknown, right: unknown): boolean {
+  return compareHashValues(left, right, undefined, true)
+}
+
 function enumerableKeys(value: object): Array<PropertyKey> {
   return Reflect.ownKeys(value).filter((key) =>
     Object.prototype.propertyIsEnumerable.call(value, key),
@@ -249,8 +254,13 @@ function compareHashValues(
   a: unknown,
   b: unknown,
   compared?: Map<object, Set<object>>,
+  signedZero = false,
 ): boolean {
-  if (a === b || (Number.isNaN(a) && Number.isNaN(b))) return true
+  if (
+    (signedZero ? Object.is(a, b) : a === b) ||
+    (Number.isNaN(a) && Number.isNaN(b))
+  )
+    return true
   if (
     a === null ||
     b === null ||
@@ -289,6 +299,7 @@ function compareHashValues(
           aBody[key as keyof object],
           bBody[key as keyof object],
           compared,
+          signedZero,
         ),
     )
   )

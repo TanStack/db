@@ -18,6 +18,10 @@
  * update is delivered. A `signed-zero`
  * payload alternates 0 and -0, which are distinct row values (maintainer
  * decision 2026-10-29), so each of its updates is delivered in both orders.
+ * Its source row also changes `version`. A `source-zero` history stores the
+ * signed zero in the source row itself, so each update changes the source
+ * row only by a zero's sign; live-query rows tell -0 from 0 as well
+ * (maintainer decision 2026-11-02), so it is delivered in both orders too.
  * These eager single-source histories do not cover ordered repairs across
  * windows or arbitrary provider schedules. Both receiving drivers use this same judgment.
  * The maintainer's 2026-10-30 decision preserves unordered notifications even
@@ -41,6 +45,7 @@ type Representation =
   | `set`
   | `equal`
   | `signed-zero`
+  | `source-zero`
 export const callbackHistories = (
   [
     `scalar`,
@@ -50,6 +55,7 @@ export const callbackHistories = (
     `set`,
     `equal`,
     `signed-zero`,
+    `source-zero`,
   ] as const
 ).flatMap((representation) =>
   ([`all`, `enter`, `exit`, `late-update`, `late-batch`] as const).flatMap(
@@ -148,7 +154,7 @@ function expectedPayload(
     ? `0,0,${version}`
     : representation === `equal`
       ? `0`
-      : representation === `signed-zero`
+      : representation === `signed-zero` || representation === `source-zero`
         ? version % 2 === 1
           ? `-0`
           : `0`
@@ -259,6 +265,8 @@ export async function runCallbackHistory(
     if (history.representation === `equal`) payload = 0
     if (history.representation === `signed-zero`)
       payload = version % 2 === 1 ? -0 : 0
+    // The source row holds the signed zero (`stored`).
+    if (history.representation === `source-zero`) payload = version
     if (history.representation === `prototype`) {
       payload = new PrototypePayload(version)
     }
@@ -273,6 +281,13 @@ export async function runCallbackHistory(
       )
     return { id, payload }
   }
+  // The version the source row stores for an authored version.
+  const stored = (version: number) =>
+    history.representation === `source-zero`
+      ? version % 2 === 1
+        ? -0
+        : 0
+      : version
   const failures: Array<unknown> = []
   let handle: Awaited<ReturnType<CallbackDriver[`mount`]>> | undefined
   let before: number | undefined
@@ -304,28 +319,28 @@ export async function runCallbackHistory(
       handlers: handlers(),
     })
     cut(`initial`, 0, history.skipInitial)
-    await handle.write(`update`, 1)
+    await handle.write(`update`, stored(1))
     cut(`unobserved`, 1)
     if (history.profile === `late-update`) channels.add(`update`)
     if (history.profile === `late-batch`) channels.add(`batch`)
     await handle.replaceHandlers(handlers())
     cut(`replacement`, 1)
-    await handle.write(`update`, 2)
+    await handle.write(`update`, stored(2))
     cut(`update`, 2)
     // Installing exit after unobserved updates distinguishes current values
     // from an initial value retained only when update handlers were present.
     channels = new Set([`exit`])
     await handle.replaceHandlers(handlers())
-    await handle.write(`delete`, 2)
+    await handle.write(`delete`, stored(2))
     cut(`exit`, undefined)
     channels = new Set([`enter`, `update`, `exit`, `batch`])
     await handle.replaceHandlers(handlers())
-    await handle.write(`insert`, 3)
+    await handle.write(`insert`, stored(3))
     cut(`reentry`, 3)
-    await handle.write(`update`, 4)
+    await handle.write(`update`, stored(4))
     cut(`next-use`, 4)
     await handle.dispose()
-    await handle.write(`update`, 5)
+    await handle.write(`update`, stored(5))
     cut(`disposed`, 4)
     if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
       console.info(

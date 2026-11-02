@@ -25,7 +25,10 @@ const valueRelations: Array<{
     name: `different plain values`,
     pair: (n) => [{ a: n }, { a: n + 1 }, false],
   },
-  { name: `signed zero`, pair: () => [-0, 0, true] },
+  // -0 and 0 are distinct row values, so a version that changes only a
+  // zero's sign replaces the old one (maintainer decision 2026-11-02).
+  { name: `signed zero`, pair: () => [-0, 0, false] },
+  { name: `nested signed zero`, pair: () => [{ a: -0 }, { a: 0 }, false] },
   { name: `NaN`, pair: () => [NaN, Number.NaN, true] },
   { name: `typed scalars`, pair: (n) => [n, String(n), false] },
   { name: `dates`, pair: (n) => [new Date(n), new Date(n), true] },
