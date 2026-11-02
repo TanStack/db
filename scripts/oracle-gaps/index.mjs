@@ -44,11 +44,15 @@
 //   node scripts/oracle-gaps/index.mjs --package <dir> --oracles <a,b>
 //     --source <src/x.ts,...> [--tests <c,d>] [--seed <n>]
 //     [--diff-base <rev>] [--out <dir>] [--only <id,id>]
-//     [--test-timeout <ms>]   (default 2000; also bounds hooks and teardown)
+//     [--test-timeout <ms>]   (default 15000; also bounds hooks and teardown.
+//                              Each mutant run also has a wall-clock limit of
+//                              10 s plus three times its files' unmutated time.)
+//     [--sample <n>]          (a fixed-seed sample of n mutants per source)
 //     [--contexts <n>]        (warm contexts, one worker each; default
 //                              the machine's parallelism minus 2, at most 8)
 import { spawnSync } from 'node:child_process'
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -90,9 +94,12 @@ function parseArgs(argv) {
     diffBase: args[`diff-base`],
     out: resolve(args.out ?? `/tmp/oracle-gaps`),
     only: args.only ? new Set(args.only.split(`,`)) : undefined,
+    // A fixed-seed random sample of this many mutants per source file, for
+    // surveys across many modules.
+    sample: args.sample ? Number(args.sample) : undefined,
     // A mutant can make a test hang. Oracles that run in milliseconds do not
     // need Vitest's default limits, which would make each hang cost seconds.
-    testTimeout: Number(args[`test-timeout`] ?? 2000),
+    testTimeout: Number(args[`test-timeout`] ?? 15000),
   }
 }
 
@@ -106,7 +113,13 @@ const instrumented = {}
 const mutants = []
 for (const source of options.sources) {
   const path = realpathSync(join(options.pkg, source))
-  const result = instrument(ts, path, readFileSync(path, `utf8`), source)
+  const result = instrument(
+    ts,
+    path,
+    readFileSync(path, `utf8`),
+    source,
+    mutants.length,
+  )
   instrumented[path] = result.code
   mutants.push(...result.mutants)
 }
@@ -165,7 +178,17 @@ function diffLines(source) {
 }
 
 let runCounter = 0
-async function run(vitest, specs, { mutant = null, select = null } = {}) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// A mutant can hang a run outside any test, in a hook or teardown, where no
+// test timeout applies. A run with a time limit that passes it is cancelled
+// and reported as timed out; its context is then replaced (see the mutant
+// loop), because a cancelled run can leave work behind in its workers.
+async function run(
+  vitest,
+  specs,
+  { mutant = null, select = null, limitMs } = {},
+) {
   const capture = join(options.out, `run-${++runCounter}.jsonl`)
   const state = { mutant, select: select && [...select], capture }
   // Vitest 3 and 4 both expose the root project's `provide`; the state file
@@ -173,7 +196,31 @@ async function run(vitest, specs, { mutant = null, select = null } = {}) {
   vitest.getRootProject?.().provide(`oracleGaps`, state)
   writeFileSync(stateFile, JSON.stringify(state))
   const started = Date.now()
-  const result = await vitest.runTestSpecifications(specs, false)
+  const running = vitest.runTestSpecifications(specs, false)
+  let timer
+  const result =
+    limitMs === undefined
+      ? await running
+      : await Promise.race([
+          running,
+          new Promise((resolve) => {
+            timer = setTimeout(() => resolve(undefined), limitMs)
+          }),
+        ])
+  clearTimeout(timer)
+  if (result === undefined) {
+    await Promise.race([
+      vitest.cancelCurrentRun(`keyboard-input`).catch(() => undefined),
+      sleep(5000),
+    ])
+    return {
+      timedOut: true,
+      result: { testModules: [], unhandledErrors: [] },
+      modules: [],
+      rows: new Map(),
+      seconds: (Date.now() - started) / 1000,
+    }
+  }
   // The result also lists test modules from earlier runs that this run did
   // not execute, with their old results. Only this run's files count.
   const ran = new Set(specs.map((spec) => spec.moduleId))
@@ -199,7 +246,8 @@ async function run(vitest, specs, { mutant = null, select = null } = {}) {
 // (ORC-006 "runtime failure after setup outside the intended comparison").
 // An error outside any test is `setup-error`. Typed verdicts will make this
 // exact; for now the error text decides.
-function outcomeOf({ result, modules }) {
+function outcomeOf({ result, modules, timedOut }) {
+  if (timedOut) return { outcome: `timeout`, detail: `run time limit` }
   const failures = []
   for (const module of modules) {
     for (const error of module.errors?.() ?? [])
@@ -273,37 +321,94 @@ const newContext = () =>
     coverage: { enabled: false },
     reporters: [{}],
   })
-try {
-  for (let i = 0; i < options.contexts; i += 1) {
-    const context = await newContext()
-    // Vitest 3 calls this step `init`; Vitest 4 renamed it `standalone`.
-    await (context.standalone ? context.standalone() : context.init())
-    contexts.push(context)
-  }
-  const vitest = contexts[0]
-  const fileSpecs = new Map()
+// Each context's specs are its own objects, so specs are looked up per
+// context by file.
+const contextSpecs = new Map()
+async function warmContext() {
+  const context = await newContext()
+  // Vitest 3 calls this step `init`; Vitest 4 renamed it `standalone`.
+  await (context.standalone ? context.standalone() : context.init())
+  const map = new Map()
   for (const file of [...options.oracles, ...options.tests]) {
     // Filters resolve against the working directory, not `root`, so each
     // file is passed by its absolute path.
     const path = realpathSync(join(options.pkg, file))
-    const specs = await vitest.globTestSpecifications([path])
+    const specs = await context.globTestSpecifications([path])
     if (specs.length === 0) throw new Error(`no test file matches ${file}`)
-    fileSpecs.set(path, specs)
+    map.set(path, specs)
   }
+  contextSpecs.set(context, map)
+  return context
+}
+try {
+  for (let i = 0; i < options.contexts; i += 1)
+    contexts.push(await warmContext())
+  const vitest = contexts[0]
+  const fileSpecs = contextSpecs.get(vitest)
   const oracleFiles = new Set(
     options.oracles.map((f) => realpathSync(join(options.pkg, f))),
   )
   const fileOf = (key) => key.split(` > `)[0]
-  const allSpecs = [...fileSpecs.values()].flat()
 
-  // 2. Two unmutated runs.
-  const first = await run(vitest, allSpecs)
-  const firstOutcome = outcomeOf(first)
-  if (firstOutcome.outcome !== `survived`)
-    throw new Error(
-      `unmutated run did not pass: ${JSON.stringify(firstOutcome)}`,
+  // 2. Two unmutated runs, with the files split across the contexts. A file
+  // that fails with no mutant active is left out of the report: it cannot
+  // detect anything, and it may read source text that instrumentation changes.
+  // Each file's unmutated duration, which sets a mutant run's time limit.
+  const fileSeconds = new Map()
+  const limitFor = (keys) =>
+    10_000 +
+    3000 *
+      [...new Set(keys.map(fileOf))].reduce(
+        (sum, file) => sum + (fileSeconds.get(file) ?? 10),
+        0,
+      )
+  const runAcross = async (files) => {
+    const parts = contexts.map(() => [])
+    files.forEach((file, index) => parts[index % contexts.length].push(file))
+    const runs = await Promise.all(
+      contexts.map((context, index) =>
+        run(
+          context,
+          parts[index].flatMap((file) => contextSpecs.get(context).get(file)),
+        ),
+      ),
     )
-  const second = await run(vitest, allSpecs)
+    const rows = new Map(runs.flatMap((r) => [...r.rows]))
+    for (const r of runs)
+      for (const module of r.modules)
+        fileSeconds.set(
+          module.moduleId,
+          Math.max(
+            fileSeconds.get(module.moduleId) ?? 0,
+            (module.diagnostic?.().duration ?? 0) / 1000,
+          ),
+        )
+    const failed = new Set()
+    for (const r of runs)
+      for (const module of r.modules)
+        if (
+          outcomeOf({ result: r.result, modules: [module] }).outcome !==
+          `survived`
+        )
+          failed.add(module.moduleId)
+    return { rows, failed, seconds: Math.max(...runs.map((r) => r.seconds)) }
+  }
+  let files = [...fileSpecs.keys()]
+  const first = await runAcross(files)
+  const excluded = [...first.failed]
+  if (excluded.length > 0) {
+    console.error(
+      `left out, failing with no mutant active: ${excluded.join(`, `)}`,
+    )
+    files = files.filter((file) => !first.failed.has(file))
+    for (const file of excluded) {
+      fileSpecs.delete(file)
+      oracleFiles.delete(file)
+      for (const key of [...first.rows.keys()])
+        if (fileOf(key) === file) first.rows.delete(key)
+    }
+  }
+  const second = await runAcross(files)
   const nondeterministic = new Set()
   for (const [key, row] of first.rows) {
     const again = second.rows.get(key)
@@ -330,6 +435,17 @@ try {
       outcomeSeen.set(id, [seen[0] || truthy, seen[1] || falsy])
     }
   }
+  // Reach over every site, by source, so a sampled survey still reports
+  // exact reach.
+  const reach = Object.fromEntries(
+    options.sources.map((source) => {
+      const own = mutants.filter((m) => m.source === source)
+      const reached = own.filter((m) =>
+        (reachedBy.get(m.number) ?? []).some((k) => oracleFiles.has(fileOf(k))),
+      )
+      return [source, { sites: own.length, reachedByAnOracle: reached.length }]
+    }),
+  )
   const missingOutcomeLines = new Set()
   for (const mutant of mutants) {
     if (mutant.operator !== `if-true`) continue
@@ -342,17 +458,26 @@ try {
   const diffs = new Map(options.sources.map((s) => [s, diffLines(s)]))
   const results = []
   const started = Date.now()
-  // Each context's specs are its own objects, so specs are looked up per
-  // context by file.
-  const contextSpecs = new Map([[vitest, fileSpecs]])
-  for (const context of contexts.slice(1)) {
-    const map = new Map()
-    for (const path of fileSpecs.keys())
-      map.set(path, await context.globTestSpecifications([path]))
-    contextSpecs.set(context, map)
+  let queue = mutants.filter((m) => !options.only || options.only.has(m.id))
+  if (options.sample !== undefined) {
+    // A fixed-seed shuffle, so a survey samples the same mutants every run.
+    let seed = 20251102
+    const random = () =>
+      (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31
+    queue = options.sources.flatMap((source) => {
+      const own = queue.filter((m) => m.source === source)
+      for (let i = own.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(random() * (i + 1))
+        ;[own[i], own[j]] = [own[j], own[i]]
+      }
+      return own.slice(0, options.sample)
+    })
   }
-  const queue = mutants.filter((m) => !options.only || options.only.has(m.id))
+  // Results are appended as they finish, so a stopped survey keeps them.
+  const partial = join(options.out, `results.jsonl`)
+  rmSync(partial, { force: true })
   async function evaluate(mutant, vitest) {
+    let replace = false
     const specsFor = (keys) =>
       [...new Set(keys.map(fileOf))].flatMap(
         (f) => contextSpecs.get(vitest).get(f) ?? [],
@@ -371,7 +496,9 @@ try {
     if (oracleKeys.length > 0) {
       const mutated = await run(vitest, specsFor(oracleKeys), {
         mutant: mutant.number,
+        limitMs: limitFor(oracleKeys),
       })
+      if (mutated.timedOut) replace = true
       Object.assign(result, outcomeOf(mutated), { seconds: mutated.seconds })
       if (result.outcome === `survived`) {
         const compared = [...mutated.rows.keys()].filter(
@@ -400,7 +527,9 @@ try {
     ) {
       const tier = await run(vitest, specsFor(testKeys), {
         mutant: mutant.number,
+        limitMs: limitFor(testKeys),
       })
+      if (tier.timedOut) replace = true
       result.testOutcome = outcomeOf(tier).outcome
       // A crash in an ordinary test is a detection, as it is for an oracle.
       if (
@@ -410,14 +539,25 @@ try {
         result.outcome = `killed-by-ordinary-test`
     }
     results.push(result)
+    appendFileSync(partial, `${JSON.stringify(result)}\n`)
     console.error(
       `${mutant.id} L${mutant.line} ${mutant.operator} ${result.outcome}${result.class ? ` (${result.class})` : ``}${result.testOutcome ? ` [ordinary: ${result.testOutcome}]` : ``}`,
     )
+    return replace
   }
   await Promise.all(
-    contexts.map(async (context) => {
-      for (let mutant = queue.shift(); mutant; mutant = queue.shift())
-        await evaluate(mutant, context)
+    contexts.map(async (initial, slot) => {
+      let context = initial
+      for (let mutant = queue.shift(); mutant; mutant = queue.shift()) {
+        if (!(await evaluate(mutant, context))) continue
+        // A cancelled run can leave work behind, so its context is replaced.
+        await Promise.race([
+          context.close().catch(() => undefined),
+          sleep(10_000),
+        ])
+        context = await warmContext()
+        contexts[slot] = context
+      }
     }),
   )
   results.sort(
@@ -432,6 +572,8 @@ try {
     JSON.stringify(
       {
         options: { ...options, only: undefined },
+        excluded,
+        reach,
         nondeterministic: [...nondeterministic],
         mutantSeconds,
         results,

@@ -47,16 +47,20 @@ function functionName(ts, node) {
   return undefined
 }
 
-export function instrument(ts, path, text, source) {
+// `offset` keeps site numbers unique across every instrumented source file,
+// because one switch serves them all.
+export function instrument(ts, path, text, source, offset = 0) {
   const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)
   const lineOf = (pos) => file.getLineAndCharacterOfPosition(pos).line + 1
   const mutants = []
   // `at` is the node whose line the mutant reports: the operator token for a
   // swap and the condition for an `if`, as the earlier runner reported them.
   const add = (at, operator, fn, original, replacement) => {
-    const id = mutants.length + 1
+    const local = mutants.length + 1
+    const id = offset + local
     mutants.push({
-      id: `${source.split(`/`).pop()}:M${id}`,
+      // The path below src/ keeps labels unique across files with one name.
+      id: `${source.replace(/^src\//, ``)}:M${local}`,
       number: id,
       source,
       line: lineOf(at.getStart(file)),
