@@ -27,6 +27,7 @@ import {
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
 import { validateJoinConditions } from '../join-conditions.js'
+import { validateLimit } from '../validate-limit.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import { getQueryIR } from './query-ir.js'
 import { cloneQueryForPlacement } from './clone-query.js'
@@ -824,6 +825,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *
    * @param count - Maximum number of rows to return
    * @returns A QueryBuilder with the limit applied
+   * @throws RangeError if count is negative
    *
    * @example
    * ```ts
@@ -835,6 +837,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   limit(count: number): QueryBuilder<TContext> {
+    validateLimit(count)
     return this._clone({
       ...this.query,
       limit: count,

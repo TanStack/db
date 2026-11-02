@@ -1,5 +1,6 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { compileCollectionQuery } from '../compiler/index.js'
+import { validateLimit } from '../validate-limit.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
@@ -75,6 +76,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * @throws `SetWindowRequiresOrderByError` if the query is neither windowed
    * nor a `findOne`, or an unordered `findOne` would move its offset.
    * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
+   * @throws RangeError if the supplied limit is negative.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -390,6 +392,8 @@ export class CollectionConfigBuilder<
     ) {
       throw new SetWindowReentrancyError()
     }
+
+    validateLimit(options.limit)
 
     // Keep caller-owned objects out of the long-lived query state. A caller may
     // reuse and mutate its options object after this operation settles.

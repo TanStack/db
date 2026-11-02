@@ -6720,7 +6720,10 @@ emits moveIn 10/moveOut 6 while reporting size 0. It remains outside the raw
 operator's supported nonnegative-width law. NaN, positive fractional widths,
 raw authored IR, framework error timing and provider delivery are outside the
 new admission evidence. Existing findOne, order and reentrancy error precedence
-remains separate. See the [admission evidence](oracle-reviews/2026-11-02-negative-limit-admission.md).
+remains separate. All 24 fixed/random admission campaigns reach every declared
+state in 21 histories each; unchanged production fails all six negative
+receivers, and eight hostile mutations fail the intended comparisons. See the
+[admission evidence](oracle-reviews/2026-11-02-negative-limit-admission.md).
 
 **Repaired operator defects:** negative-window rows, size, source edits and
 return moves now agree with absolute ranks on all three paths. Each path's
