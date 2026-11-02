@@ -734,3 +734,13 @@ source SHA-256 remains
 The sorted changed-package path/content snapshot relative to maina3c4d0676 is
 `3490f7ad553bdb4398576906a93d38723e665e3d0efed39e27c3336e1949e6d5` (NUL separates each path and content).
 No oracle model, history, comparison or run budget changed during this merge.
+
+The loss audit accounts for all eight external items: five earlier dispositions,
+two new evidence corrections, and one adjacent negative-width law question.
+The latter is recorded with its trace and primary owner in the coverage map.
+The accepted nonnegative-width contract and adapter eligibility remain the scope
+of this PR. No negative-width behavior is changed or claimed fixed.
+The three new items are two fixed-now and one design-decision outside the
+accepted width domain. The earlier items remain three fixed and two refuted.
+No required oracle budget decreased, and the final oracle lint/run-budget checks
+pass. The normal commit hooks passed with the tested package snapshot unchanged.

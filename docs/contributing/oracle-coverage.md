@@ -6700,6 +6700,18 @@ multiple groups, varying prefix predicates and downstream acquisition remain
 outside this lane; existing support/numeric budgets and their prior evidence
 remain unchanged.
 
+Review5740133634 raises an adjacent negative-width contract question. The
+support-window owner above is the location for a future maintainer decision and
+its witness. With `TopKArray(5, -2)`, install ordered values0/4/6/8/10, then insert2
+at rank1. Both maina3c4d0676 and the integrated branch emit moveIn10/moveOut6 while
+reporting size0. The executable same-source probe is recorded in the
+[second-main integration review](oracle-reviews/2026-11-02-removal-oracle-gaps.md#second-main-integration--a3c4d0676).
+The accepted rank-selection law in this change covers nonnegative widths.
+No negative-width empty-result law is claimed. Defining that behavior needs a
+maintainer decision before extending generated moves and source-edit histories.
+The adapter reuse path requires nonnegative target bounds and cannot take this
+negative-width input as an eligible page-window move.
+
 **Repaired operator defects:** negative-window rows, size, source edits and
 return moves now agree with absolute ranks on all three paths. Each path's
 fixed/random campaign reaches all eight declared states in 101 histories
