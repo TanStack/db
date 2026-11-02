@@ -2040,12 +2040,16 @@ function createElectricSync<T extends Row<unknown>>(
           const response = await request
           if (response.ok || response.status === 409) failedAttempts = 0
           else {
+            // Not `Object.fromEntries`: a DOM lib without iterable Headers
+            // also type-checks this source.
+            const headers: Record<string, string> = {}
+            response.headers.forEach((value, name) => (headers[name] = value))
             reportRetry(
               new FetchError(
                 response.status,
                 undefined,
                 undefined,
-                Object.fromEntries(response.headers),
+                headers,
                 String(input),
               ),
             )
