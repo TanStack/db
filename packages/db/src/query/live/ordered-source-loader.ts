@@ -765,8 +765,9 @@ export class OrderedSourceLoader {
       if (!this.active || !hasSupersededAcquisition) {
         this.cancelRepairRetry()
         this.repairRetries = 0
-        // Retirement can deliver a newer invalidation. This chain pays only
-        // its own epoch; the next pass must still repair that newer order.
+        // Retirement can deliver a newer invalidation or raise the debt to a
+        // full-source read. Keep that debt for the next pass; otherwise this
+        // chain has paid its own epoch.
         this.moveWork(
           { kind: `idle` },
           [`repair`],

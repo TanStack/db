@@ -241,7 +241,6 @@ function tieValue(options: RequestOptions): unknown {
 type LedgerRequest = {
   index: number
   issuedAt: number
-  issuedEpoch: number
   options: RequestOptions
   acquisition: LoadSubsetOptions
   deferred: ReturnType<typeof createDeferred>
@@ -533,25 +532,20 @@ type AuthorityObservation = {
 
 // ARCHITECTURE's ordered repair and publication laws: a read started before
 // an invalidation cannot pay it, and a later read must start before replacement
-// publication. Event order and epochs come only from observed source callbacks
-// and adapter requests. Dispatch may be deferred while the public gate holds.
-type RetirementEvent = { at: number; epoch: number }
+// publication. Event order comes only from observed source callbacks and
+// adapter requests on one clock; a read that starts after the invalidation is
+// in its epoch. Dispatch may be deferred while the public gate holds.
 function checkRetirementProgress(
-  invalidation: RetirementEvent | undefined,
-  starts: Array<RetirementEvent>,
+  invalidationAt: number | undefined,
+  startedAt: Array<number>,
   publicationAt = Number.POSITIVE_INFINITY,
 ): void {
   if (
-    invalidation &&
-    !starts.some(
-      (start) =>
-        start.at > invalidation.at &&
-        start.epoch >= invalidation.epoch &&
-        start.at < publicationAt,
-    )
+    invalidationAt !== undefined &&
+    !startedAt.some((at) => at > invalidationAt && at < publicationAt)
   ) {
     throw new Error(
-      `retirement invalidation: no newer-epoch authoritative read followed the adapter invalidation before publication`,
+      `retirement invalidation: no authoritative read followed the adapter invalidation before publication`,
     )
   }
 }
@@ -584,13 +578,13 @@ async function checkRetirementReceiver(
     [1, 2, 3, 4, 5, 6, 7].map((id) => [id, { id, rank: id }]),
   )
   const installed = new Map<number, Row>()
-  const starts: Array<RetirementEvent> = []
+  const starts: Array<number> = []
   const publications: Array<{ at: number; rows: Array<Row> }> = []
   const effectRows = new Map<number, Row>()
   const replacement = createDeferred()
   let heldAnswers = 0
   let clock = 0
-  let invalidation: RetirementEvent | undefined
+  let invalidation: number | undefined
   let armed = false
   let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const source = createCollection<Row, number>({
@@ -610,7 +604,7 @@ async function checkRetirementReceiver(
               options.where === undefined &&
               options.cursor === undefined
             )
-              starts.push({ at, epoch: invalidation ? 1 : 0 })
+              starts.push(at)
             const deliver = () => {
               if (options.signal?.aborted) return true
               const matching = [...truth.values()]
@@ -644,7 +638,7 @@ async function checkRetirementReceiver(
               }
               return operations.commit()
             }
-            if (invalidation && scenario.holdReplacement) {
+            if (invalidation !== undefined && scenario.holdReplacement) {
               heldAnswers++
               return replacement.promise.then(async () => {
                 await deliver()
@@ -657,8 +651,8 @@ async function checkRetirementReceiver(
                 })
           },
           unloadSubset: () => {
-            if (!armed || invalidation) return
-            invalidation = { at: ++clock, epoch: 1 }
+            if (!armed || invalidation !== undefined) return
+            invalidation = ++clock
             reached(`release`)
             operations.begin()
             for (let id = 2; id <= scenario.offset + scenario.limit + 1; id++) {
@@ -916,8 +910,7 @@ async function checkAuthorityCase(
   let invalidateNextPage = false
   let releaseFaults = 0
   let releaseInvalidations = 0
-  let retirementInvalidation:
-    (RetirementEvent & { truncates: number }) | undefined
+  let retirementInvalidation: { at: number; truncates: number } | undefined
   let replayContinuationHandoffs = 0
   let syncRepairs = 0
   let invalidatingPages = 0
@@ -956,7 +949,6 @@ async function checkAuthorityCase(
     const request: LedgerRequest = {
       index: ledger.length,
       issuedAt: ++clock,
-      issuedEpoch: epochMoves,
       options,
       acquisition,
       deferred: createDeferred(),
@@ -1098,7 +1090,7 @@ async function checkAuthorityCase(
         // (ARCHITECTURE, authoritative work/debt coherence). Adapter live
         // updates keep that source complete, so it owes no replacement read.
         if (!coveredBySource) {
-          retirementInvalidation = { at: ++clock, epoch: epochMoves, truncates }
+          retirementInvalidation = { at: ++clock, truncates }
           if (answeringRepair && !explicitRetrying) {
             reached?.(`completed-repair-release`)
           }
@@ -2062,11 +2054,8 @@ async function checkAuthorityCase(
         !isDisposed()
       ) {
         checkRetirementProgress(
-          retirementInvalidation,
-          ledger.filter(startsAuthority).map(({ issuedAt, issuedEpoch }) => ({
-            at: issuedAt,
-            epoch: issuedEpoch,
-          })),
+          retirementInvalidation.at,
+          ledger.filter(startsAuthority).map(({ issuedAt }) => issuedAt),
         )
       }
       if (!coveredByFullSource && !hungAuthority && !isDisposed()) {
@@ -3045,23 +3034,14 @@ describe(`Ordered source request authority`, () => {
     },
   )
 
-  // A start from the wrong epoch, before the invalidation, or after public
-  // replacement cannot discharge the debt. These adversarial observations
-  // calibrate the same relation used by both consumers and the request ledger.
-  it.each([`old-epoch`, `before-invalidation`, `after-publication`] as const)(
+  // A start before the invalidation, or after public replacement, cannot
+  // discharge the debt. These adversarial observations calibrate the same
+  // relation used by both consumers and the request ledger.
+  it.each([`before-invalidation`, `after-publication`] as const)(
     `rejects a retirement start observed %s`,
     (fault) => {
-      const invalidation = { at: 2, epoch: 1 }
-      const start = {
-        at:
-          fault === `before-invalidation`
-            ? 1
-            : fault === `after-publication`
-              ? 4
-              : 3,
-        epoch: fault === `old-epoch` ? 0 : 1,
-      }
-      expect(() => checkRetirementProgress(invalidation, [start], 4)).toThrow(
+      const startedAt = fault === `before-invalidation` ? 1 : 4
+      expect(() => checkRetirementProgress(2, [startedAt], 4)).toThrow(
         `retirement invalidation`,
       )
     },
