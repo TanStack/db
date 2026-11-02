@@ -283,7 +283,9 @@ function compareHashValues(
   const [bMarker, bHeader, bBody] = objectParts(b)
   if (
     aMarker !== bMarker ||
-    !aHeader.every((value, index) => value === bHeader[index])
+    !aHeader.every((value, index) =>
+      signedZero ? Object.is(value, bHeader[index]) : value === bHeader[index],
+    )
   )
     return false
   if (!aBody || !bBody) return true

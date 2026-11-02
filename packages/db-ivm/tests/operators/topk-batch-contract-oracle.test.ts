@@ -109,6 +109,17 @@ const valueRelations: Array<{
     },
   },
   {
+    // A header such as `lastIndex` follows the same signed-zero rule.
+    name: `regexp position signed zero`,
+    pair: () => {
+      const left = /same/g
+      const right = /same/g
+      left.lastIndex = -0
+      right.lastIndex = 0
+      return [left, right, false]
+    },
+  },
+  {
     name: `equal regexp state`,
     pair: (n) => {
       const left = /same/g
