@@ -27,7 +27,6 @@ import type {
   DbClient,
   DeferredLiveQueryCollections,
   GetResult,
-  HealthNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryHookConfig,
@@ -335,18 +334,16 @@ export function useLiveQuery(
   // it unmounts.
   const sourceIdClaims = createLiveQuerySourceIdClaims()
 
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
   const resolved = $derived.by(() => {
-    // First check if the original parameter might be a getter
-    // by seeing if toValue returns something different than the original
+    let commitWindow: (() => void) | undefined
+    // Try the getter form first; a query callback needs the builder supplied
+    // by preparation below, so retain the original input if this call fails.
     let unwrappedParam = configOrQueryOrCollection
     try {
-      const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
-      if (potentiallyUnwrapped !== configOrQueryOrCollection) {
-        unwrappedParam = potentiallyUnwrapped
-      }
+      unwrappedParam = toValue(configOrQueryOrCollection)
     } catch {
-      // If toValue fails, use original parameter
-      unwrappedParam = configOrQueryOrCollection
+      // Use the original input.
     }
 
     // Check if it's already a collection by checking for specific collection methods
@@ -357,6 +354,7 @@ export function useLiveQuery(
         contextDbClient)
 
     if (inputIsCollection) {
+      previousCollection = null
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -383,7 +381,8 @@ export function useLiveQuery(
           [`collection`, unwrappedParam.id],
           `queryKey`,
         ),
-        resumeDeferredCollections: () => {},
+        onPreload: () => {},
+        move: undefined,
       }
     }
 
@@ -453,8 +452,16 @@ export function useLiveQuery(
         collection = resolveLiveQueryValue(preparedValue, {
           gcTime: DEFAULT_GC_TIME_MS,
           pool: dbClient ? false : undefined,
+          previousCollection: dbClient ? undefined : previousCollection,
+          windowOwner: sourceIdClaims,
+          onWindowChange: (move) => {
+            commitWindow = move
+          },
         })
       }
+
+      previousCollection =
+        dbClient || isCollection(preparedValue) ? null : collection
 
       // A setup that never subscribes releases its deferred sync starts when
       // garbage collection reclaims the live query it built. A Collection
@@ -465,11 +472,12 @@ export function useLiveQuery(
           : undefined
       return {
         collection,
+        move: commitWindow,
         client: dbClient,
         queryHash,
         // The subscribing effect releases the starts, so it drops the
         // reclaim release.
-        resumeDeferredCollections: () => {
+        onPreload: () => {
           cancelReclaimRelease?.()
           resumeDeferredLiveQueryCollections(deferredCollections)
         },
@@ -480,11 +488,10 @@ export function useLiveQuery(
   })
 
   let currentResolved = untrack(() => resolved)
-  let currentObserver = createLiveQueryObserver(currentResolved.collection, {
-    client: currentResolved.client,
-    queryHash: currentResolved.queryHash,
-    onPreload: currentResolved.resumeDeferredCollections,
-  })
+  let currentObserver = createLiveQueryObserver(
+    currentResolved.collection,
+    currentResolved,
+  )
   const initialSnapshot =
     typeof window === `undefined` || context?.hydrating
       ? currentObserver.getServerSnapshot()
@@ -496,19 +503,17 @@ export function useLiveQuery(
   // Reactive data array that maintains sorted order
   let internalData = $state<Array<any>>(snapshotRows(initialSnapshot.data))
 
-  // Track collection status reactively
-  let status = $state(initialSnapshot.status)
-  let health = $state.raw<HealthNode | undefined>(initialSnapshot.health)
-  let isSyncError = $state(initialSnapshot.isSyncError)
+  // The observer already derives status flags and health coherently. Keep its
+  // snapshot, then project each metadata field through its own derived value
+  // so a row-only publication does not invalidate a status-only consumer.
+  let metadata = $state.raw(initialSnapshot)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,
     changes?: Array<ChangeMessage<any>>,
   ) => {
     const snapshot = observer.getSnapshot()
-    status = snapshot.status as CollectionStatus
-    health = snapshot.health
-    isSyncError = snapshot.isSyncError
+    metadata = snapshot
     untrack(() => {
       if (changes && changes.length > 0) {
         for (const change of changes) {
@@ -532,51 +537,55 @@ export function useLiveQuery(
     })
   }
 
+  // Source notifications write Svelte state. Apply moves outside the derived
+  // input and retain the observer when only its window changes.
+  $effect.pre(() => {
+    const next = resolved
+    untrack(() => next.move?.())
+  })
+  const observerInput = $derived.by(() => {
+    const next = resolved
+    return next.client ? next : next.collection
+  })
   // Watch for collection changes and subscribe to updates
   $effect(() => {
-    const nextResolved = resolved
+    observerInput
+    const nextResolved = untrack(() => resolved)
 
     if (nextResolved !== currentResolved) {
       currentObserver.dispose()
       currentResolved = nextResolved
-      currentObserver = createLiveQueryObserver(nextResolved.collection, {
-        client: nextResolved.client,
-        queryHash: nextResolved.queryHash,
-        onPreload: nextResolved.resumeDeferredCollections,
-      })
+      currentObserver = createLiveQueryObserver(
+        nextResolved.collection,
+        nextResolved,
+      )
       syncFromObserver(currentObserver)
     }
 
     const observer = currentObserver
 
-    const unsubscribe = observer.subscribe(
-      (changes: Array<ChangeMessage<any>> | undefined) => {
-        syncFromObserver(observer, changes)
-      },
-    )
+    observer.subscribe((changes: Array<ChangeMessage<any>> | undefined) => {
+      syncFromObserver(observer, changes)
+    })
     try {
-      currentResolved.resumeDeferredCollections()
+      currentResolved.onPreload()
       syncFromObserver(observer)
     } catch (error) {
-      unsubscribe()
       observer.dispose()
       throw error
     }
 
     // Cleanup when effect is invalidated
     return () => {
-      unsubscribe()
-      if (observer === currentObserver) observer.dispose()
+      observer.dispose()
     }
   })
 
   // Every read goes through the compiled query, so a query the hook rejected
   // throws on each read instead of serving the previous query's state.
-  const readResolved = () => resolved
-
-  return {
+  const result = {
     get state() {
-      readResolved()
+      resolved
       return state
     },
     get data() {
@@ -589,41 +598,28 @@ export function useLiveQuery(
     get collection() {
       return getPublicCollection(resolved.collection)
     },
-    get status() {
-      readResolved()
-      return status as CollectionStatus
-    },
-    get isLoading() {
-      readResolved()
-      return status === `loading`
-    },
-    get isReady() {
-      readResolved()
-      return status === `ready` || status === `disabled`
-    },
-    get isIdle() {
-      readResolved()
-      return status === `idle`
-    },
-    get isLoadingError() {
-      readResolved()
-      return status === `error`
-    },
-    get isCrashed() {
-      readResolved()
-      return status === `crashed`
-    },
-    get isCleanedUp() {
-      readResolved()
-      return status === `cleaned-up`
-    },
-    get isSyncError() {
-      readResolved()
-      return isSyncError
-    },
-    get health() {
-      readResolved()
-      return health
-    },
   }
+  for (const field of [
+    `status`,
+    `isLoading`,
+    `isReady`,
+    `isIdle`,
+    `isLoadingError`,
+    `isCrashed`,
+    `isCleanedUp`,
+    `isSyncError`,
+    `health`,
+  ] as const) {
+    const value = $derived(metadata[field])
+    Object.defineProperty(result, field, {
+      enumerable: true,
+      configurable: true,
+      get() {
+        resolved
+        return value
+      },
+    })
+  }
+  return result as typeof result &
+    Pick<UseLiveQueryReturn<any>, `status` | keyof LiveQueryStatusFlags>
 }

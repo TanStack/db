@@ -454,10 +454,9 @@ export class CollectionSubscriber<
         !this.collectionConfigBuilder.hasActiveWindowOperation(),
       () => this.collectionConfigBuilder.getGraphInputRevision(),
       () =>
-        orderByInfo.joinedFilterSourceId !== undefined &&
-        this.collectionConfigBuilder.hasPendingJoinedWork(
-          orderByInfo.joinedFilterSourceId,
-        ),
+        orderByInfo.joinedFilterSourceIds?.some((sourceId) =>
+          this.collectionConfigBuilder.hasPendingJoinedWork(sourceId),
+        ) ?? false,
     )
     this.orderedLoader.start()
 

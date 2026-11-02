@@ -204,12 +204,10 @@ const mountControllableWith = (path: IdentityPath) =>
       ...handle,
       publications: published.values,
       statePublications: published.stateValues,
-      async setParam(param: P) {
-        await guard(() =>
-          act(async () => {
-            hook.rerender({ param })
-          }),
-        )
+      async setParam(param: P, observe?: () => void) {
+        // renderHook's rerender commits inside its own synchronous act.
+        guard(() => hook.rerender({ param }))
+        observe?.()
         await handle.flush()
       },
     }
@@ -281,12 +279,10 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
       ...handle,
       publications: published.values,
       statePublications: published.stateValues,
-      async setParam(param: P) {
-        await guard(() =>
-          act(async () => {
-            hook.rerender({ param })
-          }),
-        )
+      async setParam(param: P, observe?: () => void) {
+        // renderHook's rerender commits inside its own synchronous act.
+        guard(() => hook.rerender({ param }))
+        observe?.()
         await handle.flush()
       },
     }
@@ -294,6 +290,7 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
 
 const reactDriver: LiveQueryDriver = {
   name: `react`,
+  parameterObservationCut: `committed synchronous rerender`,
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,

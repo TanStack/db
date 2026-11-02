@@ -1,6 +1,7 @@
 import { groupedTopKWithFractionalIndex } from './groupedTopKWithFractionalIndex.js'
-import { consolidate } from './consolidate.js'
+import { orderedWindow } from './ordered-window.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
+import type { OrderedTopK } from './ordered-window.js'
 
 export interface GroupedOrderByOptions<Ve> {
   comparator?: (a: Ve, b: Ve) => number
@@ -52,44 +53,11 @@ export function groupedOrderByWithFractionalIndex<
   type KeyType = T extends KeyValue<infer K, unknown> ? K : never
   type ValueType = T extends KeyValue<unknown, infer V> ? V : never
 
-  const limit = options.limit ?? Infinity
-  const offset = options.offset ?? 0
-  const setSizeCallback = options.setSizeCallback
-  const setWindowFn = options.setWindowFn
-  const groupKeyFn = options.groupKeyFn
-  const comparator =
-    options.comparator ??
-    ((a, b) => {
-      // Default to JS like ordering
-      if (a === b) return 0
-      if (a < b) return -1
-      return 1
-    })
-
-  return (
+  return orderedWindow<T, Ve>(
+    valueExtractor,
+    options,
+    groupedTopKWithFractionalIndex as OrderedTopK<T>,
+  ) as (
     stream: IStreamBuilder<T>,
-  ): IStreamBuilder<[KeyType, [ValueType, string]]> => {
-    // Cast to the expected key type for groupedTopKWithFractionalIndex
-    type StreamKey = KeyType extends string | number ? KeyType : string | number
-
-    return stream.pipe(
-      groupedTopKWithFractionalIndex<StreamKey, ValueType>(
-        (a: ValueType, b: ValueType) =>
-          comparator(valueExtractor(a), valueExtractor(b)),
-        {
-          limit,
-          offset,
-          setSizeCallback,
-          setWindowFn,
-          groupKeyFn: groupKeyFn as (
-            key: StreamKey,
-            value: ValueType,
-          ) => unknown,
-        },
-      ) as (
-        stream: IStreamBuilder<T>,
-      ) => IStreamBuilder<[KeyType, [ValueType, string]]>,
-      consolidate(),
-    )
-  }
+  ) => IStreamBuilder<[KeyType, [ValueType, string]]>
 }

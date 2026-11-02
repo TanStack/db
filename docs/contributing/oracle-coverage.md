@@ -796,27 +796,66 @@ stay ready/empty, and a new interval gets a new handle. This assumes no
 facade-local optimistic mutations. Every shape declares active empty readiness
 and nonempty child receiving cuts. Six lifetime and four inline-value hostile
 controls reject wrong observations. See [chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
-Functional callback-input observations now have a separate receiving boundary
-in `virtual-row-fields-input-oracle.test.ts`, sharing source metadata judgment
-with the existing root/Effect owners. Its finite 33 authoring descriptions cross
-seven QueryRef/join/union consumers through root and correlated inline-child
-compilation (462 histories), plus two direct-source controls. Each compares
-immutable callback captures and their ordinary derived output at initial
-readiness, held mutation, settlement and remote next use. Complete before/after
-source facts permit retraction evaluation; startup LEFT joins may expose an
-absent side, while established outputs require both typed-key rows. Reserved
-metadata is judged by presence/readable value, with ownership flags diagnostic;
-ordinary own undefined remains distinct from absence. Another 66 histories keep
-nested inline array/materialized authored values, and 33 reject compiled
-Collection inputs before callbacks. Per-history/path/cut reach is mandatory even
-under unrelated replay seeds; unentered calibration-only runs stand aside.
-Unchanged production exposes 203 correlated-child violations: new-shape fields
-leak and source-spread collisions spoof genuine metadata. Root receivers and
-nested inline preservation pass. All 2,153 declared states reach; 17 controls
-and independent seeded/unentered/partial-selection checks calibrate this owner.
-See [chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md) for exact
-fingerprints and independent evidence. Production repair is deferred under the
-[RC oracle challenge](oracle-reviews/2026-10-28-pr-2171-oracle-challenge.md).
+Functional callback-input observations have a separate receiving boundary in
+`virtual-row-fields-input-oracle.test.ts`, sharing the existing source metadata
+judgment. The maintainer extended O12 on 2026-10-30 from fn.select to fn.where
+and fn.having while preserving authored inline output. Thirty-three authoring
+descriptions cross seven QueryRef/join/union paths, five callback forms
+(select, where, having, where-select, having-select), and root, wrapped child,
+direct child and real Effect receivers. Flat union children require a named
+QueryRef for include correlation; direct flat union children remain inadmissible.
+The finite grammar has 4,290 receiving histories and 20 direct-source controls.
+
+Each receiver checks immutable callback captures and complete derived or
+predicate-filtered output at initial readiness, held mutation, settlement and
+remote next use. Effects also check exit/reentry, every delivered value and
+previousValue, continuity in both callback channels and silence after disposal.
+Before/after source facts permit retraction evaluation. Startup LEFT joins may
+expose an absent side; after source exit the unmatched peer remains a result.
+Reserved fields use presence/readable value, with ownership diagnostic.
+Ordinary own undefined remains distinct from absence. Another 132 histories
+retain inline array/materialized authored values through direct and QueryRef
+paths; 66 reject compiled Collection inputs before callbacks. All 20,720
+callback and 594 inline/rejection states reach once.
+
+Another 396 histories use exported `compileQuery`, the same exact QueryIR and
+D2 input streams, both compilation orders, shared/separate caches, and FROM,
+joined-source and union-branch placement. At initial graph drain, all 1,188
+states compare callback captures, complete derived output and raw authored
+output. Raw output uses a shared-cache/separate-cache differential, while both
+executions still undergo the independent callback/derived-output judgment.
+The union optimizer clones branch IR: counters establish original-key reuse
+for FROM/JOIN, while union checks propagation/transparency without claiming
+that cache hit. This receiver supplies no Effect-root metadata attribution law.
+
+The owner has 4,923 tests. Before callback production edits, it rejected 1,102
+metadata input comparisons on the reviewed implementation; 3,821 tests passed.
+All 22,502 callback, inline and compiler states reached. The repaired owner
+passes. Final mutants reject a WHERE-only repair (551 comparisons), enabling
+normalization for every predicate pipeline (696 authored-output comparisons),
+and dropping the selected-row cache mode (26 comparisons). Earlier path-specific
+FROM/JOIN/union normalization mutants each failed 112 compiler comparisons.
+The real Effect receiver additionally rejects 203 metadata comparisons on the
+actual PR base. That receiving evidence does not retroactively supply the
+historical selection repair's initial pre-edit gate.
+
+The ordered-work owner, `ordered-work-oracle.property.test.ts`, adds 144 finite
+histories through `ordered-compiler-cache-driver.ts`. Two compilation orders,
+shared/separate caches, FROM/JOIN/union paths, two projection forms, two order
+directions and three window moves exercise actual source Collections and the
+real OrderedSourceLoader. The independent installed-window model checks signed
+output bags at initial, moved and returned cuts. Original registration overwrite
+fails 48 histories; the repaired full 424-test owner passes. All 432 new states
+reach once. This receiver claims the controlled compiler/loader boundary, not
+public Collection window-promise integration. Its 280 existing histories retain
+their Collection/Effect receiving evidence. Separate metadata-mode pipelines
+remain a permitted representation; no one-pipeline performance promise follows.
+The [runtime repair record](oracle-reviews/callback-metadata.md) retains the
+commands, source bindings, lossless nine-item audit, calibrations and limits.
+Historical instrument acceptance remains in
+[chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
+The separate static receiving-type failures in the
+[deferred record](oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md) remain open.
 This extension does not establish arbitrary descriptors/prototypes, greater
 recursive depth, same-source overlapping transactions, other dynamic
 join kinds, truncate, provider scheduling, framework receivers or construction
@@ -1108,6 +1147,23 @@ that fails one receiver's current request while comparing another receiver's
 status at the same checkpoint. This is a stated observation limit, not a
 retirement of the per-demand error-ownership law.
 
+The replay error-identity comparison keeps subscription ownership separate
+from the source-wide publication barrier. CI seed `1926301329`, path
+`251:2:1:4:2:2`, exposed a false failure: an include replay rejected while a
+join replay still loaded, and the comparison required the join's earlier
+failure instead. Adapter request data now identifies each load's subscription.
+Only failures and covering replacements within that subscription compete for
+its replay error. A 96-history finite grammar crosses root/marker replay,
+oldest/newest failure order, four join forms, both directions and three window
+widths. It measures 52 histories with multiple failures of one subscription
+and six with sibling failures; both require at least five. The old source-wide
+comparison and a production mutant that returns the last replay failure each
+fail the intended identity assertion. Publication, request-error, retirement,
+readiness and convergence comparisons and campaign budgets remain. This is a
+controlled Collection/live-query witness, with no provider or framework claim.
+Evidence and the oracle self-review are in
+[the callback metadata record](oracle-reviews/callback-metadata.md#replay-error-identity-ci-follow-up-2026-10-30).
+
 The ordered replay owner distinguishes replay renewal from an ordinary lazy
 demand created during another subscription's replay. Its adapter records the
 leases held at truncate, then matches subscription identity and independently
@@ -1392,6 +1448,21 @@ Svelte server-only owner proves server reconstruction only; its second render
 is not browser evidence. `hydration.svelte.test.ts` separately receives
 normalized transport and normal warm-browser initialization through its native
 scheduler.
+
+The [React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
+extends that preparation grammar and judgment with real matched React/ReactDOM
+18.3.1 and 19.2.4 development server renderers. Separate paths cover provider
+and explicit-client ordinary hooks, completed non-streaming Suspense through
+both client forms, standalone builders and supplied Collections. A disabled
+input replays the same diagnostic comparison. Each checks return and the raw
+React client-layout diagnostic after server render and cleanup; ordinary
+descriptor paths also compare admission, selected rows and status, while
+prepared Suspense compares rows. Standalone/supplied paths make no hydration
+claim. Fixed/fresh campaigns retain per-runtime/path reach and direct replay;
+this does not establish streaming Suspense, actual browser hydration, arbitrary
+provider delivery or every React version. Client commit and abandonment remain
+with the window receiving owner. [SSR effect evidence](oracle-reviews/2026-10-30-react-ssr-effects.md)
+records pre-edit RED, repaired GREEN and hostile rejection.
 
 The shared admission owner also defines runtime ready/error outcomes, browser
 explicit preparation and defined/undefined causes. Its receiving drivers are
@@ -3755,6 +3826,21 @@ target execution, not reproduction of a particular bug. Local IVM and offline
 properties have separate environment variables; inspect their test headers.
 Do not assume the core multiplier reaches them.
 
+The adapter-window properties have named replay routes in
+`packages/db/tests/oracle-replay-manifest.ts`. Each shared history property
+includes its production driver: `framework.<driver>.window-history`,
+`framework.<driver>.pending-window-history`, or
+`framework.<driver>.publication-window-history`. The drivers are `react`,
+`react-dependency-list`, `preact`, `vue`, `solid`, `angular`, and `svelte`.
+Each route selects its own conformance file and names the shared model module
+as its source. React and Preact render witnesses, all twelve React SSR
+runtime/path cells, and the IVM numeric-window lane retain their own routes.
+Selectors choose only the fresh or random campaign. The earlier three shared
+`framework.*` names are retired because they lost the failing driver's identity.
+The [replay review](oracle-reviews/2026-10-30-adapter-page-window-replay.md)
+records the 21 driver/history witnesses and correction of the earlier canonical
+React routing claim in the preparation record.
+
 The Node expression-index oracle runs matching fixed-seed and seedless-random
 campaigns by default. A path replay of its property selects only the
 requested seed and shrink path:
@@ -6014,6 +6100,27 @@ path from a later run. Until then, this entry cannot tell an operator
 regression from an older defect. A later failure of that campaign must record
 its seed here before anyone calls it pre-existing.
 
+### Ordered joined dependency composition, October 30
+
+October 30 receiving extension: the same ordered-work owner now checks joined
+dependency composition across direct, wrapped QueryRef and two-filter nested
+ordered plans. Its 128 finite histories cross actual Collection and Effect
+receivers, two directions, matched/anti-joined membership, widths one/two,
+joined answer order and which of two joined sources vetoes a new head row.
+Each history checks settled initial rows, then every recorded publication and
+public read at held, partial and settled cuts. All 256 declared held/settled
+states reach their minimum once. Unchanged `8464ec977` fails 24 publication
+comparisons (12 per receiver); the repair passes all 128 histories. Overwrite,
+last-only and first-only dependency mutants fail 24, eight and eight intended
+comparisons respectively. The original 424 owner tests and their budgets stay.
+This is a controlled adapter witness through real core receivers: one inserted
+head row, two joined sources, one QueryRef level and windows of one/two rows.
+Ordinary progressive Effect startup callbacks remain outside this new atomicity
+claim. No provider/framework, arbitrary nesting, rejection, cleanup or public
+window-promise integration claim follows. See the versioned
+[joined dependency review](oracle-reviews/callback-metadata.md#ordered-joined-dependency-review-2026-10-30)
+for the pre-edit gate, experiments, source binding and loss audit.
+
 ### Ordered signalling-refetch work scope, October 27
 
 Owner: `packages/db/tests/query/ordered-work-oracle.property.test.ts`. The
@@ -6305,6 +6412,17 @@ bundle erasure, Typedoc generation, tooling GREEN and restored-old-tooling
 mutants remain required receiving checks. Generated docs remain CI-owned.
 
 
+### Replay successful-retirement ownership, October 30
+
+The load-subset replay refinement owner scopes successful replacement to the
+same subscription as the failure. Its 96-history failure/success matrix reaches
+four sibling-success coverage histories and calibrates that another subscription's
+failure survives the account action. The original account fails that comparison;
+all 44 normal owner tests pass after repair, with existing budgets intact.
+No production change or new provider/framework claim follows. See the
+[versioned retirement review](oracle-reviews/callback-metadata.md#replay-retirement-scope-review-2026-10-30).
+
+
 ### Framework row snapshot isolation
 
 The **Frameworks** owner judges preservation of borrowed Collection values at
@@ -6422,6 +6540,8 @@ prototype methods while native nodes/setters supply updates. Original-code,
 missing-node, accessor/method, and reordered-tail mutants distinguish these
 repairs. No output alias topology or public elapsed-time budget is imposed.
 
+The callback integration adds eight signal-driven lifetime histories to the same Solid materialization owner: callback/config inputs cross one/two array levels and ordinary/native payloads. The original 48 input histories remain. The 32 identity/lifetime histories each enforce source-only-write reach; the eight added histories also enforce query-input-change reach and compare selected values plus rebinding. Application input preparation stays tracked, while initial compilation and Collection startup run untracked. The extended pre-production campaign rejects eight native lifetime cases on integration head `fa5df11a`; all 201 owner tests and 336 Solid runtime tests then pass locally. Restoring the old hook fails the source-only subscription comparison. Untracking query construction too fails all eight new signal-result comparisons. Existing comparisons and budgets remain. The [integration amendment](oracle-reviews/callback-metadata.md#solid-binding-lifetime-at-compilation-2026-11-02) records commands, runner differences, exact evidence, and limits. These finite settled-host cuts establish neither native-source-only value liveness nor other frameworks' dependency tracking.
+
 The local-only draft driver does not claim top-level symbol-write admission.
 Its shared preservation comparison still checks every field actually admitted,
 including nested symbols and all actual mutation originals. The proxy-revert
@@ -6528,6 +6648,98 @@ useful extension: the hash identity oracle owns those semantic distinctions,
 but its helper-level evidence does not by itself exercise distinct storage.
 The separate Index structural-collision obligation above remains open.
 See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
+
+
+### Adapter-owned page windows
+
+The framework owner includes [window-history-oracle.ts](../../packages/db/tests/conformance/window-history-oracle.ts), registered through the shared conformance suite in React, Preact, Vue, Solid, Angular and Svelte. Maintainer decision 2026-10-30 for #2291: changing only `.limit()`/`.offset()` moves the existing outer window; it adds no hook option. The independent sort/filter/slice model checks ordered selected rows and keyed-map values after each framework flush, Collection retention for page moves, replacement for source/filter/order/projection/nested-window changes, and retained upstream ownership. Direct and nested paths have separate reach, as do changing/stable/opaque keys where the driver supports keys. Keyed source swaps include distinct source objects under one Collection ID. Generated source updates check liveness after reuse. The bare-callback lanes also vary a Collection option together with a page change and check its applied value. The pending lane observes a move during initial loading, oldest settlement while the latest remains pending, initial readiness, overlapping held acquisitions, final latest rows, and unmount before settlement. The publication-callback lane changes offset, limit or both from a public change callback, then checks the retained Collection after the host settles. It controls demand settlement over already installed source rows; the core pagination owner continues to own source delivery, failures and ordered repair.
+
+The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. DbClient/hydration and Suspense shared-result caches, supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts and paths; this fix does not retarget their shared Collections. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
+
+Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes are recorded in [the page-window review](oracle-reviews/2026-10-30-adapter-page-windows.md).
+
+The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.
+
+The existing [top-K support-window owner](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts) also has a numeric-window lane for safe-integer maximum offsets and widths, exact omitted-bound inheritance on partial moves, and required demand messages when installed ranges are empty. It permits additional messages. It observes one-group settled operator rows, size and demand signals; real framework source growth belongs to the shared receiving owner above. [Numeric evidence](oracle-reviews/2026-10-30-topk-numeric-windows.md) records RED, GREEN, reach, replay and mutants.
+
+### Projection and negative-window gaps from removal review (2026-11-02)
+
+The shared framework owner now includes
+[result-shape-oracle.ts](../../packages/db/tests/conformance/result-shape-oracle.ts).
+One independent authored-source model and generated grammar run through React
+(both registrations), Preact, Vue, Solid, Svelte and Angular. List/findOne
+transitions, repeated modes, return transitions, empty/single/multiple source
+rows and both data-first/Collection-first reads are checked at each driver's
+native parameter cut, then after settlement. Finite singleton queries retain
+identical offset/limit across projection changes, including positive offsets.
+Native cuts require raw shape; settled cuts also compare selected values and
+keyed state. This does not promise synchronous row freshness or identical host
+scheduling. Disabled inputs, errors, supplied Collections, DbClient and broad
+host/AOT behavior remain outside this lane.
+
+**Repaired receiving defect:** Angular previously returned the old query's raw
+projection at its synchronous Signal read before effects. Both directions
+failed even though the new input reached the callback and later settlement
+passed. It now reprojects captured rows through the current query while keeping
+the normal snapshot path and pooled-query laziness. All six frameworks complete
+their fixed/random campaigns; restoring the defect fails the native comparison.
+Generated guarded replay seed 2316,
+property `framework.angular.result-shape`, path `28` reproduces the defect;
+finite paths `1` and `25` preserve nonempty offset-0/offset-1 evidence.
+
+The existing top-K support-window owner adds a negative-offset grammar through
+direct array top-K, one-group top-K and public orderBy. Under the maintainer's
+2026-11-02 absolute-rank decision, nonnegative widths select the installed ranks
+in `[offset, offset + limit)`, including intervals crossing zero. Generated
+histories reach wholly negative/zero-width/crossing-zero windows, negative
+source edits, partial moves, nonnegative returns and offsets below negative
+cardinality. Signed rows, order, values, multiplicity and size remain observed.
+The direct and orderBy size getters also count with an always-true predicate,
+which must equal the selected row count. Negative widths, fractional bounds,
+multiple groups, varying prefix predicates and downstream acquisition remain
+outside this lane; existing support/numeric budgets and their prior evidence
+remain unchanged.
+
+Review5740133634 raises an adjacent negative-width contract question. The
+support-window owner above is the location for a future maintainer decision and
+its witness. With `TopKArray(5, -2)`, install ordered values0/4/6/8/10, then insert2
+at rank1. Both maina3c4d0676 and the integrated branch emit moveIn10/moveOut6 while
+reporting size0. The executable same-source probe is recorded in the
+[second-main integration review](oracle-reviews/2026-11-02-removal-oracle-gaps.md#second-main-integration--a3c4d0676).
+The accepted rank-selection law in this change covers nonnegative widths.
+No negative-width empty-result law is claimed. Defining that behavior needs a
+maintainer decision before extending generated moves and source-edit histories.
+The adapter reuse path requires nonnegative target bounds and cannot take this
+negative-width input as an eligible page-window move.
+
+**Repaired operator defects:** negative-window rows, size, source edits and
+return moves now agree with absolute ranks on all three paths. Each path's
+fixed/random campaign reaches all eight declared states in 101 histories
+(one example and 100 generated). Restoring relative slicing, the old size rule
+or the old leading-count start separately fails the corresponding observation.
+Each property `ivm.topk-negative-window-array`,
+`ivm.topk-negative-window-grouped` and `ivm.topk-negative-window-orderBy` has a
+guarded generated RED on the original code at seed 2316, path `1`, and a GREEN
+on the repair. This closes the recorded negative-window defects within the
+declared grammar, D2 paths and graph-drain cuts. Exact original/reduced traces,
+declared reach, receiving cuts, calibrations and independent review outcomes
+are in the [oracle extension record](oracle-reviews/2026-11-02-removal-oracle-gaps.md).
+Its [production repair entry](oracle-reviews/2026-11-02-removal-oracle-gaps.md#production-repairs-2026-11-02)
+records completed GREEN reach, isolated mutants and the rejected intermediate
+Angular pooling regression. The earlier page-window oracle-first qualification
+remains unchanged.
+
+**Open test-mechanics gap from the repair run:** the guarded replay owner
+(`packages/db/tests/oracle-replay.test.ts`, Small structures and test mechanics)
+does not enforce singleton execution for a successful shrink-chain path.
+With seed 2316 on the repaired code, `framework.angular.result-shape` at
+`28:0:0:0:0:0:0` reports one registration but two histories, and each
+`ivm.topk-negative-window-*` at `1:0:0:0` reports one registration but eight
+histories, although `randomParameters` requests `numRuns: 1`. Original
+one-segment paths and failing shrink paths report one history. Add a generated
+passing shrink-path receiving witness and constrain continuation before claiming
+one-history replay for that case. These extra GREEN executions are recorded
+accurately in the repair entry and are not used as singleton product evidence.
 
 ## Loading sibling replay and final catch-up reach (2026-10-30)
 

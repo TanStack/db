@@ -142,7 +142,7 @@ Local runs use saved configs under `/private/tmp/callback-metadata/release-repla
 
 The browser campaign retains 80 runs for each seed mode. Its expected injected stream errors are diagnostics, not comparison failures. The first two browser setup failures, the initial reach-only failures, and the intermediate TypeScript literal-inference error remain separate from RED/GREEN evidence.
 
-The following SHA256 fingerprints bind the executable evidence to this change. The commit containing this record supplies its immutable Git identity.
+The following SHA256 fingerprints bind the main-based executable evidence to PR 2318 commit `0e5a5234b9fe4a26244a0e52d3862916a7f4ce7e`. The callback branch port has separate source fingerprints and results in [its evidence record](callback-metadata.md#release-blocking-loading-sibling-replay-port-2026-10-30).
 
 | File | SHA256 |
 | --- | --- |
@@ -659,3 +659,19 @@ of this verification. Existing provider, framework, browser-process and deeper
 history limits remain. Browser and Solid receiving evidence above retains its
 historical source binding. Final-head CI and external review coverage remain
 separate from these local results.
+
+## Integration after the callback port (2026-11-02)
+
+The repair's production code, oracle coverage and patch Changeset landed on
+main through [#2312](https://github.com/TanStack/db/pull/2312). This section
+records #2318's subsequent integration of main
+`30e85464ed2b9b12c5f10981a062427a1fc8daaa` with a normal merge commit.
+
+The conflict resolution retains main's coverage map, including later callback,
+framework, SSR and numeric-window records. It also retains the historical
+source binding in this review. Against that main commit, the resulting change
+is this integration record only. Production, tests, manifests, the lockfile and
+Changesets are identical to main. The earlier RED, GREEN, mutant and size
+results keep their stated historical bindings. No new runtime verification or
+bug-class closure is claimed by this document update. New-head CI and review
+readiness must be checked before the requested merge.

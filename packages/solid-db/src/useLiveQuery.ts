@@ -5,15 +5,16 @@ import {
   createResource,
   createSignal,
   onCleanup,
+  untrack,
 } from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
 import {
-  BaseQueryBuilder,
   createLiveQueryObserver,
   getLiveQueryStatusFlags,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  prepareLiveQueryValue,
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
@@ -252,35 +253,29 @@ export function useLiveQuery<
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection,
+      windowOwner: resolveNext,
+    }))
   const collection = createMemo(
     () => {
-      if (configOrQueryOrCollection.length === 1) {
-        // This is a query function - check if it returns null/undefined
-        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-        const result = configOrQueryOrCollection(queryBuilder)
-
-        if (result === undefined || result === null) {
-          // Disabled query - return null
-          return null
+      const value =
+        configOrQueryOrCollection.length === 1
+          ? configOrQueryOrCollection
+          : configOrQueryOrCollection()
+      // Query-input reads define binding dependencies. Compilation can drain
+      // source rows synchronously; those reads belong to the result instead.
+      const prepared = prepareLiveQueryValue(value, undefined)
+      return untrack(() => {
+        if (isCollection(prepared)) {
+          prepared.startSyncImmediate()
+          previousCollection = null
+          return prepared as Collection
         }
-
-        return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
-      }
-
-      const innerCollection = configOrQueryOrCollection()
-
-      if (innerCollection === undefined || innerCollection === null) {
-        // Disabled query - return null
-        return null
-      }
-
-      if (isCollection(innerCollection)) {
-        innerCollection.startSyncImmediate()
-        return innerCollection as Collection
-      }
-
-      return resolveLiveQueryValue(innerCollection, {
-        gcTime: DEFAULT_GC_TIME_MS,
+        return resolveNext(prepared)
       })
     },
     undefined,
@@ -312,6 +307,17 @@ export function useLiveQuery(
     },
   )
   const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
+  const syncStatus = (view: {
+    status: CollectionStatus | `disabled`
+    health: HealthNode | undefined
+  }) => {
+    setStatus(view.status)
+    setHealth(view.health)
+  }
+  const syncState = (entries: Iterable<[string | number, any]>) => {
+    state.clear()
+    for (const [key, value] of entries) state.set(key, value)
+  }
   // Every status flag comes from the shared rule; a disabled query is ready.
   const flags = createMemo(() =>
     getLiveQueryStatusFlags(status() as CollectionStatus, health()),
@@ -375,8 +381,7 @@ export function useLiveQuery(
       if (!currentCollection) {
         return []
       }
-      setStatus(currentCollection.status)
-      setHealth(currentCollection.health)
+      syncStatus(currentCollection)
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWait = {
@@ -419,13 +424,9 @@ export function useLiveQuery(
       }
       // Initialize state with current collection data
       batch(() => {
-        state.clear()
-        for (const [key, value] of currentCollection.entries()) {
-          state.set(key, value)
-        }
+        syncState(currentCollection.entries())
         syncDataFromCollection(currentCollection)
-        setStatus(currentCollection.status)
-        setHealth(currentCollection.health)
+        syncStatus(currentCollection)
       })
       return data
     },
@@ -461,36 +462,29 @@ export function useLiveQuery(
     // rows, never deletes stale ones). Without this, switching collections
     // leaves the dropped keys in `state` until the async resource reconciles.
     state.clear()
-    const unsubscribe = observer.subscribe(
-      (changes: Array<ChangeMessage<any>> | undefined) => {
-        batch(() => {
-          if (changes) {
-            for (const change of changes) {
-              switch (change.type) {
-                case `insert`:
-                case `update`:
-                  state.set(change.key, change.value)
-                  break
-                case `delete`:
-                  state.delete(change.key)
-                  break
-              }
-            }
-          } else {
-            // Cleanup and other status-only publications carry no row deltas.
-            // Rebuild the keyed view so it cannot diverge from ordered data.
-            state.clear()
-            for (const [key, value] of observer.getSnapshot().state ?? []) {
-              state.set(key, value)
+    observer.subscribe((changes: Array<ChangeMessage<any>> | undefined) => {
+      batch(() => {
+        if (changes) {
+          for (const change of changes) {
+            switch (change.type) {
+              case `insert`:
+              case `update`:
+                state.set(change.key, change.value)
+                break
+              case `delete`:
+                state.delete(change.key)
+                break
             }
           }
-          syncDataFromCollection(currentCollection)
-          const snapshot = observer.getSnapshot()
-          setStatus(snapshot.status)
-          setHealth(snapshot.health)
-        })
-      },
-    )
+        } else {
+          // Cleanup and other status-only publications carry no row deltas.
+          // Rebuild the keyed view so it cannot diverge from ordered data.
+          syncState(observer.getSnapshot().state ?? [])
+        }
+        syncDataFromCollection(currentCollection)
+        syncStatus(observer.getSnapshot())
+      })
+    })
     subscribedCollection = currentCollection
     if (localWait?.ready && localWait.collection === currentCollection) {
       releaseLocalWait()
@@ -500,16 +494,13 @@ export function useLiveQuery(
     // resource continuation to correct the previous collection's rows.
     batch(() => {
       syncDataFromCollection(currentCollection)
-      const snapshot = observer.getSnapshot()
-      setStatus(snapshot.status)
-      setHealth(snapshot.health)
+      syncStatus(observer.getSnapshot())
     })
 
     onCleanup(() => {
       if (subscribedCollection === currentCollection) {
         subscribedCollection = undefined
       }
-      unsubscribe()
       observer.dispose()
     })
   })
@@ -517,12 +508,10 @@ export function useLiveQuery(
   // We have to remove getters from the resource function so we wrap it
   function getData() {
     const currentCollection = collection()
-    if (currentCollection) {
-      if (isSingleResultCollection(currentCollection)) {
-        // Force resource tracking so Suspense works
-        getDataResource()
-        return readData[0]
-      }
+    if (currentCollection && isSingleResultCollection(currentCollection)) {
+      // Force resource tracking so Suspense works
+      getDataResource()
+      return readData[0]
     }
     const result = getDataResource()
     return result === data ? readData : result

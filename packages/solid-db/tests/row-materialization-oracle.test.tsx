@@ -14,6 +14,8 @@
  * with same-parent controls. Resize histories grow, shrink and empty arrays.
  * The shared snapshot owner's immutable-update law also preserves source values.
  * All three inputs run on the real Solid host at one or two array levels.
+ * Signal-driven query inputs also change their selected value and must rebind.
+ * This distinguishes input tracking from incidental native row reads.
  * Comparison follows the host's settled cut. This law does not promise
  * identity for an element whose source object changed, live mutable-source
  * values, arbitrary getters, cyclic updates, or a wall-clock work bound.
@@ -43,6 +45,7 @@ type History = {
   nested: boolean
   native: boolean
   law: `identity` | `lifetime` | `reorder` | `resize`
+  reactiveInput?: boolean
   nativeElements?: boolean
   initialParent?: boolean
   nextParent?: boolean
@@ -61,8 +64,11 @@ function* histories(): Generator<History> {
           `lifetime`,
           `reorder`,
           `resize`,
-        ] as const)
+        ] as const) {
           yield { input, nested, native, law }
+          if (input !== `collection` && law === `lifetime`)
+            yield { input, nested, native, law, reactiveInput: true }
+        }
 }
 
 // Replacing a parent can expose the same native child through raw descriptors
@@ -135,7 +141,7 @@ async function runHistory(history: History) {
       ? `same-parent-control`
       : `parent-transition`
   const reach = createOracleReach(
-    `solid.materialization.${history.input}.${history.nested}.${history.native}.${history.law}.${history.initialParent}.${history.nextParent}`,
+    `solid.materialization.${history.input}.${history.nested}.${history.native}.${history.law}.${history.initialParent}.${history.nextParent}.${history.reactiveInput}`,
     history.law === `reorder` || history.law === `resize`
       ? [
           history.law === `reorder` ? `source-reorder` : `array-resize`,
@@ -148,12 +154,14 @@ async function runHistory(history: History) {
           `same-row-scalar-edit`,
           `element-replacement`,
           `source-only-write`,
+          ...(history.reactiveInput ? [`query-input-change`] : []),
         ],
   )
   reach.beginHistory()
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const [nativePayload, setNativePayload] = createStore({ value: 0 })
+    const [inputVersion, setInputVersion] = createSignal(0)
     const initialValues = history.law === `reorder` ? [0, 10] : [0]
     const tags = initialValues.map((value) =>
       history.nativeElements ? createStore({ value })[0] : { value },
@@ -190,8 +198,14 @@ async function runHistory(history: History) {
       resources.defer(() => disposeEffects?.())
       const query = createRoot((dispose) => {
         resources.defer(dispose)
-        const build = (q: InitialQueryBuilder) =>
-          q.from({ row: source }).select(({ row }) => ({ ...row }))
+        const build = (q: InitialQueryBuilder) => {
+          if (!history.reactiveInput)
+            return q.from({ row: source }).select(({ row }) => ({ ...row }))
+          const version = inputVersion()
+          return q
+            .from({ row: source })
+            .select(({ row }) => ({ ...row, inputVersion: version }))
+        }
         return history.input === `collection`
           ? useLiveQuery(() => source)
           : history.input === `config`
@@ -404,6 +418,17 @@ async function runHistory(history: History) {
         `row reads cannot rebind the hook`,
       ).toBe(starts)
       reach.reach(`source-only-write`)
+      if (history.reactiveInput) {
+        setInputVersion(1)
+        await waitFor(() =>
+          expect(Reflect.get(current(), `inputVersion`)).toBe(inputVersion()),
+        )
+        expect(
+          subscriptions.mock.calls.length,
+          `query-input reads still rebind the hook`,
+        ).toBeGreaterThan(starts)
+        reach.reach(`query-input-change`)
+      }
     } finally {
       resources.defer(() => source.cleanup())
     }
@@ -412,7 +437,7 @@ async function runHistory(history: History) {
 }
 
 it.each([...histories()])(
-  `preserves $law through $input, nested=$nested native=$native`,
+  `preserves $law through $input, nested=$nested native=$native reactive=$reactiveInput`,
   runHistory,
 )
 
