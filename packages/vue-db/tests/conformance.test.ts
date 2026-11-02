@@ -232,11 +232,12 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(next: P) {
+    async setParam(next: P, observe?: () => void) {
       param.value = next
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       await nextTick()
+      observe?.()
       published.record(result.data.value, result.state.value)
       await settle()
     },
@@ -245,6 +246,7 @@ function mountControllable<P>(
 
 const vueDriver: LiveQueryDriver = {
   name: `vue`,
+  parameterObservationCut: `nextTick before a later task`,
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
