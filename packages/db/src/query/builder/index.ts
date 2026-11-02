@@ -153,27 +153,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 
   private _clone<TNextContext extends Context = Context>(
-    query: Partial<QueryIR>,
+    patch: Partial<QueryIR>,
   ): BaseQueryBuilder<TNextContext> {
-    // Every clone receives a freshly spread query, so it needs no copy.
-    return new BaseQueryBuilder<TNextContext>(query, true)
-  }
-
-  /**
-   * Creates a source reference from a source object
-   * @param source - An object with a single key-value pair
-   * @param context - Context string for error messages (e.g., "from clause", "join clause")
-   * @returns A tuple of [alias, ref] where alias is the source key and ref is the created reference
-   */
-  private _createRefForSource<TSource extends Source>(
-    source: TSource,
-    context: SourceClauseContext,
-  ): [string, CollectionSourceRef | QueryRef] {
-    const refs = this._createRefsForSource(source, context)
-    if (refs.length !== 1) {
-      throw new OnlyOneSourceAllowedError(context)
-    }
-    return refs[0]!
+    // Merge each clause into a fresh query; explicit undefined clears a clause.
+    return new BaseQueryBuilder<TNextContext>({ ...this.query, ...patch }, true)
   }
 
   private _createRefsForSource<TSource extends Source>(
@@ -254,10 +237,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   from<TSource extends Source>(
     source: SingleSource<TSource>,
   ): QueryBuilder<ContextFromSource<TSource>> {
-    const [, from] = this._createRefForSource(source, `from clause`)
+    const [, from] = this._createRefsForSource(source, `from clause`)[0]!
 
     return this._clone({
-      ...this.query,
       from,
     }) as any
   }
@@ -289,7 +271,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<any> {
     if (sourceOrBranch instanceof BaseQueryBuilder) {
       return this._clone({
-        ...this.query,
         from: new UnionAll(
           [sourceOrBranch, ...branches].map((branch) =>
             cloneQueryForPlacement(
@@ -308,7 +289,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
     return this._clone({
-      ...this.query,
       from,
     }) as any
   }
@@ -352,7 +332,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>
   > {
-    const [alias, from] = this._createRefForSource(source, `join clause`)
+    const [alias, from] = this._createRefsForSource(source, `join clause`)[0]!
 
     // Create a temporary context for the callback
     const currentAliases = this._getCurrentAliases()
@@ -373,7 +353,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const existingJoins = this.query.join || []
 
     return this._clone({
-      ...this.query,
       join: [...existingJoins, joinClause],
     }) as any
   }
@@ -516,26 +495,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       aliases,
       this._getCurrentBindings(),
     ) as RefsForContext<TContext>
-    const rawExpression = callback(refProxy)
-
-    // Allow bare boolean column references like `.where(({ u }) => u.active)`
-    // by converting ref proxies to PropRef expressions, the same way helper
-    // functions like `not()` and `eq()` do via `toExpression()`.
-    const expression = isRefProxy(rawExpression)
-      ? toExpression(rawExpression)
-      : rawExpression
-
-    // Validate that the callback returned a valid expression
-    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
-    // which return boolean primitives instead of expression objects
-    if (!isExpressionLike(expression)) {
-      throw new InvalidWhereExpressionError(getValueTypeName(expression))
-    }
+    const expression = toCondition(callback(refProxy))
 
     const existingWhere = this.query.where || []
 
     return this._clone({
-      ...this.query,
       where: [...existingWhere, expression],
     }) as any
   }
@@ -576,26 +540,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         ? createRefProxyWithSelected(aliases, this._getCurrentBindings())
         : createRefProxy(aliases, this._getCurrentBindings())
     ) as RefsForContext<TContext>
-    const rawExpression = callback(refProxy)
-
-    // Allow bare boolean column references like `.having(({ $selected }) => $selected.isActive)`
-    // by converting ref proxies to PropRef expressions, the same way helper
-    // functions like `not()` and `eq()` do via `toExpression()`.
-    const expression = isRefProxy(rawExpression)
-      ? toExpression(rawExpression)
-      : rawExpression
-
-    // Validate that the callback returned a valid expression
-    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
-    // which return boolean primitives instead of expression objects
-    if (!isExpressionLike(expression)) {
-      throw new InvalidWhereExpressionError(getValueTypeName(expression))
-    }
+    const expression = toCondition(callback(refProxy))
 
     const existingHaving = this.query.having || []
 
     return this._clone({
-      ...this.query,
       having: [...existingHaving, expression],
     }) as any
   }
@@ -670,7 +619,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     })
 
     return this._clone({
-      ...this.query,
       select: select,
       fnSelect: undefined, // remove the fnSelect clause if it exists
     }) as any
@@ -754,7 +702,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const existingOrderBy: OrderBy = this.query.orderBy || []
 
     return this._clone({
-      ...this.query,
       orderBy: [...existingOrderBy, ...orderByClauses],
     }) as any
   }
@@ -813,7 +760,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Extend existing groupBy expressions (multiple groupBy calls should accumulate)
     const existingGroupBy = this.query.groupBy || []
     return this._clone({
-      ...this.query,
       groupBy: [...existingGroupBy, ...newExpressions],
       ...(typeof keys === `function` ? {} : { grouping: keys.grouping }),
     }) as any
@@ -839,7 +785,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   limit(count: number): QueryBuilder<TContext> {
     validateLimit(count)
     return this._clone({
-      ...this.query,
       limit: count,
     }) as any
   }
@@ -863,7 +808,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   offset(count: number): QueryBuilder<TContext> {
     return this._clone({
-      ...this.query,
       offset: count,
     }) as any
   }
@@ -884,7 +828,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   distinct(): QueryBuilder<TContext> {
     return this._clone({
-      ...this.query,
       distinct: true,
     }) as any
   }
@@ -904,7 +847,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   findOne(): QueryBuilder<TContext & SingleResult> {
     return this._clone({
-      ...this.query,
       // TODO: enforcing return only one result with also a default orderBy if none is specified
       // limit: 1,
       singleResult: true,
@@ -1000,7 +942,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         callback: (row: TContext[`schema`]) => TFuncSelectResult,
       ): FnSelectQueryResult<TContext, TFuncSelectResult> {
         return builder._clone({
-          ...builder.query,
           select: undefined, // remove the select clause if it exists
           fnSelect: callback,
         }) as any
@@ -1024,7 +965,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         callback: (row: TContext[`schema`]) => any,
       ): QueryBuilder<TContext> {
         return builder._clone({
-          ...builder.query,
           fnWhere: [
             ...(builder.query.fnWhere || []),
             callback as (row: NamespacedRow) => any,
@@ -1052,7 +992,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         callback: (row: FunctionalHavingRow<TContext>) => any,
       ): QueryBuilder<TContext> {
         return builder._clone({
-          ...builder.query,
           fnHaving: [
             ...(builder.query.fnHaving || []),
             callback as (row: NamespacedRow) => any,
@@ -1089,12 +1028,17 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 }
 
-// Helper to get a descriptive type name for error messages
-function getValueTypeName(value: unknown): string {
-  if (value === null) return `null`
-  if (value === undefined) return `undefined`
-  if (typeof value === `object`) return `object`
-  return typeof value
+// WHERE and HAVING admit bare boolean columns by converting their ref proxies.
+// Keep other values unchanged: JavaScript comparisons return primitives, which
+// must fail validation rather than becoming literal query expressions.
+function toCondition<T>(value: T): T | BasicExpression {
+  const expression = isRefProxy(value) ? toExpression(value) : value
+  if (!isExpressionLike(expression)) {
+    throw new InvalidWhereExpressionError(
+      expression === null ? `null` : typeof expression,
+    )
+  }
+  return expression
 }
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value

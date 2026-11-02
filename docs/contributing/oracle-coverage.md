@@ -6704,7 +6704,8 @@ The negative-width question has a maintainer decision (2026-11-02): public
 `.limit(negative)` and `utils.setWindow({ limit: negative })` must throw
 synchronously before changing the authored query or live window. The pagination
 owner's [limit admission companion](../../packages/db/tests/query/limit-admission-oracle.ts)
-checks that sign law and unchanged rows, bounds, status, request errors,
+checks that sign law, the documented RangeError class, and unchanged rows,
+bounds, status, request errors,
 publications, acquisitions, releases, aborts and prior operation outcome. Each
 generated history exercises limit-only and combined moves before startup,
 after readiness, during initial loading, during an unfinished move and during

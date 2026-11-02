@@ -465,7 +465,6 @@ export class CollectionConfigBuilder<
         }
       }
     }
-    const previousOperation = this.activeWindowOperation
     const operation: {
       generation: number
       failed: boolean
@@ -492,7 +491,7 @@ export class CollectionConfigBuilder<
       loadOperation?.cancel()
       throw error
     } finally {
-      this.activeWindowOperation = previousOperation
+      this.activeWindowOperation = undefined
     }
 
     const settlement = loadOperation?.wait() ?? true

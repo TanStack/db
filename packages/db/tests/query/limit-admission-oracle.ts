@@ -1,5 +1,5 @@
 /**
- * A negative limit is rejected synchronously, before query construction or a
+ * A negative limit throws RangeError synchronously, before query construction or a
  * window operation changes anything. Authority: maintainer decision 2026-11-02,
  * following the negative-width counterexample recorded in oracle-coverage.md.
  * Zero (including -0), positive integer limits and Infinity remain admitted.
@@ -78,8 +78,14 @@ function selected(rows: ReadonlyArray<Row>, window: Window): Array<Row> {
       (_, rank) => rank >= window.offset && rank < window.offset + window.limit,
     )
 }
-function checkAdmission(limit: number, threw: boolean): void {
-  expect(threw, `admission of limit ${limit}`).toBe(!admitted(limit))
+function checkAdmission(
+  limit: number,
+  outcome: ReturnType<typeof attempt>,
+): void {
+  expect(outcome.threw, `admission of limit ${limit}`).toBe(!admitted(limit))
+  // Both public entry points document RangeError. A wrong thrown value must
+  // not satisfy rejection merely because it preserves the other observations.
+  if (outcome.threw) expect(outcome.error).toBeInstanceOf(RangeError)
 }
 
 function attempt<T>(
@@ -166,7 +172,7 @@ async function runHistory(
           const outcome = attempt(() => builder.limit(value))
           reached(value < 0 ? `negative` : `valid`)
           atOracleCheckpoint(`limit admission`, `builder return`, () => {
-            checkAdmission(value, outcome.threw)
+            checkAdmission(value, outcome)
             expect(getQueryIR(builder)).toEqual(before)
             if (!outcome.threw)
               expect(getQueryIR(outcome.result).limit).toBe(value)
@@ -241,7 +247,7 @@ async function runHistory(
           const outcome = attempt(() => live.utils.setWindow(options))
           reached(value < 0 ? `negative` : `valid`)
           atOracleCheckpoint(`limit admission`, `${path} return`, () => {
-            checkAdmission(value, outcome.threw)
+            checkAdmission(value, outcome)
             if (!admitted(value)) expect(observe()).toEqual(before)
           })
           if (admitted(value))
