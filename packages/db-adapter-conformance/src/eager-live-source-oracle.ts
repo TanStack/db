@@ -74,7 +74,10 @@
  *   `matchesFailure` the node shows the attempt that crossed the threshold
  *   (maintainer decision 2026-10-30) and may list later attempts after it,
  *   in order; a later attempt does not replace it (RETRY-1). Attempts come
- *   in each of the driver's `transientVariants` kinds.
+ *   in each of the driver's `transientVariants` kinds. With capability
+ *   `empty-response`, an accepted response that delivers nothing ends the
+ *   run of failed attempts, so the count starts again, and leaves a
+ *   reported outage in place (maintainer decision 2026-10-30).
  * - **RECON-1** (capability `transport-reconnect`). A transport disconnect and
  *   reconnect keep status and rows, and later deliveries still apply.
  * - **RENEW-1** (capability `capability-renewal`). While the source's
@@ -190,6 +193,7 @@ export type EagerLiveSourceCapability =
   | `listen-before-fetch`
   | `duplicate-key-delivery`
   | `source-failure-after-ready`
+  | `empty-response`
 
 /**
  * The public Collection surface the oracle reads. A driver passes the
@@ -245,6 +249,11 @@ export interface ControlledProvider {
    * (capability `capability-renewal`). Rejects when the adapter never asked.
    */
   completeRenewal?: () => Promise<void>
+  /**
+   * An accepted response that carries no change, such as an HTTP 204 to a
+   * live request (capability `empty-response`).
+   */
+  emptyResponse?: () => void | Promise<void>
   /** Renewals the adapter completed on its latest subscription. */
   renewals?: () => number
   /**
@@ -386,6 +395,9 @@ export interface EagerLiveSourceDriver {
  * - `disconnect`, `reconnect`: transport loss and return.
  * - `renew`: the adapter's renewal of an expiring capability completes. Legal
  *   once per sync run.
+ * - `empty-response`: the provider accepts a request and delivers nothing.
+ *   Two outages below the threshold around one are generated as one
+ *   element, so the reset it causes is reached.
  * - `restart`: cleanup, then `preload()` starts a new sync run.
  *
  * Keys range over 1..5 and titles over three values, so batches revisit
@@ -429,6 +441,7 @@ export type EagerLiveSourceStep =
   | { readonly kind: `disconnect` }
   | { readonly kind: `reconnect` }
   | { readonly kind: `renew` }
+  | { readonly kind: `empty-response` }
   | { readonly kind: `restart` }
 
 /**
@@ -678,6 +691,29 @@ export function eagerLiveSourceHistoryArb(
           ...second,
         ]),
     )
+    if (capabilities.has(`empty-response`)) {
+      // Two outages below the threshold around an empty response: together
+      // they may reach it, but not in a row.
+      const below = fc.array(attempt, {
+        minLength: 1,
+        maxLength: Math.max(1, threshold - 1),
+      })
+      outages.push(
+        fc
+          .tuple(below, below)
+          .map(([first, second]): Array<EagerLiveSourceStep> => [
+            ...first,
+            { kind: `empty-response` },
+            ...second,
+          ]),
+      )
+    }
+  }
+  if (capabilities.has(`empty-response`)) {
+    steps.push({
+      weight: 1,
+      arbitrary: fc.constant({ kind: `empty-response` as const }),
+    })
   }
   if (capabilities.has(`transport-reconnect`)) {
     steps.push(
@@ -1153,6 +1189,7 @@ type AcceptedStep =
   | { kind: `disconnect` }
   | { kind: `reconnect` }
   | { kind: `renew` }
+  | { kind: `empty-response`; resetOutage: boolean }
   | { kind: `restart` }
 
 /**
@@ -1457,6 +1494,15 @@ function stepModel(
       state.renewed = true
       return { done: { kind: `renew` }, publishable: [] }
     }
+    case `empty-response`: {
+      if (!canDeliver(state) || state.phase !== `ready`) return undefined
+      // RETRY-1: an accepted response ends the run of failed attempts, so a
+      // later outage counts from one; a reported outage stays until an
+      // applied delivery (maintainer decision 2026-10-30: "in a row").
+      const resetOutage = state.outage > 0
+      state.outage = 0
+      return { done: { kind: `empty-response`, resetOutage }, publishable: [] }
+    }
     case `restart`: {
       // LIFE-5: cleanup retires the sync run; the next one starts empty. The
       // backend may change while no sync run listens: it then holds
@@ -1535,6 +1581,7 @@ export const eagerLiveSourceReachStates = [
   `outage-reported-again`,
   `outage-reported-after-batch`,
   `outage-reported-in-later-run`,
+  `outage-count-reset`,
   `transient-failure-recovered`,
   `reconnect`,
   `renewal`,
@@ -1574,6 +1621,7 @@ const capabilityOfState: Partial<
   'outage-reported-again': `retry-policy`,
   'outage-reported-after-batch': `retry-policy`,
   'outage-reported-in-later-run': `retry-policy`,
+  'outage-count-reset': `empty-response`,
   'transient-failure-repeated': `retry-policy`,
   'transient-failure-recovered': `retry-policy`,
   reconnect: `transport-reconnect`,
@@ -1713,6 +1761,8 @@ function lawFor(done: AcceptedStep, wasReady: boolean): string {
       return `RECON-1`
     case `renew`:
       return `RENEW-1`
+    case `empty-response`:
+      return `RETRY-1`
     case `restart`:
       return `LIFE-2/LIFE-5`
   }
@@ -2249,6 +2299,10 @@ export async function checkEagerLiveSourceHistory(
           await provider.completeRenewal!()
           reach(`renewal`)
           break
+        case `empty-response`:
+          await provider.emptyResponse!()
+          if (done.resetOutage) reach(`outage-count-reset`)
+          break
         case `restart`: {
           const pendingBefore = waits.some((wait) => wait.current === `pending`)
           events.stop()
@@ -2404,6 +2458,11 @@ function supports(
       return driver.capabilities.has(`transport-reconnect`)
     case `renew`:
       return driver.capabilities.has(`capability-renewal`)
+    case `empty-response`:
+      return (
+        driver.capabilities.has(`empty-response`) &&
+        !!fixture.provider.emptyResponse
+      )
     default:
       return true
   }

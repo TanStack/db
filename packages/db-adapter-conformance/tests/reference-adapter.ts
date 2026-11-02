@@ -69,6 +69,10 @@ export type ReferenceMutant =
   | `reports-outage-early`
   /** HEALTH-1, threshold: a delivery does not reset the attempt count. */
   | `outage-count-survives-delivery`
+  /** RETRY-1, threshold: an empty response does not restart the count. */
+  | `empty-response-keeps-count`
+  /** HEALTH-2: an empty response clears a reported outage. */
+  | `empty-response-recovers`
   /** EVID-3: a wait ignores its timeout. */
   | `wait-ignores-timeout`
   /** RECON-1: a transport drop is reported as a failure. */
@@ -115,6 +119,7 @@ type ProviderEvent =
   | { type: `failed`; error: Error }
   | { type: `transient`; error: Error }
   | { type: `transport`; connected: boolean }
+  | { type: `empty` }
 
 interface ProviderSubscription {
   releases: number
@@ -186,6 +191,7 @@ class ControlledPushProvider implements ControlledProvider {
     }
   }
   renewals = () => this.subscriptions.at(-1)?.renewed ?? 0
+  emptyResponse = () => this.latest().listener({ type: `empty` })
 }
 
 type Waiter = { resolve: () => void; reject: (error: Error) => void }
@@ -467,6 +473,10 @@ function referenceCollection(
               if (receipt === true) settleWaits(event.txid)
               else void receipt.then(() => settleWaits(event.txid))
               delivered()
+            } else if (event.type === `empty`) {
+              // An accepted response ends the run of failed attempts.
+              if (mutant !== `empty-response-keeps-count`) attempts = 0
+              if (mutant === `empty-response-recovers`) delivered()
             } else if (event.type === `transport`) {
               if (mutant === `disconnect-fails` && !event.connected) {
                 stop(subscription, new Error(`transport lost`))
@@ -604,6 +614,7 @@ export function referenceDriver(
       `listen-before-fetch`,
       `duplicate-key-delivery`,
       `source-failure-after-ready`,
+      `empty-response`,
     ]),
     // The same ten kinds as typed fields, one per row field.
     fieldKinds: [

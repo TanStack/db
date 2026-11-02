@@ -89,13 +89,15 @@ export function toSqlRow(row: ConformanceRow) {
 
 /**
  * A SQL row back as a conformance row: `NULL` is an absent `note`. Every
- * other field passes through, so an extra or missing column still shows.
+ * other field passes through, so an extra or missing column still shows; a
+ * row with no `note` column shows a field no delivered row has, so the
+ * comparison reports it (FID-1).
  */
 export function fromSqlRow<TRow extends { note?: unknown }>(
   row: TRow,
 ): ConformanceRow {
   if (!Object.hasOwn(row, `note`)) {
-    throw new Error(`SQL row ${JSON.stringify(row)} has no note column`)
+    return { ...row, missingNoteColumn: true } as unknown as ConformanceRow
   }
   const { note, ...rest } = row
   return (note === null ? rest : { ...rest, note }) as unknown as ConformanceRow

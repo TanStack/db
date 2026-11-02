@@ -98,7 +98,9 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`transient-fails-loading`, `RETRY-1`],
     [`splits-batch`, `PUB-1`],
     [`drops-deletes`, `PUB-3`],
-    [`snapshot-merges`, `PUB-7`],
+    // It merges a later delivery, so it also applies one that must be
+    // rejected for a duplicate key.
+    [`snapshot-merges`, /PUB-7|PUB-4/],
     [`leaks-subscription`, `LIFE-2`],
     [`restart-replays-rows`, `LIFE-5`],
     [`keeps-failed-source`, `LIFE-10`],
@@ -210,6 +212,8 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
     [`replaces-outage-value`, `RETRY-1`],
     [`reports-outage-early`, `HEALTH-1`],
     [`outage-count-survives-delivery`, `HEALTH-1`],
+    [`empty-response-keeps-count`, `HEALTH-1`],
+    [`empty-response-recovers`, `RETRY-1`],
     [`wraps-loading-failure`, `READY-4`],
   ]
   oracleReplayTest(it).each(outageMutants)(
