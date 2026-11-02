@@ -6338,3 +6338,37 @@ scoped health comparison. All existing comparisons, histories, budgets and
 reach minima remain. The controlled core, one-level include and peer limits
 remain those of this owner; no provider or framework claim follows. See the
 [versioned repair record](oracle-reviews/2026-10-30-release-replay-retention.md#subscription-scoped-request-error-checker-repair).
+
+
+### First-demand admission and terminal regimes (2026-11-02)
+
+The load-subset replay owner adds 48 finite histories crossing sibling/include
+settlement order, direction, width, failure/success and a waiting window. A new
+parent remains eligible after sibling success. Before admission repair, all 48
+fail the existing public-retention comparison. The repaired driver measures 24
+late active include settlements and 12 retries while a sibling loads, directly
+from adapter receipts. The original sibling grammar's receipt reaches are now
+44 failures, 9 same-truncate failed-demand unloads during commands and 12 own
+recoveries; its earlier model-derived retirement count 33 is historical. All
+existing semantic comparisons and required minima stay. The original-admission
+mutant fails retention.
+
+The earliest-error comparison was corrected from source-wide failure order to
+subscription-owned verdicts. Authority is the pre-existing maintainer decision
+in ARCHITECTURE **Atomic window publication**: a move rejects with *that replay's
+own* earliest still-deciding failure. Shared publication does not merge verdicts.
+This is an explicit account of the correction, not a claim that the assertion
+was unchanged. There is no source-wide race winner promise. The same-subscription
+latest-error mutant fails; the actual public owed-error check also rejects an
+error omitted after sibling coverage. Moves that resume into a different failed
+replay retain the owner's stated limit. A failed move is not promised success
+merely because a later retry recovers its demand.
+
+The multi-tab Electric owner now generates untouched arbitrary, reset-abandoned
+and stopped-source endings. Existing final comparisons, 80-run budgets, known
+gaps and minima stay; new reach separately measures final stopped-source restart
+and lagging-row rewrite. Old grammar reach was 0/46, so only the first was absent.
+Final-restart and final-commit omissions fail the real SQLite/coordinator public
+comparisons. These are Node-host controlled-stream receiving histories, not real
+provider or browser-process claims. The core and browser path limits are unchanged.
+See the [nine-item review amendment](oracle-reviews/2026-10-30-release-replay-retention.md#first-demand-admission-and-terminal-grammar-review-2026-11-02).

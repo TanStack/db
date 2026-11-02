@@ -215,3 +215,231 @@ finite calibration, with one worker and dependency verification disabled.
 The amended primary owner SHA256 is `a2ab454ff5a77aa47bf57cbd590b67a2a5602d3dd6897af051fb1819b9482ce7` on both branches. The earlier
 table binds the original repair evidence. Its runtime and browser hashes remain
 unchanged; callback runtime hashes remain bound by its separate port record.
+
+
+## First-demand admission and terminal grammar review (2026-11-02)
+
+This amendment evaluates all nine findings from the human-supplied review of
+`ec25fc4f117c0b20fa0827f33b2a400a6e77a36a`. The original review was unverified;
+its examples were hypotheses. This is an author self-review. The raw review,
+append-only nine-item ledger, source bindings and complete logs are retained in
+`/private/tmp/callback-metadata/release-replay-repair/nine-item-review-20261102`.
+
+### Law, experiment and inference
+
+**Law and authority.** ARCHITECTURE **Replay participants and failure**, law 9,
+requires new demand started under a sibling's replay to share publication.
+**Atomic window publication** separately permits a move to reject once a waited
+replay fails. The earliest-error promise is that replay's own earliest still
+deciding failure, an explicit maintainer decision already present on release
+base `e75f8455a78bc33c43376288218e9912dc2a3f4c`; it imposes no global failure order
+across independent subscription verdicts. Laws 16/17 scope request errors to
+the failed demand. Publication retention and operation success are different
+judgments.
+
+**Experiment before production.** The existing primary owner gained a provider
+settlement selector and a 48-history grammar: direction, width, include/sibling
+settlement order, success/failure and presence of a waiting move. An unmarked
+sixth parent remains eligible after the sibling succeeds. All 48 histories fail
+on unchanged ec25 at the existing public retention assertion: row 6 publishes
+while the retained result is empty and include work remains held. The mismatch
+can occur before include failure, so changing only `failDemand` cannot close
+this ordering. Earlier probes without the persistent parent passed; obsolete
+speculative includes retired, or other held loads masked the publication cut.
+Those passing probes were not treated as refutations. Both 96-history error
+campaigns passed before production changed. The real core receiving path is an
+ordered live-query Collection, its join and one-level inline include over real
+Collections with controlled adapter promises. No new framework/provider promise
+requires a different receiving driver for this admission repair.
+
+**Repair.** First demand now creates its own replay hold when a sibling replay
+still loads, before calling the adapter. Setup itself holds publication through
+reentrancy, and the existing participant machinery handles settlement, abort,
+retirement and retry. Sibling success can no longer remove this subscription's
+hold. The failure fallback remains for the existing failure path.
+
+**Reach.** The final selector chooses active, un-aborted acquisition receipts;
+it drains other work while keeping the selected include held. The 48 histories
+reach 24 late active settlements and 12 retry starts while a sibling loads.
+The selector and retry counters were corrected after the first runtime trial;
+the original 48-history public-retention RED remains the pre-edit gate. Do not
+claim the corrected reach counters ran before that trial. The first full run
+passed all behavior comparisons but had three reach-only failures: one selector
+included retired speculative requests, and two unconstrained campaigns inherited
+new obligations owned by the constructive grammar. These were corrected without
+removing any pre-existing reach or minimum.
+
+New-sibling classification, failure and retirement reach no longer read model
+barriers. The driver snapshots acquisitions at the actual truncate and uses
+adapter starts, failures, aborts and unloads. The original 48-cell grammar now
+measures 44 failures, 9 same-truncate failed-demand unloads during commands, and
+12 later own recoveries. The historical retirement count 33 was model-derived;
+it is not the count of this stricter receipt witness. Final cleanup and a newer
+truncate's physical-acquisition renewal supply no retirement reach. Semantic
+retention, request-error and recovery comparisons remain unchanged.
+
+**Calibration.** Disabling admission reproduces the intended retention RED.
+Reporting the latest own failure instead of the earliest fails error identity.
+Omitting an actually observed public error after successful sibling coverage
+fails the ordinary owed-request-error assertion. The removed model-only
+`replayScopeViolation` assertion proved no production behavior; its replacement
+evidence is this public observation calibration, not a second model invariant.
+All temporary subjects were restored in `finally` and their hashes verified.
+
+### Browser terminal regimes
+
+The old suffix's fixed 80-history run reaches zero stopped-source restarts at
+final catch-up. Its existing final comparisons do exercise a lagging-row rewrite
+in 46 histories, so the review's assertion that both regimes are absent is too
+broad. The missing stopped-source reach is a grammar failure, not a production
+mismatch. A terminal dimension now keeps the original arbitrary final state or
+constructs a reset-abandoned commit or a stopped source. The 24-step stop prefix,
+8–24-step arbitrary tail, 80 accepted histories per campaign, all comparisons,
+existing minima and known-gap handling remain. The constructive endings add
+`4 + 2 * tabCount` steps (8 or 10); an untouched ending adds none.
+
+The real SQLite/coordinator driver measures both final branches. Fixed/random
+campaigns pass with final stopped-source restart reach 53/42, lagging-row rewrite
+58/52 and reset-abandoned final recovery 22/35. Temporary omission of final
+restart fails the public source-head comparison; omission of final commit fails
+an ordinary durable/public comparison. This is the separate release CI reach
+repair described earlier, not evidence about include admission. Sampling the
+terminal dimension is bounded evidence, not a universal guarantee of reach for
+every possible future random seed. Required minima continue to fail any campaign
+that misses a declared state.
+
+### Lossless item accounting
+
+| ID | Technical judgment | Action and durable value |
+| --- | --- | --- |
+| R1 | Confirmed production and history gap; the narrower failure-only fix missed admission. | Fixed first-demand admission and added settlement order with a persistent parent. Original-admission mutant fails retention. |
+| R2 | Rejection despite eventual successful retry is allowed by Atomic window publication. An already failed operation need not become successful. | Accepted design. Keep rejection separate from shared retention; the new admission path participates normally rather than depending on synthetic failed completion. Retry reach is explicit. No success-after-retry promise was added. |
+| R3 | The self-check follows directly from the model's guarded deletion loop and does not calibrate production. Existing health comparisons have independent sensitivity. | Removed the redundant model self-check. A wrong actual health observation is rejected at the owed-error comparison. |
+| R4 | Cross-subscription earliest-error ordering is not promised. The scope change aligns with an existing maintainer decision. Its reporting needed to be explicit. | Accepted design; coverage map now cites the authority and records the comparison correction. A latest-own-error mutant fails. A claim that no assertion changed would be inaccurate: the old source-wide expectation was corrected, not preserved. |
+| R5 | Stopped-tab final recovery was absent; lagging-row final rewriting was reached. The suffix still removed arbitrary final states. | Added terminal regimes and actual branch reach. Kept the separate browser release-CI purpose explicit. Final restart/commit mutants fail. |
+| R6 | The claim of receipt-only reach was inaccurate because classification read model barriers. | All newly claimed reach comes from actual adapter receipts and truncate/command boundaries. Model-based historical counts are not relabeled as receipt measurements. |
+| R7 | Confirmed duplicate classifier. | One classifier serves both marker adapter paths. |
+| R8 | Confirmed incomplete explanatory comment. | Comment now names sibling settlement and retirement. Architecture clarifies admission before adapter reentry. |
+| R9 | Confirmed missing suffix length. | Prose states prefix, arbitrary tail and optional 8/10-step ending separately. |
+
+Totals: seven `fixed-now`, two `accepted-design` (R2/R4); no deferred finding.
+R4's reporting correction is complete even though its proposed extra product
+obligation is not accepted. Every original claim and suggested repair has a
+separate ledger entry. No global source-wide error order or automatic success
+of an already failed operation was introduced.
+
+### Reviewer assessment and limits
+
+Qualified hire. The reviewer found a real admission defect and useful test
+integrity, reach and prose problems. The proposed admission location was sound.
+The review explicitly labeled its production claims unverified. It still
+confused operation rejection with publication retention, missed an explicit
+maintainer decision, and overstated the browser reach loss. Executable probes
+and authority checks are needed before treating its downstream claims as facts.
+
+The claim remains bounded by this owner's finite histories, one ordered source,
+one-level include, no peer for retention, controlled core adapter and named
+public checkpoints. Existing initial-readiness, abort, retirement, request-error,
+error-identity and convergence checks remain. This is not Effect disposal,
+arbitrary provider, framework, deep-include or multi-process browser closure.
+An evaluated review does not establish whole-PR readiness: final pushed CI and
+integration with the actual main branch must be assessed separately. Neither
+PR is authorized to merge by this review.
+
+
+### Final validation and source binding
+
+The browser counts above bind the earlier expanded-grammar run in
+`browser-expanded.log`. Final runs use the same grammar, comparisons and
+original 80-accepted-history budgets. Their measured final branches are:
+
+| Branch/run | Stopped-source restart | Lagging-row rewrite | Reset-abandoned final recovery |
+| --- | ---: | ---: | ---: |
+| Repair fixed | 53 | 58 | 22 |
+| Repair random | 48 | 52 | 31 |
+| Callback fixed | 53 | 58 | 22 |
+| Callback random | 46 | 58 | 31 |
+
+On each branch, one fresh full primary run passes all 46 tests, the three
+neighboring files pass 21 tests, and the browser selection passes both
+campaigns plus both existing final-delivery replays (four tests). Focused core
+and browser TypeScript, ESLint, formatting, whitespace and `pnpm lint:changed`
+pass on both branches. ESLint retains two existing shadow warnings. Whole
+repository `pnpm test`, builds and installs did not run. Local Vitest is cached
+3.2.4; these runs do not replace final-head CI.
+
+Callback browser setup initially missed Electric, debug and SQLite resolution.
+A subsequent scratch mapping separated the mock from the adapter's SDK module,
+so no controlled stream started. Those runs are setup failures, not behavioral
+RED. The final mapping resolves both SDK imports to the same installed module
+and runs the callback branch's actual sources. No repository dependency file
+or installation changed.
+
+The repair is based on `ec25fc4f117c0b20fa0827f33b2a400a6e77a36a`; the port is
+based on `a2e75c30402deb815abd01783ea816a2edfe3ea8`, which already integrates
+main `85392bd1d349aa3bb77c9c11ffba671f0b2d2a84`. Both final trees share these
+SHA256 bindings:
+
+| Source | SHA256 |
+| --- | --- |
+| `packages/db/src/collection/subscription.ts` | `5cd5a8759dc38bf70c88ed756b6886e474afef5ad02f4419bd0f5d1ab6b39dc0` |
+| `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` | `d3c4edf87d4f046d888887ab4dea6e16ed40571a8e4334850427573d92c51271` |
+| `packages/browser-db-sqlite-persistence/tests/multi-tab-electric-oracle.test.ts` | `3184cd014be5ab6222350525bbd3d09a78b46e49c5e8b17fdde6ffbc417f26c5` |
+
+The containing commit versions this evidence; final commit IDs and all changed
+path hashes are additionally bound in the scratch `final-binding.json` and the
+published PR descriptions. The builder differs between branches because the
+callback branch retains its plural joined-dependency gate. This review changes
+only its explanatory comment. Compiler and Solid source/test paths are
+unchanged from each branch's starting head. Earlier runtime fingerprints and
+size figures remain historical, because admission intentionally changes runtime.
+
+### Oracle guide audit for this amendment
+
+This is author self-review, not an independent external review.
+
+- ORC-001/002/003: the architecture and existing maintainer decisions supply
+  authority. The independent source-row/barrier model and server log remain
+  separate from real drivers. Local prose explains the new grammar and cuts.
+- ORC-004/013: direction, widths 1–3, both settlement orders, success/failure and
+  waiting/no-waiting moves reconstruct the new core witness. Removing the
+  persistent parent masks it through retirement; removing order variation
+  misses sibling-first publication. Browser arbitrary/reset/stop endings keep
+  the prior arbitrary domain and distinguish final recovery branches. Aborting
+  an acquisition excludes it from the active demand premise. Closing a tab for
+  good remains outside the existing browser convergence claim.
+- ORC-005/006: core compares actual public rows and request errors after commands,
+  quiet loading and authoritative recovery. SQLite/coordinator compares durable
+  and public rows/status at existing cuts. Admission, own-error, owed-error,
+  final-restart and final-commit controls reject at intended assertions, not
+  setup or timeout. All temporary subjects were restored.
+- ORC-007: fixed and random campaigns retain the same generators, comparisons
+  and budgets. The existing direct seed/path interface and two final-delivery
+  replays remain. The new 48-cell core grammar is bounded enumeration, so it
+  does not need a second random copy. Existing related-issue seed/path results
+  remain bounded historical evidence.
+- ORC-008/009: removing model-only calibration state cannot change a promised
+  result. Acquisition receipt state belongs to the driver and measures reach,
+  not expected publication. Publication stays source-shared while verdicts stay
+  subscription-owned. These distinctions use the glossary's demand/acquisition
+  boundary and the documented barrier abstraction.
+- ORC-010: finite enumeration preserves every mismatch in an AggregateError,
+  with its first failure as cause. Existing cleanup still releases real resources.
+  Setup and reach failures remain separate from behavioral mismatches.
+- ORC-011: the concrete shared-fault hypothesis was model-derived reach. The
+  repair measures actual adapter receipts independently of model barriers. No
+  additional shared semantic fault requiring a second model was identified.
+- ORC-012/015: this versioned record reports limits, the original public RED,
+  final GREEN, hostile controls, both branches' hashes and declared reach. New
+  constructive reach is not imposed on unrelated arbitrary campaigns.
+- ORC-014: the claims end at controlled core adapters and Node-host real SQLite/
+  coordinator code. Controlled Electric streams and peer-reset messages supply
+  premises. No real-provider or browser-process handoff claim follows.
+- ORC-016: new finite histories use the existing shared model/driver/comparison.
+  Final-delivery replays carry inputs without separate expected values. No unit
+  assertion or concrete type assertion was added to an oracle.
+
+No raw review item is deferred. The remaining limitations are the owners'
+explicit controlled and finite boundaries, not a known reachable violation of
+the repaired admission law. Final pushed CI and repair integration with actual
+main remain separate readiness obligations. No merge authorization follows.

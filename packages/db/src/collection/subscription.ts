@@ -1185,83 +1185,109 @@ export class CollectionSubscription
     result: LoadSubsetRequestResult
     started: boolean
   } {
-    const demand: SubsetDemand = {
-      requestOptions,
-      acquisition: {
-        options: requestOptions,
-        syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
-      },
-      acquisitionState: `starting`,
-    }
-    // A demand that starts during an open replay joins it, parked or not (law
-    // 9: a new demand joins the open replay).
-    const replayState = this.truncateReplayState
-    const replayAttempt = replayState?.currentAttempt
+    // Law 9: a first demand joins the shared publication barrier when it
+    // starts, even if this subscription held no demand at truncate. Waiting
+    // until failure loses the hold when the sibling settles first.
+    let joinedReplay: TruncateReplayState | undefined
     if (
-      this.collection.status === `cleaned-up` ||
-      // A deferring subscription starts no acquisition attempt until it resumes.
-      (this.defersAcquisition &&
-        this.collection.config.syncMode === `on-demand`) ||
-      // Ready/error callbacks can run before sync returns its loader. Idle
-      // deferred starts still acquire through the sync manager's queue.
-      (this.collection.config.syncMode === `on-demand` &&
-        (isFailedStatus(this.collection.status) ||
-          (this.collection.status !== `idle` &&
-            this.collection._sync.syncLoadSubsetFn === null)))
+      !this.truncateReplayState &&
+      this.options.truncateReplayPublication?.siblingReplays()
     ) {
-      demand.acquisitionState = `detached`
-      this.subsetDemands.push(demand)
-      const initialResult = createDeferred<void>()
-      demand.initialResult = initialResult
-      const abort = () =>
-        initialResult.reject(new LoadSubsetOperationAbortedError())
-      requestOptions.signal?.addEventListener(`abort`, abort, { once: true })
-      const finish = () => {
-        requestOptions.signal?.removeEventListener(`abort`, abort)
-        demand.initialResult = undefined
+      joinedReplay = this.createTruncateReplayState(
+        this.collection._sync.getSyncRunGeneration(),
+        () => new Map(),
+      )
+      this.truncateReplayState = joinedReplay
+      this.truncateReplacementPending = true
+    }
+    const joinedAttempt = joinedReplay?.currentAttempt
+    try {
+      const demand: SubsetDemand = {
+        requestOptions,
+        acquisition: {
+          options: requestOptions,
+          syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
+        },
+        acquisitionState: `starting`,
       }
-      void initialResult.promise.then(finish, finish)
-      if (replayState && replayAttempt)
-        demand.parkedParticipant = this.trackTruncateReplayParticipant(
+      // A demand that starts during an open replay joins it, parked or not (law
+      // 9: a new demand joins the open replay).
+      const replayState = this.truncateReplayState
+      const replayAttempt = replayState?.currentAttempt
+      if (
+        this.collection.status === `cleaned-up` ||
+        // A deferring subscription starts no acquisition attempt until it resumes.
+        (this.defersAcquisition &&
+          this.collection.config.syncMode === `on-demand`) ||
+        // Ready/error callbacks can run before sync returns its loader. Idle
+        // deferred starts still acquire through the sync manager's queue.
+        (this.collection.config.syncMode === `on-demand` &&
+          (isFailedStatus(this.collection.status) ||
+            (this.collection.status !== `idle` &&
+              this.collection._sync.syncLoadSubsetFn === null)))
+      ) {
+        demand.acquisitionState = `detached`
+        this.subsetDemands.push(demand)
+        const initialResult = createDeferred<void>()
+        demand.initialResult = initialResult
+        const abort = () =>
+          initialResult.reject(new LoadSubsetOperationAbortedError())
+        requestOptions.signal?.addEventListener(`abort`, abort, { once: true })
+        const finish = () => {
+          requestOptions.signal?.removeEventListener(`abort`, abort)
+          demand.initialResult = undefined
+        }
+        void initialResult.promise.then(finish, finish)
+        if (replayState && replayAttempt)
+          demand.parkedParticipant = this.trackTruncateReplayParticipant(
+            replayState,
+            replayAttempt,
+            demand,
+            initialResult.promise,
+            requestOptions.signal,
+          )
+        return { demand, result: initialResult.promise, started: false }
+      }
+      const acquisition = this.createSubsetAcquisitionRecord(demand)
+      demand.acquisition = acquisition
+      const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
+      // Reentrant release must see the exact acquisition before adapter work
+      // starts. A load that throws is a rejection: it keeps its owner.
+      this.subsetDemands.push(demand)
+      const result = this.collection._sync.loadSubset(acquisition.options)
+
+      if (!this.isSyncRunGenerationCurrent(syncRunGeneration)) {
+        const demandIndex = this.subsetDemands.indexOf(demand)
+        if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
+        cancelAcquisition(acquisition)
+        return { demand, result, started: true }
+      }
+
+      demand.acquisitionState = `active`
+      if (!this.subsetDemands.includes(demand)) {
+        this.releaseAcquisition(acquisition)
+        return { demand, result, started: true }
+      }
+
+      if (replayState && replayAttempt) {
+        this.trackTruncateReplayParticipant(
           replayState,
           replayAttempt,
           demand,
-          initialResult.promise,
-          requestOptions.signal,
+          result,
+          acquisition.options.signal,
         )
-      return { demand, result: initialResult.promise, started: false }
-    }
-    const acquisition = this.createSubsetAcquisitionRecord(demand)
-    demand.acquisition = acquisition
-    const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
-    // Reentrant release must see the exact acquisition before adapter work
-    // starts. A load that throws is a rejection: it keeps its owner.
-    this.subsetDemands.push(demand)
-    const result = this.collection._sync.loadSubset(acquisition.options)
-
-    if (!this.isSyncRunGenerationCurrent(syncRunGeneration)) {
-      const demandIndex = this.subsetDemands.indexOf(demand)
-      if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
-      cancelAcquisition(acquisition)
+      }
       return { demand, result, started: true }
+    } finally {
+      // Adapter and status callbacks can reenter before returning a promise.
+      // Setup holds the replacement until that tentative work is registered.
+      if (joinedReplay && joinedAttempt) {
+        joinedReplay.pendingSetups--
+        joinedAttempt.setupComplete = true
+        this.checkTruncateReplayComplete(joinedReplay)
+      }
     }
-
-    demand.acquisitionState = `active`
-    if (!this.subsetDemands.includes(demand)) {
-      this.releaseAcquisition(acquisition)
-      return { demand, result, started: true }
-    }
-
-    if (replayState && replayAttempt) {
-      this.trackTruncateReplayParticipant(
-        replayState,
-        replayAttempt,
-        demand,
-        result,
-        acquisition.options.signal,
-      )
-    }
-    return { demand, result, started: true }
   }
 
   /** Re-check ownership after adapter and event callbacks that may reenter. */
