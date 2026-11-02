@@ -1,13 +1,7 @@
 import { UnaryOperator } from '../graph.js'
 import { unaryOperator } from '../unary-operator.js'
-import { MultiSet } from '../multiset.js'
-import {
-  TopKState,
-  handleMoveIn,
-  handleMoveOut,
-  topKBatch,
-} from './topKState.js'
-import { TopKArray, createKeyedComparator } from './topKArray.js'
+import { TopKState, topKBatch } from './topKState.js'
+import { createKeyedComparator } from './topKArray.js'
 import type { IndexedValue } from './topKArray.js'
 import type {
   DifferenceStreamReader,
@@ -51,13 +45,15 @@ export class TopKWithFractionalIndexOperator<
     options: TopKWithFractionalIndexOptions,
   ) {
     super(id, inputA, output)
-    const limit = options.limit ?? Infinity
-    const offset = options.offset ?? 0
     this.#state = new TopKState(
-      new TopKArray(offset, limit, createKeyedComparator(comparator)),
+      options.offset ?? 0,
+      options.limit ?? Infinity,
+      createKeyedComparator(comparator),
     )
     options.setSizeCallback?.((counts) =>
-      counts ? this.#state.countLeadingInWindow(counts) : this.#state.size,
+      counts
+        ? this.#state.countLeadingInWindow(([, value]) => counts(value))
+        : this.#state.size,
     )
     options.setWindowFn?.(this.moveTopK.bind(this))
   }
@@ -68,16 +64,11 @@ export class TopKWithFractionalIndexOperator<
    */
   moveTopK({ offset, limit }: { offset?: number; limit?: number }) {
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    const diff = this.#state.move({ offset, limit })
-
-    diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result))
-    diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result))
-
-    if (diff.changes) {
+    if (this.#state.moveWindow({ offset, limit }, result)) {
       // There are changes to the topK
       // it could be that moveIns and moveOuts are empty
       // because the collection is lazy, so we will run the graph again to load the data
-      this.output.sendData(new MultiSet(result))
+      this.output.sendData(result)
     }
   }
 
@@ -90,7 +81,7 @@ export class TopKWithFractionalIndexOperator<
     }
 
     if (result.length > 0) {
-      this.output.sendData(new MultiSet(result))
+      this.output.sendData(result)
     }
   }
 
@@ -100,9 +91,7 @@ export class TopKWithFractionalIndexOperator<
     multiplicity: number,
     result: Array<[[K, IndexedValue<T>], number]>,
   ): void {
-    const changes = this.#state.processElement(key, value, multiplicity)
-    handleMoveIn(changes.moveIn, result)
-    handleMoveOut(changes.moveOut, result)
+    this.#state.processElement(key, value, multiplicity, result)
   }
 }
 

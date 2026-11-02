@@ -84,7 +84,12 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection, HealthNode, PooledLiveQueries } from '@tanstack/db'
+import type {
+  Collection,
+  CollectionConfig,
+  HealthNode,
+  PooledLiveQueries,
+} from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -102,7 +107,10 @@ export interface Row {
 export interface SourceHandle<T extends { id: string } = Row> {
   collection: Collection<any, any, any>
   insert: (row: T) => void
-  update: (row: T) => void
+  /** Local mutation sources can return the transaction's borrowed originals. */
+  update: (row: T) => void | {
+    mutations: ReadonlyArray<{ original: unknown }>
+  }
   remove: (row: T) => void
 }
 
@@ -172,7 +180,11 @@ export interface DbOps {
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void
     mutationFn: (variables: any) => Promise<any>
-  }) => (variables?: any) => { when: (state: 'settled') => Promise<any> }
+  }) => (variables?: any) => {
+    when: (state: 'settled') => Promise<any>
+    /** Borrowed mutation snapshots must survive framework materialization. */
+    mutations: ReadonlyArray<{ original: unknown }>
+  }
 }
 
 /** Normalized, adapter-agnostic view of a live query's current result. */
@@ -292,6 +304,11 @@ export interface LiveQueryDriver {
   disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */
   ops: DbOps
+  /** Index constructors from the adapter's `@tanstack/db` realm. */
+  indexTypes: {
+    basic: NonNullable<CollectionConfig<Row>[`defaultIndexType`]>
+    btree: NonNullable<CollectionConfig<Row>[`defaultIndexType`]>
+  }
   /**
    * Create a realm-correct source collection + mutators, keyed by `id`. Pass
    * `collectionId` to create another source object under an existing ID.
@@ -299,7 +316,12 @@ export interface LiveQueryDriver {
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
     collectionId?: string,
+    options?: { rowUpdateMode?: `full` },
   ) => SourceHandle<T>
+  /** Wrap a source value in the real host's observable container, when supported. */
+  wrapSnapshotValue?: <T extends object>(value: T) => T
+  /** Local-only sources return actual transactions; host proxies enter initially. */
+  snapshotSourceUsesDraft?: boolean
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
   /** Create a ready source whose sync adapter reports the scenario controls. */
@@ -357,7 +379,7 @@ export interface LiveQueryDriver {
       gcTime?: number
       pool?: PooledLiveQueries
       queryKey?: ReadonlyArray<unknown>
-    },
+    } & Pick<CollectionConfig<Row>, `autoIndex` | `defaultIndexType`>,
   ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle

@@ -44,7 +44,7 @@ export function binarySearch<T, TValue = T>(
 export function compareKeys(a: string | number, b: string | number): number {
   // Same type: compare directly
   if (typeof a === typeof b) {
-    if (typeof a === `number` && typeof b === `number`) {
+    if (typeof a === `number`) {
       const aIsNaN = Number.isNaN(a)
       const bIsNaN = Number.isNaN(b)
       if (aIsNaN || bIsNaN) {

@@ -1,12 +1,9 @@
 import { equalHashValues } from '../hashing/hash.js'
 import { TopKArray } from './topKArray.js'
 import type { MultiSet } from '../multiset.js'
-import type {
-  IndexedValue,
-  TopK,
-  TopKChanges,
-  TopKMoveChanges,
-} from './topKArray.js'
+import type { IndexedValue } from './topKArray.js'
+
+type TopKOutput<K, T> = Array<[[K, IndexedValue<T>], number]>
 
 /** Apply a keyed batch's retractions before additions. An outer join can emit
  * a replacement in the opposite order; key multiplicity alone would hide it.
@@ -20,70 +17,50 @@ export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
   for (const message of messages) {
     for (const [value, weight] of message.getInner()) {
       const entries = keyed.get(value[0])
-      if (entries) entries.push([value, weight])
-      else keyed.set(value[0], [[value, weight]])
-    }
-  }
-  const batch: Array<[[K, T], number]> = []
-  for (const entries of keyed.values()) {
-    // Ordering distinct keys needs only the caller's comparator. In particular,
-    // do not traverse irrelevant payloads or merge keys on a hash collision.
-    if (entries.length === 1) {
-      batch.push(entries[0]!)
-      continue
-    }
-    // A per-key scan keeps normal two-version replacements cheap and permits
-    // cycles, at the cost of quadratic comparisons for long same-key histories.
-    const consolidated: Array<[[K, T], number]> = []
-    for (const [value, weight] of entries) {
-      const previous = consolidated.find(([candidate]) =>
+      if (!entries) {
+        keyed.set(value[0], [[value, weight]])
+        continue
+      }
+      // Compare only versions of the same key. A per-key scan keeps normal
+      // replacements cheap and never merges keys on a hash collision.
+      const previous = entries.find(([candidate]) =>
         equalHashValues(candidate[1], value[1]),
       )
       if (previous) previous[1] += weight
-      else consolidated.push([value, weight])
+      else entries.push([value, weight])
     }
-    batch.push(...consolidated)
   }
-  for (const entry of batch) if (entry[1] < 0) yield entry
-  for (const entry of batch) if (entry[1] > 0) yield entry
+  for (const entries of keyed.values())
+    for (const entry of entries) if (entry[1] < 0) yield entry
+  for (const entries of keyed.values())
+    for (const entry of entries) if (entry[1] > 0) yield entry
 }
 
 /**
- * Helper class that manages the state for a single topK window.
- * Encapsulates the multiplicity tracking and topK data structure,
- * providing a clean interface for processing elements and moving the window.
+ * An array window with keyed support tracking and signed output projection.
  *
  * This class is used by both TopKWithFractionalIndexOperator (single instance)
  * and GroupedTopKWithFractionalIndexOperator (one instance per group).
  */
-export class TopKState<K extends string | number, T> {
+export class TopKState<K extends string | number, T> extends TopKArray<[K, T]> {
   #multiplicities: Map<K, number> = new Map()
-  #topK: TopK<[K, T]>
-
-  constructor(topK: TopK<[K, T]>) {
-    this.#topK = topK
-  }
-
-  get size(): number {
-    return this.#topK.size
-  }
-
-  countLeadingInWindow(predicate: (value: T) => boolean): number {
-    return (
-      this.#topK.countLeadingInWindow?.(([, value]) => predicate(value)) ??
-      this.#topK.size
-    )
-  }
 
   get isEmpty(): boolean {
-    return this.#multiplicities.size === 0 && this.#topK.size === 0
+    // Installed rows are exactly the keys with positive support. Negative
+    // support remains recorded, so an empty map also means an empty array.
+    return this.#multiplicities.size === 0
   }
 
   /**
    * Process an element update (insert or delete based on multiplicity change).
-   * Returns the changes to the topK window.
+   * Append the signed changes to the topK window to the caller's output.
    */
-  processElement(key: K, value: T, multiplicity: number): TopKChanges<[K, T]> {
+  processElement(
+    key: K,
+    value: T,
+    multiplicity: number,
+    result: TopKOutput<K, T>,
+  ): void {
     const oldMultiplicity = this.#multiplicities.get(key) ?? 0
     const newMultiplicity = oldMultiplicity + multiplicity
     if (multiplicity !== 0) {
@@ -91,53 +68,43 @@ export class TopKState<K extends string | number, T> {
       else this.#multiplicities.set(key, newMultiplicity)
     }
 
-    if (oldMultiplicity <= 0 && newMultiplicity > 0) {
-      // The value was invisible but should now be visible
-      return this.#topK.insert([key, value])
-    } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
-      // The value was visible but should now be invisible
-      return this.#topK.delete([key, value])
+    // Crossing positive support inserts or removes a row. Other changes leave
+    // visibility unchanged and produce no window delta.
+    if (oldMultiplicity > 0 !== newMultiplicity > 0) {
+      const changes =
+        newMultiplicity > 0
+          ? super.insert([key, value])
+          : super.delete([key, value])
+      appendMove(changes.moveIn, result, 1)
+      appendMove(changes.moveOut, result, -1)
     }
-    // The value was invisible and remains invisible,
-    // or was visible and remains visible - no topK change
-    return { moveIn: null, moveOut: null }
   }
 
   /**
-   * Move the topK window. Only works with TopKArray implementation.
+   * Move the array window and append its signed changes.
    */
-  move(options: { offset?: number; limit?: number }): TopKMoveChanges<[K, T]> {
-    if (!(this.#topK instanceof TopKArray)) {
-      throw new Error(
-        `Cannot move B+-tree implementation of TopK with fractional index`,
-      )
-    }
-    return this.#topK.move(options)
+  moveWindow(
+    options: { offset?: number; limit?: number },
+    result: TopKOutput<K, T>,
+  ): boolean {
+    const changes = super.move(options)
+    for (const value of changes.moveIns) appendMove(value, result, 1)
+    for (const value of changes.moveOuts) appendMove(value, result, -1)
+    return changes.changes
   }
 }
 
 /**
- * Handles a moveIn change by adding it to the result array.
+ * Both operators expose the same signed, fractionally indexed row shape.
+ * Keep its projection beside the shared state transition that produces it.
  */
-export function handleMoveIn<K extends string | number, T>(
-  moveIn: IndexedValue<[K, T]> | null,
-  result: Array<[[K, IndexedValue<T>], number]>,
+function appendMove<K extends string | number, T>(
+  change: IndexedValue<[K, T]> | null,
+  result: TopKOutput<K, T>,
+  weight: number,
 ): void {
-  if (moveIn) {
-    const [[key, value], index] = moveIn
-    result.push([[key, [value, index]], 1])
-  }
-}
-
-/**
- * Handles a moveOut change by adding it to the result array.
- */
-export function handleMoveOut<K extends string | number, T>(
-  moveOut: IndexedValue<[K, T]> | null,
-  result: Array<[[K, IndexedValue<T>], number]>,
-): void {
-  if (moveOut) {
-    const [[key, value], index] = moveOut
-    result.push([[key, [value, index]], -1])
+  if (change) {
+    const [[key, value], index] = change
+    result.push([[key, [value, index]], weight])
   }
 }

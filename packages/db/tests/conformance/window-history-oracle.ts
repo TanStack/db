@@ -631,77 +631,81 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
               campaign === `fixed`
                 ? oracleReplayTest(it)
                 : oracleReplayTest(it, property)
-            test(`${form} window histories (${campaign})`, async () => {
-              // Registration's replay selector is the same one the ordinary suite uses.
-              const reach = createOracleReach(
-                `${driver.name}/${form}/${campaign}`,
-                states.filter((state) =>
-                  keyed && state === `Collection option change`
-                    ? false
-                    : keyPolicy === `stable`
-                      ? state === `stable key` || state === `source write`
-                      : keyPolicy === `opaque`
-                        ? ![
-                            `stable key`,
-                            `offset move`,
-                            `limit move`,
-                            `large offset move`,
-                            `large limit move`,
-                          ].includes(state) &&
-                          (nested || state !== `nested window change`)
-                        : ![`stable key`, `opaque key change`].includes(
-                            state,
-                          ) &&
-                          (nested || state !== `nested window change`),
-                ),
-                {
-                  fixedHistories: windowHistoryExamples.length,
-                },
-              )
-              let historyIndex = 0
-              const fidelity = createOracleFailureFidelity<WindowHistory>()
-              const propertyUnderTest = fc.asyncProperty(
-                windowHistoryArbitrary,
-                async (history) => {
-                  reach.beginHistory({
-                    fixed: historyIndex++ < windowHistoryExamples.length,
-                  })
-                  const exercised = { ...history, nested }
-                  await fidelity.run(exercised, () =>
-                    runWindowHistory(
-                      driver,
-                      exercised,
-                      keyed,
-                      reach,
-                      keyPolicy,
+            test(
+              `${form} window histories (${campaign})`,
+              async () => {
+                // Registration's replay selector is the same one the ordinary suite uses.
+                const reach = createOracleReach(
+                  `${driver.name}/${form}/${campaign}`,
+                  states.filter((state) =>
+                    keyed && state === `Collection option change`
+                      ? false
+                      : keyPolicy === `stable`
+                        ? state === `stable key` || state === `source write`
+                        : keyPolicy === `opaque`
+                          ? ![
+                              `stable key`,
+                              `offset move`,
+                              `limit move`,
+                              `large offset move`,
+                              `large limit move`,
+                            ].includes(state) &&
+                            (nested || state !== `nested window change`)
+                          : ![`stable key`, `opaque key change`].includes(
+                              state,
+                            ) &&
+                            (nested || state !== `nested window change`),
+                  ),
+                  {
+                    fixedHistories: windowHistoryExamples.length,
+                  },
+                )
+                let historyIndex = 0
+                const fidelity = createOracleFailureFidelity<WindowHistory>()
+                const propertyUnderTest = fc.asyncProperty(
+                  windowHistoryArbitrary,
+                  async (history) => {
+                    reach.beginHistory({
+                      fixed: historyIndex++ < windowHistoryExamples.length,
+                    })
+                    const exercised = { ...history, nested }
+                    await fidelity.run(exercised, () =>
+                      runWindowHistory(
+                        driver,
+                        exercised,
+                        keyed,
+                        reach,
+                        keyPolicy,
+                      ),
+                    )
+                  },
+                )
+                try {
+                  await fidelity.assert(() =>
+                    fc.assert(
+                      propertyUnderTest,
+                      campaign === `fixed`
+                        ? {
+                            numRuns:
+                              oracleRuns(12) + windowHistoryExamples.length,
+                            seed: 2291,
+                            examples: windowHistoryExamples,
+                          }
+                        : oraclePropertyOptions(12, property, {
+                            examples: windowHistoryExamples,
+                          }),
                     ),
                   )
-                },
-              )
-              try {
-                await fidelity.assert(() =>
-                  fc.assert(
-                    propertyUnderTest,
-                    campaign === `fixed`
-                      ? {
-                          numRuns:
-                            oracleRuns(12) + windowHistoryExamples.length,
-                          seed: 2291,
-                          examples: windowHistoryExamples,
-                        }
-                      : oraclePropertyOptions(12, property, {
-                          examples: windowHistoryExamples,
-                        }),
-                  ),
-                )
-              } finally {
-                console.info(
-                  `window reach ${driver.name}/${form}/${campaign}`,
-                  Object.fromEntries(reach.counts()),
-                )
-              }
-              reach.assertReached()
-            }, 30_000)
+                } finally {
+                  console.info(
+                    `window reach ${driver.name}/${form}/${campaign}`,
+                    Object.fromEntries(reach.counts()),
+                  )
+                }
+                reach.assertReached()
+              },
+              oracleRuns(30_000),
+            )
           }
         }
       }
@@ -900,49 +904,53 @@ function registerPendingWindowOracle(driver: LiveQueryDriver) {
       campaign === `fixed`
         ? oracleReplayTest(it)
         : oracleReplayTest(it, property)
-    test(`pending window histories (${campaign})`, async () => {
-      const reach = createOracleReach(
-        `${driver.name}/${property}/${campaign}`,
-        pendingStates,
-        { fixedHistories: pendingExamples.length },
-      )
-      let index = 0
-      const fidelity = createOracleFailureFidelity<{
-        width: number
-        jump: number
-      }>()
-      const propertyUnderTest = fc.asyncProperty(
-        pendingWindowArbitrary,
-        async (history) => {
-          reach.beginHistory({ fixed: index++ < pendingExamples.length })
-          await fidelity.run(history, () =>
-            checkPendingWindowHistory(driver, history, reach),
+    test(
+      `pending window histories (${campaign})`,
+      async () => {
+        const reach = createOracleReach(
+          `${driver.name}/${property}/${campaign}`,
+          pendingStates,
+          { fixedHistories: pendingExamples.length },
+        )
+        let index = 0
+        const fidelity = createOracleFailureFidelity<{
+          width: number
+          jump: number
+        }>()
+        const propertyUnderTest = fc.asyncProperty(
+          pendingWindowArbitrary,
+          async (history) => {
+            reach.beginHistory({ fixed: index++ < pendingExamples.length })
+            await fidelity.run(history, () =>
+              checkPendingWindowHistory(driver, history, reach),
+            )
+          },
+        )
+        try {
+          await fidelity.assert(() =>
+            fc.assert(
+              propertyUnderTest,
+              campaign === `fixed`
+                ? {
+                    numRuns: oracleRuns(6) + pendingExamples.length,
+                    seed: 2291,
+                    examples: pendingExamples,
+                  }
+                : oraclePropertyOptions(6, property, {
+                    examples: pendingExamples,
+                  }),
+            ),
           )
-        },
-      )
-      try {
-        await fidelity.assert(() =>
-          fc.assert(
-            propertyUnderTest,
-            campaign === `fixed`
-              ? {
-                  numRuns: oracleRuns(6) + pendingExamples.length,
-                  seed: 2291,
-                  examples: pendingExamples,
-                }
-              : oraclePropertyOptions(6, property, {
-                  examples: pendingExamples,
-                }),
-          ),
-        )
-      } finally {
-        console.info(
-          `pending reach ${driver.name}/${campaign}`,
-          Object.fromEntries(reach.counts()),
-        )
-      }
-      reach.assertReached()
-    }, 30_000)
+        } finally {
+          console.info(
+            `pending reach ${driver.name}/${campaign}`,
+            Object.fromEntries(reach.counts()),
+          )
+        }
+        reach.assertReached()
+      },
+      oracleRuns(30_000),
+    )
   }
 }
 
@@ -1117,53 +1125,57 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
       campaign === `fixed`
         ? oracleReplayTest(it)
         : oracleReplayTest(it, property)
-    test(`publication callback window histories (${campaign})`, async () => {
-      const reach = createOracleReach(
-        `${driver.name}/${property}/${campaign}`,
-        publicationWindowStates,
-        { fixedHistories: publicationWindowExamples.length },
-      )
-      let index = 0
-      const fidelity = createOracleFailureFidelity<{
-        width: number
-        jump: number
-        descending: boolean
-        move: `offset` | `limit` | `both`
-      }>()
-      const propertyUnderTest = fc.asyncProperty(
-        publicationWindowArbitrary,
-        async (history) => {
-          reach.beginHistory({
-            fixed: index++ < publicationWindowExamples.length,
-          })
-          await fidelity.run(history, () =>
-            checkPublicationWindowHistory(driver, history, reach),
+    test(
+      `publication callback window histories (${campaign})`,
+      async () => {
+        const reach = createOracleReach(
+          `${driver.name}/${property}/${campaign}`,
+          publicationWindowStates,
+          { fixedHistories: publicationWindowExamples.length },
+        )
+        let index = 0
+        const fidelity = createOracleFailureFidelity<{
+          width: number
+          jump: number
+          descending: boolean
+          move: `offset` | `limit` | `both`
+        }>()
+        const propertyUnderTest = fc.asyncProperty(
+          publicationWindowArbitrary,
+          async (history) => {
+            reach.beginHistory({
+              fixed: index++ < publicationWindowExamples.length,
+            })
+            await fidelity.run(history, () =>
+              checkPublicationWindowHistory(driver, history, reach),
+            )
+          },
+        )
+        try {
+          await fidelity.assert(() =>
+            fc.assert(
+              propertyUnderTest,
+              campaign === `fixed`
+                ? {
+                    numRuns: oracleRuns(6) + publicationWindowExamples.length,
+                    seed: 2291,
+                    examples: publicationWindowExamples,
+                  }
+                : oraclePropertyOptions(6, property, {
+                    examples: publicationWindowExamples,
+                  }),
+            ),
           )
-        },
-      )
-      try {
-        await fidelity.assert(() =>
-          fc.assert(
-            propertyUnderTest,
-            campaign === `fixed`
-              ? {
-                  numRuns: oracleRuns(6) + publicationWindowExamples.length,
-                  seed: 2291,
-                  examples: publicationWindowExamples,
-                }
-              : oraclePropertyOptions(6, property, {
-                  examples: publicationWindowExamples,
-                }),
-          ),
-        )
-      } finally {
-        console.info(
-          `publication callback reach ${driver.name}/${campaign}`,
-          Object.fromEntries(reach.counts()),
-        )
-      }
-      reach.assertReached()
-    }, 30_000)
+        } finally {
+          console.info(
+            `publication callback reach ${driver.name}/${campaign}`,
+            Object.fromEntries(reach.counts()),
+          )
+        }
+        reach.assertReached()
+      },
+      oracleRuns(30_000),
+    )
   }
 }
 

@@ -4,14 +4,16 @@ title: ConvexPaginatedCollectionConfig
 ---
 
 ```ts
-type ConvexPaginatedCollectionConfig<TQuery, TItem, TKey, TSchema> = Omit<BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils, unknown>, "syncMode" | "utils" | "schema"> & object & [TSchema] extends [never] ? object : object & FunctionReturnType<TQuery> extends PaginationResult<object> ? unknown : never & FunctionArgs<TQuery> extends object ? unknown : never & 
+type ConvexPaginatedCollectionConfig<TQuery, TItem, TKey, TSchema> = Omit<BaseCollectionConfig<TItem, TKey, TSchema, ConvexCollectionUtils>, "syncMode" | "utils" | "schema"> & object & [TSchema] extends [never] ? object : object & FunctionReturnType<TQuery> extends PaginationResult<object> ? unknown : never & FunctionArgs<TQuery> extends object ? unknown : never & 
+  | object & 
   | {
   select: (rows) => ReadonlyArray<TItem>;
 }
-  | PaginatedRow<TQuery> extends TItem ? object : never;
+  | PaginatedRow<TQuery> extends TItem ? object : never
+  | object & PaginatedRow<TQuery> extends TItem ? unknown : never;
 ```
 
-Defined in: [paginated-options.ts:20](https://github.com/tanstack/db/blob/main/packages/convex-db-collection/src/paginated-options.ts#L20)
+Defined in: [paginated-options.ts:30](https://github.com/TanStack/db/blob/main/packages/convex-db-collection/src/paginated-options.ts#L30)
 
 ## Type Declaration
 
@@ -27,7 +29,7 @@ client: ConvexCollectionClient;
 optional maxRows: number;
 ```
 
-Maximum accepted rows in the complete eager mirror. Defaults to 10,000.
+Maximum accepted rows in the retained query prefix. Defaults to 10,000.
 
 ### onError()?
 

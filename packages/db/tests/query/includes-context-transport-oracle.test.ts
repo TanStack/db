@@ -1,5 +1,23 @@
 import { describe, expect, test } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
+import { createOracleReach } from '../oracle-reach.js'
+import { expectRowSnapshot } from '../conformance/row-snapshot-oracle.js'
+import {
+  expectedPublicField,
+  expectedPublicFieldOverlapSource,
+  expectedSelectedPublicField,
+  expectedSelectedPublicFieldOverlap,
+  fieldStages,
+  overlapStages,
+  publicFieldCells,
+  publicFieldGrammar,
+  publicFieldOverlapCells,
+  publicFieldOverlapFunctionalCells,
+  publicFieldSymbol,
+  runPublicFieldOverlapCell,
+} from '../conformance/public-field-oracle.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import {
   add,
   and,
@@ -14,6 +32,7 @@ import {
   multiply,
   sum,
 } from '../../src/query/index.js'
+import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   createGrammarCollection,
   expectEveryForm,
@@ -24,7 +43,15 @@ import {
   readEveryForm,
   runWithCleanup,
 } from './includes-context-transport-helpers.js'
+import type {
+  PublicFieldCell,
+  PublicFieldOverlapCell,
+  PublicFieldOverlapHost,
+  PublicFieldOverlapRow,
+  PublicFieldRow,
+} from '../conformance/public-field-oracle.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
+import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
 import type {
@@ -58,7 +85,9 @@ import type {
  * Each grammar family has a small JavaScript model for its own result. The
  * production side compiles the matching live query and crosses the full
  * boundary. The suite expands the grammar across three materialization forms
- * and three checkpoints for 819 explicit observations. This finite matrix does
+ * and three checkpoints for 819 explicit observations. The public-field family
+ * adds 1200 observations across five admission stages and four receiving paths.
+ * This finite matrix does
  * not establish arbitrary query structures, values, or update histories.
  *
  * This suite owns route-context transport and public-data hygiene. The temporal
@@ -141,6 +170,7 @@ const routeContextGrammar = {
       `identity`,
     ] as const,
   },
+  publicField: publicFieldGrammar,
   publicSurface: {
     shapes: [
       `object-query-ref-scalar`,
@@ -223,6 +253,8 @@ type GrammarCell =
   | DerivedResultCell
   | NamespaceCollisionCell
   | PublicSurfaceCell
+  | PublicFieldCell
+  | PublicFieldOverlapCell
 
 // Expand every declared product once. The calibration test below rejects both
 // missing cells and duplicate cells.
@@ -298,6 +330,9 @@ const grammarCells: Array<GrammarCell> = [
       ),
     ),
   ),
+  ...publicFieldCells,
+  ...publicFieldOverlapCells,
+  ...publicFieldOverlapFunctionalCells,
   ...routeContextGrammar.publicSurface.shapes.map(
     (shape): PublicSurfaceCell => ({ family: `public-surface`, shape }),
   ),
@@ -323,6 +358,10 @@ function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${cell.boundary} / ${cell.selection} / ${cell.domain}`
     case `namespace-collision`:
       return `${cell.family} / ${cell.location} / ${cell.boundary} / ${cell.name}`
+    case `public-field`:
+      return `${cell.family} / ${String(cell.key)} / ${cell.location} / ${cell.selection} / ${cell.destination}`
+    case `public-field-overlap`:
+      return `${cell.family} / ${cell.destination} / ${cell.operation} / ${cell.descriptor}`
     case `public-surface`:
       return `${cell.family} / ${cell.shape}`
   }
@@ -2184,6 +2223,203 @@ async function runPublicSurfaceCell({
   )
 }
 
+/**
+ * Whole-row and spread selection preserve enumerable own source data fields,
+ * including inherited-name shadows and user symbols. Authority: live-queries.md's
+ * "Include all user fields" and ARCHITECTURE.md's public-boundary preservation.
+ * Authored alias paths retain their separate restrictions. These keys are data.
+ *
+ * The independent model constructs immutable scalar-version rows. Every key
+ * crosses absent, admitted, own undefined, omitted, and readmitted stages at
+ * both root and nested locations. A version field forces every stage through
+ * change-event equality. The source assertion proves admission before querying.
+ * Root Collections and all three correlated forms use the same comparison at
+ * the synchronous source-write cut. No asynchronous or descriptor claim is
+ * added by this finite field-data family.
+ */
+function selectPublicFields(
+  q: InitialQueryBuilder,
+  source: Collection<PublicFieldRow>,
+  cell: PublicFieldCell,
+  group: number | RefLeaf<number> = 1,
+) {
+  const base = q
+    .from({ row: source })
+    .where(({ row }) => eq(row.parentGroup, group))
+  if (cell.selection === `implicit`) return base
+  if (cell.selection === `functional`)
+    return base.fn.select(({ row }) => ({
+      ...row,
+      ...(cell.location === `nested` ? { payload: { ...row.payload } } : {}),
+    }))
+  if (cell.selection === `whole-row`)
+    return cell.location === `root`
+      ? base.select(({ row }) => row)
+      : base.select(({ row }) => ({
+          id: row.id,
+          parentGroup: row.parentGroup,
+          version: row.version,
+          payload: row.payload,
+        }))
+  return cell.location === `root`
+    ? base.select(({ row }) => ({ ...row }))
+    : base.select(({ row }) => ({
+        id: row.id,
+        parentGroup: row.parentGroup,
+        version: row.version,
+        ...(cell.destination === `wrapper.toString`
+          ? { wrapper: { toString: { ...row.payload } } }
+          : { [cell.destination]: { ...row.payload } }),
+      }))
+}
+async function runPublicFieldCell(cell: PublicFieldCell): Promise<void> {
+  const paths = [`root`, ...materializationForms] as const
+  const stages = [
+    `initial-absence`,
+    `admission`,
+    `own-undefined`,
+    `omission`,
+    `readmission`,
+  ]
+  const reach = createOracleReach(grammarCellName(cell), [...paths, ...stages])
+  reach.beginHistory()
+  const source = createControlledCollection(
+    `public-field`,
+    [expectedPublicField(cell, 0)],
+    { rowUpdateMode: `full` },
+  )
+  const parents = createGrammarCollection(`public-field-parent`, [
+    { id: 1, group: 1 },
+  ])
+  const root = createLiveQueryCollection((q) =>
+    selectPublicFields(q, source.collection, cell),
+  )
+  const nested = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => ({
+      id: parent.id,
+      ...includeInEveryForm(
+        selectPublicFields(q, source.collection, cell, parent.group),
+      ),
+    })),
+  )
+  await runWithCleanup(root, [source, parents], () =>
+    runWithCleanup(nested, [], async () => {
+      await Promise.all([root.preload(), nested.preload()])
+      const failures: Array<Error> = []
+      for (const version of fieldStages) {
+        if (version > 0)
+          source.write(`update`, expectedPublicField(cell, version))
+        const expected = expectedSelectedPublicField(cell, version)
+        expectRowSnapshot(
+          source.collection.get(10),
+          expectedPublicField(cell, version),
+          `source admitted fields`,
+        )
+        const compare = (rows: Iterable<unknown>, path: string) => {
+          const values = [...rows]
+          reach.reach(path)
+          // A root mismatch must not prevent the correlated receiving paths
+          // from reaching their own comparisons in this same history.
+          try {
+            expect(values, `complete ${path} result`).toHaveLength(1)
+            expectRowSnapshot(values[0], expected, `${path} own data`)
+            expectNoPrivateSymbolsDeep(values[0], new Set([publicFieldSymbol]))
+          } catch (cause) {
+            failures.push(new Error(`${path}, stage ${version}`, { cause }))
+          }
+        }
+        compare(root.toArray, `root`)
+        const forms = nested.get(1)!
+        compare(forms.collection.values(), `collection`)
+        compare(forms.array, `array`)
+        compare(forms.materialized, `materialized`)
+        reach.reach(stages[version]!)
+      }
+      if (failures.length)
+        throw new AggregateError(failures, `Public source fields were lost`)
+    }),
+  )
+  reach.assertReached()
+}
+
+// Each receiving path gets a fresh source. Sharing one source across four
+// queries could let one corrupting projection supply another query's premise.
+// The common history/checker owns scalar expectations and retained references;
+// this driver supplies only real Core source writes and the selected public form.
+async function runPublicFieldOverlapPaths(cell: PublicFieldOverlapCell) {
+  const failures: Array<Error> = []
+  for (const path of [`root`, ...materializationForms] as const) {
+    const parents = createGrammarCollection(`overlap-parent`, [
+      { id: 1, group: 1 },
+    ])
+    const host: PublicFieldOverlapHost = {
+      name: `core.${path}`,
+      makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
+        const options = mockSyncCollectionOptions<T>({
+          id: `overlap-${grammarCellName(cell)}-${path}`,
+          getKey: (row) => row.id,
+          initialData: [...initialData],
+          rowUpdateMode: `full`,
+        })
+        const collection = createCollection(options)
+        const write = (type: `insert` | `update` | `delete`, value: T) => {
+          options.utils.begin()
+          options.utils.write({ type, value })
+          options.utils.commit()
+        }
+        return {
+          collection,
+          insert: (row: T) => write(`insert`, row),
+          update: (row: T) => write(`update`, row),
+          remove: (row: T) => write(`delete`, row),
+        }
+      },
+      mount(build) {
+        const live =
+          path === `root`
+            ? createLiveQueryCollection(build)
+            : createLiveQueryCollection((q) =>
+                q.from({ parent: parents.collection }).select(({ parent }) => ({
+                  id: parent.id,
+                  ...includeInEveryForm(
+                    build(q).where(({ row }: { row: PublicFieldOverlapRow }) =>
+                      eq(row.parentGroup, parent.group),
+                    ),
+                  ),
+                })),
+              )
+        return {
+          apply: (write) => {
+            write()
+            return Promise.resolve()
+          },
+          flush: () => live.preload(),
+          unmount: () => {},
+          collection: () => live,
+          read: () =>
+            path === `root` ? live.toArray : [...live.get(1)![path].values()],
+        }
+      },
+    }
+    try {
+      await runPublicFieldOverlapCell(host, cell)
+    } catch (cause) {
+      failures.push(new Error(`${path}: overlapping projection`, { cause }))
+    } finally {
+      try {
+        await parents.collection.cleanup()
+      } catch (cause) {
+        failures.push(new Error(`${path}: parent cleanup failed`, { cause }))
+      }
+    }
+  }
+  if (failures.length)
+    throw new AggregateError(
+      failures,
+      `Overlapping source paths changed borrowed data or failed`,
+    )
+}
+
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
     case `parent-projection`:
@@ -2204,6 +2440,10 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runDerivedResultCell(cell)
     case `namespace-collision`:
       return runNamespaceCollisionCell(cell)
+    case `public-field`:
+      return runPublicFieldCell(cell)
+    case `public-field-overlap`:
+      return runPublicFieldOverlapPaths(cell)
     case `public-surface`:
       return runPublicSurfaceCell(cell)
   }
@@ -2225,6 +2465,10 @@ declareOracle({
     expectedDerivedRows,
     expectedJoinRows,
     expectedCollisionRows,
+    expectedPublicField,
+    expectedSelectedPublicField,
+    expectedPublicFieldOverlapSource,
+    expectedSelectedPublicFieldOverlap,
   ],
   grammar: [grammarCells],
 })
@@ -2248,18 +2492,42 @@ describe(`correlated include route-context transport grammar`, () => {
       routeContextGrammar.namespaceCollision.locations.length *
         routeContextGrammar.namespaceCollision.boundaries.length *
         routeContextGrammar.namespaceCollision.names.length +
-      routeContextGrammar.publicSurface.shapes.length
+      routeContextGrammar.publicSurface.shapes.length +
+      publicFieldCells.length +
+      publicFieldOverlapCells.length +
+      publicFieldOverlapFunctionalCells.length
     const names = grammarCells.map(grammarCellName)
 
     expect(grammarCells).toHaveLength(expectedCellCount)
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
-      grammarCells.length * materializationForms.length * checkpoints.length,
+      grammarCells.filter(
+        (cell) =>
+          cell.family !== `public-field` &&
+          cell.family !== `public-field-overlap`,
+      ).length *
+        materializationForms.length *
+        checkpoints.length,
     ).toBe(819)
+    expect(
+      grammarCells.filter((cell) => cell.family === `public-field`).length *
+        fieldStages.length *
+        4,
+    ).toBe(1200)
+    expect(
+      (publicFieldOverlapCells.length +
+        publicFieldOverlapFunctionalCells.length) *
+        overlapStages.length *
+        4,
+    ).toBe(432)
   })
 
   for (const cell of grammarCells) {
-    test(`${grammarCellName(cell)} × every materialization form × parent/child updates`, () =>
+    const observations =
+      cell.family === `public-field` || cell.family === `public-field-overlap`
+        ? `root and correlated forms × field admission stages`
+        : `every materialization form × parent/child updates`
+    test(`${grammarCellName(cell)} × ${observations}`, () =>
       runGrammarCell(cell))
   }
 })

@@ -92,7 +92,7 @@ export class TopKArray<V> implements TopK<V> {
   countLeadingInWindow(predicate: (value: V) => boolean): number {
     let count = 0
     const start = Math.max(0, this.#topKStart)
-    const end = start + this.size
+    const end = Math.min(this.#topKEnd, this.#sortedValues.length)
     for (let index = start; index < end; index++) {
       if (!predicate(this.#sortedValues[index]![0])) break
       count++

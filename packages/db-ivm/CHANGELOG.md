@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 1.0.0-rc.1.1
+
+### Patch Changes
+
+- Preserve unequal `distinct()` selections when their hashes collide. Keep support counts independent so incremental insertions and deletions affect only the matching selection. ([#2309](https://github.com/TanStack/db/pull/2309))
+
 ## 1.0.0-rc.1
 
 ### Major Changes

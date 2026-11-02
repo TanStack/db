@@ -522,3 +522,129 @@ The existing changeset covers all eight affected packages with patch releases.
 This checkout has no `scripts/check-changeset.mjs`, so package membership and
 patch levels were checked directly instead. Final-head CI and mergeability are
 publication gates separate from the local evidence in this record.
+
+## Current-main integration and final byte reduction
+
+The publication head `f9d0e9029` conflicted with main `035a5260e`. The combined
+source preserves main's option-qualified React Suspense cache, lookup only for
+a new binding, render-local Suspense metadata, and Solid's borrowed-row
+materialization. React retains deferred window commits and its observer during
+a bound-only change. Solid's current findOne projection reads the borrowed
+`readData` view. The latest fetched main remains `035a5260e`.
+
+The combined tree passed 10,308 selected tests, with one existing Angular TODO.
+This includes the new main indexing, Suspense option and Solid row-isolation
+receivers. Subsequent internal reductions received fresh full IVM verification
+(664 tests), core cache/options verification (6,584 tests), React verification
+(1,907 tests), and Svelte conformance/hook verification (162 tests). These are
+repeated or overlapping campaigns, not additional unique tests to sum together.
+After the timeout repair below, actual conformance registrations passed in all
+six frameworks: React 277, Preact 136, Vue 131, Solid 95, Angular 86 and Svelte
+128. Vitest jobs ran serially with at most two workers. Existing model rules,
+history grammars, comparisons and run budgets did not change in this size pass.
+
+The retained reductions remove intermediate or duplicated implementation state:
+
+- TopK batches consolidate directly into per-key buckets, retaining first-seen
+  key/value order and emitting all retractions before additions. The duplicate
+  per-key and global batch arrays are gone.
+- Internal `TopKState` specializes its sole `TopKArray` implementation directly.
+  The contained object, forwarding constructor/getters, optional prefix fallback
+  and unreachable B+-tree move error are gone. Public operator methods remain.
+- One signed projection appends to the callers' accumulators. Unchanged support
+  needs no temporary change object. The grouped operator holds one window and
+  passes its read-only bounds to every group. The writer normalizes signed
+  output arrays into the same downstream `MultiSet` before enqueueing.
+- An internal helper shares the ordered-window recipe between grouped and
+  ungrouped ordering. It captures authored options once and receives the
+  specific TopK factory, so ungrouped imports do not retain grouped execution.
+  Public wrapper signatures and operator-local bounds remain unchanged.
+- The Suspense error cache uses one client-scope representation, with the same
+  generation fence and cleanup. Hook-instance initialization remains lazy.
+- Svelte passes its resolved observer options directly, removing duplicate
+  projections and a wrapper. The same preload callback still resumes starts
+  after subscription and on preload. Error and disposal timing remain intact.
+
+Independent source reviews found no supported-contract regression in these
+removals. They checked signed support, delta order, empty demand messages,
+per-group iteration, partial bounds, repeated pipeline use, cache generations,
+preload timing and option forwarding. Negative retained support remains outside
+one existing bounded generated campaign; no regression was identified.
+Undocumented extra-property getters on ungrouped ordering options can observe
+an additional `groupKeyFn` read. No accepted ungrouped option uses that key.
+Experiments that increased size were restored, including combined Suspense refs,
+explicit Svelte metadata getters, a folded TopK mutation method and local hash
+bounds. Eligibility guards, source ownership, error propagation, commit timing
+and useful tests remain.
+
+### Exact current-main measurements
+
+Historical measurements against `0531c50ad` above are not the current-main
+comparison. The final production builds compare exact main `035a5260e`, with
+external dependencies, production minification, gzip level 9 and Brotli quality
+11. The repository comparison builds seven packages; Svelte uses each revision's
+Svelte Vite plugin and the same minification/compression settings.
+
+| Package | Gzip delta | Brotli delta |
+| --- | ---: | ---: |
+| db-ivm | -349 | -297 |
+| db | +313 | +185 |
+| react-db | -3 | -5 |
+| preact-db | +75 | +71 |
+| vue-db | -58 | -58 |
+| solid-db | -21 | -16 |
+| angular-db | 0 | +11 |
+| svelte-db | +42 | +31 |
+| All eight | **-1** | **-78** |
+| Typical tree-shaken React app | **+20** | **+54** |
+
+The aggregate package reduction is small. It does not establish a reduction for
+every application. Other scenario deltas range from -4 to +41 gzip bytes and
+-43 to +128 Brotli bytes. The seven-package command is
+`node scripts/size-compare.mjs --base 035a5260e --exact-base --packages db-ivm,db,react-db,preact-db,vue-db,solid-db,angular-db`.
+Svelte's output is raw 5,322, gzip 2,334 and Brotli 2,105 bytes, versus main's
+5,582, 2,292 and 2,074. Test sources and evidence do not enter these bundles.
+
+### Latest CodeRabbit review and timeout repair
+
+Review `5739361119` covers `f9d0e9029`. Its one item,
+[4444565382](https://github.com/TanStack/db/pull/2316#discussion_r4444565382),
+correctly identifies fixed campaign timeouts alongside scaled history counts.
+A source-discovered sibling has the same mismatch at three shared window-history
+registration sites. All four timeout sites now use `oracleRuns(30_000)`.
+The default remains 30 seconds. Models, histories, drivers, comparisons, examples
+and history budgets remain unchanged.
+
+A deterministic recorder loaded the actual oracle registration functions and
+actual run-budget configuration. It intercepted fast-check options before any
+history ran. At multipliers 1/2/3, the original six shape and sixty window
+registration cells all retained 30,000 ms. The proportional-budget assertion
+failed at multiplier 2. After the timeout-only repair all 66 cells register
+30,000/60,000/90,000 ms, and every history/example budget is identical. The
+original fixed-timeout registration is the rejected mutant. Actual framework
+campaigns then passed at the default multiplier as recorded above. This is
+registration/configuration evidence, not proof that arbitrary multipliers finish
+within the larger timeout or a new product law about elapsed time.
+
+The reviewer supplied an accurate, appropriately minor harness consistency
+finding and a minimal repair. Its static inspection did not establish an actual
+framework timeout; the executable recorder establishes the metadata mismatch.
+The loss audit now accounts for five external items: two earlier fixes, two
+executable refutations and this timeout repair. The separately recorded sibling
+is fixed too. There is no new confirmed-open product finding or design decision.
+The original R2-5/G1 chronology qualification and successful-shrink-path replay
+mechanics qualification remain disclosed; this integration does not repair or
+retroactively satisfy them. Final pushed-head CI remains a separate gate.
+
+Final package source/test snapshot SHA-256: `c8cc0d6ba2b61ae1af8ab6f3f4a5191335c4ff954a219f11d069a03b80b46262`. This hashes
+the sorted changed package paths and contents relative to main, including the
+new internal ordering helper. Full IVM664, core6,584 and Svelte162 pass on this
+production source; Svelte cache/descriptor/SSR/hydration adds236 passing checks.
+IVM/core/React types and Svelte checker pass, with zero Svelte warnings. Other
+merged framework package types already passed and their source is unchanged.
+Changed-source ESLint, oracle lint, formatting and whitespace checks pass.
+The timeout formatting is semantically identical to the four recorded timeout
+replacements; the 66 registration cells remain identical after formatting.
+Direct workspace binaries supplied these checks because pnpm's version bootstrap
+hit the configured npm proxy allowlist. No dependency override or local install
+workaround enters this merge.

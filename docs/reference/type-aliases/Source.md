@@ -7,7 +7,7 @@ title: Source
 type Source = object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L96)
+Defined in: [packages/db/src/query/builder/types.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L93)
 
 Source - Input definition for query builder `from()` and `unionAll()` clauses
 

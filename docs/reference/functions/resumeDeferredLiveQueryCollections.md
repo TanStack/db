@@ -7,7 +7,7 @@ title: resumeDeferredLiveQueryCollections
 function resumeDeferredLiveQueryCollections(collections, reportSourceErrors): void;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L117)
+Defined in: [packages/db/src/live-query-options.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L118)
 
 Release every deferred source, then report the first startup failure.
 

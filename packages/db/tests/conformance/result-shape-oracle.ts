@@ -275,38 +275,42 @@ export function registerResultShapeOracle(driver: LiveQueryDriver): void {
         campaign === `fixed`
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
-      test(`query projection histories (${campaign})`, async () => {
-        const reach = createOracleReach(`${property}/${campaign}`, states, {
-          fixedHistories: examples.length,
-        })
-        const fidelity = createOracleFailureFidelity<ShapeHistory>()
-        let begun = 0
-        try {
-          await fidelity.assert(() =>
-            fc.assert(
-              fc.asyncProperty(shapeHistory, async (history) => {
-                reach.beginHistory({ fixed: begun++ < examples.length })
-                await fidelity.run(history, () =>
-                  checkShapeHistory(driver, history, reach),
-                )
-              }),
-              campaign === `fixed`
-                ? {
-                    seed: 2316,
-                    numRuns: oracleRuns(6) + examples.length,
-                    examples,
-                  }
-                : oraclePropertyOptions(6, property, { examples }),
-            ),
-          )
-          reach.assertReached()
-        } finally {
-          console.info(
-            `shape reach ${property}/${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-      }, 30_000)
+      test(
+        `query projection histories (${campaign})`,
+        async () => {
+          const reach = createOracleReach(`${property}/${campaign}`, states, {
+            fixedHistories: examples.length,
+          })
+          const fidelity = createOracleFailureFidelity<ShapeHistory>()
+          let begun = 0
+          try {
+            await fidelity.assert(() =>
+              fc.assert(
+                fc.asyncProperty(shapeHistory, async (history) => {
+                  reach.beginHistory({ fixed: begun++ < examples.length })
+                  await fidelity.run(history, () =>
+                    checkShapeHistory(driver, history, reach),
+                  )
+                }),
+                campaign === `fixed`
+                  ? {
+                      seed: 2316,
+                      numRuns: oracleRuns(6) + examples.length,
+                      examples,
+                    }
+                  : oraclePropertyOptions(6, property, { examples }),
+              ),
+            )
+            reach.assertReached()
+          } finally {
+            console.info(
+              `shape reach ${property}/${campaign}`,
+              Object.fromEntries(reach.counts()),
+            )
+          }
+        },
+        oracleRuns(30_000),
+      )
     }
 
     // Calibrate the same raw-shape judgment with the previous mode's answer.

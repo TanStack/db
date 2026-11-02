@@ -3,7 +3,7 @@ id: SyncConfig
 title: SyncConfig
 ---
 
-Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L445)
+Defined in: [packages/db/src/types.ts:446](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L446)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L520)
+Defined in: [packages/db/src/types.ts:532](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L532)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L514)
+Defined in: [packages/db/src/types.ts:526](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L526)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:525](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L525)
+Defined in: [packages/db/src/types.ts:537](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L537)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:530](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L530)
+Defined in: [packages/db/src/types.ts:542](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L542)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L539)
+Defined in: [packages/db/src/types.ts:551](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L551)
 
 The row update mode used to sync to the collection.
 
@@ -130,7 +130,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:449](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L449)
+Defined in: [packages/db/src/types.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L450)
 
 #### Parameters
 
@@ -140,10 +140,11 @@ Defined in: [packages/db/src/types.ts:449](https://github.com/TanStack/db/blob/m
 
 (`options?`) => `void`
 
-Begin a new sync transaction. `direct: true` marks a direct write: an
-edit of the rows on screen, not part of the sync run's snapshot. During
-a reload it applies to the kept rows, and the reload's replacement of
-every row waits for the run's next transaction.
+Begin a new sync transaction. Its writes apply on the rows the
+Collection holds, also during a reload. `snapshot: true` declares that
+the transaction carries every row: its commit replaces every synced
+row, as `truncate({ markReady: false })` at its start does. A reload's
+new run replaces the kept rows only with a snapshot or `truncate()`.
 
 ###### collection
 
@@ -186,7 +187,9 @@ coalesced. Do not call it for results that answer a `loadSubset` call.
 
 () => `void`
 
-Signal that a usable initial snapshot is available for this attempt.
+Signal that the sync run's initial data is available. During a reload
+it completes the reload and keeps the rows unless a snapshot replaced
+them. A second call in the run, or one after `fail()`, does nothing.
 
 ###### metadata?
 
@@ -197,16 +200,22 @@ Signal that a usable initial snapshot is available for this attempt.
 (`error`) => `void`
 
 Report a problem after the first ready while the sync adapter keeps
-trying. It shows as the node's `failureReason`; the status and rows do
-not change. Throws before the first ready and after `fail()`.
+trying. It shows as the node's `failureReason` and adds a failure to its
+`errors`; the status and rows do not change. One error value is one
+failure: reporting a value already listed changes nothing, and that
+failure keeps its place and its `at`. Throws before the first ready and
+after `fail()`.
 
 ###### reportHealthy
 
-() => `void`
+(`error?`) => `void`
 
-Sync works again: clears a `failureReason`. With nothing to clear it does
-nothing, so it can follow every commit. Throws before the first ready
-and after `fail()`.
+Sync works again. With no `error`, clears the `failureReason`. With an
+`error`, removes only the failure whose cause is that value, for
+example one of several requests that recovered; the `failureReason`
+then shows the newest failure left, and clears once none is left. With
+nothing to clear or remove it does nothing, so it can follow every
+commit. Throws before the first ready and after `fail()`.
 
 ###### truncate
 

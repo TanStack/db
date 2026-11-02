@@ -381,7 +381,7 @@ export function useLiveQuery(
           [`collection`, unwrappedParam.id],
           `queryKey`,
         ),
-        resumeDeferredCollections: () => {},
+        onPreload: () => {},
         move: undefined,
       }
     }
@@ -477,7 +477,7 @@ export function useLiveQuery(
         queryHash,
         // The subscribing effect releases the starts, so it drops the
         // reclaim release.
-        resumeDeferredCollections: () => {
+        onPreload: () => {
           cancelReclaimRelease?.()
           resumeDeferredLiveQueryCollections(deferredCollections)
         },
@@ -487,14 +487,11 @@ export function useLiveQuery(
     }
   })
 
-  const createObserver = (input: typeof resolved) =>
-    createLiveQueryObserver(input.collection, {
-      client: input.client,
-      queryHash: input.queryHash,
-      onPreload: input.resumeDeferredCollections,
-    })
   let currentResolved = untrack(() => resolved)
-  let currentObserver = createObserver(currentResolved)
+  let currentObserver = createLiveQueryObserver(
+    currentResolved.collection,
+    currentResolved,
+  )
   const initialSnapshot =
     typeof window === `undefined` || context?.hydrating
       ? currentObserver.getServerSnapshot()
@@ -558,7 +555,10 @@ export function useLiveQuery(
     if (nextResolved !== currentResolved) {
       currentObserver.dispose()
       currentResolved = nextResolved
-      currentObserver = createObserver(nextResolved)
+      currentObserver = createLiveQueryObserver(
+        nextResolved.collection,
+        nextResolved,
+      )
       syncFromObserver(currentObserver)
     }
 
@@ -568,7 +568,7 @@ export function useLiveQuery(
       syncFromObserver(observer, changes)
     })
     try {
-      currentResolved.resumeDeferredCollections()
+      currentResolved.onPreload()
       syncFromObserver(observer)
     } catch (error) {
       observer.dispose()
