@@ -12,32 +12,74 @@
  *
  * - `law` states the promise, its authority, its limits, and its owner in the
  *   coverage map. A failure names it.
- * - `histories` lists every legal history the property runs. This first
- *   version takes an enumerated source, which runs in full: bounded
- *   exhaustiveness (glossary).
- * - `model` gives the expected result of a history, without production.
+ * - `histories` is either an enumerated list, which runs in full (bounded
+ *   exhaustiveness, glossary), or a generated source: a fast-check arbitrary
+ *   with a run budget, fixed seeds, required segments, and pins (below).
+ * - `model` gives the expected result of a history and its recorded trace,
+ *   without production. A model that answers from the history alone ignores
+ *   the trace; a model of an environment the driver observes reads it
+ *   (oracle-framework design, R7).
  * - `driver` runs one history through production and records public
  *   observations with `observe(checkpoint, value)`. It returns nothing, so it
  *   cannot decide a verdict (oracle-framework design, decision D10). A
  *   production error that the law cares about is an observation the driver
- *   records. An error that escapes the driver is a setup error, never a
- *   violation.
+ *   records. An error that escapes the driver is a setup error, unless the
+ *   trace recorded before it already violates the law: then the violation is
+ *   the failure, with the error as its cause, so a later crash cannot hide an
+ *   earlier wrong observation. A check therefore judges the recorded
+ *   checkpoints first and the trace's completeness last.
  * - `check` compares the observations with the model and returns a verdict.
- *   Only the check can report a violation of the law.
+ *   Only the check can report a violation of the law. A violation that gives
+ *   the `actual` and `expected` values gets the test runner's usual diff.
  *
  * Each history is one test, named by `label`. A violation fails it with an
  * `OracleViolation` that names the property, the law, the checkpoint, the
- * difference, and the command that reruns that history. Every observation is
+ * difference, and the command that reruns that history (the name is escaped,
+ * because Vitest reads `-t` as a regular expression). Every observation is
  * also offered to `globalThis.__oracleObserve` when a harness installs one,
  * so the gap report can tell an output the check does not compare from one
  * that never changed.
+ *
+ * A generated source runs one test per fixed seed and one random test, with
+ * the same arbitrary, check, and budget (ORC-007). The random test reads the
+ * replay variables through `oraclePropertyOptions`, and every test stands
+ * aside during another property's path replay.
+ *
+ * - **Reach** names the states a history entered. By default the driver
+ *   reports them with `observe("reach", state)`. A state that only the model
+ *   can name, such as "a failure while the seed is active", comes from
+ *   `reached(history, trace, expected)` instead. Each lane prints how many
+ *   histories entered each declared state, including none (ORC-015).
+ * - A **segment** builds a history that reaches states that the laws need,
+ *   from a generated history, and names those states. Every lane runs every
+ *   segment once as an example, and a segment run that does not enter a named
+ *   state fails. Only segments make reach required: a state that random
+ *   histories reach is measured, never gated (design, D21). So every state in
+ *   `states` must be named by a segment, and a state the property only
+ *   measures is declared in `measured` instead (ORC-015). Half of a lane's
+ *   generated histories also go through a segment, so the histories after
+ *   each required state are explored, not visited once.
+ * - A **pin** is a fixed history, such as a regression. A pin and a segment's
+ *   history must be histories the arbitrary could generate
+ *   (`canShrinkWithoutContext`), so they shrink like generated ones and cannot
+ *   cover a dimension that the grammar lacks (design, R8).
+ * - **Shrinking keeps the law.** A violation can name the law it broke. Once
+ *   a history violates one law, a smaller history that violates a different
+ *   law counts as passing, so the reported counterexample still shows the
+ *   first failure (ORC-010, design D24).
  *
  * The `oracle/no-unit-test` lint rule treats an `oracleProperty` call as an
  * oracle test whose parts are its arguments, when its options are an object
  * literal with a `check`. The property is its own declaration.
  */
 import { appendFileSync } from 'node:fs'
+import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from './oracle-config.js'
 
 /** A law and where it comes from. */
 export interface OracleLaw {
@@ -60,28 +102,86 @@ export interface Observation {
 /** The check's judgment of one history. */
 export type Verdict =
   | { kind: `pass` }
-  | { kind: `violation`; checkpoint: string; difference: string }
+  | {
+      kind: `violation`
+      checkpoint: string
+      difference: string
+      /** The law broken, which shrinking preserves. Defaults to the checkpoint. */
+      law?: string
+      /** The observed and owed values, which the failure shows as a diff. */
+      values?: { actual: unknown; expected: unknown }
+      /** A driver error that came after the violated checkpoint. */
+      cause?: unknown
+    }
 
 export const pass: Verdict = { kind: `pass` }
 
-export function violation(checkpoint: string, difference: string): Verdict {
-  return { kind: `violation`, checkpoint, difference }
+export function violation(
+  checkpoint: string,
+  difference: string,
+  law?: string,
+  values?: { actual: unknown; expected: unknown },
+): Verdict {
+  return { kind: `violation`, checkpoint, difference, law, values }
 }
 
-/** The check found a history whose observations the law does not allow. */
+/**
+ * The check found a history whose observations the law does not allow.
+ * `actual` and `expected` are the fields Vitest reads to print a diff.
+ */
 export class OracleViolation extends Error {
   override name = `OracleViolation`
+  actual?: unknown
+  expected?: unknown
+  showDiff?: boolean
+}
+
+/**
+ * A history built from a generated one so that it reaches the states the
+ * laws need. The driver reports reached states with `observe("reach", state)`.
+ */
+export interface Segment<History> {
+  name: string
+  enters: ReadonlyArray<string>
+  build: (generated: History) => History
+}
+
+export interface GeneratedHistories<History> {
+  arbitrary: fc.Arbitrary<History>
+  /**
+   * The states the laws depend on (ORC-015). Each must be named by a segment,
+   * so every lane reaches it. Each lane reports how many histories entered
+   * each one, including none.
+   */
+  states?: ReadonlyArray<string>
+  /**
+   * States that are counted but not required. A reached state outside
+   * `states` and `measured` fails, so a misspelled state cannot pass unseen.
+   */
+  measured?: ReadonlyArray<string>
+  /** The base run budget of each lane, scaled by the run multiplier. */
+  runs: number
+  /** One fixed lane per seed, beside the random lane. */
+  fixedSeeds: ReadonlyArray<number>
+  segments?: ReadonlyArray<Segment<History>>
+  pins?: ReadonlyArray<{ name: string; history: History }>
 }
 
 export interface OraclePropertyOptions<History, Expected> {
   /** A stable identifier, used in failures, the manifest, and replay. */
   id: string
   law: OracleLaw
-  /** Every legal history, in a fixed order. */
-  histories: ReadonlyArray<History>
-  /** A short, unique test name for a history. */
-  label: (history: History) => string
-  model: (history: History) => Expected
+  /** Every legal history in a fixed order, or a generated source. */
+  histories: ReadonlyArray<History> | GeneratedHistories<History>
+  /** A short, unique test name for an enumerated history. */
+  label?: (history: History) => string
+  model: (history: History, trace: ReadonlyArray<Observation>) => Expected
+  /** The states the history entered. Defaults to the trace's `reach` values. */
+  reached?: (
+    history: History,
+    trace: ReadonlyArray<Observation>,
+    expected: Expected,
+  ) => Iterable<string>
   driver: (
     history: History,
     observe: (checkpoint: string, value: unknown) => void,
@@ -99,59 +199,313 @@ declare global {
     ((checkpoint: string, value: unknown) => void) | undefined
 }
 
+/** One test that a property registers. */
+interface PropertyTest {
+  name: string
+  run: () => Promise<void>
+  /** Path replays this test runs during; empty stands aside during every one. */
+  replays: ReadonlyArray<string>
+  timeout?: number
+}
+
 export function oracleProperty<History, Expected>(
   options: OraclePropertyOptions<History, Expected>,
 ): void {
-  const { id, law, histories, label } = options
-  recordRegistration(options)
+  const { id, histories } = options
+  recordRegistration(id, options.law, histories)
+  // The tests are built as data first, so every one registers unconditionally
+  // (oracle/no-disabled).
+  const tests = Array.isArray(histories)
+    ? enumeratedTests(options, histories as ReadonlyArray<History>)
+    : generatedTests(options, histories as GeneratedHistories<History>)
   describe(id, () => {
-    for (const history of histories) {
-      const name = label(history)
-      it(name, async () => {
-        const observations: Array<Observation> = []
-        await options.driver(history, (checkpoint, value) => {
-          observations.push({ checkpoint, value })
-          globalThis.__oracleObserve?.(checkpoint, value)
-        })
-        const verdict = options.check(
-          history,
-          observations,
-          options.model(history),
-        )
-        if (verdict.kind === `violation`) {
-          throw new OracleViolation(
-            [
-              `${id} violated at checkpoint "${verdict.checkpoint}".`,
-              `Law: ${law.statement}`,
-              `Difference: ${verdict.difference}`,
-              `Authority: ${law.authority}`,
-              `Known limits: ${law.limits}`,
-              `Rerun this history: vitest run ${relativeTestFile()} -t ${JSON.stringify(`${id} ${name}`)}`,
-            ].join(`\n`),
+    for (const test of tests)
+      oracleReplayTest(it, ...test.replays)(test.name, test.run, test.timeout)
+  })
+}
+
+function enumeratedTests<History, Expected>(
+  options: OraclePropertyOptions<History, Expected>,
+  histories: ReadonlyArray<History>,
+): Array<PropertyTest> {
+  return histories.map((history) => {
+    const name = options.label?.(history) ?? JSON.stringify(history)
+    return {
+      name,
+      replays: [],
+      run: async () => {
+        const { verdict } = await runOne(options, history)
+        if (verdict.kind === `violation`)
+          throw failure(
+            options,
+            verdict,
+            history,
+            rerunByName(`${options.id} ${name}`),
           )
-        }
-      })
+      },
     }
   })
 }
 
+/** Runs one history: the driver records, the model predicts, the check judges. */
+async function runOne<History, Expected>(
+  options: OraclePropertyOptions<History, Expected>,
+  history: History,
+): Promise<{ verdict: Verdict; reached: Set<string> }> {
+  const observations: Array<Observation> = []
+  let driverError: { error: unknown } | undefined
+  try {
+    await options.driver(history, (checkpoint, value) => {
+      observations.push({ checkpoint, value })
+      globalThis.__oracleObserve?.(checkpoint, value)
+    })
+  } catch (error) {
+    driverError = { error }
+  }
+  let expected: Expected
+  let verdict: Verdict
+  try {
+    expected = options.model(history, observations)
+    verdict = options.check(history, observations, expected)
+  } catch (error) {
+    // A partial trace the model or check cannot read is still a setup error.
+    throw driverError ? driverError.error : error
+  }
+  if (driverError) {
+    // Only a violation at a checkpoint the driver recorded before it threw
+    // outranks the error; one about the missing rest of the trace does not.
+    const recorded = observations.some(
+      ({ checkpoint }) =>
+        verdict.kind === `violation` && checkpoint === verdict.checkpoint,
+    )
+    if (verdict.kind === `pass` || !recorded) throw driverError.error
+    verdict = { ...verdict, cause: driverError.error }
+  }
+  const reached = new Set(
+    options.reached?.(history, observations, expected) ??
+      observations
+        .filter((entry) => entry.checkpoint === `reach`)
+        .map((entry) => String(entry.value)),
+  )
+  return { verdict, reached }
+}
+
+function failure<History>(
+  options: { id: string; law: OracleLaw },
+  verdict: Extract<Verdict, { kind: `violation` }>,
+  history: History,
+  rerun: string,
+): OracleViolation {
+  const { id, law } = options
+  const error = new OracleViolation(
+    [
+      `${id} violated at checkpoint "${verdict.checkpoint}"${verdict.law ? ` (law: ${verdict.law})` : ``}.`,
+      `Law: ${law.statement}`,
+      `Difference: ${verdict.difference}`,
+      `History: ${JSON.stringify(history)}`,
+      `Authority: ${law.authority}`,
+      `Known limits: ${law.limits}`,
+      `Rerun: ${rerun}`,
+    ].join(`\n`),
+    verdict.cause === undefined ? undefined : { cause: verdict.cause },
+  )
+  if (verdict.values) {
+    error.actual = verdict.values.actual
+    error.expected = verdict.values.expected
+    error.showDiff = true
+  }
+  return error
+}
+
+/** A Vitest `-t` argument that matches exactly this test name. */
+function rerunByName(name: string): string {
+  const pattern = name.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
+  return `-t ${JSON.stringify(`^${pattern}$`)}`
+}
+
+function generatedTests<History, Expected>(
+  options: OraclePropertyOptions<History, Expected>,
+  source: GeneratedHistories<History>,
+): Array<PropertyTest> {
+  const { id } = options
+  const segments = source.segments ?? []
+  const declared =
+    source.states || source.measured
+      ? new Set([...(source.states ?? []), ...(source.measured ?? [])])
+      : undefined
+  const named = new Set(segments.flatMap((segment) => segment.enters))
+  const unsegmented = (source.states ?? []).filter((state) => !named.has(state))
+  if (unsegmented.length > 0)
+    throw new Error(
+      `${id}: no segment enters ${unsegmented.join(`, `)}. A required state needs a segment; a state that is only counted belongs in \`measured\`.`,
+    )
+  // Generated histories, half of them built by a segment. A built history
+  // shrinks through its generated input, as a mapped arbitrary does.
+  const arbitrary =
+    segments.length === 0
+      ? source.arbitrary
+      : fc.oneof(
+          { arbitrary: source.arbitrary, weight: segments.length },
+          ...segments.map((segment) => ({
+            arbitrary: source.arbitrary.map(segment.build),
+            weight: 1,
+          })),
+        )
+  for (const segment of segments) {
+    const undeclared = segment.enters.filter(
+      (state) =>
+        declared !== undefined && !(source.states ?? []).includes(state),
+    )
+    if (undeclared.length > 0)
+      throw new Error(
+        `${id}: segment "${segment.name}" names undeclared states ${undeclared.join(`, `)}.`,
+      )
+  }
+
+  // Each lane gets a fresh predicate: its first violation fixes the law that
+  // shrinking must keep. It counts the histories that entered each state.
+  const predicateFor = (
+    segmentOf: Map<History, Segment<History>>,
+    counts: Map<string, number>,
+  ) => {
+    let firstLaw: string | undefined
+    return async (history: History) => {
+      const { verdict, reached } = await runOne(options, history)
+      for (const state of reached) {
+        if (declared !== undefined && !declared.has(state))
+          throw new Error(
+            `${id}: a history entered "${state}", which the property does not declare.`,
+          )
+        counts.set(state, (counts.get(state) ?? 0) + 1)
+      }
+      const segment = segmentOf.get(history)
+      if (segment !== undefined) {
+        const missing = segment.enters.filter((state) => !reached.has(state))
+        if (missing.length > 0)
+          throw new Error(
+            `${id}: segment "${segment.name}" did not enter ${missing.join(`, `)}. A segment must reach every state it names.`,
+          )
+      }
+      if (verdict.kind === `pass`) return
+      const law = verdict.law ?? verdict.checkpoint
+      firstLaw ??= law
+      // A different law's violation during shrinking is not this failure.
+      if (law !== firstLaw) return
+      throw failure(
+        options,
+        verdict,
+        history,
+        `TANSTACK_DB_ORACLE_PROPERTY=${id} with the seed and path that fast-check reports`,
+      )
+    }
+  }
+  // Each lane runs every segment, built from histories its own seed draws.
+  // fast-check passes example inputs by reference, which identifies them.
+  const examplesFor = (seed: number) => {
+    const segmentOf = new Map<History, Segment<History>>()
+    const examples = segments.map((segment, index) => {
+      const [generated] = fc.sample(source.arbitrary, {
+        seed: seed + index,
+        numRuns: 1,
+      })
+      const history = segment.build(generated!)
+      if (!source.arbitrary.canShrinkWithoutContext(history))
+        throw new Error(
+          `${id}: segment "${segment.name}" built a history the arbitrary cannot generate. A segment must stay inside the generated language so that its failures shrink.`,
+        )
+      segmentOf.set(history, segment)
+      return [history] as [History]
+    })
+    return { examples, segmentOf }
+  }
+
+  // A lane reports its reach counts after it passes; a failing lane reports
+  // its counterexample instead.
+  const runLane = async (
+    name: string,
+    seed: number,
+    parameters: (examples: Array<[History]>) => Parameters<typeof fc.assert>[1],
+  ) => {
+    const { examples, segmentOf } = examplesFor(seed)
+    const counts = new Map<string, number>(
+      [...(declared ?? [])].map((state) => [state, 0]),
+    )
+    await fc.assert(
+      fc.asyncProperty(arbitrary, predicateFor(segmentOf, counts)),
+      parameters(examples),
+    )
+    // Vitest hides console output from a passing test; stdout reaches the log.
+    process.stdout.write(
+      `${id} ${name} reach ${JSON.stringify(Object.fromEntries([...counts].sort(([a], [b]) => (a < b ? -1 : 1))))}\n`,
+    )
+  }
+  // Examples come on top of a lane's budget, as in `oraclePropertyOptions`.
+  const fixedLanes = source.fixedSeeds.map((seed): PropertyTest => ({
+    name: `fixed seed ${seed}`,
+    replays: [],
+    timeout: 120_000,
+    run: () =>
+      runLane(`fixed seed ${seed}`, seed, (examples) => ({
+        numRuns: oracleRuns(source.runs) + examples.length,
+        seed,
+        examples,
+      })),
+  }))
+  // The random lane picks its seed itself, so a replay of that seed rebuilds
+  // the same segment histories, which the replay path counts.
+  const randomLane: PropertyTest = {
+    name: `random seed`,
+    replays: [id],
+    timeout: 120_000,
+    run: () => {
+      const seed =
+        oraclePropertyOptions(source.runs, id).seed ?? Date.now() % 2 ** 31
+      return runLane(`random seed`, seed, (examples) => ({
+        ...oraclePropertyOptions(source.runs, id, { examples }),
+        seed,
+      }))
+    },
+  }
+  const pins = (source.pins ?? []).map((pin): PropertyTest => ({
+    name: `pin: ${pin.name}`,
+    replays: [],
+    run: async () => {
+      if (!source.arbitrary.canShrinkWithoutContext(pin.history))
+        throw new Error(
+          `${id}: pin "${pin.name}" is not a history the arbitrary can generate. A pin must stay inside the generated language, or the property must declare the missing dimension as a limit.`,
+        )
+      const { verdict } = await runOne(options, pin.history)
+      if (verdict.kind === `violation`)
+        throw failure(
+          options,
+          verdict,
+          pin.history,
+          rerunByName(`${id} pin: ${pin.name}`),
+        )
+    },
+  }))
+  return [...fixedLanes, randomLane, ...pins]
+}
+
 // A collect-only run (ORACLE_MANIFEST set) records each registration, so the
 // committed manifest can be generated without running any history.
-function recordRegistration(options: {
-  id: string
-  law: OracleLaw
-  histories: { length: number }
-}): void {
+function recordRegistration(
+  id: string,
+  law: OracleLaw,
+  histories: ReadonlyArray<unknown> | { runs: number },
+): void {
   const manifest = process.env.ORACLE_MANIFEST
   if (manifest === undefined) return
   appendFileSync(
     manifest,
     `${JSON.stringify({
-      id: options.id,
+      id,
       file: relativeTestFile(),
-      owner: options.law.owner,
-      authority: options.law.authority,
-      histories: options.histories.length,
+      owner: law.owner,
+      authority: law.authority,
+      histories: Array.isArray(histories)
+        ? histories.length
+        : { runs: (histories as { runs: number }).runs },
     })}\n`,
   )
 }

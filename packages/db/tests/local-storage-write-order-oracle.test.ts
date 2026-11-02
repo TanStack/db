@@ -19,9 +19,12 @@
  * Limits. Writes are whole-row updates and deletes of two stored rows, made
  * by one Collection with automatic handlers. Inserts are excluded: an insert
  * after a rejected delete of the same key is undecided behaviour. Manual
- * acceptance, peer writes, storage faults, and histories longer than three
- * writes are outside this property; the order oracle's pinned witnesses and
- * the peer tests cover some of them.
+ * acceptance and peer writes are outside this property because they need
+ * different event and ownership boundaries; the order oracle's pinned
+ * witnesses and `local-storage.peers` cover them. Storage faults and
+ * histories longer than three writes are also outside it. The prompt release
+ * of a failed later handler's receipt and optimistic row is witnessed only by
+ * the fixed tests in `local-storage-order.test.ts` (coverage map).
  */
 import { createCollection } from '../src/collection/index'
 import { createDeferred } from '../src/deferred'
@@ -40,7 +43,15 @@ import type { Row } from './local-storage-fixtures'
 // A history is a list of writes, the order in which their handlers finish, and
 // each handler's decision. A write is legal when it is submitted: an update or
 // a delete needs its row to exist in the Collection at that moment, which is
-// the authored state with every earlier write applied optimistically.
+// the authored state with every earlier write applied optimistically. The
+// lists cross same-key and disjoint-key writes. An update followed by a delete
+// of the same row distinguishes author order from a simple last-value
+// replacement: an accepted delete removes the row even when its handler
+// finishes before the update's.
+//
+// A test is named by its history: `ua db` is an update of `a` then a delete of
+// `b`, `release 10` lets write 1's handler finish before write 0's, and
+// `decisions YN` accepts write 0 and rejects write 1.
 
 type Write = { kind: `update` | `delete`; id: `a` | `b` }
 type History = {
@@ -99,7 +110,8 @@ const histories: Array<History> = legalWriteLists().flatMap((writes) =>
 
 // -- Model ----------------------------------------------------------------------
 //
-// The documented effect of an accepted write, in author order: an update
+// The model does not model handlers, optimistic overlays, storage caches, or
+// sync queues. The documented effect of an accepted write, in author order: an update
 // replaces the whole row with the value it authored (its position plus one),
 // and a delete removes the row. A rejected write contributes nothing. The fold
 // of the first m writes is what storage may hold once those m writes are
@@ -155,7 +167,7 @@ async function drive(
   const entered = writes.map(() => createDeferred<void>())
   // An update names itself by the value it authored. A delete names itself by
   // its key: a legal history deletes a key at most once.
-  const deletes = new Map(
+  const deletes = new Map<string, number>(
     writes.flatMap((write, index) =>
       write.kind === `delete` ? [[write.id, index] as const] : [],
     ),
@@ -248,14 +260,6 @@ function checkHistory(
   expected: ReturnType<typeof expectedResult>,
 ) {
   const count = history.writes.length
-  const seen = new Set(observations.map(({ checkpoint }) => checkpoint))
-  for (const checkpoint of [`settled`, `fresh restore`]) {
-    if (!seen.has(checkpoint))
-      return violation(
-        checkpoint,
-        `the driver recorded no "${checkpoint}" observation`,
-      )
-  }
   for (const { checkpoint, value } of observations) {
     if (checkpoint.startsWith(`held`)) {
       const { released, settled, durable } = value as {
@@ -292,23 +296,41 @@ function checkHistory(
         return violation(
           checkpoint,
           `outcomes ${JSON.stringify(outcomes)}, decisions ${JSON.stringify(expected.outcomes)}`,
+          undefined,
+          { actual: outcomes, expected: expected.outcomes },
         )
       if (!same(durable, expected.rows))
         return violation(
           checkpoint,
           `storage ${JSON.stringify(durable)}, expected ${JSON.stringify(expected.rows)}`,
+          undefined,
+          { actual: durable, expected: expected.rows },
         )
       if (!same(rows, expected.rows))
         return violation(
           checkpoint,
           `public rows ${JSON.stringify(rows)}, expected ${JSON.stringify(expected.rows)}`,
+          undefined,
+          { actual: rows, expected: expected.rows },
         )
     } else if (!same(value, expected.rows)) {
       return violation(
         checkpoint,
         `restored ${JSON.stringify(value)}, expected ${JSON.stringify(expected.rows)}`,
+        undefined,
+        { actual: value, expected: expected.rows },
       )
     }
+  }
+  // Completeness last: a history whose driver threw keeps the violation
+  // found at a recorded checkpoint.
+  const seen = new Set(observations.map(({ checkpoint }) => checkpoint))
+  for (const checkpoint of [`settled`, `fresh restore`]) {
+    if (!seen.has(checkpoint))
+      return violation(
+        checkpoint,
+        `the driver recorded no "${checkpoint}" observation`,
+      )
   }
   return pass
 }

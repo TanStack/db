@@ -457,6 +457,8 @@ function checkHistory(
       return violation(
         checkpoint,
         `stored ${json(observed.stored)}, expected ${json(allowed.stored)}`,
+        undefined,
+        { actual: observed.stored, expected: allowed.stored },
       )
     for (const collection of [`A`, `B`, `C`] as const) {
       const rows = observed[collection]
@@ -483,6 +485,8 @@ function checkHistory(
     return violation(
       `fresh restore`,
       `restored ${json(restored.value)}, expected ${json(expected.restored)}`,
+      undefined,
+      { actual: restored.value, expected: expected.restored },
     )
   return pass
 }
