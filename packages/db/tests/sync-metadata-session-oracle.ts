@@ -67,6 +67,9 @@ import { declareOracle } from './oracle-declaration.js'
  *   re-inserts without explicit metadata leave durable metadata alone. A
  *   named current-run write is source-written (D11); under unknown writes,
  *   differing stored metadata may become source-written (D15 and D18).
+ * - Metadata written for a missing row stays in this sync run until a source
+ *   deletes the row (D16). It is not durable. Recreating the row without a
+ *   metadata write cannot make that run-only value durable (D9/D18).
  *
  * Authority: maintainer decisions of 2026-10-22 to borrow standard theory and
  * to place seeds beneath source writes (D4, D5, and its clarification "b");
@@ -75,7 +78,7 @@ import { declareOracle } from './oracle-declaration.js'
  * share the sync API with the source; the glossary
  * entries for accepted sync transactions and the exposed authoritative base;
  * and the row-metadata write rules of 2026-10-05 for implicit metadata.
- * Decisions 9, 11, 14, 15 and 18 are recorded in
+ * Decisions 9, 11, 14, 15, 16 and 18 are recorded in
  * `docs/contributing/oracle-reviews/2026-10-22-sync-metadata-session.md`.
  *
  * ## Limits
@@ -756,6 +759,108 @@ export const queuedMetadataRepairHistoriesArbitrary = fc
   )
 
 /**
+ * D16 keeps metadata written while a row is missing in this run, without
+ * storing it. An enclosing update can recreate the row after an inner delete
+ * commits first. Keeping that metadata still does not write it (D9/D18).
+ * Named writes of the same key replace it (D11), unknown writes use D15, and
+ * source deletes and truncates clear it. Each batch includes these boundaries
+ * and immediate/core-held implicit/explicit writes. Repetition varies the
+ * missing-row value. The source-truncate prefix removes the prior seed and
+ * creates a source row before reconstructing the same nested history.
+ */
+export const missingRowMetadataCases: ReadonlyArray<{
+  name: string
+  held?: boolean
+  metadata?: boolean
+  priorTruncate?: boolean
+  tail: ReadonlyArray<SessionAction>
+}> = [
+  ...[false, true].flatMap((held) =>
+    [false, true].map((metadata) => ({
+      name: `${held ? `core held` : `immediate`}: ${metadata ? `explicit` : `kept`}`,
+      held,
+      metadata,
+      tail: [{ type: `peer`, key: 2, notice: `row` }] as Array<SessionAction>,
+    })),
+  ),
+  ...[false, true].map((held) => ({
+    name: `after source truncate: ${held ? `core held` : `immediate`}`,
+    held,
+    priorTruncate: true,
+    tail: [{ type: `peer`, key: 2, notice: `row` }] as Array<SessionAction>,
+  })),
+  {
+    name: `peer row replaces metadata`,
+    tail: [{ type: `peer`, key: 1, notice: `row` }],
+  },
+  {
+    name: `peer metadata replaces metadata`,
+    tail: [{ type: `peer`, key: 1, notice: `metadata` }],
+  },
+  {
+    name: `unknown writes replace metadata`,
+    tail: [{ type: `peer`, key: 2, notice: `reload` }],
+  },
+  {
+    name: `peer delete clears metadata`,
+    tail: [{ type: `peer`, key: 1, notice: `delete` }],
+  },
+  {
+    name: `source delete clears metadata`,
+    tail: [
+      { type: `begin` },
+      { type: `remove`, key: 1 },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `row` },
+    ],
+  },
+  {
+    name: `source truncate clears metadata`,
+    tail: [
+      { type: `begin` },
+      { type: `truncate` },
+      { type: `commit` },
+      { type: `peer`, key: 2, notice: `row` },
+    ],
+  },
+]
+
+export const missingRowMetadataHistoriesArbitrary = fc
+  .integer({ min: 1, max: 3 })
+  .map((repeats) =>
+    missingRowMetadataCases.map(
+      ({ name, held, metadata, priorTruncate, tail }) => {
+        const history: Array<SessionAction> = [
+          ...(priorTruncate
+            ? [
+                { type: `begin` as const },
+                { type: `truncate` as const },
+                { type: `commit` as const },
+                { type: `begin` as const },
+                { type: `upsert` as const, key: 1 as const, metadata: false },
+                { type: `commit` as const },
+              ]
+            : []),
+          ...(held ? [{ type: `hold` as const }] : []),
+          { type: `begin` },
+          { type: `upsert`, key: 1, metadata: metadata === true },
+          { type: `begin` },
+          { type: `remove`, key: 1 },
+          ...Array.from({ length: repeats }, (): SessionAction => ({
+            type: `rowSet`,
+            key: 1,
+          })),
+          { type: `commit` },
+          { type: `commit` },
+          ...(held ? [{ type: `release` as const }] : []),
+          ...tail,
+        ]
+        return { name, history }
+      },
+    ),
+  )
+
+/**
  * This classifier records a completed implicit re-insert across a full reload
  * while the enclosing write remains unaccepted. "Kept" names that implicit
  * operation, not a promise to promote its metadata into storage. The shared
@@ -1304,11 +1409,16 @@ export class SessionModel {
         row: absent,
         metadata: absent,
       }
+      // D16's metadata for a missing row exists only in this run. Recreating
+      // the durable row cannot revive it without a metadata write (D9/D18).
+      // The session events still retain it for source reads.
       this.storage.set(key, {
         row: writesRow ? this.fold(`row`, key, entries) : previous.row,
         metadata: writesMetadata
           ? this.fold(`rowMetadata`, key, entries)
-          : previous.metadata,
+          : previous.row.present
+            ? previous.metadata
+            : absent,
       })
     }
   }
@@ -2891,5 +3001,6 @@ declareOracle({
     completedSeedReinsertReloadRegime,
     keptMetadataDurabilityHistoriesArbitrary,
     queuedMetadataRepairHistoriesArbitrary,
+    missingRowMetadataHistoriesArbitrary,
   ],
 })

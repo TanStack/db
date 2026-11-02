@@ -154,12 +154,15 @@ export async function createSQLiteDriver(
     }
   }
   let lastPeerTxId: string | undefined
-  const sourceTxIds: Array<string> = []
+  const sourceTransactions: Array<{ txId: string; reload: boolean }> = []
   const sourceApply = coordinators[0]!.requestApplyCommittedTx.bind(
     coordinators[0],
   )
   coordinators[0]!.requestApplyCommittedTx = (...args) => {
-    sourceTxIds.push(args[1].txId)
+    sourceTransactions.push({
+      txId: args[1].txId,
+      reload: args[1].truncate === true,
+    })
     return sourceApply(...args)
   }
   let peerSubmitted: (() => void) | undefined
@@ -380,7 +383,7 @@ export async function createSQLiteDriver(
     },
     commit: async () => {
       const noticeStart = notices.length
-      const transactionStart = sourceTxIds.length
+      const transactionStart = sourceTransactions.length
       const index = receiptStates.length
       const receipt = sync.commit()
       depth--
@@ -402,8 +405,8 @@ export async function createSQLiteDriver(
       // that actually read the pre-peer durable state. Core holds may keep the
       // applied receipt pending, so wait for acceptance rather than visibility.
       await whenSyncAccepted(receipt)
-      for (const txId of sourceTxIds.slice(transactionStart))
-        await awaitNotice(noticeStart, false, txId)
+      for (const { txId, reload } of sourceTransactions.slice(transactionStart))
+        await awaitNotice(noticeStart, reload, txId)
       await quiesce()
     },
     cancel: abort,
@@ -452,12 +455,24 @@ export async function createSQLiteDriver(
               value: row.value as Row,
               ...rowMetadata(row.metadata),
             })
-      } else if (notice === `row`) peer.begin()
+      } else if (
+        notice === `row` ||
+        notice === `metadata` ||
+        notice === `delete`
+      )
+        peer.begin()
       else
         throw new Error(
-          `unexpected peer notice in the seed/re-insert grammar: ${notice}`,
+          `unsupported peer notice in the native metadata driver: ${notice}`,
         )
-      peer.write({ type: `insert`, value: value as Row, ...rowMetadata(meta) })
+      if (notice === `metadata`) peer.metadata!.row.set(key, meta)
+      else if (notice === `delete`) peer.write({ type: `delete`, key })
+      else
+        peer.write({
+          type: `insert`,
+          value: value as Row,
+          ...rowMetadata(meta),
+        })
       await peer.commit()
       if (!lastPeerTxId)
         throw new Error(`the peer issued no durable transaction`)

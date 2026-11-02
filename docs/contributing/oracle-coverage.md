@@ -4913,6 +4913,28 @@ do not retire that obligation. Cross-host recovery schedules still need actual
 Chromium OPFS and Electron IPC receiving witnesses; their owner remains this
 session oracle with the broader receiving work tracked by #2272.
 
+Repaired counterexample, **META-CI-051-S001**: an enclosing update reads a
+cached row, an inner transaction deletes that row and sets its metadata while
+missing, then both commit. A named peer notice for another key drops the
+retained metadata in the on-demand receiver, with and without a core hold.
+Both the controlled adapter and native SQLite reproduce this source-read
+failure under D16 before the production repair. The model correction separates
+this run-only metadata from durable metadata when the outer update recreates the
+row; the old model's false durable expectation masks the later source failure.
+Owner: this session oracle. The generated
+`sync-metadata-session.{persisted,sqlite}-missing-row-metadata` campaigns
+cover twelve cases in all three peer lanes: implicit/explicit metadata,
+immediate/core-held application, a prior source truncate, same-key peer row or
+metadata replacement, unknown-write reloads, peer/source delete and source
+truncate. All 36 case/lane states reach eight times in each fixed/random campaign
+on both hosts. The wrapper distinguishes local metadata from a named peer
+replacement, preserving D16 without defeating D11 or D15. Three wrong retention
+policies fail the same source-read comparisons. The
+[CI investigation](oracle-reviews/2026-11-02-p6-ci-missing-row.md)
+records the pre-edit receiving RED, repaired GREEN, controls and bounded class
+claim. This does not determine that the separate #2317/P8 witness has the same
+cause or close its broader scope.
+
 `persisted-reads-seeds` crosses read holds with seeds and the cached row and
 aborts a buffered commit's signal, which abandons it at the read's end
 (decision 21); a seed that arrived after it stays judged against it

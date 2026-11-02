@@ -2,6 +2,7 @@
 import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import {
+  missingRowMetadataHistoriesArbitrary,
   persistedPeerLane,
   persistedPeerOnDemandLane,
   queuedMetadataRepairHistoriesArbitrary,
@@ -17,6 +18,30 @@ import { createPersistedDriver } from './sync-metadata-session-persisted-driver'
 import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
 import type { SessionDriver } from '../../db/tests/sync-metadata-session-oracle'
 import type { RecoveryPhase } from '../../db/tests/sync-metadata-recovery-oracle'
+
+it(`retains missing-row metadata boundaries in every generated batch`, () => {
+  const required = new Set([
+    `immediate: kept`,
+    `immediate: explicit`,
+    `core held: kept`,
+    `core held: explicit`,
+    `after source truncate: immediate`,
+    `after source truncate: core held`,
+    `peer row replaces metadata`,
+    `peer metadata replaces metadata`,
+    `unknown writes replace metadata`,
+    `peer delete clears metadata`,
+    `source delete clears metadata`,
+    `source truncate clears metadata`,
+  ])
+  for (const batch of fc.sample(missingRowMetadataHistoriesArbitrary, {
+    seed: 2220037,
+    numRuns: 8,
+  })) {
+    expect(batch).toHaveLength(required.size)
+    expect(new Set(batch.map(({ name }) => name))).toEqual(required)
+  }
+})
 
 it(`rejects a recovery schedule whose boundary the driver cannot hold`, async () => {
   await expect(

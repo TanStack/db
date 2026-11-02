@@ -741,6 +741,11 @@ const ownerGroups: ReadonlyArray<
     `sync-metadata-session`,
     `sqlite-recovery-schedules`,
   ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-missing-row.test.ts`,
+    `sync-metadata-session`,
+    `persisted-missing-row-metadata sqlite-missing-row-metadata`,
+  ],
 ]
 
 const owners = new Map<string, string>()

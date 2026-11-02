@@ -292,6 +292,8 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-queued-metadata-repair`,
   `sync-metadata-session.sqlite-kept-metadata-durability`,
   `sync-metadata-session.sqlite-recovery-schedules`,
+  `sync-metadata-session.persisted-missing-row-metadata`,
+  `sync-metadata-session.sqlite-missing-row-metadata`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
   `d2-source.exact-retractions`,
