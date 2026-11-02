@@ -1,4 +1,4 @@
-import { deepEquals, sameRowValue } from '../utils'
+import { sameRowValue } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import {
@@ -924,7 +924,8 @@ export class CollectionStateManager<
     // like any insert, holds and seeds notwithstanding.
     if (this.hydrationSeedKeys.has(key) && !projection.sourceKeys.has(key))
       return `insert`
-    if (current.value !== undefined && deepEquals(current.value, value)) {
+    // An equal re-insert has the same row value: -0 and 0 differ (FID-1).
+    if (current.value !== undefined && sameRowValue(current.value, value)) {
       return `update`
     }
     return `duplicate`

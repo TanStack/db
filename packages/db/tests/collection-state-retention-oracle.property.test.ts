@@ -1,9 +1,10 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { afterAll, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   historyRow,
   optimisticHistory,
@@ -32,6 +33,12 @@ import type { Collection } from '../src/collection/index.js'
  * restart, and while a reentrant restart's new transaction is still open, the
  * old run writes and commits a row. Cleanup ended that run, so the row never
  * appears and the commit returns `true`.
+ *
+ * A source insert of a held key is an equal re-insert only when its row value
+ * equals the held one; otherwise it throws `DuplicateKeySyncError`. Row values
+ * tell -0 from 0 (maintainer decision 2026-10-29), so values include -0, and
+ * an insert that differs from the held row only by a zero's sign is a
+ * duplicate (reach `sign-only-reinsert`).
  */
 
 type RetentionAction =
@@ -53,8 +60,21 @@ type RetentionHarness = {
 
 const retainedRowArbitrary = fc.record({
   id: fc.integer({ min: 0, max: 3 }),
-  value: fc.integer({ min: -2, max: 2 }),
+  // Zeros of both signs are common, so an insert often differs from the
+  // held row only by a zero's sign.
+  value: fc.oneof(
+    { weight: 3, arbitrary: fc.integer({ min: -2, max: 2 }) },
+    { weight: 1, arbitrary: fc.constant(0) },
+    { weight: 1, arbitrary: fc.constant(-0) },
+  ),
 })
+
+const retentionReach = createOracleReach(
+  `collection-state.retention`,
+  [`sign-only-reinsert`],
+  { minimum: 5 },
+)
+afterAll(() => retentionReach.assertReached())
 
 function snapshotRetainedRow(row: RetainedRow): RetainedRow {
   return { id: row.id, value: row.value }
@@ -137,7 +157,17 @@ function applyAction(
   switch (action.type) {
     case `insert`: {
       const previous = model.get(action.row.id)
-      if (previous !== undefined && previous.value !== action.row.value) {
+      if (
+        previous !== undefined &&
+        previous.value === action.row.value &&
+        !Object.is(previous.value, action.row.value)
+      ) {
+        retentionReach.reach(`sign-only-reinsert`)
+      }
+      if (
+        previous !== undefined &&
+        !Object.is(previous.value, action.row.value)
+      ) {
         expect(() =>
           sync.write({
             type: `insert`,
@@ -212,6 +242,7 @@ declareOracle({ check: [expectRetainedState] })
 async function runRetentionHistory(
   actions: ReadonlyArray<RetentionAction>,
 ): Promise<void> {
+  retentionReach.beginHistory()
   const harness = createRetentionHarness()
   const { collection } = harness
   const model = new Map<number, RetainedRow>()
@@ -434,10 +465,23 @@ it(`releases retained keys after long unique-key churn`, async () => {
   await runRetentionHistory(actions)
 })
 
-const retentionHistory = fc.array(retentionActionArbitrary, {
-  minLength: 1,
-  maxLength: 20,
-})
+// One element in ten writes a zero to a key, then inserts the other zero:
+// random actions rarely put the two next to each other.
+const signFlipArbitrary = fc
+  .record({ id: fc.integer({ min: 0, max: 3 }), zero: fc.constantFrom(0, -0) })
+  .map(({ id, zero }): Array<RetentionAction> => [
+    { type: `update`, row: { id, value: zero } },
+    { type: `insert`, row: { id, value: Object.is(zero, -0) ? 0 : -0 } },
+  ])
+const retentionHistory = fc
+  .array(
+    fc.oneof(
+      { weight: 9, arbitrary: retentionActionArbitrary.map((a) => [a]) },
+      { weight: 1, arbitrary: signFlipArbitrary },
+    ),
+    { minLength: 1, maxLength: 20 },
+  )
+  .map((elements) => elements.flat())
 
 fcTest.prop([retentionHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
   `matches retained authoritative state with a fixed seed`,

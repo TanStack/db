@@ -6227,7 +6227,10 @@ crosses an unordered and an ordered query (`orderBy` with `limit`) and adds a
 decision 2026-10-29); 120 histories on each path. An ordered Effect delivers an
 update only when its projection changed. On unchanged `f06ee8fdd` the ordered
 `signed-zero` histories fail (an update that flips only a zero's sign was
-dropped); comparing with `sameRowValue` repairs them. An ordered Effect also
+dropped); comparing with `sameRowValue` repairs them. That payload's source
+row also changes its `version`; a source update that changes only a zero's
+sign is dropped earlier, by the ordered query's top-K (open, see the adapter
+conformance entry's signed-zero paragraph). An ordered Effect also
 dropped an update whose change is private or non-enumerable state, so the
 consumer kept a stale value (`private` and `prototype` payloads, 20 ordered
 histories, RED on `370e029db`). Maintainer decision 2026-11-02: the ordered
@@ -6890,7 +6893,19 @@ detection (`optimistic-history-oracle`, with a `flipZeros` edit and
 `zeroSignEditsOverPending` reach), subscription truncate replay
 (`collection-subscription-replay-oracle`), and stale-row reconciliation
 (`collection-subscription-lifecycle-publication-oracle`) all compare row
-values with signed zeros. Open: generated publication histories never write
+values with signed zeros. A source insert of a held key is an equal
+re-insert only for an equal row value: the state-retention oracle
+(`collection-state.retention`) generates zeros of both signs and a write of
+one zero followed by an insert of the other (reach `sign-only-reinsert`, 92
+histories over its fixed and random campaigns); the deep-equality check
+accepted such an insert as an equal re-insert instead of throwing
+`DuplicateKeySyncError` (RED at `[update {0: 0}, insert {0: -0}]`). Open,
+for a maintainer decision: an ordered live query (`orderBy`, with or without
+`limit`) drops a source update that changes only a zero's sign, because its
+top-K consolidates rows by D2 value identity, where -0 equals 0 (the
+hash-identity oracle's law); an unordered live query delivers it. The
+Effect-callback `signed-zero` payload changes the source row's `version`
+too, so no generated history reaches that case. Open: generated publication histories never write
 over a row a failed replay retained (the random grammar inserts source
 writes into green lifecycle histories), so the stale reconcile is reached
 only by pinned replays, including a `-0` one. A generated failed-replay
