@@ -50,7 +50,17 @@ export function deepEquals(a: any, b: any): boolean {
  * tells -0 from 0, as row values do (FID-1; maintainer decision 2026-10-29).
  */
 export function sameRowValue(a: unknown, b: unknown): boolean {
-  return deepEqualsInternal(a, b, undefined, false, false, true)
+  return deepEqualsInternal(a, b, undefined, false, false, `row`)
+}
+
+/**
+ * @internal Whether an ordered Effect's update repeats its previous
+ * publication: row-value equality, except that a class instance equals only
+ * itself, since it can hold readable state outside its enumerable fields
+ * (maintainer decision 2026-11-02).
+ */
+export function samePublishedValue(a: unknown, b: unknown): boolean {
+  return deepEqualsInternal(a, b, undefined, false, false, `publication`)
 }
 
 /** @internal Compare persisted public and durable value shapes before skipping a reload. */
@@ -86,11 +96,13 @@ export function deepEqualsInternal(
   visited: Map<object, object> | undefined,
   draft = false,
   persistedSnapshot = false,
-  // Row change detection tells -0 from 0; general equality does not.
-  signedZero = false,
+  // Row change detection (`row`) tells -0 from 0; general equality does not.
+  // An ordered Effect's publication (`publication`) also compares a class
+  // instance by identity.
+  rowValue: false | `row` | `publication` = false,
 ): boolean {
   // Handle strict equality (primitives, same reference)
-  if (signedZero ? Object.is(a, b) : a === b || Object.is(a, b)) return true
+  if (rowValue ? Object.is(a, b) : a === b || Object.is(a, b)) return true
 
   // Handle null/undefined
   if (a == null || b == null) return false
@@ -151,7 +163,7 @@ export function deepEqualsInternal(
             visited,
             true,
             persistedSnapshot,
-            signedZero,
+            rowValue,
           )
         : b.has(key) &&
           deepEqualsInternal(
@@ -160,7 +172,7 @@ export function deepEqualsInternal(
             visited,
             draft,
             persistedSnapshot,
-            signedZero,
+            rowValue,
           ),
     )
 
@@ -194,7 +206,7 @@ export function deepEqualsInternal(
           visited,
           draft,
           persistedSnapshot,
-          signedZero,
+          rowValue,
         ),
       )
       visited.delete(a)
@@ -225,7 +237,7 @@ export function deepEqualsInternal(
             candidateVisited,
             draft,
             persistedSnapshot,
-            signedZero,
+            rowValue,
           ) &&
           matchValues(
             index + 1,
@@ -258,8 +270,9 @@ export function deepEqualsInternal(
   ) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
-    // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
-    // draft treats a change of typed-array class as a change.
+    // Elements compare like numbers: NaN equals NaN, and -0 equals 0 except
+    // as a row value. Only a draft treats a change of typed-array class as a
+    // change.
     if (
       (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) ||
       typedA.length !== typedB.length
@@ -269,7 +282,8 @@ export function deepEqualsInternal(
     for (let i = 0; i < typedA.length; i++) {
       const x = typedA[i]!
       const y = typedB[i]!
-      if (x !== y && !(x !== x && y !== y)) return false
+      if (rowValue ? !Object.is(x, y) : x !== y && !(x !== x && y !== y))
+        return false
     }
 
     return true
@@ -331,7 +345,7 @@ export function deepEqualsInternal(
         visited,
         draft,
         persistedSnapshot,
-        signedZero,
+        rowValue,
       ),
     )
     visited.delete(a)
@@ -347,6 +361,7 @@ export function deepEqualsInternal(
     const plain = isPlainPrototype(prototype)
     const plainB = isPlainPrototype(prototypeB)
     if (prototype !== prototypeB && !plain && !plainB) return false
+    if (rowValue === `publication` && !(plain && plainB)) return false
 
     // Check for circular references
     if (visited?.has(a)) {
@@ -388,7 +403,7 @@ export function deepEqualsInternal(
           visited,
           draft,
           persistedSnapshot,
-          signedZero,
+          rowValue,
         )
       ) {
         result = false

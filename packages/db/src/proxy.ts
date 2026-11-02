@@ -364,7 +364,7 @@ function draftValuesEqual(
   right: unknown,
   paired?: Map<object, object>,
 ): boolean {
-  return deepEqualsInternal(left, right, paired, true, false, true)
+  return deepEqualsInternal(left, right, paired, true, false, `row`)
 }
 
 /**

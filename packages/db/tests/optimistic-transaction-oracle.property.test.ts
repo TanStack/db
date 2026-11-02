@@ -292,15 +292,36 @@ describe(`Same-key transaction laws`, () => {
       )
       await fc.assert(
         fc.asyncProperty(
-          fc.record({
-            sequence: fc.constantFrom(...sameKeySequences),
-            success: fc.boolean(),
-            value: fc.oneof(fc.integer({ min: 1, max: 50 }), fc.constant(-0)),
-            note: fc.oneof(
-              fc.string({ minLength: 1, maxLength: 8 }).map((s) => `new:${s}`),
-              fc.constant(`original`),
-            ),
-          }),
+          fc.oneof(
+            {
+              weight: 4,
+              arbitrary: fc.record({
+                sequence: fc.constantFrom(...sameKeySequences),
+                success: fc.boolean(),
+                value: fc.oneof(
+                  fc.integer({ min: 1, max: 50 }),
+                  fc.constant(-0),
+                ),
+                note: fc.oneof(
+                  fc
+                    .string({ minLength: 1, maxLength: 8 })
+                    .map((s) => `new:${s}`),
+                  fc.constant(`original`),
+                ),
+              }),
+            },
+            // A reinsert that differs from the original row only by a
+            // zero's sign; at random, one history in 20 is one.
+            {
+              weight: 1,
+              arbitrary: fc.record({
+                sequence: fc.constant(`delete-insert` as const),
+                success: fc.boolean(),
+                value: fc.constant(-0),
+                note: fc.constant(`original`),
+              }),
+            },
+          ),
           (scenario) => {
             reach.beginHistory()
             if (

@@ -178,6 +178,8 @@ export type ValueKind =
   | `bigint`
   | `array`
   | `object`
+  /** A `Float64Array`: its elements follow the number rules, -0 included. */
+  | `float-array`
 
 export const jsonValueKinds: ReadonlyArray<ValueKind> = [
   `string`,
@@ -517,6 +519,13 @@ const valueExamples: Record<ValueKind, ReadonlyArray<() => unknown>> = {
     () => ({ a: 0, b: `x` }),
     () => ({ nested: { deep: [1, { k: null }] } }),
     () => ({ '': false }),
+  ],
+  // -0 and 0 are distinct inside typed arrays too (maintainer decision
+  // 2026-11-02).
+  'float-array': [
+    () => Float64Array.of(0),
+    () => Float64Array.of(-0, 1.5),
+    () => new Float64Array(0),
   ],
 }
 
@@ -969,6 +978,9 @@ export function describeValue(value: unknown): string {
       if (Array.isArray(value) && prototype === Array.prototype) {
         return `[${value.map(describeValue).join(`,`)}]`
       }
+      if (prototype === Float64Array.prototype) {
+        return `f[${[...(value as Float64Array)].map(describeValue).join(`,`)}]`
+      }
       if (prototype === Object.prototype || prototype === null) {
         const fields = Object.keys(value)
           .sort()
@@ -988,6 +1000,7 @@ export function describeValue(value: unknown): string {
 /** The kind of a generated value, for reach. */
 function kindOf(value: unknown): ValueKind {
   if (value === null) return `null`
+  if (value instanceof Float64Array) return `float-array`
   if (describeValue(value).includes(`n-0`)) return `negative-zero`
   if (typeof value === `number`) {
     return Number.isInteger(value) ? `integer` : `float`
@@ -1142,6 +1155,9 @@ function flipZeros(value: unknown): unknown {
     return value === 0 ? (Object.is(value, -0) ? 0 : -0) : value
   }
   if (Array.isArray(value)) return value.map(flipZeros)
+  if (value instanceof Float64Array) {
+    return value.map((item) => flipZeros(item) as number)
+  }
   if (
     typeof value === `object` &&
     value !== null &&

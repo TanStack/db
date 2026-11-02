@@ -1959,7 +1959,10 @@ function createElectricSync<T extends Row<unknown>>(
     let sessionCleanedUp = false
     const failInitialSync = (cause: unknown) => {
       if (firstSnapshotCommitted) {
-        // A truncate commit already made the Collection ready.
+        // The Collection is already ready: a truncate commit made it so, or
+        // a reload's run started on a ready Collection. The give-up is then
+        // a post-ready failure; READY-9 defers only a first load's
+        // (maintainer decision).
         if (collection.status === `ready`) {
           gaveUp = true
           fail(cause)

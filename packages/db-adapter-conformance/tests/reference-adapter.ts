@@ -667,6 +667,7 @@ export function referenceDriver(
       `bigint`,
       `array`,
       `object`,
+      `float-array`,
     ],
     valueKinds: [
       `string`,
@@ -679,6 +680,7 @@ export function referenceDriver(
       `bigint`,
       `array`,
       `object`,
+      `float-array`,
     ],
     changeCommits: perChange ? `per-change` : `per-batch`,
     // A delivery holding two rows with one key fails the run (PUB-4).

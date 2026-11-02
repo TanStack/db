@@ -12,7 +12,10 @@
  * Every history updates before and after callback replacement, then exits,
  * reenters and updates again. An update of an absent source is not legal.
  * An ordered Effect compares an update with its previous publication, so an
- * update whose projection did not change is not delivered; a `signed-zero`
+ * update whose projection did not change is not delivered. A class instance
+ * can hold readable state outside its enumerable fields, so the comparison
+ * treats it as equal only to itself (maintainer decision 2026-11-02): its
+ * update is delivered. A `signed-zero`
  * payload alternates 0 and -0, which are distinct row values (maintainer
  * decision 2026-10-29), so each of its updates is delivered in both orders.
  * These eager single-source histories do not cover ordered repairs across
@@ -52,14 +55,7 @@ export const callbackHistories = (
   ([`all`, `enter`, `exit`, `late-update`, `late-batch`] as const).flatMap(
     (profile) =>
       [false, true].flatMap((skipInitial) =>
-        // Open: an ordered Effect compares an update by its enumerable fields,
-        // so it drops one whose change is private or non-enumerable state
-        // (coverage map, Effect callback delivery). Those pairs wait on the
-        // maintainer's decision about ordered equality.
-        (representation === `private` || representation === `prototype`
-          ? [false]
-          : [false, true]
-        ).map((ordered) => ({
+        [false, true].map((ordered) => ({
           representation,
           profile,
           skipInitial,

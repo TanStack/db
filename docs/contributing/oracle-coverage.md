@@ -6120,14 +6120,13 @@ crosses an unordered and an ordered query (`orderBy` with `limit`) and adds a
 decision 2026-10-29); 120 histories on each path. An ordered Effect delivers an
 update only when its projection changed. On unchanged `f06ee8fdd` the ordered
 `signed-zero` histories fail (an update that flips only a zero's sign was
-dropped); comparing with `sameRowValue` repairs them. Open, for a maintainer
-decision: an ordered Effect compares an update by enumerable fields, so it
-drops an update whose change is private or non-enumerable state, and the
-consumer keeps a stale value. Trace: `private` or `prototype` payload,
-ordered, any profile, update version 0 to 1 at the `unobserved` cut, expected
-an update, received none; these 20 ordered pairs are not generated until the
-decision (owner: this callback-profile oracle; witness: the same histories
-with `ordered: true`).
+dropped); comparing with `sameRowValue` repairs them. An ordered Effect also
+dropped an update whose change is private or non-enumerable state, so the
+consumer kept a stale value (`private` and `prototype` payloads, 20 ordered
+histories, RED on `370e029db`). Maintainer decision 2026-11-02: the ordered
+comparison (`samePublishedValue`) treats a class instance as equal only to
+itself, so its update is delivered; an ordered repair may then deliver an
+update for an unchanged class instance.
 
 ### RC bound schema mutation receivers (2026-10-28)
 
@@ -6591,8 +6590,8 @@ READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
 (subscription kept open after an error state) behind them. Limits: no
 on-demand loading, mutation handlers, or reload; publications are observed
 through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
-that rejects before its timeout; FID-1 covers ten value kinds, not Temporal,
-Map, Set, typed arrays, class instances, or field identity; PUB-4 covers a
+that rejects before its timeout; FID-1 covers eleven value kinds (with `Float64Array`), not
+Temporal, Map, Set, other typed arrays, class instances, or field identity; PUB-4 covers a
 complete delivery with two rows for one key, under each driver's
 `duplicateInsert` (TrailBase `replace`, reference `error`), not malformed
 keys, undecodable rows, or FID-3 out-of-domain values; the Neon and TrailBase claims cover
@@ -6676,7 +6675,14 @@ real Electric server;  without an app `onError`, the driver detects a
 give-up from the adapter's log, so an adapter that stops logging times out
 rather than failing a law. The shared check refuses `retryReportAfter`
 above 1 with `transport-reconnect` or `capability-renewal`: no law fixes
-whether a reconnect or a renewal ends an outage a threshold is counting.
+whether a reconnect or a renewal ends an outage a threshold is counting. Typed arrays (maintainer decision 2026-11-02): -0 and 0
+are distinct inside them as row values too; the `float-array` value kind
+(a `Float64Array`) makes the reference driver the generated witness (RED on
+`370e029db`: PUB-2 after a retouch that flipped a zero inside one). A
+reload's give-up while its first commit's acceptance is pending fails at once
+when the Collection is already ready (maintainer decision 2026-11-02: READY-9's
+deferral applies to the first load); no generated history reloads with a held
+acceptance.
 Convex (`adapter-conformance.eager-live-source.convex`, eager mode over the
 real Convex JavaScript client and a controlled WebSocket that answers the
 sync protocol, complete results, per-batch commits, Convex value kinds as
