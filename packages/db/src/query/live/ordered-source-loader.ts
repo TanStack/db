@@ -78,6 +78,8 @@ export class OrderedSourceLoader {
   // completion sets it again, so it never needs clearing.
   private hasSettledSourceRequest = false
   private settledSourceBoundary: Record<string, unknown> | undefined
+  // The boundary row's key: a tie with the boundary is not the boundary row.
+  private settledSourceBoundaryKey: string | number | undefined
   // Independent of ordinary finite success. A live delete or order-changing
   // update owes a bounded repair: unlike a failed request it cannot have
   // partially written unknown rows, so re-reading the exact ordered prefix is
@@ -229,18 +231,20 @@ export class OrderedSourceLoader {
     let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
-      // A finished repair holds every row before its boundary, so releasing
-      // what it superseded removes only rows from the boundary on, such as a
-      // tie only an old tie request held. Deleting a sent row before the
-      // boundary is new source information.
-      if (
-        change.type === `delete` &&
-        this.retiringSupersededAcquisitions &&
-        (previous === undefined ||
-          this.settledSourceBoundary === undefined ||
-          this.info.comparator(previous, this.settledSourceBoundary) >= 0)
-      ) {
-        continue
+      // A finished repair holds every row through its boundary row, so
+      // releasing what it superseded removes only rows after it, such as a tie
+      // only an old tie request held. Deleting a sent row through the boundary
+      // row is new source information.
+      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
+        const order =
+          previous === undefined || this.settledSourceBoundary === undefined
+            ? 1
+            : this.info.comparator(previous, this.settledSourceBoundary)
+        if (
+          order > 0 ||
+          (order === 0 && change.key !== this.settledSourceBoundaryKey)
+        )
+          continue
       }
       // A sent row that leaves or moves. An optimistic overlay may still
       // revert, so it only checks the local supply; a source move invalidates
@@ -1235,15 +1239,18 @@ export class OrderedSourceLoader {
               }
               if (!isFullSource && options.orderBy) {
                 try {
-                  this.settledSourceBoundary =
-                    this.subscription
-                      .readOrderedSnapshot({
-                        ...options,
-                        // Provider limits include optimistic headroom. Those
-                        // extra local ranks do not prove a source boundary.
-                        limit: requestedCount ?? options.limit,
-                      })
-                      .at(-1)?.value ?? this.settledSourceBoundary
+                  const boundary = this.subscription
+                    .readOrderedSnapshot({
+                      ...options,
+                      // Provider limits include optimistic headroom. Those
+                      // extra local ranks do not prove a source boundary.
+                      limit: requestedCount ?? options.limit,
+                    })
+                    .at(-1)
+                  if (boundary) {
+                    this.settledSourceBoundary = boundary.value
+                    this.settledSourceBoundaryKey = boundary.key
+                  }
                 } catch (error) {
                   if (canSettleSynchronously) {
                     synchronousCompletionFailure = { error }

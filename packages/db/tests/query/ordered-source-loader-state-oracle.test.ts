@@ -562,12 +562,11 @@ type RetirementReceiverCase = {
   kind: `collection` | `collection-window` | `effect`
   offset: 0 | 1
   holdReplacement: boolean
-  // The unload moves the repaired prefix or deletes its rows before the
-  // boundary, which is new source information, or evicts a sent row past the
-  // boundary that only a replaced acquisition held. Eviction is not a
-  // source-order change. A delete at the boundary row itself is not generated:
-  // the loader cannot tell it from an old tie request's eviction.
-  unloadChange: `move` | `delete` | `evict`
+  // The unload moves the repaired prefix, deletes its rows before the
+  // boundary, or deletes the boundary row itself: each is new source
+  // information. Or it evicts a sent row past the boundary that only a
+  // replaced acquisition held, which is not a source-order change.
+  unloadChange: `move` | `delete` | `delete-boundary` | `evict`
 }
 
 // Both real consumers receive the same legal history and shared judgments.
@@ -586,6 +585,7 @@ async function checkRetirementReceiver(
       | `held-answer`
       | `delete-release`
       | `delete-held-answer`
+      | `delete-boundary-release`
       | `evict-release`,
   ) => void,
 ): Promise<void> {
@@ -695,8 +695,13 @@ async function checkRetirementReceiver(
             // The repair's prefix is rows 2 through offset + limit + 1; the
             // last of them is its boundary.
             for (let id = 2; id <= scenario.offset + scenario.limit + 1; id++) {
-              if (scenario.unloadChange === `delete`) {
-                if (id === scenario.offset + scenario.limit + 1) continue
+              if (
+                scenario.unloadChange === `delete` ||
+                scenario.unloadChange === `delete-boundary`
+              ) {
+                const boundary = id === scenario.offset + scenario.limit + 1
+                if (boundary !== (scenario.unloadChange === `delete-boundary`))
+                  continue
                 const value = truth.get(id)!
                 truth.delete(id)
                 installed.delete(id)
@@ -3032,8 +3037,9 @@ describe(`Ordered source request authority`, () => {
 
   // Real Collection and Effect consumers share the same provider grammar,
   // full-sort model, event-ordered progress relation, and publication check.
-  // Three adapter unloads cross them: moving or deleting the repaired prefix
-  // owes a replacement; evicting a row past its boundary owes none. Each
+  // Four adapter unloads cross them: moving the repaired prefix, deleting its
+  // rows before the boundary, or deleting the boundary row owes a replacement;
+  // evicting a row past its boundary owes none. Each
   // grammar runs 300 histories so held answers stay above their minimum.
   // A Collection window move in the same turn as the ordering write must
   // wait for the replacement before it reports success.
@@ -3060,6 +3066,7 @@ describe(`Ordered source request authority`, () => {
       unloadChange: fc.constantFrom(
         `move` as const,
         `delete` as const,
+        `delete-boundary` as const,
         `evict` as const,
       ),
     })
@@ -3092,6 +3099,7 @@ describe(`Ordered source request authority`, () => {
           `effect-held-answer`,
           `delete-release`,
           `delete-held-answer`,
+          `delete-boundary-release`,
           `evict-release`,
         ] as const,
         { minimum: 20 },
@@ -3126,6 +3134,7 @@ describe(`Ordered source request authority`, () => {
     [`collection-window`, `move`],
     [`effect`, `move`],
     [`collection`, `delete`],
+    [`collection`, `delete-boundary`],
     [`collection`, `evict`],
   ] as const)(
     `receives retirement invalidation in a held %s replay (unload: %s)`,
