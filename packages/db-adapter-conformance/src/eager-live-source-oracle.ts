@@ -1623,6 +1623,7 @@ export const eagerLiveSourceReachStates = [
   `failure-before-ready`,
   `failure-after-ready`,
   `restart`,
+  `restart-after-failure`,
   `wait-before-evidence-fulfilled`,
   `wait-timed-out`,
   `wait-rejected-at-retirement`,
@@ -2237,6 +2238,7 @@ export async function checkEagerLiveSourceHistory(
     let batchesThisRun = 0
     for (const [index, step] of history.entries()) {
       const wasReady = state.phase === `ready`
+      const phaseBefore = state.phase
       const transientBefore = state.transient.length
       // Support is decided before the model moves, so a skipped step leaves
       // the model unchanged.
@@ -2396,6 +2398,9 @@ export async function checkEagerLiveSourceHistory(
           break
         case `restart`: {
           const pendingBefore = waits.some((wait) => wait.current === `pending`)
+          // LIFE-5: a failed run's restart starts loading, as any does.
+          const failedBefore =
+            phaseBefore === `loading-error` || phaseBefore === `stopped`
           events.stop()
           await collection.cleanup()
           // The backend may change while no sync run listens.
@@ -2407,6 +2412,7 @@ export async function checkEagerLiveSourceHistory(
           preload = recordSettlement(collection.preload())
           events = foldChanges(collection)
           reach(`restart`)
+          if (failedBefore) reach(`restart-after-failure`)
           open.clear()
           outagesThisRun = 0
           batchesThisRun = 0
