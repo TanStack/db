@@ -1693,10 +1693,17 @@ function createElectricSync<T extends Row<unknown>>(
     // Collection still shows the previous run's status, so status cannot say
     // whether this run has reached its first ready.
     let ready = false
+    // READY-9: a give-up while the first snapshot's acceptance is pending
+    // fails the run once that acceptance makes it ready.
+    let gaveUpBeforeReady: { cause: unknown } | undefined
     const markReady = () => {
       ready = true
       lifecycle.markReady(lifecycleEpoch)
       params.markReady()
+      if (gaveUpBeforeReady) {
+        gaveUp = true
+        fail(gaveUpBeforeReady.cause)
+      }
     }
     // A failure ends the run's waits (EVID-2).
     const fail = (error: unknown) => {
@@ -1922,7 +1929,14 @@ function createElectricSync<T extends Row<unknown>>(
     // claim on readiness; a replacement session decides it.
     let sessionCleanedUp = false
     const failInitialSync = (cause: unknown) => {
-      if (firstSnapshotCommitted) return
+      if (firstSnapshotCommitted) {
+        // A truncate commit already made the Collection ready.
+        if (collection.status === `ready`) {
+          gaveUp = true
+          fail(cause)
+        } else gaveUpBeforeReady ??= { cause }
+        return
+      }
       initialSyncFailedFinally = true
       fail(cause)
     }

@@ -3995,12 +3995,35 @@ describe(`Electric adapter laws`, () => {
         preload = `rejected:${retrySettlementTag(reason, tags)}`
       },
     )
+    // An `awaitTxId` and an `awaitMatch` that no evidence satisfies.
+    let waitsRejected = 0
+    for (const wait of [
+      trace.collection.utils.awaitTxId(2_000_000_000, 2_000_000_000),
+      trace.collection.utils.awaitMatch(() => false, 2_000_000_000),
+    ]) {
+      void wait.then(
+        () => undefined,
+        () => waitsRejected++,
+      )
+    }
     const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
     const observe = (): RetryObservation => ({
       status: trace.collection.status,
       demands: [...settlements],
       rowVisible: trace.collection.has(1),
       preload: trace.collection.status === `cleaned-up` ? undefined : preload,
+      waits:
+        waitsRejected === 2
+          ? `rejected`
+          : waitsRejected === 0
+            ? `pending`
+            : (`one of two rejected` as never),
+      health:
+        trace.collection.status === `ready` && !controller.signal.aborted
+          ? trace.collection.health.error
+            ? `error`
+            : `none`
+          : undefined,
     })
     const decisions: Array<Promise<unknown>> = []
     const persistence = createDeferred<void>()
@@ -4035,8 +4058,15 @@ describe(`Electric adapter laws`, () => {
             decision = step.decision
             thrown = new Error(`onError threw ${tag}`)
             tags.set(thrown, `thrown-${tag}`)
+            // As the installed client does, a decision that is not a retry
+            // ends the stream and reports the error to the subscriber.
             decisions.push(
-              Promise.resolve(streamOnError(error)).catch(() => undefined),
+              Promise.resolve(streamOnError(error)).then(
+                (retry) => {
+                  if (!retry || typeof retry !== `object`) trace.sdkError(error)
+                },
+                () => undefined,
+              ),
             )
             break
           }

@@ -221,6 +221,21 @@ function resetResumeMetadata(): SyncMetadataApi<string | number> {
   }
 }
 
+type SnapshotReachState =
+  | `subset-attempts-past-threshold`
+  | `live-pauses-past-threshold`
+  | `live-outage`
+  | `retired-evidence-after-restart`
+const createSnapshotReach = () =>
+  createOracleReach<SnapshotReachState>(`electric.sdk-snapshot-delivery`, [
+    `subset-attempts-past-threshold`,
+    `live-pauses-past-threshold`,
+    `live-outage`,
+    `retired-evidence-after-restart`,
+  ])
+// Each campaign declares its own reach.
+let snapshotReach = createSnapshotReach()
+
 /**
  * Retried subset attempts: how many HTTP 503 responses each subset request
  * gets before its snapshot, and how many empty loads follow the three
@@ -241,6 +256,7 @@ async function checkSnapshots(
   setupFault?: { primary: Error; cleanup?: Error },
   retries: SubsetRetries = { failures: [], extraLoads: 0 },
 ) {
+  snapshotReach.beginHistory()
   const http = controlledHttp()
   const batches: Array<Array<Message<Item>>> = []
   let delivery = deferred<void>()
@@ -335,7 +351,13 @@ async function checkSnapshots(
         (_, i) => width + 1 + i,
       ),
     ]
+    // Each load pauses the live request; five pause it past the threshold.
+    if (lowerBounds.length >= 5)
+      snapshotReach.reach(`live-pauses-past-threshold`)
     for (const [index, lowerBound] of lowerBounds.entries()) {
+      if ((retries.failures[index] ?? 0) >= 5) {
+        snapshotReach.reach(`subset-attempts-past-threshold`)
+      }
       // Distinct predicates prevent request deduplication; the second response
       // overlaps prior rows and changes their payload, and the last is empty.
       if (index === 1) for (const item of source) item.name += `-changed`
@@ -425,10 +447,66 @@ async function checkSnapshots(
           live = await atCheckpoint(http.take(), `retried live request`)
         }
         outage = retries.liveFailures! >= 5
+        if (outage) snapshotReach.reach(`live-outage`)
         sourceHealth(`source health after live attempts`)
       }
     }
     await atCheckpoint(http.take(), `resumed live request`)
+
+    // EVID-2 across a restart (maintainer decision 2026-10-30): the
+    // snapshots' boundary (xmin 10) shows txid 5 committed, and imported sync
+    // metadata (META-1) shows txid 25, which no snapshot boundary covers
+    // (xmax 20). A restarted run counts that retired
+    // evidence once it is ready, because its rows are read after it.
+    collection.config.sync.importSyncMeta?.({ version: 1, seenTxids: [25] })
+    for (const txid of [5, 25]) {
+      expect(
+        await collection.utils.awaitTxId(txid, 50),
+        `txid ${txid} before the restart`,
+      ).toBe(true)
+    }
+    await collection.cleanup()
+    void collection.preload()
+    const restartedLive = await atCheckpoint(
+      http.take(),
+      `restarted live request`,
+    )
+    const retired = [5, 25].map((txid) => {
+      const wait = {
+        settled: `pending` as `pending` | `fulfilled` | `rejected`,
+      }
+      collection.utils.awaitTxId(txid, 5_000).then(
+        () => (wait.settled = `fulfilled`),
+        () => (wait.settled = `rejected`),
+      )
+      return wait
+    })
+    for (let turn = 0; turn < 5; turn++)
+      await new Promise((r) => setTimeout(r, 0))
+    expect(
+      retired.map((wait) => wait.settled),
+      `retired evidence before the restarted run is ready`,
+    ).toEqual([`pending`, `pending`])
+    // The restarted run becomes ready on its live up-to-date, which carries
+    // no evidence for either txid: only the retired evidence can fulfill
+    // the waits.
+    restartedLive.respond(
+      new Response(
+        JSON.stringify([
+          { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+        ]),
+        { headers: headers(lowerBounds.length + 2) },
+      ),
+    )
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+    for (let turn = 0; turn < 5; turn++)
+      await new Promise((r) => setTimeout(r, 0))
+    expect(collection.status, `restarted status`).toBe(`ready`)
+    expect(
+      retired.map((wait) => wait.settled),
+      `retired evidence once the restarted run is ready`,
+    ).toEqual([`fulfilled`, `fulfilled`])
+    snapshotReach.reach(`retired-evidence-after-restart`)
   }, [
     { label: `snapshot collection`, release: () => collection.cleanup() },
     {
@@ -498,11 +576,14 @@ sdkCampaigns(
   `applies installed-SDK snapshot deliveries against an independent overlapping source`,
   20260917,
   snapshotViolation,
-  (seed) =>
-    fc.assert(snapshotProperty, {
-      ...oraclePropertyOptions(12, `electric.sdk-snapshot-delivery`),
+  async (seed) => {
+    snapshotReach = createSnapshotReach()
+    await fc.assert(snapshotProperty, {
+      ...oraclePropertyOptions(40, `electric.sdk-snapshot-delivery`),
       ...(seed === undefined ? {} : { seed }),
-    }),
+    })
+    snapshotReach.assertReached()
+  },
 )
 
 fixedCase(`detects dropped snapshot rows`, async () => {
@@ -831,6 +912,8 @@ function clientObservation(observation: RetryObservation): RetryObservation {
   return {
     status: observation.status,
     rowVisible: observation.rowVisible,
+    waits: observation.waits,
+    health: observation.health,
     demands: observation.demands.map((settlement) =>
       settlement.startsWith(`rejected`) ? `rejected:any` : settlement,
     ),
@@ -887,6 +970,17 @@ async function runClientRetryCell(
         : originalSync,
   })
   const model: RetryModel = createRetryModel(false)
+  // An `awaitTxId` and an `awaitMatch` that no evidence satisfies.
+  let waitsRejected = 0
+  for (const wait of [
+    collection.utils.awaitTxId(2_000_000_000, 2_000_000_000),
+    collection.utils.awaitMatch(() => false, 2_000_000_000),
+  ]) {
+    void wait.then(
+      () => undefined,
+      () => waitsRejected++,
+    )
+  }
   const settlements: Array<`pending` | `fulfilled` | `rejected:any`> = []
   const track = (result: unknown) => {
     const slot = settlements.push(`pending`) - 1
@@ -915,6 +1009,18 @@ async function runClientRetryCell(
         status: collection.status,
         demands: [...settlements],
         rowVisible: collection.has(1),
+        waits:
+          waitsRejected === 2
+            ? `rejected`
+            : waitsRejected === 0
+              ? `pending`
+              : (`one of two rejected` as never),
+        health:
+          collection.status === `ready`
+            ? collection.health.error
+              ? `error`
+              : `none`
+            : undefined,
       }),
       `${outcome} ${mode} ${decision}: ${label}`,
     ).toEqual(clientObservation(expectedRetryObservation(model, false)))

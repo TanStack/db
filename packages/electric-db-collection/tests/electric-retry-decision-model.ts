@@ -45,6 +45,12 @@ export type RetryObservation = {
   // A readiness wait started with the history. It rejects with the same
   // cause as every waiting demand. Not compared after cleanup.
   preload?: RetrySettlement
+  // An `awaitTxId` and an `awaitMatch` that no evidence satisfies, started
+  // with the history: both `pending`, or both `rejected`.
+  waits?: `pending` | `rejected`
+  // While `ready`, whether the source node shows an `error`. Not compared
+  // after an external abort, which no law gives a health effect yet.
+  health?: `error` | `none`
 }
 
 export type RetryModel = {
@@ -58,6 +64,9 @@ export type RetryModel = {
   committed: boolean
   // The source stopped after its first snapshot was committed.
   stopped: boolean
+  // The source gave up after the Collection became ready, or while its
+  // first snapshot's acceptance was pending and that acceptance succeeded.
+  gaveUpAfterReady: boolean
   ready: boolean
   visible: boolean
   held: boolean
@@ -77,7 +86,12 @@ export function retryModelFail(model: RetryModel, cause: string): void {
     model.stopped = true
     return
   }
-  if (model.ready || model.failed !== undefined) return
+  // HEALTH-1: a give-up after ready is the source node's error.
+  if (model.ready) {
+    model.gaveUpAfterReady = true
+    return
+  }
+  if (model.failed !== undefined) return
   model.failed = cause
   model.demands = model.demands.map((settlement): RetrySettlement =>
     settlement === `pending` ? `rejected:${cause}` : settlement,
@@ -174,8 +188,10 @@ export function applyRetryModel(
       return
     case `accept`:
       // The committed snapshot is usable: the Collection is ready, whatever
-      // errors, retries, or give-ups arrived while it waited.
+      // errors, retries, or give-ups arrived while it waited. READY-9: a
+      // give-up while it waited is then a post-ready failure (HEALTH-1).
       model.ready = true
+      if (model.stopped && !model.aborted) model.gaveUpAfterReady = true
       return
     case `accept-fails`: {
       // The snapshot never became usable, so this is an initial failure with
@@ -240,6 +256,21 @@ export function expectedRetryObservation(
         : settlement,
     ),
     rowVisible: !cleanedUp && model.visible,
+    // EVID-2: a sync run retires when it fails or is cleaned up, and its
+    // pending waits reject then (maintainer decision 2026-10-30).
+    waits:
+      cleanedUp ||
+      model.failed !== undefined ||
+      model.gaveUpAfterReady ||
+      model.aborted
+        ? `rejected`
+        : `pending`,
+    health:
+      !cleanedUp && model.ready && model.failed === undefined && !model.aborted
+        ? model.gaveUpAfterReady
+          ? `error`
+          : `none`
+        : undefined,
   }
 }
 
@@ -263,6 +294,7 @@ export function createRetryModel(
     acceptanceArmed: false,
     committed: false,
     stopped: false,
+    gaveUpAfterReady: false,
     ready: false,
     visible: false,
     held: false,

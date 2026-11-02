@@ -448,7 +448,9 @@ times and then succeeding once shows and clears the outage each time. A
 subset snapshot request that the client retries does not count: its failure
 belongs to the live query that requested it. When the stream gives up, it
 calls `fail()` with the error, or with the error your `onError` threw: a
-failed first load before readiness, or the source node's `error` after it. Complete updates from an explicit `replica: 'full'` stream remain valid.
+failed first load before readiness, or the source node's `error` after it. A give-up while a persistence wrapper is
+still accepting the first snapshot fails the Collection once that acceptance
+makes it ready. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
 Outside scoped recovery, complete rows published by persistence reloads or

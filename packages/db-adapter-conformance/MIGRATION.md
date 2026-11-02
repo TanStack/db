@@ -405,3 +405,43 @@ range`). The Collection shows what the database stored, so this is not
     over the previous round, for the retired-evidence set, failure-time
     wait rejection, and the merged export. The `app` scenario does not
     include Electric.
+- **2026-11-02, Electric, open coverage gaps.** Closing the gaps the review
+  round left open found one more Electric defect (READY-9).
+  - **Partial updates:** the driver now sends an update as Electric's
+    default replica mode does, the primary key and the changed columns. A
+    mutant that replaces the row with the partial value passed with
+    whole-row updates and is now rejected (PUB-3/FID-4). The shared
+    `fromSqlRow` shows a row with no `note` column as a field instead of
+    throwing, so such a row reaches the comparison.
+  - **Accepted response that commits nothing:** new capability and step
+    `empty-response` (Electric: HTTP 204 to the live request), with a
+    generated element of two below-threshold outages around one, and reach
+    `outage-count-reset`. The mutant that never restarts the count on an
+    accepted response, which survived last round, is rejected (HEALTH-1 at
+    `[snapshot, attempt, empty-response, attempt ×4]`). Reference mutants
+    `empty-response-keeps-count` and `empty-response-recovers`.
+  - **Give-ups:** by HTTP 400 or by the client's `maxRetries` bound, with
+    `onError` returning nothing or throwing; a second campaign runs without
+    an app `onError`. A mutant whose no-`onError` path retries is rejected
+    (LIFE-10). A mutant that stops logging times out instead: the driver
+    detects that give-up from the log (recorded seam).
+  - **Evidence across a restart (on-demand lane):** snapshot-boundary
+    evidence and imported sync metadata stay pending until the restarted
+    run is ready, then fulfill. Mutants: retired snapshots dropped, retired
+    txids dropped, retired evidence before ready, each rejected. The lane
+    declares reach and runs 40 histories.
+  - **READY-9 (retry-decision model):** the model now observes two waits
+    and the source's error while ready. RED on e67c4bae9: a give-up while
+    the first snapshot's acceptance was pending left a ready Collection with
+    no error and pending waits (`[demand, hold-acceptance, up-to-date,
+error/sync-give-up, accept]`). Fix: remember that give-up and fail the
+    run once acceptance makes it ready, or at once when a truncate commit
+    already made it ready (progressive). Mutants removing each half are
+    rejected. The controlled driver now reports a give-up decision to the
+    subscriber, as the installed client does.
+  - **Law set:** `field-trip-adapter-conformance/grammar/v19-laws.md`
+    applies the 2026-10-30 decisions (untracked).
+  - **GREEN:** Electric 1243 passed (4 skipped); conformance 79/79;
+    TrailBase 151, RxDB 23, PowerSync 195.
+  - **Size:** Electric +443 gzip bytes over the merge base, +28 for READY-9.
+  - **Open:** health after an external abort after ready has no law.

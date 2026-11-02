@@ -6071,15 +6071,30 @@ request), up to six live pauses, and a live outage after the first load,
 and checks that the source node shows a problem exactly when the live
 stream had an outage. Excluded by `excludesValue` (column domains, not
 adapter behavior): int4 values outside 32 bits, and a `-0` nested in an
-array or object for the float8 column. Limits: the eager grammar has no
-accepted response that commits nothing, so restarting the count on one is
-enforced only by source inspection (a mutant that never restarts it
-survives); snapshot-visibility evidence (`snapshot-end`) across a restart is
-not generated, so the retired-evidence rule is witnessed for txids only;
-`awaitMatch` after a failure is not generated; a held commit receipt and
-persisted resume are not exercised; there is no real Electric server; the
-default configuration without `onError` and a give-up after `maxRetries`
-are not generated. The on-demand lane runs 12 histories without declared
-reach. The shared check refuses `retryReportAfter` above 1 with
-`transport-reconnect` or `capability-renewal`: no law fixes whether a
-reconnect or a renewal ends an outage a threshold is counting.
+array or object for the float8 column. Updates carry only the changed
+columns, as Electric's default replica mode sends them, so the adapter's
+merge is exercised. An `empty-response` step (HTTP 204, accepted, with no
+change) restarts the attempt count. Give-ups come as an HTTP 400 or as the
+client's `maxRetries` bound (85), with `onError` returning nothing or
+throwing, and a second campaign runs the default configuration without an
+app `onError`, declaring the adapter's give-up log. The on-demand lane also
+restarts the Collection and checks that a retired run's snapshot-boundary
+evidence (txid 5 below `xmin` 10) and imported sync metadata (txid 25) stay
+pending until the restarted run is ready, then fulfill; it declares reach
+for a subset request's five retried attempts, five live pauses, a live
+outage, and that restart. The retry-decision model
+(`electric-retry-decision-model.ts`, shared by the controlled lane of
+`electric-oracle.property.test.ts` and the installed-client lane) now
+observes an `awaitTxId` and an `awaitMatch` that reject when the run fails
+or is cleaned up, and the source node's `error` while ready (READY-9: a
+give-up while the first snapshot's acceptance is pending is a post-ready
+failure once it is accepted). Its controlled driver now reports a give-up
+decision to the subscriber, as the installed client does; before, a
+give-up after ready never reached the adapter's failure path in that lane.
+Limits: no persisted resume or held commit receipt in the eager lane; no
+real Electric server; health after an external abort after ready has no
+law yet and is not compared; without an app `onError`, the driver detects a
+give-up from the adapter's log, so an adapter that stops logging times out
+rather than failing a law. The shared check refuses `retryReportAfter`
+above 1 with `transport-reconnect` or `capability-renewal`: no law fixes
+whether a reconnect or a renewal ends an outage a threshold is counting.

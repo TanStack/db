@@ -16,7 +16,9 @@
  * - a change batch answers the pending live request with one message per
  *   change, each carrying the batch's txid (`await-evidence`), and
  *   `up-to-date`. `insert` for a key the provider does not hold, `update`
- *   for one it does, `delete` otherwise. The adapter commits at
+ *   for one it does, `delete` otherwise. As in Electric's default replica
+ *   mode, an update carries the primary key and only the changed columns,
+ *   so the adapter merges it over the row it holds. The adapter commits at
  *   `up-to-date`, so the driver declares `per-batch` commits;
  * - a failure answers with HTTP 400, which the client gives to the shape's
  *   `onError`. The handler gives up by returning nothing, or for an odd
@@ -31,8 +33,13 @@
  *   (a network failure, also retried by the client), or an HTTP 400 that
  *   the shape's `onError` retries. Health shows an outage from its fifth
  *   attempt in a row (`retryReportAfter`);
+ * - an empty response (`empty-response`) answers the live request with
+ *   HTTP 204, which the client accepts and which carries no change;
  * - a provider subscription is one sync run's request chain; its release is
- *   the abort of the chain's pending request (LIFE-2, LIFE-10);
+ *   the abort of the chain's pending request (LIFE-2, LIFE-10), or the
+ *   driver's own terminal response, after which the client holds nothing
+ *   open. The driver serves eager mode only: it takes a request after an
+ *   aborted one as a new sync run, which an on-demand pause would break;
  * - the propagation step (`settle`) waits until the client asks again after
  *   a response, or, after a failure, until the shape's `onError` gave up.
  *
@@ -116,6 +123,21 @@ function rowValue(row: ConformanceRow): Record<string, string | null> {
   }
 }
 
+/**
+ * An update's value in Electric's default replica mode: the primary key and
+ * the columns whose value changed, a column set to NULL included.
+ */
+function changedColumns(
+  before: Record<string, string | null>,
+  after: Record<string, string | null>,
+): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(after).filter(
+      ([name, value]) => name === `id` || before[name] !== value,
+    ),
+  )
+}
+
 type Request = {
   url: URL
   signal: AbortSignal | undefined
@@ -134,6 +156,13 @@ const TRANSIENT_VARIANTS = [
   `network`,
   `http-400-retried`,
 ] as const
+type TransientVariant = (typeof TRANSIENT_VARIANTS)[number]
+
+/**
+ * The client's retry bound. A history holds at most 12 outages of at most
+ * seven attempts, so only a give-up by exhaustion reaches it.
+ */
+const MAX_RETRIES = 85
 
 type Session = {
   handle: string
@@ -174,6 +203,13 @@ class ElectricProvider implements ControlledProvider {
   /** The error `onError` threw to give up, by failure index. */
   readonly thrown = new Map<string, Error>()
 
+  constructor(readonly variants: ReadonlyArray<TransientVariant>) {}
+
+  /** The adapter gave up; without an app `onError`, it logs that. */
+  readonly noteGiveUp = () => {
+    this.gaveUp++
+  }
+
   /**
    * An app's `onError`. It retries the HTTP 400 of a retried failure by
    * returning an empty retry. It gives up on any other error by returning
@@ -185,7 +221,7 @@ class ElectricProvider implements ControlledProvider {
       this.retryNextError = false
       return {}
     }
-    this.gaveUp++
+    this.noteGiveUp()
     const index = (error as { headers?: Record<string, string> }).headers?.[
       FAILURE_HEADER
     ]
@@ -336,11 +372,13 @@ class ElectricProvider implements ControlledProvider {
     const request = await this.take()
     const messages = changes.map((change) => {
       if (change.type === `upsert`) {
-        const held = this.rows.has(change.row.id)
+        const held = this.rows.get(change.row.id)
         this.rows.set(change.row.id, change.row)
         return {
           key: String(change.row.id),
-          value: rowValue(change.row),
+          value: held
+            ? changedColumns(rowValue(held), rowValue(change.row))
+            : rowValue(change.row),
           headers: {
             operation: held ? `update` : `insert`,
             txids: [Number(txid)],
@@ -359,11 +397,33 @@ class ElectricProvider implements ControlledProvider {
     this.respondRows(request, messages)
   }
 
+  // A failure is an HTTP 400 the client does not retry, or, for failure
+  // indexes 2 and 3 modulo 4, HTTP 503s until the client's `maxRetries`
+  // bound gives up.
   fail = async (error: Error) => {
-    const request = await this.take()
-    this.session(request).stopped = true
     this.giveUpTarget = this.gaveUp + 1
-    request.respond(failureResponse(error, 400))
+    if (Math.floor(Number(failureIndex(error)) / 2) % 2 === 0) {
+      const request = await this.take()
+      this.session(request).stopped = true
+      request.respond(failureResponse(error, 400))
+      return
+    }
+    for (;;) {
+      const request = await this.take()
+      request.respond(failureResponse(error, 503))
+      const deadline = Date.now() + clientTimeoutMs
+      while (
+        this.queued.length === 0 &&
+        this.gaveUp < this.giveUpTarget &&
+        Date.now() < deadline
+      ) {
+        await sleep(1)
+      }
+      if (this.queued.length === 0) {
+        this.session(request).stopped = true
+        return
+      }
+    }
   }
 
   // One failed attempt: an HTTP 503 or 429 the client retries, a network
@@ -371,7 +431,7 @@ class ElectricProvider implements ControlledProvider {
   // retries.
   transientFailure = async (error: Error, variant: number) => {
     const request = await this.take()
-    const kind = TRANSIENT_VARIANTS[variant]
+    const kind = this.variants[variant]
     if (kind === `network`) {
       request.reject(new TypeError(error.message))
       return
@@ -382,6 +442,17 @@ class ElectricProvider implements ControlledProvider {
         error,
         kind === `http-503` ? 503 : kind === `http-429` ? 429 : 400,
       ),
+    )
+  }
+
+  /** An HTTP 204 to the live request: accepted, with no change. */
+  emptyResponse = async () => {
+    const request = await this.take()
+    request.respond(
+      new Response(null, {
+        status: 204,
+        headers: this.headers(this.session(request), false),
+      }),
     )
   }
 
@@ -427,16 +498,28 @@ function conformanceRow(row: ElectricRow): ConformanceRow {
 
 let sequence = 0
 
-export function electricConformanceDriver(): EagerLiveSourceDriver {
+/**
+ * With `appOnError: false`, the shape has no `onError`, as in Electric's
+ * default configuration: the adapter gives up on every failure the client
+ * does not retry and logs it, so no HTTP 400 is retried and the driver
+ * declares that log.
+ */
+export function electricConformanceDriver({
+  appOnError = true,
+}: { appOnError?: boolean } = {}): EagerLiveSourceDriver {
   // The provider of the history being checked.
   let current: ElectricProvider | undefined
+  const variants = TRANSIENT_VARIANTS.filter(
+    (kind) => appOnError || kind !== `http-400-retried`,
+  )
   return {
-    adapter: `@tanstack/electric-db-collection (eager)`,
+    adapter: `@tanstack/electric-db-collection (eager${appOnError ? `` : `, no onError`})`,
     capabilities: new Set([
       `complete-snapshot`,
       `await-evidence`,
       `retry-policy`,
       `source-failure-after-ready`,
+      `empty-response`,
     ]),
     changeCommits: `per-batch`,
     // The Collection reports the client's error for a failed response, the
@@ -454,7 +537,18 @@ export function electricConformanceDriver(): EagerLiveSourceDriver {
         reported.message.endsWith(` failure ${index}`)
       )
     },
-    transientVariants: TRANSIENT_VARIANTS,
+    transientVariants: variants,
+    // Without an app `onError`, the adapter logs each give-up; the log is
+    // the driver's sign that the client stopped.
+    declaredDiagnostic: appOnError
+      ? undefined
+      : (level, args) => {
+          const giveUp =
+            level === `error` &&
+            String(args[0]).startsWith(`An error occurred while syncing`)
+          if (giveUp) current?.noteGiveUp()
+          return giveUp
+        },
     // Electric carries txids on row messages; an empty batch sends none.
     txidEvidence: `change`,
     // Only an extended outage shows (maintainer decision 2026-10-30).
@@ -469,7 +563,7 @@ export function electricConformanceDriver(): EagerLiveSourceDriver {
         (value > 2_147_483_647 || value < -2_147_483_648)) ||
       (kind === `negative-zero` && typeof value !== `number`),
     create(): EagerLiveSourceFixture {
-      const provider = new ElectricProvider()
+      const provider = new ElectricProvider(variants)
       current = provider
       const collection = createCollection(
         electricCollectionOptions<ElectricRow>({
@@ -479,8 +573,13 @@ export function electricConformanceDriver(): EagerLiveSourceDriver {
             params: { table: `rows` },
             fetchClient: provider.fetchClient,
             parser: { timestamptz: (value: string) => new Date(value) },
-            backoffOptions: { initialDelay: 1, maxDelay: 2, multiplier: 1 },
-            onError: provider.onError,
+            backoffOptions: {
+              initialDelay: 1,
+              maxDelay: 2,
+              multiplier: 1,
+              maxRetries: MAX_RETRIES,
+            },
+            ...(appOnError ? { onError: provider.onError } : {}),
           },
           getKey: (row) => row.id,
         }),

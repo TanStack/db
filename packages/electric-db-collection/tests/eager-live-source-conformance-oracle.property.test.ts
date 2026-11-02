@@ -26,10 +26,12 @@ import { electricConformanceDriver } from './conformance-driver'
  *
  * Electric runs here in eager mode over the installed `@electric-sql/client`
  * through a controlled `fetchClient`. It declares `complete-snapshot`
- * (must-refetch), `await-evidence` (txids), `retry-policy` (an HTTP 503 the
- * client retries, or an HTTP 400 the shape's `onError` retries), and
- * `source-failure-after-ready` (a give-up through `onError`), and typed
- * Postgres columns. The claim is limited to the controlled HTTP provider; a
+ * (must-refetch), `await-evidence` (txids), `retry-policy` (an HTTP 503 or
+ * 429 or a network failure the client retries, or an HTTP 400 the shape's
+ * `onError` retries), and `source-failure-after-ready` (a give-up through
+ * `onError`, after an HTTP 400 or after the client's `maxRetries`), and
+ * typed Postgres columns. A second campaign runs Electric's default
+ * configuration, with no app `onError`. The claim is limited to the controlled HTTP provider; a
  * claim about an Electric server needs a receiving witness against it.
  */
 
@@ -42,11 +44,15 @@ const runs = 400
 // A campaign takes about 35 seconds.
 const campaignTimeoutMs = 120_000
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
+async function campaign(
+  options: fc.Parameters<[unknown]>,
+  checked = driver,
+  name = property,
+) {
+  const reach = createOracleReach(name, reachStatesFor(checked), {
     minimum: 5,
   })
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
+  await fc.assert(eagerLiveSourceProperty(checked, reach), options)
   return reach
 }
 
@@ -64,6 +70,21 @@ describe(`eager live-source conformance: Electric`, () => {
     `conforms on a random campaign or a replayed seed`,
     async () => {
       const reach = await campaign(oraclePropertyOptions(runs, property))
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
+  // Electric's default configuration: no app `onError`, so the adapter
+  // gives up on every failure the client does not retry and logs it.
+  oracleReplayTest(it)(
+    `conforms without an app onError on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        electricConformanceDriver({ appOnError: false }),
+        `${property}.no-on-error`,
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
