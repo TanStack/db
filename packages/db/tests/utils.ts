@@ -294,6 +294,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   getKey: (item: T) => string | number
   autoIndex?: `off` | `eager`
   sync?: SyncConfig<T>
+  rowUpdateMode?: `full`
   syncMode?: `eager` | `on-demand`
   defaultStringCollation?: StringCollationConfig
   defaultIndexType?: IndexConstructor
@@ -362,6 +363,7 @@ export function mockSyncCollectionOptions<
   }
 
   const sync = config.sync ?? {
+    rowUpdateMode: config.rowUpdateMode,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       begin = params.begin
       write = params.write
@@ -381,7 +383,11 @@ export function mockSyncCollectionOptions<
   }
 
   // Destructure to avoid passing test-only properties (like initialData) to createCollection
-  const { initialData: _initialData, ...collectionConfig } = config
+  const {
+    initialData: _initialData,
+    rowUpdateMode: _rowUpdateMode,
+    ...collectionConfig
+  } = config
 
   const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils

@@ -3,7 +3,7 @@ id: IncludeOperatorRequiredError
 title: IncludeOperatorRequiredError
 ---
 
-Defined in: [packages/db/src/errors.ts:643](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L643)
+Defined in: [packages/db/src/errors.ts:648](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L648)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:643](https://github.com/TanStack/db/blob/
 new IncludeOperatorRequiredError(field): IncludeOperatorRequiredError;
 ```
 
-Defined in: [packages/db/src/errors.ts:644](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L644)
+Defined in: [packages/db/src/errors.ts:649](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L649)
 
 #### Parameters
 

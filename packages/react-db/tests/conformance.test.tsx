@@ -10,6 +10,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { useLayoutEffect } from 'react'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -56,12 +58,14 @@ function writer<T extends { id: string }>(collection: any) {
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
   collectionId?: string,
+  options?: { rowUpdateMode?: `full` },
 ) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: collectionId ?? `conformance-react-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
+      rowUpdateMode: options?.rowUpdateMode,
     }),
   )
   const write = writer<T>(collection)
@@ -132,7 +136,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   const hook = renderHook(() => useLiveQuery({ query: build as any, ...opts }))
   return makeHandle(hook)
@@ -147,7 +151,7 @@ function mountWithDependencyList(build: QueryBuild) {
 
 function mountConfigWithDependencyList(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   const hook = renderHook(() =>
     useLiveQuery({ query: build as any, ...opts } as any),
@@ -200,12 +204,10 @@ const mountControllableWith = (path: IdentityPath) =>
       ...handle,
       publications: published.values,
       statePublications: published.stateValues,
-      async setParam(param: P) {
-        await guard(() =>
-          act(async () => {
-            hook.rerender({ param })
-          }),
-        )
+      async setParam(param: P, observe?: () => void) {
+        // renderHook's rerender commits inside its own synchronous act.
+        guard(() => hook.rerender({ param }))
+        observe?.()
         await handle.flush()
       },
     }
@@ -277,12 +279,10 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
       ...handle,
       publications: published.values,
       statePublications: published.stateValues,
-      async setParam(param: P) {
-        await guard(() =>
-          act(async () => {
-            hook.rerender({ param })
-          }),
-        )
+      async setParam(param: P, observe?: () => void) {
+        // renderHook's rerender commits inside its own synchronous act.
+        guard(() => hook.rerender({ param }))
+        observe?.()
         await handle.flush()
       },
     }
@@ -290,10 +290,12 @@ const mountKeyedControllableWith = (path: IdentityPath) =>
 
 const reactDriver: LiveQueryDriver = {
   name: `react`,
+  parameterObservationCut: `committed synchronous rerender`,
   // Each render re-runs the query input and compares its identity.
   comparesQueryIdentity: true,
   disabledRepresentation: `absent`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>

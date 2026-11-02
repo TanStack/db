@@ -1,16 +1,13 @@
-import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { MultiSet } from '../multiset.js'
-import {
-  TopKState,
-  handleMoveIn,
-  handleMoveOut,
-  topKBatch,
-} from './topKState.js'
-import { TopKArray, createKeyedComparator } from './topKArray.js'
+import { UnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
+import { TopKState, topKBatch } from './topKState.js'
+import { createKeyedComparator } from './topKArray.js'
 import type { IndexedValue } from './topKArray.js'
-import type { DifferenceStreamReader } from '../graph.js'
-import type { IStreamBuilder, PipedOperator } from '../types.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
+import type { PipedOperator } from '../types.js'
 
 export interface GroupedTopKWithFractionalIndexOptions<K, T> {
   limit?: number
@@ -42,8 +39,7 @@ export class GroupedTopKWithFractionalIndexOperator<
   #groupStates: Map<unknown, TopKState<K, T>> = new Map()
   #groupKeyFn: (key: K, value: T) => unknown
   #comparator: (a: [K, T], b: [K, T]) => number
-  #offset: number
-  #limit: number
+  #window: { offset: number; limit: number }
 
   constructor(
     id: number,
@@ -54,67 +50,38 @@ export class GroupedTopKWithFractionalIndexOperator<
   ) {
     super(id, inputA, output)
     this.#groupKeyFn = options.groupKeyFn
-    this.#limit = options.limit ?? Infinity
-    this.#offset = options.offset ?? 0
+    this.#window = {
+      limit: options.limit ?? Infinity,
+      offset: options.offset ?? 0,
+    }
     this.#comparator = createKeyedComparator(comparator)
-    options.setSizeCallback?.(() => this.#getTotalSize())
-    options.setWindowFn?.(this.#moveTopK.bind(this))
-  }
-
-  #getTotalSize(): number {
-    let size = 0
-    for (const state of this.#groupStates.values()) {
-      size += state.size
-    }
-    return size
-  }
-
-  #getOrCreateGroupState(groupKey: unknown): TopKState<K, T> {
-    let state = this.#groupStates.get(groupKey)
-    if (!state) {
-      state = new TopKState(
-        new TopKArray(this.#offset, this.#limit, this.#comparator),
-      )
-      this.#groupStates.set(groupKey, state)
-    }
-    return state
-  }
-
-  #cleanupGroupIfEmpty(groupKey: unknown, state: TopKState<K, T>): void {
-    if (state.isEmpty) {
-      this.#groupStates.delete(groupKey)
-    }
-  }
-
-  /**
-   * Moves the topK window for all groups based on the provided offset and limit.
-   * Any changes to the topK are sent to the output.
-   */
-  #moveTopK({ offset, limit }: { offset?: number; limit?: number }): void {
-    if (offset !== undefined) {
-      this.#offset = offset
-    }
-    if (limit !== undefined) {
-      this.#limit = limit
-    }
-
-    const result: Array<[[K, IndexedValue<T>], number]> = []
-    let hasChanges = false
-
-    for (const state of this.#groupStates.values()) {
-      const diff = state.move({ offset: this.#offset, limit: this.#limit }) // TODO: think we should just pass offset and limit
-
-      diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result))
-      diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result))
-
-      if (diff.changes) {
-        hasChanges = true
+    options.setSizeCallback?.(() => {
+      let size = 0
+      for (const state of this.#groupStates.values()) {
+        size += state.size
       }
-    }
+      return size
+    })
 
-    if (hasChanges) {
-      this.output.sendData(new MultiSet(result))
-    }
+    // Move every group's window and publish their combined signed changes.
+    options.setWindowFn?.(
+      ({ offset = this.#window.offset, limit = this.#window.limit }) => {
+        this.#window = { offset, limit }
+
+        const result: Array<[[K, IndexedValue<T>], number]> = []
+        let hasChanges = false
+
+        for (const state of this.#groupStates.values()) {
+          if (state.moveWindow(this.#window, result)) {
+            hasChanges = true
+          }
+        }
+
+        if (hasChanges) {
+          this.output.sendData(result)
+        }
+      },
+    )
   }
 
   run(): void {
@@ -122,29 +89,26 @@ export class GroupedTopKWithFractionalIndexOperator<
     for (const [[key, value], multiplicity] of topKBatch(
       this.inputMessages(),
     )) {
-      this.#processElement(key, value, multiplicity, result)
+      const groupKey = this.#groupKeyFn(key, value)
+      let state = this.#groupStates.get(groupKey)
+      if (!state) {
+        state = new TopKState(
+          this.#window.offset,
+          this.#window.limit,
+          this.#comparator,
+        )
+        this.#groupStates.set(groupKey, state)
+      }
+
+      state.processElement(key, value, multiplicity, result)
+
+      // Cleanup empty groups to prevent memory leaks
+      if (state.isEmpty) this.#groupStates.delete(groupKey)
     }
 
     if (result.length > 0) {
-      this.output.sendData(new MultiSet(result))
+      this.output.sendData(result)
     }
-  }
-
-  #processElement(
-    key: K,
-    value: T,
-    multiplicity: number,
-    result: Array<[[K, IndexedValue<T>], number]>,
-  ): void {
-    const groupKey = this.#groupKeyFn(key, value)
-    const state = this.#getOrCreateGroupState(groupKey)
-
-    const changes = state.processElement(key, value, multiplicity)
-    handleMoveIn(changes.moveIn, result)
-    handleMoveOut(changes.moveOut, result)
-
-    // Cleanup empty groups to prevent memory leaks
-    this.#cleanupGroupIfEmpty(groupKey, state)
   }
 }
 
@@ -165,21 +129,9 @@ export function groupedTopKWithFractionalIndex<K extends string | number, T>(
   comparator: (a: T, b: T) => number,
   options: GroupedTopKWithFractionalIndexOptions<K, T>,
 ): PipedOperator<[K, T], [K, IndexedValue<T>]> {
-  return (
-    stream: IStreamBuilder<[K, T]>,
-  ): IStreamBuilder<[K, IndexedValue<T>]> => {
-    const output = new StreamBuilder<[K, IndexedValue<T>]>(
-      stream.graph,
-      new DifferenceStreamWriter<[K, IndexedValue<T>]>(),
-    )
-    const operator = new GroupedTopKWithFractionalIndexOperator<K, T>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader(),
-      output.writer,
-      comparator,
-      options,
-    )
-    stream.graph.addOperator(operator)
-    return output
-  }
+  return unaryOperator(
+    GroupedTopKWithFractionalIndexOperator<K, T>,
+    comparator,
+    options,
+  )
 }

@@ -796,27 +796,66 @@ stay ready/empty, and a new interval gets a new handle. This assumes no
 facade-local optimistic mutations. Every shape declares active empty readiness
 and nonempty child receiving cuts. Six lifetime and four inline-value hostile
 controls reject wrong observations. See [chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
-Functional callback-input observations now have a separate receiving boundary
-in `virtual-row-fields-input-oracle.test.ts`, sharing source metadata judgment
-with the existing root/Effect owners. Its finite 33 authoring descriptions cross
-seven QueryRef/join/union consumers through root and correlated inline-child
-compilation (462 histories), plus two direct-source controls. Each compares
-immutable callback captures and their ordinary derived output at initial
-readiness, held mutation, settlement and remote next use. Complete before/after
-source facts permit retraction evaluation; startup LEFT joins may expose an
-absent side, while established outputs require both typed-key rows. Reserved
-metadata is judged by presence/readable value, with ownership flags diagnostic;
-ordinary own undefined remains distinct from absence. Another 66 histories keep
-nested inline array/materialized authored values, and 33 reject compiled
-Collection inputs before callbacks. Per-history/path/cut reach is mandatory even
-under unrelated replay seeds; unentered calibration-only runs stand aside.
-Unchanged production exposes 203 correlated-child violations: new-shape fields
-leak and source-spread collisions spoof genuine metadata. Root receivers and
-nested inline preservation pass. All 2,153 declared states reach; 17 controls
-and independent seeded/unentered/partial-selection checks calibrate this owner.
-See [chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md) for exact
-fingerprints and independent evidence. Production repair is deferred under the
-[RC oracle challenge](oracle-reviews/2026-10-28-pr-2171-oracle-challenge.md).
+Functional callback-input observations have a separate receiving boundary in
+`virtual-row-fields-input-oracle.test.ts`, sharing the existing source metadata
+judgment. The maintainer extended O12 on 2026-10-30 from fn.select to fn.where
+and fn.having while preserving authored inline output. Thirty-three authoring
+descriptions cross seven QueryRef/join/union paths, five callback forms
+(select, where, having, where-select, having-select), and root, wrapped child,
+direct child and real Effect receivers. Flat union children require a named
+QueryRef for include correlation; direct flat union children remain inadmissible.
+The finite grammar has 4,290 receiving histories and 20 direct-source controls.
+
+Each receiver checks immutable callback captures and complete derived or
+predicate-filtered output at initial readiness, held mutation, settlement and
+remote next use. Effects also check exit/reentry, every delivered value and
+previousValue, continuity in both callback channels and silence after disposal.
+Before/after source facts permit retraction evaluation. Startup LEFT joins may
+expose an absent side; after source exit the unmatched peer remains a result.
+Reserved fields use presence/readable value, with ownership diagnostic.
+Ordinary own undefined remains distinct from absence. Another 132 histories
+retain inline array/materialized authored values through direct and QueryRef
+paths; 66 reject compiled Collection inputs before callbacks. All 20,720
+callback and 594 inline/rejection states reach once.
+
+Another 396 histories use exported `compileQuery`, the same exact QueryIR and
+D2 input streams, both compilation orders, shared/separate caches, and FROM,
+joined-source and union-branch placement. At initial graph drain, all 1,188
+states compare callback captures, complete derived output and raw authored
+output. Raw output uses a shared-cache/separate-cache differential, while both
+executions still undergo the independent callback/derived-output judgment.
+The union optimizer clones branch IR: counters establish original-key reuse
+for FROM/JOIN, while union checks propagation/transparency without claiming
+that cache hit. This receiver supplies no Effect-root metadata attribution law.
+
+The owner has 4,923 tests. Before callback production edits, it rejected 1,102
+metadata input comparisons on the reviewed implementation; 3,821 tests passed.
+All 22,502 callback, inline and compiler states reached. The repaired owner
+passes. Final mutants reject a WHERE-only repair (551 comparisons), enabling
+normalization for every predicate pipeline (696 authored-output comparisons),
+and dropping the selected-row cache mode (26 comparisons). Earlier path-specific
+FROM/JOIN/union normalization mutants each failed 112 compiler comparisons.
+The real Effect receiver additionally rejects 203 metadata comparisons on the
+actual PR base. That receiving evidence does not retroactively supply the
+historical selection repair's initial pre-edit gate.
+
+The ordered-work owner, `ordered-work-oracle.property.test.ts`, adds 144 finite
+histories through `ordered-compiler-cache-driver.ts`. Two compilation orders,
+shared/separate caches, FROM/JOIN/union paths, two projection forms, two order
+directions and three window moves exercise actual source Collections and the
+real OrderedSourceLoader. The independent installed-window model checks signed
+output bags at initial, moved and returned cuts. Original registration overwrite
+fails 48 histories; the repaired full 424-test owner passes. All 432 new states
+reach once. This receiver claims the controlled compiler/loader boundary, not
+public Collection window-promise integration. Its 280 existing histories retain
+their Collection/Effect receiving evidence. Separate metadata-mode pipelines
+remain a permitted representation; no one-pipeline performance promise follows.
+The [runtime repair record](oracle-reviews/callback-metadata.md) retains the
+commands, source bindings, lossless nine-item audit, calibrations and limits.
+Historical instrument acceptance remains in
+[chunk 17](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
+The separate static receiving-type failures in the
+[deferred record](oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md) remain open.
 This extension does not establish arbitrary descriptors/prototypes, greater
 recursive depth, same-source overlapping transactions, other dynamic
 join kinds, truncate, provider scheduling, framework receivers or construction
@@ -1108,6 +1147,23 @@ that fails one receiver's current request while comparing another receiver's
 status at the same checkpoint. This is a stated observation limit, not a
 retirement of the per-demand error-ownership law.
 
+The replay error-identity comparison keeps subscription ownership separate
+from the source-wide publication barrier. CI seed `1926301329`, path
+`251:2:1:4:2:2`, exposed a false failure: an include replay rejected while a
+join replay still loaded, and the comparison required the join's earlier
+failure instead. Adapter request data now identifies each load's subscription.
+Only failures and covering replacements within that subscription compete for
+its replay error. A 96-history finite grammar crosses root/marker replay,
+oldest/newest failure order, four join forms, both directions and three window
+widths. It measures 52 histories with multiple failures of one subscription
+and six with sibling failures; both require at least five. The old source-wide
+comparison and a production mutant that returns the last replay failure each
+fail the intended identity assertion. Publication, request-error, retirement,
+readiness and convergence comparisons and campaign budgets remain. This is a
+controlled Collection/live-query witness, with no provider or framework claim.
+Evidence and the oracle self-review are in
+[the callback metadata record](oracle-reviews/callback-metadata.md#replay-error-identity-ci-follow-up-2026-10-30).
+
 The ordered replay owner distinguishes replay renewal from an ordinary lazy
 demand created during another subscription's replay. Its adapter records the
 leases held at truncate, then matches subscription identity and independently
@@ -1392,6 +1448,21 @@ Svelte server-only owner proves server reconstruction only; its second render
 is not browser evidence. `hydration.svelte.test.ts` separately receives
 normalized transport and normal warm-browser initialization through its native
 scheduler.
+
+The [React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
+extends that preparation grammar and judgment with real matched React/ReactDOM
+18.3.1 and 19.2.4 development server renderers. Separate paths cover provider
+and explicit-client ordinary hooks, completed non-streaming Suspense through
+both client forms, standalone builders and supplied Collections. A disabled
+input replays the same diagnostic comparison. Each checks return and the raw
+React client-layout diagnostic after server render and cleanup; ordinary
+descriptor paths also compare admission, selected rows and status, while
+prepared Suspense compares rows. Standalone/supplied paths make no hydration
+claim. Fixed/fresh campaigns retain per-runtime/path reach and direct replay;
+this does not establish streaming Suspense, actual browser hydration, arbitrary
+provider delivery or every React version. Client commit and abandonment remain
+with the window receiving owner. [SSR effect evidence](oracle-reviews/2026-10-30-react-ssr-effects.md)
+records pre-edit RED, repaired GREEN and hostile rejection.
 
 The shared admission owner also defines runtime ready/error outcomes, browser
 explicit preparation and defined/undefined causes. Its receiving drivers are
@@ -1769,7 +1840,7 @@ generic visitor behavior outside the named collectors.
 
 | Surface                                      | Primary executable owners                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Independent judgment and important limit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ordered relations and BTree                  | [top-K relation oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-relation-oracle.test.ts), [fractional-index window moves](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts), [BTree/Map](https://github.com/TanStack/db/blob/main/packages/db/tests/btree-map-oracle.test.ts), [incrementalization laws](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/incrementalization-law-oracle.property.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Independent ordered relations and cumulative signed output. Each generated incrementalization campaign sums the checker's delivery counts and requires one atomic delivery per checkpoint and more split deliveries than an unsplit run makes; a checker that stops splitting fails all six campaigns. Most ordered steps edit the previous world by one removal or insertion, and a reconstruction check counts promotions of retained rows over the executed fixed campaign (25 global and 21 per parity at 100 runs; independent worlds gave 2 and 2). A type test pins `join(other, type)`'s nullable pair sides for every join type. Top-K consolidation compares same-key values without hashing, including cyclic replacements and fresh transient cancellation. The fractional-index test checks an empty output message for a window move after all rows retract; it does not prove downstream lazy acquisition. Other hash-based operators retain hashing's declared domain. Algebra does not specify client readiness. The BTree/Map oracle checks point operations, neighbor pairs, and full, partial, boundary, exclusive-high, and empty range scans for integer keys and node sizes 4–8. It does not check balance or space, and it assumes consistent comparators ([code-weight BTree review](oracle-reviews/code-weight-btree-trim.md)). The generated groupBy law compares JSON values; a pinned contract test in `packages/db-ivm/tests/operators/groupBy.test.ts` records that after a delete, `min` and `max` return a value hash-equal to a remaining member, not necessarily the remaining instance (`-0` for `0`, an equal Date), which is why the query compiler keeps its own exact-value keys. It checks both insertion orders, reads the group's row by integrating output multiplicities, deletes the minimum and the maximum, and shows that an aggregate input that tells the rows apart returns the remaining instance, for -0/0 in both directions and for both `min` and `max`. The contract holds while every member has positive multiplicity. It pins the current behavior separately: the delete's retraction is the last record a shared hash entry gets, so the deleted instance comes back in either insertion order, for -0/0 in either direction and for an equal Date. For -0/0 and equal Dates the contract assertions only show hash equality, which is all the contract promises. Open: the incrementalization law's value policy compares JSON and clones by `structuredClone`, so no generated history sees -0 or Date identity; a value-identity policy with -0/0 and equal-time Dates would generalize this pinned contract. |
+| Ordered relations and BTree                  | [top-K relation oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-relation-oracle.test.ts), [fractional-index window moves](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts), [BTree/Map](https://github.com/TanStack/db/blob/main/packages/db/tests/btree-map-oracle.test.ts), [incrementalization laws](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/incrementalization-law-oracle.property.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Independent ordered relations and cumulative signed output. Each generated incrementalization campaign sums the checker's delivery counts and requires one atomic delivery per checkpoint and more split deliveries than an unsplit run makes; a checker that stops splitting fails all six campaigns. Most ordered steps edit the previous world by one removal or insertion, and a reconstruction check counts promotions of retained rows over the executed fixed campaign (25 global and 21 per parity at 100 runs; independent worlds gave 2 and 2). A type test pins `join(other, type)`'s nullable pair sides for every join type. Top-K consolidation compares same-key values without hashing, including cyclic replacements and fresh transient cancellation. The fractional-index test checks an empty output message for a window move after all rows retract; it does not prove downstream lazy acquisition. The [distinct incrementalization extension](../../packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts) recomputes unique immutable `{id: string, value: integer}` selections across real hash collisions, with two unequal collision members and a constructively verified noncolliding anchor. Its shared [model and grammar](../../packages/db-ivm/tests/distinct-incrementalization-oracle.ts) vary collision-member order, atomic versus separate insertion, duplicate support, partial and last removal, replacement, cancellation, and reinsertion, with a noncolliding anchor. The existing incrementalization checker compares net weighted deltas and retained rows after every logical batch in atomic and legal unit-split D2 deliveries, for selected-value and default-tuple distinct. The [public receiving witness](../../packages/db/tests/query/distinct-collision-oracle.test.ts) checks the same law and histories after every applied source transaction through ordered and unordered live-query Collections; the [reported seeded pair](../../packages/db/tests/query/distinct-reported-collision.test.ts) replays that shared judgment. Each campaign declares and measures collision coexistence, duplicate support, partial removal, last removal, and reinsertion separately for its receiving path. The original hash-only operator, equality buckets with shared output keys, and counts capped at one all fail value comparisons. These checks do not promise representative choice for unselected fields, intermediate source-transaction publications, framework render scheduling, arbitrary payload types, or collision freedom of the digest. The [issue 2306 audit](oracle-reviews/2026-10-30-distinct-collisions.md) records RED, GREEN, mutants, bounds, and byte cost. The wider representative and includes receiving lanes are recorded under [Distinct collision review extension](#distinct-collision-review-extension-2026-10-30). Other hash-based operators remain outside this distinct repair; the Index structural-collision trace is recorded there with its owner. Algebra does not specify client readiness. The BTree/Map oracle checks point operations, neighbor pairs, and full, partial, boundary, exclusive-high, and empty range scans for integer keys and node sizes 4–8. It does not check balance or space, and it assumes consistent comparators ([code-weight BTree review](oracle-reviews/code-weight-btree-trim.md)). The generated groupBy law compares JSON values; a pinned contract test in `packages/db-ivm/tests/operators/groupBy.test.ts` records that after a delete, `min` and `max` return a value hash-equal to a remaining member, not necessarily the remaining instance (`-0` for `0`, an equal Date), which is why the query compiler keeps its own exact-value keys. It checks both insertion orders, reads the group's row by integrating output multiplicities, deletes the minimum and the maximum, and shows that an aggregate input that tells the rows apart returns the remaining instance, for -0/0 in both directions and for both `min` and `max`. The contract holds while every member has positive multiplicity. It pins the current behavior separately: the delete's retraction is the last record a shared hash entry gets, so the deleted instance comes back in either insertion order, for -0/0 in either direction and for an equal Date. For -0/0 and equal Dates the contract assertions only show hash equality, which is all the contract promises. Open: the incrementalization law's value policy compares JSON and clones by `structuredClone`, so no generated history sees -0 or Date identity; a value-identity policy with -0/0 and equal-time Dates would generalize this pinned contract. |
 | Includes and publication                     | [cross-formulation](https://github.com/TanStack/db/blob/main/packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts), [temporal](https://github.com/TanStack/db/blob/main/packages/db/tests/query/includes-temporal-oracle.test.ts), [Collection includes](https://github.com/TanStack/db/blob/main/packages/db/tests/query/includes-collection-oracle.property.test.ts), [architecture and complete suite map](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/ARCHITECTURE.md#executable-contracts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Per-parent/flat-join/partition relations, callback-time rows, nested values, and route histories. Fragmented lazy-demand consolidation covers delta growth and successful, rejected/retried, and obsolete replacements at the Collection request boundary; it observes exact key unions and abort checkpoints. A compiled-includes fixture makes adapter unload evict owned child rows and proves a rejected union cannot remove established public child rows. Retry after that terminal live-query failure remains covered at the acquisition boundary; no automatic in-place recovery is claimed. Observe raw promised order; fresh queries do not establish continuous publication safety. The temporal owner's source-readiness lane enumerates every legal order of delivery, settlement, source readiness, and one later change for a source whose Collection readiness lags its settled subsets. It checks live-query readiness, preload settlement, and visible rows for direct, single-result, ordered-window, include-child, lazy-join, and eager-root sources; `queryOnce` results for the direct and eager-root shapes; `toArrayWhenReady()` and `stateWhenReady()` results for a read started after rows are visible but before readiness, over the direct, single-result, and eager-root shapes (and the lazy join for `toArrayWhenReady()`); and Effect `skipInitial` deltas for the direct, lazy-join, and eager-root shapes, and every on-demand cell of every consumer is crossed with a truncate or (join and include) a parent rekey before settlement. Each on-demand cell also compares its consumer with a metamorphic twin over a source that is ready from its start, which does not rely on the model's eager/on-demand rule. A live-query observer test checks that a hydration seed hands off at subset settlement, and an Electric test pins that a ready progressive query's rows update only at the full sync's swap. Effects over an ordered window or an include have no lane. It rejects both a design that waits for every source's Collection readiness and one that ignores source readiness. Electric live-query tests are the receiving witnesses for a real progressive source and an on-demand source that is ready before its subset loads; a React Suspense test checks that Suspense and `isReady` release together. Other framework adapters have no Suspense witness.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Collection lifecycle                         | [mutation startup](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-mutation-startup.test.ts) (fixed tests; no oracle owner (tracked in #2264)), [change-event history](https://github.com/TanStack/db/blob/main/packages/db/tests/change-event-history-oracle.test.ts), [sync publication reentrancy](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-sync-reentrancy-oracle.test.ts), [history](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts), [publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts), [replay](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts), [effect disposal](https://github.com/TanStack/db/blob/main/packages/db/tests/effect-disposal-oracle.test.ts), [GC and persisting transactions](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-transaction-oracle.property.test.ts), [GC retention boundaries](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-retention-oracle.property.test.ts), [shared GC model](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-retention-oracle.ts), [GC mutation projection](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-mutation-oracle.property.test.ts), [native idle receiver](https://github.com/TanStack/db/tree/main/packages/db/e2e/collection-gc), [initial GC review evidence](oracle-reviews/pr-2258-gc-retention.md), [second GC review and decisions](oracle-reviews/pr-2258-gc-retention-round2.md), [interaction and mutation receiving evidence](oracle-reviews/pr-2258-gc-retention-round3.md), [GC checker calibration](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-retention-oracle.test.ts), [Electric confirmation receiver](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/e2e/collection-gc.e2e.test.ts), [PR #1902 review](oracle-reviews/pr-1902-change-event-history.md), [batch-order decision review](oracle-reviews/change-event-batch-order.md), [absent-key insert review](oracle-reviews/2026-10-02-insert-for-absent-key.md)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Core Collection `insert`/`update`/`delete` admission while `startSync:false` is idle; complete public-row/change-message agreement across bounded one- and two-key histories plus replayable four-key campaigns, where every message must be valid for a strict consumer (insert only for an absent key, update or delete only for a present one; [absent-key insert review](oracle-reviews/2026-10-02-insert-for-absent-key.md)); a two-key deferred sync history checks each key's causal insert/update/delete trace while allowing any cross-key interleaving. Reversing all deferred messages fails that check; reversing each sync transaction's distinct-key messages passes. Queued duplicate admission and cancellation, ownership and phase histories, exact caller/error/publication evidence, and late completion and restart have separate witnesses. Generated deferred histories with cancellation or reentrant callbacks need a witness in the change-event history owner before claiming general batch-shape coverage. Every bounded change-event history, and about half of each generated campaign, runs again on a local-only Collection that ends with `reload()`: it must resolve with the Collection `ready`, the change-message mirror of valid messages must equal the public rows, the public rows must equal the history's kept rows (maintainer decision: a local-only reload keeps the user's writes, and `initialData` loads only into a Collection that starts empty), and a later write must reach both. The adapter that re-inserted `initialData` in each run failed 210 histories (a crash when a kept row changed, or a mix of kept rows and `initialData`); a reset to `initialData` fails 344, and loading `initialData` whenever the Collection is empty fails 45 (a history that deleted every row). Query write utilities and effect self-dependent disposal remain separate contracts. During a truncate, a ready callback can write to any key after a prior optimistic request. Each subscriber, with or without initial state or a filter, must receive valid messages after the Collection is ready and end at the Collection's rows. A ready callback that throws while entering sync surfaces when the sync function returns, whether it calls markReady or commits a truncate ([round 3 follow-ups](oracle-reviews/2026-10-05-round-3-followups.md)). Callback rollbacks, non-optimistic callback writes, and several writing callbacks remain open ([ready-callback truncate review](oracle-reviews/2026-10-05-truncate-ready-callback-delete.md)). The GC property (`collection-lifecycle.gc-persisting-transaction`) checks on a fake clock that automatic garbage collection retires a Collection only after `gcTime` with no subscriber and no persisting transaction, that the delay restarts when the last transaction completes or fails, and that explicit `cleanup()` still retires it while a transaction persists. Histories run over two Collections, with inserts through one Collection's `onInsert` or through a manually committed transaction that touches both. After each subscribe, unsubscribe, insert, settlement, and clock step it compares each Collection's `cleaned-up` status and each persisting row's visibility with an independent deadline model. `main` before the fix, a hold that never restarts the delay, a restart only on completion, and a restart only for the first Collection a transaction touched each fail it. The companion `collection-lifecycle.gc-retention-boundaries` property separates elapsed eligibility from host idle delivery. Its shared reference model checks the absolute 50ms startup/preload handoff, real last unsubscribe, pending versus persisting transactions, delayed commit, success/failure/rollback, surviving siblings, disabled GC, and old idle work after renewal. Generated configured delays are 1, 10, 49, 50, 51, and 100ms; observations include immediately before and at the independent deadline. Eager sync and write-started sync both run. A Chromium receiving driver uses the same model/checker with native idle delivery and cancellation and controlled elapsed timers. It records the actual budget core reads and checks public status at core delivery and a usable native observation opportunity. Exact wall-clock cleanup latency is not promised. Paced mutations, offline transaction restoration, live-query Collections, and actual Electric `awaitTxId` plus provider delivery are not generated by these GC owners. The boundary grammar now generates repeated warm preloads over queued idle and persisting holds, successful and failed cold preloads as first or last releases, both sibling settlement orders, and pending drafts held by subscriptions. Held adapter cleanup crosses settlement with surviving pending or persisting siblings, both before and after cleanup settlement. Exact key comparisons reject leftover settled rows and cleanup resurrection; tracked transaction identities still match unsettled transactions. The 250-history fixed and random campaigns require all 33 declared states. Alongside the 15 focused lanes, constructive interaction histories combine up to seven transactions and three subscribers, delayed commit, three persisting siblings, non-FIFO settlement and preload between releases. Automatic GC also starts held or rejecting adapter cleanup, checks synchronous row discard before adapter settlement, and rejects pending-sibling resurrection. The shared model additionally receives direct updates/deletes, shared update/delete and cancelled insert/delete ownership with a surviving peer update through `collection-lifecycle.gc-mutation-shapes`. Its independent source/intent projection checks exact keys and values across completion/failure/rollback, both Collection orientations and subscriber states; each 150-history campaign requires all 11 declared states. The maintainer chose first-usable-idle retirement as a fixture scheduling assumption, not a public liveness guarantee. The maintainer also chose caller-owned pending draft visibility: keep a subscription; restart after GC does not promise draft restoration. The boundary grammar therefore does not establish post-GC draft restoration, paced/offline restoration, or arbitrary cleanup/source-recovery histories. A real Electric/Postgres receiving driver now crosses gcTime 10/100ms with absent/last-unsubscribed owners, holds an assigned uncommitted txid across the unheld deadline, and observes pending caller, persisting phase, optimistic row, genuine confirmation, successful settlement, synced row, renewed GC and idle delivery. Its 12 paths retain four one-write cases and add eight two-write cases with separate real SQL transactions and both local settlement orders. A genuine acknowledgement releases only one hold; the other SQL transaction remains open beyond the first-release deadline. It shares the model/checker and rejects no-hold and first-release runtime mutants. Native host and real provider are witnessed separately; their combined browser/provider schedule, three-or-more provider writers, provider failure/recovery and persistence wrappers remain outside these bounded receiving histories. The Collection lifecycle GC owners still use fresh disjoint optimistic keys. Before claiming the combined same-key rollback-cascade or confirming-sync-queue law with GC, this owner needs a generated receiving history that crosses those semantic owners at retention and cleanup checkpoints. The history owner's demand-change grammar (`demandChangeLifecycleHistoryArbitrary`, a fixed seed and the random campaign `subscription-lifecycle.demand-change`) adds a third demand, a `replace` command (`replaceSnapshots`: a held replacement whose own load did not fail covers the owners it replaces, law 10), and a `change` command that retires several owners through one `releaseSnapshot(...wheres)` call; the model judges an open replay once after the whole change (law 9). Declared reach: a change during a replay, a replacement covering a failed owner, and a change whose verdict between releases would differ. Per-release judging, first-release-alone, and batching only two-owner changes each fail it. A covered owner's failed replay load reports `loadSubset:error` whatever its settlement order (the model's existing reporting rule; suppressing the last settler fails it), and a prompt cancellation of a covered owner settles the replay as any settlement does. An aborted held replacement covers nothing: the abort ended its load before it applied (maintainer decision: an abort ends the load; law 10), so its replaced owner's failure keeps the replay failed (two 30-times counterexamples, now `keeps a replay failed when a replacement aborted after its replaced owner failed` and its peer-loaded twin; RED on the first simplification, which counted the aborted replacement as covering; a mutant that drops the check fails both). The controller always aborts and releases a segment together, so it never makes that case. An abort ends the load (maintainer decision): the history model's `abort`, and a truncate that replaces an attempt, stop that attempt's gating at once in both `manual` and `reject` cancellation; an owner whose attempt the abort ended before it settled owes the replay nothing, and a rejection after the abort decides nothing (a failure settled before the abort stays). The publication model finishes a replacement at an abort, and the replay oracle's newer attempt drops the older attempts' pending loads. A synchronous throw from `loadSubset` is a rejection (maintainer decision): an acquisition that core releases, also in the acquisition-cell and replay witnesses. RED on 2bc79fc7c: 18 lifecycle tests, 1 refinement test. Mutants that fail: a replay that waits for an aborted load (14), an aborted rejection reported as `loadSubset:error` (19), an aborted load that still holds readiness (17).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Paced mutations                              | [virtual-clock oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/paced-mutations-oracle.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `createPacedMutations` with queue front/back options, bounded waiting capacity at zero and one, cleanup draining in FIFO/LIFO order after a held write, cleanup timing at the configured wait for immediate writes, admitted writes after separate Collection cleanup, debounce and throttle schedules with explicit and omitted options, and first-leading throttle execution at epoch zero. Finite histories compare optimistic rows, returned transaction identity and receipt outcome, execution order and virtual-clock time. Held writes verify queue serialization. Leading-only throttle and debounce witnesses reject skipped calls immediately with their named dropped-call errors, including omitted edges, both edges disabled, and same-row rollback while a prior write is held. Capacity witnesses cover overflow rejection, distinct-key optimistic rollback, same-key admitted-write survival, and in-flight versus waiting admission. Cleanup witnesses check repeated queue cleanup, eventual admitted receipt settlement, direct queue strategy rejection of new callbacks, public post-cleanup rollback with `QueueDisposedError`, pending debounce transactions that wait until the last call's quiet edge after separate Collection cleanup, and a trailing throttle timer that runs at its regular edge after separate Collection cleanup. Deferred custom queue and batch callbacks check compatibility with `void` and `false` execute results, respectively. Frozen options verify factory non-mutation; a mutable option witness checks that debounce uses its construction-time trailing setting. Throwing `onMutate` histories check leading-edge reuse before any row change, failed-row restoration when a pending transaction already has admitted work, eligible leading writes behind a held handler, and throttle pending merges at the throw, start, receipt, and later-timer cuts. New debounce/throttle admission after cleanup, manual commit of a strategy-owned transaction, longer throwing/reentrant bursts, failed persistence, broader capacities and schedules remain outside this owner.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -1889,6 +1960,19 @@ The [round 7 ledger](oracle-reviews/utils-unit-retirement-round-7.md) retains
 the retired examples. Caller-modified built-ins and Collection publication
 are outside this direct-return owner.
 
+Set performance work evaluated in PR #2301 is excluded by the maintainer's
+2026-10-30 decision: "we've never had this perf problem ... let's remove it."
+The production matcher and the existing `utils.1`–`utils.40` campaigns and
+budgets remain unchanged. The synthetic duplicate-valued object-Set family
+exposes factorial assignment work, and an 8,192-member flat assignment chain
+exposes recursive stack depth. No application incident was established.
+The [versioned replay inputs](oracle-reviews/effect-startup-delta.md#deferred-set-replay-inputs)
+retain the descriptors, observations and limits. The primary owner remains
+`packages/db/tests/utils-oracle.property.test.ts`; resume optimization when the
+maintainer requests it or an application workload requires it. The new
+`utils.41`/`utils.42` work guards and dedicated receivers leave with that work.
+This records a scope decision, not closure of those performance limitations.
+
 The [Duration query equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/duration-query-equality-oracle.test.ts)
 uses ten public fields to predict direct BasicIndex/BTreeIndex exact lookups and
 public `eq` snapshots before and after indexing. The `in` evaluator owner also
@@ -1924,6 +2008,81 @@ ordered request, a read through the eligible index, and no read through the
 ineligible index. The first-matching-index mutant fails at that reader check.
 Provider paging from an incomplete on-demand source and later updates remain
 outside this witness.
+
+The same owner now exhausts output-indexing configurations through
+`createLiveQueryCollection` and `createCollection(liveQueryCollectionOptions)`:
+omitted/off/eager modes, omitted/BasicIndex/BTreeIndex constructors, and eager
+admission without a constructor. It compares output config, constructor use,
+optimized snapshots, and independent sorted windows over two projected fields
+with both null placements, repeated consumers, and one source update. Each
+configuration requires distinct `rejected` or `output-read` reach; source
+settings remain unchanged. Admission/default policy comes from the shared
+indexing model. The ordered-index count derives from distinct requested
+specifications; calibration rejects extra indexes and inverted optimized-read
+availability.
+The [hook indexing handoff owner](https://github.com/TanStack/db/blob/main/packages/db/tests/conformance/indexing-config-oracle.ts)
+receives the nine configurations through the real React, Preact, Vue, Solid,
+Svelte, and Angular drivers after their settled flush cuts. It judges output
+config and downstream automatic/manual index creation. It does not judge
+rendering before flush or reactive adapters' option updates. Its
+[React Suspense receiver](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-indexing-config-oracle.test.tsx)
+exhausts two initial bindings across config pairs, derived/same/different keys,
+unscoped/client caches, and distinct same-name constructor references. It checks
+both admissions, each admitted output's settings, retained first settings, and
+compatible sharing and forbidden sharing between two admitted outputs.
+Its 582 histories retain the original 534 cases and add 24 omitted/explicit-
+undefined cases and 24 pending-source cases. They check first-option retention
+on rerender (528 admitted-first histories) and application after an actual
+`queryKey` change (480 histories with two valid declarations). Invalid admissions have no output
+identity to compare. Constructor labels use grammar roles, and equal function
+names cannot collapse registration keys. This protects local cache qualification
+without changing portable query identity or mounted first-option retention. The
+[evidence record](oracle-reviews/2026-10-30-live-query-indexing.md) gives each
+receiving path's pre-repair RED, repaired GREEN, calibration, and finite bounds.
+
+The [PR #2314 high-effort review record](oracle-reviews/2026-10-30-pr-2314-high-effort-review.md)
+adds the maintainer's independent-caller local-options law to the existing
+`live-query-cache-options-oracle.ts` owner. Its
+`packages/react-db/tests/suspense-local-options-oracle.test.tsx` receiver exhausts
+492 real Suspense histories: every non-indexing public Collection config field,
+independent absent/equal/different declarations, derived/same/different keys,
+and both client scopes. The public type inventory checks that new config
+fields cannot silently miss the driver. The shared indexing owner separately
+covers both indexing fields. Each history requires first output, second output
+and retained-first reach. Warm `cache-options-oracle.test.tsx` now receives
+144 histories through Suspense in addition to ordinary mounted and server
+rendering; rejection must preserve the original caller's rows. These are
+initial-binding and cached-result claims, not arbitrary SSR/hydration timing
+or semantic equality of separately allocated option objects. The authored query
+owns list/single result shape; the local-sharing check does not promise that a
+config annotation rewrites the query's shape.
+
+The [Suspense oracle follow-up](oracle-reviews/2026-11-02-pr-2314-suspense-oracles.md)
+adds omitted versus explicit undefined in both caller orders: 120 local-option
+histories and the 24 indexing histories above, across all three identity
+relations and both scopes. A key that retains undefined properties passes the
+old 882 receiver histories but fails 88 of the extended 1,074 histories at
+output-identity comparisons. Each receiver also adds 24 pending histories.
+The local owner uses equal/different callback and scalar declarations; the
+indexing owner crosses mode and constructor equality. Both hold source writes,
+require two distinct visible Suspense fallbacks before release, then use their
+existing output comparisons after delivery. Per-scope aggregate reach requires
+both-suspended, shared and separate outputs, plus each representative option
+dimension. A mutant that reuses and memoizes an unqualified pending entry passes
+the old 882 histories and fails 36 extended histories after the pending premise.
+These controlled eager-source schedules do not establish abandonment, rejection
+while pending, cleanup races, hydration, or arbitrary Suspense scheduling.
+
+The same decision requires eager/no-constructor admission to reject on every
+`DbClient.preloadLiveQuery` call, even when no new Collection is needed.
+`packages/db/tests/live-query-preload-indexing-oracle.test.ts` receives the
+shared indexing model across 459 histories: cold; eight prior valid configs
+with held or settled delivery; nine second declarations; and three key
+relations. Every history reaches admission; all 432 warm histories also check
+original-promise reuse. Original production accepts 32 invalid warm calls.
+This supersedes the construction-only limit in the earlier indexing record.
+Hydrated records, observer preload, SSR scheduling and malformed options
+outside the eager-constructor rule are not claimed by this receiver.
 
 The PR #2196 follow-up adds a direct `optimizedOnly` snapshot to the
 first-ineligible/second-eligible history. An eager-auto history starts with
@@ -2336,6 +2495,37 @@ The following related oracles own distinct production paths or observation cuts:
   Limit: the generated grammars reach a failed retirement followed by another
   retired replay only rarely (the replay grammar releases one demand, on the
   last attempt), so the named histories own that sequence.
+  The cleanup/restart equality crossing (`subscription-lifecycle.restart-publication`)
+  retains equal rows actually restored into a direct subscriber's private
+  replacement while deleting omitted retained rows. It runs the shared model,
+  driver, and exact per-command batch/source/subscriber comparisons over two
+  delivery paths (acquisition writes and independent source writes), six demand
+  lifetimes (pending, settled, two live demands, aborted, released, absent),
+  three prior-row relationships (absent, equal, changed), and resolve/reject
+  commands for live acquisitions. Acquisition histories without a live attempt
+  distinguish absent from retained rows and measure the settlement as a no-op;
+  they do not claim restored equality. The single scenario grammar has 24
+  acquisition and 27 source cases. Each case reaches its measured owner lifetime,
+  prior/delivered row relation, current outcome, and restarted acquisition count
+  12 times in each fixed/random campaign. Explicit generated row values and
+  zero to three prior retired acquisitions remove the fixture-attempt-ID premise.
+  Additional direct, filtered, ordered-snapshot and snapshot-before-source-events
+  drivers each measure absent/equal/changed rows 12 times per campaign and reuse
+  the owner's Map diff at held and settled publication cuts. The predicate
+  excludes a real nonmatching row; ordered selection covers the complete bounded
+  two-row replacement, not arbitrary windows. The exact issue #2310 history
+  remains a shared replay. Original suppression fails every restart campaign;
+  the earlier acquisition-only and retention-of-omitted-rows mutants remain
+  recorded. [Evidence and limits](oracle-reviews/2026-10-30-pr-2313-review.md).
+  This crossing concerns direct subscriptions under the controlled sync boundary.
+  Eager sources follow a separate accepted first-public-batch reconciliation law
+  in ARCHITECTURE's cleanup/restart section. The supplemental
+  `collection-restart-publication-boundaries.test.ts` observes its before-ready
+  deletion and later reinsertion, and checks actual compiled-query cleanup and
+  restart in eager/on-demand modes. Public cleanup refuses active dependents;
+  internal cleanup crashes them; restarting the query builds a fresh result.
+  This evidence does not claim source-only restart revives a query, nor does it
+  establish delegated includes, arbitrary ordered windows, or external providers.
   Bounded three-row histories now compare a subscription's selected keys with
   callback key/type batches across full, explicit, filtered, and empty snapshots,
   two later ordered selections, both initial-state modes, and callback reentry.
@@ -3636,6 +3826,21 @@ target execution, not reproduction of a particular bug. Local IVM and offline
 properties have separate environment variables; inspect their test headers.
 Do not assume the core multiplier reaches them.
 
+The adapter-window properties have named replay routes in
+`packages/db/tests/oracle-replay-manifest.ts`. Each shared history property
+includes its production driver: `framework.<driver>.window-history`,
+`framework.<driver>.pending-window-history`, or
+`framework.<driver>.publication-window-history`. The drivers are `react`,
+`react-dependency-list`, `preact`, `vue`, `solid`, `angular`, and `svelte`.
+Each route selects its own conformance file and names the shared model module
+as its source. React and Preact render witnesses, all twelve React SSR
+runtime/path cells, and the IVM numeric-window lane retain their own routes.
+Selectors choose only the fresh or random campaign. The earlier three shared
+`framework.*` names are retired because they lost the failing driver's identity.
+The [replay review](oracle-reviews/2026-10-30-adapter-page-window-replay.md)
+records the 21 driver/history witnesses and correction of the earlier canonical
+React routing claim in the preparation record.
+
 The Node expression-index oracle runs matching fixed-seed and seedless-random
 campaigns by default. A path replay of its property selects only the
 requested seed and shrink path:
@@ -3786,6 +3991,66 @@ real-path spelling: a name given through a symlinked path is not covered. It
 does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
+
+`packages/db/tests/declared-reach-oracle.property.test.ts`
+(`oracle.declared-reach`; [review record](oracle-reviews/pr-2290-declared-reach.md))
+owns what `createOracleReach` (ORC-015) counts, when
+it checks reach, and what fixed examples prove. It also owns the run
+parameters that `oracleRandomParameters` and `oraclePropertyOptions` return,
+and the campaigns that `runOracleCampaign` in
+`packages/db/tests/oracle-campaign.ts` runs.
+
+- A history counts once per declared state it enters. A `reach()` call for an
+  undeclared state, or before the first history, throws and counts nothing.
+  Options that cannot describe a reach (a minimum below one, a fractional or
+  negative number of fixed histories, a state declared twice) throw.
+- The check runs in an ordinary run and in a run with only
+  `TANSTACK_DB_ORACLE_SEED`, which reseeds the whole campaign at its full
+  budget. A path replay, which runs one recorded history, skips it in every
+  reach of its process: a reach need not carry its property's name, so it
+  cannot tell whose replay runs. An explicit `replaying` option overrides the
+  environment.
+- A property can run fixed examples first in every run, through
+  `oraclePropertyOptions(…, { examples })`, on top of the base run budget. It
+  declares their number as `fixedHistories` and begins each example's history
+  with `beginHistory({ fixed: true })`, which it can do because fast-check
+  passes an example's input by reference. The check then also fails for each
+  declared state that no fixed history entered. Fixedness belongs to the
+  history, so another test may share the reach. Shrinking can run an example
+  again, so an extra fixed history counts as fixed. When fewer fixed histories
+  ran than were declared, the check reports only that.
+- A replay keeps its seed, and a path replay of the property keeps its path
+  and runs one history. `runOracleCampaign` runs a fixed-seed and a random
+  campaign without a prefix seed, one replay campaign with one, passes each
+  its parameters, and reports each passing campaign on one `ORACLE_REACH`
+  line. An invalid prefix environment throws.
+
+The `source-health.on-demand` and `source-health.lazy-demand` properties run
+each reach prefix, and each driver option that a declared state needs, as
+examples, so their reach does not depend on the seed (#2287).
+`source-health.history` gets the same guarantee from
+`source-health.required-history`, which runs every reach prefix in each
+campaign and shares its reach without fixed histories. The oracle generates
+ledgers over two to four states, up to six histories with fixed marks,
+minimums up to three, up to four declared fixed histories, invalid options,
+undeclared and early reaches, an optional `replaying` option, a fixed campaign
+seed, and invalid campaign environments, under four run kinds: ordinary,
+seed-only, and path replays of the property and of another property.
+
+Limits. A declared state of another property that only random histories
+reach can still miss by chance at the normal budget. Those properties have not
+been measured, about twenty set fast-check's `examples` inside their base runs
+instead of through the option, and a `runOracleCampaign` reach cannot declare
+fixed histories. Destination: #2289. Needed witness: per property, the declared
+states that no fixed example enters, and how often a normal-budget run misses
+each one. A path replay also skips reach in a property that the replay does not
+name and that still runs its seeded budget. When a property fails after its
+examples, the check still reports the states that the stopped run missed. The
+oracle does not judge reporter keys, which only a replay witness channel adds,
+the rejection of an unregistered property, or the compile-time rule that a call
+without examples returns parameters without an `examples` key; type-aware
+lint in every package that infers from these parameters is that rule's only
+witness.
 
 `packages/db/tests/oracle-replay.test.ts` checks every replay manifest owner:
 from its cwd, the command's files exist, its target is the owner, and a Vitest
@@ -5835,6 +6100,27 @@ path from a later run. Until then, this entry cannot tell an operator
 regression from an older defect. A later failure of that campaign must record
 its seed here before anyone calls it pre-existing.
 
+### Ordered joined dependency composition, October 30
+
+October 30 receiving extension: the same ordered-work owner now checks joined
+dependency composition across direct, wrapped QueryRef and two-filter nested
+ordered plans. Its 128 finite histories cross actual Collection and Effect
+receivers, two directions, matched/anti-joined membership, widths one/two,
+joined answer order and which of two joined sources vetoes a new head row.
+Each history checks settled initial rows, then every recorded publication and
+public read at held, partial and settled cuts. All 256 declared held/settled
+states reach their minimum once. Unchanged `8464ec977` fails 24 publication
+comparisons (12 per receiver); the repair passes all 128 histories. Overwrite,
+last-only and first-only dependency mutants fail 24, eight and eight intended
+comparisons respectively. The original 424 owner tests and their budgets stay.
+This is a controlled adapter witness through real core receivers: one inserted
+head row, two joined sources, one QueryRef level and windows of one/two rows.
+Ordinary progressive Effect startup callbacks remain outside this new atomicity
+claim. No provider/framework, arbitrary nesting, rejection, cleanup or public
+window-promise integration claim follows. See the versioned
+[joined dependency review](oracle-reviews/callback-metadata.md#ordered-joined-dependency-review-2026-10-30)
+for the pre-edit gate, experiments, source binding and loss audit.
+
 ### Ordered signalling-refetch work scope, October 27
 
 Owner: `packages/db/tests/query/ordered-work-oracle.property.test.ts`. The
@@ -5863,9 +6149,10 @@ Held mutations, independent confirmations/outcomes, both settlement orders,
 remote updates, peer exit/reentry and next-use reach 5,512 lane/channel/cut cells
 exactly once. No implicit Effect-root metadata or output Collection ID is claimed.
 
-Open P09: all 64 LEFT-join histories emit a startup update for a never-entered
-unmatched occurrence after its load finished. Those initial comparisons remain
-RED on unchanged `858b174a6`; histories continue and all later comparisons pass.
+Original P09 evidence: all 64 LEFT-join histories emitted a startup update for
+a never-entered unmatched occurrence after its load finished. Those initial
+comparisons were RED on unchanged `858b174a6`; histories continued and all later
+comparisons passed.
 The other 136 native histories and 16 controls pass. Independent hostile
 overlays reject dispatch, previous-value, duplication, colliding-key and extra
 undefined defects; lawful key renaming, fresh reentry and empty partitions retain
@@ -5877,8 +6164,62 @@ in the RC chunk record for exact fingerprints, evidence and review.
 Limits: eager controlled core sources, scalar rows, one mutation per source,
 and these named paths. No real provider/framework, arbitrary scheduling,
 ordered repair, same-source overlap, callback-input sanitization or exact
-internal graph-run callback-count guarantee follows. P09 requires production
-repair after the full oracle campaign; this entry makes no closure claim.
+internal graph-run callback-count guarantee follows.
+
+Historical initial P09 repair evidence for PR #2301:
+The exact owner and `test:oracles` entry were restored before production edits.
+On baseline `9b03e639f`, the fresh RED reproduced 64 startup failures with every
+reach cell at count 1. Repaired production passes all 216 owner tests and all
+2,756 checkpoint comparisons. Restoring the original classifier reproduces the
+same 64 assertion failures; suppressing all unordered updates fails all 200
+native histories. Each of the 5,512 reach cells remains at count 1 in both
+mutants and GREEN. All 1,690 neighboring tests pass before and after the edit.
+See [the Effect startup follow-up](oracle-reviews/effect-startup-delta.md) for
+commands, fingerprints and limits. Arbitrary scheduling, join multiplicity,
+ordered repair, same-source overlap and callback-input sanitization remain
+outside this bounded closure. Other deferred findings remain open.
+
+Subsequent checker calibration keeps both callback channels coherent when
+injecting a bad update key. The `key-collision` and `key-change` controls now
+reject deletion of the interval-continuity judgment itself: the full checker
+mutant passes 214 controls/histories and fails those two controls. Repaired
+production passed all 216 owner tests and the combined 619 targeted tests at
+that historical subject, including subsequently removed Set work.
+Native histories and all 5,512 reach cells are unchanged. See the follow-up's
+[calibration evidence](oracle-reviews/effect-startup-delta.md#key-interval-checker-calibration)
+for the new owner fingerprint and the limits of the continuity claim.
+
+The subsequent high-review repair extends the same owner with 24 finite
+histories crossing scalar/callable/private-field payloads, one source/LEFT join,
+initially absent/present membership, and separate/coalesced source transactions.
+The independent source snapshots still determine the full delta. Both callback
+channels preserve event multiplicity, previous readable payloads, and active key
+intervals across initial, sequence, absent, reentry and next-use cuts. All 120
+new reach cells have count 1. On unchanged `d97c1aaf4`, 14 histories fail;
+retaining preceding result membership repairs them without relying on payload
+equality. The original classifier and a net-count-only classifier fail these
+comparisons. This finite extension does not claim exact rich-payload instance
+identity, arbitrary nondeterministic projections, changing join keys, provider
+schedules or framework behavior. The earlier scalar and ordered-repair limits
+remain. See the [Effect membership evidence](oracle-reviews/effect-startup-delta.md#membership-and-coalesced-source-writes).
+
+Current key-only repair: the metadata owner has **300 tests**, including 60
+callback-profile histories from `query/effect-callback-oracle.ts`. The actual
+React driver `packages/react-db/tests/effect-callback-oracle.test.tsx` runs the
+same 60 histories, model and comparison. Six payload representations cross
+five callback profiles and `skipInitial`. Source-version updates, handler
+replacement, exit, reentry, next use and disposal reach 480 cells on each path,
+each at count 1. The original 5,512 cells and 120 membership cells remain.
+On unchanged `2b3dd8c2d`, 56 core and 40 React histories fail. The repair passes
+all **708 targeted tests**. The stale-value mutant survives the original 314
+tests and fails the extended histories at exit; gross-count membership fails
+79 comparisons. Unordered Effects now retain keys only and never compare
+projected values. Ordered repairs retain their preceding coherent values.
+The maintainer explicitly chose preservation of unordered update notifications,
+including equal projections, on 2026-10-30. The new histories cover eager core
+sources and actual React hook commits; other providers/frameworks, arbitrary
+schedules and ordered repair semantics retain their existing limits. See the
+[key-only review evidence](oracle-reviews/effect-startup-delta.md#review-of-2b3dd8c2d-key-only-unordered-results).
 
 ### RC bound schema mutation receivers (2026-10-28)
 
@@ -6094,3 +6435,425 @@ does not establish offline delivery, automatic write retries, native SQLite I/O,
 prompt cancellation of held storage I/O, GC ownership, or arbitrary delayed
 callback/restart interleavings. The persisted cleanup observation follows storage
 release and cleanup completion; it promises no subsequent backend dispatch.
+
+### Replay successful-retirement ownership, October 30
+
+The load-subset replay refinement owner scopes successful replacement to the
+same subscription as the failure. Its 96-history failure/success matrix reaches
+four sibling-success coverage histories and calibrates that another subscription's
+failure survives the account action. The original account fails that comparison;
+all 44 normal owner tests pass after repair, with existing budgets intact.
+No production change or new provider/framework claim follows. See the
+[versioned retirement review](oracle-reviews/callback-metadata.md#replay-retirement-scope-review-2026-10-30).
+
+
+### Framework row snapshot isolation
+
+The **Frameworks** owner judges preservation of borrowed Collection values at
+actual framework boundaries. Authority is immutable updates,
+`PendingMutation.original`, `ChangeMessage.previousValue`, and the shared
+`packages/db/tests/conformance/contract.ts` result law. The shared executable
+owner is `packages/db/tests/conformance/row-snapshot-oracle.ts`. Core supplies
+admitted source facts before materialization. This relational comparison judges
+adapter preservation, not Core draft normalization or prototype policy.
+
+Nine common shapes cross one/two keys, callback/config/supplied Collection
+inputs, and sync/optimistic writes: 108 histories per common driver. Solid adds
+native stores for 120 histories, plus 60 real local-only histories. React has two
+registrations of its derived-identity API, labelled `react` and
+`react (dependency list)`; neither is a DbClient receiving driver. Two-key
+histories share initial containers and alternate updates. Actual mutable sharing
+is asserted before crediting cross-row alias reach: eight common histories and
+nine Solid histories per group. The later-object shape starts at null and gets
+no mutable-alias credit. Three updates per key distinguish initial and later
+admissions, alias split/merge, hidden string data, inherited-name shadows, and
+own-undefined/omission. The grammar contains 828 history slots across 45 group tests, including the
+duplicate React API registration.
+
+Every receiving group asserts its own reach. The shared comparison checks
+complete current framework and source values, retained initial `get()` and
+admitted `change.value` references, `previousValue`, and actual transaction
+`original` references at every existing cut. Optimistic handlers also have a
+held cut. Three isolated source-corruption controls reject damage limited to
+current, initial, or newly admitted values. A real Solid fault injection is
+rejected at the current-source comparison, even when its detached output is
+correct. The local-only driver returns actual mutation receipts.
+Alternative legal source-shape policy is accepted. Original-only corruption and
+cross-row caching mutants distinguish the extended owner from its predecessor.
+
+Solid's separate receiving owner,
+`packages/solid-db/tests/row-materialization-oracle.test.tsx`, judges nested
+identity, binding lifetime, current array membership, live nested getters, and
+bounded shared-graph work. Its original 85 finite histories include real `For` and effect
+consumers, native-store-only writes, reorder, growth/shrink/empty arrays, getter
+admission/replacement/omission/readmission, and crossed old/new graph sharing.
+The maintainer chose live getters and efficient shared acyclic graphs on
+2026-10-30, with cyclic support decided separately. Work counts source and owned
+container enumerations against an unchanged 32-per-distinct-container budget.
+This is a bounded regression check, not a public SLO or a complexity proof.
+
+The native-store revision skips unchanged source rows and memoizes immutable,
+detached nested stores by source identity within each row. Solid setters update
+the ordinary stable root row and replace changed nested containers. Consumers
+must read the current nested path reactively: a captured old nested proxy does
+not follow replacement. Native stores supply getter tracking and notifications.
+Explicit root own-key admission handles inherited-name and own-undefined cases.
+The complete graph comparison checks mixed paths without imposing alias identity.
+Twelve additional controlled-helper histories vary descriptor visibility for
+undefined, null, scalar, object, array, and native-store payloads. They observe
+captured-root `Object.keys` consumers across unchanged, hidden, visible, and
+restored-visibility stages while retaining payload and root identity. The raw/proxy
+identity guard fails six container histories before repair. These histories
+test only the materializer's internal invariant. Core public row snapshots
+normalize root descriptors, so no public descriptor-admission claim follows.
+Valid derived array-wrapper prototypes retain source methods, and local-only
+original reach requires a nonempty actual receipt. See the
+[native revision review](oracle-reviews/2026-10-30-solid-native-store-review.md)
+and the historical [materialization](oracle-reviews/2026-10-30-solid-row-materialization-review.md)
+and [snapshot](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md) records.
+
+**Core source-field and destination preservation:** the maintainer authorized
+fixing the sibling Core boundary in this PR. The existing context-transport
+owner now imports its public-field model/grammar from
+`packages/db/tests/conformance/public-field-oracle.ts`. Sixty histories cross
+six source keys, root/nested location, four selection forms, five stages, and
+ordinary/inherited nested destinations. Root Collection and three correlated
+forms supply 1,200 path/stage observations; the original 819 observations remain.
+The source admission check precedes result comparisons. Five restored wrong
+merge/destination designs fail intended own-field assertions. Real framework
+callback/config receivers reuse the same models and comparison for twelve
+new destination cells per input. Fourteen groups across seven registrations
+supply 168 histories / 840 comparisons. Core creates own enumerable data fields
+and own destination containers; unsafe authored alias paths retain rejection.
+The final [review record](oracle-reviews/2026-10-30-solid-native-store-review.md)
+records RED, GREEN, mutant classifications, reviewer outcomes, and exact code.
+
+The second independent review extends the same public-field owner with thirty
+overlap cells. Twenty-four legal expression cells reach every framework input;
+six functional controls supply a second Core formulation. A prior outer spread
+borrows the destination before a nested spread, literal field, or dotted alias
+writes it. Ordinary, inherited-name, and deeper destinations cross writable
+configurable/nonconfigurable source data. Authored nested objects replace their
+field; dotted aliases preserve siblings without writing through source objects.
+The four Core paths supply 120 path histories and 360 result cuts. Fourteen real
+framework groups supply another 336 histories and 1,008 result cuts. All compare
+current and retained source rows and require the actual source descriptor at
+all three stages. Existing 819 and 1,200 observations and the earlier receiving
+histories remain. Unkeyed functional projections are not legal derived-identity
+framework inputs, so they receive no framework handoff credit. Legal fresh-object
+expression controls provide those neighboring receiving comparisons instead.
+See the [second review record](oracle-reviews/2026-10-30-solid-oracle-review-round-two.md)
+for complete intake, RED gates, GREEN, hostile variants, and bounded closure.
+
+The same review adds six ordinary/subclass-array overlap cells. Dotted writes
+select lengths zero, one, and two while current and retained source arrays keep
+length three. Core now has 36 overlap cells / 144 path histories / 432 selected
+cuts. The fourteen real receiving groups each run thirty cells: 420 histories
+and 1,260 selected cuts. Each history independently requires all twelve declared
+checkpoints. Post-admission mount errors are recorded and later stages retry
+mounting; they cannot escape the shared comparison or supply false reach.
+
+Solid adds 93 actual receiving histories to its original 85: 24 native-parent
+identity transitions, 33 tracked callable data/getter histories, eighteen
+reserved-field histories, and eighteen inherited array-method histories. All
+three public inputs supply their own source admission and tracked consumers.
+The reorder comparison now checks complete current/rendered values and every
+element identity. A canonical backing-node memo preserves unchanged children
+across ordinary/native parent changes; a read facade retains live accessors and
+prototype methods while native nodes/setters supply updates. Original-code,
+missing-node, accessor/method, and reordered-tail mutants distinguish these
+repairs. No output alias topology or public elapsed-time budget is imposed.
+
+The callback integration adds eight signal-driven lifetime histories to the same Solid materialization owner: callback/config inputs cross one/two array levels and ordinary/native payloads. The original 48 input histories remain. The 32 identity/lifetime histories each enforce source-only-write reach; the eight added histories also enforce query-input-change reach and compare selected values plus rebinding. Application input preparation stays tracked, while initial compilation and Collection startup run untracked. The extended pre-production campaign rejects eight native lifetime cases on integration head `fa5df11a`; all 201 owner tests and 336 Solid runtime tests then pass locally. Restoring the old hook fails the source-only subscription comparison. Untracking query construction too fails all eight new signal-result comparisons. Existing comparisons and budgets remain. The [integration amendment](oracle-reviews/callback-metadata.md#solid-binding-lifetime-at-compilation-2026-11-02) records commands, runner differences, exact evidence, and limits. These finite settled-host cuts establish neither native-source-only value liveness nor other frameworks' dependency tracking.
+
+The local-only draft driver does not claim top-level symbol-write admission.
+Its shared preservation comparison still checks every field actually admitted,
+including nested symbols and all actual mutation originals. The proxy-revert
+owner excludes top-level symbol writes explicitly; **Drafts and native values**
+and [#1820](https://github.com/TanStack/db/issues/1820) own that support decision.
+The minimal trace assigns a fresh enumerable root symbol and nested symbol
+through `Collection.update`: the root is absent from the modified/source row,
+the nested symbol survives. Current and clean-main traces agree. Initial data
+admits both. No adapter or Core-selection claim extends through this missing
+source premise.
+
+Limits: the stated finite histories and real hosts' settled/held-handler cuts.
+Core normalization, arbitrary cycles, arbitrary getter/setter bodies, hidden
+symbols, all descriptor-visibility notification combinations, callback atomicity,
+other settlement schedules, and real browser rendering are not established.
+Core may evaluate root getters before the adapter receives them. The live
+getter claim covers nested accessors actually admitted to Solid. Cycle policy
+remains a separate maintainer decision, as explicitly requested. Existing
+framework, includes, and optimistic-history owners retain other responsibilities.
+
+The **Drafts and native values** owner retains an unresolved Core boundary:
+assigning a native Solid store through `Collection.update` can promote hidden
+host bookkeeping symbols during Core detachment. Support policy for that
+host-proxy assignment needs a maintainer decision before classification as a
+product-law violation. The needed receiving witness is actual `createStore`
+into `Collection.update`, distinguishing user keys from wrapper metadata in
+stored and retained values. Local-only histories use ordinary replacements
+after initial admission. Controlled sync histories admit native stores on
+every update and cover direct adapter input.
+
+
+
+### Distinct collision review extension (2026-10-30)
+
+The existing distinct incrementalization owner now also generates four unequal
+native-collision members and an anchor, with independently varying unselected
+payloads. Its wider receiving driver is
+`packages/db-ivm/tests/distinct-representative-oracle.property.test.ts`.
+The full-row accumulated relation must have one positive unit representative
+per supported selected identity and no negative residue. Representative choice
+is unspecified. Atomic and unit-split deliveries each run fixed/random
+100-history campaigns. Declared reaches are unequal unselected payloads, three
+colliding members, a later collision after removal, and empty output after
+unequal payloads. A last-input retraction mutant and a reused negative-key
+mutant fail the wider check while passing the prior two-member owner.
+
+`includes-oracle.property.test.ts` extends its existing full-tree recompute
+owner with colliding numeric-group route strings and the shared distinct
+support history grammar. Inline arrays and Collection facades each run
+fixed/random 100-history campaigns and compare public rows after each applied
+source transaction. The original operator fails Collection facade membership
+at checkpoint 2. Inline arrays pass: `createActiveBuckets` is used only for
+Collection-valued includes. This is a receiving witness for route coexistence,
+shared support, partial/last removal and reactivation, not a claim about every
+facade lifecycle observation. Four-member buckets are exercised at D2; the
+public includes witness has two colliding routes and one anchor. Neither lane
+claims mutable values, arbitrary payload kinds, framework scheduling or
+intermediate source-transaction publication cuts.
+
+Implicit distinct keys across separate builds remain unspecified (maintainer
+decision in the 2026-10-30 review); applications needing stable keys supply
+`getKey`. The existing top-level ordered/unordered receiving campaigns remain
+at their original budgets. See the append-only
+[review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
+
+A separate reachable Index defect remains open under the **D2 Index storage**
+owner (`index-refinement-oracle.property.test.ts`), whose current grammar omits
+structural payloads. With module hash initialization `Math.random = () => 0.5`,
+let `a = { id: 'item-51277', value: 51277 }` and
+`b = { id: 'item-90754', value: 90754 }`; both hash to `2650141082`.
+`index.addValue('k', [a, 1]); index.addValue('k', [b, 1])` returns only
+`[[b, 2]]`, whereas structural multiset identity requires `[[a, 1], [b, 1]]`.
+The direct `reduce(values => values)` path has the same wrong result.
+Direct `distinct(([, row]) => row)` on these rows preserves both, and does not
+use Index, so moving the distinct repair into Index cannot replace it.
+This is a sibling storage-boundary defect, outside this PR's distinct operator
+repair, not a regression excused by its age. The Index owner needs a structural
+collision dimension, per-addition multiplicity checks, storage repair, and
+reduce/join receiving witnesses before claiming collision-safe Index storage.
+The existing groupBy structural-identity bypass also means that repairing
+Index alone is not evidence for every groupBy path; #2192 remains open.
+
+
+### Distinct provenance and fresh-identity challenge (2026-10-30)
+
+The wider distinct owner now realizes a fresh equal selection on every selector
+call, and owns separate scalar copies of source rows. Each atomic/split,
+fixed/random 100-history campaign declares and reaches **fresh equal
+selections** in 100 histories, alongside its four earlier reaches. This rejects
+a reference-only matcher that the earlier shared-reference driver accepted.
+The shared full-row checker also requires every retained representative's
+(member, variant) payload to have appeared in a positive input. It rejects
+fabricated unselected payloads without choosing first/last or requiring the
+representative's source slot to remain live. A permanent wrong-observation
+calibration protects that assertion. This is historical input provenance; it
+does not establish representative freshness across a zero-support boundary.
+
+Both motivating mutants passed all five earlier wider-owner tests and now fail
+at the contribution comparison. The four-member immutable selection domain,
+public receiving paths and transaction checkpoints retain their previous
+limits. Rich value-identity receiving histories through distinct (functions,
+opaque references, binary, RegExp, Map/Set and special primitives) remain a
+useful extension: the hash identity oracle owns those semantic distinctions,
+but its helper-level evidence does not by itself exercise distinct storage.
+The separate Index structural-collision obligation above remains open.
+See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
+
+
+### Adapter-owned page windows
+
+The framework owner includes [window-history-oracle.ts](../../packages/db/tests/conformance/window-history-oracle.ts), registered through the shared conformance suite in React, Preact, Vue, Solid, Angular and Svelte. Maintainer decision 2026-10-30 for #2291: changing only `.limit()`/`.offset()` moves the existing outer window; it adds no hook option. The independent sort/filter/slice model checks ordered selected rows and keyed-map values after each framework flush, Collection retention for page moves, replacement for source/filter/order/projection/nested-window changes, and retained upstream ownership. Direct and nested paths have separate reach, as do changing/stable/opaque keys where the driver supports keys. Keyed source swaps include distinct source objects under one Collection ID. Generated source updates check liveness after reuse. The bare-callback lanes also vary a Collection option together with a page change and check its applied value. The pending lane observes a move during initial loading, oldest settlement while the latest remains pending, initial readiness, overlapping held acquisitions, final latest rows, and unmount before settlement. The publication-callback lane changes offset, limit or both from a public change callback, then checks the retained Collection after the host settles. It controls demand settlement over already installed source rows; the core pagination owner continues to own source delivery, failures and ordered repair.
+
+The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. DbClient/hydration and Suspense shared-result caches, supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts and paths; this fix does not retarget their shared Collections. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
+
+Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes are recorded in [the page-window review](oracle-reviews/2026-10-30-adapter-page-windows.md).
+
+The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.
+
+The existing [top-K support-window owner](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts) also has a numeric-window lane for safe-integer maximum offsets and widths, exact omitted-bound inheritance on partial moves, and required demand messages when installed ranges are empty. It permits additional messages. It observes one-group settled operator rows, size and demand signals; real framework source growth belongs to the shared receiving owner above. [Numeric evidence](oracle-reviews/2026-10-30-topk-numeric-windows.md) records RED, GREEN, reach, replay and mutants.
+
+### Projection and negative-window gaps from removal review (2026-11-02)
+
+The shared framework owner now includes
+[result-shape-oracle.ts](../../packages/db/tests/conformance/result-shape-oracle.ts).
+One independent authored-source model and generated grammar run through React
+(both registrations), Preact, Vue, Solid, Svelte and Angular. List/findOne
+transitions, repeated modes, return transitions, empty/single/multiple source
+rows and both data-first/Collection-first reads are checked at each driver's
+native parameter cut, then after settlement. Finite singleton queries retain
+identical offset/limit across projection changes, including positive offsets.
+Native cuts require raw shape; settled cuts also compare selected values and
+keyed state. This does not promise synchronous row freshness or identical host
+scheduling. Disabled inputs, errors, supplied Collections, DbClient and broad
+host/AOT behavior remain outside this lane.
+
+**Repaired receiving defect:** Angular previously returned the old query's raw
+projection at its synchronous Signal read before effects. Both directions
+failed even though the new input reached the callback and later settlement
+passed. It now reprojects captured rows through the current query while keeping
+the normal snapshot path and pooled-query laziness. All six frameworks complete
+their fixed/random campaigns; restoring the defect fails the native comparison.
+Generated guarded replay seed 2316,
+property `framework.angular.result-shape`, path `28` reproduces the defect;
+finite paths `1` and `25` preserve nonempty offset-0/offset-1 evidence.
+
+The existing top-K support-window owner adds a negative-offset grammar through
+direct array top-K, one-group top-K and public orderBy. Under the maintainer's
+2026-11-02 absolute-rank decision, nonnegative widths select the installed ranks
+in `[offset, offset + limit)`, including intervals crossing zero. Generated
+histories reach wholly negative/zero-width/crossing-zero windows, negative
+source edits, partial moves, nonnegative returns and offsets below negative
+cardinality. Signed rows, order, values, multiplicity and size remain observed.
+The direct and orderBy size getters also count with an always-true predicate,
+which must equal the selected row count. Negative widths, fractional bounds,
+multiple groups, varying prefix predicates and downstream acquisition remain
+outside this lane; existing support/numeric budgets and their prior evidence
+remain unchanged.
+
+Review5740133634 raises an adjacent negative-width contract question. The
+support-window owner above is the location for a future maintainer decision and
+its witness. With `TopKArray(5, -2)`, install ordered values0/4/6/8/10, then insert2
+at rank1. Both maina3c4d0676 and the integrated branch emit moveIn10/moveOut6 while
+reporting size0. The executable same-source probe is recorded in the
+[second-main integration review](oracle-reviews/2026-11-02-removal-oracle-gaps.md#second-main-integration--a3c4d0676).
+The accepted rank-selection law in this change covers nonnegative widths.
+No negative-width empty-result law is claimed. Defining that behavior needs a
+maintainer decision before extending generated moves and source-edit histories.
+The adapter reuse path requires nonnegative target bounds and cannot take this
+negative-width input as an eligible page-window move.
+
+**Repaired operator defects:** negative-window rows, size, source edits and
+return moves now agree with absolute ranks on all three paths. Each path's
+fixed/random campaign reaches all eight declared states in 101 histories
+(one example and 100 generated). Restoring relative slicing, the old size rule
+or the old leading-count start separately fails the corresponding observation.
+Each property `ivm.topk-negative-window-array`,
+`ivm.topk-negative-window-grouped` and `ivm.topk-negative-window-orderBy` has a
+guarded generated RED on the original code at seed 2316, path `1`, and a GREEN
+on the repair. This closes the recorded negative-window defects within the
+declared grammar, D2 paths and graph-drain cuts. Exact original/reduced traces,
+declared reach, receiving cuts, calibrations and independent review outcomes
+are in the [oracle extension record](oracle-reviews/2026-11-02-removal-oracle-gaps.md).
+Its [production repair entry](oracle-reviews/2026-11-02-removal-oracle-gaps.md#production-repairs-2026-11-02)
+records completed GREEN reach, isolated mutants and the rejected intermediate
+Angular pooling regression. The earlier page-window oracle-first qualification
+remains unchanged.
+
+**Open test-mechanics gap from the repair run:** the guarded replay owner
+(`packages/db/tests/oracle-replay.test.ts`, Small structures and test mechanics)
+does not enforce singleton execution for a successful shrink-chain path.
+With seed 2316 on the repaired code, `framework.angular.result-shape` at
+`28:0:0:0:0:0:0` reports one registration but two histories, and each
+`ivm.topk-negative-window-*` at `1:0:0:0` reports one registration but eight
+histories, although `randomParameters` requests `numRuns: 1`. Original
+one-segment paths and failing shrink paths report one history. Add a generated
+passing shrink-path receiving witness and constrain continuation before claiming
+one-history replay for that case. These extra GREEN executions are recorded
+accurately in the repair entry and are not used as singleton product evidence.
+
+## Loading sibling replay and final catch-up reach (2026-10-30)
+
+The primary load-subset replay owner now constructs 48 finite histories where
+an include with no demand at truncate starts under its sibling's loading replay.
+It measures held failure (44 histories), failure retirement (33), and later own
+coverage (12), through the existing public retention and recovery comparisons.
+The original guard fails the quiet retention check. Subscription-scoped verdict
+and successful-coverage calibrations remain in that primary owner.
+
+The browser multi-tab Electric owner preserves its stop prefix and arbitrary
+tail and constructs an abandoned reservation immediately before final catch-up.
+This removes dependence on sampling that boundary without changing its model,
+80-run budgets, comparisons or reach minima.
+
+See [the versioned experiment record](oracle-reviews/2026-10-30-release-replay-retention.md)
+for authority, RED, reach, mutant, grammar controls, historical gate limits and
+receiving-path limits. This is core Collection publication evidence and a Node
+SQLite/coordinator receiving witness with controlled Electric streams. It does
+not claim Effect, provider, framework, deeper include, or browser-process closure.
+
+
+### Subscription-scoped request-error assertion (2026-10-30)
+
+The primary load-subset replay owner now retains subscription identity in its
+later-request and successful-coverage account. A sibling requesting overlapping
+source keys cannot exempt the failed demand's public health error. Its existing
+96-history sibling-success grammar measures the actual owed-error assertion in
+four histories, alongside four successful-sibling-coverage histories. A targeted
+omitted-error observation passes the former source-wide account and fails the
+scoped health comparison. All existing comparisons, histories, budgets and
+reach minima remain. The controlled core, one-level include and peer limits
+remain those of this owner; no provider or framework claim follows. See the
+[versioned repair record](oracle-reviews/2026-10-30-release-replay-retention.md#subscription-scoped-request-error-checker-repair).
+
+
+### First-demand admission and terminal regimes (2026-11-02)
+
+The load-subset replay owner adds 48 finite histories crossing sibling/include
+settlement order, direction, width, failure/success and a waiting window. A new
+parent remains eligible after sibling success. Before admission repair, all 48
+fail the existing public-retention comparison. The repaired driver measures 24
+late active include settlements and 12 retries while a sibling loads, directly
+from adapter receipts. The original sibling grammar's receipt reaches are now
+44 failures, 9 same-truncate failed-demand unloads during commands and 12 own
+recoveries; its earlier model-derived retirement count 33 is historical. All
+existing semantic comparisons and required minima stay. The original-admission
+mutant fails retention.
+
+The earliest-error comparison was corrected from source-wide failure order to
+subscription-owned verdicts. Authority is the pre-existing maintainer decision
+in ARCHITECTURE **Atomic window publication**: a move rejects with *that replay's
+own* earliest still-deciding failure. Shared publication does not merge verdicts.
+This is an explicit account of the correction, not a claim that the assertion
+was unchanged. There is no source-wide race winner promise. The same-subscription
+latest-error mutant fails; the actual public owed-error check also rejects an
+error omitted after sibling coverage. Moves that resume into a different failed
+replay retain the owner's stated limit. A failed move is not promised success
+merely because a later retry recovers its demand.
+
+The multi-tab Electric owner now generates untouched arbitrary, reset-abandoned
+and stopped-source endings. Existing final comparisons, 80-run budgets, known
+gaps and minima stay; new reach separately measures final stopped-source restart
+and lagging-row rewrite. Old grammar reach was 0/46, so only the first was absent.
+Final-restart and final-commit omissions fail the real SQLite/coordinator public
+comparisons. These are Node-host controlled-stream receiving histories, not real
+provider or browser-process claims. The core and browser path limits are unchanged.
+See the [nine-item review amendment](oracle-reviews/2026-10-30-release-replay-retention.md#first-demand-admission-and-terminal-grammar-review-2026-11-02).
+
+
+### Final-catch-up provenance and deferred sibling resumption (2026-11-02)
+
+The multi-tab Electric owner now separates durable/server divergence from an
+actual older same-key commit overwriting a newer peer commit. The old fixed
+campaign measured 58 divergence repairs, of which 57 lacked that overwrite
+premise and one had it (81 initiated/80 accepted histories). Earlier final
+"lagging rewrite" counts are historical divergence evidence. A fourth terminal
+regime constructs the actual overwrite. Original arbitrary/reset/stop regimes,
+24-step prefix, 8–24-step arbitrary tail, models, comparisons, known gaps,
+80-run budgets and minima remain. New lagging suffix length is 12/15 for two/three
+tabs. Final commit omission fails the ordinary durable/public comparison.
+
+The deferred-acquisition owner adds 32 finite histories over a real same-source
+LEFT self-join, crossing subscriber/preload, one/two rows, literal/Promise
+acquisitions, and settlement order. Every history requires an actual deferred
+joined demand, checks zero acquisitions before its own reader, and checks
+readiness and independently projected rows after successful coverage. Existing
+production passes; retaining the parked participant makes all 32 fail readiness.
+No production cycle was confirmed. Both full owners pass 540 tests. Browser
+fixed/random actual overwrite reaches are repair 25/18 and callback 25/25.
+These boundaries retain their controlled core and Node-host SQLite/Electric
+limits. No HTTP, framework, browser-process, or arbitrary-shape closure follows.
+See the [versioned amendment](oracle-reviews/2026-10-30-release-replay-retention.md#final-catch-up-provenance-and-deferred-sibling-resumption-review-2026-11-02).

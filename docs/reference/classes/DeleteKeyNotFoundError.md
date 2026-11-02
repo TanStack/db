@@ -3,7 +3,7 @@ id: DeleteKeyNotFoundError
 title: DeleteKeyNotFoundError
 ---
 
-Defined in: [packages/db/src/errors.ts:366](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L366)
+Defined in: [packages/db/src/errors.ts:371](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L371)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:366](https://github.com/TanStack/db/blob/
 new DeleteKeyNotFoundError(key): DeleteKeyNotFoundError;
 ```
 
-Defined in: [packages/db/src/errors.ts:367](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L367)
+Defined in: [packages/db/src/errors.ts:372](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L372)
 
 #### Parameters
 

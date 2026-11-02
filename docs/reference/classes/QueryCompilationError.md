@@ -3,7 +3,7 @@ id: QueryCompilationError
 title: QueryCompilationError
 ---
 
-Defined in: [packages/db/src/errors.ts:717](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L717)
+Defined in: [packages/db/src/errors.ts:722](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L722)
 
 ## Extends
 
@@ -20,7 +20,6 @@ Defined in: [packages/db/src/errors.ts:717](https://github.com/TanStack/db/blob/
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)
 - [`CollectionInputNotFoundError`](CollectionInputNotFoundError.md)
-- [`DuplicateAliasInSubqueryError`](DuplicateAliasInSubqueryError.md)
 - [`UnsupportedFromTypeError`](UnsupportedFromTypeError.md)
 - [`UnknownExpressionTypeError`](UnknownExpressionTypeError.md)
 - [`EmptyReferencePathError`](EmptyReferencePathError.md)
@@ -38,7 +37,7 @@ Defined in: [packages/db/src/errors.ts:717](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:718](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L718)
+Defined in: [packages/db/src/errors.ts:723](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L723)
 
 #### Parameters
 

@@ -1,0 +1,1337 @@
+{
+  "reviewed_parent": "cc058b802ed6921f692f234399437c5a4e663991",
+  "review_id": 5718063990,
+  "source_sha256": {
+    "packages/db/tests/conformance/window-history-oracle.ts": "8643275378fdbd648b095fd6088b78b07ee97794d92ce059b24f99bc3d5a80ca",
+    "packages/db/tests/oracle-config.ts": "25adaf6ef56c1cdcb75f8b4b240974e2e6df698e3331e5deb2f297c62f76b478",
+    "packages/db/tests/oracle-replay-manifest.ts": "41dcfce6a0022435d29b4b9232d93c27a0acfa5a2596993df079c0f4ca95c70e",
+    "packages/db/tests/oracle-replay.test.ts": "2c9de0c64aa62f6941c1efc878cc979ac8997df8760cf978b1041e291bf86a06"
+  },
+  "routes": [
+    {
+      "property": "framework.react.window-history",
+      "status": 0,
+      "owner": "packages/react-db/tests/conformance.test.tsx",
+      "executions": 8,
+      "log_sha256": "7383741fde5159c580564352b6933dfc43f0dfbef690eb27f90e664488593486",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.react.pending-window-history",
+      "status": 0,
+      "owner": "packages/react-db/tests/conformance.test.tsx",
+      "executions": 1,
+      "log_sha256": "38d1d961bc39be8e4be01f73e9483ef34ac5b67d091bd7e8963e6cb581c6e70d",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.react.publication-window-history",
+      "status": 0,
+      "owner": "packages/react-db/tests/conformance.test.tsx",
+      "executions": 1,
+      "log_sha256": "42e65e0b8b75679f9eed16aa6fed08568c68248eeac4d27343a33a01ec52d0e9",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.react-dependency-list.window-history",
+      "status": 0,
+      "owner": "packages/react-db/tests/conformance.test.tsx",
+      "executions": 8,
+      "log_sha256": "f9d96c3d797b441bc3a3c9ec5afde37b7a2c3f78fb7134984da19dcd41630eff",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.react-dependency-list.pending-window-history",
+      "status": 0,
+      "owner": "packages/react-db/tests/conformance.test.tsx",
+      "executions": 1,
+      "log_sha256": "89030f3b92c5eb3f9a92fe620ab5b0c5ea995432e26a01c59db44ba23950d358",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.react-dependency-list.publication-window-history",
+      "status": 0,
+      "owner": "packages/react-db/tests/conformance.test.tsx",
+      "executions": 1,
+      "log_sha256": "7f4b313a1ce1097c5a8c1af606f90fb17644c5e1c8db1d9151c98234ce13ae04",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.preact.window-history",
+      "status": 0,
+      "owner": "packages/preact-db/tests/conformance.test.ts",
+      "executions": 8,
+      "log_sha256": "91d8b0e6819bbab86612ea6e27d94eedbc0de691a627e5e68f16a7bd88861cf0",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.preact.pending-window-history",
+      "status": 0,
+      "owner": "packages/preact-db/tests/conformance.test.ts",
+      "executions": 1,
+      "log_sha256": "08a2f7c9605651f27ddf2104cc8b7d9ebb00813c1ab0d19d02a08dbb2d469f4a",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.preact.publication-window-history",
+      "status": 0,
+      "owner": "packages/preact-db/tests/conformance.test.ts",
+      "executions": 1,
+      "log_sha256": "6fc526fe33095525942de865e04b360d83425589c9100bd9a23356d5f0608873",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.vue.window-history",
+      "status": 0,
+      "owner": "packages/vue-db/tests/conformance.test.ts",
+      "executions": 2,
+      "log_sha256": "9b3f739dd067f7b987eb041c39109523d4e7b73b61a284a410254345a1904383",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.vue.pending-window-history",
+      "status": 0,
+      "owner": "packages/vue-db/tests/conformance.test.ts",
+      "executions": 1,
+      "log_sha256": "9e539fd0c48b1db9fa6454442b44fd88be95688c00a2dff4890bde8fb0704388",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.vue.publication-window-history",
+      "status": 0,
+      "owner": "packages/vue-db/tests/conformance.test.ts",
+      "executions": 1,
+      "log_sha256": "f4b1b8e32290d4542ca78ac0993fff85db5df19c929ebd7a9f08f66233b4313b",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.solid.window-history",
+      "status": 0,
+      "owner": "packages/solid-db/tests/conformance.test.tsx",
+      "executions": 2,
+      "log_sha256": "581043fd1f97f5acc03c249257f2b691c7fe67dc4eb70991726e60f029214dd2",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.solid.pending-window-history",
+      "status": 0,
+      "owner": "packages/solid-db/tests/conformance.test.tsx",
+      "executions": 1,
+      "log_sha256": "ea8f4cf84fb840664796905542aa3904cc043b99573339fe817b23e44edca93a",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.solid.publication-window-history",
+      "status": 0,
+      "owner": "packages/solid-db/tests/conformance.test.tsx",
+      "executions": 1,
+      "log_sha256": "df0e25ab2a1a0c7052dd6e6c3056a13d476df50aed26be09fe47dc3b9fa08eca",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.angular.window-history",
+      "status": 0,
+      "owner": "packages/angular-db/tests/conformance.test.ts",
+      "executions": 2,
+      "log_sha256": "b91a8939774b86cc78069e017a57496767972d376d26eaf329f33aafc5522989",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.angular.pending-window-history",
+      "status": 0,
+      "owner": "packages/angular-db/tests/conformance.test.ts",
+      "executions": 1,
+      "log_sha256": "6152d92a93b35d1c8edb5696f9e6a5aa80f1b6740ad975222b2ad3f430c28463",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.angular.publication-window-history",
+      "status": 0,
+      "owner": "packages/angular-db/tests/conformance.test.ts",
+      "executions": 1,
+      "log_sha256": "578b71ea47e8c903a5ac026920ff60d91de87876135ed34713bf9810185e1cf9",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.svelte.window-history",
+      "status": 0,
+      "owner": "packages/svelte-db/tests/conformance.svelte.test.ts",
+      "executions": 2,
+      "log_sha256": "be74fa20129e36cb54ae703d4aa809d4da4beacc68ccb1e98c483be872057383",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1,
+        1
+      ],
+      "failed": [
+        false,
+        false
+      ]
+    },
+    {
+      "property": "framework.svelte.pending-window-history",
+      "status": 0,
+      "owner": "packages/svelte-db/tests/conformance.svelte.test.ts",
+      "executions": 1,
+      "log_sha256": "a288bc4550c6f8743fada715e203062cd2dcd27753e0fac6bb8fd65e020f84c3",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    },
+    {
+      "property": "framework.svelte.publication-window-history",
+      "status": 0,
+      "owner": "packages/svelte-db/tests/conformance.svelte.test.ts",
+      "executions": 1,
+      "log_sha256": "0b591e3cf58d71f1521e07ad380d01c0ee4fc07b992d2ce406f68c492f61889d",
+      "seed": 2291,
+      "path": "0",
+      "num_runs": [
+        1
+      ],
+      "failed": [
+        false
+      ]
+    }
+  ],
+  "protocol_suite": {
+    "passed": 63
+  },
+  "red": {
+    "missing_exact_driver_owners": 21
+  },
+  "mutant": {
+    "react_for_solid_owner_assertion_failures": 3
+  },
+  "normal_campaigns": [
+    {
+      "driver": "react",
+      "status": 0,
+      "passed": 44,
+      "log_sha256": "35d1b8ddd9baa50c17bb27ec62f8e0afe064fb6719a1d7532ddeb3a08ff833cf",
+      "reach": {
+        "pending reach react/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach react/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach react/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach react/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 5,
+          "limit requested in callback": 6,
+          "callback update settled": 9
+        },
+        "window reach react/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/changing/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/changing/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/stable/direct/fixed": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach react/stable/direct/fresh": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach react/opaque/direct/fixed": {
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach react/opaque/direct/fresh": {
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach react/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/changing/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/changing/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react/stable/nested/fixed": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach react/stable/nested/fresh": {
+          "source write": 9,
+          "stable key": 13
+        },
+        "window reach react/opaque/nested/fixed": {
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach react/opaque/nested/fresh": {
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "pending reach react (dependency list)/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach react (dependency list)/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach react (dependency list)/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach react (dependency list)/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 7,
+          "limit requested in callback": 4,
+          "callback update settled": 9
+        },
+        "window reach react (dependency list)/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/changing/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/changing/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/stable/direct/fixed": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach react (dependency list)/stable/direct/fresh": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach react (dependency list)/opaque/direct/fixed": {
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach react (dependency list)/opaque/direct/fresh": {
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach react (dependency list)/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/changing/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/changing/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach react (dependency list)/stable/nested/fixed": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach react (dependency list)/stable/nested/fresh": {
+          "source write": 11,
+          "stable key": 13
+        },
+        "window reach react (dependency list)/opaque/nested/fixed": {
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach react (dependency list)/opaque/nested/fresh": {
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        }
+      }
+    },
+    {
+      "driver": "preact",
+      "status": 0,
+      "passed": 22,
+      "log_sha256": "be11270d18e473ab2caebdd494398f087e162b2ab553c8f8d09951a6fc290066",
+      "reach": {
+        "pending reach preact/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach preact/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach preact/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach preact/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 5,
+          "limit requested in callback": 6,
+          "callback update settled": 9
+        },
+        "window reach preact/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/changing/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/changing/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/stable/direct/fixed": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach preact/stable/direct/fresh": {
+          "source write": 11,
+          "stable key": 13
+        },
+        "window reach preact/opaque/direct/fixed": {
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach preact/opaque/direct/fresh": {
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach preact/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/changing/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/changing/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach preact/stable/nested/fixed": {
+          "source write": 13,
+          "stable key": 13
+        },
+        "window reach preact/stable/nested/fresh": {
+          "source write": 10,
+          "stable key": 13
+        },
+        "window reach preact/opaque/nested/fixed": {
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        },
+        "window reach preact/opaque/nested/fresh": {
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "source write": 13,
+          "source growth": 13,
+          "opaque key change": 13
+        }
+      }
+    },
+    {
+      "driver": "vue",
+      "status": 0,
+      "passed": 10,
+      "log_sha256": "a3effa927fc2cd9a17a0f5363411cef22bee877bedc3d8d1b5730f1116f45ada",
+      "reach": {
+        "pending reach vue/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach vue/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach vue/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach vue/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 7,
+          "limit requested in callback": 4,
+          "callback update settled": 9
+        },
+        "window reach vue/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach vue/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach vue/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach vue/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        }
+      }
+    },
+    {
+      "driver": "solid",
+      "status": 0,
+      "passed": 10,
+      "log_sha256": "7bb5be2df9d0030b556ab4b94137fad3bc2836ece4cebce5d6e6601f63719f42",
+      "reach": {
+        "pending reach solid/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach solid/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach solid/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach solid/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 7,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "window reach solid/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach solid/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach solid/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach solid/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        }
+      }
+    },
+    {
+      "driver": "angular",
+      "status": 0,
+      "passed": 10,
+      "log_sha256": "bbae6299216f62e690b419330168d8aaf210dd8bfee9d6b084422e5c775b602a",
+      "reach": {
+        "pending reach angular/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach angular/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach angular/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach angular/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "window reach angular/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach angular/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach angular/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach angular/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        }
+      }
+    },
+    {
+      "driver": "svelte",
+      "status": 0,
+      "passed": 10,
+      "log_sha256": "bc16f9eb3a60045bbcb9f3f030abbd336d8af46bc2b0772b37f7369b0688e30b",
+      "reach": {
+        "pending reach svelte/fixed": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "pending reach svelte/fresh": {
+          "initial loading move": 7,
+          "initial oldest settled while latest pending": 7,
+          "initial ready": 7,
+          "overlap pending": 7,
+          "oldest settled while latest pending": 7,
+          "settled latest": 7,
+          "unmounted pending": 7
+        },
+        "publication callback reach svelte/fixed": {
+          "publication callback entered": 9,
+          "offset requested in callback": 6,
+          "limit requested in callback": 5,
+          "callback update settled": 9
+        },
+        "publication callback reach svelte/fresh": {
+          "publication callback entered": 9,
+          "offset requested in callback": 7,
+          "limit requested in callback": 3,
+          "callback update settled": 9
+        },
+        "window reach svelte/derived/direct/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach svelte/derived/direct/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach svelte/derived/nested/fixed": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        },
+        "window reach svelte/derived/nested/fresh": {
+          "offset move": 13,
+          "limit move": 13,
+          "large offset move": 13,
+          "large limit move": 13,
+          "filter change": 13,
+          "order change": 13,
+          "nested window change": 13,
+          "source change": 13,
+          "projection change": 13,
+          "Collection option change": 13,
+          "source write": 13,
+          "source growth": 13
+        }
+      }
+    }
+  ],
+  "normal_passed": 106
+}

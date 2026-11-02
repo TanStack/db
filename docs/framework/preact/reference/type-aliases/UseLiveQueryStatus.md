@@ -7,4 +7,4 @@ title: UseLiveQueryStatus
 type UseLiveQueryStatus = CollectionStatus | "disabled";
 ```
 
-Defined in: [useLiveQuery.ts:36](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L36)
+Defined in: [useLiveQuery.ts:35](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L35)

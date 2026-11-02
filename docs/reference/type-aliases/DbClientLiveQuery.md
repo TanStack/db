@@ -7,7 +7,7 @@ title: DbClientLiveQuery
 type DbClientLiveQuery = object;
 ```
 
-Defined in: [packages/db/src/client.ts:166](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L166)
+Defined in: [packages/db/src/client.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L173)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/client.ts:166](https://github.com/TanStack/db/blob/
 readonly dehydratedAt: number;
 ```
 
-Defined in: [packages/db/src/client.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L168)
+Defined in: [packages/db/src/client.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L175)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/client.ts:168](https://github.com/TanStack/db/blob/
 readonly optional error: unknown;
 ```
 
-Defined in: [packages/db/src/client.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L174)
+Defined in: [packages/db/src/client.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L181)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/client.ts:174](https://github.com/TanStack/db/blob/
 readonly optional initialSnapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L172)
+Defined in: [packages/db/src/client.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L179)
 
 Initial hydration view retained while a local preload completes.
 
@@ -49,7 +49,7 @@ Initial hydration view retained while a local preload completes.
 readonly promise: Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L170)
+Defined in: [packages/db/src/client.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L177)
 
 ***
 
@@ -59,7 +59,7 @@ Defined in: [packages/db/src/client.ts:170](https://github.com/TanStack/db/blob/
 readonly queryHash: string;
 ```
 
-Defined in: [packages/db/src/client.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L167)
+Defined in: [packages/db/src/client.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L174)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: [packages/db/src/client.ts:167](https://github.com/TanStack/db/blob/
 readonly optional snapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L173)
+Defined in: [packages/db/src/client.ts:180](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L180)
 
 ***
 
@@ -79,4 +79,4 @@ Defined in: [packages/db/src/client.ts:173](https://github.com/TanStack/db/blob/
 readonly status: DbClientLiveQueryState;
 ```
 
-Defined in: [packages/db/src/client.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L169)
+Defined in: [packages/db/src/client.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L176)

@@ -14,7 +14,7 @@ function configPool(config):
   | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L35)
+Defined in: [packages/db/src/live-query-options.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L36)
 
 A hook config's pool: `pooledLiveQueries` or nothing. Any other value, such
 as the removed boolean form, contradicts the hook contract, so every reader

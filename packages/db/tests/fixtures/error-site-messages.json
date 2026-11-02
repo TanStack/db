@@ -704,7 +704,7 @@
     "literals": ["Failed to get item with key \"", "\" from object store \""]
   },
   "206": {
-    "file": "collection/index.ts",
+    "file": "collection/validate-indexing.ts",
     "template": "autoIndex: 'eager' requires defaultIndexType to be set. Import an index type and set it:\n  import { BasicIndex } from '@tanstack/db'\n  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })",
     "literals": [
       "autoIndex: 'eager' requires defaultIndexType to be set. ",

@@ -106,7 +106,6 @@
   "retainedWindow": "b8",
   "setReadyIfIdle": "b9",
   "cachedCollectionRevision": "ca",
-  "collectionRestartCleanup": "cb",
   "pendingHydration": "cd",
   "removeFromBucket": "cf",
   "restorePublishedSnapshotTracking": "cg",
@@ -178,7 +177,6 @@
   "requireFullSourceRepair": "dy",
   "trackOrderedPublication": "dz",
   "canGarbageCollect": "dA",
-  "collectionCleanup": "dB",
   "extendPipelineWithChangeProcessing": "dC",
   "startSubsetDemand": "dD",
   "virtualPropsCache": "dE",
@@ -212,7 +210,6 @@
   "restoreInitialWindow": "d9",
   "settleTruncateReplay": "ea",
   "takeInternal": "eb",
-  "truncateCleanup": "ec",
   "_createRefForSource": "ee",
   "compileBasePipeline": "ef",
   "scheduleIdleCleanup": "eg",
@@ -265,7 +262,6 @@
   "publishEvents": "e5",
   "releaseDemand": "e6",
   "rollbackLease": "e7",
-  "trackSentKeys": "e9",
   "updateTimeout": "fa",
   "flushTruncateReplay": "fb",
   "accumulateActivity": "fc",
@@ -275,7 +271,6 @@
   "getOrCreateContext": "fg",
   "sentToD2Rows": "fh",
   "subscribeToChanges": "fi",
-  "trackPublishedRows": "fj",
   "_status": "fk",
   "clearSyncRunState": "fl",
   "retireEmptyReplay": "fm",
@@ -439,5 +434,6 @@
   "mergesOverRow": "b_",
   "awaitsSiblingReplays": "gN",
   "grownPrefixRows": "gZ",
-  "ownPrefixEnd": "he"
+  "ownPrefixEnd": "he",
+  "sourceListenerCleanups": "cb"
 }

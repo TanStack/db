@@ -3,7 +3,6 @@
 import { useRef } from 'react'
 import { rejectLiveQueryInput, toBoundaryError } from '@tanstack/db'
 import { useLiveQueryForSuspense } from './useLiveQuery'
-import { getLiveQueryResultInfo } from './live-query-internals'
 import type { UseLiveQueryConfig } from './useLiveQuery'
 import type {
   Collection,
@@ -21,22 +20,17 @@ import type {
 // React can discard a render that suspends, including its refs. Keep the
 // initial-render failure across retries, scoped by client because streamed
 // preloads of the same collection can fail independently.
+const unscopedErrorScope = {}
 const initialRenderErrors = new WeakMap<
   Collection<any, any, any>,
-  {
-    byClient: WeakMap<DbClient, { error: unknown; clientQuery?: object }>
-    unscoped?: { error: unknown; clientQuery?: object }
-  }
+  WeakMap<object, { error: unknown; clientQuery?: object }>
 >()
 
 function clearInitialRenderError(
   collection: Collection<any, any, any>,
   client: DbClient | undefined,
 ) {
-  const entry = initialRenderErrors.get(collection)
-  if (!entry) return
-  if (client) entry.byClient.delete(client)
-  else delete entry.unscoped
+  initialRenderErrors.get(collection)?.delete(client ?? unscopedErrorScope)
 }
 
 function rememberInitialRenderError(
@@ -48,14 +42,13 @@ function rememberInitialRenderError(
   if (collection.status === `cleaned-up`) return
   let entry = initialRenderErrors.get(collection)
   if (!entry) {
-    entry = { byClient: new WeakMap() }
+    entry = new WeakMap()
     collection.once(`status:cleaned-up`, () => {
       initialRenderErrors.delete(collection)
     })
     initialRenderErrors.set(collection, entry)
   }
-  if (client) entry.byClient.set(client, { error, clientQuery })
-  else entry.unscoped = { error }
+  entry.set(client ?? unscopedErrorScope, { error, clientQuery })
 }
 
 /**
@@ -205,7 +198,14 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
   const hasBeenReadyRef = useRef(false)
 
   // Use useLiveQuery to handle collection management and reactivity
-  const result = useLiveQueryForSuspense(configOrQueryOrCollection)
+  const {
+    result,
+    client,
+    queryHash,
+    identityError,
+    observer,
+    deferredCollections,
+  } = useLiveQueryForSuspense(configOrQueryOrCollection)
 
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
@@ -218,36 +218,36 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
     )
   }
 
-  const queryInfo = getLiveQueryResultInfo(result)
+  // An enabled observer snapshot always has its Collection.
+  const collection = result.collection!
+
   // The render boundary: an error thrown before this render commits releases
   // the sync starts it deferred. A thrown promise suspends; its preload owns
   // those starts.
   try {
     // Reset promise and ready state when query identity changes
-    if (collectionRef.current !== result.collection) {
+    if (collectionRef.current !== collection) {
       promiseRef.current = null
-      collectionRef.current = result.collection
+      collectionRef.current = collection
       hasBeenReadyRef.current = false
     }
 
     // SUSPENSE LOGIC: Throw promise or error based on collection status
 
-    const collectionStatus = result.collection.status
+    const collectionStatus = collection.status
 
     // Track when we reach ready state
     if (result.isReady) {
       hasBeenReadyRef.current = true
       promiseRef.current = null
-      clearInitialRenderError(result.collection, queryInfo.client)
+      clearInitialRenderError(collection, client)
     }
 
-    const observerError = queryInfo.observer.getError()
+    const observerError = observer.getError()
     // A client request can reject with undefined, which getError() cannot
     // distinguish from no error. The request status preserves that distinction.
     const clientQuery =
-      queryInfo.client && queryInfo.queryHash
-        ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
-        : undefined
+      client && queryHash ? client._getLiveQuery(queryHash) : undefined
     if (
       !hasBeenReadyRef.current &&
       (observerError !== undefined || clientQuery?.status === `error`)
@@ -256,24 +256,23 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
       throw observerError === undefined ? clientQuery?.error : observerError
     }
 
-    if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
-      const reason = queryInfo.identityError
-        ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
+    if (client?._isSsrStreamingEnabled() && !queryHash) {
+      const reason = identityError
+        ? `${identityError.reason} at ${identityError.path}`
         : `the query has no stable identity`
       throw new Error(
         `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
       )
     }
-    const errorEntry = initialRenderErrors.get(result.collection)
-    const initialRenderError = queryInfo.client
-      ? errorEntry?.byClient.get(queryInfo.client)
-      : errorEntry?.unscoped
+    const initialRenderError = initialRenderErrors
+      .get(collection)
+      ?.get(client ?? unscopedErrorScope)
     // A replacement client query must not inherit the prior request's error.
     if (
       initialRenderError?.clientQuery !== undefined &&
       initialRenderError.clientQuery !== clientQuery
     ) {
-      clearInitialRenderError(result.collection, queryInfo.client)
+      clearInitialRenderError(collection, client)
     } else if (initialRenderError && !hasBeenReadyRef.current) {
       promiseRef.current = null
       throw toBoundaryError(initialRenderError.error)
@@ -287,7 +286,7 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
       (collectionStatus === `error` && !hasBeenReadyRef.current)
     ) {
       promiseRef.current = null
-      throw toBoundaryError(result.collection.health.error?.cause)
+      throw toBoundaryError(collection.health.error?.cause)
     }
 
     if (
@@ -299,16 +298,13 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
     ) {
       // Create or reuse promise for current collection
       if (!promiseRef.current) {
-        const collection = result.collection
-        const client = queryInfo.client
-        const queryHash = queryInfo.queryHash
         let active = true
         const stopWatchingCleanup = collection.once(`status:cleaned-up`, () => {
           active = false
         })
         let preload: Promise<void>
         try {
-          preload = queryInfo.observer.preload()
+          preload = observer.preload()
         } catch (error) {
           stopWatchingCleanup()
           throw error
@@ -339,11 +335,11 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
     return {
       state: result.state,
       data: result.data,
-      collection: result.collection,
+      collection,
       health: result.health,
     }
   } catch (error) {
     if (error instanceof Promise) throw error
-    return rejectLiveQueryInput(queryInfo.deferredCollections, error)
+    return rejectLiveQueryInput(deferredCollections, error)
   }
 }

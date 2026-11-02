@@ -5,11 +5,57 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `framework.react.result-shape`,
+  `framework.react-dependency-list.result-shape`,
+  `framework.preact.result-shape`,
+  `framework.vue.result-shape`,
+  `framework.solid.result-shape`,
+  `framework.angular.result-shape`,
+  `framework.svelte.result-shape`,
+  `ivm.topk-negative-window-array`,
+  `ivm.topk-negative-window-grouped`,
+  `ivm.topk-negative-window-orderBy`,
+  `framework.react.window-history`,
+  `framework.react.pending-window-history`,
+  `framework.react.publication-window-history`,
+  `framework.react-dependency-list.window-history`,
+  `framework.react-dependency-list.pending-window-history`,
+  `framework.react-dependency-list.publication-window-history`,
+  `framework.preact.window-history`,
+  `framework.preact.pending-window-history`,
+  `framework.preact.publication-window-history`,
+  `framework.vue.window-history`,
+  `framework.vue.pending-window-history`,
+  `framework.vue.publication-window-history`,
+  `framework.solid.window-history`,
+  `framework.solid.pending-window-history`,
+  `framework.solid.publication-window-history`,
+  `framework.angular.window-history`,
+  `framework.angular.pending-window-history`,
+  `framework.angular.publication-window-history`,
+  `framework.svelte.window-history`,
+  `framework.svelte.pending-window-history`,
+  `framework.svelte.publication-window-history`,
+  `react.window-render`,
+  `preact.window-render`,
   `lint.part-reach`,
+  `oracle.declared-reach`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
   `scripts.release-version`,
   `scripts.release-seed-failure`,
+  `react.ssr-effects-react18-ordinary-provider`,
+  `react.ssr-effects-react18-ordinary-explicit`,
+  `react.ssr-effects-react18-suspense-provider`,
+  `react.ssr-effects-react18-suspense-explicit`,
+  `react.ssr-effects-react18-standalone`,
+  `react.ssr-effects-react18-supplied`,
+  `react.ssr-effects-current-ordinary-provider`,
+  `react.ssr-effects-current-ordinary-explicit`,
+  `react.ssr-effects-current-suspense-provider`,
+  `react.ssr-effects-current-suspense-explicit`,
+  `react.ssr-effects-current-standalone`,
+  `react.ssr-effects-current-supplied`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
   `react.ssr-stream-cut`,
@@ -320,6 +366,7 @@ const staticOracleProperties = [
   `subscription-replay.same-tick`,
   `subscription-lifecycle.history-statistics`,
   `subscription-lifecycle.publication-history`,
+  `subscription-lifecycle.restart-publication`,
   `subscription-lifecycle.sync-history`,
   `subscription-lifecycle.async-history`,
   `subscription-lifecycle.demand-change`,
@@ -337,7 +384,12 @@ const staticOracleProperties = [
   `ivm.hash-mixed-graph`,
   `ivm.hash-value`,
   `ivm.incrementalization-law`,
+  `ivm.distinct-collisions`,
+  `ivm.distinct-representatives`,
+  `includes.bucket-collisions`,
+  `query.distinct-collisions`,
   `ivm.topk-support-window`,
+  `ivm.topk-numeric-window`,
   `opfs.close`,
   `opfs.failure-cleanup`,
   `opfs.mixed-execute`,
@@ -654,13 +706,41 @@ export function readOracleRunConfig(
   return { multiplier, replaySeed, replayPath, replayProperty }
 }
 
+type OracleRunParameters = {
+  numRuns: number
+  seed?: number
+  path?: string
+} & ReturnType<typeof oracleReplayReporter>
+
+// fast-check infers a property's argument types from `examples` too, so only
+// a call with examples returns them. `ReturnType` reads the last overload,
+// the one without examples.
+export function oracleRandomParameters<TExample>(
+  numRuns: number,
+  replay: OracleReplayConfig | number | undefined,
+  property: string | undefined,
+  examples: ReadonlyArray<TExample>,
+): OracleRunParameters & { examples: Array<TExample> }
 export function oracleRandomParameters(
   numRuns: number,
   replay: OracleReplayConfig | number | undefined,
   property?: string,
-): { numRuns: number; seed?: number; path?: string } & ReturnType<
-  typeof oracleReplayReporter
-> {
+): OracleRunParameters
+export function oracleRandomParameters<TExample>(
+  numRuns: number,
+  replay: OracleReplayConfig | number | undefined,
+  property?: string,
+  examples?: ReadonlyArray<TExample>,
+): OracleRunParameters & { examples?: Array<TExample> } {
+  return randomParameters(numRuns, replay, property, examples)
+}
+
+function randomParameters<TExample>(
+  numRuns: number,
+  replay: OracleReplayConfig | number | undefined,
+  property: string | undefined,
+  examples: ReadonlyArray<TExample> | undefined,
+): OracleRunParameters & { examples?: Array<TExample> } {
   if (property !== undefined) assertRegisteredOracleProperty(property)
   const { replaySeed, replayPath, replayProperty } =
     typeof replay === `object`
@@ -670,22 +750,36 @@ export function oracleRandomParameters(
           replayPath: undefined,
           replayProperty: undefined,
         }
-  if (replaySeed === undefined) return { numRuns }
-  return {
-    numRuns,
-    seed: replaySeed,
-    // A path replays one recorded counterexample, so the replay runs once.
-    // From a path with one segment, fast-check would otherwise run `numRuns`
-    // histories that start at that index.
-    ...(property !== undefined &&
-    replayPath !== undefined &&
-    replayProperty === property
-      ? {
-          numRuns: 1,
-          path: replayPath,
-          ...oracleReplayReporter(property, replaySeed, replayPath),
+  const parameters: OracleRunParameters =
+    replaySeed === undefined
+      ? { numRuns }
+      : {
+          numRuns,
+          seed: replaySeed,
+          // A path replays one recorded counterexample, so the replay runs
+          // once. From a path with one segment, fast-check would otherwise
+          // run `numRuns` histories that start at that index.
+          ...(property !== undefined &&
+          replayPath !== undefined &&
+          replayProperty === property
+            ? {
+                numRuns: 1,
+                path: replayPath,
+                ...oracleReplayReporter(property, replaySeed, replayPath),
+              }
+            : {}),
         }
-      : {}),
+  if (examples === undefined) return parameters
+  // fast-check runs the examples first and counts them in numRuns, so they
+  // come on top of the random runs: the examples never displace one. A path
+  // replay runs one recorded history, which can be an example.
+  return {
+    ...parameters,
+    examples: [...examples],
+    numRuns:
+      parameters.path === undefined
+        ? parameters.numRuns + examples.length
+        : parameters.numRuns,
   }
 }
 
@@ -768,10 +862,25 @@ export function oracleRuns(baseRuns: number): number {
   return baseRuns * multiplier
 }
 
-/** Replays broad randomized properties when a campaign seed is supplied. */
+/**
+ * Replays broad randomized properties when a campaign seed is supplied.
+ * `examples` run first in every run, on top of the base runs. A site that
+ * spreads these options and sets fast-check's `examples` itself runs them
+ * inside the base runs instead, so they displace random histories.
+ */
+export function oraclePropertyOptions<TExample>(
+  baseRuns: number,
+  property: string | undefined,
+  options: { examples: ReadonlyArray<TExample> },
+): OracleRunParameters & { examples: Array<TExample> }
 export function oraclePropertyOptions(
   baseRuns: number,
   property?: string,
-): ReturnType<typeof oracleRandomParameters> {
-  return oracleRandomParameters(oracleRuns(baseRuns), replay, property)
+): OracleRunParameters
+export function oraclePropertyOptions<TExample>(
+  baseRuns: number,
+  property?: string,
+  { examples }: { examples?: ReadonlyArray<TExample> } = {},
+): OracleRunParameters & { examples?: Array<TExample> } {
+  return randomParameters(oracleRuns(baseRuns), replay, property, examples)
 }

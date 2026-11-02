@@ -9,6 +9,8 @@
  * All registered laws must pass; the driver has no whole-test waivers.
  */
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -56,12 +58,14 @@ function writer<T extends { id: string }>(collection: any) {
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
   collectionId?: string,
+  options?: { rowUpdateMode?: `full` },
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: collectionId ?? `conformance-svelte-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
+      rowUpdateMode: options?.rowUpdateMode,
     }),
   )
   const write = writer<T>(collection)
@@ -171,7 +175,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   let query: any
   const dispose = $effect.root(() => {
@@ -215,11 +219,12 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(next: P) {
+    async setParam(next: P, observe?: () => void) {
       param = next
       // The first paint after the change: the framework has flushed its
       // reactive work, but no later task has run.
       flushSync()
+      observe?.()
       published.record(query.data, query.state)
       await settle()
     },
@@ -228,10 +233,12 @@ function mountControllable<P>(
 
 const svelteDriver: LiveQueryDriver = {
   name: `svelte`,
+  parameterObservationCut: `flushSync before a later task`,
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
