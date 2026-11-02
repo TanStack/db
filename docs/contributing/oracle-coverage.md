@@ -6435,6 +6435,8 @@ prototype methods while native nodes/setters supply updates. Original-code,
 missing-node, accessor/method, and reordered-tail mutants distinguish these
 repairs. No output alias topology or public elapsed-time budget is imposed.
 
+The callback integration adds eight signal-driven lifetime histories to the same Solid materialization owner: callback/config inputs cross one/two array levels and ordinary/native payloads. The original 48 input histories remain. The 32 identity/lifetime histories each enforce source-only-write reach; the eight added histories also enforce query-input-change reach and compare selected values plus rebinding. Application input preparation stays tracked, while initial compilation and Collection startup run untracked. The extended pre-production campaign rejects eight native lifetime cases on integration head `fa5df11a`; all 201 owner tests and 336 Solid runtime tests then pass locally. Restoring the old hook fails the source-only subscription comparison. Untracking query construction too fails all eight new signal-result comparisons. Existing comparisons and budgets remain. The [integration amendment](oracle-reviews/callback-metadata.md#solid-binding-lifetime-at-compilation-2026-11-02) records commands, runner differences, exact evidence, and limits. These finite settled-host cuts establish neither native-source-only value liveness nor other frameworks' dependency tracking.
+
 The local-only draft driver does not claim top-level symbol-write admission.
 Its shared preservation comparison still checks every field actually admitted,
 including nested symbols and all actual mutation originals. The proxy-revert
