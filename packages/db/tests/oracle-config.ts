@@ -726,6 +726,23 @@ export function readOracleRunConfig(
   return { multiplier, replaySeed, replayPath, replayProperty }
 }
 
+/**
+ * Select a fresh campaign seed unless the caller supplied one. Report the
+ * selection before fast-check runs: a later reach failure is outside its
+ * reporter and must still be replayable. This line records selection, not
+ * execution; guarded replay witnesses remain the execution evidence.
+ */
+export function oracleCampaignSeed(
+  seed: number | undefined,
+  property: string | undefined,
+): number {
+  const selected = seed ?? Math.floor(Math.random() * 0x100000000) - 0x80000000
+  console.info(
+    `ORACLE_SEED ${JSON.stringify({ property: property ?? null, seed: selected })}`,
+  )
+  return selected
+}
+
 type OracleRunParameters = {
   numRuns: number
   seed?: number
@@ -770,9 +787,10 @@ function randomParameters<TExample>(
           replayPath: undefined,
           replayProperty: undefined,
         }
+  const selectedSeed = oracleCampaignSeed(replaySeed, property)
   const parameters: OracleRunParameters =
     replaySeed === undefined
-      ? { numRuns }
+      ? { numRuns, seed: selectedSeed }
       : {
           numRuns,
           seed: replaySeed,
