@@ -20,7 +20,6 @@
  * SQLite/coordinator receiving witness, not a Chromium OPFS or Electron claim.
  */
 import { DatabaseSync } from 'node:sqlite'
-import { fc } from '@fast-check/vitest'
 import { it } from 'vitest'
 import { DbClient, collectionOptions, whenSyncAccepted } from '@tanstack/db'
 import { BrowserCollectionCoordinator } from '../../browser-db-sqlite-persistence/src/browser-coordinator'
@@ -29,7 +28,6 @@ import {
   cachedMetadata,
   cachedRow,
   describeMismatch,
-  keptMetadataDurabilityHistoriesArbitrary,
   persistedPeerFullLane,
   persistedPeerLane,
   persistedPeerOnDemandLane,
@@ -38,13 +36,9 @@ import {
   sessionCollectionKeys,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
-  oraclePropertyOptions,
   oracleReplayTest,
-  oracleRuns,
   readOracleRunConfig,
-  recordOracleReplay,
 } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   SQLiteCorePersistenceAdapter,
@@ -53,7 +47,10 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { createMetadataSQLiteDriver } from './sync-metadata-sqlite-driver'
-import { runSeedReinsertReloadCampaign } from './sync-metadata-session-campaign'
+import {
+  runKeptMetadataDurabilityCampaign,
+  runSeedReinsertReloadCampaign,
+} from './sync-metadata-session-campaign'
 import type { SyncConfig } from '@tanstack/db'
 import type {
   ReceiptState,
@@ -103,22 +100,43 @@ async function createSQLiteDriver(lane: SessionLane): Promise<SessionDriver> {
   const coordinators = adapters.map(
     (adapter) => new BrowserCollectionCoordinator({ dbName, adapter }),
   )
-  // Observe an actual transport input, never a production reload flag or a
+  // Observe the transport's replay information, not the wrapper's decision or a
   // metadata mismatch. Without replay details this response cannot distinguish
   // earlier cached writes from this run's writes; D15 governs that information
   // gap. The model derives its effect solely from its own durable storage.
   const recoveryInputs: Array<SessionRecoveryInput> = []
+  const pendingRecoveryInputs: Array<SessionRecoveryInput> = []
   const pullSince = coordinators[0]!.pullSince!.bind(coordinators[0])
   coordinators[0]!.pullSince = async (...args) => {
     const response = await pullSince(...args)
     if (response.ok && (response.requiresFullReload || !response.deltas))
-      recoveryInputs.push({
+      pendingRecoveryInputs.push({
         type: `unknown-storage-observation`,
         fromRowVersion: args[1],
         latestRowVersion: response.latestRowVersion,
       })
     return response
   }
+  const hydrate = adapters[0]!.runInHydrationScope.bind(adapters[0])
+  adapters[0]!.runInHydrationScope = (task) =>
+    hydrate(async (adapter) => {
+      const inputs = pendingRecoveryInputs.splice(0)
+      const observation = { reads: 0 }
+      const result = await task({
+        ...adapter,
+        loadSubset: async (...args) => {
+          const rows = await adapter.loadSubset(...args)
+          observation.reads++
+          return rows
+        },
+      })
+      if (inputs.length && observation.reads === 0)
+        throw new Error(`recovery response completed no storage observation`)
+      // The hydration task includes application. Merely receiving a response
+      // that cleanup or claim recovery discards must not advance the model.
+      recoveryInputs.push(...inputs)
+      return result
+    })
   const pendingEnsures = new Set<Promise<unknown>>()
   for (const coordinator of coordinators) {
     const request = coordinator.requestEnsureRemoteSubset.bind(coordinator)
@@ -172,6 +190,8 @@ async function createSQLiteDriver(lane: SessionLane): Promise<SessionDriver> {
     // Each empty source commit enters the wrapper after already delivered
     // notices. Its acceptance drains that wrapper's apply lock without
     // waiting for visibility behind a core hold. No write or notice results.
+    // These empty commits stutter in the model, including under two open
+    // authored transactions; maxDepth bounds authored histories only.
     do {
       // An on-demand cached load may settle before its upstream ensure. Wait
       // for those actual coordinator replies before draining their receiver.
@@ -422,7 +442,11 @@ async function createSQLiteDriver(lane: SessionLane): Promise<SessionDriver> {
           read(durableRows.find((row) => row.key === key)?.metadata),
         ]),
       ),
-    takeRecoveryInputs: () => recoveryInputs.splice(0),
+    takeRecoveryInputs: () => {
+      if (pendingRecoveryInputs.length)
+        throw new Error(`recovery response was not applied before comparison`)
+      return recoveryInputs.splice(0)
+    },
     flush: quiesce,
     settle: async () => {
       await release()
@@ -501,69 +525,19 @@ for (const campaign of [`fixed`, `random`] as const) {
   )
     continue
   it(`keeps tab-local and durable metadata distinct (sqlite, ${campaign})`, async () => {
-    const durabilityLanes = [
-      persistedPeerLane,
-      persistedPeerFullLane,
-      persistedPeerOnDemandLane,
-    ]
-    const states = durabilityLanes.flatMap((lane) =>
-      [`update`, `reinsert`, `inner-reinsert`].flatMap((write) =>
-        [false, true].flatMap((bare) =>
-          [false, true].map(
-            (metadata) =>
-              `${lane.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}`,
-          ),
-        ),
-      ),
-    )
-    const reach = createOracleReach(durabilityProperty, [
-      ...states,
-      `on-demand: cached prior-run version crossed without replay details`,
-    ])
-    const result = await fc.check(
-      fc.asyncProperty(
-        keptMetadataDurabilityHistoriesArbitrary,
-        async (batch) => {
-          const failures: Array<string> = []
-          for (const lane of durabilityLanes) {
-            for (const { write, bare, metadata, history } of batch) {
-              reach.beginHistory()
-              const result = await check(history, lane)
-              if (
-                lane.onDemand &&
-                result.recoveryInputs.some(
-                  (input) =>
-                    input.fromRowVersion === 0 && input.latestRowVersion >= 2,
-                )
-              )
-                reach.reach(
-                  `on-demand: cached prior-run version crossed without replay details`,
-                )
-              if (result.mismatch)
-                failures.push(
-                  `${lane.name}\n${describeMismatch(history, result.mismatch)}`,
-                )
-              else if (result.steps === history.length)
-                reach.reach(
-                  `${lane.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}`,
-                )
-            }
-          }
-          if (failures.length) throw new Error(failures.join(`\n\n`))
-        },
-      ),
-      campaign === `fixed`
-        ? { numRuns: oracleRuns(8), seed: 2220031 }
-        : oraclePropertyOptions(8, durabilityProperty),
-    )
-    recordOracleReplay(durabilityProperty, result)
-    console.info(
-      `ORACLE_REACH ${JSON.stringify({ property: durabilityProperty, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
-    )
-    if (result.failed)
-      throw new Error(
-        `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
-      )
-    reach.assertReached()
+    const recoveryState = `on-demand: cached prior-run version crossed without replay details`
+    await runKeptMetadataDurabilityCampaign({
+      property: durabilityProperty,
+      campaign,
+      runHistory: check,
+      extraStates: [recoveryState],
+      extraReached: (lane, result) =>
+        lane.onDemand &&
+        result.recoveryInputs.some(
+          (input) => input.fromRowVersion === 0 && input.latestRowVersion >= 2,
+        )
+          ? [recoveryState]
+          : [],
+    })
   }, 240_000)
 }

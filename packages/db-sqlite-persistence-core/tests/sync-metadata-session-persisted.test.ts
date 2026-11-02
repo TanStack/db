@@ -1,13 +1,17 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
-import { DbClient, collectionOptions, createCollection } from '@tanstack/db'
+import {
+  DbClient,
+  collectionOptions,
+  createCollection,
+  whenSyncAccepted,
+} from '@tanstack/db'
 import {
   absentMarker,
   cachedMetadata,
   cachedRow,
   describeMismatch,
   historyRegimes,
-  keptMetadataDurabilityHistoriesArbitrary,
   persistedCachedLane,
   persistedConflictLane,
   persistedFlatLane,
@@ -19,6 +23,7 @@ import {
   persistedReadLane,
   persistedReadSeedLane,
   persistedSeedLane,
+  queuedMetadataRepairHistoriesArbitrary,
   runSessionHistory,
   seedReinsertReloadReplay,
   sessionCollectionKeys,
@@ -33,7 +38,10 @@ import {
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { SingleProcessCoordinator, persistedCollectionOptions } from '../src'
-import { runSeedReinsertReloadCampaign } from './sync-metadata-session-campaign'
+import {
+  runKeptMetadataDurabilityCampaign,
+  runSeedReinsertReloadCampaign,
+} from './sync-metadata-session-campaign'
 import type { CollectionConfig, SyncConfig } from '@tanstack/db'
 import type {
   PeerNotice,
@@ -116,6 +124,22 @@ function createHoldingAdapter(cached = false, stores = false) {
   )
   const storedRows = () =>
     stores ? Array.from(stored, ([key, row]) => ({ key, ...row })) : cachedRows
+  // Capture every completed durable transaction before another queued write
+  // can replace it. The shared comparison permits identical empty commits.
+  const metadataSnapshots: Array<Record<string, unknown>> = []
+  const recordMetadata = () => {
+    metadataSnapshots.push(
+      structuredClone(
+        Object.fromEntries(
+          [1, 2].map((key) => {
+            const value = stored.get(key)?.metadata
+            return [key, value === undefined ? absentMarker : value]
+          }),
+        ),
+      ),
+    )
+  }
+  recordMetadata()
   // A reload restores collection metadata from storage, so storage keeps it.
   const storedCollectionMetadata = new Map<string, unknown>()
   const collectionMetadata = () =>
@@ -164,6 +188,7 @@ function createHoldingAdapter(cached = false, stores = false) {
         if (mutation.type === `delete`)
           storedCollectionMetadata.delete(mutation.key)
         else storedCollectionMetadata.set(mutation.key, mutation.value)
+      recordMetadata()
     },
     ensureIndex: () => Promise.resolve(),
   }
@@ -185,6 +210,7 @@ function createHoldingAdapter(cached = false, stores = false) {
         }
         resetEpoch++
         latest = { term: latest.term + 1, seq: 0, rowVersion: 0 }
+        recordMetadata()
         return latest
       }
       if (notice === `delete`) stored.delete(key)
@@ -195,12 +221,14 @@ function createHoldingAdapter(cached = false, stores = false) {
         seq: latest.seq + 1,
         rowVersion: latest.rowVersion + 1,
       }
+      recordMetadata()
       return latest
     },
     resetEpoch: () => resetEpoch,
     /** The row storage holds for a key, if any. */
     storedRow: (key: number): Row | undefined => stored.get(key)?.value,
     storedRowMetadata: (key: number): unknown => stored.get(key)?.metadata,
+    storedMetadataTrace: () => metadataSnapshots,
     holdNextStore: () => {
       holdNext = true
     },
@@ -326,6 +354,8 @@ async function createPersistedDriver(
   const read = (value: unknown) => (value === undefined ? absentMarker : value)
   let readGate: { resolve: () => void } | undefined
   let reading: Promise<unknown> | undefined
+  let storageHeld = false
+  const accepted: Array<Promise<unknown>> = []
   const release = async () => {
     readGate?.resolve()
     readGate = undefined
@@ -333,6 +363,7 @@ async function createPersistedDriver(
     await reading
     reading = undefined
     store.releaseStore()
+    storageHeld = false
     const pending = blocker
     blocker = undefined
     resolveMutation?.()
@@ -344,6 +375,7 @@ async function createPersistedDriver(
 
   return {
     consumerCheckpoint: `final`,
+    storedMetadataTrace: peers ? store.storedMetadataTrace : undefined,
     begin: () => {
       sync.begin()
       depth++
@@ -353,6 +385,9 @@ async function createPersistedDriver(
       const controller = new AbortController()
       if (readGate && depth === 1) readCommits.push(controller)
       const receipt = sync.commit(controller.signal)
+      accepted.push(
+        Promise.resolve(whenSyncAccepted(receipt)).catch(() => undefined),
+      )
       depth--
       if (receipt === true) {
         receiptStates.push(`applied`)
@@ -391,6 +426,7 @@ async function createPersistedDriver(
     collectionSet: (key, value) => metadata().collection.set(key, value),
     collectionDelete: (key) => metadata().collection.delete(key),
     hold: (holdStore, holdRead) => {
+      storageHeld = holdStore || holdRead === true
       if (holdRead) {
         let open!: () => void
         const gate = new Promise<void>((resolve) => {
@@ -511,7 +547,12 @@ async function createPersistedDriver(
       },
       receipts: [...receiptStates],
     }),
-    flush: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    flush: async () => {
+      // Acceptance follows durability even when a core hold delays visibility.
+      // A deliberately held store/read has no completed durable cut yet.
+      if (!storageHeld) await Promise.all(accepted)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    },
     settle: async () => {
       await release()
       while (depth > 0) abort()
@@ -1335,65 +1376,75 @@ for (const campaign of [`fixed`, `random`] as const) {
   )
     continue
   it(`keeps tab-local and durable metadata distinct (persisted, ${campaign})`, async () => {
-    const durabilityLanes = [
-      persistedPeerLane,
-      persistedPeerFullLane,
-      persistedPeerOnDemandLane,
-    ]
-    const states = durabilityLanes.flatMap((lane) =>
-      [`update`, `reinsert`, `inner-reinsert`].flatMap((write) =>
-        [false, true].flatMap((bare) =>
-          [false, true].map(
-            (metadata) =>
-              `${lane.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}`,
+    await runKeptMetadataDurabilityCampaign({
+      property: durabilityProperty,
+      campaign,
+      runHistory: (history, lane) =>
+        runSessionHistory(lane, history, () =>
+          createPersistedDriver(
+            true,
+            true,
+            false,
+            true,
+            lane.fullRows === true,
+            lane.onDemand === true,
           ),
         ),
-      ),
+    })
+  }, 240_000)
+}
+
+// Storage holds belong to this controlled receiver. The native schedule awaits
+// every durable commit separately and uses the same action-level comparison.
+const queuedRepairProperty = `sync-metadata-session.persisted-queued-metadata-repair`
+for (const campaign of [`fixed`, `random`] as const) {
+  if (
+    requestedReplayProperty !== undefined &&
+    (requestedReplayProperty !== queuedRepairProperty || campaign === `fixed`)
+  )
+    continue
+  it(`observes durable metadata between queued commits (${campaign})`, async () => {
+    const name = (bare: boolean, held: boolean) =>
+      `${bare ? `bare` : `metadata`} seed: ${held ? `store hold` : `immediate`}`
+    const states = [false, true].flatMap((bare) =>
+      [false, true].map((held) => name(bare, held)),
     )
-    const reach = createOracleReach(durabilityProperty, states)
+    const reach = createOracleReach(queuedRepairProperty, states)
     const result = await fc.check(
       fc.asyncProperty(
-        keptMetadataDurabilityHistoriesArbitrary,
+        queuedMetadataRepairHistoriesArbitrary,
         async (batch) => {
-          const failures: Array<string> = []
-          for (const lane of durabilityLanes) {
-            for (const { write, bare, metadata, history } of batch) {
-              reach.beginHistory()
-              const result = await runSessionHistory(lane, history, () =>
-                createPersistedDriver(
-                  true,
-                  true,
-                  false,
-                  true,
-                  lane.fullRows === true,
-                  lane.onDemand === true,
-                ),
-              )
-              if (result.mismatch)
-                failures.push(
-                  `${lane.name}\n${describeMismatch(history, result.mismatch)}`,
-                )
-              else if (result.steps === history.length)
-                reach.reach(
-                  `${lane.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}`,
-                )
-            }
+          for (const { bare, held, history } of batch) {
+            reach.beginHistory()
+            const result = await runSessionHistory(
+              persistedPeerLane,
+              history,
+              () => createPersistedDriver(true, true, false, true),
+            )
+            if (result.mismatch)
+              throw new Error(describeMismatch(history, result.mismatch))
+            if (result.steps !== history.length)
+              throw new Error(`constructive history skipped an authored action`)
+            reach.reach(name(bare, held))
           }
-          if (failures.length) throw new Error(failures.join(`\n\n`))
         },
       ),
       campaign === `fixed`
         ? { numRuns: oracleRuns(8), seed: 2220031 }
-        : oraclePropertyOptions(8, durabilityProperty),
+        : oraclePropertyOptions(8, queuedRepairProperty),
     )
-    recordOracleReplay(durabilityProperty, result)
+    recordOracleReplay(queuedRepairProperty, result)
     console.info(
-      `ORACLE_REACH ${JSON.stringify({ property: durabilityProperty, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
+      `ORACLE_REACH ${JSON.stringify({ property: queuedRepairProperty, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
     )
+    if (result.numRuns === 0)
+      throw new Error(
+        `oracle replay executed no history: ${queuedRepairProperty}`,
+      )
     if (result.failed)
       throw new Error(
         `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
       )
     reach.assertReached()
-  }, 240_000)
+  }, 120_000)
 }

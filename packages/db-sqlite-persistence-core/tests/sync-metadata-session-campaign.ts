@@ -2,6 +2,7 @@ import { fc } from '@fast-check/vitest'
 import {
   completedSeedReinsertReloadRegime,
   describeMismatch,
+  keptMetadataDurabilityHistoriesArbitrary,
   persistedPeerFullLane,
   persistedPeerLane,
   persistedPeerOnDemandLane,
@@ -60,6 +61,8 @@ export async function runSeedReinsertReloadCampaign({
         reach.beginHistory()
         completedReach.beginHistory()
         const result = await runHistory(history, lane)
+        if (!result.mismatch && result.steps !== history.length)
+          throw new Error(`constructive history skipped an authored action`)
         const last = history.at(-1)!
         const innerCommit = history.findIndex(
           (action) => action.type === `commit`,
@@ -83,6 +86,8 @@ export async function runSeedReinsertReloadCampaign({
       : oraclePropertyOptions(40, property),
   )
   recordOracleReplay(property, result)
+  if (result.numRuns === 0)
+    throw new Error(`oracle replay executed no history: ${property}`)
   console.info(
     `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, shrinks: result.numShrinks, completedBranchGuards: campaign === `fixed` ? `enforced` : `measured`, counts: Object.fromEntries([...reach.counts(), ...completedReach.counts()]) })}`,
   )
@@ -96,4 +101,96 @@ export async function runSeedReinsertReloadCampaign({
   // guards; the identical random40 campaign measures them. Existing
   // inner/row/reload guards apply to both campaigns.
   if (campaign === `fixed`) completedReach.assertReached()
+}
+
+/**
+ * Every batch reaches every write/seed/metadata/notice premise on each host.
+ * Drivers own their real entry point and recovery evidence; this runner shares
+ * only campaign mechanics, the common comparison and successful reach checks.
+ */
+export async function runKeptMetadataDurabilityCampaign({
+  property,
+  campaign,
+  runHistory,
+  extraStates = [],
+  extraReached = () => [],
+}: {
+  property: string
+  campaign: `fixed` | `random`
+  runHistory: (
+    history: ReadonlyArray<SessionAction>,
+    lane: SessionLane,
+  ) => ReturnType<typeof runSessionHistory>
+  extraStates?: ReadonlyArray<string>
+  extraReached?: (
+    lane: SessionLane,
+    result: Awaited<ReturnType<typeof runSessionHistory>>,
+  ) => ReadonlyArray<string>
+}): Promise<void> {
+  const lanes = [
+    persistedPeerLane,
+    persistedPeerFullLane,
+    persistedPeerOnDemandLane,
+  ]
+  const name = (
+    lane: SessionLane,
+    write: string,
+    bare: boolean,
+    metadata: boolean,
+    notice: string,
+  ) =>
+    `${lane.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}: ${notice}`
+  const states = lanes.flatMap((lane) =>
+    [`update`, `reinsert`, `inner-reinsert`].flatMap((write) =>
+      [false, true].flatMap((bare) =>
+        [false, true].flatMap((metadata) =>
+          [`none`, `row`, `reload`].map((notice) =>
+            name(lane, write, bare, metadata, notice),
+          ),
+        ),
+      ),
+    ),
+  )
+  const reach = createOracleReach(property, [...states, ...extraStates])
+  const result = await fc.check(
+    fc.asyncProperty(
+      keptMetadataDurabilityHistoriesArbitrary,
+      async (batch) => {
+        const failures: Array<string> = []
+        for (const lane of lanes) {
+          for (const { write, bare, metadata, notice, history } of batch) {
+            reach.beginHistory()
+            const result = await runHistory(history, lane)
+            if (result.mismatch)
+              failures.push(
+                `${lane.name}\n${describeMismatch(history, result.mismatch)}`,
+              )
+            else {
+              if (result.steps !== history.length)
+                throw new Error(
+                  `constructive history skipped an authored action`,
+                )
+              reach.reach(name(lane, write, bare, metadata, notice))
+              for (const state of extraReached(lane, result)) reach.reach(state)
+            }
+          }
+        }
+        if (failures.length) throw new Error(failures.join(`\n\n`))
+      },
+    ),
+    campaign === `fixed`
+      ? { numRuns: oracleRuns(8), seed: 2220031 }
+      : oraclePropertyOptions(8, property),
+  )
+  recordOracleReplay(property, result)
+  if (result.numRuns === 0)
+    throw new Error(`oracle replay executed no history: ${property}`)
+  console.info(
+    `ORACLE_REACH ${JSON.stringify({ property, campaign, seed: result.seed, runs: result.numRuns, counts: Object.fromEntries(reach.counts()) })}`,
+  )
+  if (result.failed)
+    throw new Error(
+      `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
+    )
+  reach.assertReached()
 }

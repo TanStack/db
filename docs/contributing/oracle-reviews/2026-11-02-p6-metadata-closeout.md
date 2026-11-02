@@ -309,3 +309,203 @@ behavioral defect. CodeRabbit supplied useful minor cleanup, but this review
 does not demonstrate deep behavioral analysis. Hire for assisted documentation
 review; do not use this sample as evidence of independent oracle-audit ability.
 Final-head CI and the external docstring calculation remain publication checks.
+
+## Ten-item revision review: enforcement repairs
+
+The external review targets `9eef6525d663a3ca586f1e0c5e8af4bab1c29dbb`.
+Evaluation started at `d0c4d0dde04208f9aaa66a03dcb7bada9c4f7cdb`; its intervening
+changes were documentation only. The raw ten claims, grouped experiment plan,
+commands, traces and append-only dispositions remain in task scratch under
+`revision-review-10-*`, `revision-*-green.log` and `revision-calibration/`.
+This section supplements the historical results above. It changes no product
+law or production source, and needs no release changeset.
+
+### Law, experiment and inference
+
+No new product decision is required. Dated decisions 9, 14, 15 and 18 remain
+the authority. A seed's metadata can remain local while cached metadata stays
+durable. D18 explicitly limits seed retention to reloads after named notices;
+its final paragraph applies D15 to differing metadata under unknown writes.
+An old model expectation or open coverage note cannot supersede that decision.
+
+| Accepted law and affected items | Decisive experiment | Inference and enforcement |
+| --- | --- | --- |
+| An implicit keep does not write metadata; an explicit write does (D9/D18; 1, 4, 6). | The supplied nested bare-seed trace passed on both hosts in all three lanes, restoring cached M0 under D15 as independently predicted. A materialization mutant made an incorrect first durable write, then an explicit write repaired it; the old settlement-only runner passed. Seed 46 also produced eight old batches without a reload; reload-only corruption survived all 96 histories. | The authority accusation is false, but action-level durable comparison and guaranteed reload reach were missing. Both receiving paths now compare completed durable metadata before a later action can hide it. The controlled path also compares a transaction trace across held releases. Every constructive batch includes all three notice variants. |
+| Only completed storage observations advance the model, at their actual order (D15; 2, 3). | The old runner consumed inputs after its first authored action. The six actual factories recorded zero setup inputs, so no existing setup metadata failure was demonstrated. A separate runner-order witness supplies a setup input. | The recorder now withholds qualifying raw responses until hydration completes a storage read and application. Undrained responses fail a guard. Setup observations are consumed before authored actions; expected metadata still comes only from independent model storage. |
+| Constructive histories execute their declared actions; fixture transactions preserve scope (5, 7, 8). | All 3,000 sampled sibling lane histories had no skipped actions. The caught-inner-failure SQL probe committed row 2 incorrectly; a root query remained queued behind its own callback. Empty housekeeping commits under two open authored transactions preserved source metadata, consumer rows, receipts and durable metadata. | The reach count mismatch requires illegal actions the constructive grammar excludes; a new guard makes that premise explicit. SQL nested scopes now use savepoints and async-context root reentry, while unrelated callers retain serialized admission. Empty quiescence commits remain a stuttering abstraction; maxDepth bounds authored histories, not the runtime API. |
+
+The primary law, model and comparison remain in
+`packages/db/tests/sync-metadata-session-oracle.ts`. The controlled persisted
+and native SQLite/coordinator hosts receive the same generated histories and
+judgment. Store/read holds postpone the durable comparison until release. The controlled
+adapter preserves each completed metadata snapshot for comparison then;
+core holds postpone visibility but do not postpone durability. This preserves
+commit order, explicit writes, source reads and consumer settlement as separate
+guarantees. The new checkpoint enforces the existing no-write law, rather than
+creating an obligation for every internal SQLite statement.
+
+### Lossless item dispositions
+
+IDs below abbreviate the scratch prefix `META-REV2-`. These are instrument and
+maintenance findings; none establishes a new production defect.
+
+| ID | Technical verdict and severity | PR action and preserved value |
+| --- | --- | --- |
+| 001 | Refuted. D18, dated October 27, explicitly selects the reviewed unknown-write outcome; six same-trace host/lane runs agree. | Retain the shared replay and distinguish named versus unknown notices. No model-law or production change. The broader #2281 reports remain open. |
+| 002 | Confirmed recorder gap, P2. A qualifying transport response alone did not prove that storage was observed or applied. Reading response.requiresFullReload is reading transport data, so the old comment was imprecise. | Correlate response delivery with successful hydration/storage observation before exposing a model input; guard unapplied responses. Retain the serialized recovery scope and its lifecycle exclusions. |
+| 003 | Confirmed latent ordering gap, P2. The old order probe was action/recovery/recovery; actual factories had no setup inputs in the measured runs. | Consume inputs before the authored loop and keep an ordinary runner-order calibration. Do not report an unobserved current metadata failure. |
+| 004 | Confirmed generator/reach gap, P2. Seed 46 omitted reload in eight old batches, and reload-only wrong observations survived. | Construct all no-notice/named/full-reload variants and declare 108 case/lane/notice states per host. Preserve the eight-run budgets and neighboring explicit-write cases. |
+| 005 | Refuted for this constructive grammar. Every action is legal by construction; sampled model checkpoints execute all 3,000 lane histories without skips. | Add a fail-fast successful-history length check, preserving the legality premise and existing completed-branch guards. The reviewer’s suggested executed-step accounting remains relevant to grammars that can skip. |
+| 006 | Confirmed observation gap, P2. A wrong first durable write followed by an explicit repair passed the old settlement comparison. | Compare durable metadata after every action with completed storage I/O and at settlement. Both receiving hosts use the same check. The controlled adapter records every completed durable transaction, so a hold release cannot collapse a wrong write and its later repair. A four-regime generated campaign covers both seed forms and immediate/store-held commits. Coverage-map observations now name these cuts. |
+| 007 | Confirmed fixture defect, P2. Caught inner rollback left row 2 committed; awaited root reentry would cycle behind its own callback. | Add nested savepoints and scoped async root reentry. Retain cross-adapter isolation. Reusing preparedDriver alone would lose the root admission that this two-adapter fixture needs. |
+| 008 | Refuted as a fidelity defect. Empty commits are real runtime operations but introduce no model writes or recorded receipts; the same-path two-open-transaction probe preserved all compared observations. | Keep quiescence and document its stuttering abstraction. Runtime depth three is legal; the grammar's authored depth two is a finite test bound. |
+| 009 | Confirmed duplication, P3. The hosts repeated durability campaign mechanics and state construction. | Extract runKeptMetadataDurabilityCampaign. Hosts retain setup, replay selection and native recovery reach. Source comparison and both receiver suites validate this maintenance repair. |
+| 010 | Confirmed weak calibration, P3. The count guarded label cardinality, not whether actions implemented those labels. Its sampling cost was not a product-performance finding. | Replace diagnostic sampling with checks of all 36 unique cells, seed metadata, actual notices, explicit-write actions, reinsert form, nesting and legality in all lanes. Preserve emitted-work controls. |
+
+### Reviewer assessment
+
+The review supplied seven useful issues or narrower weaknesses out of ten,
+including the important transient-durability and reload omissions. It separated
+several test-integrity concerns from cleanup and proposed useful general fixes.
+However, the highest-ranked authority accusation missed D18's explicit scoped
+decision. The reach and quiescence objections also omitted premises that source
+inspection and executable probes resolved. No submitted test or mutant supported
+the downstream consequences, and preparedDriver was an incomplete fixture cure.
+
+Hire for assisted adversarial test review, with required authority verification
+and executable follow-through. This sample does not support an unsupervised
+final correctness verdict. Its strongest value is identifying distinguishing
+experiments, not proving all ten conclusions.
+
+### Repaired observations and hostile controls
+
+A second cut audit extended item 006 beyond action-level storage reads. A
+store hold can drain several commits during one release. The controlled
+adapter now captures raw durable metadata after every completed transaction
+and peer write. The model records its own durable states after authored
+transitions. The comparison removes only consecutive identical snapshots,
+which permits empty transactions while preserving every change and its order.
+Expected metadata never comes from a production transaction's classifications.
+The native schedule awaits each durable commit separately, so its action cuts
+already distinguish those writes.
+
+`queuedMetadataRepairHistoriesArbitrary` constructs all four bare/non-bare ×
+immediate/store-held histories in each batch, varying seed shape and reinsert
+count. Each makes an implicit keep, then an explicit write. Its controlled
+fixed and random campaigns retain eight-run parity, declare every regime and
+use the same session model/driver/comparison. Direct replay is registered as
+`sync-metadata-session.persisted-queued-metadata-repair`.
+
+| Deliberately wrong execution | Rejection or distinguishing result |
+| --- | --- |
+| Materialization followed by a later explicit write, both hosts | The new comparison rejects the first wrong durable commit at step 5. The earlier runner passed the same corrupted history. |
+| Wrong source observation only after full reload | The expanded grammar reaches reload and the source-metadata assertion rejects `wrong after reload`. The old seed-46 campaign omitted that cut and accepted the corruption. |
+| Keep notice labels but remove peer actions | The grammar calibration rejects the missing actual notice. |
+| Consume setup input after the first action | The runner-order assertion rejects action before recovery. |
+| Remove nested savepoints | The fixture assertions reject row 2 surviving caught inner rollback, for scoped and root reentry. |
+| Remove unrelated-root admission | The isolation assertion reads uncommitted row 1 instead of `[]`. |
+| Discard a successful qualifying pull response before hydration | The actual native path fails `recovery response was not applied before comparison`. It never supplies that unapplied input to the model. |
+| Ignore completed recovery input | The source-metadata comparison rejects cached M0 where the mutant model still expects the seed. The trace records version 0 to 2. |
+| Drop explicit durable metadata writes | The durable comparison rejects the missing explicit value. |
+| Materialization with a later repair inside one store hold, trace disabled | GREEN hostile execution: action-level comparison alone misses both bare and metadata-bearing cases. |
+| The same held materialization, trace enabled | RED at release: the trace contains the wrong intermediate value before the explicit write. Restored production passes. |
+| Replay obsolete durability path `0:0:0` after grammar expansion | Both hosts now reject zero-history execution. The valid path `0` executes the requested batch and passes after restoration. |
+
+The initial obsolete-path control ran zero histories and returned GREEN. That
+is an unreached path, not a surviving recovery mutant. Sibling
+`META-REV2-S001` adds zero-run guards to both shared runners. The following
+valid-path control reaches the native recovery guard. An intermediate log
+validator also searched for `source metadata` instead of the actual law text,
+`source reads its row metadata`; inspection found the intended assertion, and
+the repeated control validated that exact law. Neither diagnostic mistake
+counts as evidence of oracle sensitivity.
+
+Temporary production, model, driver and fixture edits were restored
+byte-for-byte after each control. Logs and restoration hashes remain in
+`revision-calibration-v2/`, `revision-calibration-v3/` and
+`revision-held-calibration/`. No timeout, setup failure or zero-test run is
+credited as a successful value comparison. The temporary probe is absent from
+the final diff.
+
+### Current validation and rubric audit
+
+The final executable tree passes **253 tests**: 76 controlled receiver, 163
+core/session/composition/registry, and 14 native receiver/SQL/work tests. Scoped
+TypeScript, Prettier, changed-oracle lint and diff checks pass. General ESLint
+reports zero errors and 12 warnings, from shadowed test variables and async
+fixture stubs. The full workspace test command was not run locally.
+
+The complete runs use the same commands listed earlier, with
+`tests/oracle-replay.test.ts` included in the core command. Logs use the
+`revision-complete-` prefix. Direct controls and replays use the same Vitest
+flags and matching property/seed/path selectors. The ten changed TypeScript
+file hashes in `revision-final-code-freeze.json` match the executed tree. Their
+sorted path/hash JSON has SHA-256
+`ba6782bae1011f2f7d565157cafa1fe5e0050d63c3c9b761cec5c9e87e8069d6`.
+This record accompanies those repairs on parent `d0c4d0dde`.
+
+The fetched main head is `d9d0a8e50bf8494fe401e2925438b766594c5e26`.
+Its only change since integrated `30e85464e` is a disjoint review-document
+appendix. Production, manifests, lockfile and changesets still have zero delta
+against fetched main. No overlapping implementation integration is outstanding.
+
+Normal constructive campaigns declare all 108 case/lane/notice states per
+host and reach each state eight times. Native prior-cache recovery reaches
+288 histories per campaign. The additional controlled queued-repair campaigns
+reach all four declared regimes eight times. The older 40-run campaigns keep
+their budgets, fixed completed-branch guards, replay selection and comparisons.
+Random completed-branch counts remain measured. No run budget decreases.
+
+Durability replay now uses seed `2220031`, path `0`, because the expanded
+grammar has a different shrink tree. Sibling replay retains seed `527962096`,
+path `0`. Queued-repair replay uses seed `2220031`, path `0`. Each requested
+property executes directly and the fixed campaign stands aside. Obsolete
+zero-history paths fail explicitly.
+
+| Rubric requirement | Current outcome |
+| --- | --- |
+| ORC-001 | D9/D14/D15/D18 supply authority. Named/unknown authorship, direct durability and finite receiving limits remain explicit. |
+| ORC-002 | Expected storage and its trace come from model actions. Transport inputs carry versions, never expected metadata. No production semantic helper computes expected values. |
+| ORC-003 | Opening law/limits, grammar prose, model store rule, recorder and comparison describe their separate responsibilities beside executable code. |
+| ORC-004 | The grammar rebuilds the supplied prefix, omitting notice actions fails calibration, both seed forms and immediate/held repairs occur constructively, and all authored actions satisfy model legality. Depth overflow and writes without an open transaction remain excluded. |
+| ORC-005 | Actual source, peer/coordinator and direct durable paths reach the shared checks. The response guard distinguishes delivery from applied storage observation. Completed durable traces preserve intermediate changes. |
+| ORC-006 | The controls above distinguish assertion rejection, an instrument guard, a GREEN hostile subject and an initially unreached replay. Restored subjects pass. |
+| ORC-007 | Fixed/random campaigns share histories, driver, judgment and budget. Both receiver properties and the new queued property execute checked direct replays. Registry tests cover their selectors. |
+| ORC-008 | The semantic model state and rules are unchanged. The runner's new trace retains a distinguishable history: two different durable writes can end at the same final value. |
+| ORC-009 | Existing glossary mappings remain. Raw transport response, completed hydration input, action cut and durable-transaction snapshot name separate observations. Empty housekeeping commits stutter in the model. |
+| ORC-010 | Existing primary/cleanup failure handling remains. Controls preserve their intended law/checkpoint, and temporary probes retain raw diagnostics separately from cleanup. |
+| ORC-011 | The alleged shared semantic fault in item 001 is disproved by dated D18 and same-path execution. No model-law revision requires another formulation. Snapshot traces challenge the named final-state blind spot directly. |
+| ORC-012 | This append-only versioned section records all applicable requirements, all ten raw findings, the replay sibling and evidence limits. |
+| ORC-013 | Implicit versus explicit writes, bare versus metadata-bearing seeds, named versus unknown notices and immediate versus queued repairs distinguish the conditional law and nearby wrong designs. |
+| ORC-014 | Controlled and native receivers share the same model/grammar/comparison. Native storage, messages and recovery supply the bounded real-host premise. Store holds and their transaction trace belong to the controlled receiver, while native commits are awaited individually. |
+| ORC-015 | Both hosts declare 108 successful notice/case/lane states. The native receiver separately declares prior-cache recovery. The queued campaign declares all four immediate/store-held seed regimes. |
+| ORC-016 | New fixed/constructive histories reuse the model, driver and comparison. Runner-order, SQL fixture and grammar calibrations remain in ordinary test files. |
+
+The durable trace covers the peer lanes, where the model owns durable storage,
+including queued source commits under store holds. Read-hold/abandonment lanes
+retain their source-facing laws and do not establish this direct durable trace.
+No evidence covers intermediate SQL statements, arbitrary concurrent recovery,
+cleanup/expiry/generation changes during recovery, Chromium OPFS, Electron IPC
+or restart. The existing coverage-map owner retains those receiving limits.
+The #2317/P8 source-facing witness, the broader #2281 reports and #2272 scope
+remain separate and open.
+
+### Final loss audit
+
+The raw review was reread after the final diff. All ten original source-order
+items survive: **10 = 7 fixed-now + 3 refuted** (001, 005 and 008). No raw item
+is deferred, duplicated away or awaiting a product decision. The initial
+counts-only calibration's limited value, item 003's absent actual setup input,
+item 007's incomplete preparedDriver cure and the authority dispute in 001
+retain their qualifications. The separately discovered replay item S001 is
+fixed-now. No sibling counterexample remains hidden in the loss accounting.
+
+The same current-head CodeRabbit summary reports no actionable comments and
+100% docstring coverage at `d0c4d0dde`; the previous external percentage is
+resolved. Formal review 5741628374 still covers `9eef6525d` and its wording
+item is fixed. CI snapshot 14 has all 25 checks passing for `d0c4d0dde`.
+These are historical publication observations, not final-head CI for the new
+semantic test/instrument repairs. The new pushed head needs its own checks and
+review coverage before a readiness verdict. This evaluation's accounting and
+authorized repairs are complete within the stated receiving boundary. It does
+not close #2281, #2272 or #2317/P8, or establish whole-library correctness.

@@ -289,6 +289,7 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-seed-reinsert-reload`,
   `sync-metadata-session.sqlite-seed-reinsert-reload`,
   `sync-metadata-session.persisted-kept-metadata-durability`,
+  `sync-metadata-session.persisted-queued-metadata-repair`,
   `sync-metadata-session.sqlite-kept-metadata-durability`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
