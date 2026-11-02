@@ -50,12 +50,20 @@ Implement `EagerLiveSourceDriver`:
 - **`valueKinds`:** the kinds of FID-1's `valueDomain` your backend represents; `jsonValueKinds` for a JSON backend. The driver delivers each value in the backend's own form and the Collection must show it decoded.
 - **Asynchronous steps and `settle`:** provider methods may return a promise, which the check awaits. A fixture whose deliveries reach the Collection later than a few event-loop turns supplies `settle()`, its law-set `propagationStep`, which the check awaits before every comparison.
 - **`source-failure-after-ready`:** declare it when your provider can fail terminally after the first ready (the law set's `terminal-source-end`, or an `errorMapping` that reports a terminal failure); otherwise `fail` is generated only before ready.
+- **`retry-policy` and its parameters:** `transientFailure(error, variant)` makes one failed attempt the adapter retries, of the kind `transientVariants[variant]` (for example an HTTP 503, a 429, or a network error). `retryReportAfter` is your adapter's outage threshold: the failed attempts in a row after ready from which `failureReason` shows the outage (default 1, report at once; Electric 5). `empty-response` with `emptyResponse()`: an accepted response with no change, which restarts that count.
+- **`delivery-error`:** `deliveryError(error)`, after ready: the source reports an error for its current result and keeps its subscription; the next valid delivery clears it (Convex's `QueryFailed`).
+- **`rejectedDelivery`:** how your adapter reports a delivery it rejects after ready, such as two rows with one key: `fails` the sync run (default) or `reported` in `failureReason` until the next valid delivery.
+- **`matchesFailure`:** when your client library creates the error value the Collection reports (an HTTP client's error for a response), the relation that names the value owed for each injected failure, for example by an index the driver carried in a response header. Without it, failures compare by identity with the provider's error.
+- **`txidEvidence`:** `change` when txids travel on each row message, so a batch with no change carries none; default `batch`.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
 Declare only the capabilities your adapter supports; the grammar generates
-only the steps they allow. Then run `checkEagerLiveSourceHistory` over
-`eagerLiveSourceHistoryArb(capabilities)` in a fast-check property. Pass a
-reach counter, so the run fails when histories miss a state the laws need.
+only the steps they allow. Then run `eagerLiveSourceProperty(driver, reach)`
+with `fc.assert`. `reach` is a `ReachCounter` (`beginHistory`, `reach`);
+count the states `reachStatesFor(driver)` lists and fail the run when one
+was reached fewer than five times, so histories that miss a state the laws
+need do not pass silently. The in-repo campaigns use `createOracleReach`
+from `packages/db/tests/oracle-reach.ts`.
 
 ## Drivers
 
