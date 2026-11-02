@@ -6004,7 +6004,7 @@ a step, not only the settled checkpoint. The reference push adapter
 (`tests/reference-adapter-oracle.property.test.ts`,
 `adapter-conformance.eager-live-source.reference`) runs fixed and random
 campaigns of 600 histories with declared reach, a per-change variant, an
-outage-threshold variant with client-created values, and 41 law-named
+outage-threshold variant with client-created values, and 45 law-named
 hostile mutants, with ORC-004 reconstruction, exclusion, and
 ablation controls. The Neon Realtime receiving driver
 (`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
@@ -6099,3 +6099,17 @@ give-up from the adapter's log, so an adapter that stops logging times out
 rather than failing a law. The shared check refuses `retryReportAfter`
 above 1 with `transport-reconnect` or `capability-renewal`: no law fixes
 whether a reconnect or a renewal ends an outage a threshold is counting.
+Convex (`adapter-conformance.eager-live-source.convex`, eager mode over the
+real Convex JavaScript client and a controlled WebSocket that answers the
+sync protocol, complete results, per-batch commits, Convex value kinds as
+values and typed fields) is GREEN after a fix: a failed first load now
+releases the query subscription (LIFE-10). It declares `delivery-error` (a
+`QueryFailed` after ready, cleared by the next result) and reports a
+rejected delivery after ready (`rejectedDelivery: reported`, the law set's
+default `errorMapping`). Limits: no `awaitSync` evidence (the shared
+oracle's waits are txid waits), no transport reconnect, no on-demand or
+paginated mode, no deployment; the truncate on a restarted run's first
+result is not distinguished, because an eager restart starts empty; a
+restart before the server acknowledges the previous removal can receive the
+client's cached result, which the driver avoids by acknowledging at once
+(observation for a maintainer decision).

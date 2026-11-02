@@ -62,7 +62,7 @@ reach counter, so the run fails when histories miss a state the laws need.
 - **Reference adapter** (`tests/reference-adapter.ts`): a small push adapter
   written to conform. `tests/reference-adapter-oracle.property.test.ts` runs a
   fixed-seed and a random campaign with declared reach, a per-change variant,
-  an outage-threshold variant, and 41 hostile mutants of the adapter, each of which the check must reject
+  an outage-threshold variant, and 45 hostile mutants of the adapter, each of which the check must reject
   with its law.
   It runs in the default `pnpm test`.
 - **Neon Realtime** (`tests/neon/`): `@neon/realtime-tanstack` 0.1.1, vendored
@@ -74,6 +74,11 @@ reach counter, so the run fails when histories miss a state the laws need.
   until the adapter is updated, so it has its own config:
   `pnpm --filter @tanstack/db-adapter-conformance test:neon`.
 
+- **Convex** (`packages/convex-db-collection/tests/conformance-driver.ts`):
+  the published adapter in eager mode over the real Convex JavaScript
+  client, through a controlled WebSocket that answers the sync protocol,
+  with complete results and per-batch commits. It runs in that package's
+  default `pnpm test`.
 - **Electric** (`packages/electric-db-collection/tests/conformance-driver.ts`):
   the published adapter in eager mode over the installed
   `@electric-sql/client`, through a controlled `fetchClient` that answers

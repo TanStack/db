@@ -668,6 +668,11 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.eager-live-source`,
     `electric`,
   ],
+  [
+    `convex-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `convex`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -761,6 +766,7 @@ const replayTestNames = new Map([
     `rxdb`,
     `powersync`,
     `electric`,
+    `convex`,
   ].map(
     (driver) =>
       [

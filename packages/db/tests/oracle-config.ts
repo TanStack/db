@@ -148,6 +148,7 @@ const staticOracleProperties = [
   `adapter-conformance.eager-live-source.rxdb`,
   `adapter-conformance.eager-live-source.powersync`,
   `adapter-conformance.eager-live-source.electric`,
+  `adapter-conformance.eager-live-source.convex`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.required-history`,

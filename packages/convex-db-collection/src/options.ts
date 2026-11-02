@@ -83,6 +83,8 @@ export function createConvexOptions<
         if (!ready || terminal) {
           stopped = { error }
           failSync(error)
+          // LIFE-10: the stopped run releases its subscription at once.
+          release()
         } else reportError(error)
         onError?.(error)
       }
@@ -184,6 +186,12 @@ export function createConvexOptions<
         }
       }
       let subscription: ConvexSubscription<TResult> | undefined
+      let released = false
+      const release = (): void => {
+        if (released || !subscription) return
+        released = true
+        subscription.unsubscribe()
+      }
       const refresh = async (): Promise<void> => {
         if (stopped) throw stopped.error
         if (!active || !subscription) {
@@ -209,6 +217,8 @@ export function createConvexOptions<
       readCurrent = refresh
       try {
         subscription = subscribe(receive, fail)
+        // A failure during subscription comes before it can be released.
+        if (stopped) release()
         // Validate subscription construction before readiness. The empty lazy
         // run still precedes subset activation, avoiding first-page replay.
         if (syncMode === `on-demand`) receive([] as TResult)
@@ -247,7 +257,7 @@ export function createConvexOptions<
           active = false
           rejectFirst(new Error(`Convex sync ended before source acceptance.`))
           if (readCurrent === refresh) readCurrent = undefined
-          subscription?.unsubscribe()
+          release()
         },
       }
     },

@@ -27,23 +27,23 @@ reviewed change.
 
 ## Adapters
 
-| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                        |
-| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started |
-| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started                          |
-| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                                               |
-| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started                            |
-| Convex            | eager live source, mutations, on-demand, source shapes                                | Not started                                                                                                                                                                                                                                                            |
-| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                     |
-| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                            |
-| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                            |
-| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                            |
-| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                            |
+| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                                                                     |
+| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started                                              |
+| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started                                                                       |
+| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                                                                                            |
+| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares no optional capability. Mutations, on-demand: not started                                                                         |
+| Convex            | eager live source, mutations, on-demand, source shapes                                | Eager: GREEN (2026-11-02) after a fix, per-batch commits, complete results, over the real Convex JavaScript client and a controlled WebSocket. Driver `convex-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.convex`. Mutations, on-demand, source shapes: not started |
+| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                                                                  |
+| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                         |
+| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                         |
+| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                                                                         |
+| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                                                                         |
 
 ## Suggested order
 
-1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode, done), and Convex. Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
+1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode, done), and Convex (eager mode, done). Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
 2. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN.
 3. **The mutations family.** It applies to every adapter except the storage hosts.
 4. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
@@ -451,3 +451,42 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     RED on 2dd5f0e75 at `[demand, hold, up-to-date, abort, release]`
     (health none); the adapter now fails the run on an external abort
     after ready.
+- **2026-11-02, Convex, eager live source: one Convex defect.** The driver
+  runs the real Convex JavaScript client over a controlled WebSocket, as
+  `sdk.test.ts` does, and answers the sync protocol. Every delivery is the
+  query's complete result in one `Transition`; a failure is a
+  `QueryFailed`; a release is the adapter's unsubscribe, counted at the
+  client boundary.
+  - **Oracle changes this exposed:** capability and step `delivery-error`:
+    after ready, the source reports an error for its current result and
+    keeps its subscription, and the next valid delivery clears it (HEALTH-1,
+    HEALTH-2). Parameter `rejectedDelivery: reported` (the law set's default
+    `errorMapping`): a delivery the adapter rejects after ready joins
+    `failureReason` with the adapter's own error and the run continues.
+    Reach states `delivery-error-reported`, `delivery-error-recovered`,
+    `rejected-delivery-reported`. Reference mutants
+    `delivery-error-is-fatal` and `rejected-delivery-fails`. The FID-1
+    relabel of a publication mismatch is narrowed to value-only
+    differences: a split batch differing in `note` is PUB-1.
+  - **RED:** LIFE-10 at `[fail, changes []]`: after a failed first load,
+    the query subscription stayed open until cleanup.
+  - **Fix:** a stopping failure releases the subscription once, also when
+    the subscription fails while it is being set up.
+  - **GREEN:** Convex suite 114/114; 400 histories per campaign, lowest
+    reach 13 across four seeds; about 15 seconds per campaign.
+  - **Mutants of `src/options.ts`:** the original defect (LIFE-10), a fatal
+    post-ready error (HEALTH-1), no recovery on an equal result (HEALTH-2),
+    skipped updates (PUB-3/FID-4), accepted duplicates (PUB-4), each
+    rejected. Skipping the truncate on a run's first result survives: an
+    eager restart already starts empty; it matters for retained rows, which
+    this lane does not generate.
+  - **Driver lessons:** a real server acknowledges a query removal at once,
+    which drops the client's cached result; without that, a restart reused
+    the previous run's cached error. A result equal to the one the client
+    holds sends no update, but after an error or a rejected result the
+    valid result is a change.
+  - **Observed, for a decision:** a restart that comes before the server
+    acknowledges the previous run's removal receives the client's cached
+    result or error for the query at once (the client serves results by
+    query token).
+  - **Size:** convex-db-collection +26 gzip bytes.
