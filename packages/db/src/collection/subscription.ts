@@ -447,7 +447,7 @@ export class CollectionSubscription
     const joins = open?.syncRunGeneration === syncRunGeneration
     const replayState = joins
       ? open
-      : this.createTruncateReplayState(syncRunGeneration, () => {
+      : this.createTruncateReplayState(() => {
           const currentRows = this.collection.currentStateAsChanges({
             optimizedOnly: false,
           })
@@ -510,7 +510,6 @@ export class CollectionSubscription
     } else {
       // Every overlapping attempt shares one publication baseline and buffer.
       replayState = this.createTruncateReplayState(
-        this.collection._sync.getSyncRunGeneration(),
         () => new Map(this.publishedRows),
       )
       this.truncateReplayState = replayState
@@ -561,11 +560,9 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
   ): void {
-    const isCurrentAttempt = () =>
-      this.truncateReplayState === replayState &&
-      replayState.currentAttempt === attempt
     const isCurrent = () =>
-      isCurrentAttempt() &&
+      this.truncateReplayState === replayState &&
+      replayState.currentAttempt === attempt &&
       this.isSyncRunGenerationCurrent(replayState.syncRunGeneration) &&
       this.isDemandActive(demand)
     const waiting = demand.initialResult
@@ -590,7 +587,7 @@ export class CollectionSubscription
     if (hadPreviousAcquisition) this.releaseAcquisition(previous)
     if (!isCurrent() || demand.requestOptions.signal?.aborted) return
 
-    const next = this.createSubsetAcquisitionRecord(demand)
+    const next = this.createSubsetAcquisitionRecord(demand.requestOptions)
     next.attempt = attempt
     demand.acquisition = next
     demand.acquisitionState = `starting`
@@ -637,9 +634,7 @@ export class CollectionSubscription
       // Replay settlement runs from a Promise callback, so throwing here would
       // create an unobserved derived rejection. Surface subscriber errors like
       // other async collection events instead.
-      queueMicrotask(() => {
-        throw error
-      })
+      reportUncaught(error)
     }
   }
 
@@ -714,18 +709,19 @@ export class CollectionSubscription
     if (replayState.pendingSetups > 0 || replayState.pending.size > 0) return
 
     // A held replacement that loaded decides the demands it replaces.
-    const activeFailures = [...replayState.failures]
-      .filter(
-        ([demand]) =>
-          this.subsetDemands.includes(demand) &&
-          !this.subsetDemands.some(
-            (replacement) =>
-              replacement.replaces?.includes(demand) &&
-              !replayState.failures.has(replacement) &&
-              !replayState.unloaded.has(replacement),
-          ),
+    const activeFailures: Array<Error> = []
+    for (const [demand, error] of replayState.failures) {
+      if (
+        this.subsetDemands.includes(demand) &&
+        !this.subsetDemands.some(
+          (replacement) =>
+            replacement.replaces?.includes(demand) &&
+            !replayState.failures.has(replacement) &&
+            !replayState.unloaded.has(replacement),
+        )
       )
-      .map(([, error]) => error)
+        activeFailures.push(error)
+    }
     try {
       if (activeFailures.length > 0) {
         this.abandonTruncateReplay(replayState, activeFailures)
@@ -880,10 +876,7 @@ export class CollectionSubscription
    */
   failReplacement(error: Error): void {
     if (this.truncateReplayState) return
-    const replayState = this.createTruncateReplayState(
-      this.collection._sync.getSyncRunGeneration(),
-      () => new Map(),
-    )
+    const replayState = this.createTruncateReplayState(() => new Map())
     replayState.pendingSetups = 0
     replayState.failed = true
     replayState.completion.reject(error)
@@ -933,11 +926,10 @@ export class CollectionSubscription
 
   /** One replay state; only direct subscribers buffer a private replacement. */
   private createTruncateReplayState(
-    syncRunGeneration: number,
     privateRows: () => Map<string | number, object>,
   ): TruncateReplayState {
     return {
-      syncRunGeneration,
+      syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
       publicationState: {
         loadedInitialState: this.loadedInitialState,
         snapshotSent: this.snapshotSent,
@@ -1125,18 +1117,19 @@ export class CollectionSubscription
 
   /** Create the record for a fresh, abortable acquisition attempt. */
   private createSubsetAcquisitionRecord(
-    demand: SubsetDemand,
+    requestOptions: LoadSubsetOptions,
+    detached = false,
   ): SubsetAcquisitionRecord {
-    // Eager sync never passes subset options to an adapter, so an abortable
-    // acquisition would only allocate a controller and an AbortError.
-    if (this.collection.config.syncMode !== `on-demand`) {
+    // Detached demand has no physical work. Eager sync never passes subset
+    // options to an adapter. Neither needs an abortable acquisition yet.
+    if (detached || this.collection.config.syncMode !== `on-demand`) {
       return {
-        options: demand.requestOptions,
+        options: requestOptions,
         syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
       }
     }
     const abortController = new AbortController()
-    const requestSignal = demand.requestOptions.signal
+    const requestSignal = requestOptions.signal
     let removeRequestAbortListener: (() => void) | undefined
 
     if (requestSignal?.aborted) {
@@ -1150,7 +1143,7 @@ export class CollectionSubscription
 
     return {
       options: {
-        ...demand.requestOptions,
+        ...requestOptions,
         signal: abortController.signal,
       },
       syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
@@ -1193,28 +1186,14 @@ export class CollectionSubscription
       !this.truncateReplayState &&
       this.options.truncateReplayPublication?.siblingReplays()
     ) {
-      joinedReplay = this.createTruncateReplayState(
-        this.collection._sync.getSyncRunGeneration(),
-        () => new Map(),
-      )
+      joinedReplay = this.createTruncateReplayState(() => new Map())
       this.truncateReplayState = joinedReplay
       this.truncateReplacementPending = true
     }
-    const joinedAttempt = joinedReplay?.currentAttempt
+    const replayState = this.truncateReplayState
+    const replayAttempt = replayState?.currentAttempt
     try {
-      const demand: SubsetDemand = {
-        requestOptions,
-        acquisition: {
-          options: requestOptions,
-          syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
-        },
-        acquisitionState: `starting`,
-      }
-      // A demand that starts during an open replay joins it, parked or not (law
-      // 9: a new demand joins the open replay).
-      const replayState = this.truncateReplayState
-      const replayAttempt = replayState?.currentAttempt
-      if (
+      const detached =
         this.collection.status === `cleaned-up` ||
         // A deferring subscription starts no acquisition attempt until it resumes.
         (this.defersAcquisition &&
@@ -1225,9 +1204,21 @@ export class CollectionSubscription
           (isFailedStatus(this.collection.status) ||
             (this.collection.status !== `idle` &&
               this.collection._sync.syncLoadSubsetFn === null)))
-      ) {
-        demand.acquisitionState = `detached`
-        this.subsetDemands.push(demand)
+      const acquisition = this.createSubsetAcquisitionRecord(
+        requestOptions,
+        detached,
+      )
+      const demand: SubsetDemand = {
+        requestOptions,
+        acquisition,
+        acquisitionState: detached ? `detached` : `starting`,
+      }
+      // A demand that starts during an open replay joins it, parked or not (law
+      // 9: a new demand joins the open replay).
+      // Reentrant release must see the exact acquisition before adapter work
+      // starts. A load that throws is a rejection: it keeps its owner.
+      this.subsetDemands.push(demand)
+      if (detached) {
         const initialResult = createDeferred<void>()
         demand.initialResult = initialResult
         const abort = () =>
@@ -1248,44 +1239,33 @@ export class CollectionSubscription
           )
         return { demand, result: initialResult.promise, started: false }
       }
-      const acquisition = this.createSubsetAcquisitionRecord(demand)
-      demand.acquisition = acquisition
-      const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
-      // Reentrant release must see the exact acquisition before adapter work
-      // starts. A load that throws is a rejection: it keeps its owner.
-      this.subsetDemands.push(demand)
+      const syncRunGeneration = acquisition.syncRunGeneration
       const result = this.collection._sync.loadSubset(acquisition.options)
 
       if (!this.isSyncRunGenerationCurrent(syncRunGeneration)) {
         const demandIndex = this.subsetDemands.indexOf(demand)
         if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
         cancelAcquisition(acquisition)
-        return { demand, result, started: true }
-      }
-
-      demand.acquisitionState = `active`
-      if (!this.subsetDemands.includes(demand)) {
-        this.releaseAcquisition(acquisition)
-        return { demand, result, started: true }
-      }
-
-      if (replayState && replayAttempt) {
-        this.trackTruncateReplayParticipant(
-          replayState,
-          replayAttempt,
-          demand,
-          result,
-          acquisition.options.signal,
-        )
+      } else {
+        demand.acquisitionState = `active`
+        if (!this.subsetDemands.includes(demand)) {
+          this.releaseAcquisition(acquisition)
+        } else if (replayState && replayAttempt) {
+          this.trackTruncateReplayParticipant(
+            replayState,
+            replayAttempt,
+            demand,
+            result,
+            acquisition.options.signal,
+          )
+        }
       }
       return { demand, result, started: true }
     } finally {
       // Adapter and status callbacks can reenter before returning a promise.
       // Setup holds the replacement until that tentative work is registered.
-      if (joinedReplay && joinedAttempt) {
-        joinedReplay.pendingSetups--
-        joinedAttempt.setupComplete = true
-        this.checkTruncateReplayComplete(joinedReplay)
+      if (joinedReplay && replayAttempt) {
+        this.startTruncateReplayAttempt(joinedReplay, replayAttempt, [])
       }
     }
   }

@@ -1121,3 +1121,15 @@ refuted, with its useful coverage retained. Historical final rewrite counts
 remain divergence measurements. Compiler, Solid, browser runtime, and core
 runtime sources stay exact to the parent. CI after this oracle commit remains
 pending; paused callback review at 8464 supplies no current-head review.
+
+## Shared compressed-size refactor (2026-11-02)
+
+The callback branch includes main `035a5260ef994ce3aabed77a3f09b35c71482a9a`
+through a normal merge and carries the identical subscription refactor as the
+release repair. The [compressed-size record](2026-10-30-release-replay-retention.md#compressed-size-refactor-on-current-main-2026-11-02)
+records the changes, exact baseline, final tests and limits. Both branches pass
+1,787 tests in 11 unchanged owners on their final sources. The callback package
+decreases by 59 gzip bytes and 38 Brotli bytes. Its typical app decreases by
+75 gzip bytes and increases by 26 Brotli bytes. Earlier source fingerprints and
+size figures remain historical. No oracle law, comparison, grammar or budget
+changes. Fresh CI must check this pushed head before merge.

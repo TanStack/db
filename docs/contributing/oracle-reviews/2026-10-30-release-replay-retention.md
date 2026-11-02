@@ -607,3 +607,55 @@ excluded/pinned known gaps. No new product behavior or shipped source changes.
 Current-head CI after the oracle commits and actual-main repair integration
 remain separate readiness requirements. No merge or publication is authorized
 by this review.
+
+## Compressed-size refactor on current main (2026-11-02)
+
+The maintainer requested negative compressed bundle size for this repair. Both
+branches now include main `035a5260ef994ce3aabed77a3f09b35c71482a9a` through normal
+merge commits. Their merged trees exactly matched the preceding clean scratch
+integration trees before this refactor.
+
+The subscription constructs its acquisition record once, including for detached
+demand. It captures the replay attempt once, uses the existing attempt finisher
+for its setup hold, and shares the existing uncaught-error reporter. Replay
+failure collection retains the same membership checks and Map insertion order
+without intermediate filter/map arrays. Acquisition admission has one result
+return after its cancellation, release, or participation branch. The replay
+factory reads the current sync-run generation itself instead of receiving the
+same value from every caller.
+
+This is an internal refactor under architecture laws 9, 10, 15 and 16. The
+accepted behavior, oracle models, history grammars, comparisons, reach minima
+and run budgets do not change. The original production RED and hostile-mutant
+evidence above remains historical. This refactor introduces no new behavior or
+bug-class closure claim, so it uses existing applicable owners without changing
+their expectations.
+
+On each branch, one final-source run passes 1,787 tests in 11 files: replay
+refinement, its fixed neighbors, deferred acquisition, lifecycle history and
+publication, subscription replay, lifecycle ownership and cells, adapter
+ownership, preload indexing and index reuse. Focused TypeScript, ESLint,
+formatting, whitespace and `pnpm lint:changed` pass. Each branch uses one Vitest
+worker, for two total. Local Vitest is cached 3.2.4, while CI uses 4.1.12. No
+install, lockfile edit, full repository build or full `pnpm test` run occurs.
+
+The existing `pnpm size:compare --base 035a5260ef994ce3aabed77a3f09b35c71482a9a
+--exact-base --packages db --files` command measures the targeted production
+build and app scenarios. The repair's package gzip changes from 109,825 to
+109,824 bytes, a decrease of 1 byte. Its package Brotli decreases by 114 bytes.
+Its typical app gzip changes from 96,410 to 96,399 bytes, a decrease of 11 bytes.
+Every measured app scenario decreases with gzip. Typical app Brotli increases
+by 14 bytes, and some other Brotli scenarios increase. The package-only `--dev`
+measure, which includes development code as CI does, decreases by 2 gzip bytes
+and 19 Brotli bytes. These local measures do not replace the remote size check.
+
+The callback port's package gzip decreases by 59 bytes and package Brotli by
+38 bytes against the same main. Its typical app gzip decreases by 75 bytes.
+Typical app Brotli increases by 26 bytes. Its earlier size figures retain their
+original historical bindings.
+
+The finite core histories and current-main indexing checks supply the bounds
+of this verification. Existing provider, framework, browser-process and deeper
+history limits remain. Browser and Solid receiving evidence above retains its
+historical source binding. Final-head CI and external review coverage remain
+separate from these local results.
