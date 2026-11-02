@@ -2719,6 +2719,11 @@ function describeError(error: unknown): string {
     : String(error)
 }
 
+/**
+ * Reports the violated law and history prefix at its observation checkpoint.
+ * Recorded host recovery inputs accompany expected and actual values so an
+ * input gap remains distinguishable from a wrong model or production result.
+ */
 export function describeMismatch(
   history: ReadonlyArray<SessionAction>,
   mismatch: SessionMismatch,

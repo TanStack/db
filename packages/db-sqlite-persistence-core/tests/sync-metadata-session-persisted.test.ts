@@ -219,6 +219,11 @@ const drainTurns = async () => {
 
 let run = 0
 
+/**
+ * Drives one persisted Collection through the shared session contract. Lane
+ * options select hydration seeds, cached rows, storage holds and peer notices;
+ * source reads and durable observations remain separate comparison inputs.
+ */
 async function createPersistedDriver(
   withClient = false,
   cached = false,

@@ -29,8 +29,8 @@ premise too rarely. The repair changes the independent model, grammar and
 observations, then restores the serializer already present on main. It does
 not add a production recovery algorithm.
 
-The native path also exposed a model environment-input gap. A real successful
-`pullSince(0)` returned row version 2 without transaction replay details. The
+The native path also exposed a model environment-input gap. A successful
+`pullSince(0)` response returned row version 2 without transaction replay details. The
 shared model now records that response input and applies the existing D15 rule
 to its own storage. It derives no expected metadata from production output or
 the wrapper's reload classifier. Earlier suspicion of a production recovery

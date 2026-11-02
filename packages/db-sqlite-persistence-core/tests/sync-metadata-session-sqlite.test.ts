@@ -67,6 +67,11 @@ type Row = { id: number; v: unknown }
 type Actions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 let run = 0
 
+/**
+ * Supplies the shared model with two SQLite-backed Collections and real
+ * coordinator traffic. Each authored action drains its correlated recovery
+ * before comparison; returned recovery inputs contain no expected metadata.
+ */
 async function createSQLiteDriver(lane: SessionLane): Promise<SessionDriver> {
   const database = new DatabaseSync(`:memory:`)
   const { driver, drained } = createMetadataSQLiteDriver(database)

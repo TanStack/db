@@ -284,3 +284,28 @@ byte-for-byte. The `integrated-calibration/` directory retains exact commands,
 mutated/restored hashes and assertion classifications. All 248 integrated
 tests, replay checks and controls preserve the earlier bounded conclusion.
 Final published-head CI and review remain a separate publication check.
+
+## CodeRabbit documentation follow-up
+
+Review `5741628374` and mutable summary `6507648970` cover published head
+`9eef6525d663a3ca586f1e0c5e8af4bab1c29dbb`. The review contains one minor
+wording suggestion and no inline comments. The summary also reports 57.14%
+docstring coverage against its 80% threshold, without naming deficient functions.
+
+| ID | Evaluation and repair | Evidence and retained value |
+| --- | --- | --- |
+| META-CR-5741628374-001 | Clarified the successful `pullSince(0)` response sentence. The proposed sentence preserves the measured input; calling `real` an adverb was unnecessary. | Direct comparison of the historical sentence and replacement; no evidence or contract change. |
+| META-CR-6507648970-002 | Added missing function documentation to both receiving-driver constructors and `describeMismatch`. | The comments explain receiving inputs, observation cuts and failure diagnostics. The external coverage percentage needs CodeRabbit's next calculation. |
+
+These are documentation findings. They require source and formatting checks,
+not a new product RED or changed oracle histories. TypeScript emission with
+comments removed is identical to the reviewed head for all three edited test
+modules. The 248-test integrated result and five calibration controls therefore
+still describe the executable tree. Budgets, guards and comparisons are unchanged.
+
+The raw review, mutable summary and append-only ledger remain in task scratch.
+The loss audit accounts for both documentation items; neither reveals a new
+behavioral defect. CodeRabbit supplied useful minor cleanup, but this review
+does not demonstrate deep behavioral analysis. Hire for assisted documentation
+review; do not use this sample as evidence of independent oracle-audit ability.
+Final-head CI and the external docstring calculation remain publication checks.
