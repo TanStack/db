@@ -3,6 +3,10 @@ id: "@tanstack/react-db"
 title: "@tanstack/react-db"
 ---
 
+## Classes
+
+- [SuspenseBinding](classes/SuspenseBinding.md)
+
 ## Type Aliases
 
 - [ConditionalUseLiveQueryConfig](type-aliases/ConditionalUseLiveQueryConfig.md)

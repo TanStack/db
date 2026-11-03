@@ -7,7 +7,7 @@ title: equalPersistedSnapshotValues
 function equalPersistedSnapshotValues(a, b): boolean;
 ```
 
-Defined in: [packages/db/src/utils.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L68)
+Defined in: [packages/db/src/utils.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L70)
 
 **`Internal`**
 

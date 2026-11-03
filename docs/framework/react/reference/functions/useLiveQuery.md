@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:376](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L376)
+Defined in: [useLiveQuery.ts:321](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L321)
 
 Create a live query using a query function.
 
@@ -111,7 +111,7 @@ return (
 function useLiveQuery<TContext>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:387](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L387)
+Defined in: [useLiveQuery.ts:332](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L332)
 
 Create a live query using a query function.
 
@@ -213,7 +213,7 @@ return (
 function useLiveQuery<TContext>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:400](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L400)
+Defined in: [useLiveQuery.ts:345](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L345)
 
 Create a live query using a query function.
 
@@ -318,7 +318,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:413](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L413)
+Defined in: [useLiveQuery.ts:358](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L358)
 
 Create a live query using a query function.
 
@@ -431,7 +431,7 @@ return (
 function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:430](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L430)
+Defined in: [useLiveQuery.ts:375](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L375)
 
 Create a live query using a query function.
 
@@ -550,7 +550,7 @@ return (
 function useLiveQuery<TContext>(config): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:491](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L491)
+Defined in: [useLiveQuery.ts:436](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L436)
 
 Create a live query using configuration object
 
@@ -615,7 +615,7 @@ return <div>{data.length} items loaded</div>
 function useLiveQuery<TContext>(config): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:502](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L502)
+Defined in: [useLiveQuery.ts:447](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L447)
 
 Create a live query using a query function.
 
@@ -715,7 +715,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:542](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L542)
+Defined in: [useLiveQuery.ts:487](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L487)
 
 Subscribe to an existing live query collection
 
@@ -783,7 +783,7 @@ return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object & LiveQueryStatusFlags;
 ```
 
-Defined in: [useLiveQuery.ts:557](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L557)
+Defined in: [useLiveQuery.ts:502](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L502)
 
 Create a live query using a query function.
 

@@ -7,7 +7,7 @@ title: toBoundaryError
 function toBoundaryError(cause): Error;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:810](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L810)
+Defined in: [packages/db/src/live-query-observer.ts:777](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L777)
 
 **`Internal`**
 

@@ -54,7 +54,7 @@ React/Preact defer mutation until their render commits.
 
 **`Internal`**
 
-Previous adapter-owned result; absent for shared results.
+undefined skips window tracking; null starts an owned result.
 
 #### startSync?
 
