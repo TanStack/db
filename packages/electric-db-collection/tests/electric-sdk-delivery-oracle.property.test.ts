@@ -241,6 +241,8 @@ type SnapshotReachState =
   | `live-pauses-past-threshold`
   | `live-outage`
   | `live-outage-with-synchronous-throws`
+  | `live-outage-led-by-throw`
+  | `live-outage-crossed-by-throw`
   | `retired-evidence-after-restart`
 const createSnapshotReach = () =>
   createOracleReach<SnapshotReachState>(`electric.sdk-snapshot-delivery`, [
@@ -248,6 +250,8 @@ const createSnapshotReach = () =>
     `live-pauses-past-threshold`,
     `live-outage`,
     `live-outage-with-synchronous-throws`,
+    `live-outage-led-by-throw`,
+    `live-outage-crossed-by-throw`,
     `retired-evidence-after-restart`,
   ])
 // Each campaign declares its own reach.
@@ -261,13 +265,11 @@ let snapshotReach = createSnapshotReach()
 type SubsetRetries = {
   failures: ReadonlyArray<number>
   extraLoads: number
-  /** HTTP 503 responses to the live request after the first load. */
-  liveFailures?: number
   /**
-   * After the first of those 503s, the app's `fetchClient` throws
-   * synchronously on this many live attempts: a failed attempt too.
+   * Failed live attempts after the first load, in order: an HTTP 503, or the
+   * app's `fetchClient` throwing before it returns a request.
    */
-  liveThrows?: number
+  live?: ReadonlyArray<`http` | `throw`>
 }
 
 async function checkSnapshots(
@@ -280,7 +282,10 @@ async function checkSnapshots(
 ) {
   snapshotReach.beginHistory()
   const http = controlledHttp()
+  // Live attempts the app's fetchClient still throws on, and every failed
+  // live attempt the provider made, in order.
   let liveThrows = 0
+  const made: Array<`http` | `throw`> = []
   const batches: Array<Array<Message<Item>>> = []
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
@@ -325,9 +330,12 @@ async function checkSnapshots(
           url: `http://test-url/snapshot-${sequence}`,
           params: { table: `rows` },
           // A live attempt can throw before it returns a request.
+          // Only shape-log requests carry a signal. A prefetch is one too, and
+          // counts (maintainer decision 2026-11-02); `made` records it.
           fetchClient: (input, init) => {
             if (liveThrows > 0 && init?.signal) {
               liveThrows--
+              made.push(`throw`)
               throw new TypeError(`offline`)
             }
             return http.fetchClient(input, init)
@@ -371,13 +379,14 @@ async function checkSnapshots(
     // 2026-10-30). Only the live stream's up-to-date ends it; a subset's
     // end does not.
     let outage = false
-    // HEALTH-4: the outage shows the client's error for a 503 response,
-    // which names the status and the request.
+    // HEALTH-4: the outage shows the attempt that crossed the threshold: the
+    // client's error for a 503 response, which names the status and the
+    // request, or the error the app's fetchClient threw.
     const sourceHealth = (label: string) => {
       expect(collection.health.failureReason !== null, label).toBe(outage)
       if (outage) {
         expect(collection.health.failureReason?.message, label).toMatch(
-          /^HTTP Error 503 at http\S+$/,
+          made[4] === `throw` ? /^offline$/ : /^HTTP Error 503 at http\S+$/,
         )
       }
     }
@@ -473,23 +482,38 @@ async function checkSnapshots(
         [...expected.values()].sort((a, b) => a.id - b.id),
       )
       sourceHealth(`snapshot ${index} source health`)
+      const attempts = index === 0 ? (retries.live ?? []) : []
+      // Leading throws hit the live request that resumes after this load.
+      let next = attempts.findIndex((kind) => kind === `http`)
+      if (next === -1) next = attempts.length
+      liveThrows = next
       const outcome = await atCheckpoint(
         completion,
         `snapshot request completion`,
       )
       if (!outcome.ok) throw outcome.error
-      if (index === 0 && (retries.liveFailures ?? 0) > 0) {
+      if (attempts.length > 0) {
         let live = await atCheckpoint(http.take(), `resumed live request`)
-        for (let attempt = 0; attempt < retries.liveFailures!; attempt++) {
+        // Each 503 is followed by the throws that come before the next one.
+        while (next < attempts.length) {
           live.respond(new Response(`transient`, { status: 503 }))
-          if (attempt === 0) liveThrows = retries.liveThrows ?? 0
+          made.push(`http`)
+          let throws = 0
+          while (attempts[++next] === `throw`) throws++
+          liveThrows = throws
           live = await atCheckpoint(http.take(), `retried live request`)
         }
-        const attempts = retries.liveFailures! + (retries.liveThrows ?? 0)
-        outage = attempts >= 5
+        // The outage follows the attempts the provider made, not the plan.
+        outage = made.length >= 5
         if (outage) snapshotReach.reach(`live-outage`)
-        if (outage && retries.liveFailures! < 5) {
+        if (outage && made.slice(0, 5).includes(`throw`)) {
           snapshotReach.reach(`live-outage-with-synchronous-throws`)
+        }
+        if (outage && made[0] === `throw`) {
+          snapshotReach.reach(`live-outage-led-by-throw`)
+        }
+        if (made[4] === `throw`) {
+          snapshotReach.reach(`live-outage-crossed-by-throw`)
         }
         sourceHealth(`source health after live attempts`)
       }
@@ -625,8 +649,13 @@ async function checkSnapshots(
 // Retries: each subset request gets 0..7 HTTP 503 responses that the client
 // retries before its snapshot, so five or more in a row are common; 0..3
 // extra empty loads (id>=width+2 on) pause the live request up to six times
-// between its responses. After the first load, the live request gets 0..6
-// HTTP 503 responses the client retries; five or more are a source outage.
+// between its responses. After the first load, the live stream makes 0..7
+// failed attempts the client retries, each an HTTP 503 or a throw of the
+// app's fetchClient before it returns a request, in any order: a throw can
+// lead, cross the threshold, or follow a 503. Five or more in a row are a
+// source outage, which shows the attempt that crossed the threshold
+// (HEALTH-4). The expected outage follows the attempts the provider
+// actually made.
 // The source node shows a problem exactly when the live stream had that
 // outage: a subset request's retried attempts and a live pause are not
 // failures of the source, and a subset's end does not end its outage.
@@ -637,8 +666,9 @@ const snapshotProperty = fc.asyncProperty(
   fc.record({
     failures: fc.array(fc.nat(7), { maxLength: 6 }),
     extraLoads: fc.nat(3),
-    liveFailures: fc.nat(6),
-    liveThrows: fc.nat(3),
+    live: fc.array(fc.constantFrom(`http` as const, `throw` as const), {
+      maxLength: 7,
+    }),
   }),
   (width, name, retries) =>
     snapshotViolation.check({ width, name, retries }, () =>
