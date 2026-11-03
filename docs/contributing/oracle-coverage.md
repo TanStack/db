@@ -7218,10 +7218,12 @@ restarted run empty. A fixed-seed campaign runs the React client
 Owner: `packages/db-adapter-conformance/src/mutation-oracle.ts`, run against
 the reference adapter in
 `packages/db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`
-(`adapter-conformance.mutations.reference`, with a structured-clone and a JSON
-provider) and against RxDB in
+(`adapter-conformance.mutations.reference`, with a structured-clone, a JSON,
+and a SQL provider), against RxDB in
 `packages/rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.rxdb`). It checks auto-transaction
+(`adapter-conformance.mutations.rxdb`), and against TrailBase in
+`packages/trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`
+(`adapter-conformance.mutations.trailbase`). It checks auto-transaction
 writes on a ready Collection whose adapter persists them itself: MUT-1 (the
 public rows show the optimistic state while the mutation function runs, and
 no publication shows the earlier synced value when it fulfills), MUT-2 (a
@@ -7246,21 +7248,32 @@ it replaces the held optimistic row. With `server-rewrites`, an accepted
 insert's or update's plan can also rewrite the stored row (normalize the
 title, drop `note`, or set `note` as a server default): the request still
 carries the authored row (MUT-8), and the provider's copy, not the authored
-row, is the row's value once it applies (MUT-1, FID-5). Reach: each of insert, update, and delete
+row, is the row's value once it applies (MUT-1, FID-5). With `field-updates`
+(the law set's capability), an update sends only its changed fields and the
+provider merges them into its row as it is when the write is accepted; a
+removed field is sent in the provider's representation, `null` for a SQL
+provider (`undefinedField: 'null'`, which also sends a complete row with
+every column). With `held-echoes`, the provider can answer an accepted write
+before its change feed delivers the copy, at a `deliver` step: under MUT-7 the
+mutation stays pending, and holds later writes (MUT-10), until its copy
+arrives. A driver can declare several `rejectionKinds`, each reached. Reach: each of insert, update, and delete
 accepted, a rejected write, a held write, a write queued behind a held one, a
 held write rejected, a commit by another client, an accepted field removal, a
-held optimistic row, a copy the provider rewrote, and a quiescent cut after
-writes, at least five histories each per campaign; a grammar arm generates
-updates without `note`, so removals are common. Calibration: nine reference
+held optimistic row, a copy the provider rewrote, an answered write whose copy
+is withheld, each declared rejection kind, and a quiescent cut after writes,
+at least five histories each per campaign; a grammar arm generates
+updates without `note`, so removals are common. Calibration: twelve reference
 mutants each fail
 with their law (an applied copy after the mutation function settles, a
 swallowed or wrapped rejection, a duplicated insert request, writes that do
 not wait for the earlier one, a skipped delete, an update that sends only
 changed fields, under a JSON provider a change feed that carries the
 authored row instead of the stored copy, and an adapter that writes the
-authored row into its synced rows after the provider accepts). The last
-survives the fixed campaign without `server-rewrites` and fails FID-5 with
-it. Before the held-row rule, the
+authored row into its synced rows after the provider accepts, and under a SQL
+provider an update that sends the complete row, one that drops a removed
+field, and a mutation function that settles when the provider answers instead
+of when its copy arrives). The write-back mutant survives the fixed campaign
+without `server-rewrites` and fails FID-5 with it. Before the held-row rule, the
 JSON-provider campaign failed MUT-1 on a fulfilled removal behind a pending
 write.
 
@@ -7297,5 +7310,24 @@ counts its reach (`removedFieldEdits`). Limits: one pending mutation per
 key; commits by another client only while no mutation is pending (a commit
 held behind a pending mutation is core's MUT-5); no manual transactions,
 confirmation through sync (MUT-7), schema validation, or an update that
-changes no field; only the RxDB adapter driver so far.
+changes no field; multi-mutation transactions, so MUT-8's mutation order
+within one transaction; a newer backend value in a disjoint field (commits
+by another client arrive only while nothing is pending); server-generated
+keys.
+
+TrailBase (`undefinedField: 'null'`, `field-updates`, `held-echoes`, and every
+other mutation capability): the driver's RecordApi acts as a TrailBase
+service with SQL rows, records each `createBulk` record, `update`, and
+`delete` as JSON, as the SDK sends it, and sends change events at once or at
+`deliver`. The application writes an absent `note` as `null` and removes a
+held one by assigning `undefined`; removal by assigning `null` is not
+generated. On the parent of the fix, 37 of the fixed campaign's 300 histories
+failed MUT-8 (a removed field was sent as an empty patch, so the service kept
+it), 27 failed MUT-10 (writes did not wait for the earlier one), and 5 failed
+MUT-1 (a write was confirmed by an earlier event on the same key, so its
+optimistic row dropped before its own event arrived). The adapter now sends
+a removed field as `null`, runs each write after the earlier one settles,
+and confirms a write only by an event after it began; a mutant that keeps the
+old confirmation fails MUT-1. The record API is a test double that bypasses
+the SDK's fetch and SSE decoding.
 

@@ -83,6 +83,9 @@ function convertPartial<
   return Object.fromEntries(
     Object.keys(input).map((k: string) => {
       const value = input[k]
+      // A removed field is an own `undefined`, which JSON would drop; it is
+      // the column's `NULL`.
+      if (value === undefined) return [k, null]
       return [k, c[k]?.(value as any) ?? value]
     }),
   ) as OutputType
@@ -140,17 +143,24 @@ export function trailBaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
 
+  // Each key's latest change event, by its sequence number. It is kept only
+  // while a write waits for its confirmation, which must be an event after
+  // the write began, not an earlier one on the same key (MUT-7).
   const seenIds = new Store(new Map<string, number>())
+  let eventSequence = 0
+  // Writes admitted and not yet settled.
+  let writes = 0
 
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
 
   const awaitIds = (
     ids: Array<string>,
+    after: number,
     timeout: number = 120 * 1000,
   ): Promise<void> => {
     const completed = (value: Map<string, number>) =>
-      ids.every((id) => value.has(id))
+      ids.every((id) => (value.get(id) ?? 0) > after)
     if (completed(seenIds.state)) {
       return Promise.resolve()
     }
@@ -171,6 +181,23 @@ export function trailBaseCollectionOptions<
     })
   }
 
+  // Writes reach TrailBase in author order: a write starts at once when no
+  // other is admitted, and otherwise after the earlier one is confirmed or
+  // rejected (MUT-10). A write returns the ids it wrote and settles once the
+  // change stream carries each of them (MUT-7).
+  let turn: Promise<unknown> = Promise.resolve()
+  const persist = (write: () => Promise<Array<string>>): Promise<void> => {
+    const start = async () => {
+      const after = eventSequence
+      await awaitIds(await write(), after)
+    }
+    const run = (writes++ === 0 ? start() : turn.then(start)).finally(() => {
+      if (--writes === 0) seenIds.setState(() => new Map())
+    })
+    turn = run.catch(() => {})
+    return run
+  }
+
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
   const cancelEventReader = () => {
     if (eventReader) {
@@ -187,15 +214,10 @@ export function trailBaseCollectionOptions<
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, fail, collection } = params
       let cancelled = false
-      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
         cancelled = true
         settleListener()
         cancelEventReader()
-        if (periodicCleanupTask !== undefined) {
-          clearInterval(periodicCleanupTask)
-          periodicCleanupTask = undefined
-        }
       }
 
       // TrailBase cursors are opaque. Cache a cursor by its last fetched key
@@ -205,9 +227,8 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       let listening = false
-      // Orders this run's change events against its list calls. Only loads
-      // in flight compare against it, so it is kept only while one runs.
-      let eventSequence = 0
+      // Orders change events against this run's list calls. Only loads in
+      // flight compare against it, so it is kept only while one runs.
       const eventSequenceByKey = new Map<TKey, number>()
       let loadsInFlight = 0
       // Settles when the listener runs, cannot start (with the failure), or
@@ -404,14 +425,13 @@ export function trailBaseCollectionOptions<
           void commit()
 
           if (value) {
-            ++eventSequence
+            const sequence = ++eventSequence
             if (loadsInFlight > 0)
-              eventSequenceByKey.set(getKey(value), eventSequence)
-            seenIds.setState((curr: Map<string, number>) => {
-              const newIds = new Map(curr)
-              newIds.set(String(getKey(value)), Date.now())
-              return newIds
-            })
+              eventSequenceByKey.set(getKey(value), sequence)
+            if (writes > 0)
+              seenIds.setState((curr: Map<string, number>) =>
+                new Map(curr).set(String(getKey(value)), sequence),
+              )
           }
         }
       }
@@ -431,7 +451,6 @@ export function trailBaseCollectionOptions<
       }
 
       async function start() {
-        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
           const eventStream = await config.recordApi.subscribe(`*`)
           if (cancelled) {
@@ -439,7 +458,7 @@ export function trailBaseCollectionOptions<
             return
           }
           const subscribedReader = eventStream.getReader()
-          reader = eventReader = subscribedReader
+          eventReader = subscribedReader
 
           // Start listening for subscriptions first. Otherwise, we'd risk a gap
           // between the initial fetch and starting to listen.
@@ -482,37 +501,6 @@ export function trailBaseCollectionOptions<
           reportStreamEnd(error, true)
           return
         }
-
-        // Lastly, start a periodic cleanup task that will be removed when the
-        // reader closes.
-        if (cancelled || !reader) return
-
-        periodicCleanupTask = setInterval(() => {
-          seenIds.setState((curr) => {
-            const now = Date.now()
-            let anyExpired = false
-
-            const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
-              const expired = now - v > 300 * 1000
-              anyExpired = anyExpired || expired
-              return !expired
-            })
-
-            if (anyExpired) {
-              return new Map(notExpired)
-            }
-            return curr
-          })
-        }, 120 * 1000)
-
-        const clearCleanupTask = () => {
-          if (periodicCleanupTask !== undefined) {
-            clearInterval(periodicCleanupTask)
-            periodicCleanupTask = undefined
-          }
-        }
-        // listen() reports read errors. Observe this separate promise too.
-        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
       void start()
@@ -550,59 +538,47 @@ export function trailBaseCollectionOptions<
     ...collectionConfig,
     sync,
     getKey,
-    onInsert: async (params: InsertMutationFnParams<TItem, TKey>) => {
-      const ids = await config.recordApi.createBulk(
-        params.transaction.mutations.map((tx) => {
-          const { type, modified } = tx
-          if (type !== `insert`) {
-            throw new ExpectedInsertTypeError(type)
-          }
-          return serialIns(modified)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly added to the local
-      // DB by the subscription.
-      await awaitIds(ids.map((id) => String(id)))
-    },
-    onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
-      const ids: Array<string> = await Promise.all(
-        params.transaction.mutations.map(async (tx) => {
-          const { type, changes, key } = tx
-          if (type !== `update`) {
-            throw new ExpectedUpdateTypeError(type)
-          }
-
-          await config.recordApi.update(key, serialUpd(changes))
-
-          return String(key)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly updated in the local
-      // DB by the subscription.
-      await awaitIds(ids)
-    },
-    onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
-      const ids: Array<string> = await Promise.all(
-        params.transaction.mutations.map(async (tx) => {
-          const { type, key } = tx
-          if (type !== `delete`) {
-            throw new ExpectedDeleteTypeError(type)
-          }
-
-          await config.recordApi.delete(key)
-          return String(key)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly updated in the local
-      // DB by the subscription.
-      await awaitIds(ids)
-    },
+    // The optimistic mutation overlay is removed when a handler returns, so
+    // each one waits until the subscription has applied what it wrote.
+    onInsert: (params: InsertMutationFnParams<TItem, TKey>) =>
+      persist(async () => {
+        const ids = await config.recordApi.createBulk(
+          params.transaction.mutations.map((tx) => {
+            const { type, modified } = tx
+            if (type !== `insert`) {
+              throw new ExpectedInsertTypeError(type)
+            }
+            return serialIns(modified)
+          }),
+        )
+        return ids.map((id) => String(id))
+      }),
+    onUpdate: (params: UpdateMutationFnParams<TItem, TKey>) =>
+      persist(() =>
+        Promise.all(
+          params.transaction.mutations.map(async (tx) => {
+            const { type, changes, key } = tx
+            if (type !== `update`) {
+              throw new ExpectedUpdateTypeError(type)
+            }
+            await config.recordApi.update(key, serialUpd(changes))
+            return String(key)
+          }),
+        ),
+      ),
+    onDelete: (params: DeleteMutationFnParams<TItem, TKey>) =>
+      persist(() =>
+        Promise.all(
+          params.transaction.mutations.map(async (tx) => {
+            const { type, key } = tx
+            if (type !== `delete`) {
+              throw new ExpectedDeleteTypeError(type)
+            }
+            await config.recordApi.delete(key)
+            return String(key)
+          }),
+        ),
+      ),
     utils: {
       cancel: cancelEventReader,
     },

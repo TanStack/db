@@ -300,15 +300,11 @@ describe(`TrailBase Integration`, () => {
       const errors: Array<unknown> = []
       const recordUnhandled = (error: unknown) => errors.push(error)
       const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
-      const intervals = vi.spyOn(globalThis, `setInterval`)
-      const clear = vi.spyOn(globalThis, `clearInterval`)
       process.on(`unhandledRejection`, recordUnhandled)
       const collection = createCollection(setUp(recordApi))
 
       try {
         await collection.preload()
-        const timer = intervals.mock.results.at(-1)?.value
-        expect(timer).toBeDefined()
         const expectedRows = new Map([[1, row]])
         if (ending === `buffered-close`) {
           for (const id of [2, 3]) {
@@ -322,7 +318,6 @@ describe(`TrailBase Integration`, () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
 
         expect(errors).toEqual([])
-        expect(clear).toHaveBeenCalledWith(timer)
         expect(stream.locked).toBe(false)
         expect(collection.status).toBe(`ready`)
         expect(stripState(collection.state)).toEqual(expectedRows)
@@ -343,8 +338,6 @@ describe(`TrailBase Integration`, () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
         process.off(`unhandledRejection`, recordUnhandled)
         reported.mockRestore()
-        intervals.mockRestore()
-        clear.mockRestore()
       }
     },
   )
