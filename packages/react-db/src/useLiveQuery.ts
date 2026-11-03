@@ -761,6 +761,7 @@ export function useLiveQueryImpl(
         instance.subscribe = subscribe
         commitWindow()
       }
+      claim?.()
     })
     // A Suspense render asks for its data. Preloading starts the sync run, so a
     // source that already holds the rows makes it ready before the snapshot is
@@ -786,13 +787,16 @@ export function useLiveQueryImpl(
     }
     const returned = useSyncExternalStore(
       subscribe,
-      () => suspense?.read(observer.getSnapshot()) ?? observer.getSnapshot(),
-      () =>
-        suspense?.read(observer.getServerSnapshot(forSuspense)) ??
-        observer.getServerSnapshot(forSuspense),
+      () => {
+        const snapshot = observer.getSnapshot()
+        return suspense ? suspense.read(snapshot) : snapshot
+      },
+      () => {
+        const snapshot = observer.getServerSnapshot(forSuspense)
+        return suspense ? suspense.read(snapshot) : snapshot
+      },
     )
     const claim = returned.isReady ? suspense?.claim() : undefined
-    useWindowCommitEffect(() => claim?.())
     // Pass render-local metadata directly to the Suspense wrapper. The public
     // hook returns the observer's stable snapshot without a wrapper allocation.
     if (forSuspense) {

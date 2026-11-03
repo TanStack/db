@@ -339,7 +339,11 @@ declareOracle({
  * that same preload first. React preserves the mounted binding's refs in this
  * case. On resumption it still owes its own output, not the peer's mutable page.
  * The before-hook hold forces that ordering instead of assuming React's retry
- * order. Expected rows and identity use the shared page comparison above.
+ * order. Peer-first admission also crosses a mounted replacement with a peer
+ * already pending under the target plan. A post-hook hold discards a successful
+ * candidate after resolution. Neither schedule changes the shared page law.
+ * Work counters are diagnostics; uncommitted Collection retention is not owed.
+ * Expected rows and identity use the shared page comparison above.
  */
 const retryStates = [
   `replacement suspended`,
@@ -347,12 +351,15 @@ const retryStates = [
   `replacement resumed`,
   `page isolated`,
   `borrower moves after compiler retries`,
+  `peer pending before mounted replacement`,
+  `successful replacement held after hook`,
 ] as const
 async function checkRetryOwnershipHistory(
   history: RenderHistory,
   withClient: boolean,
   keyed: boolean,
   simultaneous: boolean,
+  order: `compiler-first` | `peer-first` | `post-hook`,
   reach: ReturnType<typeof createOracleReach<(typeof retryStates)[number]>>,
 ) {
   const lifetime = new ScenarioLifetime()
@@ -369,6 +376,7 @@ async function checkRetryOwnershipHistory(
     }),
   )
   let release: (() => void) | undefined
+  let replacementRendersHeld = 0
   const replacement = createCollection({
     getKey: (row: WindowRow) => row.id,
     sync: {
@@ -397,8 +405,13 @@ async function checkRetryOwnershipHistory(
   const blocked = new Promise<void>(() => {})
   const hook = renderHook(
     ({ replace, block, offset }) => {
-      if (block) throw blocked
-      return useLiveSuspenseQuery(query(replace, offset))
+      if (block && order !== `post-hook`) throw blocked
+      const result = useLiveSuspenseQuery(query(replace, offset))
+      if (block && order === `post-hook`) {
+        replacementRendersHeld++
+        throw blocked
+      }
+      return result
     },
     {
       initialProps: props,
@@ -415,33 +428,53 @@ async function checkRetryOwnershipHistory(
       await Promise.resolve()
     })
     expect(hook.result.current.data).toHaveLength(history.limit)
-    await act(() => hook.rerender({ ...props, replace: true }))
-    expect(screen.getByTestId(`retry-primary`)).toBeTruthy()
-    expect(release, `replacement source was requested`).toBeDefined()
-    reach.reach(`replacement suspended`)
-    await act(() => hook.rerender({ ...props, replace: true, block: true }))
     let peerOffset = 0
-    const peer = renderHook(
-      () => useLiveSuspenseQuery(query(true, peerOffset)),
-      {
+    const mountPeer = () =>
+      renderHook(() => useLiveSuspenseQuery(query(true, peerOffset)), {
         wrapper: ({ children }) => (
           <Suspense fallback={<div data-testid="retry-peer" />}>
             {children}
           </Suspense>
         ),
-      },
-    )
+      })
+    const earlyPeer = order === `peer-first` ? mountPeer() : undefined
+    if (earlyPeer) {
+      expect(screen.getByTestId(`retry-peer`)).toBeTruthy()
+      reach.reach(`peer pending before mounted replacement`)
+    }
+    await act(() => hook.rerender({ ...props, replace: true }))
+    expect(screen.getByTestId(`retry-primary`)).toBeTruthy()
+    expect(release, `replacement source was requested`).toBeDefined()
+    reach.reach(`replacement suspended`)
+    await act(() => hook.rerender({ ...props, replace: true, block: true }))
+    const peer = earlyPeer ?? mountPeer()
     lifetime.defer(() => peer.unmount())
-    expect(
-      replacement.subscriberCount,
-      `both pending bindings adopted one preload`,
-    ).toBe(1)
+    if (!earlyPeer)
+      expect(
+        replacement.subscriberCount,
+        `both pending bindings adopted one preload`,
+      ).toBe(1)
+    else
+      console.info(`mounted replacement pending work`, {
+        withClient,
+        keyed,
+        subscriptions: replacement.subscriberCount,
+      })
     await act(() => {
-      if (simultaneous) hook.rerender({ ...props, replace: true })
+      if (simultaneous && order !== `post-hook`)
+        hook.rerender({ ...props, replace: true })
       release!()
     })
     expect(peer.result.current.data).toHaveLength(history.limit)
-    if (!simultaneous) expect(screen.getByTestId(`retry-primary`)).toBeTruthy()
+    if (!simultaneous || order === `post-hook`)
+      expect(screen.getByTestId(`retry-primary`)).toBeTruthy()
+    if (order === `post-hook`) {
+      expect(
+        replacementRendersHeld,
+        `React attempted the ready hook before the hold`,
+      ).toBeGreaterThan(0)
+      reach.reach(`successful replacement held after hook`)
+    }
     reach.reach(`peer ready`)
     const peerCollection = peer.result.current.collection
     await act(() => hook.rerender({ ...props, replace: true }))
@@ -517,55 +550,67 @@ async function checkRetryOwnershipHistory(
 for (const client of [false, true])
   for (const keyed of [false, true])
     for (const simultaneous of [false, true])
-      for (const campaign of [`fixed`, `fresh`] as const) {
-        const property = `react.window-retry-ownership`
-        const test =
-          campaign === `fixed`
-            ? oracleReplayTest(it)
-            : oracleReplayTest(it, property)
-        test(`retry ownership/${client ? `client` : `unscoped`}/${keyed ? `keyed` : `derived`}/${simultaneous ? `co-ready` : `borrower-first`}/${campaign}`, async () => {
-          const reach = createOracleReach(
-            `${property}/${client}/${keyed}/${simultaneous}/${campaign}`,
-            retryStates,
-            { fixedHistories: examples.length },
-          )
-          let index = 0
-          const fidelity = createOracleFailureFidelity<RenderHistory>()
-          try {
-            await fidelity.assert(() =>
-              fc.assert(
-                fc.asyncProperty(renderHistoryArbitrary, async (history) => {
-                  reach.beginHistory({ fixed: index++ < examples.length })
-                  await fidelity.run(history, () =>
-                    checkRetryOwnershipHistory(
-                      history,
-                      client,
-                      keyed,
-                      simultaneous,
-                      reach,
-                    ),
-                  )
-                }),
-                campaign === `fixed`
-                  ? {
-                      numRuns: oracleRuns(6) + examples.length,
-                      seed: 2345,
-                      examples: [...examples].map(([value]) => [value]),
-                    }
-                  : oraclePropertyOptions(6, property, {
-                      examples: [...examples].map(([value]) => [value]),
-                    }),
+      for (const order of [
+        `compiler-first`,
+        `peer-first`,
+        `post-hook`,
+      ] as const)
+        for (const campaign of [`fixed`, `fresh`] as const) {
+          const property = `react.window-retry-ownership`
+          const test =
+            campaign === `fixed`
+              ? oracleReplayTest(it)
+              : oracleReplayTest(it, property)
+          test(`retry ownership/${client ? `client` : `unscoped`}/${keyed ? `keyed` : `derived`}/${simultaneous ? `co-ready` : `borrower-first`}/${order}/${campaign}`, async () => {
+            const reach = createOracleReach(
+              `${property}/${client}/${keyed}/${simultaneous}/${order}/${campaign}`,
+              retryStates.filter(
+                (state) =>
+                  (state !== `peer pending before mounted replacement` ||
+                    order === `peer-first`) &&
+                  (state !== `successful replacement held after hook` ||
+                    order === `post-hook`),
               ),
+              { fixedHistories: examples.length },
             )
-          } finally {
-            console.info(
-              `retry reach ${client}/${keyed}/${simultaneous}/${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
-          }
-          reach.assertReached()
-        })
-      }
+            let index = 0
+            const fidelity = createOracleFailureFidelity<RenderHistory>()
+            try {
+              await fidelity.assert(() =>
+                fc.assert(
+                  fc.asyncProperty(renderHistoryArbitrary, async (history) => {
+                    reach.beginHistory({ fixed: index++ < examples.length })
+                    await fidelity.run(history, () =>
+                      checkRetryOwnershipHistory(
+                        history,
+                        client,
+                        keyed,
+                        simultaneous,
+                        order,
+                        reach,
+                      ),
+                    )
+                  }),
+                  campaign === `fixed`
+                    ? {
+                        numRuns: oracleRuns(6) + examples.length,
+                        seed: 2345,
+                        examples: [...examples].map(([value]) => [value]),
+                      }
+                    : oraclePropertyOptions(6, property, {
+                        examples: [...examples].map(([value]) => [value]),
+                      }),
+                ),
+              )
+            } finally {
+              console.info(
+                `retry reach ${client}/${keyed}/${simultaneous}/${order}/${campaign}`,
+                Object.fromEntries(reach.counts()),
+              )
+            }
+            reach.assertReached()
+          })
+        }
 declareOracle({
   grammar: [renderHistoryArbitrary],
   check: [checkRetryOwnershipHistory],

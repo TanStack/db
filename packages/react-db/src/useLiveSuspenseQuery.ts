@@ -2,6 +2,7 @@
 
 import { useRef } from 'react'
 import {
+  getLiveQueryStatusFlags,
   getSourceObjectToken,
   getStableValueHash,
   rejectLiveQueryInput,
@@ -76,7 +77,6 @@ function getSourceQualifiedSuspenseKey(
 export class SuspenseBinding {
   private entry?: SuspenseCollectionEntry
   private seed?: LiveQuerySnapshot<object, string | number>
-  private seedObserver?: LiveQueryObserver<object, string | number>
   collection?: Collection<any, any, any>
   promise?: Promise<void>
   ready = false
@@ -97,9 +97,11 @@ export class SuspenseBinding {
       cache = new Map()
       suspenseCollectionsByClient.set(scope, cache)
     }
-    const key = getSourceQualifiedSuspenseKey(input, hash, client)
     const owned = this.entry?.owner === this
-    const cached = owned ? undefined : cache.get(key)
+    const key = owned
+      ? undefined
+      : getSourceQualifiedSuspenseKey(input, hash, client)
+    const cached = key === undefined ? undefined : cache.get(key)
     if (cached) return (this.entry = cached).collection
 
     // A new attempt gets a fresh resolver token. Adoption retains that token;
@@ -109,13 +111,14 @@ export class SuspenseBinding {
     if (owned && collection === this.entry!.collection) return collection
     this.seed = undefined
     if (collection && this.entry?.collection !== collection) {
+      const entryKey = key ?? getSourceQualifiedSuspenseKey(input, hash, client)
       const release = () => {
-        if (cache.get(key) === entry) cache.delete(key)
+        if (cache.get(entryKey) === entry) cache.delete(entryKey)
         removeStatusListener()
       }
       const entry = { collection, windowOwner, release }
       this.entry = entry
-      cache.set(key, entry)
+      cache.set(entryKey, entry)
       const removeStatusListener = collection.on(
         `status:change`,
         ({ status }) => {
@@ -151,7 +154,6 @@ export class SuspenseBinding {
     const collection = compile(false, windowOwner)
     if (!collection) return
     this.seed = { ...snapshot, collection }
-    this.seedObserver = resource
     this.entry = {
       collection,
       windowOwner,
@@ -167,21 +169,13 @@ export class SuspenseBinding {
       // Its failure must end both the seed and the hook's ready latch.
       if (this.seed && snapshot.isLoadingError) this.ready = false
       this.seed = undefined
-      this.seedObserver = undefined
     }
-    // Keep source health current while the private output acquires its first
-    // subset. Its seed rows stay fixed: the successful peer may move its page.
-    const source = this.seedObserver?.getSnapshot()
-    if (
-      this.seed &&
-      source?.isReady &&
-      (source.health !== this.seed.health ||
-        source.isSyncError !== this.seed.isSyncError)
-    ) {
+    // Copy only rows from the peer. This output's observer owns its health,
+    // including source notifications and query-local request failures.
+    if (this.seed && snapshot.health !== this.seed.health) {
       this.seed = {
         ...this.seed,
-        health: source.health,
-        isSyncError: source.isSyncError,
+        ...getLiveQueryStatusFlags(`ready`, snapshot.health),
       }
     }
     return this.seed ?? snapshot

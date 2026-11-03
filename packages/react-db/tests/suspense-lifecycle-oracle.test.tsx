@@ -972,9 +972,16 @@ describe(`Suspense lifecycle histories`, () => {
  * Its first-load rejection ends the provisional seed and reaches the boundary,
  * as in the observer hydration oracle; failure after owned readiness is health.
  * Unlike the old peer lane, both hooks are present before any successful commit.
+ * Source health reports and recovery must notify a seeded successful output
+ * while its private startup is held, without an unrelated host render. Both
+ * sides of a peer move receive that law (glossary health tree; hook health API).
+ * Request errors belong to the query owning the demand (glossary). A peer page
+ * rejection must not change a seeded output's own root health or source health.
  */
 const siblingsArbitrary = fc.record({
   sharedBoundary: fc.boolean(),
+  holdCandidate: fc.boolean(),
+  peerFailure: fc.boolean(),
   sourceReady: fc.boolean(),
   sameQuery: fc.boolean(),
   first: fc.integer({ min: 0, max: 1 }),
@@ -993,6 +1000,8 @@ function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
     history,
     {
       ...history,
+      holdCandidate: false,
+      peerFailure: false,
       sharedBoundary: true,
       sameQuery: true,
       first: 0,
@@ -1001,6 +1010,8 @@ function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
     },
     {
       ...history,
+      holdCandidate: false,
+      peerFailure: false,
       sharedBoundary: true,
       sameQuery: true,
       first: 0,
@@ -1010,6 +1021,8 @@ function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
     },
     {
       ...history,
+      holdCandidate: false,
+      peerFailure: false,
       sharedBoundary: true,
       sameQuery: true,
       first: 0,
@@ -1017,20 +1030,89 @@ function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
       startup: `reject`,
       rejectBeforeMove: false,
     },
-    { ...history, sharedBoundary: true, sameQuery: false, simultaneous: false },
     {
       ...history,
+      holdCandidate: false,
+      peerFailure: false,
+      sharedBoundary: true,
+      sameQuery: false,
+      simultaneous: false,
+    },
+    {
+      ...history,
+      holdCandidate: false,
+      peerFailure: false,
+      sharedBoundary: true,
+      sameQuery: true,
+      first: 0,
+      sourceReady: true,
+      startup: `fulfill`,
+    },
+    {
+      ...history,
+      holdCandidate: false,
+      peerFailure: false,
       sharedBoundary: false,
       sameQuery: true,
       first: 1,
       sourceReady: true,
     },
+    {
+      ...history,
+      holdCandidate: false,
+      peerFailure: true,
+      sharedBoundary: true,
+      sameQuery: true,
+      first: 0,
+      sourceReady: false,
+      startup: `fulfill`,
+    },
+    ...[true, false].map((sharedBoundary) => ({
+      ...history,
+      holdCandidate: true,
+      peerFailure: false,
+      sharedBoundary,
+      sameQuery: true,
+      first: 0,
+      sourceReady: false,
+      startup: `fulfill` as const,
+    })),
   ]
 }
 function checkSiblingOwnership(left: object, right: object, cut: string) {
   atOracleCheckpoint(`independent successful outputs`, cut, () => {
     expect(left, `every successful sibling owns its output`).not.toBe(right)
   })
+}
+// A successful view must expose its source's current failure reason and its
+// removal. This judges input reports, independently of observer/cache mechanics.
+function checkSiblingHealth(
+  health: HealthNode | undefined,
+  cause: unknown,
+  cut: string,
+) {
+  atOracleCheckpoint(`seeded source health notification`, cut, () => {
+    const problem = health?.sources[0]?.failureReason
+    if (cause === undefined) expect(problem).toBeNull()
+    else {
+      expect(problem, `source report reaches the committed hook`).toBeTruthy()
+      expect(problem!.cause).toBe(cause)
+    }
+  })
+}
+function checkSiblingRequestIsolation(health: HealthNode | undefined) {
+  atOracleCheckpoint(
+    `query-local request health`,
+    `seed after peer request failure`,
+    () => {
+      expect(health, `successful seed exposes health`).toBeDefined()
+      expect(
+        health!.error,
+        `peer query does not own this output's demand`,
+      ).toBeNull()
+      expect(health!.sources[0]?.error, `source did not fail`).toBeNull()
+    },
+  )
 }
 const siblingStates = [
   `co-mounted pending peers`,
@@ -1051,6 +1133,13 @@ const siblingStates = [
   `private startup rejection after success`,
   `private rejection before peer move`,
   `private rejection after peer move`,
+  `seed source health before peer move`,
+  `seed source health after peer move`,
+  `seed source health recovery`,
+  `post-hook discarded candidate`,
+  `peer commits before candidate`,
+  `discarded candidate resumes`,
+  `peer request error isolated from seed`,
 ] as const
 async function checkSiblings(
   history: SiblingsHistory,
@@ -1069,6 +1158,11 @@ async function checkSiblings(
       rank,
     }))
     const releases: Array<() => void> = []
+    const loads = [0, 0]
+    const reports: Array<{
+      reportError: (cause: unknown) => void
+      reportHealthy: () => void
+    }> = []
     const demands: Array<
       Array<{ fulfill: () => void; reject: (cause: unknown) => void }>
     > = [[], []]
@@ -1078,7 +1172,15 @@ async function checkSiblings(
         syncMode: `on-demand`,
         defaultIndexType: BTreeIndex,
         sync: {
-          sync: ({ begin, write, commit, markReady }) => {
+          sync: ({
+            begin,
+            write,
+            commit,
+            markReady,
+            reportError,
+            reportHealthy,
+          }) => {
+            reports[slot] = { reportError, reportHealthy }
             begin()
             for (const value of rows)
               write({ type: `insert`, value: { ...value } })
@@ -1088,10 +1190,12 @@ async function checkSiblings(
               for (const demand of demands[slot]!.splice(0)) demand.fulfill()
             }
             return {
-              loadSubset: () =>
-                new Promise<void>((resolve, reject) => {
+              loadSubset: () => {
+                loads[slot]!++
+                return new Promise<void>((resolve, reject) => {
                   demands[slot]!.push({ fulfill: resolve, reject })
-                }),
+                })
+              },
             }
           },
         },
@@ -1109,6 +1213,10 @@ async function checkSiblings(
       }
     }> = [{}, {}]
     const rendered = [0, 0]
+    let holdCandidate = history.holdCandidate
+    const blocked = new Promise<void>(() => {})
+    let discardedCandidates = 0
+    const candidates = new Set<object>()
     const failure: Recorded = {}
     const diagnostics = vi.spyOn(console, `error`).mockImplementation(() => {})
     lifetime.defer(() => diagnostics.mockRestore())
@@ -1126,6 +1234,7 @@ async function checkSiblings(
             .offset(offset)
             .select(({ row }) => ({ id: row.id, rank: row.rank })),
       })
+      candidates.add(result.collection)
       useLayoutEffect(() => {
         const peer = records[1 - slot]!.result
         if (peer)
@@ -1136,6 +1245,10 @@ async function checkSiblings(
           )
         records[slot]!.result = result
       })
+      if (slot === 0 && holdCandidate) {
+        discardedCandidates++
+        throw blocked
+      }
       return <output data-slot={slot} data-phase="ready" />
     }
     const fallback = <output data-phase="pending" />
@@ -1203,6 +1316,36 @@ async function checkSiblings(
       })
       await settle()
     }
+    if (holdCandidate) {
+      expect(
+        discardedCandidates,
+        `React discarded a candidate after its hook returned`,
+      ).toBeGreaterThan(0)
+      reach.reach(`post-hook discarded candidate`)
+      if (!history.sharedBoundary) {
+        expect(records[0]!.result).toBeUndefined()
+        expect(
+          records[1]!.result,
+          `independent boundary let the peer commit first`,
+        ).toBeDefined()
+        reach.reach(`peer commits before candidate`)
+      }
+      holdCandidate = false
+      await act(() => mounted!.rerender(tree(0)))
+      await settle()
+      for (
+        let turn = 0;
+        turn < 4 &&
+        mounted.container.querySelectorAll('[data-phase="ready"]').length < 2;
+        turn++
+      ) {
+        await act(() => {
+          for (const release of releases) release()
+        })
+        await settle()
+      }
+      reach.reach(`discarded candidate resumes`)
+    }
     // This bounded cut asks for host progress, not a particular retry count.
     // A fallback after every requested source is ready violates the model's view.
     expect(
@@ -1210,6 +1353,18 @@ async function checkSiblings(
       `both initial obligations made retry progress`,
     ).toHaveLength(2)
     reach.reach(`both committed`)
+    if (history.holdCandidate || history.sameQuery || !history.simultaneous)
+      console.info(`sibling initial work`, {
+        scope,
+        keyed,
+        shared: history.sharedBoundary,
+        sameQuery: history.sameQuery,
+        simultaneous: history.simultaneous,
+        holdCandidate: history.holdCandidate,
+        loads,
+        returnedCollections: candidates.size,
+        discardedCandidates,
+      })
     reach.reach(
       history.sourceReady ? `ready source` : `lagging source readiness`,
     )
@@ -1296,7 +1451,48 @@ async function checkSiblings(
           : `private rejection after peer move`,
       )
     }
+    // The source, not the peer's query-local request, owns these reports.
+    // Only the sync report drives React; no rerender repairs a missed notify.
+    const reportSeedHealth = async (offset: number, afterMove: boolean) => {
+      if (
+        history.holdCandidate ||
+        !history.sameQuery ||
+        history.first !== 0 ||
+        !history.sourceReady
+      )
+        return
+      const privateResult = records[1]!.result!
+      expect(
+        privateResult.collection.status,
+        `private startup held for health`,
+      ).toBe(`loading`)
+      const cause = new Error(`source health at ${offset}`)
+      await act(() => reports[0]!.reportError(cause))
+      await settle()
+      checkSiblingHealth(
+        records[1]!.result!.health,
+        cause,
+        `reported source problem`,
+      )
+      comparePeers(offset, `source health preserves page`)
+      reach.reach(
+        afterMove
+          ? `seed source health after peer move`
+          : `seed source health before peer move`,
+      )
+      await act(() => reports[0]!.reportHealthy())
+      await settle()
+      checkSiblingHealth(
+        records[1]!.result!.health,
+        undefined,
+        `source recovery`,
+      )
+      comparePeers(offset, `source recovery preserves page`)
+      reach.reach(`seed source health recovery`)
+    }
+    await reportSeedHealth(0, false)
     if (
+      !history.holdCandidate &&
       history.sameQuery &&
       history.first === 0 &&
       history.startup === `reject` &&
@@ -1311,7 +1507,10 @@ async function checkSiblings(
     // A same-query peer may still be acquiring its private output's first
     // subset. Keep that oldest demand held while the first output moves.
     const held =
-      history.sameQuery && history.first === 0 ? demands[0]![0] : undefined
+      !history.holdCandidate && history.sameQuery && history.first === 0
+        ? demands[0]![0]
+        : undefined
+    let rejectedPeerMove = false
     for (let turn = 0; turn < 4; turn++) {
       await settle()
       await act(() => {
@@ -1322,11 +1521,41 @@ async function checkSiblings(
             pending.length,
             ...pending.filter((release) => release === held),
           )
-          for (const demand of deliver) demand.fulfill()
+          for (const demand of deliver) {
+            if (held && history.peerFailure && !rejectedPeerMove) {
+              demand.reject(new Error(`peer page request failed`))
+              rejectedPeerMove = true
+            } else demand.fulfill()
+          }
         }
       })
     }
     await settle()
+    if (held && history.peerFailure) {
+      expect(
+        rejectedPeerMove,
+        `peer's changed-window acquisition rejected`,
+      ).toBe(true)
+      await act(() => mounted!.rerender(tree(history.offset)))
+      await settle()
+      const peer = records[0]!.result!
+      expect(peer.collection.status, `peer passed initial readiness`).toBe(
+        `ready`,
+      )
+      expect(
+        peer.health?.error,
+        `failed demand belongs to peer query`,
+      ).toBeTruthy()
+      expect(
+        records[1]!.result!.collection.status,
+        `private initial acquisition still held`,
+      ).toBe(`loading`)
+      // The glossary assigns request errors to the query that owns the demand.
+      // Source health is shared; this query-local problem is not source health.
+      checkSiblingRequestIsolation(records[1]!.result!.health)
+      reach.reach(`peer request error isolated from seed`)
+      return
+    }
     if (held) {
       // Re-read both hooks after the moved output publishes, while the private
       // startup demand remains held. An unchanged-input host render must not
@@ -1335,6 +1564,7 @@ async function checkSiblings(
       await settle()
       comparePeers(history.offset, `seed while successful peer has moved`)
       reach.reach(`seed isolated during peer move`)
+      await reportSeedHealth(history.offset, true)
       const privateResult = records[1]!.result!
       expect(
         privateResult.collection.status,
@@ -1400,5 +1630,10 @@ for (const scope of [`none`, `provider`, `explicit`] as const)
     }
 declareOracle({
   grammar: [siblingsArbitrary, siblingHistories],
-  check: [checkSiblings, checkSiblingOwnership],
+  check: [
+    checkSiblings,
+    checkSiblingOwnership,
+    checkSiblingHealth,
+    checkSiblingRequestIsolation,
+  ],
 })

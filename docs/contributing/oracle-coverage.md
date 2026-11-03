@@ -6833,6 +6833,23 @@ public normalized failure as input and checks the boundary's cause; it does not
 reimplement core's provider-error normalization. Both the original hidden error
 and a repair that clears the seed without resetting readiness fail this receiver.
 
+The sibling grammar also discards candidates after their hook returns and
+lets a peer commit first under a separate boundary. The mounted replacement
+receiver admits a peer's pending target plan before the mounted binding changes
+to it, and crosses before/after-hook holds. Both receivers compare progress,
+exclusive outputs and subsequent retained page moves. Diagnostic acquisition
+counts expose finite retry work; no exact request budget or retention of
+uncommitted Collections is promised.
+
+While private startup remains held, source report/recovery histories compare
+committed health before and after a peer page move without a host rerender.
+A peer's page-request rejection then crosses an unchanged-input read. Its
+query-local problem must not appear on the seeded output or the unchanged
+source. The seed takes health from its own observer. Restoring peer health
+copying fails request isolation; freezing seed health fails source notification.
+These are query-local and source-health receiving laws, not provider transport
+or garbage-collection claims.
+
 Each receiving campaign declares reach and replays fixed examples through the
 same model/checker. Five hostile mutations fail at retry progress, successful
 peer ownership, replacement pending, restart pending, and late preload rejection.

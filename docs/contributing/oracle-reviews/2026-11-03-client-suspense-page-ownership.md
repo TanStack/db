@@ -1651,9 +1651,11 @@ public API, Svelte production code or extra retry state is added.
 
 ### Generated reach and hostile calibration
 
-Each generated family now contains six histories: its unconstrained member,
-the existing shared/separate and equal/different neighbors, a fulfilled private
-startup, and guaranteed private rejections before and after a peer page move.
+At this review boundary, each generated family contains six histories: its
+unconstrained member, three existing shared/separate and equal/different
+neighbors, and two additional private rejection schedules before and after a
+peer page move. The shared-boundary equal-query neighbor also covers fulfilled
+private startup; that case is not a seventh member.
 Eight families produce 48 histories per campaign. The existing page comparison
 still checks seed rows, ordered rows, state and independent/retained Collections.
 The lifecycle comparison checks the real boundary and normalized public cause
@@ -1740,3 +1742,208 @@ whole-PR readiness at a newly pushed head.
 Final local verification for this follow-up: full React `pnpm --filter @tanstack/react-db test --maxWorkers=2` passes **4,823 tests in 40 files**, including all 30 lifecycle campaigns, with no type errors. Explicit React `tsc --noEmit`, focused ESLint, Prettier and `pnpm lint:changed` pass. The same shared page and conformance suites run in that full package command. No Svelte runtime changed; its preceding 542-test run remains the recorded Svelte evidence. The full monorepo `pnpm test` command was not run. Raw RED, GREEN, type, reach, hostile-mutant and replay logs remain in the task-local `2345-ci-loop` directory under the `5756985798-` prefix.
 
 Source snapshot for this follow-up: `c970caa0f5dc74b6fbc04da7c1092cf57ea7d2ec2fe7c05cbf195534bf3f79f5` across 30 files. The companion manifest preserves the preceding snapshots and records every source hash.
+
+
+## Second high-effort review and query-local seed health
+
+The user supplied ten unverified findings against `2c605f92b`. Evaluation started
+on `3cb5df960508663d6b6b4c1e4d28a37cdde6f9f9`, which already fixes the private
+first-load failure in item 2. The raw review and all source-order claims were
+preserved before experiments in `/private/tmp/2348-high-review-r2/`. This entry
+records the complete evaluation and resulting source snapshot. Earlier evidence,
+including the original Svelte pre-edit type-gate qualification, remains intact.
+
+### Laws and the oracle-first experiment
+
+No product law changed. The shared conformance contract promises retry progress,
+exclusive successful outputs and retained complete pages during pending window
+moves. It explicitly does not promise retention of an uncommitted Collection.
+The maintainer requested independent implicit query outputs, including Suspense.
+The proposed common-case sharing in item 7 conflicts with that decision.
+
+The glossary's health tree and request-error definitions distinguish source
+health from a query's own failed demand. Source reports reach each successful
+binding without an unrelated host render. A peer's page-request failure has no
+authority over a private output's health. Copied rows remain provisional under
+the existing first-load failure law. Those laws interact: copying all of a
+peer's changing snapshot would break both page isolation and health ownership.
+
+Before production edits, the existing sibling receiver gained post-hook holds
+and source report/recovery observations. The mounted replacement receiver gained
+peer-first admission and after-hook holds. Generated histories reach shared
+boundaries, discarded successful candidates, a peer committing before a held
+candidate, and a mounted owner changing to a plan a peer already awaits. Public
+progress, distinct Collections and each binding's next page move are compared.
+Acquisition and returned-Collection counters are diagnostic observations, not
+an invented exact request budget. The shared pending receiver now also checks
+that a native Suspense fallback does not hide the retained complete page.
+
+Explicit React `tsc --noEmit` passed. On unchanged `3cb5df960`, the first extension
+reported 258 passes and 12 failures because the new checker expected undefined
+for cleared `failureReason`. The public representation is null. Correcting that
+model mistake gave **270/270** receiving tests and **10/10** pending-page tests.
+This is disproof/neighbor evidence, not a production RED. Source reports and
+recovery reached the seeded output without forced renders, refuting item 5's
+source-notification claim. Same-path retry histories made progress with exclusive
+outputs, while counters confirmed finite extra acquisition work in items 1/3/4.
+
+Challenging the neighboring health law exposed a new defect, S1. The grammar
+holds private startup, rejects the peer's new page demand after peer readiness,
+then re-reads unchanged inputs. The peer remains ready with its own request
+problem, the source remains healthy, and the private initial acquisition remains
+held. Its committed hook health nevertheless contains the peer's root error.
+The observer already supplies the correct own-query health at this checkpoint.
+The seed replaces it with the peer's health: production is the repair location.
+
+Before any behavioral source edit, the explicit type gate passed and all **12**
+client/key sibling campaigns failed at `query-local request health` /
+`seed after peer request failure`. The public private root error was non-null
+where this query had no failed demand. Command:
+
+```sh
+pnpm --filter @tanstack/react-db exec vitest run tests/suspense-lifecycle-oracle.test.tsx -t 'co-mounted siblings' --maxWorkers=2 --coverage.enabled=false
+```
+
+Production now copies only seed rows. The private observer supplies health and
+notifications, with the existing ready-view status helper deriving its flags.
+This removes the `seedObserver` field and its stale reference. Retry-cache
+lifetimes remain subject to their existing cleanup policy. The qualified
+retry key is computed only if lookup or replacement needs it. One existing
+commit effect now releases a successful retry entry and commits window moves.
+Its original placement stays before the external-store hook. Snapshot callbacks
+read their observer once and apply the optional Suspense view explicitly. No
+extra render hashing, public API or Svelte runtime change is introduced.
+
+### Enforcement and measured reach
+
+The repaired source passed **639** lifecycle/render/conformance tests. The final
+reach run passed all 60 selected sibling/retry campaign tests. Each sibling
+family now has ten members: the six historical members, a ready-source health
+member, a peer request-failure member and two post-hook hold members. Eight
+families give 80 histories per campaign. Existing budgets were not lowered.
+
+| Mode | Histories | Post-hook discard | Peer commits first | Source report before move | Source report after move | Source recovery | Peer request isolation |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| none/false/fixed | 80 | 19 | 10 | 11 | 8 | 11 | 9 |
+| none/false/fresh | 80 | 18 | 10 | 8 | 8 | 8 | 9 |
+| none/true/fixed | 80 | 19 | 10 | 11 | 8 | 11 | 9 |
+| none/true/fresh | 80 | 20 | 9 | 8 | 8 | 8 | 8 |
+| provider/false/fixed | 80 | 19 | 10 | 11 | 8 | 11 | 9 |
+| provider/false/fresh | 80 | 21 | 13 | 8 | 8 | 8 | 8 |
+| provider/true/fixed | 80 | 19 | 10 | 11 | 8 | 11 | 9 |
+| provider/true/fresh | 80 | 20 | 11 | 8 | 8 | 8 | 8 |
+| explicit/false/fixed | 80 | 19 | 10 | 11 | 8 | 11 | 9 |
+| explicit/false/fresh | 80 | 18 | 8 | 10 | 9 | 10 | 8 |
+| explicit/true/fixed | 80 | 19 | 10 | 11 | 8 | 11 | 9 |
+| explicit/true/fresh | 80 | 20 | 10 | 8 | 8 | 8 | 8 |
+
+All 48 mounted replacement campaigns reach their declared states. Each retains
+the original compiler-first histories and adds peer-first and post-hook schedules,
+with client/unscoped, keyed/derived, co-ready/borrower-first and fixed/fresh modes.
+The original six generated histories plus one fixed example per campaign remain.
+
+Two hostile sources pass explicit typechecking and each fail all 12 sibling
+campaigns at the intended assertion. Restoring the original peer-health copy
+fails request isolation. Freezing seed health instead fails source notification.
+The first frozen mutant left an unused import and failed its type gate. After
+that correction, calibration exposed a checker defect: toBeDefined permits null,
+so the checker dereferenced a missing problem. Requiring a truthy problem makes
+the final calibration an assertion failure, not that accidental TypeError.
+Neither diagnostic is counted as a hostile kill.
+
+Direct replay of `react.suspense-siblings`, seed `2348`, path
+`0:0:0:0:0:0:0:0:0`, filter `co-mounted siblings/none/false/fresh`, rejects the
+original source and passes the restored repair. Replay uses the standard
+property/seed/path environment variables and runs the requested trace directly.
+Raw type, RED, GREEN, replay, work and reach logs are in the task-local R2 folder.
+
+### Lossless finding ledger
+
+| ID | Claim | Technical judgment and PR action | Durable value |
+| --- | --- | --- | --- |
+| R2-1 | Render reserves an owner that can be discarded, causing another Collection and load. | **accepted-design** for uncommitted retention. Reservation and extra work are real. Shared-boundary staggered and post-hook histories still progress with distinct successful outputs. This is not the prior render-time eviction livelock. No exact pre-commit work promise exists. | Generated discarded-candidate schedules and measured acquisition/returned-Collection counts preserve the optimization question. No exact GC claim. |
+| R2-2 | Private first-load error remains hidden by its seed. | **already-fixed** in `3cb5df960`. Valid at reviewed `2c605f92b`; previous entry records 12 pre-edit failures, repaired GREEN and two typed seed/latch mutants. Current receivers preserve both failure timings. | Existing provisional-readiness model and private rejection histories. |
+| R2-3 | A private output inherits the shared release and can evict it before its original candidate commits. | **accepted-design** for uncommitted retention. The source mechanism is real. Separate-boundary post-hook holds let the peer commit first, then the held candidate resumes with correct independent data. An abandoned initial candidate can compile again. | Retain work diagnostics and both participant observations. A new exact preload-retention budget would require a contract decision. |
+| R2-4 | Mounted replacement overwrites a peer's pending cache entry. | **accepted-design** for uncommitted retention. Peer-first receiving histories measure two upstream subscriptions before settlement and check both subsequent owned page moves. No stuck fallback or output alias was observed at the stated finite cuts. | Peer-first admission dimension now belongs to the primary mounted replacement receiver. |
+| R2-5 | Lack of seedObserver subscription prevents health notification. | **refuted** for shared source health: report/recovery reaches committed output without a host render, before and after peer move. The own observer supplies notification. Peer-local request errors should not propagate at all; that neighboring defect is S1 below. | Explicit source notification/recovery and query-local isolation comparisons. |
+| R2-6 | Client Suspense returns old page while new page is pending instead of falling back. | **accepted-design**: pending moves keep the last complete window under the shared contract. Ten native pending campaigns pass, including client Suspense without transported page seeds. Initial readiness still uses fallback. | Added native fallback assertion prevents stale renderHook output from masking loss of the visible page. |
+| R2-7 | Independent outputs perform multiple acquisitions. Share until first move instead. | **accepted-design** under the explicit maintainer decision for independent successful implicit queries. Multiple loadSubset calls are measured; these are acquisition attempts, not necessarily provider transports. Lazy shared mutable outputs reverse the approved ownership rule. | Preserve counts without promoting one request per arbitrary retry history into a new law. |
+| R2-8 | Qualified key computed before an owned retained move returns. | **fixed-now**, mechanical: defer key computation until lookup or replacement needs it. | Direct source order plus retained-window receiving comparisons. |
+| R2-9 | Recompilation clears seed but retains seedObserver. | **fixed-now**: remove seedObserver entirely as part of S1. The field retained a peer reference; no experiment claims an exact GC lifetime. | The obsolete seed-observer field is gone. No broader cache GC guarantee is claimed. |
+| R2-10 | Unreachable Suspense snapshot fallback and extra commit effect. | **fixed-now**, mechanical: explicit single snapshot read, one shared commit effect, captured entry release and original window-effect placement preserved. | Full React lifecycle/SSR/StrictMode and receiving suites. |
+| R2-T1 | No generated same-boundary siblings exist; render reservation proves old class remains open. | **refuted** as stated: reviewed `2c605f92b` already generated shared-boundary, staggered and same-pass siblings. New post-hook and peer-first schedules close real observation gaps. Reservation exposes finite extra work, not the old progress failure in these histories. | Keep the stronger generated schedules and finite coverage bounds. |
+| S1 | Peer query-local request health leaks into a private seed. | **fixed-now**, discovered while challenging R2-5. Own observer health replaces peer health. Pre-edit RED, final GREEN and both hostile calibrations above enforce the law. | Primary lifecycle sibling grammar, health judgments and per-mode reach. |
+
+Ten numbered raw claims equal three fixed-now, one already-fixed, one refuted
+and five accepted-design. Including the broader testing claim and discovered
+sibling gives 12 items: four fixed-now, one already-fixed, two refuted and five
+accepted-design. No item is deferred, confirmed-open or awaiting a design choice.
+Accepted retry work does not become an unfixed violation of an exact request
+budget: the approved contract explicitly leaves uncommitted retention free.
+
+Reviewer assessment: useful hypothesis generation, but no hire for independent
+high-effort correctness review on this evidence. The review identified real
+mechanisms and three useful cleanups. It did not execute its claims, missed
+existing sibling histories and treated approved ownership/page policy as bugs.
+The first-load issue was valid on its target commit. The health question led to
+a real adjacent bug, but adding the proposed peer subscription would propagate
+that peer's query-local errors more reliably rather than fix ownership.
+
+CodeRabbit review `5757342434` on `3cb5df960` separately requested clarification
+of overlapping fulfilled-startup history. The historical paragraph now states
+six distinct members explicitly. Its repeated scope warning remains authorized
+scope, its default docstring threshold is not a repository requirement, and its
+incomplete report review and paused automatic review remain external limits.
+No GitHub reply or review-control command was sent.
+
+### Self-review and limits
+
+This is a self-review, not an independent challenge. ORC-001/002 derive the new
+health judgment from the glossary and keep it independent of observer/cache
+logic. ORC-003/009 explain source versus query-local health and post-hook holds
+beside their grammar/checks. ORC-004 reconstructs every reported schedule and
+keeps old families. Removing peer failure loses S1, source reports lose the
+frozen-health rejection, and post-hook/peer-first axes lose their retry cuts.
+Widths1–3, offsets1–4, one or two source Collections and two consumers bound the
+domain. A rejected acquisition after abort has no authority and is excluded.
+ORC-005/014 use actual React19/jsdom boundaries with controlled on-demand sources,
+not external provider or native hydration evidence. ORC-006/007 use typed
+assertion failures, matching fixed/fresh budgets and direct RED/GREEN replay.
+ORC-008 preserves the existing model distinction between seed visibility and
+owned readiness. ORC-010 retains failure fidelity and ScenarioLifetime cleanup.
+ORC-011 has no named shared semantic fault needing another reference model:
+source reports and query-local request failures provide independent rival
+inputs. ORC-012 records the source digest and the complete loss audit here.
+ORC-013/015 cross notification/recovery and source/query-local neighbors with
+measured per-mode reach. ORC-016 keeps laws and histories in the primary owner.
+No pinned example substitutes for a missing generator dimension.
+
+Limits remain finite React19/jsdom schedules, controlled request settlement and
+public committed health/rows/Collection identity. No arbitrary scheduler, exact
+GC timing, exact retry work budget, real provider transport or native hydration
+claim follows. The broader PR still retains the original Svelte pre-edit gate
+qualification. Full monorepo `pnpm test` was not run. CI and PR readiness remain
+separate from this completed review accounting.
+
+Final package verification for the second review: React **4,855 tests in 40
+files** passes with no type errors (`pnpm --filter @tanstack/react-db test
+--maxWorkers=2 --coverage.enabled=false`). The selected lifecycle/render/shared
+conformance run passes639 tests, and direct health replay and both final typed
+hostile mutants produce their recorded outcomes. No Svelte runtime changed.
+The earlier Svelte542-test result remains historical evidence, and the original
+Svelte pre-edit type-gate qualification remains unchanged. No full monorepo
+`pnpm test` or new bundle-size measurement is claimed.
+
+Focused ESLint initially requested const for the captured commit callback. The
+final source keeps that const after the snapshot read. The earlier effect closes
+over it and executes only after render, preserving the original effect position.
+Explicit typechecking and all270 lifecycle/render receiver tests pass after this
+lint-only change. The full4,855-test package run precedes that const spelling
+change. The final SSR rerun and lint results are recorded with publication.
+
+The final SSR effects and SSR error-handoff run passes63 tests in two files,
+with no type errors. Focused ESLint and explicit React typechecking pass.
+Prettier and `pnpm lint:changed` pass. The PR draft passes both the structural
+English check (zero hard findings) and the GitHub paragraph-format check.
+
+Source snapshot for the second review: `26ab15ef15c4b4237977ec64c6f271f094a74aead8de855871af7f74fd0fa86f` across 30 files. The companion manifest preserves all preceding snapshots.

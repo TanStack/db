@@ -836,6 +836,12 @@ async function checkPendingWindowHistory(
           ).toBeNull()
           return
         }
+        // The previous complete page remains public during a later move. A
+        // stale renderHook result behind a fallback is not that observation.
+        if (suspends)
+          expect(handle.isSuspended!(), `settled page stays visible`).toBe(
+            false,
+          )
         const expectedRows = offset === undefined ? [] : expected(offset)
         checkWindowObservation(
           { rows: handle.current().data, collection: handle.collection() },
