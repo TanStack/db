@@ -6408,7 +6408,12 @@ explicit factory and inferred factory entry points, with/without schema and
 Query rows/envelope select.36 consumers contain4,212 cells; all702 declared
 states reach six histories. Promise<void> accepts void/undefined and rejection,
 including a synchronous never result; fulfilled values and synchronous void
-are rejected. Six controls calibrate missing/duplicate/misattributed diagnostics.
+are rejected. It is the `oracleProperty` `adapter.handler-types`: each shape
+resolves to a generated consumer program, the TypeScript compiler is the
+driver, and six calibrations (missing, duplicate, setup-error, rejected-void,
+unrelated same-code, and body-local Promise<void> diagnostics) must each fail
+their named law. Its enumerated reach is no longer asserted per state (open:
+enumerated sources declare no reach yet).
 All42 tests pass on unchanged858b174a6. Independent compiler probes reject
 unrelated same-code and body-local Promise<void> errors substituted for handler
 errors. Source imports do not establish packed declarations or npm consumers;
