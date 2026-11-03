@@ -73,6 +73,23 @@ const ownerGroups: ReadonlyArray<
       ] as const,
   ),
   [`react-db/tests/client-window-oracle.test.tsx`, `react`, `client-window`],
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `immutable-key-history`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
   [
     `svelte-db/tests/client-window-oracle.svelte.test.ts`,
     `svelte`,
@@ -1087,6 +1104,8 @@ function directReplayTestName(property: string): string | undefined {
         return `peer page histories \\(fresh\\)`
       case `keyed-admission`:
         return `initial disabled keyed admission \\(fresh\\)`
+      case `immutable-key-history`:
+        return `immutable query key histories \\(fresh\\)`
     }
   }
   if (property.startsWith(`react.ssr-effects-`)) {

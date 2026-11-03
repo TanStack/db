@@ -33,6 +33,11 @@
  * explicit key keeps its authored input, and changed opaque keyed inputs compile.
  * An initially disabled input has no authored plan to retain: enabling it admits
  * its first plan even with the same key.
+ * Explicit keys are immutable values (maintainer decision, 2026-11-03): fresh
+ * equal plain records and arrays retain the authored input, regardless of
+ * record property order. Replacing a nested value with a different value
+ * invalidates it. Replace changed objects along their path; mutating a key
+ * in place is unsupported and has no promised invalidation behavior.
  * The same law applies to every client-backed adapter (issue #2345) and to
  * Suspense hooks (maintainer decision, 2026-11-03). Independent query inputs
  * own distinct live-query Collections, even under equal keys and options.

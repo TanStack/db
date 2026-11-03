@@ -430,6 +430,17 @@ describe(`named oracle replay manifest`, () => {
         ...([
           `react`,
           `react-dependency-list`,
+          `react-DbClient`,
+          `react-Suspense`,
+          `react-Suspense-DbClient`,
+          `preact`,
+          `svelte-DbClient`,
+        ].includes(driver!)
+          ? [`immutable-key-history`]
+          : []),
+        ...([
+          `react`,
+          `react-dependency-list`,
           `preact`,
           `vue`,
           `solid`,

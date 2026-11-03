@@ -1156,7 +1156,7 @@ replay suggestion also asks to inspect other new names, which exposes the full
 32-route omission. The scope warning lacks the conversation's authorization;
 the docstring threshold is a bot default. Those warnings have less signal than
 the three precise source findings. The reviewer does not itself supply the
-required generated RED or mutant evidence; the repair adds those instruments.
+RED or mutant evidence needed to validate the repair; the repair adds those instruments.
 
 The final audit returned to the full review body, all inline bodies and the
 mutable summary. The overview repeats the three inline findings. Passed title,
@@ -1178,3 +1178,166 @@ files and adds the replay enforcement test to the prior 26-file snapshot.
 The report and manifest exclude themselves. Earlier manifests remain in
 `priorManifests`. PR readiness still requires pushed-head CI; these local
 results alone do not establish that status.
+
+## Immutable explicit-key contract (maintainer decision, 2026-11-03)
+
+This amendment starts from pushed head `69664f1d9215bfdbe7fb2d31e7e5ee0661506f20`.
+The maintainer accepted immutable keys and requested enforcement in the adapter
+oracle. Equal immutable plain records and arrays retain the authored query;
+record property order does not matter. Replacing a nested value invalidates the
+input. Applications replace changed objects along their path on the next host
+update. In-place mutation is unsupported and has no guaranteed behavior.
+An adapter may happen to detect it without creating an obligation for peers.
+
+The pre-edit inventory was React, React DbClient, React Suspense, React Suspense
+DbClient, Preact and Svelte DbClient, plus the existing secondary React
+registration. All seven identity-comparing receivers use the same owner,
+`packages/db/tests/conformance/window-history-oracle.ts`. The contract,
+public guides, coverage map and replay routes now record the law. Reactive
+bindings that compare no identity retain their existing reactive-read contract.
+No production edit or additional render-time hash is needed.
+
+### Law, experiment, inference, and limits
+
+- **Law:** Immutable key value equality retains the authored input. A changed
+  nested value admits the proposed input. Authority: the maintainer's explicit
+  decision in this task and the shared contract's existing explicit-key law.
+- **Reach:** Fourteen fixed/fresh campaigns execute 84 generated histories.
+  Each of eight declared states is reached six times in every campaign:
+  same key object; fresh outer array; fresh equal nested values; reordered
+  record properties; changed nested record value; equal key after replacement;
+  changed nested array value; and return to an earlier key. The minimum is the
+  full six-run campaign budget, not pooled across receivers. This supplies 672
+  declared-state comparisons, plus initial and generated-tail observations.
+- **Baseline GREEN:** The new histories pass unchanged production on all seven
+  receiving modes. This work adds enforcement; it does not claim to repair a
+  newly discovered runtime defect or manufacture an original-production RED.
+- **Mutant RED:** Eight well-typed source mutations fail the shared window
+  comparisons. React and Svelte each reject reference-only equality, ignored
+  key changes, and unconditional reauthoring. Preact rejects ignored key
+  changes and unconditional reauthoring. React's five modes each fail all three
+  mutations in both campaigns; Svelte and Preact fail their respective modes.
+  The forty failing campaign tests reject wrong rows at fresh equal nested
+  values, changed nested record value, or same key object. None is counted by
+  timeout, setup error or reach failure.
+- **GREEN:** Restored production passes all fourteen campaigns. Each mode also
+  has a guarded seed/path replay. The captured React reference-equality failure
+  replays RED at seed 2345, path `0:0:0:0:0`; restored source replays GREEN.
+- **Limits:** Frozen plain records/arrays with finite integer, string, boolean
+  and null leaves. Histories change integer leaves under records and arrays.
+  Native keys, signed zero, undefined, cycles, custom prototypes and mutation
+  are outside this lane. This does not alter their existing support policies.
+  Native host settlement is the cut; no speculative-render, pending-demand,
+  transport-seed or external provider claim follows from this key lane. The
+  existing receivers retain those neighboring obligations.
+
+The independent model names key equivalence classes with two integers. One
+maps to a leaf under a record, the other to a leaf under an array. It stores the
+admitted predicate separately from the proposed predicate. Equal keys can
+propose different queries, so that distinction determines the next result.
+Rows use the existing independent sort/filter/slice judgment. Neither model
+imports a production key comparator, hash or invalidation classifier.
+Changed keys with identical plans impose no new Collection-replacement rule.
+
+The compulsory history prefix reconstructs the supported immutable forms.
+Same-key proposals change their candidate predicate, which distinguishes
+retaining the authored input from running the latest callback. Independent
+record and array replacements prevent one path from masking the other.
+Returning to the original frozen key distinguishes current admission from
+keeping every earlier authored plan forever. Generated tails vary repeats,
+returns, new values, predicates and property order. Removing a prefix form
+loses its corresponding equality or replacement witness; removing the changed
+candidate behind equal keys hides accidental reauthoring. Without independent
+leaf changes, a comparator that ignores one nested path can evade the claim.
+
+Ranges: three to ten ordered source rows; label length zero to eight; zero to
+four scalar payload entries; zero to five tail actions; each model key axis
+zero to two; tail predicates minus one through ten. Empty payloads, empty
+results and complete results occur. Frozen construction excludes in-place
+mutation; the grammar creates no cycles or unsupported key leaves. More
+sampling would not establish those excluded domains.
+
+The actual driver calls each framework's real hook and waits for its declared
+native settled cut. Each comparison checks ordered data, keyed state and the
+public Collection. Stable keys require Collection retention; a changed
+predicate requires replacement. An equal plan after key invalidation leaves
+reuse free. Failure fidelity and ScenarioLifetime preserve the first law/cut,
+keep cleanup diagnostics distinct and release the mounted input and source.
+
+An initial Svelte reauthor mutant written as literal `false` failed type setup
+because of control-flow inference. That attempt is not a mutant rejection.
+The equivalent runtime predicate `queryKey.length < 0` stays well-typed and
+fails the intended row comparison. A first test-only type alias used a
+fast-check API absent in the installed version; it was corrected before any
+runtime result. These setup repairs did not change production behavior.
+
+### Rubric self-review
+
+ORC-001: authority and limits appear above and beside the owner. ORC-002:
+model-only equivalence classes and independent row recomputation avoid the
+production equality machinery. ORC-003: opening/local prose identifies the
+contract, model, grammar, driver and comparison. ORC-004: reconstruction,
+ablation, bounded ranges and exclusion controls are stated above. ORC-005:
+seven real hook paths compare data/state/Collection after native settlement;
+all source rows are installed before mount, with no concrete missing-input
+hypothesis at that cut. ORC-006: eight typed source mutants fail forty intended
+comparisons. ORC-007: fixed seed 2345 and fresh campaigns share grammar, budget
+and judgment; all seven routes have guarded direct replay. ORC-008: key
+classes and admitted predicate are separately observable by the next proposal.
+ORC-009: model-only classes map explicitly to concrete record/array leaves.
+ORC-010: existing failure-fidelity and lifetime mechanisms remain in use.
+ORC-011: no concrete fault shared by this scalar-class model and production's
+rich-value comparator was identified; no second model is claimed. ORC-012:
+this versioned amendment records the applicable outcomes and source snapshot.
+ORC-013: equal fresh trees versus independently changed record/array leaves
+supply adjacent legal distinctions. ORC-014: real host drivers receive the
+controlled ready source; no external-provider claim is made. ORC-015: each
+campaign asserts six histories for each declared state. ORC-016: all histories
+use the same independent model/driver/comparison, without per-example answers.
+This is a self-review; no new independent reviewer is claimed.
+
+### Incremental CodeRabbit review 5755842735
+
+The review covers `69664f1d9`. The full raw review and mutable summary are
+preserved in the task-local lossless ledger. Its wording suggestion is
+**fixed-now**: the earlier sentence now says “RED or mutant evidence needed to
+validate the repair.” The summary repeats the scope warning (**accepted-design**,
+explicit maintainer authorization) and an 80% docstring threshold (**refuted**
+as a repository requirement). Its updated 18.18% metric over 22 functions was
+not independently reproduced. Passed checks and generic bot controls add no
+findings. Three items are accounted for; no confirmed-open item or deferral
+remains. The clarity suggestion is useful; repeated policy warnings lack task
+context. The prior positive correctness-review assessment remains, while this
+incremental wording review supplies little new correctness evidence.
+
+Source snapshot for this amendment: `0247b20dac86a5f8da38769860bf7c4d78c2baefab61c87c2b2bb06796f8ef3f`. The companion manifest
+records 28 source/contract/coverage files and preserves prior snapshots.
+The report and manifest exclude themselves. Production files match `69664f1d9`.
+
+### Completed validation for immutable keys
+
+Complete receiving conformance commands pass: React 369 tests, Preact 142,
+and Svelte 158. Each command selects the package's conformance file and its
+existing infinite-query neighbor. The guarded replay suite passes 117 tests.
+Explicit React/Preact TypeScript checks, Svelte check (zero errors/warnings),
+ESLint, Prettier, `pnpm lint:changed` and `git diff --check` pass.
+
+Commands, each with at most two Vitest workers:
+
+```sh
+pnpm --filter @tanstack/react-db exec vitest run tests/conformance.test.tsx --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/preact-db exec vitest run tests/conformance.test.ts --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/svelte-db exec vitest run tests/conformance.svelte.test.ts --maxWorkers=2
+pnpm --filter @tanstack/db exec vitest run tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+From `packages/react-db`, the captured calibration uses this direct replay:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=framework.react.immutable-key-history TANSTACK_DB_ORACLE_SEED=2345 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0 node --import tsx ../db/tests/oracle-replay.ts tests/conformance.test.tsx --maxWorkers=2 --coverage.enabled=false
+```
+
+The task-local `2345-ci-loop` directory retains `immutable-reach-results.json`,
+`immutable-mutant-results.json`, `immutable-replay-results.json`, per-mutant
+explicit type and RED logs, per-package GREEN/type logs, and conformance logs.
+The evidence does not claim that the full monorepo test command ran.

@@ -623,6 +623,7 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
       },
     )
     registerPeerWindowOracle(driver)
+    if (driver.mountKeyedControllable) registerImmutableKeyOracle(driver)
     // Disabled input is legal only for ordinary bindings that accept keys.
     for (const receiver of driver.mountKeyedControllable &&
     !driver.features?.suspendsUntilReady
@@ -1531,4 +1532,255 @@ function registerKeyedAdmissionOracle(driver: LiveQueryDriver) {
 declareOracle({
   grammar: [keyedAdmissionArbitrary],
   check: [checkKeyedAdmission],
+})
+
+// Immutable explicit keys obey contract.ts (maintainer decision, 2026-11-03).
+// Equal values keep the authored query even when a new callback proposes a
+// different predicate. Changed nested values admit that predicate. Mutation is
+// outside the legal grammar; frozen key trees catch accidental fixture writes.
+// This lane covers plain records/arrays and JSON scalar leaves, not rich keys,
+// disabled admission, pending work, transport seeds or speculative host cuts.
+const immutableKeyArbitrary = fc.record({
+  count: fc.integer({ min: 3, max: 10 }),
+  label: fc.string({ maxLength: 8 }),
+  values: fc.array(
+    fc.oneof(fc.integer(), fc.string(), fc.boolean(), fc.constant(null)),
+    {
+      maxLength: 4,
+    },
+  ),
+  tail: fc.array(
+    fc.record({
+      object: fc.integer({ min: 0, max: 2 }),
+      array: fc.integer({ min: 0, max: 2 }),
+      minimum: fc.integer({ min: -1, max: 10 }),
+      reordered: fc.boolean(),
+    }),
+    { maxLength: 5 },
+  ),
+})
+type ImmutableKeyHistory =
+  typeof immutableKeyArbitrary extends fc.Arbitrary<infer T> ? T : never
+
+function immutableKey(
+  history: ImmutableKeyHistory,
+  object: number,
+  array: number,
+  reordered = false,
+): ReadonlyArray<unknown> {
+  const filter = Object.freeze({ minimum: object })
+  const clauses = Object.freeze([Object.freeze({ minimum: array })])
+  const values = Object.freeze([...history.values])
+  return Object.freeze([
+    `immutable-key`,
+    Object.freeze(
+      reordered
+        ? { values, clauses, filter, label: history.label }
+        : { label: history.label, filter, clauses, values },
+    ),
+  ])
+}
+
+// The two integers are model-only key equivalence classes. One names a value
+// under a record, the other under an array. Equality needs no production deep
+// comparator or hash. The authored minimum is separate: equal keys may propose
+// different queries, so the next render distinguishes it from the candidate.
+async function checkImmutableKeyHistory(
+  driver: LiveQueryDriver,
+  history: ImmutableKeyHistory,
+  reach: ReturnType<typeof createOracleReach<string>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  let mounted:
+    | ControllableHandle<{
+        key: ReadonlyArray<unknown>
+        minimum: number
+      }>
+    | undefined
+  lifetime.defer(() => mounted?.unmount())
+  await lifetime.run(async () => {
+    const rows = Array.from({ length: history.count }, (_, rank) => ({
+      id: String(rank),
+      rank,
+    }))
+    const source = driver.makeSource(rows)
+    lifetime.defer(() => source.collection.cleanup({ dependents: true }))
+    const page = {
+      offset: 0,
+      limit: history.count,
+      minimum: -1,
+      descending: false,
+      nestedLimit: history.count,
+    }
+    const firstKey = immutableKey(history, 0, 0)
+    mounted = driver.mountKeyedControllable!(
+      (q, input: { key: ReadonlyArray<unknown>; minimum: number }) =>
+        q
+          .from({ row: source.collection })
+          .where(({ row }: { row: WindowRow }) =>
+            driver.ops.gt(row.rank, input.minimum),
+          )
+          .orderBy(({ row }: { row: WindowRow }) => row.rank)
+          .limit(page.limit)
+          .select(({ row }: { row: WindowRow }) => ({
+            id: row.id,
+            rank: row.rank,
+          })),
+      (input) => input.key,
+      { key: firstKey, minimum: -1 },
+    )
+    await mounted.flush()
+    let previous = { object: 0, array: 0 }
+    let minimum = -1
+    const compare = (
+      checkpoint: string,
+      previousCollection?: unknown,
+      retain = true,
+    ) => {
+      const expected = windowRows(rows, { ...page, minimum }, false)
+      checkWindowObservation(
+        { rows: mounted!.current().data, collection: mounted!.collection() },
+        {
+          rows: expected,
+          previousCollection,
+          retain,
+        },
+        checkpoint,
+      )
+      checkWindowState(mounted!.current().state, expected, checkpoint)
+    }
+    compare(`initial immutable key`)
+    // Each history reconstructs equal reference/deep-value proposals, then
+    // changes each nested path independently and restores the original key.
+    // Tail actions vary repetitions, returns, predicates and property order.
+    const steps = [
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: firstKey,
+        cut: `same key object`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: Object.freeze([...firstKey]),
+        cut: `fresh outer array`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: immutableKey(history, 0, 0),
+        cut: `fresh equal nested values`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: immutableKey(history, 0, 0, true),
+        cut: `reordered record properties`,
+      },
+      {
+        object: 1,
+        array: 0,
+        minimum: history.count,
+        key: immutableKey(history, 1, 0),
+        cut: `changed nested record value`,
+      },
+      {
+        object: 1,
+        array: 0,
+        minimum: -1,
+        key: immutableKey(history, 1, 0),
+        cut: `equal key after replacement`,
+      },
+      {
+        object: 1,
+        array: 1,
+        minimum: -1,
+        key: immutableKey(history, 1, 1),
+        cut: `changed nested array value`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: 0,
+        key: firstKey,
+        cut: `return to earlier key`,
+      },
+      ...history.tail.map((step) => ({
+        ...step,
+        key: immutableKey(history, step.object, step.array, step.reordered),
+        cut: `generated key proposal`,
+      })),
+    ]
+    for (const step of steps) {
+      const retain =
+        previous.object === step.object && previous.array === step.array
+      const collection = mounted.collection()
+      const changedPlan = minimum !== step.minimum
+      if (!retain) minimum = step.minimum
+      await mounted.setParam({ key: step.key, minimum: step.minimum })
+      // The driver's native settled cut supplies the real host witness. Check
+      // data, keyed state and Collection identity without normalizing output.
+      // An invalidated key with an identical plan leaves Collection reuse free.
+      compare(step.cut, retain || changedPlan ? collection : undefined, retain)
+      if (step.cut !== `generated key proposal`) reach.reach(step.cut)
+      previous = step
+    }
+  })
+}
+
+function registerImmutableKeyOracle(driver: LiveQueryDriver) {
+  for (const campaign of [`fixed`, `fresh`] as const) {
+    const property = windowHistoryProperty(driver, `immutable-key-history`)
+    const test =
+      campaign === `fixed`
+        ? oracleReplayTest(it)
+        : oracleReplayTest(it, property)
+    test(`immutable query key histories (${campaign})`, async () => {
+      const reach = createOracleReach<string>(
+        `${property}/${campaign}`,
+        [
+          `same key object`,
+          `fresh outer array`,
+          `fresh equal nested values`,
+          `reordered record properties`,
+          `changed nested record value`,
+          `equal key after replacement`,
+          `changed nested array value`,
+          `return to earlier key`,
+        ],
+        { minimum: oracleRuns(6) },
+      )
+      const fidelity = createOracleFailureFidelity<ImmutableKeyHistory>()
+      try {
+        await fidelity.assert(() =>
+          fc.assert(
+            fc.asyncProperty(immutableKeyArbitrary, async (history) => {
+              reach.beginHistory()
+              await fidelity.run(history, () =>
+                checkImmutableKeyHistory(driver, history, reach),
+              )
+            }),
+            campaign === `fixed`
+              ? { numRuns: oracleRuns(6), seed: 2345 }
+              : oraclePropertyOptions(6, property),
+          ),
+        )
+        reach.assertReached()
+      } finally {
+        console.info(
+          `immutable key reach ${driver.name}/${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
+    })
+  }
+}
+declareOracle({
+  grammar: [immutableKeyArbitrary],
+  check: [checkImmutableKeyHistory],
 })

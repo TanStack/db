@@ -6850,6 +6850,20 @@ The [Svelte client page receiver](../../packages/svelte-db/tests/client-window-o
 
 The ready-output/subset-settlement handoff found by this receiving extension is owned by the existing [observer hydration oracle](../../packages/db/tests/live-query-observer-hydration-oracle.property.test.ts). Its new fixed/fresh grammar holds subset work on a ready Collection before seeded observer attachment, then settles it without any row or status change. Both granular and wholesale consumers must keep the seed while held, then observe and receive the local snapshot, including empty local rows. The original missing subset notification and a premature handoff each fail their intended comparison. The Svelte page receiver supplies the same premise through retained live-query Collections. These controlled histories do not establish arbitrary provider schedules.
 
+The same shared window owner enforces immutable explicit-key values (maintainer
+decision, 2026-11-03). React, React DbClient, ordinary/client Suspense, Preact and
+Svelte DbClient receive equal-key retention and changed-key admission histories.
+Each fixed/fresh campaign declares separate reach for the same key object, a
+fresh outer array, fresh equal nested values, reordered record properties,
+independent record/array leaf replacements, equality after replacement and a
+return to an earlier key. Ordered data, keyed state and Collection identity are
+compared after native host settlement. Keys are frozen plain records/arrays
+with JSON scalar leaves. In-place mutation is unsupported; its behavior is
+unconstrained. Rich native keys, speculative cuts and transported seeds remain
+outside this lane. Reactive bindings that compare no query identity retain
+their reactive input contract. Future identity-comparing adapters register the
+same key histories through `mountKeyedControllable`.
+
 Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes are recorded in [the page-window review](oracle-reviews/2026-10-30-adapter-page-windows.md) and the [client/Suspense extension](oracle-reviews/2026-11-03-client-suspense-page-ownership.md).
 
 The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.

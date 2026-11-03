@@ -123,6 +123,12 @@ An explicit `queryKey` is the caller's identity contract. If its source object
 changes, change the key too, even when the source ID stays the same. Use a
 primitive scope token in the key; Collection objects cannot be hashed there.
 
+Treat `queryKey` and its nested values as immutable. Fresh objects with equal
+contents keep the authored query, including when record properties appear in a
+different order. To change a nested value, replace that object and its parent
+objects, as with React state. In-place mutation has no supported invalidation
+behavior. This applies to both `useLiveQuery` and `useLiveSuspenseQuery`.
+
 An unhashable query without `queryKey` throws `UnhashableQueryIRError`, so
 represent the values that opaque logic captures in the key. An empty
 `queryKey` counts as none, as it does for a `DbClient` preload. A dependency
