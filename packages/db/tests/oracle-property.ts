@@ -30,7 +30,8 @@
  *   checkpoints first and the trace's completeness last.
  * - `check` compares the observations with the model and returns a verdict.
  *   Only the check can report a violation of the law. A violation that gives
- *   the `actual` and `expected` values gets the test runner's usual diff.
+ *   the `actual` and `expected` values gets the test runner's usual diff;
+ *   `differs` builds one from an exact comparison.
  *
  * Each history is one test, named by `label`. A violation fails it with an
  * `OracleViolation` that names the property, the law, the checkpoint, the
@@ -101,12 +102,14 @@
  * literal with a `check`. The property is its own declaration.
  */
 import { appendFileSync } from 'node:fs'
+import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
+  withOracleExamples,
 } from './oracle-config.js'
 
 /** A law and where it comes from. */
@@ -151,6 +154,26 @@ export function violation(
   values?: { actual: unknown; expected: unknown },
 ): Verdict {
   return { kind: `violation`, checkpoint, difference, law, values }
+}
+
+/**
+ * One exact comparison: a violation of `law` at `checkpoint` when `actual` is
+ * not strictly deep-equal to `expected`, with both values attached so the
+ * failure shows a diff; otherwise undefined, so comparisons chain as
+ * `return differs(...) ?? differs(...) ?? pass`. Equality is Node's
+ * `isDeepStrictEqual`: symbol keys, undefined-versus-absent fields, `-0`,
+ * and prototypes count, where JSON text would erase them.
+ */
+export function differs(
+  checkpoint: string,
+  law: string,
+  actual: unknown,
+  expected: unknown,
+  difference = `the observed value differs from the owed value`,
+): Verdict | undefined {
+  return isDeepStrictEqual(actual, expected)
+    ? undefined
+    : violation(checkpoint, difference, law, { actual, expected })
 }
 
 /**
@@ -825,16 +848,16 @@ function generatedTests<History, Expected, Plan>(
       `${id} ${name} reach ${JSON.stringify(Object.fromEntries([...counts].sort(([a], [b]) => (a < b ? -1 : 1))))}\n`,
     )
   }
-  // Examples come on top of a lane's budget, as in `oraclePropertyOptions`.
   const fixedLanes = source.fixedSeeds.map((seed): PropertyTest => ({
     name: `fixed seed ${seed}`,
     replays: [],
     run: () =>
-      runLane(`fixed seed ${seed}`, seed, (examples) => ({
-        numRuns: oracleRuns(source.runs) + examples.length,
-        seed,
-        examples,
-      })),
+      runLane(`fixed seed ${seed}`, seed, (examples) =>
+        withOracleExamples(
+          { numRuns: oracleRuns(source.runs), seed },
+          examples,
+        ),
+      ),
   }))
   // The random lane picks its seed itself, so a replay of that seed rebuilds
   // the same segment histories, which the replay path counts.
@@ -842,12 +865,11 @@ function generatedTests<History, Expected, Plan>(
     name: `random seed`,
     replays: [id],
     run: () => {
-      const seed =
-        oraclePropertyOptions(source.runs, id).seed ?? Date.now() % 2 ** 31
-      return runLane(`random seed`, seed, (examples) => ({
-        ...oraclePropertyOptions(source.runs, id, { examples }),
-        seed,
-      }))
+      // One call selects and logs the seed; a replay reads that log line.
+      const parameters = oraclePropertyOptions(source.runs, id)
+      return runLane(`random seed`, parameters.seed!, (examples) =>
+        withOracleExamples(parameters, examples),
+      )
     },
   }
   const pins = (source.pins ?? []).map((pin): PropertyTest => ({
@@ -869,7 +891,7 @@ function generatedTests<History, Expected, Plan>(
       const missing = (pin.enters ?? []).filter((state) => !reached.has(state))
       if (missing.length > 0)
         throw new Error(
-          `${id}: pin "${pin.name}" did not enter ${missing.join(`, `)}. A pin must reach every state it names.`,
+          `${id}: pin "${pin.name}" did not enter ${missing.join(`, `)}; it entered ${[...reached].sort().join(`, `) || `no declared state`}. A pin must reach every state it names.`,
         )
     },
   }))

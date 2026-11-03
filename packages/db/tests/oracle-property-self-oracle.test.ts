@@ -30,6 +30,9 @@
  *   property's random lane, starts from the counterexample itself, and
  *   reproduces it.
  * - `rerun`: a violation's printed rerun command runs exactly that test.
+ * - `seed-log`: a random lane logs exactly one `ORACLE_SEED` line for its
+ *   property, the seed it runs, and no other test logs one; a replay tool
+ *   reads that line.
  *
  * Authority: the contract in the header of `oracle-property.ts`; the
  * maintainer decisions of 2026-11-03 on calibration candidates, failure
@@ -41,8 +44,8 @@
  * synthetic driver's log, and relies on fast-check running a lane's examples
  * (its segment histories) first, in order. A replay or rerun probe covers
  * every failing lane but only the first violating pin or history of each
- * property. The gap report's observation hook, `forwardCut`, and `withinTurns`
- * have no law here.
+ * property. The gap report's observation hook, `forwardCut`, `withinTurns`,
+ * and `differs` have no law here.
  */
 import { spawnSync } from 'node:child_process'
 import {
@@ -469,6 +472,7 @@ const frameworkStates = [
   `determinism-caught`,
   `observed-reach`,
   `timeout`,
+  `random-lane`,
 ] as const
 
 function frameworkReach(
@@ -492,6 +496,7 @@ function frameworkReach(
         reached.add(`lane-setup-failure`)
       if (outcome.cause) reached.add(`cause-attached`)
       if (outcome.kind === `timeout`) reached.add(`timeout`)
+      if (name === `random seed`) reached.add(`random-lane`)
       if (outcome.kind === `determinism`) reached.add(`determinism-caught`)
       const failure = {
         'segment-reach': `segment-reach-failure`,
@@ -544,6 +549,7 @@ type ReportedTest = {
   name: string
   state: string
   errors: Array<ReportedError>
+  console: string
 }
 type ReportedFile = {
   file: string
@@ -565,7 +571,13 @@ type SuiteRun = {
     string,
     {
       loaded: boolean
-      tests: Array<{ name: string; state: string; failure?: Failure }>
+      tests: Array<{
+        name: string
+        state: string
+        failure?: Failure
+        /** Seeds of the `ORACLE_SEED` lines the test logged for its property. */
+        seedLogs: Array<number>
+      }>
       reach: Record<string, Record<string, number>>
     }
   >
@@ -752,6 +764,21 @@ async function driveSuite(
           ...(test.state === `failed`
             ? { failure: classify(test.errors[0]) }
             : {}),
+          seedLogs: test.console
+            .split(`\n`)
+            .filter((line) =>
+              line.startsWith(
+                `ORACLE_SEED {"property":${JSON.stringify(spec.id)},`,
+              ),
+            )
+            .map(
+              (line) =>
+                (
+                  JSON.parse(line.slice(`ORACLE_SEED `.length)) as {
+                    seed: number
+                  }
+                ).seed,
+            ),
         })),
         reach,
       }
@@ -892,6 +919,27 @@ function checkSuite(
             test.name,
           ),
           { actual: failure ?? { kind: `pass` }, expected: outcome },
+        )
+      // A random lane selects its seed once and logs that selection once;
+      // a failing lane's reported seed is the logged one.
+      const owedSeedLogs = test.name === `random seed` ? 1 : 0
+      if (test.seedLogs.length !== owedSeedLogs)
+        return violation(
+          `run`,
+          `${spec.id} "${test.name}" logged ${test.seedLogs.length} ORACLE_SEED lines, owed ${owedSeedLogs}`,
+          `seed-log`,
+          { actual: test.seedLogs, expected: owedSeedLogs },
+        )
+      if (
+        failure?.seed !== undefined &&
+        test.name === `random seed` &&
+        test.seedLogs[0] !== failure.seed
+      )
+        return violation(
+          `run`,
+          `${spec.id} "${test.name}" logged seed ${test.seedLogs[0]} but ran seed ${failure.seed}`,
+          `seed-log`,
+          { actual: failure.seed, expected: test.seedLogs[0] },
         )
       if (
         test.name === `determinism` &&

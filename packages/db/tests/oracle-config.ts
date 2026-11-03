@@ -826,10 +826,24 @@ function randomParameters<TExample>(
               }
             : {}),
         }
-  if (examples === undefined) return parameters
-  // fast-check runs the examples first and counts them in numRuns, so they
-  // come on top of the random runs: the examples never displace one. A path
-  // replay runs one recorded history, which can be an example.
+  return examples === undefined
+    ? parameters
+    : withOracleExamples(parameters, examples)
+}
+
+/**
+ * Run parameters with examples added. fast-check runs the examples first and
+ * counts them in numRuns, so they come on top of the random runs: the
+ * examples never displace one. A path replay runs one recorded history, which
+ * can be an example.
+ */
+export function withOracleExamples<
+  TParameters extends { numRuns: number; path?: string },
+  TExample,
+>(
+  parameters: TParameters,
+  examples: ReadonlyArray<TExample>,
+): TParameters & { examples: Array<TExample> } {
   return {
     ...parameters,
     examples: [...examples],
