@@ -164,7 +164,9 @@ async function checkClientWindowHistory(
     }
     const peer = mountPage(first)
     flushSync()
-    const comparePeer = (rows: Array<WindowRow>, cut: string) =>
+    // Judge the existing peer's keyed view as well as its rows while the
+    // transported seed is held and when the local snapshot takes over.
+    const comparePeer = (rows: Array<WindowRow>, cut: string) => {
       checkWindowObservation(
         {
           rows: peer.current().data,
@@ -177,6 +179,8 @@ async function checkClientWindowHistory(
         },
         cut,
       )
+      checkWindowState(peer.current().state, expected(rows, first), cut)
+    }
     comparePeer(serverRows, `peer before move`)
     // Independent query inputs own distinct Collections. Moving one hook leaves
     // the other hook on its original page.
@@ -189,6 +193,7 @@ async function checkClientWindowHistory(
     )
     reach.reach(`moved seed`)
     comparePeer(serverRows, `peer while local readiness is held`)
+    reach.reach(`held peer keyed state`)
     for (let index = 0; index < history.latePeers; index++) {
       const late = mountPage(first)
       flushSync()
@@ -222,6 +227,7 @@ async function checkClientWindowHistory(
     reach.reach(`local handoff`)
     comparePeer(browserRows, `peer after handoff`)
     reach.reach(`peer isolation`)
+    reach.reach(`local peer keyed state`)
     hook.move(first)
     await vi.waitFor(() => {
       flushSync()

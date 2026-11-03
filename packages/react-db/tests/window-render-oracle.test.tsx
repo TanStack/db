@@ -26,6 +26,7 @@ import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
 import {
   checkWindowObservation,
+  checkWindowState,
   windowRows,
 } from '../../db/tests/conformance/window-history-oracle'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -351,6 +352,7 @@ const retryStates = [
   `replacement resumed`,
   `page isolated`,
   `borrower moves after compiler retries`,
+  `original page retained after borrower move`,
   `peer pending before mounted replacement`,
   `successful replacement held after hook`,
 ] as const
@@ -499,6 +501,13 @@ async function checkRetryOwnershipHistory(
       `resumed binding owns its output`,
     )
     reach.reach(`replacement resumed`)
+    const collection = hook.result.current.collection
+    checkWindowState(
+      hook.result.current.state,
+      expected(0),
+      `resumed keyed view`,
+    )
+    checkWindowState(peer.result.current.state, expected(0), `peer keyed view`)
     // The borrower adopted pending work compiled by the original binding.
     // Its next use must retain its own Collection even after that compiler retries.
     peerOffset = history.abandoned
@@ -516,7 +525,31 @@ async function checkRetryOwnershipHistory(
       `borrower page after original compiler retries`,
     )
     reach.reach(`borrower moves after compiler retries`)
-    const collection = hook.result.current.collection
+    checkWindowState(
+      peer.result.current.state,
+      expected(peerOffset),
+      `borrower keyed view after compiler retries`,
+    )
+    // Observe the unchanged binding before its own next move can repair it.
+    checkWindowObservation(
+      {
+        rows: hook.result.current.data,
+        collection: hook.result.current.collection,
+      },
+      { rows: expected(0), previousCollection: collection, retain: true },
+      `original page after borrower move`,
+    )
+    checkWindowState(
+      hook.result.current.state,
+      expected(0),
+      `original keyed view after borrower move`,
+    )
+    checkWindowObservation(
+      { rows: collection.toArray, collection },
+      { rows: expected(0), previousCollection: collection, retain: true },
+      `original Collection page after borrower move`,
+    )
+    reach.reach(`original page retained after borrower move`)
     await act(() =>
       hook.rerender({ ...props, replace: true, offset: history.committed }),
     )
@@ -543,6 +576,16 @@ async function checkRetryOwnershipHistory(
         retain: true,
       },
       `peer after resumed binding page move`,
+    )
+    checkWindowState(
+      hook.result.current.state,
+      expected(history.committed),
+      `resumed binding keyed view after page move`,
+    )
+    checkWindowState(
+      peer.result.current.state,
+      expected(peerOffset),
+      `peer keyed view after resumed binding page move`,
     )
     reach.reach(`page isolated`)
   })

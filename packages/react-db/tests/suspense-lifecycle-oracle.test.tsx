@@ -1121,6 +1121,7 @@ const siblingStates = [
   `same query`,
   `different queries`,
   `staggered readiness`,
+  `successful candidate while peer pending`,
   `same-pass readiness`,
   `both committed`,
   `exclusive outputs`,
@@ -1133,6 +1134,8 @@ const siblingStates = [
   `private startup rejection after success`,
   `private rejection before peer move`,
   `private rejection after peer move`,
+  `private error notification before peer move`,
+  `private error notification after peer move`,
   `seed source health before peer move`,
   `seed source health after peer move`,
   `seed source health recovery`,
@@ -1213,6 +1216,7 @@ async function checkSiblings(
       }
     }> = [{}, {}]
     const rendered = [0, 0]
+    const successfulReturns = [0, 0]
     let holdCandidate = history.holdCandidate
     const blocked = new Promise<void>(() => {})
     let discardedCandidates = 0
@@ -1234,6 +1238,7 @@ async function checkSiblings(
             .offset(offset)
             .select(({ row }) => ({ id: row.id, rank: row.rank })),
       })
+      successfulReturns[slot]!++
       candidates.add(result.collection)
       useLayoutEffect(() => {
         const peer = records[1 - slot]!.result
@@ -1293,6 +1298,24 @@ async function checkSiblings(
     if (!history.sameQuery && !history.simultaneous) {
       await act(() => releases[history.first]!())
       await settle()
+      // One query can need several acquisitions. Drain only that query and
+      // retry the host until its hook returns; the peer's work stays held.
+      for (
+        let turn = 0;
+        turn < 4 && successfulReturns[history.first] === 0;
+        turn++
+      ) {
+        await act(() => releases[history.first]!())
+        await settle()
+        await act(() => mounted!.rerender(tree(0)))
+        await settle()
+      }
+      expect(
+        successfulReturns[history.first],
+        `first candidate returned while its peer remains pending`,
+      ).toBeGreaterThan(0)
+      expect(successfulReturns[1 - history.first]).toBe(0)
+      expect(demands[1 - history.first]!.length).toBeGreaterThan(0)
       if (history.sharedBoundary) {
         expect(
           records.every((record) => record.result === undefined),
@@ -1300,6 +1323,7 @@ async function checkSiblings(
         ).toBe(true)
       }
       reach.reach(`staggered readiness`)
+      reach.reach(`successful candidate while peer pending`)
     }
     await act(() => {
       for (const release of releases) release()
@@ -1419,8 +1443,6 @@ async function checkSiblings(
       const cause = makeCause(history.cause, history.offset)
       await act(() => held.reject(cause))
       await settle()
-      await act(() => mounted!.rerender(tree(offset)))
-      await settle()
       expect(privateResult.collection.status, `private first load failed`).toBe(
         `error`,
       )
@@ -1444,6 +1466,21 @@ async function checkSiblings(
         failure,
         model,
         `private startup rejects after seed commit`,
+      )
+      // The error must publish from the observer notification. A host reread
+      // could otherwise repair a missing notification before this comparison.
+      reach.reach(
+        history.rejectBeforeMove
+          ? `private error notification before peer move`
+          : `private error notification after peer move`,
+      )
+      await act(() => mounted!.rerender(tree(offset)))
+      await settle()
+      compare(
+        mounted!.container,
+        failure,
+        model,
+        `private startup error after host rerender`,
       )
       reach.reach(
         history.rejectBeforeMove

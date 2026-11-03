@@ -32,6 +32,8 @@ export const clientWindowStates = [
   `moved seed`,
   `local handoff`,
   `peer isolation`,
+  `held peer keyed state`,
+  `local peer keyed state`,
   `returned page`,
   `client scope switch`,
   `fresh old-page lookup`,

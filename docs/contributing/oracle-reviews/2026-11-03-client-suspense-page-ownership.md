@@ -1947,3 +1947,198 @@ Prettier and `pnpm lint:changed` pass. The PR draft passes both the structural
 English check (zero hard findings) and the GitHub paragraph-format check.
 
 Source snapshot for the second review: `26ab15ef15c4b4237977ec64c6f271f094a74aead8de855871af7f74fd0fa86f` across 30 files. The companion manifest preserves all preceding snapshots.
+
+## Four receiving-oracle enforcement repairs before merge
+
+Parent production head: `42514b45f3e8d63f3bb4000280d915ab4079d41c`.
+The maintainer authorized closing the four independent audit findings before
+merge. This amendment changes only oracle drivers, observations, reach and
+coverage documentation. It changes no production code or reference-model rule.
+The prior qualifications remain historical facts, including the original Svelte
+receiver's missing typed pre-edit gate. These later results do not repair that
+process order retroactively.
+
+### Law and authority
+
+The existing error-handling guide and observer hydration laws require a private
+first-load error to end provisional rows and notify the real ErrorBoundary.
+The shared conformance contract requires retry progress and independent
+successful output Collections. Its page law requires each binding's rows and
+keyed state to remain on its own page when another binding moves. Transported
+seeds obey that same law. No new law or narrowed expectation is introduced.
+
+The production paths are real React 19/jsdom hooks and boundaries, plus Svelte
+rune construction and native flush/settled cuts. Sources and request settlement
+remain controlled. The independent initial-view and sort/filter/slice models
+are unchanged; existing shared comparisons judge the new observations.
+
+### Lossless audit account and permanent repairs
+
+| Audit ID | Missing enforcement | Repair and observation cut | Disposition |
+| --- | --- | --- | --- |
+| S1 | A forced host reread supplied notification before the error comparison. | Compare the actual ErrorBoundary before any application rerender. Retain the later reread as a second comparison. Declare notification reach before/after peer movement. | fixed-now |
+| SCHED-1 | Releasing one source did not prove a successful first hook return. | Count successful hook returns. Drain only that query, with at most four host retries, while the peer has no successful return and retains demand. Shared boundaries also have no layout commit. Declare successful-candidate reach. | fixed-now |
+| O1 | The original binding acted before its page was observed after the borrower moved. | Before the original's next action, compare original rows, keyed state, retained identity and captured Collection rows. Compare both keyed maps after later moves too. Declare unchanged-original reach. | fixed-now |
+| O2 | Transported existing peers had correct data checks but no keyed-state comparison. | Both React and Svelte compare the peer map with the existing independent window judgment at every peer cut. Declare held-seed and local-handoff reach per mode. | fixed-now |
+
+All four raw audit findings have durable repairs. No newly demonstrated
+production violation remains. The audit's frozen-ready-seed concern already had
+sensitive receiving coverage and remains a rejected concern, not a fifth gap.
+
+### Experiment order and calibration
+
+Before any new production change, explicit React/Svelte typechecks passed and
+the expanded receivers passed unchanged production: 318 React tests and 6 Svelte
+tests. Therefore no production repair was necessary. No new product-defect RED
+is claimed. RED below calibrates the repaired enforcement against deliberate
+wrong subjects. Each transformed source passed its explicit package type gate
+before its selected campaign ran. Every counted RED is an intended assertion
+failure, not a timeout, setup error or unrelated crash.
+
+| Calibration | Selected RED campaigns | Intended rejection |
+| --- | ---: | --- |
+| Drop only notifications for a seeded private initial-loading error | 12 sibling | `current Suspense attempt` at `private startup rejects after seed commit`: expected error, observed ready. The dropped branch executed 105 times. |
+| Remove the selected-query drain/retry loop | 12 sibling | Positive successful-return premise while the peer remains pending. This is driver calibration, not a production mutant. |
+| Record borrower rows as the unchanged original result after borrower movement | 48 replacement | `ordered window rows` at `original page after borrower move`. This is a wrong-observation control. |
+| Keep React peer data/identity correct but replace its keyed map with moved-page rows | 48 transported | `keyed window rows` at `peer while local readiness is held`. |
+| Apply the same wrong keyed-map observation to Svelte | 4 transported | The same shared law and held-peer checkpoint. |
+
+The first React peer-state calibration used a wrong test-name filter and
+selected zero tests. Its zero exit supplies neither survival nor rejection
+credit. The complete first-attempt script/results/output remain in task scratch.
+The corrected 48-campaign run above supplies the intended RED. No experiment is
+silently replaced by a later successful run.
+
+The notification fault is a narrow production mutant. The other calibrations
+challenge a premise or recorder directly; they do not prove a general production
+map-sharing mechanism. Prior audit controls showed these faults could pass the
+old observations. The durable comparisons now reject them.
+
+### Measured reach at the final unchanged runtime
+
+Each sibling campaign runs 8 generated base histories, each expanded into 10
+legal family members, for 80 histories per mode. There are no separate examples.
+The three new state counts are:
+
+| Client scope / keyed / campaign | Successful candidate with pending peer | Error notification before peer move | Error notification after peer move |
+| --- | ---: | ---: | ---: |
+| none/false/fixed | 9 | 10 | 8 |
+| none/false/fresh | 8 | 8 | 8 |
+| none/true/fixed | 9 | 10 | 8 |
+| none/true/fresh | 10 | 8 | 8 |
+| provider/false/fixed | 9 | 10 | 8 |
+| provider/false/fresh | 8 | 10 | 8 |
+| provider/true/fixed | 9 | 10 | 8 |
+| provider/true/fresh | 10 | 8 | 8 |
+| explicit/false/fixed | 9 | 10 | 8 |
+| explicit/false/fresh | 9 | 9 | 8 |
+| explicit/true/fixed | 9 | 10 | 8 |
+| explicit/true/fresh | 10 | 8 | 8 |
+
+Every replacement mode reaches `original page retained after borrower move`
+7 times:6 generated histories plus1 fixed replay example. This holds separately
+for all 48 combinations of client/unscoped, keyed/derived, co-ready/borrower-first,
+compiler-first/peer-first/post-hook and fixed/fresh. The total is336 histories,
+including48 fixed examples.
+
+Every React transported mode reaches both `held peer keyed state` and
+`local peer keyed state`8 times:6 generated histories plus2 fixed examples.
+This holds separately for all 48 combinations of keyed/derived, ordinary/Suspense,
+provider/explicit, offset/limit/both and fixed/fresh. Each state totals384
+histories, including96 fixed examples.
+
+Every Svelte transported mode has the same8 reaches per state:6 generated
+histories plus2 fixed examples. This holds separately for derived/fixed,
+derived/fresh, keyed/fixed and keyed/fresh. Each state totals32 histories,
+including8 fixed examples. Svelte does not claim a client-switch path here.
+
+All new states have minimum 1 and fail the normal campaign when missed.
+Fixed/fresh run budgets and examples are unchanged. The captured sibling
+counts distinguish actual hook success from source-release ordering.
+
+### Direct replay and final GREEN
+
+Each row below ran through the guarded replay runner with exactly 1 selected
+execution. The same captured seed/path fails with its stated fault and passes
+after restoration, preserving the original law/checkpoint. The first runner
+attempt could not create the `tsx` CLI IPC socket in the sandbox and ran no
+property. Its setup log is preserved. The successful runner uses
+`node --import tsx`, which avoids that CLI socket.
+
+| Calibration | Property | Seed | Shrink path | Guarded RED / GREEN |
+| --- | --- | ---: | --- | --- |
+| missing-private-error-notify | `react.suspense-siblings` | 1481104148 | `0:0:0:0:0:0:0` | assertion / pass,1 execution each |
+| missing-staggered-premise | `react.suspense-siblings` | -271402343 | `0:0:0:0:0:0` | assertion / pass,1 execution each |
+| wrong-original-page | `react.window-retry-ownership` | 2073608762 | `0:0:0` | assertion / pass,1 execution each |
+| wrong-react-peer-state | `react.client-window` | 1577995267 | `0:0:0:0` | assertion / pass,1 execution each |
+| wrong-svelte-peer-state | `svelte.client-window` | -902254508 | `0:0:0:0` | assertion / pass,1 execution each |
+
+The exact replay commands (from the repository root) are:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=react.suspense-siblings TANSTACK_DB_ORACLE_SEED=1481104148 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0 pnpm --filter @tanstack/react-db exec node --import tsx ../db/tests/oracle-replay.ts tests/suspense-lifecycle-oracle.test.tsx -t 'co-mounted siblings/none/false/fresh' --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+TANSTACK_DB_ORACLE_PROPERTY=react.suspense-siblings TANSTACK_DB_ORACLE_SEED=-271402343 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0 pnpm --filter @tanstack/react-db exec node --import tsx ../db/tests/oracle-replay.ts tests/suspense-lifecycle-oracle.test.tsx -t 'co-mounted siblings/none/false/fresh' --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+TANSTACK_DB_ORACLE_PROPERTY=react.window-retry-ownership TANSTACK_DB_ORACLE_SEED=2073608762 TANSTACK_DB_ORACLE_PATH=0:0:0 pnpm --filter @tanstack/react-db exec node --import tsx ../db/tests/oracle-replay.ts tests/window-render-oracle.test.tsx -t 'retry ownership/unscoped/derived/borrower-first/compiler-first/fresh' --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+TANSTACK_DB_ORACLE_PROPERTY=react.client-window TANSTACK_DB_ORACLE_SEED=1577995267 TANSTACK_DB_ORACLE_PATH=0:0:0:0 pnpm --filter @tanstack/react-db exec node --import tsx ../db/tests/oracle-replay.ts tests/client-window-oracle.test.tsx -t derived/ordinary/provider/offset/fresh --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+TANSTACK_DB_ORACLE_PROPERTY=svelte.client-window TANSTACK_DB_ORACLE_SEED=-902254508 TANSTACK_DB_ORACLE_PATH=0:0:0:0 pnpm --filter @tanstack/svelte-db exec node --import tsx ../db/tests/oracle-replay.ts tests/client-window-oracle.svelte.test.ts -t derived/fresh --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+```
+
+The restored source matches its pre-calibration bytes. Full React passes
+**4,855 tests in 40 files**; full Svelte passes **542 tests  in 16 files**. Both
+report no type errors. Commands:
+
+```sh
+pnpm exec tsc --noEmit -p packages/react-db/tsconfig.json
+pnpm exec tsc --noEmit -p packages/svelte-db/tsconfig.json
+pnpm --filter @tanstack/react-db exec vitest run --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+pnpm --filter @tanstack/svelte-db exec vitest run --maxWorkers=2 --coverage.enabled=false --disableConsoleIntercept
+```
+
+The final size comparison uses the original exact base `1443dc92e5417394acbdc98b782caa9802848ce6`.
+The typical tree-shaken app changes from 96,397 to 96,341 gzip bytes (**−56**),
+and decreases **100 Brotli bytes**. The all-exports React package grows 258
+gzip/207 Brotli bytes. The maintainer accepted optional Suspense package growth.
+This amendment adds no runtime bytes. Command:
+
+```sh
+pnpm size:compare --base 1443dc92e5417394acbdc98b782caa9802848ce6 --exact-base --packages db,react-db,preact-db
+```
+
+### Independent review and bounded closure
+
+The independent oracle reviewer inspected the permanent diff, every typed
+calibration, all 10 guarded replay outcomes and the per-mode reach results.
+The final verdict finds all four named gaps closed at the declared finite
+histories, production paths and observation cuts, with no supported blocker.
+This review supplies independent evidence review, not a new external GitHub
+review of the whole semantic head.
+
+ORC-001/002 preserve accepted authority and independent models. ORC-003/009
+keep explanations beside actual host cuts and use existing glossary terms.
+ORC-004 reconstruction retains the reported error, staggered, borrower and
+transported cases. Ablation controls reject missing notification, missing
+successful-return work and missing peer comparisons. Finite widths, offsets,
+empty pages and existing invalid-history exclusions stay unchanged.
+ORC-005/014 use actual React/Svelte hosts with controlled source work and make
+no real-provider or native-hydration claim. ORC-006/007 have typed intended
+REDs, unchanged fixed/fresh budgets and direct replay. ORC-008 is not triggered:
+no reference-model state changes. ORC-010 keeps the existing failure-fidelity
+and lifetime mechanisms; captured reductions retain their law/checkpoint.
+ORC-011 has no named shared model/production semantic fault requiring a second
+formulation. ORC-012 binds this review to the companion source digest.
+ORC-013/015 distinguish notification from host reread, successful return from
+source release, and unchanged peer from moved peer, with per-mode reach.
+ORC-016 adds no ordinary unit expectations to oracle files.
+
+Limits remain finite React 19/jsdom and Svelte host histories, controlled
+requests and the named public error/row/map/Collection cuts. No arbitrary
+scheduling, React 18, native hydration, actual Electric/Start transport, exact
+retry-work budget, GC bound or heavy-query benchmark result is claimed. The
+original Svelte typed pre-edit qualification remains. Full monorepo `pnpm test`
+was not run. Current-head CI and discovered-review evaluation remain separate
+merge conditions. No accepted in-scope counterexample is known after these
+repairs.
+
+Final replay infrastructure verification passes **130 tests in three files** with no type errors (`oracle-replay.test.ts`, `replay-adapter-ownership.test.ts`, `replay-publication-storage.test.ts`). Prettier, `pnpm lint:changed` and `git diff --check` pass. No oracle run budget decreased.
+
+Source snapshot for the four enforcement repairs: `2324d2e46262f0e5a63498bc53824e44aa33db945904159727bd8905792cc5ad` across 30 files. The companion manifest preserves previous snapshots and excludes itself and this report.

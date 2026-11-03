@@ -6813,6 +6813,11 @@ modeled as replacement.
 The co-mounted sibling grammar places both hooks before their first successful
 commit. Shared/separate boundaries, equal/different queries, staggered/same-pass
 readiness, and ready/lagging source Collections cross every client/key mode.
+The staggered path drains only the selected query's acquisitions until its hook
+returns successfully. The peer's hook has not returned and its demand stays
+held. Shared-boundary histories also require that neither layout effect commits.
+Each receiving mode declares this successful-candidate state separately from
+source-release ordering.
 Each generated family guarantees the reported shared-boundary shape. Every
 successful layout commit checks distinct output Collections. After both commit,
 a held private startup crosses a peer page move and an unchanged-input render;
@@ -6832,6 +6837,10 @@ hydration owner's failure-ending-seed law. It reads the private Collection's
 public normalized failure as input and checks the boundary's cause; it does not
 reimplement core's provider-error normalization. Both the original hidden error
 and a repair that clears the seed without resetting readiness fail this receiver.
+The first error comparison runs before any application rerender, with declared
+reach before and after the peer move. A later reread checks the same error
+again. Suppressing only the private initial-error notification fails the first
+comparison; a forced host reread cannot supply the missing notification.
 
 The sibling grammar also discards candidates after their hook returns and
 lets a peer commit first under a separate boundary. The mounted replacement
@@ -6890,6 +6899,10 @@ retries, then moves the original binding and checks both pages. Reusing the
 compiler's resolver token fails borrower Collection retention. This adds the
 next-use direction the earlier receiver omitted; the initial successful
 Collections remain distinct in the reviewed implementation's co-ready lane.
+Before the original binding moves, every mode also checks its unchanged rows,
+keyed state and previously captured Collection's rows. Both bindings' keyed
+state is checked after each move. A wrong original page cannot disappear behind
+the original binding's next action before it is observed.
 
 Svelte client recovery histories cross a committed declarative move, an
 imperative move, a throwing key getter, repeated public rejection, the throwing
@@ -6903,6 +6916,11 @@ typed API or promise in-place key mutation.
 The shared owner also crosses initially disabled inputs with stable keys through real ordinary React, Preact and client-backed Svelte bindings. A disabled input admits no plan; first enablement admits one, an enabled unchanged key retains it, and a changed key admits the changed plan. This distinguishes the enablement fix from deleting stable-key retention. Suspense has no disabled-input overload and does not receive this lane.
 
 The [Svelte client page receiver](../../packages/svelte-db/tests/client-window-oracle.svelte.test.ts) and React client receiver share [transported-page histories](../../packages/db/tests/conformance/client-window-history-oracle.ts) and the existing window judgment. Every keyed/derived receiving campaign mounts one or two fresh old-page readers after a move while local readiness is held. It compares their first seed and distinct Collection, then the moved binding and existing peer through local handoff and return. Svelte uses rune construction, native `flushSync` for held-readiness page changes, and a bounded settled cut for the asynchronous observer handoff; it does not claim native `hydrate`. React's client-switch subhistory now actually executes ordinary/Suspense × keyed/derived hooks, replacing its Collection for both same-page and moved-page switches through explicit clients. Those per-mode results are later evidence, not retroactive credit for the original pre-edit gate's ordinary unkeyed switch.
+
+Both transported-page receivers compare the existing peer's keyed state at
+every peer row comparison. Each receiving mode declares separate reach while
+the seed is held and after local handoff. A wrong keyed map fails even when
+the peer's data array and Collection identity remain correct.
 
 The ready-output/subset-settlement handoff found by this receiving extension is owned by the existing [observer hydration oracle](../../packages/db/tests/live-query-observer-hydration-oracle.property.test.ts). Its new fixed/fresh grammar holds subset work on a ready Collection before seeded observer attachment, then settles it without any row or status change. Both granular and wholesale consumers must keep the seed while held, then observe and receive the local snapshot, including empty local rows. The original missing subset notification and a premature handoff each fail their intended comparison. The Svelte page receiver supplies the same premise through retained live-query Collections. These controlled histories do not establish arbitrary provider schedules.
 

@@ -193,7 +193,9 @@ async function checkClientWindowHistory(
       ),
     })
     unmounts.push(() => peer.unmount())
-    const comparePeer = (rows: Array<WindowRow>, cut: string) =>
+    // A correct data array cannot establish that the peer's keyed view stayed
+    // on the same transported page. Judge both at every existing peer cut.
+    const comparePeer = (rows: Array<WindowRow>, cut: string) => {
       checkWindowObservation(
         {
           rows: peer.result.current.data,
@@ -206,6 +208,8 @@ async function checkClientWindowHistory(
         },
         cut,
       )
+      checkWindowState(peer.result.current.state, expected(rows, first), cut)
+    }
     comparePeer(serverRows, `peer before move`)
     await act(() =>
       startTransition(() => hook.rerender({ page: abandoned, suspend: true })),
@@ -229,6 +233,7 @@ async function checkClientWindowHistory(
     )
     reach.reach(`moved seed`)
     comparePeer(serverRows, `peer while local readiness is held`)
+    reach.reach(`held peer keyed state`)
     for (let index = 0; index < history.latePeers; index++) {
       const late = renderHook(() => usePage(hookConfig(first)), {
         wrapper: ({ children }: { children: ReactNode }) => (
@@ -266,6 +271,7 @@ async function checkClientWindowHistory(
     reach.reach(`local handoff`)
     comparePeer(browserRows, `peer after handoff`)
     reach.reach(`peer isolation`)
+    reach.reach(`local peer keyed state`)
     await act(() => {
       hook.rerender({ page: first, suspend: false })
     })
