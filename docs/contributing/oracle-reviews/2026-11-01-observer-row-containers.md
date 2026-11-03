@@ -211,7 +211,8 @@ The single entry-comparison call is inlined, entry capture returns its array
 without a redundant result wrapper, and identical notification capture branches
 are combined. Both removed private names leave the mangle cache.
 
-The last materialized row cache is an immutable ordered capture. It supplies the
+The last materialized row cache is an ordered capture kept unchanged through the
+readonly API; its arrays and Maps are not runtime-frozen. It supplies the
 same key sequence that the removed key array held. Value-only writes retain
 layoutRevision; membership and order changes advance it. The initial empty
 capture still advances it once. Older snapshots retain their own cache, with no
@@ -695,3 +696,196 @@ group-by scenario grows 23 bytes, while the other seven shrink. These current
 compression results supersede the earlier baseline's measurements for the
 merged tree. Full workspace local testing and the combined Angular #2327 tree
 remain unverified. Exact pushed-head CI is tracked separately.
+
+
+## 2026-11-03: CodeRabbit Set work and pooled receiving paths
+
+This section records changes on parent `f66d68490e827393d18d67ba8e3f6ce9e003138a`.
+It supplements the merged-head evidence above. The implementation in this commit
+uses candidate-pair comparisons and augmenting paths for object-valued Sets,
+and restores optional layout-channel registration for supported pooled views.
+No framework adapter production source changes. The historical cache description
+above now explicitly distinguishes readonly access from runtime freezing.
+
+### Law, experiment, inference, and limits
+
+An unordered Set comparison needs a bijection of structurally equal members:
+separate equal objects still occupy separate positions. The approved prototype
+policy distinguishes plain, class, and null-prototype records. AGENTS.md's
+Algorithm Efficiency rule rejects combinatorial assignment enumeration. For
+scalar record members the new utility lane enforces a generous cubic field-read
+ceiling, `4 * (maxSize + 1)^3`. This observation bounds comparison work for that
+grammar; it promises no wall-clock latency or global bound for nested values.
+Primitive Set and draft comparison paths retain their existing policies.
+
+The primary utility owner now counts authored shape/value tokens independently
+of production. Generated widths 6–12, values 1–5, and rotations 0–12 construct
+reordered equal bags, late unmatched class/null records, and multiplicity
+deficits where every member has a candidate. Derived empty and singleton bags
+use that same model. Each pair runs through `deepEquals` and `sameRowValue`, in
+both directions, with acyclic members and members that link back to the compared
+Set. No alternate matching algorithm supplies the expected answer. Equal-field
+records may duplicate structural value, but every Set member is a distinct object.
+
+**Reach:** normal fixed and random campaigns each run 100 histories. Their
+combined measured counts are 200 for each of twelve states: empty, singleton,
+wide, equal, unmatched, deficit, cyclic, acyclic, general-forward,
+general-reverse, row-forward, and row-reverse. Every generated input constructs
+all these regimes and receiving comparisons. The registered property is
+`utils.42`; the registry increases from 41 to 42 without renumbering old IDs.
+
+**RED:** with production restored to f66, the extended utility lane fails at
+scalar read 2049 against ceiling 2048. Fixed seed `20260911`, shrink path
+`0:0:0`, reaches width 6/value 1/rotation 0; random seed `10715839`, path
+`0:0:0:0`, reaches the same input. The renewed baseline gate preserves failures
+from both comparators and directions in an AggregateError. It preceded the
+final matcher repair. The earlier generic-only RED did not prove row-path RED;
+production was restored before extending that receiving driver and rerunning.
+
+**GREEN:** the final five-file source gate passes 190 tests, including utility,
+pooled, snapshot, observer and facade owners. The preceding broader eight-file
+gate passed 786 tests. The built-dist lane passes 357 tests in six files;
+Preact conformance passes 136 tests in two files. Types, ESLint, changed-file
+oracle lint, minified public API and mangle checks are recorded with the final
+verification. These are focused gates; the full workspace suite did not run
+locally.
+
+**Mutants:** restoring permutation enumeration fails the work assertion in both
+comparators/directions. Adding only CodeRabbit's unmatched-element precheck
+still fails on multiplicity deficit; that witness distinguishes complete repair
+from a one-trace fix. Allowing candidate reuse fails exact bag equality in both
+comparators. These three are intended assertion failures, not timeout or setup
+failures. Guarded replay of `utils.42`, seed `20260911`, path `0:0:0`, executes
+the selected comparison and passes after restoration. Earlier attempts selecting
+`utils.43`, or selecting IDs shifted by a top-level registration, were setup
+failures and supply no mutant evidence. The trailing describe registration keeps
+all earlier replay IDs stable. Replay machinery reports four internal runs for
+this shrink path; it is not evidence of four independent histories.
+
+A second CI finding concerns supported pooled views, which have authoritative
+row/layout clocks but intentionally no separate layout subscription channel.
+Their normal change stream carries layout changes. Treating that optional
+channel as mandatory throws during observer subscription. The pooled owner
+already generated this path; the previous local gate omitted that owner.
+The repair keeps clock authority and registers the extra channel only when
+available. It adds no clockless or cross-copy compatibility branch.
+
+The pooled owner now declares successful wholesale, granular, and detached
+comparisons. Both normal 80-history campaigns reach each mode in all 160
+histories; cleanup with a detached reader holding rows reaches 32 histories,
+and an unwatched detached reader holding rows reaches 10. The unchanged
+independent membership model and live-query Collection second formulation judge
+rows, order, status and change payloads after every legal step.
+
+**Pooled RED:** before the production repair, all 13 owner tests fail with
+`_subscribeLayoutChanges is not a function`. The extended reach gate reproduces
+that failure with fixed seed `44502001`, path `0:0:0:0:0:0`, on an empty source
+and one peer. This is a production runtime failure at subscription, before the
+refinement checkpoint, not an assertion kill. Current-head CI's Preact
+`eq-filter-peers` and `pooled-param-change` cases fail on that same path before
+the repair; the repaired real Preact receiving suite is GREEN.
+
+**Pooled calibration:** a silent fallback that returns from attach when the
+channel is absent fails the existing granular comparison. Seed `44502001`,
+path `1:0:0:0:3:2:2`, starts empty and optimistically inserts one matching row
+before cleanup/rollback. At the pending checkpoint the granular mirror has no
+row while the model requires it. This is an intended assertion failure after
+setup. The restored owner passes. Thus merely avoiding the throw without
+subscribing to changes does not satisfy the law.
+
+CI also exposed two ordinary facade tests that expected private row clocks to
+rewind after a failed flush. The failed-flush architecture law restores public
+rows, indexes and layout and emits no publication; it does not require clock
+reuse. The tests now require monotonic invalidation and one subsequent row
+advance. All public row, ordering, index, event, truncate and layout assertions
+remain. Both source and built-dist suites pass these tests.
+
+### Review ledger and reviewer assessment
+
+Review `5756078957` covers `e5c2d6d3c`; inline `4457695586` and mutable summary
+version `4d967a8643c3` were frozen before experiments. The merge retained the
+matcher, so its finding still applied at f66.
+
+| ID | Original claim or sibling | Verdict and action | Durable destination |
+| --- | --- | --- | --- |
+| CR-E5-01 | Late unmatched Set member causes factorial search; precheck it | Confirmed, fixed with polynomial matching | Utility work lane and this evidence |
+| CR-E5-02 | Precheck does not bound multiplicity deficits | Confirmed sibling, fixed and generated | Utility bag model and precheck mutant |
+| CR-E5-03 | Moderate merge risk from Set stalls | Duplicate of 01; prototype trigger retained | Same work lane |
+| CR-E5-04 | 16.67% docstring coverage needs 80%; six functions/ten files, five unsupported | Refuted as repository-required remediation; bot says no repository configuration applied. No function-specific missing contract is identified. Existing observer, equality-mode and literate-oracle prose is substantive. Reported arithmetic was not independently reproduced. Keep warning visible without boilerplate docstrings | This rationale and source comments |
+| CR-E5-05 | Full local suite unchecked and CI pending | Accurate, accepted validation boundary; preserve checklist | PR validation and final CI outcome |
+| CI-DIST-01 | Facade tests expect counter rollback | Fixed internal-clock expectations; public checks retained | Facade test and built-dist gate |
+| CI-POOL-01 | Pooled observer subscription throws | Confirmed, fixed with optional channel registration | Pooled owner plus real Preact receiving witness |
+
+Raw review accounting: five items = two fixed, one duplicate, one refuted, one
+accepted design. The two CI siblings remain separately accounted for. Hire
+recommendation: **hire as a bug finder**. The performance diagnosis is accurate,
+and the reviewer explicitly states its proposed precheck's limitation. The
+suggested repair alone does not close the class. The default docstring metric
+has little product signal.
+
+Review `5756250137` covers f66; inline `4457835442` and mutable summary version
+`0dd0683f404a` were also frozen. Its raw items remain separate:
+
+| ID | Claim | Verdict and action |
+| --- | --- | --- |
+| CR-F66-01 | Historical cache prose calls mutable containers immutable | Fixed: qualify readonly access and lack of runtime freezing |
+| CR-F66-02 | Repeat docstring warning, now four unsupported files | Duplicate of CR-E5-04 with changed diagnostic count preserved |
+| CR-F66-03 | Full-local-suite and CI caveat | Accepted accurate boundary, same as CR-E5-05 |
+| CR-F66-04 | Summary repeats moderate Set-stall risk | Duplicate of CR-E5-01; repair and work evidence apply |
+
+Four = one fixed, two duplicates, one accepted design. Hire recommendation:
+**hire for precise prose review**; the incremental inline comment is a useful
+source-based correction. These ledgers account for all raw findings, summary
+warnings, merge-risk prose and validation caveats; bot action buttons and tool
+instructions supply no additional product finding or authorization.
+
+### Conformance and size
+
+ORC-001/002: Set contract, approved prototype policy, independent token counts
+and bounded work law are stated above and beside the owner. ORC-003: model,
+grammar, production driver and comparison are distinct and literate. ORC-004:
+width/shape/value/multiplicity/rotation and cycle axes reconstruct the reported
+case and deficit sibling; removing deficit admits the precheck-only repair,
+removing work admits factorial search, and removing multiplicity admits candidate
+reuse. Bounds include empty/singleton neighbors. Repeated references cannot
+create duplicate identity members, and arbitrary mismatched cycle topology is
+excluded. ORC-005: both comparison receivers and directions execute before their
+result assertion; pooled readers run actual public observers. ORC-006: the
+three Set mutants and silent pooled fallback fail intended comparisons.
+ORC-007: unchanged utility registration supplies equal 100-run fixed/random
+campaigns and guarded direct replay; pooled campaigns retain 80 runs.
+ORC-008: no new stateful model. ORC-009: token kinds map to authored record
+prototypes; token counts map to distinct structural Set positions.
+ORC-010: work errors abort before combinatorial hangs; AggregateError keeps
+both receivers' failures. ORC-011: independent counts differ from graph matching;
+no additional shared-fault hypothesis was found. The pooled owner retains its
+independent membership plus live-query Collection formulation. ORC-012: this
+versioned supplement records the evidence and limits for this commit.
+ORC-013: the unmatched and deficit neighbors distinguish a precheck from a full
+matching repair. ORC-014: the utility work claim is internal and requires no
+host premise; Preact supplies a real receiving witness for pooled subscription.
+ORC-015: twelve utility and five pooled states have measured reach above.
+ORC-016: generated inputs and replays use shared judgment with no separate
+handwritten expected answer.
+
+Against exact main `1443dc92e`, production is **−285 minified bytes**: observer
+−311, Collection changes −7, utility +33. DB gzip is **−124** and brotli **−162**.
+All eight app gzip scenarios shrink by 91–116 bytes. Brotli spans −211 to +25:
+group-by grows 25 bytes; the other seven shrink. These measurements supersede
+the preceding −339 and interim −312 values. Unbounded nested comparison cost,
+arbitrary cycle topology, and the latest combined tree with Angular #2327
+remain outside this evidence. Final pushed-head CI and the newest CodeRabbit
+covered commit are tracked separately from these local results.
+
+
+Reproduce the new owners from `packages/db`:
+
+```sh
+pnpm exec vitest run tests/utils-oracle.property.test.ts tests/query/pooled-live-query-oracle.property.test.ts --coverage.enabled=false --maxWorkers=2
+TANSTACK_DB_ORACLE_PROPERTY=utils.42 TANSTACK_DB_ORACLE_SEED=20260911 TANSTACK_DB_ORACLE_PATH=0:0:0 node --import tsx tests/oracle-replay.ts tests/utils-oracle.property.test.ts --coverage.enabled=false --maxWorkers=1
+```
+
+After mutant restoration, this two-owner gate passes 100 tests, with each new
+utility reach at 200 and each pooled receiving comparison at 160. The separate
+pooled GC owner passes 21 tests. The final TypeScript, ESLint, changed-file oracle
+lint, 433-name mangle cache and minified public API commands all exit zero.

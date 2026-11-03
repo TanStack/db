@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { deepEquals } from '../src/utils'
+import { deepEquals, sameRowValue } from '../src/utils'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
@@ -16,6 +16,7 @@ import {
   expectRingLaw,
 } from './deep-equals-support'
 import { createOracleReach } from './oracle-reach.js'
+import { declareOracle } from './oracle-declaration.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -838,6 +839,170 @@ describe(`typed-array value class`, () => {
     (typed) => {
       assertDistinctTypes(typed, { ...Array.from(typed) }, deepEquals)
       assertDistinctTypes(typed, Array.from(typed), deepEquals)
+    },
+  )
+})
+
+/**
+ * Object-valued Sets compare unordered structural members with multiplicity:
+ * distinct objects with equal fields still occupy distinct Set positions.
+ * The approved record-prototype rule distinguishes plain/class/null records.
+ * AGENTS.md's Algorithm Efficiency rule excludes combinatorial assignment
+ * searches. Scalar record comparisons below get a generous cubic field-read
+ * ceiling; this is a work measure, not elapsed time or a nested-value bound.
+ *
+ * The model counts authored shape/value tokens. It neither searches candidate
+ * assignments nor calls production equality. Generated widths and values
+ * construct equal bags, a late unmatched prototype, and a count deficit where
+ * every member has some candidate. Rotation challenges insertion order. Empty
+ * and singleton neighbors use the same model. Optional parent links close a
+ * cycle through the compared Sets without changing token identity.
+ */
+type SetRecord = { kind: `plain` | `class` | `null`; value: number }
+const ambiguousSets = fc.record({
+  width: fc.integer({ min: 6, max: 12 }),
+  value: fc.integer({ min: 1, max: 5 }),
+  rotation: fc.nat(12),
+})
+function setBag(records: ReadonlyArray<SetRecord>): Array<[string, number]> {
+  const counts = new Map<string, number>()
+  for (const { kind, value } of records) {
+    const token = `${kind}:${value}`
+    counts.set(token, (counts.get(token) ?? 0) + 1)
+  }
+  return [...counts].sort(([a], [b]) => a.localeCompare(b))
+}
+class SetPayload {}
+const setReachStates = [
+  `empty`,
+  `singleton`,
+  `wide`,
+  `equal`,
+  `unmatched`,
+  `deficit`,
+  `cyclic`,
+  `acyclic`,
+  `general-forward`,
+  `general-reverse`,
+  `row-forward`,
+  `row-reverse`,
+] as const
+function checkSetBag(
+  left: ReadonlyArray<SetRecord>,
+  right: ReadonlyArray<SetRecord>,
+  cyclic: boolean,
+  reach: (state: (typeof setReachStates)[number]) => void,
+): void {
+  const expected =
+    JSON.stringify(setBag(left)) === JSON.stringify(setBag(right))
+  const errors: Array<Error> = []
+  for (const [name, equal] of [
+    [`general`, deepEquals],
+    [`row`, sameRowValue],
+  ] as const) {
+    for (const [a, b, direction] of [
+      [left, right, `forward`],
+      [right, left, `reverse`],
+    ] as const) {
+      try {
+        reach(`${name}-${direction}`)
+        let reads = 0
+        const ceiling = 4 * (Math.max(a.length, b.length) + 1) ** 3
+        const make = (records: ReadonlyArray<SetRecord>) => {
+          const result = new Set<object>()
+          for (const spec of records) {
+            const member: object =
+              spec.kind === `class`
+                ? new SetPayload()
+                : spec.kind === `null`
+                  ? (Object.create(null) as object)
+                  : {}
+            Object.defineProperty(member, `value`, {
+              enumerable: true,
+              get() {
+                // Fail at the work observation, before exponential code can hang.
+                expect(
+                  ++reads,
+                  `Set scalar-field comparison work`,
+                ).toBeLessThanOrEqual(ceiling)
+                return spec.value
+              },
+            })
+            if (cyclic) Object.assign(member, { parent: result })
+            result.add(member)
+          }
+          return result
+        }
+        expect(equal(make(a), make(b)), `Set bag equality`).toBe(expected)
+      } catch (error) {
+        errors.push(
+          new Error(`${name} Set comparison: ${String(error)}`, {
+            cause: error,
+          }),
+        )
+      }
+    }
+  }
+  if (errors.length)
+    throw new AggregateError(errors, errors.map(String).join(`; `), {
+      cause: errors[0],
+    })
+}
+declareOracle({
+  model: [setBag],
+  check: [checkSetBag],
+  grammar: [ambiguousSets],
+})
+// Match the existing describe registration order to preserve IDs: utils.42.
+describe(`object Set matching work`, () => {
+  const reach = createOracleReach(`utils.set-matching`, setReachStates)
+  afterAll(() => {
+    if (reach.counts().get(`empty`)) {
+      process.stdout.write(
+        `Set matching reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+      reach.assertReached()
+    }
+  })
+  utilsProperty([ambiguousSets])(
+    `object Set equality respects multiplicity with polynomial scalar reads`,
+    ({ width, value, rotation }) => {
+      reach.beginHistory()
+      const plain = (count: number, leaf = value): Array<SetRecord> =>
+        Array.from({ length: count }, () => ({ kind: `plain`, value: leaf }))
+      for (const cyclic of [false, true]) {
+        reach.reach(cyclic ? `cyclic` : `acyclic`)
+        for (const count of [0, 1, width]) {
+          reach.reach(
+            count === 0 ? `empty` : count === 1 ? `singleton` : `wide`,
+          )
+          const records = plain(count)
+          checkSetBag(records, [...records].reverse(), cyclic, reach.reach)
+          reach.reach(`equal`)
+        }
+        for (const kind of [`class`, `null`] as const) {
+          const records = plain(width)
+          checkSetBag(
+            [...records, { kind, value }],
+            plain(width + 1),
+            cyclic,
+            reach.reach,
+          )
+          reach.reach(`unmatched`)
+        }
+        // Every member has a candidate, but the value counts cannot be paired.
+        const a = [...plain(width + 1), ...plain(1, value + 1)]
+        const b = [...plain(width), ...plain(2, value + 1)]
+        const offset = rotation % b.length
+        checkSetBag(
+          a,
+          [...b.slice(offset), ...b.slice(0, offset)],
+          cyclic,
+          reach.reach,
+        )
+        reach.reach(`deficit`)
+      }
+      reach.assertReached()
     },
   )
 })

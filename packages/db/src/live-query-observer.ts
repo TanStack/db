@@ -397,7 +397,7 @@ class LiveQueryObserverImpl<
 
   /**
    * A detached read catches up from the Collection's row and layout clocks.
-   * Supported inputs are concrete Collections from this DB instance.
+   * Supported inputs are Collections and pooled views from this DB instance.
    */
   private refreshDetachedState(collection: Collection<T, TKey, any>): void {
     const status = collection.status
@@ -585,11 +585,16 @@ class LiveQueryObserverImpl<
         notify(undefined, collection.status)
       }),
     )
-    ownRelease(
-      collection._subscribeLayoutChanges(() =>
-        notify([], collection.status, true),
-      ),
-    )
+    // Pooled views carry layout changes in their ordinary change stream.
+    if (
+      (collection as Partial<Collection<T, TKey, any>>)._subscribeLayoutChanges
+    ) {
+      ownRelease(
+        collection._subscribeLayoutChanges(() =>
+          notify([], collection.status, true),
+        ),
+      )
+    }
     // `subscribeChanges` delivers the initial state synchronously, so a
     // listener can dispose the observer while the collection subscription is
     // still being created. Register the release hook up front; if detach()

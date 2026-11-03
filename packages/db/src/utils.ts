@@ -198,40 +198,26 @@ export function deepEqualsInternal(
       return aValues.every((val) => b.has(val))
     }
 
-    // Object-valued Sets are unordered. Match each value once, carrying a
-    // branch-local cycle map so a failed candidate cannot poison the next.
-    const matchValues = (
-      index: number,
-      remaining: ReadonlyArray<number>,
-      branchVisited: Map<object, object>,
-    ): boolean => {
-      if (index === aValues.length) return true
-      const value = aValues[index]
-      for (const [remainingIndex, candidateIndex] of remaining.entries()) {
-        const candidateVisited = new Map(branchVisited)
-        if (
-          deepEqualsInternal(
-            value,
-            bValues[candidateIndex],
-            mode,
-            candidateVisited,
-          ) &&
-          matchValues(
-            index + 1,
-            remaining.filter((_, otherIndex) => otherIndex !== remainingIndex),
-            candidateVisited,
-          )
-        ) {
-          return true
-        }
-      }
-      return false
-    }
-    const result = matchValues(
-      0,
-      bValues.map((_, index) => index),
-      visited,
+    // Compare each candidate pair once, with independent cycle bookkeeping.
+    // Augmenting paths find a bijection without enumerating permutations.
+    const candidates = aValues.map((value) =>
+      bValues.flatMap((candidate, index) =>
+        deepEqualsInternal(value, candidate, mode, new Map(visited))
+          ? [index]
+          : [],
+      ),
     )
+    const assigned = new Map<number, number>()
+    const match = (index: number, seen: Set<number>): boolean =>
+      candidates[index]!.some((candidate) => {
+        if (seen.has(candidate)) return false
+        seen.add(candidate)
+        const previous = assigned.get(candidate)
+        if (previous !== undefined && !match(previous, seen)) return false
+        assigned.set(candidate, index)
+        return true
+      })
+    const result = aValues.every((_, index) => match(index, new Set()))
     visited.delete(a)
     return result
   }
