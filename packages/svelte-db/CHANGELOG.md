@@ -1,5 +1,14 @@
 # @tanstack/svelte-db
 
+## 1.0.0-rc.1.2
+
+### Patch Changes
+
+- Keep adapter-owned live queries and their source subscriptions when only the ordered query's finite `.limit()` or `.offset()` changes. Preserve exact requested bounds and select only installed ranks when page windows include negative offsets. Keep Angular's list/findOne result shape consistent with the current query during reactive changes, and avoid React 18 layout-effect warnings during server rendering. ([#2316](https://github.com/TanStack/db/pull/2316))
+
+- Updated dependencies [[`30e8546`](https://github.com/TanStack/db/commit/30e85464ed2b9b12c5f10981a062427a1fc8daaa), [`a3c4d06`](https://github.com/TanStack/db/commit/a3c4d0676621cc7df4d242bdfe31815509add734), [`035a526`](https://github.com/TanStack/db/commit/035a5260ef994ce3aabed77a3f09b35c71482a9a), [`baabf57`](https://github.com/TanStack/db/commit/baabf57a0f110d57ad9bb7b81148466b18fbe0d1), [`9be51e0`](https://github.com/TanStack/db/commit/9be51e037f6c092bc9625f9b5b4b7e23eb4fa5fe), [`a3c4d06`](https://github.com/TanStack/db/commit/a3c4d0676621cc7df4d242bdfe31815509add734), [`85392bd`](https://github.com/TanStack/db/commit/85392bd1d349aa3bb77c9c11ffba671f0b2d2a84), [`9be3c4e`](https://github.com/TanStack/db/commit/9be3c4ed2c8d9762d3837e38d8869483d50b07f6)]:
+  - @tanstack/db@1.0.0-rc.1.2
+
 ## 1.0.0-rc.1.1
 
 ### Patch Changes
