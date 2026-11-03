@@ -1036,7 +1036,7 @@ function directReplayTestName(property: string): string | undefined {
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
       case `result-shape`:
-        return `query projection histories \\(random\\)`
+        return `result-shape > random seed`
       case `window-history`:
         return `(?:direct|nested) window histories \\(fresh\\)`
       case `pending-window-history`:

@@ -10,23 +10,30 @@
  * This does not promise synchronous row freshness or identical host scheduling.
  * Disabled inputs, errors, supplied Collections and DbClient remain with their
  * existing conformance owners; this grammar uses enabled callback queries.
+ *
+ * The property is defined once here and registered once per framework, by
+ * that framework's conformance suite, with its own driver: one law, model,
+ * history grammar, and check, judged through each framework's binding.
  */
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
-import { declareOracle } from '../oracle-declaration'
-import { createOracleReach } from '../oracle-reach'
-import {
-  atOracleCheckpoint,
-  createOracleFailureFidelity,
-} from '../oracle-failure-fidelity'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../oracle-config'
-import { expectKeyedRows, expectOrderedRows, selectedRow } from './result-laws'
+import { oracleRuns } from '../oracle-config'
+import { oracleProperty, pass, violation } from '../oracle-property'
+import { selectedRowKeys } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
+import type { Observation } from '../oracle-property'
 import type { ControllableHandle, LiveQueryDriver } from './contract'
+
+// ---------------------------------------------------------------------------
+// Histories
+// ---------------------------------------------------------------------------
+//
+// Source cardinality makes absent, single and multiple rows distinguishable.
+// Mode changes projection; order changes which row findOne selects. The tail
+// permits repeated modes and further returns. No disabled or invalid query is
+// generated. Removing either direction or the native cut loses the reported
+// stale-projection witness, even when all settled comparisons remain green.
+// A finite singleton list and findOne can have identical offset/limit while
+// their projections differ. That axis rejects window-only shape invalidation.
 
 type Mode = `list` | `single`
 type ReadOrder = `data first` | `Collection first`
@@ -43,14 +50,7 @@ type ShapeHistory = {
   tail: Array<Mode>
 }
 
-// Source cardinality makes absent, single and multiple rows distinguishable.
-// Mode changes projection; order changes which row findOne selects. The tail
-// permits repeated modes and further returns. No disabled or invalid query is
-// generated. Removing either direction or the native cut loses the reported
-// stale-projection witness, even when all settled comparisons remain green.
-// A finite singleton list and findOne can have identical offset/limit while
-// their projections differ. That axis rejects window-only shape invalidation.
-const shapeHistory = fc.record({
+const shapeHistory: fc.Arbitrary<ShapeHistory> = fc.record({
   initial: fc.constantFrom<Mode>(`list`, `single`),
   order: fc.constantFrom<ReadOrder>(`data first`, `Collection first`),
   count: fc.integer({ min: 0, max: 4 }),
@@ -61,55 +61,62 @@ const shapeHistory = fc.record({
   offset: fc.integer({ min: 0, max: 3 }),
   tail: fc.array(fc.constantFrom<Mode>(`list`, `single`), { maxLength: 4 }),
 })
-const examples: Array<[ShapeHistory]> = [3, 1, 0].flatMap((count) =>
+
+// The regressions: every count, initial mode, read order, and window choice,
+// plus the adjacent finite offset for the three-row windows.
+const regressions: Array<ShapeHistory> = [3, 1, 0].flatMap((count) =>
   ([`list`, `single`] as const).flatMap((initial) =>
     ([`data first`, `Collection first`] as const).flatMap((order) =>
-      [false, true].map((windowed): [ShapeHistory] => [
-        {
-          initial,
-          order,
-          count,
-          base: 0,
-          spacing: 1,
-          descending: false,
-          windowed,
-          offset: 0,
-          tail: [],
-        },
-      ]),
+      [false, true].map((windowed): ShapeHistory => ({
+        initial,
+        order,
+        count,
+        base: 0,
+        spacing: 1,
+        descending: false,
+        windowed,
+        offset: 0,
+        tail: [],
+      })),
     ),
   ),
 )
-// Pin the adjacent finite offset as well as zero. Each input still goes through
-// the same history grammar, independent model, real driver and comparison.
-examples.push(
-  ...examples
-    .filter(([history]) => history.count === 3 && history.windowed)
-    .map(([history]): [ShapeHistory] => [{ ...history, offset: 1 }]),
+regressions.push(
+  ...regressions
+    .filter((history) => history.count === 3 && history.windowed)
+    .map((history) => ({ ...history, offset: 1 })),
 )
 
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+//
 // The model recomputes from authored source rows and mode. It knows nothing
-// about Collection classifiers, observer snapshots, or adapter caches.
-function shapeRows(
-  rows: ReadonlyArray<ShapeRow>,
-  mode: Mode,
-  descending: boolean,
-  windowed = false,
-  offset = 0,
-) {
-  const ordered = [...rows].sort((a, b) =>
-    descending ? b.value - a.value : a.value - b.value,
+// about Collection classifiers, observer snapshots, or adapter caches. A
+// history mounts in its initial mode, switches to the opposite mode twice,
+// returns, then follows its tail; each switch has a native cut, where only
+// the shape is owed, and a settled cut, where the rows are owed too.
+
+function sourceRows(history: ShapeHistory): Array<ShapeRow> {
+  return Array.from({ length: history.count }, (_, index) => ({
+    id: String(index),
+    value: history.base + index * history.spacing,
+  }))
+}
+
+function shapeRows(history: ShapeHistory, mode: Mode): Array<ShapeRow> {
+  const ordered = [...sourceRows(history)].sort((a, b) =>
+    history.descending ? b.value - a.value : a.value - b.value,
   )
-  const selected = windowed ? ordered.slice(offset, offset + 1) : ordered
+  const selected = history.windowed
+    ? ordered.slice(history.offset, history.offset + 1)
+    : ordered
   return mode === `single` ? selected.slice(0, 1) : selected
 }
 
-function checkResultShape(actual: unknown, mode: Mode): void {
-  expect(Array.isArray(actual), `raw ${mode} projection`).toBe(mode === `list`)
-  if (mode === `single` && actual !== undefined) {
-    expect(actual).not.toBeNull()
-    expect(typeof actual).toBe(`object`)
-  }
+function modes(history: ShapeHistory): Array<Mode> {
+  const opposite: Mode = history.initial === `list` ? `single` : `list`
+  return [history.initial, opposite, opposite, history.initial, ...history.tail]
 }
 
 const states = [
@@ -127,204 +134,360 @@ const states = [
   `nonzero finite window projection change`,
 ] as const
 
-async function checkShapeHistory(
-  driver: LiveQueryDriver,
-  history: ShapeHistory,
-  reach: ReturnType<typeof createOracleReach<(typeof states)[number]>>,
-) {
-  const { initial, order } = history
-  const lifetime = new ScenarioLifetime()
-  let handle: ControllableHandle<Mode> | undefined
-  lifetime.defer(() => handle?.unmount())
-  await lifetime.run(async () => {
-    const rows = Array.from({ length: history.count }, (_, index) => ({
-      id: String(index),
-      value: history.base + index * history.spacing,
-    }))
-    const source = driver.makeSource(rows.map((row) => ({ ...row })))
-    lifetime.defer(() => source.collection.cleanup({ dependents: true }))
-    let compiledMode: Mode | undefined
-    handle = driver.mountControllable<Mode>((q, mode) => {
-      compiledMode = mode
-      let query = q
-        .from({ row: source.collection })
-        .orderBy(
-          ({ row }: { row: ShapeRow }) => row.value,
-          history.descending ? `desc` : `asc`,
-        )
-      if (history.windowed) query = query.offset(history.offset).limit(1)
-      return mode === `single` ? query.findOne() : query
-    }, initial)
-    const mounted = handle
-    const failures: Array<unknown> = []
-    const compare = (law: string, checkpoint: string, check: () => void) => {
-      try {
-        atOracleCheckpoint(law, checkpoint, check)
-      } catch (error) {
-        // Keep both directions and the later settled evidence even when the
-        // native shape is wrong. No failed comparison is discarded.
-        failures.push(error)
-      }
+type Owed = { mode: Mode; rows?: Array<ShapeRow> }
+
+function shapeModel(history: ShapeHistory) {
+  const sequence = modes(history)
+  const owed = new Map<string, Owed>()
+  const reached = new Set<string>()
+  const settled = (checkpoint: string, mode: Mode) => {
+    owed.set(checkpoint, { mode, rows: shapeRows(history, mode) })
+    if (history.count === 0) reached.add(`empty source settled`)
+    if (history.count > 1) reached.add(`multiple source rows settled`)
+  }
+  settled(`initial settled`, history.initial)
+  for (const [index, mode] of sequence.slice(1).entries()) {
+    const previous = sequence[index]!
+    const transition = `${previous} to ${mode}`
+    owed.set(`${index}: ${transition}; native`, { mode })
+    reached.add(`${history.order} read`)
+    if (previous === mode) reached.add(`repeated mode at native cut`)
+    else {
+      reached.add(`${transition} at native cut`)
+      if (history.count > 0) reached.add(`nonempty ${transition} at native cut`)
+      if (history.windowed) reached.add(`same finite window projection change`)
+      if (history.windowed && history.offset > 0)
+        reached.add(`nonzero finite window projection change`)
     }
-    const settled = (mode: Mode, checkpoint: string) => {
-      const actual = mounted.current()
-      const expected = shapeRows(
-        rows,
-        mode,
-        history.descending,
-        history.windowed,
-        history.offset,
-      )
-      compare(`current query projection`, checkpoint, () =>
-        checkResultShape(actual.data, mode),
-      )
-      compare(`settled selected rows`, checkpoint, () => {
-        if (mode === `list`) expectOrderedRows(actual.data, expected)
-        else if (expected.length === 0) expect(actual.data).toBeUndefined()
-        else {
-          checkResultShape(actual.data, mode)
-          expect(selectedRow(actual.data)).toStrictEqual(expected[0])
-        }
-      })
-      compare(`settled keyed rows`, checkpoint, () =>
-        expectKeyedRows(actual.state, expected),
-      )
-      if (history.count === 0) reach.reach(`empty source settled`)
-      if (history.count > 1) reach.reach(`multiple source rows settled`)
-    }
-    try {
-      await mounted.flush()
-      settled(initial, `initial settled`)
-      const opposite: Mode = initial === `list` ? `single` : `list`
-      let previous = initial
-      for (const [index, mode] of [
-        opposite,
-        opposite,
-        initial,
-        ...history.tail,
-      ].entries()) {
-        let observations = 0
-        const transition = `${previous} to ${mode}`
-        const checkpoint = `${transition}; ${driver.parameterObservationCut}; ${order}`
-        await mounted.setParam(mode, () => {
-          observations++
-          reach.reach(`${order} read`)
-          // These are real public reads. Their order is part of the history;
-          // neither a snapshot normalization nor a later flush can repair them.
-          const actual = atOracleCheckpoint(
-            `public result read`,
-            checkpoint,
-            () => {
-              if (order === `Collection first`) mounted.collection()
-              const result = mounted.current()
-              if (order === `data first`) mounted.collection()
-              return result
-            },
-          )
-          compare(`current input reached query callback`, checkpoint, () =>
-            expect(compiledMode).toBe(mode),
-          )
-          if (previous === mode) reach.reach(`repeated mode at native cut`)
-          else {
-            if (history.windowed)
-              reach.reach(`same finite window projection change`)
-            if (history.windowed && history.offset > 0)
-              reach.reach(`nonzero finite window projection change`)
-            reach.reach(
-              `${transition} at native cut` as (typeof states)[number],
-            )
-            if (history.count > 0)
-              reach.reach(
-                `nonempty ${transition} at native cut` as (typeof states)[number],
-              )
-          }
-          compare(`current query projection`, checkpoint, () =>
-            checkResultShape(actual.data, mode),
-          )
-        })
-        compare(`native observation executed`, checkpoint, () =>
-          expect(observations).toBe(1),
-        )
-        settled(mode, `${transition}; settled`)
-        if (index === 2) reach.reach(`returned mode settled`)
-        previous = mode
-      }
-    } catch (error) {
-      // A later driver/read interruption cannot replace an earlier mismatch.
-      failures.push(error)
-    }
-    if (failures.length)
-      throw new AggregateError(failures, failures.map(String).join(`\n`), {
-        cause: failures[0],
-      })
-  })
+    settled(`${index}: ${transition}; settled`, mode)
+    if (index === 2) reached.add(`returned mode settled`)
+  }
+  return { owed, reached }
 }
 
-declareOracle({
-  model: [shapeRows],
-  grammar: [shapeHistory],
-  check: [checkResultShape, checkShapeHistory],
-})
+// ---------------------------------------------------------------------------
+// Production driver, for one framework's binding
+// ---------------------------------------------------------------------------
+//
+// The driver mounts the query through the framework's controllable binding,
+// flushes, and records the settled projection: its shape, its selected rows,
+// and the keyed state. For each switch it reads the binding inside the
+// framework's native observation callback, in the history's read order, and
+// records the shape and the mode the query callback last compiled; after the
+// switch settles it records how many native observations ran and the settled
+// projection. Rows are recorded as plain selected values; the driver
+// decides nothing.
+
+type Shape = `array` | `undefined` | `null` | `object` | `other`
+const shapeOf = (value: unknown): Shape =>
+  Array.isArray(value)
+    ? `array`
+    : value === undefined
+      ? `undefined`
+      : value === null
+        ? `null`
+        : typeof value === `object`
+          ? `object`
+          : `other`
+const plainRow = (row: unknown): unknown =>
+  row !== null && typeof row === `object`
+    ? Object.fromEntries(
+        selectedRowKeys(row)
+          .filter((key) => typeof key === `string`)
+          .map((key) => [key, (row as Record<PropertyKey, unknown>)[key]]),
+      )
+    : row
+const byId = (a: { id: unknown }, b: { id: unknown }) =>
+  String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0
+
+type Settled = {
+  shape: Shape
+  rows: Array<unknown>
+  /** Keyed state as plain entries, or null when the binding exposes none. */
+  state: Array<{ id: unknown; value: unknown }> | null
+}
+type Native = {
+  shape: Shape
+  compiledMode: Mode | undefined
+  readError?: string
+  observations: number
+}
+
+function resultShapeDriver(driver: LiveQueryDriver) {
+  return async (
+    history: ShapeHistory,
+    observe: (checkpoint: string, value: unknown) => void,
+  ) => {
+    const lifetime = new ScenarioLifetime()
+    let handle: ControllableHandle<Mode> | undefined
+    lifetime.defer(() => handle?.unmount())
+    await lifetime.run(async () => {
+      const source = driver.makeSource(sourceRows(history))
+      lifetime.defer(() => source.collection.cleanup({ dependents: true }))
+      let compiledMode: Mode | undefined
+      handle = driver.mountControllable<Mode>((q, mode) => {
+        compiledMode = mode
+        let query = q
+          .from({ row: source.collection })
+          .orderBy(
+            ({ row }: { row: ShapeRow }) => row.value,
+            history.descending ? `desc` : `asc`,
+          )
+        if (history.windowed) query = query.offset(history.offset).limit(1)
+        return mode === `single` ? query.findOne() : query
+      }, history.initial)
+      const mounted = handle
+      const settled = (checkpoint: string) => {
+        const { data, state } = mounted.current()
+        const shape = shapeOf(data)
+        observe(checkpoint, {
+          shape,
+          rows:
+            shape === `array`
+              ? (data as Array<unknown>).map(plainRow)
+              : shape === `object`
+                ? [plainRow(data)]
+                : [],
+          state: state
+            ? [...(state as ReadonlyMap<unknown, unknown>).entries()]
+                .map(([id, value]) => ({ id, value: plainRow(value) }))
+                .sort(byId)
+            : null,
+        } satisfies Settled)
+      }
+      await mounted.flush()
+      settled(`initial settled`)
+      const sequence = modes(history)
+      for (const [index, mode] of sequence.slice(1).entries()) {
+        const transition = `${sequence[index]} to ${mode}`
+        let native: Omit<Native, `observations`> | undefined
+        let observations = 0
+        await mounted.setParam(mode, () => {
+          observations++
+          // These are real public reads; their order is part of the history.
+          try {
+            if (history.order === `Collection first`) mounted.collection()
+            const result = mounted.current()
+            if (history.order === `data first`) mounted.collection()
+            native = { shape: shapeOf(result.data), compiledMode }
+          } catch (error) {
+            native = { shape: `other`, compiledMode, readError: String(error) }
+          }
+        })
+        observe(`${index}: ${transition}; native`, {
+          ...(native ?? { shape: `other`, compiledMode }),
+          observations,
+        } satisfies Native)
+        settled(`${index}: ${transition}; settled`)
+      }
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Check
+// ---------------------------------------------------------------------------
+//
+// At a native cut: the public read did not throw, exactly one native
+// observation ran, the query callback compiled the current mode, and the
+// projection has the current mode's shape. At a settled cut: the shape again,
+// the selected rows in order (a findOne row or undefined), and the keyed
+// state as an unordered set.
+
+const projects = (shape: Shape, mode: Mode) =>
+  mode === `list`
+    ? shape === `array`
+    : shape === `undefined` || shape === `object`
+const json = (value: unknown) => JSON.stringify(value)
+
+function checkResultShape(
+  _history: ShapeHistory,
+  trace: ReadonlyArray<Observation>,
+  { owed }: ReturnType<typeof shapeModel>,
+) {
+  for (const { checkpoint, value } of trace) {
+    const expected = owed.get(checkpoint)
+    if (!expected)
+      return violation(
+        checkpoint,
+        `the driver recorded a checkpoint the model does not owe`,
+        `trace`,
+      )
+    if (checkpoint.endsWith(`native`)) {
+      const native = value as Native
+      if (native.readError)
+        return violation(
+          checkpoint,
+          `the public read threw: ${native.readError}`,
+          `public result read`,
+        )
+      if (native.observations !== 1)
+        return violation(
+          checkpoint,
+          `${native.observations} native observations ran`,
+          `native observation executed`,
+        )
+      if (native.compiledMode !== expected.mode)
+        return violation(
+          checkpoint,
+          `the query callback last compiled ${native.compiledMode}`,
+          `current input reached query callback`,
+        )
+      if (!projects(native.shape, expected.mode))
+        return violation(
+          checkpoint,
+          `a ${expected.mode} binding projects ${native.shape}`,
+          `current query projection`,
+          { actual: native.shape, expected: expected.mode },
+        )
+      continue
+    }
+    const seen = value as Settled
+    if (!projects(seen.shape, expected.mode))
+      return violation(
+        checkpoint,
+        `a ${expected.mode} binding projects ${seen.shape}`,
+        `current query projection`,
+        { actual: seen.shape, expected: expected.mode },
+      )
+    const rows = expected.rows!
+    const selected =
+      expected.mode === `single` && rows.length === 0
+        ? seen.shape === `undefined`
+        : json(seen.rows) === json(rows)
+    if (!selected)
+      return violation(
+        checkpoint,
+        `selected rows ${json(seen.rows)}, owed ${json(rows)}`,
+        `settled selected rows`,
+        { actual: seen.rows, expected: rows },
+      )
+    const keyed = rows.map((row) => ({ id: row.id, value: row })).sort(byId)
+    if (json(seen.state) !== json(keyed))
+      return violation(
+        checkpoint,
+        `keyed state ${json(seen.state)}, owed ${json(keyed)}`,
+        `settled keyed rows`,
+        { actual: seen.state, expected: keyed },
+      )
+  }
+  for (const checkpoint of owed.keys())
+    if (!trace.some((entry) => entry.checkpoint === checkpoint))
+      return violation(
+        checkpoint,
+        `the driver recorded no "${checkpoint}"`,
+        `trace`,
+      )
+  return pass
+}
+
+// ---------------------------------------------------------------------------
+// Definition and registration
+// ---------------------------------------------------------------------------
+
+// Two segments enter every state the laws need, on every lane.
+const resultShapeHistories = {
+  arbitrary: shapeHistory,
+  states,
+  runs: 6,
+  fixedSeeds: [2316],
+  segments: [
+    {
+      name: `every switch over a three-row window`,
+      enters: states.filter(
+        (state) =>
+          state !== `Collection first read` && state !== `empty source settled`,
+      ),
+      build: (generated: ShapeHistory): ShapeHistory => ({
+        ...generated,
+        initial: `list`,
+        order: `data first`,
+        count: 3,
+        windowed: true,
+        offset: 1,
+        tail: [`list`],
+      }),
+    },
+    {
+      name: `an empty source read Collection first`,
+      enters: [`Collection first read`, `empty source settled`],
+      build: (generated: ShapeHistory): ShapeHistory => ({
+        ...generated,
+        order: `Collection first`,
+        count: 0,
+      }),
+    },
+  ],
+  pins: regressions.map((history) => ({
+    name: `${history.initial}, ${history.order}, ${history.count} rows${history.windowed ? `, window at ${history.offset}` : ``}`,
+    history,
+  })),
+}
+
+// Wrong answers the check must reject: the previous mode's projection at a
+// native cut, in either direction, and stale rows at a settled cut.
+const resultShapeCalibrations = [
+  {
+    name: `previous projection at the native cut`,
+    law: `current query projection`,
+    corrupt: (trace: ReadonlyArray<Observation>) => {
+      const at = trace.findIndex(({ checkpoint }) =>
+        checkpoint.endsWith(`native`),
+      )
+      if (at < 0) return undefined
+      return trace.map((entry, index) => {
+        if (index !== at) return entry
+        const native = entry.value as Native
+        return {
+          ...entry,
+          value: {
+            ...native,
+            shape: native.shape === `array` ? `object` : `array`,
+          },
+        }
+      })
+    },
+  },
+  {
+    name: `stale rows at a settled cut`,
+    law: `settled selected rows`,
+    corrupt: (trace: ReadonlyArray<Observation>) => {
+      const at = trace.findIndex(
+        ({ checkpoint, value }) =>
+          checkpoint.endsWith(`settled`) && (value as Settled).rows.length > 0,
+      )
+      if (at < 0) return undefined
+      return trace.map((entry, index) =>
+        index === at
+          ? {
+              ...entry,
+              value: {
+                ...(entry.value as Settled),
+                rows: [{ id: `stale`, value: 0 }],
+              },
+            }
+          : entry,
+      )
+    },
+  },
+]
 
 export function registerResultShapeOracle(driver: LiveQueryDriver): void {
   const id = driver.name.replace(/\W+/g, `-`).replace(/-$/, ``)
-  const property = `framework.${id}.result-shape`
-  describe(`${driver.name} result-shape conformance`, () => {
-    for (const campaign of [`fixed`, `random`] as const) {
-      const test =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      test(
-        `query projection histories (${campaign})`,
-        async () => {
-          const reach = createOracleReach(`${property}/${campaign}`, states, {
-            fixedHistories: examples.length,
-          })
-          const fidelity = createOracleFailureFidelity<ShapeHistory>()
-          let begun = 0
-          try {
-            await fidelity.assert(() =>
-              fc.assert(
-                fc.asyncProperty(shapeHistory, async (history) => {
-                  reach.beginHistory({ fixed: begun++ < examples.length })
-                  await fidelity.run(history, () =>
-                    checkShapeHistory(driver, history, reach),
-                  )
-                }),
-                campaign === `fixed`
-                  ? {
-                      seed: 2316,
-                      numRuns: oracleRuns(6) + examples.length,
-                      examples,
-                    }
-                  : oraclePropertyOptions(6, property, { examples }),
-              ),
-            )
-            reach.assertReached()
-          } finally {
-            console.info(
-              `shape reach ${property}/${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
-          }
-        },
-        oracleRuns(30_000),
-      )
-    }
-
-    // Calibrate the same raw-shape judgment with the previous mode's answer.
-    // Both wrong directions have identical selected rows and differ only in
-    // array-versus-row projection, which row normalization would erase.
-    it(`rejects the previous query projection in either direction`, () => {
-      const rows = [{ id: `0`, value: 0 }]
-      for (const mode of [`list`, `single`] as const) {
-        const expected = shapeRows(rows, mode, false)
-        const good = mode === `list` ? expected : expected[0]
-        checkResultShape(good, mode)
-        const wrong = mode === `list` ? expected[0] : expected
-        expect(() => checkResultShape(wrong, mode)).toThrow()
-      }
-    })
+  oracleProperty({
+    id: `framework.${id}.result-shape`,
+    law: {
+      statement: `A binding projects data through its current authored query: a list exposes an array and findOne a row or undefined, at the native cut after a mode change and after it settles, where the selected rows and keyed state equal the source model.`,
+      authority: `packages/db/tests/conformance/contract.ts and each adapter's public result type`,
+      limits: `Enabled callback queries over one source of zero to four rows; no disabled inputs, errors, supplied Collections, or DbClient. No promise of synchronous row freshness or identical host scheduling.`,
+      owner: `Framework conformance`,
+    },
+    histories: resultShapeHistories,
+    model: shapeModel,
+    reached: (_history, _trace, expected) => expected.reached,
+    driver: resultShapeDriver(driver),
+    check: checkResultShape,
+    calibrations: resultShapeCalibrations,
+    timeout: oracleRuns(30_000),
   })
 }

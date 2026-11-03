@@ -6791,7 +6791,12 @@ rows and both data-first/Collection-first reads are checked at each driver's
 native parameter cut, then after settlement. Finite singleton queries retain
 identical offset/limit across projection changes, including positive offsets.
 Native cuts require raw shape; settled cuts also compare selected values and
-keyed state. This does not promise synchronous row freshness or identical host
+keyed state. It is one `oracleProperty` definition, registered by each
+framework's conformance suite with that framework's driver as
+`framework.<driver>.result-shape`; two segments enter its twelve required
+states on every lane, the former fixed examples are pins, and the previous-mode
+projection and stale rows are calibrations. Reintroducing the Angular defect
+below fails 32 of its tests, each at law `current query projection`. This does not promise synchronous row freshness or identical host
 scheduling. Disabled inputs, errors, supplied Collections, DbClient and broad
 host/AOT behavior remain outside this lane.
 
