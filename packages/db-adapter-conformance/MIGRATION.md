@@ -563,8 +563,10 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
   - **Decided 2026-11-03:** a storage `bulkWrite` that throws wedges the
     incremental write queue of RxDB 17.1.0 to 17.5.0, so `incrementalPatch`
     never settles (pubkey/rxdb#9025, fixed in 17.6.0). The adapter keeps
-    `incrementalPatch`. Thrown storage errors are generated once the RxDB
-    dev dependency reaches 17.6.0.
+    `incrementalPatch`; its RxDB dev dependency is now 17.6.0 and its peer
+    range `>=17.6.0`. A driver can declare `rejectionKinds`; RxDB declares
+    a per-row write error and a thrown storage error. RED on 17.1.0 (both
+    campaigns failed HEALTH-5 at a thrown update), GREEN on 17.6.0.
   - **Size:** rxdb-db-collection +43 gzip bytes for MUT-10.
 - **2026-11-03, mutations family, server rewrites.** A new capability,
   `server-rewrites`: an accepted insert's or update's plan can rewrite the

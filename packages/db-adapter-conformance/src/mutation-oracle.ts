@@ -156,6 +156,11 @@ export interface WritePlan {
   readonly rewrite: ServerRewrite
   /** Answer only at `release`, so the write stays pending until then. */
   readonly held: boolean
+  /**
+   * How the provider rejects, one of the driver's `rejectionKinds`; absent
+   * when the driver declares none.
+   */
+  readonly rejectionKind?: string
   /** The error a rejection answers with. */
   readonly error: Error
 }
@@ -203,6 +208,13 @@ export interface MutationDriver {
    */
   readonly matchesFailure?: (reported: unknown, failure: Error) => boolean
   /**
+   * The ways the provider can reject a write request, such as an error in
+   * its response and a thrown exception (`write-rejection`). The grammar
+   * picks one for each rejection, and each must be reached; MUT-2 owes the
+   * same outcome for every kind.
+   */
+  readonly rejectionKinds?: ReadonlyArray<string>
+  /**
    * How the provider stores an authored field whose value is `undefined`,
    * as an update that removes a field authors it. FID-1 parameterizes row
    * values by the adapter's value domain: `own` keeps the field as an own
@@ -235,7 +247,8 @@ export interface MutationDriver {
  *   of a key they hold, with no other pending mutation on that key. An update
  *   that changes no field is not generated. An update without `note` of a
  *   row that holds one removes the field. Its plan rejects only with
- *   `write-rejection`, is held only with `held-writes`, and rewrites an
+ *   `write-rejection`, in one of the driver's `rejectionKinds` when it
+ *   declares several, is held only with `held-writes`, and rewrites an
  *   accepted insert's or update's row only with `server-rewrites`.
  * - `release`: the provider answers the oldest held request (`held-writes`).
  * - `foreign`: another client commits an upsert or a delete while no
@@ -258,6 +271,8 @@ export type MutationStep =
       readonly outcome: `accept` | `reject`
       readonly held: boolean
       readonly rewrite: ServerRewrite
+      /** One of the driver's `rejectionKinds`, for a rejection. */
+      readonly rejectionKind?: string
     }
   | { readonly kind: `release` }
   | { readonly kind: `foreign`; readonly change: ProviderChange }
@@ -278,9 +293,10 @@ const rowArb: fc.Arbitrary<ConformanceRow> = fc.record(
 
 /** Generates histories whose steps use only the driver's capabilities. */
 export function mutationHistoryArb(
-  domain: Pick<MutationDriver, `capabilities`>,
+  domain: Pick<MutationDriver, `capabilities` | `rejectionKinds`>,
 ): fc.Arbitrary<MutationHistory> {
   const { capabilities } = domain
+  const kinds = domain.rejectionKinds ?? []
   const write = fc
     .record({
       type: fc.constantFrom(
@@ -307,17 +323,26 @@ export function mutationHistoryArb(
             `set-note`,
           )
         : fc.constant<ServerRewrite>(`none`),
+      rejectionKind:
+        kinds.length > 0
+          ? fc.constantFrom(...kinds)
+          : fc.constant<string | undefined>(undefined),
     })
-    .map(({ type, row, outcome, held, rewrite }): MutationStep => ({
-      kind: `write`,
-      type,
-      id: row.id,
-      title: row.title,
-      ...(row.note === undefined ? {} : { note: row.note }),
-      outcome,
-      held,
-      rewrite: type === `delete` ? `none` : rewrite,
-    }))
+    .map(
+      ({ type, row, outcome, held, rewrite, rejectionKind }): MutationStep => ({
+        kind: `write`,
+        type,
+        id: row.id,
+        title: row.title,
+        ...(row.note === undefined ? {} : { note: row.note }),
+        outcome,
+        held,
+        rewrite: type === `delete` ? `none` : rewrite,
+        ...(outcome === `reject` && rejectionKind !== undefined
+          ? { rejectionKind }
+          : {}),
+      }),
+    )
   const steps: Array<{
     weight: number
     arbitrary: fc.Arbitrary<MutationStep>
@@ -326,19 +351,21 @@ export function mutationHistoryArb(
     // An update without `note`: it removes the field when the row holds one.
     {
       weight: 2,
-      arbitrary: write.map(
-        (step): MutationStep =>
-          step.kind === `write`
-            ? {
-                kind: `write`,
-                type: `update`,
-                id: step.id,
-                title: step.title,
-                outcome: step.outcome,
-                held: step.held,
-                rewrite: step.rewrite,
-              }
-            : step,
+      arbitrary: write.map((step): MutationStep =>
+        step.kind === `write`
+          ? {
+              kind: `write`,
+              type: `update`,
+              id: step.id,
+              title: step.title,
+              outcome: step.outcome,
+              held: step.held,
+              rewrite: step.rewrite,
+              ...(step.rejectionKind === undefined
+                ? {}
+                : { rejectionKind: step.rejectionKind }),
+            }
+          : step,
       ),
     },
   ]
@@ -709,7 +736,9 @@ export const mutationReachStates = [
   `quiescent-after-writes`,
 ] as const
 
-export type MutationReachState = (typeof mutationReachStates)[number]
+/** A rejection of one of the driver's `rejectionKinds`, per kind. */
+export type MutationReachState =
+  (typeof mutationReachStates)[number] | `rejected-as-${string}`
 
 const capabilityOfState: Partial<
   Record<MutationReachState, MutationCapability>
@@ -725,17 +754,25 @@ const capabilityOfState: Partial<
 
 /** The declared states a driver's capabilities let histories reach. */
 export function mutationReachStatesFor(
-  domain: Pick<MutationDriver, `capabilities`>,
+  domain: Pick<MutationDriver, `capabilities` | `rejectionKinds`>,
 ): Array<MutationReachState> {
-  return mutationReachStates.filter((state) => {
-    const capability = capabilityOfState[state]
-    if (state === `held-write-rejected`)
-      return (
-        domain.capabilities.has(`held-writes`) &&
-        domain.capabilities.has(`write-rejection`)
+  const kinds = domain.capabilities.has(`write-rejection`)
+    ? (domain.rejectionKinds ?? []).map(
+        (kind): MutationReachState => `rejected-as-${kind}`,
       )
-    return capability === undefined || domain.capabilities.has(capability)
-  })
+    : []
+  return [
+    ...mutationReachStates.filter((state) => {
+      const capability = capabilityOfState[state]
+      if (state === `held-write-rejected`)
+        return (
+          domain.capabilities.has(`held-writes`) &&
+          domain.capabilities.has(`write-rejection`)
+        )
+      return capability === undefined || domain.capabilities.has(capability)
+    }),
+    ...kinds,
+  ]
 }
 
 type Settlement = `pending` | `fulfilled` | { rejected: unknown }
@@ -975,6 +1012,9 @@ export async function checkMutationHistory(
       outcome: step.outcome,
       held: step.held,
       rewrite: step.rewrite,
+      ...(step.rejectionKind === undefined
+        ? {}
+        : { rejectionKind: step.rejectionKind }),
       error,
     }
     return lastPlan
@@ -1014,6 +1054,8 @@ export async function checkMutationHistory(
           if (write.held) reach(`held-write-pending`)
           if (done.queued) reach(`write-queued-behind-held`)
           if (write.outcome === `reject`) reach(`write-rejected`)
+          if (write.rejectionKind !== undefined)
+            reach(`rejected-as-${write.rejectionKind}`)
           else if (!write.held) reach(`${write.type}-accepted` as const)
           if (done.removesField && write.outcome === `accept`)
             reach(`field-removed`)

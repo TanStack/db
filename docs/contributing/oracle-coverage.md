@@ -7276,15 +7276,16 @@ object. On the parent of the fix, 38 of the fixed campaign's 300 histories
 failed MUT-10 (a write reached RxDB while an earlier one was pending) and 24
 failed MUT-2 (a rejected delete rejected with an array of write errors). The
 adapter now runs each write after the earlier one is decided and rejects a
-failed delete with RxDB's `RxError`. RxDB limits: a `bulkWrite` that throws is
-not generated. RxDB 17.1.0 to 17.5.0's incremental write queue does not catch
-it: the throw is an unhandled rejection, `incrementalPatch` never settles, and
-every later incremental write on the collection waits forever (trace: seed row
-4, an update of row 4 whose storage write throws). This is RxDB issue
-pubkey/rxdb#9025, fixed in RxDB 17.6.0 (pubkey/rxdb#9058). The adapter keeps
-`incrementalPatch` and its conflict retry (maintainer decision 2026-11-03);
-generating thrown storage errors waits for the repository's RxDB dev
-dependency to reach 17.6.0. A conflict (status 409) is not generated, and an update of a
+failed delete with RxDB's `RxError`. RxDB rejection kinds (`rejectionKinds`): a per-row write error and a
+`bulkWrite` that throws, as a failing storage does; each must be reached. On
+RxDB 17.1.0 to 17.5.0 a thrown storage error wedges the incremental write
+queue: the throw is an unhandled rejection, `incrementalPatch` never settles,
+and every later incremental write on the collection waits forever
+(pubkey/rxdb#9025, fixed in RxDB 17.6.0 by pubkey/rxdb#9058). On 17.1.0 both
+campaigns failed HEALTH-5 at an update whose storage write throws. The adapter
+keeps `incrementalPatch` and its conflict retry, and its RxDB dev dependency
+and peer range are now 17.6.0 and `>=17.6.0` (maintainer decision
+2026-11-03); both campaigns pass. A conflict (status 409) is not generated, and an update of a
 document that another client deleted while the update was pending (the
 adapter skips it and fulfills) is outside the grammar.
 A removed field is an own `undefined` in the authored row (maintainer

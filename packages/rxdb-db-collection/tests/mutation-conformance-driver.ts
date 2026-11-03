@@ -19,10 +19,13 @@
  *   conflict, an insert of a document it holds, is not a request: it has no
  *   effect, and RxDB's `bulkUpsert` sends it and answers it itself before
  *   it writes the update;
- * - a plan answers the next request. A rejection answers with a per-row
- *   write error in the `bulkWrite` response and writes nothing, as RxDB's
- *   schema validation refuses a document; RxDB reports it as an `RxError`
- *   whose `parameters.writeError` is that error object (`matchesFailure`).
+ * - a plan answers the next request. A rejection writes nothing, in one of
+ *   two kinds: `write-error` answers with a per-row write error in the
+ *   `bulkWrite` response, as RxDB's schema validation refuses a document,
+ *   which RxDB reports as an `RxError` whose `parameters.writeError` is that
+ *   error object; `thrown` throws the plan's error from `bulkWrite`, as a
+ *   failing storage does, which reaches the caller as itself
+ *   (`matchesFailure`).
  *   A held request waits in the wrapper until `release`. An accepted
  *   request runs the memory storage's own `bulkWrite`;
  * - a commit from another client is a write through the same RxCollection
@@ -40,11 +43,7 @@
  * `"n"`, and `observedView` maps each key and row id back with
  * `conformanceKey`. A JSON document omits an absent `note`.
  *
- * Limits: a rejection is a per-row write error. A `bulkWrite` that throws, as
- * a failing storage does, is not generated: RxDB's incremental write queue
- * (17.1.0) does not catch it, so `incrementalPatch` never settles and later
- * incremental writes on the collection wait forever (recorded in the
- * coverage map). A conflict (status 409) is not generated either.
+ * Limits: a conflict (status 409) is not generated.
  */
 import { createCollection } from '@tanstack/db'
 import { createRxDatabase, prepareQuery } from 'rxdb/plugins/core'
@@ -166,10 +165,12 @@ function writeError(
 }
 
 /**
- * MUT-2's relation for RxDB: RxDB reports a write error as an `RxError` whose
+ * MUT-2's relation for RxDB: a thrown storage error reaches the caller as
+ * itself, and RxDB reports a write error as an `RxError` whose
  * `parameters.writeError` is the storage's error object for that row.
  */
 function matchesFailure(reported: unknown, failure: Error): boolean {
+  if (reported === failure) return true
   const rowError = (
     reported as { parameters?: { writeError?: object } } | undefined
   )?.parameters?.writeError
@@ -243,6 +244,7 @@ class RxdbMutationProvider implements MutationProvider {
         await new Promise<void>((resolve) => this.held.push(resolve))
       }
       if (plan.outcome === `reject`) {
+        if (plan.rejectionKind === `thrown`) throw plan.error
         response.error.push(writeError(row, plan.error, context))
         continue
       }
@@ -347,6 +349,7 @@ export function rxdbMutationDriver(): MutationDriver {
     // A JSON document has no `undefined`: a removed field is absent.
     undefinedField: `absent`,
     matchesFailure,
+    rejectionKinds: [`write-error`, `thrown`],
     async create(seed): Promise<MutationFixture> {
       const provider = new RxdbMutationProvider()
       const db: RxDatabase = await createRxDatabase({
