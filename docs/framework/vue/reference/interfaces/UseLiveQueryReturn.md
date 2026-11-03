@@ -3,7 +3,7 @@ id: UseLiveQueryReturn
 title: UseLiveQueryReturn
 ---
 
-Defined in: [useLiveQuery.ts:65](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L65)
+Defined in: [useLiveQuery.ts:55](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L55)
 
 The status and flag refs every `useLiveQuery` result has.
 
@@ -26,7 +26,7 @@ collection: ComputedRef<Collection<{ [K in string | number | symbol]: ResultValu
 }, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>>;
 ```
 
-Defined in: [useLiveQuery.ts:70](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L70)
+Defined in: [useLiveQuery.ts:60](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L60)
 
 ***
 
@@ -36,7 +36,7 @@ Defined in: [useLiveQuery.ts:70](https://github.com/TanStack/db/blob/main/packag
 data: ComputedRef<InferResultType<TContext>>;
 ```
 
-Defined in: [useLiveQuery.ts:69](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L69)
+Defined in: [useLiveQuery.ts:59](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L59)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: [useLiveQuery.ts:69](https://github.com/TanStack/db/blob/main/packag
 state: ComputedRef<Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>>;
 ```
 
-Defined in: [useLiveQuery.ts:68](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L68)
+Defined in: [useLiveQuery.ts:58](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L58)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: [useLiveQuery.ts:68](https://github.com/TanStack/db/blob/main/packag
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveQuery.ts:60](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L60)
+Defined in: [useLiveQuery.ts:50](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L50)
 
 #### Inherited from
 

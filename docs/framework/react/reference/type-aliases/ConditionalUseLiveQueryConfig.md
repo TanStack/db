@@ -7,7 +7,7 @@ title: ConditionalUseLiveQueryConfig
 type ConditionalUseLiveQueryConfig<TContext> = UseLiveQueryConfigOptions<TContext> & object;
 ```
 
-Defined in: [useLiveQuery.ts:143](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L143)
+Defined in: [useLiveQuery.ts:168](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L168)
 
 ## Type Declaration
 

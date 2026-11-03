@@ -9,7 +9,7 @@ function resolveLiveQueryValue(value, __namedParameters):
   | null;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L362)
+Defined in: [packages/db/src/live-query-options.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L417)
 
 Resolve an adapter's query value to what its observer watches: `null` for a
 disabled query, an existing Collection with sync started, or a live query.
@@ -28,6 +28,14 @@ instead of its own live-query Collection.
 
 `number`
 
+#### onWindowChange?
+
+(`move`) => `void`
+
+**`Internal`**
+
+React/Preact defer mutation until their render commits.
+
 #### pool?
 
   \| `false`
@@ -38,9 +46,27 @@ instead of its own live-query Collection.
   `getPooledQueryIdentity`: (`query`) => `string` \| `undefined`;
 \}
 
+#### previousCollection?
+
+  \| [`Collection`](../interfaces/Collection.md)\<`object`, `string` \| `number`, \{
+\}, `StandardSchemaV1`\<`unknown`, `unknown`\>, `object`\>
+  \| `null`
+
+**`Internal`**
+
+Previous adapter-owned result; absent for shared results.
+
 #### startSync?
 
 `boolean` = `true`
+
+#### windowOwner?
+
+`object`
+
+**`Internal`**
+
+Identity of one framework binding; never shared by peers.
 
 ## Returns
 
