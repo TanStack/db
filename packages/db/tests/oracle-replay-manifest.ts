@@ -559,6 +559,11 @@ const ownerGroups: ReadonlyArray<
   [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
   [`db/tests/oracle-property-self-oracle.test.ts`, `self-oracle`, `framework`],
   [
+    `db/tests/oracle-property-scheduler-oracle.property.test.ts`,
+    `self-oracle`,
+    `scheduler`,
+  ],
+  [
     `db/tests/oracle-property-self-oracle-fixture.ts`,
     `self-oracle`,
     `synthetic-0 synthetic-1 synthetic-2 synthetic-3`,

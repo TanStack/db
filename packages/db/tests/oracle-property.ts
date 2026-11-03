@@ -202,6 +202,80 @@ export function withinTurns(
 }
 
 /**
+ * A schedule as plain data. `scheduleFrom(choices)` orders promises the way
+ * fast-check's `fc.scheduler()` does, with the same method names, but its
+ * decisions are a list of numbers in the history. A task belongs to a queue
+ * (its label's text before the first space, unless `queue` names one), and a
+ * queue releases its tasks in the order they were scheduled, as a storage
+ * engine completes one store's operations in order. At each step the schedule
+ * releases the oldest task of queue `choices[step] % queues`, counting the
+ * queues that have a pending task in the order they first did, and the oldest
+ * task overall once the choices run out. A history that holds the choices replays exactly, shrinks
+ * like any array, can be a pin or a segment, and prints as JSON; a
+ * `fc.scheduler()` value does none of these (it is consumed as it runs, its
+ * clones do not reproduce, and it is never a member of its own language).
+ */
+export interface DataScheduler {
+  /** A promise that settles like `promise`, once the schedule releases it. */
+  schedule: <T>(
+    promise: Promise<T> | T,
+    label?: string,
+    queue?: string,
+  ) => Promise<T>
+  /** Releases one pending task and waits for its continuations. */
+  waitOne: () => Promise<void>
+  /** Releases tasks until none is pending, including ones they schedule. */
+  waitIdle: () => Promise<void>
+  /** The labels of released tasks, in release order. */
+  released: () => ReadonlyArray<string>
+}
+
+export function scheduleFrom(choices: ReadonlyArray<number>): DataScheduler {
+  const pending: Array<{ label: string; queue: string; release: () => void }> =
+    []
+  const released: Array<string> = []
+  let step = 0
+  // Continuations of a released task run on microtasks; one macrotask turn
+  // lets them finish, and lets them schedule further tasks.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const waitOne = async () => {
+    if (pending.length === 0) return
+    const queues = [...new Set(pending.map((task) => task.queue))]
+    const choice = choices[step++]
+    const at =
+      choice === undefined
+        ? 0
+        : pending.findIndex(
+            (task) => task.queue === queues[choice % queues.length],
+          )
+    const [task] = pending.splice(at, 1)
+    released.push(task!.label)
+    task!.release()
+    await settle()
+  }
+  return {
+    schedule: <T>(
+      promise: Promise<T> | T,
+      label = `task ${pending.length}`,
+      queue = label.split(` `)[0]!,
+    ) =>
+      new Promise<T>((resolve, reject) => {
+        pending.push({
+          label,
+          queue,
+          release: () => void Promise.resolve(promise).then(resolve, reject),
+        })
+      }),
+    waitOne,
+    waitIdle: async () => {
+      await settle()
+      while (pending.length > 0) await waitOne()
+    },
+    released: () => [...released],
+  }
+}
+
+/**
  * The check found a history whose observations the law does not allow.
  * `actual` and `expected` are the fields Vitest reads to print a diff.
  */

@@ -285,6 +285,7 @@ const staticOracleProperties = [
   `self-oracle.synthetic-2`,
   `self-oracle.synthetic-3`,
   `self-oracle.framework`,
+  `self-oracle.scheduler`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
