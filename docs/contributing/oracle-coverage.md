@@ -2029,7 +2029,8 @@ rendering before flush or reactive adapters' option updates. Its
 exhausts two initial bindings across config pairs, derived/same/different keys,
 unscoped/client caches, and distinct same-name constructor references. It checks
 both admissions, each admitted output's settings, retained first settings, and
-compatible sharing and forbidden sharing between two admitted outputs.
+independent output identity between two admitted bindings, including equal
+declarations (maintainer decision, 2026-11-03, superseding compatible sharing).
 Its 582 histories retain the original 534 cases and add 24 omitted/explicit-
 undefined cases and 24 pending-source cases. They check first-option retention
 on rerender (528 admitted-first histories) and application after an actual
@@ -2067,8 +2068,9 @@ The local owner uses equal/different callback and scalar declarations; the
 indexing owner crosses mode and constructor equality. Both hold source writes,
 require two distinct visible Suspense fallbacks before release, then use their
 existing output comparisons after delivery. Per-scope aggregate reach requires
-both-suspended, shared and separate outputs, plus each representative option
-dimension. A mutant that reuses and memoizes an unqualified pending entry passes
+both-suspended, equal and different option declarations, plus each
+representative option dimension. As of 2026-11-03, both cases require distinct
+outputs; the original sharing outcomes remain historical evidence only. A mutant that reuses and memoizes an unqualified pending entry passes
 the old 882 histories and fails 36 extended histories after the pending premise.
 These controlled eager-source schedules do not establish abandonment, rejection
 while pending, cleanup races, hydration, or arbitrary Suspense scheduling.
@@ -6785,13 +6787,158 @@ The separate Index structural-collision obligation above remains open.
 See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
 
 
+### React Suspense initial-view lifecycle
+
+[The lifecycle oracle](../../packages/react-db/tests/suspense-lifecycle-oracle.test.tsx)
+owns the React boundary observation of current initial-view obligations. Its
+small model keeps only the current obligation, public pending/ready/error view,
+rows, boundary cause policy, and stopped-source health. It has no retry cache,
+observer, or source lifecycle implementation. Authority is the error-handling
+guide's Suspense contract, hook JSDoc, the shared conformance contract's retry
+progress and exclusive output laws, and the established cleanup/request recovery
+contract examples.
+
+Fixed and fresh campaigns generate source fail/crash/abandon, pending rerenders,
+boundary reset/root remount, retired rejection, successful peers, and source
+failure after readiness. Derived/keyed queries run without a client, with a
+provider, and with an explicit client. Supplied Collections receive query-only
+preload rejection before/after cleanup without a client or under a provider.
+After a late rejection, a forced render checks the replacement while it remains
+pending; readiness cannot hide a stale wrapper error. Four legal client request
+schedules cover observed failure, replacement in the old promise's rejection
+reaction, cleanup before rejection, and switching clients. A pending client
+record deduplicates work, so registration while it remains pending is not
+modeled as replacement.
+
+The co-mounted sibling grammar places both hooks before their first successful
+commit. Shared/separate boundaries, equal/different queries, staggered/same-pass
+readiness, and ready/lagging source Collections cross every client/key mode.
+The staggered path drains only the selected query's acquisitions until its hook
+returns successfully. The peer's hook has not returned and its demand stays
+held. Shared-boundary histories also require that neither layout effect commits.
+Each receiving mode declares this successful-candidate state separately from
+source-release ordering.
+Each generated family guarantees the reported shared-boundary shape. Every
+successful layout commit checks distinct output Collections. After both commit,
+a held private startup crosses a peer page move and an unchanged-input render;
+the copied ready rows stay on their own page until private startup settles.
+Render-time retry-cache eviction, an effect-only ownership fix, and copying a
+peer's moving rows all fail this receiver. These are finite React 19/jsdom
+histories with controlled on-demand requests, not arbitrary scheduler coverage.
+
+Copied ready rows do not establish the private output's initial-query readiness.
+The sibling grammar also rejects its held first acquisition before or after a
+peer page move, with Error, record and undefined provider causes. Each client/key
+mode declares and measures both rejection schedules. The existing initial-view
+model distinguishes a provisional seed from owned readiness: a first-load error
+ends the seed and reaches the real React ErrorBoundary; a source failure after
+owned readiness keeps data and appears in health. This receives the observer
+hydration owner's failure-ending-seed law. It reads the private Collection's
+public normalized failure as input and checks the boundary's cause; it does not
+reimplement core's provider-error normalization. Both the original hidden error
+and a repair that clears the seed without resetting readiness fail this receiver.
+The first error comparison runs before any application rerender, with declared
+reach before and after the peer move. A later reread checks the same error
+again. Suppressing only the private initial-error notification fails the first
+comparison; a forced host reread cannot supply the missing notification.
+
+The sibling grammar also discards candidates after their hook returns and
+lets a peer commit first under a separate boundary. The mounted replacement
+receiver admits a peer's pending target plan before the mounted binding changes
+to it, and crosses before/after-hook holds. Both receivers compare progress,
+exclusive outputs and subsequent retained page moves. Diagnostic acquisition
+counts expose finite retry work; no exact request budget or retention of
+uncommitted Collections is promised.
+
+While private startup remains held, source report/recovery histories compare
+committed health before and after a peer page move without a host rerender.
+A peer's page-request rejection then crosses an unchanged-input read. Its
+query-local problem must not appear on the seeded output or the unchanged
+source. The seed takes health from its own observer. Restoring peer health
+copying fails request isolation; freezing seed health fails source notification.
+These are query-local and source-health receiving laws, not provider transport
+or garbage-collection claims.
+
+Each receiving campaign declares reach and replays fixed examples through the
+same model/checker. Five hostile mutations fail at retry progress, successful
+peer ownership, replacement pending, restart pending, and late preload rejection.
+These laws previously depended on ordinary fixed recovery tests; the generated
+owner adds adjacent histories and direct seed/path replay. The core source-health
+and observer owners retain their status, health-tree, and transport contracts;
+the page owner retains page mutation and peer isolation. Limits: finite one-source
+queries, real React boundaries in jsdom, controlled subset work and a public
+query-preload seam. This does not establish native hydration, provider behavior,
+React 18 scheduling, arbitrary concurrent rendering, exact GC timing, or delayed
+failure-retirement timers. Error message text remains with the existing supplied
+query boundary examples; this owner checks Error identity or wrapped cause.
+The [review record](oracle-reviews/2026-11-03-client-suspense-page-ownership.md)
+contains per-mode reach, calibration, replay and grammar accounting.
+
 ### Adapter-owned page windows
 
 The framework owner includes [window-history-oracle.ts](../../packages/db/tests/conformance/window-history-oracle.ts), registered through the shared conformance suite in React, Preact, Vue, Solid, Angular and Svelte. Maintainer decision 2026-10-30 for #2291: changing only `.limit()`/`.offset()` moves the existing outer window; it adds no hook option. The independent sort/filter/slice model checks ordered selected rows and keyed-map values after each framework flush, Collection retention for page moves, replacement for source/filter/order/projection/nested-window changes, and retained upstream ownership. Direct and nested paths have separate reach, as do changing/stable/opaque keys where the driver supports keys. Keyed source swaps include distinct source objects under one Collection ID. Generated source updates check liveness after reuse. The bare-callback lanes also vary a Collection option together with a page change and check its applied value. The pending lane observes a move during initial loading, oldest settlement while the latest remains pending, initial readiness, overlapping held acquisitions, final latest rows, and unmount before settlement. The publication-callback lane changes offset, limit or both from a public change callback, then checks the retained Collection after the host settles. It controls demand settlement over already installed source rows; the core pagination owner continues to own source delivery, failures and ordered repair.
 
-The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. DbClient/hydration and Suspense shared-result caches, supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts and paths; this fix does not retarget their shared Collections. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
+The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. The page law now runs through client-backed React and Svelte drivers, and React Suspense both with and without a client (maintainer decision, 2026-11-03, issue #2345). DbClient is a driver mode, not a React exception; future client-backed adapters register the same histories and comparisons. Each mode receives direct/nested, applicable keyed/derived, pending, publication-callback, changed-plan and source-write histories. Every adapter also runs the independent-peer histories: equal queries yield distinct outputs; declarative and imperative moves preserve the peer page; source writes update both; retiring one leaves its peer usable. Before initial Suspense readiness, the pending comparison observes the actual fallback and absence of a successful result. It starts retention comparisons at the first successful return.
 
-Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes are recorded in [the page-window review](oracle-reviews/2026-10-30-adapter-page-windows.md).
+The React render receiver crosses ordinary/Suspense hooks, provider/explicit-client/descriptor inputs, eager/on-demand sources, derived/keyed identities, and offset/limit/combined moves. A separate receiving schedule in that same file blocks a mounted replacement before its hook while a peer finishes the same preload, then resumes it. Its rows and identity use the shared page comparison; a missing exclusive-ownership check fails after the peer has rendered first. The [client page receiver](../../packages/react-db/tests/client-window-oracle.test.tsx) checks JSON-transported server preloads at the first browser hook render, a move before local readiness, local handoff, peer isolation, return to the first page, and replacement on a client switch over the same concrete source. Keyed preload identity includes the outer page. This receiver does not run hydrateRoot or a real Electric provider. Suspense retry work may remain unclaimed across discarded renders, but a successful binding takes exclusive ownership; returned query Collections are never shared implicitly. Supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts; no transported snapshot is retargeted. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
+
+The React client page receiver also crosses the held-seed history with a
+speculative offset-only, limit-only, or combined move and cancellation. Each
+keyed/derived × ordinary/Suspense × provider/explicit-client campaign proves
+React ran the post-hook suspension, checks the original committed seed while
+suspended, then checks data, keyed state and Collection identity after the
+original page renders again. Local readiness remains held through both cuts.
+This distinguishes a wrong observer transport identity that correct local rows
+would conceal. All 48 fixed/fresh campaigns reject the original render-time
+observer mutation. The source remains a controlled finite Collection; native
+hydration and arbitrary React schedules remain outside this receiver.
+
+The mounted replacement/borrower receiver also generates both co-ready and
+borrower-first schedules. It moves the borrower after the original compiler
+retries, then moves the original binding and checks both pages. Reusing the
+compiler's resolver token fails borrower Collection retention. This adds the
+next-use direction the earlier receiver omitted; the initial successful
+Collections remain distinct in the reviewed implementation's co-ready lane.
+Before the original binding moves, every mode also checks its unchanged rows,
+keyed state and previously captured Collection's rows. Both bindings' keyed
+state is checked after each move. A wrong original page cannot disappear behind
+the original binding's next action before it is observed.
+
+Svelte client recovery histories cross a committed declarative move, an
+imperative move, a throwing key getter, repeated public rejection, the throwing
+native pre-effect, and recovery. Equal keys retain the authored input and its
+imperative page despite changed body/dependency proposals; changed keys admit
+the new plan. The existing independent window judgment compares data, keyed
+state and Collection retention after native settlement. Removing stable-key
+retention fails this receiver. This does not add disabled config fields to the
+typed API or promise in-place key mutation.
+
+The shared owner also crosses initially disabled inputs with stable keys through real ordinary React, Preact and client-backed Svelte bindings. A disabled input admits no plan; first enablement admits one, an enabled unchanged key retains it, and a changed key admits the changed plan. This distinguishes the enablement fix from deleting stable-key retention. Suspense has no disabled-input overload and does not receive this lane.
+
+The [Svelte client page receiver](../../packages/svelte-db/tests/client-window-oracle.svelte.test.ts) and React client receiver share [transported-page histories](../../packages/db/tests/conformance/client-window-history-oracle.ts) and the existing window judgment. Every keyed/derived receiving campaign mounts one or two fresh old-page readers after a move while local readiness is held. It compares their first seed and distinct Collection, then the moved binding and existing peer through local handoff and return. Svelte uses rune construction, native `flushSync` for held-readiness page changes, and a bounded settled cut for the asynchronous observer handoff; it does not claim native `hydrate`. React's client-switch subhistory now actually executes ordinary/Suspense × keyed/derived hooks, replacing its Collection for both same-page and moved-page switches through explicit clients. Those per-mode results are later evidence, not retroactive credit for the original pre-edit gate's ordinary unkeyed switch.
+
+Both transported-page receivers compare the existing peer's keyed state at
+every peer row comparison. Each receiving mode declares separate reach while
+the seed is held and after local handoff. A wrong keyed map fails even when
+the peer's data array and Collection identity remain correct.
+
+The ready-output/subset-settlement handoff found by this receiving extension is owned by the existing [observer hydration oracle](../../packages/db/tests/live-query-observer-hydration-oracle.property.test.ts). Its new fixed/fresh grammar holds subset work on a ready Collection before seeded observer attachment, then settles it without any row or status change. Both granular and wholesale consumers must keep the seed while held, then observe and receive the local snapshot, including empty local rows. The original missing subset notification and a premature handoff each fail their intended comparison. The Svelte page receiver supplies the same premise through retained live-query Collections. These controlled histories do not establish arbitrary provider schedules.
+
+The same shared window owner enforces immutable explicit-key values (maintainer
+decision, 2026-11-03). React, React DbClient, ordinary/client Suspense, Preact and
+Svelte DbClient receive equal-key retention and changed-key admission histories.
+Each fixed/fresh campaign declares separate reach for the same key object, a
+fresh outer array, fresh equal nested values, reordered record properties,
+independent record/array leaf replacements, equality after replacement and a
+return to an earlier key. Ordered data, keyed state and Collection identity are
+compared after native host settlement. Keys are frozen plain records/arrays
+with JSON scalar leaves. In-place mutation is unsupported; its behavior is
+unconstrained. Rich native keys, speculative cuts and transported seeds remain
+outside this lane. Reactive bindings that compare no query identity retain
+their reactive input contract. Future identity-comparing adapters register the
+same key histories through `mountKeyedControllable`.
+
+Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes are recorded in [the page-window review](oracle-reviews/2026-10-30-adapter-page-windows.md) and the [client/Suspense extension](oracle-reviews/2026-11-03-client-suspense-page-ownership.md).
 
 The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.
 

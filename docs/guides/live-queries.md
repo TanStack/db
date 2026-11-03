@@ -277,6 +277,12 @@ function UserSearch({ search }: { search: string }) {
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
 
+For bindings that compare query identity, treat the key and its nested values
+as immutable. Fresh plain objects and arrays with equal contents keep the
+authored query; record property order does not matter. Replace changed nested
+objects and their parents to invalidate the query on the next framework update.
+Mutating a key in place has no supported invalidation behavior.
+
 Query identity matters where a hook compares it to decide whether to compile
 again: React and Preact compare it on every render, and a `DbClient` matches
 preloaded and hydrated queries by it. Those hooks throw

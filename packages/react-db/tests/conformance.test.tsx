@@ -8,10 +8,12 @@
  * All registered laws must pass; the driver has no whole-test waivers.
  */
 import { act, renderHook } from '@testing-library/react'
-import { useLayoutEffect } from 'react'
+import { Suspense, useLayoutEffect } from 'react'
 import {
   BTreeIndex,
   BasicIndex,
+  DbClient,
+  Query,
   coalesce,
   count,
   createCollection,
@@ -22,12 +24,14 @@ import {
   gt,
   sum,
 } from '@tanstack/db'
-import { expect, it } from 'vitest'
+import { afterAll, expect, it } from 'vitest'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
+import { registerWindowHistoryOracle } from '../../db/tests/conformance/window-history-oracle'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
@@ -170,38 +174,71 @@ function mountDisabled() {
 // labels do not represent separate production paths.
 type IdentityPath = `derived` | `dependency list`
 
-const mountControllableWith = (path: IdentityPath) =>
+const mountControllableWith = (
+  path: IdentityPath,
+  withClient: boolean | DbClient = false,
+  suspense = false,
+) =>
   function mountControllable<P>(
     build: (q: any, param: P) => any,
     initial: P,
     opts?: { pool?: PooledLiveQueries },
   ): ControllableHandle<P> {
+    const client =
+      withClient instanceof DbClient
+        ? withClient
+        : withClient
+          ? new DbClient()
+          : undefined
     const published = createPublicationLog()
+    const usePage = suspense ? useLiveSuspenseQuery : useLiveQuery
+    let suspended = false
+    function Fallback() {
+      suspended = true
+      return null
+    }
     const hook = renderHook(
       ({ param }: { param: P }) => {
         const query = (q: any) => build(q, param)
+        const input = client ? build(new Query(), param) : undefined
         // Both retained registrations use the config form for a pooled query.
         const result =
           opts?.pool !== undefined
             ? path === `derived`
-              ? useLiveQuery({ query, pool: opts.pool })
-              : useLiveQuery({ query, pool: opts.pool })
-            : path === `derived`
-              ? // The callback captures param, so its IR identity changes with it.
-                useLiveQuery(query)
-              : useLiveQuery(query)
+              ? usePage({ query, pool: opts.pool, client })
+              : usePage({ query, pool: opts.pool, client })
+            : client
+              ? usePage(
+                  input instanceof Query
+                    ? { query: input, client }
+                    : { ...input, client },
+                )
+              : path === `derived`
+                ? // The callback captures param, so its IR identity changes with it.
+                  usePage(query)
+                : usePage(query)
         // A layout effect records each committed value.
         useLayoutEffect(() => {
+          suspended = false
           published.record(result.data, result.state)
         })
         return result
       },
-      { initialProps: { param: initial } },
+      {
+        initialProps: { param: initial },
+        wrapper: ({ children }) =>
+          suspense ? (
+            <Suspense fallback={<Fallback />}>{children}</Suspense>
+          ) : (
+            children
+          ),
+      },
     )
     const guard = rejectReadsAfterRenderError(hook)
-    const handle = makeHandle(hook)
+    const handle = makeHandle(hook, suspense)
     return {
       ...handle,
+      isSuspended: () => suspended,
       publications: published.values,
       statePublications: published.stateValues,
       async setParam(param: P, observe?: () => void) {
@@ -213,11 +250,26 @@ const mountControllableWith = (path: IdentityPath) =>
     }
   }
 
-function makeHandle(hook: RenderHookResult<any, any>) {
+function makeHandle(hook: RenderHookResult<any, any>, suspense = false) {
   return {
     collection: () => hook.result.current?.collection ?? null,
     current(): ConformanceResult {
       const r: any = hook.result.current
+      // Suspense exposes readiness by returning successfully, not via flags.
+      // No result is fabricated while it shows a fallback; the shared pending
+      // receiver observes that fallback through isSuspended instead.
+      if (suspense) {
+        if (!r) throw new Error(`Suspense has no committed result`)
+        return {
+          ...r,
+          status: `ready`,
+          isReady: true,
+          isLoadingError: false,
+          isCrashed: false,
+          isSyncError: false,
+          isEnabled: true,
+        }
+      }
       return expectResultSurface({
         data: r?.data,
         state: r?.state,
@@ -251,32 +303,58 @@ function makeHandle(hook: RenderHookResult<any, any>) {
 
 // The config-object form with a queryKey chosen per step; an undefined key
 // leaves the hook to derive the identity.
-const mountKeyedControllableWith = (path: IdentityPath) =>
+const mountKeyedControllableWith = (
+  path: IdentityPath,
+  withClient: boolean | DbClient = false,
+  suspense = false,
+) =>
   function mountKeyedControllable<P>(
     build: (q: any, param: P) => any,
     key: (param: P) => ReadonlyArray<unknown> | undefined,
     initial: P,
   ): ControllableHandle<P> {
+    const client =
+      withClient instanceof DbClient
+        ? withClient
+        : withClient
+          ? new DbClient()
+          : undefined
     const published = createPublicationLog()
+    const usePage = suspense ? useLiveSuspenseQuery : useLiveQuery
+    let suspended = false
+    function Fallback() {
+      suspended = true
+      return null
+    }
     const hook = renderHook(
       ({ param }: { param: P }) => {
         const config = {
           query: (q: any) => build(q, param),
           queryKey: key(param),
+          client,
         } as any
-        const result =
-          path === `derived` ? useLiveQuery(config) : useLiveQuery(config)
+        const result = path === `derived` ? usePage(config) : usePage(config)
         useLayoutEffect(() => {
+          suspended = false
           published.record(result.data, result.state)
         })
         return result
       },
-      { initialProps: { param: initial } },
+      {
+        initialProps: { param: initial },
+        wrapper: ({ children }) =>
+          suspense ? (
+            <Suspense fallback={<Fallback />}>{children}</Suspense>
+          ) : (
+            children
+          ),
+      },
     )
     const guard = rejectReadsAfterRenderError(hook)
-    const handle = makeHandle(hook)
+    const handle = makeHandle(hook, suspense)
     return {
       ...handle,
+      isSuspended: () => suspended,
       publications: published.values,
       statePublications: published.stateValues,
       async setParam(param: P, observe?: () => void) {
@@ -320,6 +398,26 @@ const reactDriver: LiveQueryDriver = {
   knownGaps: [],
   features: { serverSnapshot: true, suspense: true, pooledEqFilters: true },
 }
+
+// DbClient and Suspense are receiving modes of the shared page law. Other
+// adapters register client-backed drivers against the same model and histories.
+for (const client of [false, true])
+  for (const suspense of [false, true]) {
+    if (!client && !suspense) continue // registered by runSuite below
+    const scope = client ? new DbClient() : false
+    if (scope) afterAll(() => scope.cleanup())
+    registerWindowHistoryOracle({
+      ...reactDriver,
+      name: `react${suspense ? ` Suspense` : ``}${client ? ` (DbClient)` : ``}`,
+      features: { ...reactDriver.features, suspendsUntilReady: suspense },
+      mountControllable: mountControllableWith(`derived`, scope, suspense),
+      mountKeyedControllable: mountKeyedControllableWith(
+        `derived`,
+        scope,
+        suspense,
+      ),
+    })
+  }
 
 runSuite(reactDriver)
 runSuite({
