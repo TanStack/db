@@ -558,6 +558,11 @@ const ownerGroups: ReadonlyArray<
   ],
   [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
   [
+    `db/tests/optimistic-history-oracle.property.test.ts`,
+    `optimistic-history`,
+    `core`,
+  ],
+  [
     `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
     `live-query-observer`,
     `hydration-terminal`,

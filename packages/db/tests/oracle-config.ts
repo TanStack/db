@@ -279,6 +279,7 @@ const staticOracleProperties = [
   `flat-change-tracking.equivalence`,
   `local-storage.value-fidelity`,
   `live-query-observer.hydration-terminal`,
+  `optimistic-history.core`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,

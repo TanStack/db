@@ -8,7 +8,7 @@ import { createLiveQueryCollection } from '../src/query/index.js'
 import { whenSyncAccepted } from '../src/sync-receipt.js'
 import { createTransaction } from '../src/transactions.js'
 import { declareOracle } from './oracle-declaration.js'
-import { forwardCut, withinTurns } from './oracle-property.js'
+import { forwardCut, pass, violation, withinTurns } from './oracle-property.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 /**
@@ -535,6 +535,45 @@ const observed = (
 const sorted = <T extends HistoryRow>(rows: Iterable<T>) =>
   [...rows].sort((a, b) => a.id - b.id)
 
+/**
+ * Why a batch of native changes is invalid against the replica it applies
+ * to, or undefined when it is valid: an insert names an absent key, an update
+ * names a present key and carries its previous visible row, and a delete
+ * names a present key and carries the removed row. Validated before a
+ * change's kind and old value are lost to Map.set.
+ */
+export function eventSemanticsDifference<T>(
+  before: ReadonlyMap<unknown, T>,
+  changes: ReadonlyArray<{
+    key: unknown
+    type: string
+    value: T
+    previousValue?: T
+  }>,
+): string | undefined {
+  const rows = new Map(before)
+  for (const change of changes) {
+    const event = `${change.type} ${String(change.key)}`
+    if (change.type === `insert`) {
+      if (rows.has(change.key)) return `${event}: the key is already present`
+      rows.set(change.key, change.value)
+      continue
+    }
+    if (!rows.has(change.key)) return `${event}: the key is absent`
+    const previous = rows.get(change.key)
+    if (change.type === `update`) {
+      if (!isDeepStrictEqual(change.previousValue, previous))
+        return `${event}: previous value ${JSON.stringify(change.previousValue)}, visible row ${JSON.stringify(previous)}`
+      rows.set(change.key, change.value)
+    } else if (change.type === `delete`) {
+      if (!isDeepStrictEqual(change.value, previous))
+        return `${event}: removed value ${JSON.stringify(change.value)}, visible row ${JSON.stringify(previous)}`
+      rows.delete(change.key)
+    } else return `${event}: unknown change type`
+  }
+  return undefined
+}
+
 /** Validate native deltas before their kind/old value are lost to Map.set. */
 export function expectHistoryEventSemantics<T>(
   before: ReadonlyMap<unknown, T>,
@@ -546,34 +585,8 @@ export function expectHistoryEventSemantics<T>(
   }>,
   label: string,
 ): void {
-  const rows = new Map(before)
-  for (const change of changes) {
-    const message = `${label}: event semantics ${change.type} ${String(change.key)}`
-    if (change.type === `insert`) {
-      expect(rows.has(change.key), `${message}: absent old membership`).toBe(
-        false,
-      )
-      rows.set(change.key, change.value)
-    } else {
-      expect(rows.has(change.key), `${message}: present old membership`).toBe(
-        true,
-      )
-      const previous = rows.get(change.key)
-      if (change.type === `update`) {
-        expect(
-          change.previousValue,
-          `${message}: previous visible row`,
-        ).toStrictEqual(previous)
-        rows.set(change.key, change.value)
-      } else {
-        expect(change.type, message).toBe(`delete`)
-        expect(change.value, `${message}: removed visible row`).toStrictEqual(
-          previous,
-        )
-        rows.delete(change.key)
-      }
-    }
-  }
+  const difference = eventSemanticsDifference(before, changes)
+  expect(difference, `${label}: event semantics`).toBeUndefined()
 }
 
 export type HistoryOutcome<T> =
@@ -653,6 +666,13 @@ export const historyRow = fc.record({
   b: fc.integer({ min: -2, max: 2 }),
   c: fc.integer({ min: -2, max: 2 }),
 })
+const noDeletes = fc.constant(0).map(
+  (): Array<number> => [],
+  (value) => {
+    if (Array.isArray(value) && value.length === 0) return 0
+    throw new Error(`not an empty delete list`)
+  },
+)
 const sourceBatch = fc.record({
   type: fc.constant(`sync` as const),
   rows: fc.uniqueArray(historyRow, {
@@ -661,7 +681,9 @@ const sourceBatch = fc.record({
   }),
   // The source may also delete keys, including keys it does not hold.
   deletes: fc.oneof(
-    { weight: 3, arbitrary: fc.constant<Array<number>>([]) },
+    // A mapped constant, not `fc.constant([])`: fast-check compares a constant
+    // by identity, so a pinned `[]` would not be a member of the language.
+    { weight: 3, arbitrary: noDeletes },
     {
       weight: 1,
       arbitrary: fc.uniqueArray(fc.integer({ min: 1, max: 3 }), {
@@ -1716,3 +1738,1505 @@ export async function runOptimisticHistory(
 }
 
 declareOracle({ check: [runOptimisticHistory], model: [HistoryModel] })
+
+// ===========================================================================
+// The optimistic history as oracleProperty parts
+// ===========================================================================
+//
+// The same laws, model, and production paths as `runOptimisticHistory`, with
+// the jobs separated (rubric, ORC-003):
+//
+// - The history is the initial rows, the steps, and the lane's options.
+// - `resolveOptimisticHistory` turns it into a plan of concrete actions. A
+//   step can name its target indirectly, such as "settle active transaction
+//   `slot`", and an edit can be a no-op; resolution replays the model's
+//   state to decide that, so it is part of what the history means, not an
+//   expectation. The plan holds only actions.
+// - `optimisticHistoryModel` replays the same model over the plan and owes,
+//   at each checkpoint, the allowed publication cuts, the visible rows, each
+//   request's outcome and state, the receipts that must still wait, and the
+//   unsettled transactions.
+// - `optimisticHistoryDriver(lane)` runs the plan through a real Collection
+//   and records, at each checkpoint, what production published and showed.
+//   It decides nothing.
+// - `checkOptimisticHistory` compares them, law by law.
+
+/** One history: rows, steps, and the lane's row options. */
+export type OptimisticHistory = {
+  initial: Array<HistoryRow>
+  steps: ReadonlyArray<OptimisticStep>
+  /** The default `partial` row update mode, so a source update may omit `c`. */
+  partialUpdates?: boolean
+  /** A schema default for `c` on an insert that omits it. */
+  insertDefault?: number
+}
+
+/** A source transaction and the message kind of each of its operations. */
+type PlannedBatch = {
+  batch: SourceBatch
+  /** `insert` or `update` for a row, by operation index. */
+  rowKinds: Map<number, `insert` | `update`>
+  /** Operation indexes of deletes of keys the source did not hold. */
+  absentDeletes: Set<number>
+  /** Partial updates whose omitted `c` differs from the source's held row. */
+  distinguishingPartials: number
+}
+
+type PlanAction =
+  | {
+      type: `edit`
+      position: number
+      step: Extract<OptimisticStep, { type: `edit` | `delete` }>
+      /** The request's index among the history's requests. */
+      index: number
+      kind: `insert` | `update` | `delete`
+      /** The row the request authors. */
+      row: HistoryRow
+      manual: boolean
+      handler?: PlannedBatch & { awaitReceipt: boolean }
+    }
+  | { type: `complete`; position: number; index: number }
+  | {
+      type: `settle`
+      position: number
+      index: number
+      success: boolean
+      failure: `rollback` | `reject` | undefined
+      cascade: boolean
+    }
+  | { type: `hold-store`; position: number }
+  | { type: `release-store`; position: number | `final` }
+  | { type: `abort-deferred`; position: number; batch: SourceBatch }
+  | {
+      type: `reentrant`
+      position: number
+      trigger: PlannedBatch
+      batches: Array<PlannedBatch>
+    }
+  | { type: `open`; position: number; batch: PlannedBatch }
+  | { type: `close`; position: number; commit: boolean }
+  | { type: `sync`; position: number; batch: PlannedBatch }
+
+export type OptimisticPlan = {
+  history: OptimisticHistory
+  actions: Array<PlanAction>
+}
+
+const checkpointOf = (action: PlanAction) =>
+  action.position === `final`
+    ? `final release-store`
+    : `step ${action.position} (${action.type})`
+
+/**
+ * Replays the model over a history. Resolution keeps the actions; the model
+ * keeps what each checkpoint owes. Both read one replay, so a step means the
+ * same thing to the driver and to the judgment.
+ */
+function replayOptimisticHistory(history: OptimisticHistory) {
+  const { initial, steps } = history
+  const partialUpdates = history.partialUpdates === true
+  const model = new HistoryModel(initial, history.insertDefault, partialUpdates)
+  const actions: Array<PlanAction> = []
+  const owed = new Map<string, OwedCheckpoint>()
+  const states = new Set<string>()
+  // The source admits each message against its own rows, including queued
+  // ones: an insert names an absent key, an update a present one; it may
+  // delete a key it does not hold.
+  const sourceKeys = new Set(initial.map((row) => row.id))
+  const sourceRows = new Map(initial.map((row) => [row.id, row]))
+  let open:
+    | { batch: PlannedBatch; keys: Set<number>; rows: Map<number, HistoryRow> }
+    | undefined
+  // Expected outcome of each request, by index.
+  const outcomes: Array<OwedOutcome> = []
+  // Each request's authored changes, computed when it is made.
+  const changes: Array<object> = []
+  const plan = (batch: SourceBatch): PlannedBatch => {
+    if (batch.operations && batch.copies !== 1)
+      throw new Error(`Ordered source batches have one copy`)
+    if (batch.operations && (batch.rows.length || batch.deletes?.length))
+      throw new Error(`Ordered source batches use operations alone`)
+    if (batch.truncate) {
+      sourceKeys.clear()
+      sourceRows.clear()
+      states.add(`truncate`)
+    }
+    const planned: PlannedBatch = {
+      batch,
+      rowKinds: new Map(),
+      absentDeletes: new Set(),
+      distinguishingPartials: 0,
+    }
+    for (const [index, operation] of sourceOperations(batch).entries()) {
+      if (operation.type === `delete`) {
+        if (!sourceKeys.delete(operation.key)) {
+          planned.absentDeletes.add(index)
+          states.add(`absent-source-delete`)
+        }
+        sourceRows.delete(operation.key)
+        states.add(`source-delete`)
+        continue
+      }
+      const { row } = operation
+      const kind = sourceKeys.has(row.id) ? `update` : `insert`
+      planned.rowKinds.set(index, kind)
+      if (kind === `insert`) states.add(`source-insert`)
+      sourceKeys.add(row.id)
+      const held = sourceRows.get(row.id)
+      if (kind === `update` && partialUpdates && batch.partial) {
+        if (!held) throw new Error(`Partial update of unknown source row`)
+        if (held.c !== row.c) {
+          planned.distinguishingPartials++
+          states.add(`distinguishing-partial-update`)
+        }
+        sourceRows.set(row.id, { ...row, c: held.c })
+      } else sourceRows.set(row.id, row)
+    }
+    return planned
+  }
+  const persisting = () =>
+    model.transactions.some((entry) => entry.state === `persisting`)
+  const committed = (batch: SourceBatch) => {
+    if (persisting())
+      states.add(batch.truncate ? `snapshot-override` : `queued`)
+  }
+  const visible = () => sorted(model.visible().values())
+  let cuts = [visible()]
+  const owe = (checkpoint: string, extra: Partial<OwedCheckpoint> = {}) => {
+    owed.set(checkpoint, {
+      cuts,
+      visible: visible(),
+      outcomes: outcomes.map((outcome) => ({ ...outcome })),
+      requests: model.transactions.map((entry, index) => ({
+        state: entry.state,
+        row: plain(entry.row),
+        changes: changes[index]!,
+      })),
+      waiting: [...model.queue, ...model.deferred],
+      unsettled: model.transactions.flatMap((entry, index) =>
+        entry.state === `pending` || entry.state === `persisting`
+          ? [index]
+          : [],
+      ),
+      ...extra,
+    })
+  }
+  owe(`initial`)
+  for (const [position, step] of steps.entries()) {
+    const before = visible()
+    if (step.type === `edit` || step.type === `delete`) {
+      if (step.type === `edit` && step.pending && step.inHandler)
+        throw new Error(`A pending edit cannot write from its handler yet`)
+      const index = model.author(step)
+      if (index === undefined) continue
+      const intent = model.transactions[index]!
+      states.add(step.type === `delete` ? `delete` : `edit`)
+      if (step.type === `edit` && step.pending) states.add(`manual`)
+      outcomes.push({ status: `pending` })
+      const schemaInsert =
+        history.insertDefault !== undefined &&
+        intent.kind === `insert` &&
+        step.type === `edit` &&
+        step.fields.c === undefined
+      changes.push(
+        step.type === `delete`
+          ? plain(intent.row)
+          : intent.kind === `insert`
+            ? schemaInsert
+              ? { id: intent.key, a: intent.row.a, b: intent.row.b }
+              : plain(intent.row)
+            : Object.fromEntries(
+                Object.entries(step.fields).filter(
+                  ([key, value]) =>
+                    before.find((row) => row.id === intent.key)?.[
+                      key as keyof Fields
+                    ] !== value,
+                ),
+              ),
+      )
+      cuts = [visible()]
+      let handler: (PlannedBatch & { awaitReceipt: boolean }) | undefined
+      if (step.inHandler && !open) {
+        const awaitReceipt = step.inHandler.awaitReceipt === true
+        // Acceptance waits for the wrapping sync's durable step, so a
+        // handler awaiting it would wait for the held store.
+        if (awaitReceipt && (model.storeHeld || model.holdNext))
+          throw new Error(`A held store excludes awaited handler receipts`)
+        handler = { ...plan(step.inHandler), awaitReceipt }
+        model.sync(step.inHandler)
+        committed(step.inHandler)
+        cuts.push(visible())
+        states.add(`handler-batch`)
+        if (awaitReceipt) states.add(`awaited-receipt`)
+      }
+      const action: PlanAction = {
+        type: `edit`,
+        position,
+        step,
+        index,
+        kind: intent.kind,
+        row: plain(intent.row),
+        manual: step.type === `edit` && step.pending === true,
+        handler,
+      }
+      actions.push(action)
+      owe(checkpointOf(action), {
+        live: step.optimistic
+          ? step.type === `delete`
+            ? null
+            : plain(intent.row)
+          : undefined,
+        captured: plain(intent.row),
+      })
+      continue
+    }
+    if (step.type === `complete`) {
+      if (!model.transactions.length) continue
+      const index = step.slot % model.transactions.length
+      const admitted = model.transactions[index]!.state === `pending`
+      states.add(admitted ? `completion` : `completion-rejection`)
+      if (admitted) {
+        model.settle(index, true, false)
+        outcomes[index] = { status: `fulfilled` }
+        cuts = [visible()]
+      }
+      const action: PlanAction = { type: `complete`, position, index }
+      actions.push(action)
+      owe(checkpointOf(action), {
+        completion: admitted ? `admitted` : `rejected`,
+        settledRows: admitted ? cuts[0] : undefined,
+      })
+      continue
+    }
+    if (step.type === `settle`) {
+      const active = model.transactions.flatMap((entry, index) =>
+        entry.state === `persisting` || entry.state === `pending`
+          ? [index]
+          : [],
+      )
+      if (!active.length) continue
+      const index = active[step.slot % active.length]!
+      const canceled = model.settle(
+        index,
+        step.success,
+        step.failure === `reject` || step.cascade,
+      )
+      for (const peer of canceled) outcomes[peer] = { status: `rejected` }
+      outcomes[index] = step.success
+        ? { status: `fulfilled` }
+        : step.failure === `reject`
+          ? { status: `rejected`, reason: `handler error` }
+          : { status: `rejected` }
+      states.add(step.success ? `settlement` : `failure`)
+      // The drop and the queued sync transactions publish together.
+      cuts = [visible()]
+      const action: PlanAction = {
+        type: `settle`,
+        position,
+        index,
+        success: step.success,
+        failure: step.failure,
+        cascade: step.cascade,
+      }
+      actions.push(action)
+      owe(checkpointOf(action), {
+        settledRows: cuts[0],
+        // A settlement that changes no visible row publishes nothing.
+        quiet: JSON.stringify(before) === JSON.stringify(visible()),
+      })
+      continue
+    }
+    if (step.type === `hold-store`) {
+      model.holdStore()
+      const action: PlanAction = { type: `hold-store`, position }
+      actions.push(action)
+      owe(checkpointOf(action))
+      continue
+    }
+    if (step.type === `release-store`) {
+      cuts = [visible()]
+      model.releaseStore(() => cuts.push(visible()))
+      const action: PlanAction = { type: `release-store`, position }
+      actions.push(action)
+      owe(checkpointOf(action))
+      continue
+    }
+    if (step.type === `abort-deferred`) {
+      const aborted = model.abortDeferred(step.slot)
+      if (!aborted) continue
+      states.add(`aborted-deferred`)
+      const action: PlanAction = {
+        type: `abort-deferred`,
+        position,
+        batch: aborted,
+      }
+      actions.push(action)
+      owe(checkpointOf(action))
+      continue
+    }
+    if (step.type === `reentrant`) {
+      if (open) continue
+      if (!step.trigger.truncate)
+        throw new Error(`Reentrant trigger must publish a truncate`)
+      const trigger = plan(step.trigger)
+      const batches = step.batches.map(plan)
+      if (!batches.some(({ batch }) => batch.truncate))
+        throw new Error(`Reentrant suffix must include a truncate`)
+      model.sync(step.trigger)
+      committed(step.trigger)
+      cuts = [visible()]
+      model.syncTogether(step.batches)
+      for (const batch of step.batches) committed(batch)
+      cuts.push(visible())
+      states.add(`reentrant`)
+      const action: PlanAction = {
+        type: `reentrant`,
+        position,
+        trigger,
+        batches,
+      }
+      actions.push(action)
+      owe(checkpointOf(action))
+      continue
+    }
+    if (step.type === `open`) {
+      if (open || step.batch.truncate) continue
+      const keys = new Set(sourceKeys)
+      const rows = new Map(sourceRows)
+      open = { batch: plan(step.batch), keys, rows }
+      states.add(`open-batch`)
+      const action: PlanAction = { type: `open`, position, batch: open.batch }
+      actions.push(action)
+      owe(checkpointOf(action))
+      continue
+    }
+    if (step.type === `close`) {
+      if (!open) continue
+      const { batch, keys, rows } = open
+      open = undefined
+      if (step.commit) {
+        model.sync(batch.batch)
+        committed(batch.batch)
+        cuts = [visible()]
+      } else {
+        // Aborted before acceptance: its writes never apply.
+        sourceKeys.clear()
+        for (const key of keys) sourceKeys.add(key)
+        sourceRows.clear()
+        for (const [key, row] of rows) sourceRows.set(key, row)
+        states.add(`aborted-batch`)
+      }
+      const action: PlanAction = {
+        type: `close`,
+        position,
+        commit: step.commit,
+      }
+      actions.push(action)
+      owe(checkpointOf(action))
+      continue
+    }
+    if (open) continue
+    const batch = plan(step)
+    model.sync(step)
+    committed(step)
+    cuts = [visible()]
+    const action: PlanAction = { type: `sync`, position, batch }
+    actions.push(action)
+    owe(checkpointOf(action))
+  }
+  // Every history ends with its deferred transactions applied.
+  if (model.storeHeld || model.holdNext) {
+    cuts = [visible()]
+    model.releaseStore(() => cuts.push(visible()))
+    const action: PlanAction = { type: `release-store`, position: `final` }
+    actions.push(action)
+    owe(checkpointOf(action))
+  }
+  if (model.deferredHoldsAcrossDrain > 0) states.add(`deferred-hold`)
+  if (model.abortReleases > 0) states.add(`abort-release`)
+  if (model.abortAttributionReleases > 0)
+    states.add(`abort-attribution-release`)
+  // At cleanup every request still pending is rolled back, and every receipt
+  // settles: an aborted transaction's rejects, every other one fulfills.
+  const final = {
+    outcomes: outcomes.map((outcome) =>
+      outcome.status === `pending` ? { status: `rejected` as const } : outcome,
+    ),
+    aborted: model.aborted,
+  }
+  return { actions, owed, states, final }
+}
+
+type OwedOutcome =
+  | { status: `pending` }
+  | { status: `fulfilled` }
+  | { status: `rejected`; reason?: `handler error` }
+
+/** What one checkpoint owes. */
+type OwedCheckpoint = {
+  /** The visible rows a publication may show, in order. */
+  cuts: Array<Array<ObservedRow>>
+  visible: Array<ObservedRow>
+  outcomes: Array<OwedOutcome>
+  requests: Array<{
+    state: ModelTransaction[`state`]
+    row: HistoryRow
+    changes: object
+  }>
+  /** Committed source transactions that have not applied. */
+  waiting: Array<SourceBatch>
+  unsettled: Array<number>
+  /** The row an optimistic mutation shows in the tick that makes it. */
+  live?: HistoryRow | null
+  /** The row the request captured when it was made. */
+  captured?: HistoryRow
+  completion?: `admitted` | `rejected`
+  settledRows?: Array<ObservedRow>
+  quiet?: boolean
+}
+
+export function resolveOptimisticHistory(
+  history: OptimisticHistory,
+): OptimisticPlan {
+  return { history, actions: replayOptimisticHistory(history).actions }
+}
+
+export function optimisticHistoryModel(plan: OptimisticPlan) {
+  const { owed, states, final } = replayOptimisticHistory(plan.history)
+  return { owed, states, final }
+}
+
+/** The states a history entered, which the model names. */
+export function optimisticHistoryReach(
+  _plan: OptimisticPlan,
+  _trace: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+  expected: ReturnType<typeof optimisticHistoryModel>,
+): Iterable<string> {
+  return expected.states
+}
+
+export const optimisticHistoryStates = [
+  `edit`,
+  `delete`,
+  `manual`,
+  `settlement`,
+  `failure`,
+  `completion`,
+  `completion-rejection`,
+  `queued`,
+  `snapshot-override`,
+  `truncate`,
+  `handler-batch`,
+  `awaited-receipt`,
+  `open-batch`,
+  `aborted-batch`,
+  `source-insert`,
+  `source-delete`,
+  `absent-source-delete`,
+  `distinguishing-partial-update`,
+  `reentrant`,
+  `aborted-deferred`,
+  `deferred-hold`,
+  `abort-release`,
+  `abort-attribution-release`,
+] as const
+
+/** Each source transaction in the plan, numbered in plan order. */
+function batchIds(plan: OptimisticPlan): Map<SourceBatch, number> {
+  const ids = new Map<SourceBatch, number>()
+  const add = (batch: SourceBatch) => {
+    if (!ids.has(batch)) ids.set(batch, ids.size)
+  }
+  for (const action of plan.actions) {
+    if (action.type === `edit` && action.handler) add(action.handler.batch)
+    if (action.type === `reentrant`) {
+      add(action.trigger.batch)
+      for (const { batch } of action.batches) add(batch)
+    }
+    if (action.type === `open` || action.type === `sync`)
+      add(action.batch.batch)
+  }
+  return ids
+}
+
+type Change = {
+  key: unknown
+  type: string
+  value: ObservedRow
+  previousValue?: ObservedRow
+}
+/** A publication to the subscriber that started with the initial rows. */
+type RecordedPublication = {
+  before: Array<[unknown, ObservedRow]>
+  batch: Array<Change>
+  /** The subscriber's replica after the batch. */
+  replica: Array<ObservedRow>
+  /** The Collection's rows when the callback ran. */
+  source: Array<ObservedRow>
+}
+/** A publication to the subscriber that started from the visible rows. */
+type RawPublication = {
+  before: Array<[unknown, ObservedRow]>
+  batch: Array<Change>
+}
+type RecordedOutcome = {
+  status: `pending` | `fulfilled` | `rejected`
+  /** Whether a fulfilled request resolved to its own transaction. */
+  ownTransaction?: boolean
+  /** Whether a rejected request carries the error its handler threw. */
+  handlerError?: boolean
+}
+/** What production showed at one checkpoint. */
+export type OptimisticObservation = {
+  publications: Array<RecordedPublication>
+  raw: Array<RawPublication>
+  requests: Array<{
+    outcome: RecordedOutcome
+    state: string
+    modified: HistoryRow
+    changes: object
+  }>
+  /** Receipt status of each source transaction that returned one, by id. */
+  receipts: Array<[number, `pending` | `fulfilled` | `rejected`]>
+  rows: Array<ObservedRow>
+  replica: Array<ObservedRow>
+  rawReplica: Array<ObservedRow>
+  downstream: Array<HistoryRow>
+  /** The Collection's tracked transactions, as request indexes (-1: unknown). */
+  tracked: Array<number>
+  deliveries: number
+  /** The row right after the mutation call, before any await. */
+  live?: HistoryRow | null
+  captured?: HistoryRow
+  /** Whether the handler wrote its source transaction before it returned. */
+  handlerWrote?: boolean
+  completion?: `admitted` | `rejected`
+  settledRows?: Array<ObservedRow>
+  /** Whether a reentrant subscriber committed the suffix during the trigger. */
+  suffixCommitted?: boolean
+  /** An aborted open transaction: its receipt and its acceptance reject. */
+  abortedOpen?: { receiptRejected: boolean; acceptanceRejected: boolean }
+}
+export type OptimisticCleanup = {
+  outcomes: Array<RecordedOutcome>
+  receipts: Array<[number, `pending` | `fulfilled` | `rejected`]>
+}
+
+/**
+ * The production driver for one lane: core, or a wrapping sync such as
+ * persistence. `fullRows` sets up the partial-update lane in `full` row update
+ * mode, a hostile configuration that a calibration uses.
+ */
+export function optimisticHistoryDriver(
+  lane: { wrapping?: WrappingSyncLane; fullRows?: boolean } = {},
+) {
+  return async (
+    plan: OptimisticPlan,
+    observe: (checkpoint: string, value: unknown) => void,
+  ): Promise<void> => {
+    const { history } = plan
+    const { wrapping } = lane
+    const partialUpdates = history.partialUpdates === true
+    const ids = batchIds(plan)
+    const db: HistoryDb = wrapping?.db ?? {
+      createCollection,
+      createLiveQueryCollection,
+      createTransaction,
+      whenSyncAccepted,
+    }
+    if (wrapping && history.insertDefault !== undefined)
+      throw new Error(`The wrapping-sync lane has no schema lane`)
+    if (
+      !wrapping &&
+      plan.actions.some(
+        (action) =>
+          action.type === `hold-store` ||
+          action.type === `release-store` ||
+          action.type === `abort-deferred`,
+      )
+    )
+      throw new Error(`Store steps need a wrapping sync`)
+    if (wrapping && plan.actions.some((action) => action.type === `reentrant`))
+      throw new Error(`The wrapping-sync lane has no reentrant drain`)
+    let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
+    let starting: ReturnType<typeof createDeferred<void>> | undefined
+    // The next handler call writes this batch before it returns.
+    let handlerBatch: (PlannedBatch & { awaitReceipt: boolean }) | undefined
+    // The suffix a subscriber commits during the next publication. An object,
+    // so the driver reads what the callback clears.
+    const reentrant: { batches?: Array<PlannedBatch> } = {}
+    const pendingSuffix = () => reentrant.batches
+    const handler = async () => {
+      const batch = handlerBatch
+      const done = starting!.promise
+      handlerBatch = undefined
+      if (batch) {
+        const receipt = writeSourceBatch(batch)
+        // Handler-facing writes wait for acceptance. Waiting for visibility
+        // would wait for this handler's own transaction to settle.
+        if (batch.awaitReceipt) await db.whenSyncAccepted(receipt)
+      }
+      return done
+    }
+    const config: CollectionConfig<HistoryRow> = {
+      getKey: (row) => row.id,
+      onInsert: handler,
+      onUpdate: handler,
+      onDelete: handler,
+      sync: {
+        // The partial-update lane keeps the default row update mode.
+        ...(partialUpdates && !lane.fullRows
+          ? {}
+          : { rowUpdateMode: `full` as const }),
+        sync: (actions) => {
+          sync = actions
+          actions.begin()
+          for (const row of history.initial)
+            actions.write({ type: `insert`, value: { ...row } })
+          actions.commit()
+          actions.markReady()
+        },
+      },
+    }
+    const schemaCollection =
+      history.insertDefault === undefined
+        ? undefined
+        : db.createCollection({
+            ...config,
+            schema: z.object({
+              id: z.number(),
+              a: z.number(),
+              b: z.number(),
+              c: z.number().default(history.insertDefault),
+            }),
+          })
+    const collection =
+      schemaCollection ??
+      db.createCollection<HistoryRow>(wrapping ? wrapping.wrap(config) : config)
+    const downstream = db.createLiveQueryCollection({
+      query: (q) => q.from({ row: collection }),
+    })
+    let sub: ReturnType<typeof collection.subscribeChanges> | undefined
+    let rawSub: ReturnType<typeof collection.subscribeChanges> | undefined
+    const requests: Array<{
+      tx:
+        | ReturnType<typeof collection.update>
+        | ReturnType<typeof collection.insert>
+        | ReturnType<typeof createTransaction<HistoryRow>>
+      done: ReturnType<typeof createDeferred<void>>
+      outcome: ReturnType<typeof observeHistoryPromise<unknown>>
+      settledRows?: Array<ObservedRow>
+      handlerError?: Error
+      manual: boolean
+    }> = []
+    const receipts: Array<{
+      id: number
+      outcome: ReturnType<typeof observeHistoryPromise<void>>
+    }> = []
+    const sourceRows = new Map(history.initial.map((row) => [row.id, row]))
+    // An open source transaction and the source's rows before it began.
+    let opened:
+      { batch: PlannedBatch; rows: Map<number, HistoryRow> } | undefined
+    function beginSourceBatch({ batch, rowKinds }: PlannedBatch) {
+      sync.begin()
+      if (batch.truncate) {
+        sync.truncate()
+        sourceRows.clear()
+      }
+      for (const [index, operation] of sourceOperations(batch).entries()) {
+        if (operation.type === `delete`) {
+          sync.write({ type: `delete`, key: operation.key })
+          sourceRows.delete(operation.key)
+          continue
+        }
+        const { row } = operation
+        const type = rowKinds.get(index)!
+        const held = sourceRows.get(row.id)
+        if (type === `update` && partialUpdates && batch.partial && held) {
+          const { c: _omitted, ...partialRow } = row
+          sync.write({ type, value: partialRow as HistoryRow })
+          sourceRows.set(row.id, { ...row, c: held.c })
+        } else {
+          sync.write({ type, value: { ...row } })
+          sourceRows.set(row.id, row)
+        }
+      }
+    }
+    // In a wrapping-sync lane each source transaction carries its own signal,
+    // so a history can abort it while it is deferred.
+    const controllers = new Map<SourceBatch, AbortController>()
+    function commitSourceBatch({ batch }: PlannedBatch) {
+      let signal: AbortSignal | undefined
+      if (wrapping) {
+        const controller = new AbortController()
+        controllers.set(batch, controller)
+        signal = controller.signal
+      }
+      const receipt = sync.commit(signal)
+      if (receipt !== true)
+        receipts.push({
+          id: ids.get(batch)!,
+          outcome: observeHistoryPromise(receipt),
+        })
+      return receipt
+    }
+    function writeSourceBatch(batch: PlannedBatch) {
+      beginSourceBatch(batch)
+      return commitSourceBatch(batch)
+    }
+    const outcomeOf = (request: (typeof requests)[number]): RecordedOutcome => {
+      const current = request.outcome.read()
+      if (current.status === `fulfilled`)
+        return {
+          status: `fulfilled`,
+          ownTransaction: current.value === request.tx,
+        }
+      if (current.status === `rejected`)
+        return {
+          status: `rejected`,
+          handlerError:
+            request.handlerError !== undefined &&
+            current.reason === request.handlerError,
+        }
+      return { status: `pending` }
+    }
+    return withHistoryCleanup(
+      async () => {
+        await downstream.preload()
+        await wrapping?.settle()
+        const replica = new Map<number, ObservedRow>()
+        let deliveries = 0
+        let publications: Array<RecordedPublication> = []
+        const capture = (
+          batch: ReadonlyArray<{
+            key: unknown
+            type: string
+            value: HistoryRow
+            previousValue?: HistoryRow
+          }>,
+        ): Array<Change> =>
+          batch.map((change) => ({
+            key: change.key,
+            type: change.type,
+            value: observed(change.value as ObservedRow),
+            ...(`previousValue` in change
+              ? {
+                  previousValue:
+                    change.previousValue === undefined
+                      ? undefined
+                      : observed(change.previousValue as ObservedRow),
+                }
+              : {}),
+          }))
+        sub = collection.subscribeChanges(
+          (batch) => {
+            deliveries += batch.length
+            const captured = capture(batch)
+            const before = [...replica]
+            for (const change of captured) {
+              if (change.type === `delete`) replica.delete(change.key as number)
+              else replica.set(change.key as number, change.value)
+            }
+            publications.push({
+              before,
+              batch: captured,
+              replica: sorted(replica.values()),
+              source: sorted([...collection.values()].map(observed)),
+            })
+            if (reentrant.batches) {
+              const batches = reentrant.batches
+              reentrant.batches = undefined
+              for (const suffix of batches) writeSourceBatch(suffix)
+            }
+          },
+          { includeInitialState: true },
+        )
+        // A raw subscriber starts from the visible rows and receives only later
+        // changes. It has no sent-key filter to hide an invalid message.
+        const rawReplica = new Map<unknown, ObservedRow>(
+          [...collection.values()].map((row) => [
+            row.id,
+            observed(row as ObservedRow),
+          ]),
+        )
+        let raw: Array<RawPublication> = []
+        rawSub = collection.subscribeChanges(
+          (batch) => {
+            const before = [...rawReplica]
+            const captured = capture(batch)
+            for (const change of captured) {
+              if (change.type === `delete`) rawReplica.delete(change.key)
+              else rawReplica.set(change.key, change.value)
+            }
+            raw.push({ before, batch: captured })
+          },
+          { includeInitialState: false },
+        )
+        const record = (
+          checkpoint: string,
+          extra: Partial<OptimisticObservation> = {},
+        ) => {
+          const observation: OptimisticObservation = {
+            publications,
+            raw,
+            requests: requests.map((request) => ({
+              outcome: outcomeOf(request),
+              state: request.tx.state,
+              modified: plain(request.tx.mutations[0]!.modified as HistoryRow),
+              changes: request.tx.mutations[0]!.changes,
+            })),
+            receipts: receipts.map(({ id, outcome }) => [
+              id,
+              outcome.read().status,
+            ]),
+            rows: sorted([...collection.values()].map(observed)),
+            replica: sorted(replica.values()),
+            rawReplica: sorted(rawReplica.values()),
+            downstream: sorted([...downstream.values()].map(plain)),
+            tracked: [...collection._state.transactions.values()].map((tx) =>
+              requests.findIndex((request) => request.tx === tx),
+            ),
+            deliveries,
+            ...extra,
+          }
+          publications = []
+          raw = []
+          observe(checkpoint, observation)
+        }
+        record(`initial`)
+        for (const action of plan.actions) {
+          const checkpoint = checkpointOf(action)
+          if (action.type === `edit`) {
+            const { step } = action
+            handlerBatch = action.handler
+            const done = createDeferred<void>()
+            // Rejection can precede a manual commit. Keep that controlled
+            // failure from becoming an unhandled promise during diagnosis.
+            void done.promise.catch(() => undefined)
+            starting = done
+            const performEdit = () =>
+              step.type === `delete`
+                ? collection.delete(step.key, { optimistic: step.optimistic })
+                : action.kind === `insert`
+                  ? schemaCollection && step.fields.c === undefined
+                    ? schemaCollection.insert(
+                        { id: action.row.id, a: action.row.a, b: action.row.b },
+                        { optimistic: step.optimistic },
+                      )
+                    : collection.insert(
+                        { ...action.row },
+                        { optimistic: step.optimistic },
+                      )
+                  : collection.update(
+                      step.key,
+                      { optimistic: step.optimistic },
+                      (draft) => Object.assign(draft, step.fields),
+                    )
+            const tx = action.manual
+              ? db.createTransaction<HistoryRow>({
+                  autoCommit: false,
+                  // A manual commit can run after later edits replace `starting`.
+                  mutationFn: () => done.promise,
+                })
+              : performEdit()
+            if (action.manual) tx.mutate(() => void performEdit())
+            // An optimistic mutation is visible in the tick that makes it.
+            const current = collection.get(step.key)
+            const live = step.optimistic
+              ? current
+                ? plain(current)
+                : null
+              : undefined
+            const request: (typeof requests)[number] = {
+              tx,
+              done,
+              manual: action.manual,
+              outcome: observeHistoryPromise<unknown>(
+                tx.when(`settled`).finally(() => {
+                  request.settledRows = sorted(
+                    [...collection.values()].map(observed),
+                  )
+                }),
+              ),
+            }
+            requests.push(request)
+            const captured = plain(tx.mutations[0]!.modified as HistoryRow)
+            const handlerWrote = handlerBatch === undefined
+            await wrapping?.settle()
+            record(checkpoint, { live, captured, handlerWrote })
+            continue
+          }
+          if (action.type === `complete`) {
+            const request = requests[action.index]!
+            let completion: `admitted` | `rejected` = `admitted`
+            try {
+              request.tx.completeWithoutCommit()
+            } catch {
+              completion = `rejected`
+            }
+            if (completion === `admitted`) {
+              request.tx.touchCollection()
+              await withinTurns(request.outcome.settled, 10)
+            }
+            await wrapping?.settle()
+            record(checkpoint, { completion, settledRows: request.settledRows })
+            continue
+          }
+          if (action.type === `settle`) {
+            const request = requests[action.index]!
+            if (action.success) {
+              if (request.manual)
+                void request.tx.commit().catch(() => undefined)
+              request.done.resolve()
+            } else if (action.failure === `reject`) {
+              request.handlerError = new Error(
+                `Mutation rejected at step ${action.position}`,
+              )
+              if (request.manual)
+                void request.tx.commit().catch(() => undefined)
+              request.done.reject(request.handlerError)
+            } else {
+              request.tx.rollback({ isSecondaryRollback: !action.cascade })
+              request.done.resolve()
+            }
+            // A receipt that waited for visibility would deadlock the handler,
+            // so the wait is bounded in event-loop turns, not milliseconds.
+            await withinTurns(request.outcome.settled, 10)
+            await Promise.resolve()
+            const settledRows = request.settledRows
+            await wrapping?.settle()
+            record(checkpoint, { settledRows })
+            continue
+          }
+          if (action.type === `hold-store`) wrapping!.holdNextStore()
+          else if (action.type === `release-store`) wrapping!.releaseStore()
+          else if (action.type === `abort-deferred`)
+            controllers.get(action.batch)!.abort()
+          else if (action.type === `reentrant`) {
+            reentrant.batches = action.batches
+            writeSourceBatch(action.trigger)
+            const suffixCommitted = pendingSuffix() === undefined
+            await wrapping?.settle()
+            record(checkpoint, { suffixCommitted })
+            continue
+          } else if (action.type === `open`) {
+            opened = { batch: action.batch, rows: new Map(sourceRows) }
+            beginSourceBatch(action.batch)
+          } else if (action.type === `close`) {
+            const { batch, rows } = opened!
+            opened = undefined
+            if (action.commit) commitSourceBatch(batch)
+            else {
+              // Aborted before acceptance: the source's rows return to their
+              // state before the transaction began.
+              sourceRows.clear()
+              for (const [key, row] of rows) sourceRows.set(key, row)
+              const controller = new AbortController()
+              controller.abort()
+              const receipt = sync.commit(controller.signal)
+              const isAbort = (error: unknown) =>
+                (error as { name?: unknown } | null)?.name === `AbortError`
+              const receiptRejected =
+                receipt instanceof Promise &&
+                (await receipt.then(() => false, isAbort))
+              const acceptanceRejected = await Promise.resolve(
+                db.whenSyncAccepted(receipt),
+              ).then(() => false, isAbort)
+              await wrapping?.settle()
+              record(checkpoint, {
+                abortedOpen: { receiptRejected, acceptanceRejected },
+              })
+              continue
+            }
+          } else writeSourceBatch(action.batch)
+          await wrapping?.settle()
+          record(checkpoint)
+        }
+      },
+      () => [
+        () => wrapping?.releaseStore(),
+        // A request still pending at the end is rolled back, one at a time.
+        ...requests.flatMap((request) => [
+          () => {
+            if (
+              request.tx.state === `pending` ||
+              request.tx.state === `persisting`
+            )
+              request.tx.rollback({ isSecondaryRollback: true })
+          },
+          () => request.done.resolve(),
+          // Bounded, so a request that never settles fails the cleanup law
+          // instead of hanging the run.
+          () => withinTurns(request.outcome.settled, 10),
+        ]),
+        () => sub?.unsubscribe(),
+        () => rawSub?.unsubscribe(),
+        () => downstream.cleanup(),
+        () => collection.cleanup(),
+        async () => {
+          for (const { outcome } of receipts)
+            await withinTurns(outcome.settled, 10)
+          const cleanup: OptimisticCleanup = {
+            outcomes: requests.map(outcomeOf),
+            receipts: receipts.map(({ id, outcome }) => {
+              return [id, outcome.read().status]
+            }),
+          }
+          observe(`cleanup`, cleanup)
+        },
+      ],
+    )
+  }
+}
+
+const same = isDeepStrictEqual
+
+function outcomeMatches(seen: RecordedOutcome, owed: OwedOutcome): boolean {
+  if (seen.status !== owed.status) return false
+  if (owed.status === `fulfilled`) return seen.ownTransaction === true
+  if (owed.status === `rejected` && owed.reason === `handler error`)
+    return seen.handlerError === true
+  return true
+}
+
+/**
+ * Compares each checkpoint with what the model owes. The laws, in the order
+ * a checkpoint is judged:
+ * - `same-tick`: an optimistic mutation is visible in the tick that makes it.
+ * - `request-snapshot`: a request captures the row it authors.
+ * - `handler-batch`: a handler writes its source transaction before it returns.
+ * - `external-completion`: external completion admits only a pending request.
+ * - `settled-rows`: `when('settled')` settles after the publication that
+ *   drops the request's optimistic state.
+ * - `reentrant-suffix` and `aborted-open-batch`: the reentrant subscriber
+ *   commits its suffix during the trigger, and an aborted open transaction's
+ *   receipt and acceptance both reject.
+ * - `callback-shape`: a callback key is the row's numeric id.
+ * - `event-semantics`: every batch is valid for its subscriber's replica.
+ * - `forward-cuts`: each publication shows an allowed state at or after the
+ *   previous one, and the Collection shows the same state when it runs.
+ * - `outcomes`, `transaction-state`, `authored-changes`: each request's
+ *   outcome, state, immutable row, and authored changes.
+ * - `receipts`: a committed source transaction's receipt waits until it
+ *   applies.
+ * - `rows`: the Collection, both replicas, and the downstream query show the
+ *   visible rows.
+ * - `tracked-transactions`: the Collection tracks exactly its unsettled
+ *   transactions, by identity.
+ * - `quiet-settlement`: a settlement that changes no visible row publishes
+ *   nothing.
+ * - `cleanup`: at the end every request and receipt settles as owed.
+ * The trace must cover every checkpoint (`trace`); that is judged last.
+ */
+export function checkOptimisticHistory(
+  plan: OptimisticPlan,
+  trace: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+  expected: ReturnType<typeof optimisticHistoryModel>,
+) {
+  const ids = batchIds(plan)
+  let deliveries = 0
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `cleanup`) {
+      const cleanup = value as OptimisticCleanup
+      for (const [index, outcome] of cleanup.outcomes.entries()) {
+        const owed = expected.final.outcomes[index]
+        if (!owed || !outcomeMatches(outcome, owed))
+          return violation(
+            checkpoint,
+            `request ${index} ended ${JSON.stringify(outcome)}, owed ${JSON.stringify(owed)}`,
+            `cleanup`,
+            { actual: outcome, expected: owed },
+          )
+      }
+      const aborted = new Set(
+        [...expected.final.aborted].map((batch) => ids.get(batch)),
+      )
+      for (const [id, status] of cleanup.receipts) {
+        const owed = aborted.has(id) ? `rejected` : `fulfilled`
+        if (status !== owed)
+          return violation(
+            checkpoint,
+            `receipt of source transaction ${id} ${status}, owed ${owed}`,
+            `cleanup`,
+          )
+      }
+      continue
+    }
+    const owed = expected.owed.get(checkpoint)
+    if (!owed)
+      return violation(
+        checkpoint,
+        `the driver recorded a checkpoint the plan does not have`,
+        `trace`,
+      )
+    const seen = value as OptimisticObservation
+    if (owed.live !== undefined && !same(seen.live, owed.live))
+      return violation(
+        checkpoint,
+        `the row right after the call is ${JSON.stringify(seen.live)}, owed ${JSON.stringify(owed.live)}`,
+        `same-tick`,
+        { actual: seen.live, expected: owed.live },
+      )
+    if (owed.captured && !same(seen.captured, owed.captured))
+      return violation(
+        checkpoint,
+        `the request captured ${JSON.stringify(seen.captured)}, owed ${JSON.stringify(owed.captured)}`,
+        `request-snapshot`,
+        { actual: seen.captured, expected: owed.captured },
+      )
+    if (seen.handlerWrote === false)
+      return violation(
+        checkpoint,
+        `the handler returned before writing its source transaction`,
+        `handler-batch`,
+      )
+    if (owed.completion && seen.completion !== owed.completion)
+      return violation(
+        checkpoint,
+        `external completion was ${seen.completion}, owed ${owed.completion}`,
+        `external-completion`,
+      )
+    if (owed.settledRows && !same(seen.settledRows, owed.settledRows))
+      return violation(
+        checkpoint,
+        `rows when settlement completed ${JSON.stringify(seen.settledRows)}, owed ${JSON.stringify(owed.settledRows)}`,
+        `settled-rows`,
+        { actual: seen.settledRows, expected: owed.settledRows },
+      )
+    if (seen.suffixCommitted === false)
+      return violation(
+        checkpoint,
+        `the subscriber did not commit the suffix during the trigger`,
+        `reentrant-suffix`,
+      )
+    if (
+      seen.abortedOpen &&
+      !(seen.abortedOpen.receiptRejected && seen.abortedOpen.acceptanceRejected)
+    )
+      return violation(
+        checkpoint,
+        `an aborted open transaction: ${JSON.stringify(seen.abortedOpen)}`,
+        `aborted-open-batch`,
+      )
+    for (const publication of seen.raw) {
+      const difference = eventSemanticsDifference(
+        new Map(publication.before),
+        publication.batch,
+      )
+      if (difference)
+        return violation(
+          checkpoint,
+          `raw subscriber: ${difference}`,
+          `event-semantics`,
+        )
+    }
+    let cut = 0
+    for (const publication of seen.publications) {
+      // Shape first: a key of the wrong type would otherwise read as absent.
+      for (const change of publication.batch)
+        if (typeof change.key !== `number` || change.key !== change.value.id)
+          return violation(
+            checkpoint,
+            `callback key ${JSON.stringify(change.key)} for row ${change.value.id}`,
+            `callback-shape`,
+          )
+      const difference = eventSemanticsDifference(
+        new Map(publication.before),
+        publication.batch,
+      )
+      if (difference)
+        return violation(checkpoint, difference, `event-semantics`)
+      const next = forwardCut(owed.cuts, publication.replica, cut, same)
+      if (next < 0)
+        return violation(
+          checkpoint,
+          `publication shows ${JSON.stringify(publication.replica)}; allowed from cut ${cut}: ${JSON.stringify(owed.cuts)}`,
+          `forward-cuts`,
+          { actual: publication.replica, expected: owed.cuts.slice(cut) },
+        )
+      if (!same(publication.source, owed.cuts[next]))
+        return violation(
+          checkpoint,
+          `the Collection showed ${JSON.stringify(publication.source)} while publishing ${JSON.stringify(owed.cuts[next])}`,
+          `forward-cuts`,
+          { actual: publication.source, expected: owed.cuts[next] },
+        )
+      cut = next
+    }
+    if (seen.requests.length !== owed.requests.length)
+      return violation(
+        checkpoint,
+        `${seen.requests.length} requests recorded, ${owed.requests.length} owed`,
+        `trace`,
+      )
+    for (const [index, request] of seen.requests.entries()) {
+      const owedRequest = owed.requests[index]!
+      if (!outcomeMatches(request.outcome, owed.outcomes[index]!))
+        return violation(
+          checkpoint,
+          `request ${index} is ${JSON.stringify(request.outcome)}, owed ${JSON.stringify(owed.outcomes[index])}`,
+          `outcomes`,
+          { actual: request.outcome, expected: owed.outcomes[index] },
+        )
+      if (request.state !== owedRequest.state)
+        return violation(
+          checkpoint,
+          `request ${index} state ${request.state}, owed ${owedRequest.state}`,
+          `transaction-state`,
+        )
+      if (!same(request.modified, owedRequest.row))
+        return violation(
+          checkpoint,
+          `request ${index} holds ${JSON.stringify(request.modified)}, owed ${JSON.stringify(owedRequest.row)}`,
+          `transaction-state`,
+          { actual: request.modified, expected: owedRequest.row },
+        )
+      if (!same(request.changes, owedRequest.changes))
+        return violation(
+          checkpoint,
+          `request ${index} authored ${JSON.stringify(request.changes)}, owed ${JSON.stringify(owedRequest.changes)}`,
+          `authored-changes`,
+          { actual: request.changes, expected: owedRequest.changes },
+        )
+    }
+    const waiting = new Set(owed.waiting.map((batch) => ids.get(batch)))
+    for (const [id, status] of seen.receipts)
+      if (waiting.has(id) && status !== `pending`)
+        return violation(
+          checkpoint,
+          `receipt of source transaction ${id} ${status} before it applied`,
+          `receipts`,
+        )
+    for (const [name, rows] of [
+      [`Collection`, seen.rows],
+      [`event replica`, seen.replica],
+      [`raw event replica`, seen.rawReplica],
+    ] as const)
+      if (!same(rows, owed.visible))
+        return violation(
+          checkpoint,
+          `${name} shows ${JSON.stringify(rows)}, owed ${JSON.stringify(owed.visible)}`,
+          `rows`,
+          { actual: rows, expected: owed.visible },
+        )
+    if (!same(seen.downstream, owed.visible.map(plain)))
+      return violation(
+        checkpoint,
+        `downstream shows ${JSON.stringify(seen.downstream)}`,
+        `rows`,
+        { actual: seen.downstream, expected: owed.visible.map(plain) },
+      )
+    const tracked = [...seen.tracked].sort((a, b) => a - b)
+    if (!same(tracked, owed.unsettled))
+      return violation(
+        checkpoint,
+        `tracked transactions ${JSON.stringify(tracked)}, unsettled ${JSON.stringify(owed.unsettled)}`,
+        `tracked-transactions`,
+      )
+    if (owed.quiet && seen.deliveries !== deliveries)
+      return violation(
+        checkpoint,
+        `${seen.deliveries - deliveries} deliveries for a settlement that changed no visible row`,
+        `quiet-settlement`,
+      )
+    deliveries = seen.deliveries
+  }
+  const recorded = new Set(trace.map(({ checkpoint }) => checkpoint))
+  for (const checkpoint of [...expected.owed.keys(), `cleanup`])
+    if (!recorded.has(checkpoint))
+      return violation(
+        checkpoint,
+        `the driver recorded no "${checkpoint}" checkpoint`,
+        `trace`,
+      )
+  return pass
+}
+
+// -- Calibrations --------------------------------------------------------------
+//
+// The observation mutants, as corruptions of a recorded trace. Each alters a
+// copy of a real publication or reading at the first checkpoint where it
+// applies, and names the law that must reject it.
+
+type Entry = { checkpoint: string; value: unknown }
+
+/** Replaces the observation at the first checkpoint `change` alters. */
+function corruptFirst(
+  trace: ReadonlyArray<Entry>,
+  change: (
+    seen: OptimisticObservation,
+    checkpoint: string,
+  ) => OptimisticObservation | undefined,
+): Array<Entry> | undefined {
+  for (const [index, entry] of trace.entries()) {
+    if (entry.checkpoint === `cleanup`) continue
+    const changed = change(
+      entry.value as OptimisticObservation,
+      entry.checkpoint,
+    )
+    if (changed)
+      return trace.map((other, at) =>
+        at === index ? { ...other, value: changed } : other,
+      )
+  }
+  return undefined
+}
+
+function appliedTo(
+  before: Array<[unknown, ObservedRow]>,
+  batch: Array<Change>,
+): Array<[unknown, ObservedRow]> {
+  const rows = new Map(before)
+  for (const change of batch)
+    if (change.type === `delete`) rows.delete(change.key)
+    else rows.set(change.key, change.value)
+  return [...rows]
+}
+
+/** Inserts a corrupted copy before the first later publication `pick` accepts. */
+function injectBefore(
+  pick: (publication: RecordedPublication) => Array<Change> | undefined,
+) {
+  return (trace: ReadonlyArray<Entry>) =>
+    corruptFirst(trace, (seen, checkpoint) => {
+      if (checkpoint === `initial`) return undefined
+      const at = seen.publications.findIndex((publication) => pick(publication))
+      if (at < 0) return undefined
+      const real = seen.publications[at]!
+      const batch = pick(real)!
+      const fake: RecordedPublication = {
+        before: real.before,
+        batch,
+        replica: sorted(appliedTo(real.before, batch).map(([, row]) => row)),
+        source: real.source,
+      }
+      const publications = [...seen.publications]
+      publications.splice(at, 1, fake, {
+        ...real,
+        before: appliedTo(real.before, batch),
+      })
+      return { ...seen, publications }
+    })
+}
+
+/** Replaces the first later publication `change` alters. */
+function alterPublication(
+  change: (publication: RecordedPublication) => RecordedPublication | undefined,
+) {
+  return (trace: ReadonlyArray<Entry>) =>
+    corruptFirst(trace, (seen, checkpoint) => {
+      if (checkpoint === `initial`) return undefined
+      for (const [at, publication] of seen.publications.entries()) {
+        const changed = change(publication)
+        if (changed) {
+          const publications = [...seen.publications]
+          publications[at] = changed
+          return { ...seen, publications }
+        }
+      }
+      return undefined
+    })
+}
+
+export const optimisticHistoryCalibrations = [
+  {
+    name: `wrong key`,
+    law: `callback-shape`,
+    corrupt: alterPublication((publication) =>
+      publication.batch.length
+        ? {
+            ...publication,
+            batch: publication.batch.map((change) => ({
+              ...change,
+              key: String(change.key),
+            })),
+          }
+        : undefined,
+    ),
+  },
+  {
+    name: `transient field`,
+    law: `forward-cuts`,
+    corrupt: injectBefore((publication) =>
+      publication.batch.length
+        ? publication.batch.map((change) => ({
+            ...change,
+            value: { ...change.value, c: change.value.c + 100 },
+          }))
+        : undefined,
+    ),
+  },
+  {
+    name: `partial batch`,
+    law: `forward-cuts`,
+    corrupt: injectBefore((publication) =>
+      publication.batch.length > 1 ? publication.batch.slice(0, 1) : undefined,
+    ),
+  },
+  {
+    name: `stale previous value`,
+    law: `event-semantics`,
+    corrupt: alterPublication((publication) =>
+      publication.batch.some((change) => change.type === `update`)
+        ? {
+            ...publication,
+            batch: publication.batch.map((change) =>
+              change.type === `update`
+                ? {
+                    ...change,
+                    previousValue: { ...change.previousValue!, c: 999999 },
+                  }
+                : change,
+            ),
+          }
+        : undefined,
+    ),
+  },
+  {
+    name: `update as insert`,
+    law: `event-semantics`,
+    corrupt: alterPublication((publication) =>
+      publication.batch.some((change) => change.type === `update`)
+        ? {
+            ...publication,
+            batch: publication.batch.map((change) =>
+              change.type === `update` ? { ...change, type: `insert` } : change,
+            ),
+          }
+        : undefined,
+    ),
+  },
+  {
+    // Replay the initial publication after a later settlement's cut. A
+    // healthy runtime may coalesce an intermediate cut, but never go back.
+    name: `backwards cuts`,
+    law: `forward-cuts`,
+    corrupt: (trace: ReadonlyArray<Entry>) => {
+      const initial = (
+        trace.find(({ checkpoint }) => checkpoint === `initial`)?.value as
+          OptimisticObservation | undefined
+      )?.publications.at(-1)
+      if (!initial) return undefined
+      return corruptFirst(trace, (seen, checkpoint) =>
+        checkpoint.endsWith(`(settle)`) &&
+        seen.publications.length > 0 &&
+        !same(initial.replica, seen.publications.at(-1)!.replica)
+          ? { ...seen, publications: [...seen.publications, initial] }
+          : undefined,
+      )
+    },
+  },
+  {
+    name: `retained default`,
+    law: `rows`,
+    corrupt: (trace: ReadonlyArray<Entry>) =>
+      corruptFirst(trace, (seen, checkpoint) =>
+        checkpoint.endsWith(`(settle)`) && seen.rows.length
+          ? {
+              ...seen,
+              rows: [{ ...seen.rows[0]!, c: -999999 }, ...seen.rows.slice(1)],
+            }
+          : undefined,
+      ),
+  },
+]
