@@ -120,6 +120,17 @@ const valueRelations: Array<{
     },
   },
   {
+    // Row values treat NaN as equal to NaN, in a header as at a leaf
+    // (`sameRowValue`); D2 value identity keeps a NaN header distinct.
+    name: `regexp position NaN`,
+    pair: () => {
+      const left = /same/g
+      const right = /same/g
+      left.lastIndex = right.lastIndex = NaN
+      return [left, right, true]
+    },
+  },
+  {
     name: `equal regexp state`,
     pair: (n) => {
       const left = /same/g

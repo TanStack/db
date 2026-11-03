@@ -237,7 +237,10 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
   return compareHashValues(left, right)
 }
 
-/** @internal `equalHashValues` for row values, which tell -0 from 0. */
+/**
+ * @internal `equalHashValues` for row values, which tell -0 from 0 and treat
+ * NaN as equal to NaN, at a leaf or in a header such as `lastIndex`.
+ */
 export function equalRowValues(left: unknown, right: unknown): boolean {
   return compareHashValues(left, right, undefined, true)
 }
