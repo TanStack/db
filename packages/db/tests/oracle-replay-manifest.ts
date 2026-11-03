@@ -93,7 +93,7 @@ const ownerGroups: ReadonlyArray<
   [
     `svelte-db/tests/client-window-oracle.svelte.test.ts`,
     `svelte`,
-    `client-window`,
+    `client-window client-window-recovery`,
   ],
   [
     `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
@@ -108,7 +108,7 @@ const ownerGroups: ReadonlyArray<
   [
     `react-db/tests/suspense-lifecycle-oracle.test.tsx`,
     `react`,
-    `suspense-retry-history suspense-replacement-history suspense-preload-restart-history`,
+    `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
   [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
   [
@@ -927,6 +927,8 @@ const replayTestNames = new Map([
   [`react.window-retry-ownership`, `retry ownership/.*fresh`],
   [`react.client-window`, `client page identity.*fresh`],
   [`svelte.client-window`, `Svelte client page identity.*fresh`],
+  [`svelte.client-window-recovery`, `client key recovery/.*fresh`],
+  [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
   [
     `live-query-observer.hydration-subset-handoff`,
     `seeded ready-subset handoff \\(fresh\\)`,

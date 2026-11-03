@@ -1341,3 +1341,255 @@ The task-local `2345-ci-loop` directory retains `immutable-reach-results.json`,
 `immutable-mutant-results.json`, `immutable-replay-results.json`, per-mutant
 explicit type and RED logs, per-package GREEN/type logs, and conformance logs.
 The evidence does not claim that the full monorepo test command ran.
+
+
+## High-effort review of PR #2348: co-mounted Suspense ownership
+
+This amendment evaluates all ten source-ordered claims supplied by the maintainer.
+The reviewed input is `d8bf49f2e2457dcd6da5977570e4bb83afd73eb4`.
+Production and oracle repairs follow that commit. The companion manifest records
+this amendment's exact source snapshot and preserves the preceding snapshots.
+This amendment supersedes earlier closure claims for initial sibling progress,
+borrower next-use, and copied-seed isolation. Earlier evidence retains its
+original meaning and process qualifications.
+
+### Laws, experiments and inference
+
+No new product decision is required. The authority remains the shared
+conformance contract and the maintainer's 2026-11-03 decision: independently
+authored Suspense queries own distinct successful Collections. Retry work may
+be reused before success. Finite outer page changes retain each binding's
+Collection, transported snapshots keep their page identities, and speculative
+renders cannot change a committed page. Immutable equal keys retain the authored
+input. The error-handling guide and existing recovery examples supply the
+initial-error, retry and post-success health promises.
+
+| Law / source IDs | Earlier enforcement | Distinguishing experiment | Result and repair |
+| --- | --- | --- | --- |
+| Retry progress and exclusive successful outputs, R1/R3/R8 | The peer mounted in a separate root after the first success. Initial shared-boundary retries were absent. | Co-mount both hooks, vary one/two boundaries, equal/different queries, readiness order and source readiness. Check every successful layout commit's Collection ownership. | Original code fails progress in shared-boundary histories. Keep retry work available until commit, reserve it once, and give competing successful candidates private seeded outputs. |
+| Page ownership persists through another compiler's retry, R4/R7 | Only the original compiler moved after adoption. | A borrower finishes pending work, original compiler retries, borrower moves first, then original moves. Run borrower-first and co-ready schedules. | Original code replaces the borrower's Collection. Each new retry resource now gets a unique resolver token that follows its adopted output. |
+| Copied ready rows cannot follow another binding's page, sibling enforcement gap | Initial seed fixture did not force a read after peer publication. | Keep private startup pending while the peer moves, then rerender both unchanged inputs. Cross lagging and ready source Collections. | A live-row seed mutant initially survived. The added render rejects it at ordered rows for the unchanged peer. The repair retains copied rows while tracking source health. |
+| A cancelled client page proposal preserves the committed seed, R2/R8 | Already enforced by the interrupted-render client receiver. | Speculative offset/limit/combined move, post-hook suspension, urgent original-page render with local readiness held. | Current input passes all 48 campaigns. Reintroducing render-time observer/hash assignment fails all 48. No additional production repair is needed. |
+| Equal client keys retain authored input through error recovery, R5/R6 | General immutable-key and rejection owners covered the separate rules. | Declarative move, imperative move, throwing key read twice, throwing native pre-effect, equal/changed-key recovery with changed body/deps. | Original Svelte passes. Removing stable-key retention fails the retained imperative page. No Svelte production change is justified. |
+
+The React lifecycle owner reuses the independent sort/filter/slice page judgment
+for both outputs. Its expectation contains no retry cache, observer, resolver
+token or ownership algorithm. Public progress and distinct-output relations
+express the lifecycle promise separately. The page receiver checks rows,
+keyed state and Collection retention at the borrower and original binding's
+next-use cuts. The Svelte receiver uses that same page judgment at native rune
+and effect settlement. One framework's scheduling result supplies no credit
+for another's scheduler.
+
+### Lossless finding ledger
+
+| ID | Original claim and proposed action | Technical verdict / evidence | PR action and durable destination |
+| --- | --- | --- | --- |
+| R1 | `useLiveQuery.ts:773`: render-time `claim()` removes ready work before a shared Suspense boundary commits. Staggered siblings can continually rebuild. Move claim to an effect. | Confirmed, high severity. On unchanged production, controlled on-demand shared-boundary siblings fail the bounded retry-progress comparison. | **fixed-now**. Cache eviction runs at commit. First-candidate reservation and private completed seeds also preserve successful output independence; moving all ownership work to an effect alone is insufficient. Lifecycle sibling grammar and render-eviction mutant preserve the finding. |
+| R2 | `useLiveQuery.ts:716`: speculative client move replaces observer, subscribe and hash before identity commits. An urgent old-page render can consume the wrong seed/client record. | Real earlier defect, stale at the reviewed input. Commit `69664f1d9` already keeps observer/hash local until commit. Same-path interrupted-seed campaigns pass; old assignments fail all 48. | **already-fixed**. Retain the client-window cancellation receiver and exact seed observation. |
+| R3 | `useLiveSuspenseQuery.ts:124`: unguarded `claim()` lets the last borrower steal ownership. Co-ready A/B then share B's moved page and A suspends again. Guard owner/release. | Refuted as a whole-hook counterexample. The method was unguarded, but old `ownedByPeer` admission prevents a ready peer from taking another successful output. The mounted replacement/borrower co-ready probe reaches shared pending work and same-pass readiness, observes distinct outputs, then fails only on R4's next-use retention. | **refuted**. Keep the co-ready history and every-commit ownership comparison. The new implementation reserves once explicitly, preserving the useful defensive idea. No reproduced transient page theft is claimed. |
+| R4 | `useLiveSuspenseQuery.ts:101`: adopted entry retains its compiler's window token. Compiler retry overwrites the borrower's resolver state, breaking its next offset-only reuse. | Confirmed, high severity. Original source fails Collection retention at `borrower page after original compiler retries`. The same-token hostile mutant reproduces it. | **fixed-now**. Unique token per retry resource, retained through adoption. Both next-use directions remain in the page owner. |
+| R5 | `useLiveQuery.svelte.ts:418`: equal-key recovery returns an old move closure after a derived error, replaying the declarative move. | Refuted by the same native path: declarative move, distinct imperative page, two throwing public reads, throwing `flushSync`, then same-key recovery. The imperative page remains intact. | **refuted**. Preserve generated error/recovery crossings in the Svelte client receiver, including changed-key neighbors and both body/dependency proposals. |
+| R6 | `useLiveQuery.svelte.ts:418`: stable client keys ignore query body/deps and enabled-to-false changes, unlike nonclient Svelte. | Body/deps retention is the approved identity-comparing law, not a defect. Nonclient Svelte follows reactive inputs. The typed config has no `enabled` option and its config query cannot return undefined. Ordinary callback disablement retains its existing separate contract. | **accepted-design**. The shared contract and native recovery grammar distinguish equal-key retention from changed-key admission. No unsupported config field becomes a new law. |
+| R7 | `live-query-options.ts:441`: null versus undefined re-prepares already prepared values, tracks client/Suspense Collections contrary to line 313, and contributes to R4. Add a flag. | Partly valid documentation issue. Null intentionally starts owned tracking; undefined opts out. Re-preparation strips wrappers without invoking the author callback twice or rebinding an already bound builder. R4 requires a token-lifetime repair, not exclusion of these outputs. | **fixed-now** for stale prose. Keep the existing sentinel interface, explain its meaning and tracked ownership. The page retention mutant protects the behavior; source review suffices for the comment repair. |
+| R8 | `suspense-lifecycle-oracle.test.tsx:413`: old peer lane misses co-mounted/shared-boundary/co-ready/urgent schedules. R1–R4 pass. Add grammar and render-claim mutant. | Confirmed coverage overclaim for R1/R4. R2's exact cancellation receiver already exists and rejects the old observer mutation, so the claim that all four escape every campaign is too broad. | **fixed-now**. Add shared/separate boundaries, readiness schedules, mounted co-ready replacements, borrower next-use and post-publication seed reads. Declare and measure reach per mode; calibrate the wider law with multiple hostile implementations. |
+| R9 | `suspense-local-options-oracle.test.tsx:42`: equality model no longer affects ownership verdict. `_identity` is unused in indexing checker. | Confirmed stale declaration/parameter. `equalLocalDeclarations` still classifies reach, so the helper itself is not dead. Independent outputs no longer depend on effective equality. | **fixed-now**. Remove obsolete model declaration and checker parameter. Keep the equality reach classifier and all identity grammar axes. Existing local-options/indexing campaigns remain. |
+| R10 | `useLiveSuspenseQuery.ts:437`: local options still qualify a sharing key despite independent successful outputs. Trim key or fix prose. | Confirmed stale prose. Compatible local options still matter when adopting pending retry work. Removing them could adopt an incompatible callback or output config. | **fixed-now**. Comment now names pending retry adoption. Existing local-option/indexing owners preserve compatibility and independent successful outputs. |
+
+Totals: **6 fixed-now + 1 already-fixed + 2 refuted + 1 accepted-design = 10**.
+No raw finding, proposed fix or useful test idea is omitted. No deferral or
+unresolved product decision remains. The separately discovered seed-read gap
+is repaired and calibrated; it is not silently counted as an eleventh raw item.
+
+### RED before production, neighboring regressions and hostile calibration
+
+Before the first production edit, explicit React and Svelte `tsc --noEmit`
+checks pass. The expanded real-host receiving histories run on unchanged
+`d8bf49f2e`: 20 React assertion failures (12 sibling progress campaigns and
+eight borrower-next-page campaigns), with 258 passing tests. All 48 existing
+client cancellation campaigns pass. Native Svelte recovery also passes on
+unchanged production, including the throwing pre-effect. Earlier untyped or
+incomplete diagnostic attempts supply no product evidence.
+
+The first repair made every successful candidate fork. Wider tests rejected
+extra warm preload work and an incorrect server snapshot read. The next repair
+kept the first candidate, forked competitors, and used the server snapshot API
+on the server. Co-ready mounted replacements then exposed a skipped ownership
+admission for an unclaimed ready resource. The final single-entry ownership
+state fixes that admission and captures each committed render's release, so a
+replayed older effect cannot release a newer suspended attempt. Existing warm
+preload, request failure and SSR stream-cut expectations remain unchanged.
+
+Each credited source mutant passes explicit package typechecking first. These
+are assertion failures at the intended checkpoints, not setup errors or timeouts:
+
+| Mutant | Rejected observation |
+| --- | --- |
+| Original reviewed React sources | Sibling retry progress and borrower Collection retention; final expanded receivers fail 20 campaigns. |
+| Release retry resource during render | Shared-boundary progress or moved-page rows after discarded candidate work; all 12 sibling campaigns fail. |
+| Use compiler binding as every new resource token | Borrower Collection retention after compiler retries; eight borrower-first campaigns fail. Co-ready neighbors remain distinct. |
+| Keep shared ready output until an ownership effect | Every successful layout commit must own an independent Collection; all 12 sibling campaigns fail. |
+| Refresh copied seed data/state from its peer's live observer | Unchanged peer rows after the successful peer moves and both hooks rerender with private startup held; all 12 sibling campaigns fail. |
+| Assign page observer/hash during render | Matching committed seed after cancelled page; all 48 client-window campaigns fail. |
+| Remove Svelte stable-key retention | Retained imperative page at recovered client key; both recovery campaigns fail. |
+
+A literal-false Svelte mutant failed TypeScript setup and receives no credit.
+The well-typed runtime-false predicate replaces it. The live-seed mutation
+survived two earlier fixtures, including the first lagging-source version.
+Lagging readiness alone did not force a post-move read. The final unchanged-input
+render provides that missing observation. No surviving mutant is reported as a
+kill, and no comparison was relaxed to obtain GREEN.
+
+### Declared reach, bounded grammar and observation cuts
+
+The sibling property runs eight generated families per campaign. Each family
+contains its unconstrained history plus three structurally required neighbors:
+shared-boundary equal query with lagging source readiness, shared-boundary
+staggered different queries, and separate-boundary equal queries with ready
+sources. This produces 32 histories in each of 12 fixed/fresh campaigns.
+Fixed seed is 2348. Limits are widths 1–3, page offsets 1–4, 12 source rows,
+one/two source Collections, and at most four controlled retry drains. The drain
+comparison establishes progress in this host schedule, not a general time bound.
+
+Every campaign reaches co-mounted pending peers, both committed, exclusive
+outputs and retained peer move **32 times**. The following table reports the
+remaining declared states. Each seed-isolation count also equals private-startup
+handoff reach. Every state has an asserted minimum of one per receiving campaign.
+
+| Client scope / key / campaign | Shared / separate boundary | Same / different query | Staggered / same-pass readiness | Seed isolation / handoff | Lagging / ready source |
+| --- | --- | --- | --- | --- | --- |
+| none/derived/fixed | 20 / 12 | 21 / 11 | 9 / 23 | 9 / 9 | 18 / 14 |
+| none/derived/fresh | 21 / 11 | 16 / 16 | 13 / 19 | 8 / 8 | 20 / 12 |
+| none/keyed/fixed | 20 / 12 | 21 / 11 | 9 / 23 | 9 / 9 | 18 / 14 |
+| none/keyed/fresh | 21 / 11 | 20 / 12 | 9 / 23 | 11 / 11 | 14 / 18 |
+| provider/derived/fixed | 20 / 12 | 21 / 11 | 9 / 23 | 9 / 9 | 18 / 14 |
+| provider/derived/fresh | 20 / 12 | 21 / 11 | 10 / 22 | 11 / 11 | 16 / 16 |
+| provider/keyed/fixed | 20 / 12 | 21 / 11 | 9 / 23 | 9 / 9 | 18 / 14 |
+| provider/keyed/fresh | 19 / 13 | 21 / 11 | 8 / 24 | 12 / 12 | 24 / 8 |
+| explicit/derived/fixed | 20 / 12 | 21 / 11 | 9 / 23 | 9 / 9 | 18 / 14 |
+| explicit/derived/fresh | 19 / 13 | 21 / 11 | 10 / 22 | 12 / 12 | 16 / 16 |
+| explicit/keyed/fixed | 20 / 12 | 21 / 11 | 9 / 23 | 9 / 9 | 18 / 14 |
+| explicit/keyed/fresh | 22 / 10 | 20 / 12 | 11 / 21 | 9 / 9 | 18 / 14 |
+
+The retry-ownership receiver has 16 campaigns: client/unscoped × keyed/derived ×
+borrower-first/co-ready × fixed/fresh. Each reaches all five declared states
+seven times: replacement suspended, peer ready, replacement resumed, borrower
+moves after compiler retries, and page isolated. Fixed seed remains 2345 and
+existing run budgets remain intact.
+
+Svelte recovery generates 24 numeric histories per campaign and crosses each
+with body/dependency proposals and same/changed keys. Each campaign therefore
+runs 96 native histories. Committed move, imperative move and rejected read
+reach 96 times. Same-key and changed-key recovery, body and deps each reach 48.
+Each of the four joint key/proposal states reaches 24. Fixed seed is 2348.
+Widths and declarative offsets are 1–3, imperative offsets 4–6, and the admitted
+replacement page is nine. These disjoint pages make replayed moves observable.
+
+Reconstruction: shared initial retries reproduce R1; the mounted replacement
+with borrower-next-use reproduces R4; native throwing key recovery reaches
+R5's stated path. Ablation: separate-only roots lose R1, compiler-only moves
+lose R4, no unchanged-input render admits the live-seed mutant, eager readiness
+can hide private startup, and separate marginal Svelte reaches could miss
+same-key dependency recovery. The grammar preserves these crossings explicitly.
+Range neighbors vary both page width and nonzero offsets, readiness order,
+client/key identity, equal/different plans, and key retention/admission.
+Exclusions: no negative/nonfinite windows, disabled Suspense input, supplied
+shared Collection ownership, unsupported Svelte config field or key mutation
+is generated. Those are not silently classified as successful histories.
+
+### Rubric self-review and remaining limits
+
+ORC-001: the accepted contract and maintainer decision authorize each relation.
+ORC-002: pure row recomputation and public ownership/progress relations do not
+copy production caches or resolver logic. ORC-003: owner prose separates law,
+grammar, production driver and observation. ORC-004: reconstruction, ablation,
+ranges and exclusions appear above. ORC-005: real React boundaries/layout
+commits and Svelte rune/effect cuts supply the receiving path; held requests and
+installed rows give the needed facts at each named cut. ORC-006: typed mutants
+fail the intended comparisons, with setup failures and survivors recorded.
+ORC-007: fixed/fresh campaigns share grammar, run budgets and comparison; guarded
+seed/path replay selects the exact owner. ORC-008: no independent model state
+was added. The existing admitted-page distinction is observable at next-use.
+ORC-009: the existing model-only attempt abstraction is unchanged; page and
+framework binding use glossary terms. ORC-010: failure fidelity and lifetime
+cleanup preserve the original law/cut and secondary diagnostics. ORC-011:
+no concrete shared semantic fault between independent slicing and production
+ownership was identified; no new second-formulation claim is made. ORC-012:
+this versioned amendment and source manifest retain evidence and process limits.
+ORC-013: equal versus changed keys, equal versus different queries, ready versus
+lagging sources, and both next-use directions distinguish neighboring wrong
+rules. ORC-014: actual React/Svelte supply scheduling, with controlled finite
+sources. No external provider claim follows. ORC-015: every required receiving
+campaign asserts and reports its own reach. ORC-016: generated histories all
+use shared judgments without per-example expected answers. This is a self-review.
+
+The repair preserves existing SSR stream cuts, warm preload work, local output
+options, failures and source health, client seed cancellation, immutable keys
+and finite page retention. No additional per-render hash was added. This
+extension enters no correlated materialization implementation and changes no
+core materialization law. No oracle run budget was lowered or removed.
+
+The claim remains bounded to React 19/jsdom and Svelte's native rune/effect host,
+finite query shapes and controlled on-demand acquisition settlement. Existing
+SSR owners cover their own stream cuts. No arbitrary concurrent schedule,
+React 18 client schedule, native hydration, Electric/Start provider timing,
+exact GC deadline, nonfinite-window law or heavy-query benchmark follows.
+These are evidence limits, not waivers for known in-scope violations.
+
+### Reviewer assessment
+
+**Hire for correctness review, with calibration feedback.** The reviewer found
+two consequential production bugs and the missing histories that concealed
+them. R1/R4/R8 show strong ownership and lifecycle analysis, and their priority
+was appropriate. R7/R9/R10 supply useful cleanup. Accuracy is uneven: R2 was
+already fixed, R3 infers an unreachable whole-hook outcome from one method,
+R5 fails a native same-path recovery probe, and R6 misses the approved identity
+contract and typed config boundary. Moving claim into an effect alone also
+fails the independence law. Require executable counterexamples and current-head
+verification before treating all ten ranked items as blockers.
+
+### Final validation and PR status
+
+All commands use at most two Vitest workers, with Vitest jobs sequential.
+Full React passes **4,823 tests / 40 files**. Full Svelte passes **542 / 16**;
+after strengthening the key/proposal Cartesian family, its two recovery
+campaigns pass again with 96 histories each. Final sibling campaigns pass all
+12 modes after adding stable law/checkpoint fingerprints. Core indexing plus
+guarded replay passes **362 tests / two files**. Explicit React/Svelte
+TypeScript, formatting, ESLint and `pnpm lint:changed` pass. Production sources
+are restored after every mutation. No dependency workaround entered this diff.
+
+```sh
+pnpm --filter @tanstack/react-db exec vitest run --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/svelte-db exec vitest run --maxWorkers=2 --coverage.enabled=false
+pnpm --filter @tanstack/db exec vitest run tests/conformance/indexing-reuse-oracle.test.ts tests/oracle-replay.test.ts --maxWorkers=2 --coverage.enabled=false
+pnpm exec tsc --noEmit -p packages/react-db/tsconfig.json
+pnpm exec tsc --noEmit -p packages/svelte-db/tsconfig.json
+pnpm lint:changed
+pnpm size:compare --base 1443dc92e5417394acbdc98b782caa9802848ce6 --exact-base --packages db,react-db,preact-db
+```
+
+From `packages/react-db`, this captured live-seed mutant failure replays RED
+and restored production replays GREEN at the same row checkpoint:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=react.suspense-siblings TANSTACK_DB_ORACLE_SEED=2348 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0 node --import tsx ../db/tests/oracle-replay.ts tests/suspense-lifecycle-oracle.test.tsx -t 'co-mounted siblings/none/false/fresh' --maxWorkers=2 --coverage.enabled=false
+```
+
+Guarded seed 2348 / path `0` also passes for all selected receiving campaigns
+of `react.suspense-siblings`, `react.window-retry-ownership` and
+`svelte.client-window-recovery`. Each route executes its actual owner, skips
+the fixed campaign and records nonzero requested property execution. Existing
+manifest checks pass with both newly registered properties.
+
+The measured tree-shaken app remains 61 bytes smaller with gzip and 94 bytes
+smaller with Brotli than base `1443dc92e`. This is not an every-package claim.
+The all-exports React package grows 245 gzip / 198 Brotli bytes. Across the
+measured db/react-db/preact-db exports, the total grows 268 gzip / 292 Brotli
+bytes. The ownership repair's extra state is visible in that measurement.
+
+The item accounting and authorized production/oracle repairs are complete.
+Final pushed-head CI status is separate from this finite evidence. The full
+monorepo `pnpm test` command did not run, and its PR checklist remains unchecked.
+
+Source snapshot for this amendment: `d70fdf29acd5de0c9e24322f6a5e271a93e35d08ac1300657101c3be7781d657` across 29 source, grammar, contract and coverage files. The companion manifest records each file hash, excludes itself and this report, and preserves the earlier manifests.

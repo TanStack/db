@@ -303,13 +303,7 @@ test.each(histories)(
       const firstOutput = readyFirst ?? (await readFirst?.())
       const secondOutput = await readSecond?.()
       if (firstOutput) expectIndexingConfiguration(firstOutput, first)
-      expectIndependentIndexingOutputs(
-        firstOutput,
-        secondOutput,
-        first,
-        second,
-        identity,
-      )
+      expectIndependentIndexingOutputs(firstOutput, secondOutput, first, second)
       pendingReach?.reach(
         first.autoIndex === second.autoIndex &&
           first.defaultIndexType === second.defaultIndexType

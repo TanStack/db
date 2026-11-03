@@ -343,14 +343,16 @@ declareOracle({
  */
 const retryStates = [
   `replacement suspended`,
-  `peer ready first`,
+  `peer ready`,
   `replacement resumed`,
   `page isolated`,
+  `borrower moves after compiler retries`,
 ] as const
 async function checkRetryOwnershipHistory(
   history: RenderHistory,
   withClient: boolean,
   keyed: boolean,
+  simultaneous: boolean,
   reach: ReturnType<typeof createOracleReach<(typeof retryStates)[number]>>,
 ) {
   const lifetime = new ScenarioLifetime()
@@ -418,18 +420,29 @@ async function checkRetryOwnershipHistory(
     expect(release, `replacement source was requested`).toBeDefined()
     reach.reach(`replacement suspended`)
     await act(() => hook.rerender({ ...props, replace: true, block: true }))
-    const peer = renderHook(() => useLiveSuspenseQuery(query(true, 0)), {
-      wrapper: ({ children }) => (
-        <Suspense fallback={<div data-testid="retry-peer" />}>
-          {children}
-        </Suspense>
-      ),
-    })
+    let peerOffset = 0
+    const peer = renderHook(
+      () => useLiveSuspenseQuery(query(true, peerOffset)),
+      {
+        wrapper: ({ children }) => (
+          <Suspense fallback={<div data-testid="retry-peer" />}>
+            {children}
+          </Suspense>
+        ),
+      },
+    )
     lifetime.defer(() => peer.unmount())
-    await act(() => release!())
+    expect(
+      replacement.subscriberCount,
+      `both pending bindings adopted one preload`,
+    ).toBe(1)
+    await act(() => {
+      if (simultaneous) hook.rerender({ ...props, replace: true })
+      release!()
+    })
     expect(peer.result.current.data).toHaveLength(history.limit)
-    expect(screen.getByTestId(`retry-primary`)).toBeTruthy()
-    reach.reach(`peer ready first`)
+    if (!simultaneous) expect(screen.getByTestId(`retry-primary`)).toBeTruthy()
+    reach.reach(`peer ready`)
     const peerCollection = peer.result.current.collection
     await act(() => hook.rerender({ ...props, replace: true }))
     const expected = (offset: number) =>
@@ -453,6 +466,23 @@ async function checkRetryOwnershipHistory(
       `resumed binding owns its output`,
     )
     reach.reach(`replacement resumed`)
+    // The borrower adopted pending work compiled by the original binding.
+    // Its next use must retain its own Collection even after that compiler retries.
+    peerOffset = history.abandoned
+    await act(() => peer.rerender())
+    checkWindowObservation(
+      {
+        rows: peer.result.current.data,
+        collection: peer.result.current.collection,
+      },
+      {
+        rows: expected(peerOffset),
+        previousCollection: peerCollection,
+        retain: true,
+      },
+      `borrower page after original compiler retries`,
+    )
+    reach.reach(`borrower moves after compiler retries`)
     const collection = hook.result.current.collection
     await act(() =>
       hook.rerender({ ...props, replace: true, offset: history.committed }),
@@ -474,7 +504,11 @@ async function checkRetryOwnershipHistory(
         rows: peer.result.current.data,
         collection: peer.result.current.collection,
       },
-      { rows: expected(0), previousCollection: peerCollection, retain: true },
+      {
+        rows: expected(peerOffset),
+        previousCollection: peerCollection,
+        retain: true,
+      },
       `peer after resumed binding page move`,
     )
     reach.reach(`page isolated`)
@@ -482,49 +516,56 @@ async function checkRetryOwnershipHistory(
 }
 for (const client of [false, true])
   for (const keyed of [false, true])
-    for (const campaign of [`fixed`, `fresh`] as const) {
-      const property = `react.window-retry-ownership`
-      const test =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      test(`retry ownership/${client ? `client` : `unscoped`}/${keyed ? `keyed` : `derived`}/${campaign}`, async () => {
-        const reach = createOracleReach(
-          `${property}/${client}/${keyed}/${campaign}`,
-          retryStates,
-          { fixedHistories: examples.length },
-        )
-        let index = 0
-        const fidelity = createOracleFailureFidelity<RenderHistory>()
-        try {
-          await fidelity.assert(() =>
-            fc.assert(
-              fc.asyncProperty(renderHistoryArbitrary, async (history) => {
-                reach.beginHistory({ fixed: index++ < examples.length })
-                await fidelity.run(history, () =>
-                  checkRetryOwnershipHistory(history, client, keyed, reach),
-                )
-              }),
-              campaign === `fixed`
-                ? {
-                    numRuns: oracleRuns(6) + examples.length,
-                    seed: 2345,
-                    examples: [...examples].map(([value]) => [value]),
-                  }
-                : oraclePropertyOptions(6, property, {
-                    examples: [...examples].map(([value]) => [value]),
-                  }),
-            ),
+    for (const simultaneous of [false, true])
+      for (const campaign of [`fixed`, `fresh`] as const) {
+        const property = `react.window-retry-ownership`
+        const test =
+          campaign === `fixed`
+            ? oracleReplayTest(it)
+            : oracleReplayTest(it, property)
+        test(`retry ownership/${client ? `client` : `unscoped`}/${keyed ? `keyed` : `derived`}/${simultaneous ? `co-ready` : `borrower-first`}/${campaign}`, async () => {
+          const reach = createOracleReach(
+            `${property}/${client}/${keyed}/${simultaneous}/${campaign}`,
+            retryStates,
+            { fixedHistories: examples.length },
           )
-        } finally {
-          console.info(
-            `retry reach ${client}/${keyed}/${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-        reach.assertReached()
-      })
-    }
+          let index = 0
+          const fidelity = createOracleFailureFidelity<RenderHistory>()
+          try {
+            await fidelity.assert(() =>
+              fc.assert(
+                fc.asyncProperty(renderHistoryArbitrary, async (history) => {
+                  reach.beginHistory({ fixed: index++ < examples.length })
+                  await fidelity.run(history, () =>
+                    checkRetryOwnershipHistory(
+                      history,
+                      client,
+                      keyed,
+                      simultaneous,
+                      reach,
+                    ),
+                  )
+                }),
+                campaign === `fixed`
+                  ? {
+                      numRuns: oracleRuns(6) + examples.length,
+                      seed: 2345,
+                      examples: [...examples].map(([value]) => [value]),
+                    }
+                  : oraclePropertyOptions(6, property, {
+                      examples: [...examples].map(([value]) => [value]),
+                    }),
+              ),
+            )
+          } finally {
+            console.info(
+              `retry reach ${client}/${keyed}/${simultaneous}/${campaign}`,
+              Object.fromEntries(reach.counts()),
+            )
+          }
+          reach.assertReached()
+        })
+      }
 declareOracle({
   grammar: [renderHistoryArbitrary],
   check: [checkRetryOwnershipHistory],

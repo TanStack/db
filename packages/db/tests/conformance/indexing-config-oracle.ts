@@ -121,7 +121,6 @@ export function expectIndependentIndexingOutputs(
   secondOutput: object | undefined,
   first: IndexSettings,
   second: IndexSettings,
-  _identity: ReturnType<typeof indexConfigurationPairs>[number][`identity`],
 ): void {
   if (!expectedIndexing(first).rejects && !expectedIndexing(second).rejects)
     expect(secondOutput).not.toBe(firstOutput)

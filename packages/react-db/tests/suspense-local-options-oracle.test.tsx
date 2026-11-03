@@ -39,7 +39,6 @@ import type { ReactNode } from 'react'
 
 declareOracle({
   grammar: [localOptionPairs],
-  model: [equalLocalDeclarations],
   check: [checkLocalOutputOwnership],
 })
 const histories = localOptionPairs.flatMap((history, cell) =>

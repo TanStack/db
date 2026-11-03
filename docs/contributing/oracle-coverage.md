@@ -6810,6 +6810,17 @@ reaction, cleanup before rejection, and switching clients. A pending client
 record deduplicates work, so registration while it remains pending is not
 modeled as replacement.
 
+The co-mounted sibling grammar places both hooks before their first successful
+commit. Shared/separate boundaries, equal/different queries, staggered/same-pass
+readiness, and ready/lagging source Collections cross every client/key mode.
+Each generated family guarantees the reported shared-boundary shape. Every
+successful layout commit checks distinct output Collections. After both commit,
+a held private startup crosses a peer page move and an unchanged-input render;
+the copied ready rows stay on their own page until private startup settles.
+Render-time retry-cache eviction, an effect-only ownership fix, and copying a
+peer's moving rows all fail this receiver. These are finite React 19/jsdom
+histories with controlled on-demand requests, not arbitrary scheduler coverage.
+
 Each receiving campaign declares reach and replays fixed examples through the
 same model/checker. Five hostile mutations fail at retry progress, successful
 peer ownership, replacement pending, restart pending, and late preload rejection.
@@ -6843,6 +6854,22 @@ This distinguishes a wrong observer transport identity that correct local rows
 would conceal. All 48 fixed/fresh campaigns reject the original render-time
 observer mutation. The source remains a controlled finite Collection; native
 hydration and arbitrary React schedules remain outside this receiver.
+
+The mounted replacement/borrower receiver also generates both co-ready and
+borrower-first schedules. It moves the borrower after the original compiler
+retries, then moves the original binding and checks both pages. Reusing the
+compiler's resolver token fails borrower Collection retention. This adds the
+next-use direction the earlier receiver omitted; the initial successful
+Collections remain distinct in the reviewed implementation's co-ready lane.
+
+Svelte client recovery histories cross a committed declarative move, an
+imperative move, a throwing key getter, repeated public rejection, the throwing
+native pre-effect, and recovery. Equal keys retain the authored input and its
+imperative page despite changed body/dependency proposals; changed keys admit
+the new plan. The existing independent window judgment compares data, keyed
+state and Collection retention after native settlement. Removing stable-key
+retention fails this receiver. This does not add disabled config fields to the
+typed API or promise in-place key mutation.
 
 The shared owner also crosses initially disabled inputs with stable keys through real ordinary React, Preact and client-backed Svelte bindings. A disabled input admits no plan; first enablement admits one, an enabled unchanged key retains it, and a changed key admits the changed plan. This distinguishes the enablement fix from deleting stable-key retention. Suspense has no disabled-input overload and does not receive this lane.
 

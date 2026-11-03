@@ -20,6 +20,7 @@
 import { Component, Suspense, useLayoutEffect } from 'react'
 import { act, render } from '@testing-library/react'
 import {
+  BTreeIndex,
   DbClient,
   createCollection,
   createLiveQueryCollection,
@@ -29,6 +30,11 @@ import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
+import {
+  checkWindowObservation,
+  checkWindowState,
+  windowRows,
+} from '../../db/tests/conformance/window-history-oracle'
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
 import {
   expectKeyedRows,
@@ -45,6 +51,7 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import type { WindowRow } from '../../db/tests/conformance/window-history-oracle'
 import type { ReactNode } from 'react'
 import type { HealthNode, SyncConfig } from '@tanstack/db'
 
@@ -936,4 +943,345 @@ describe(`Suspense lifecycle histories`, () => {
         }
       }, 60_000)
     }
+})
+
+/** Initial sibling histories cross boundary placement, query identity, and
+ * readiness order. The existing current-attempt model predicts each ready view;
+ * the shared window judgment checks rows and exclusive/retained Collections.
+ * A ready sibling in a shared boundary has not committed while its peer waits.
+ * Settling both obligations must permit the boundary to commit both outputs.
+ * Source Collection readiness can lag settled on-demand subsets. A private
+ * output keeps its completed seed's rows through a peer move and a later render
+ * until its own startup settles; source readiness cannot hide that handoff.
+ * Unlike the old peer lane, both hooks are present before any successful commit.
+ */
+const siblingsArbitrary = fc.record({
+  sharedBoundary: fc.boolean(),
+  sourceReady: fc.boolean(),
+  sameQuery: fc.boolean(),
+  first: fc.integer({ min: 0, max: 1 }),
+  simultaneous: fc.boolean(),
+  width: fc.integer({ min: 1, max: 3 }),
+  offset: fc.integer({ min: 1, max: 4 }),
+})
+type SiblingsHistory = HistoryOf<typeof siblingsArbitrary>
+// Each generated family includes the reported shapes plus its unconstrained
+// history. Structural reach does not depend on random selection frequency.
+function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
+  return [
+    history,
+    {
+      ...history,
+      sharedBoundary: true,
+      sameQuery: true,
+      first: 0,
+      sourceReady: false,
+    },
+    { ...history, sharedBoundary: true, sameQuery: false, simultaneous: false },
+    {
+      ...history,
+      sharedBoundary: false,
+      sameQuery: true,
+      first: 1,
+      sourceReady: true,
+    },
+  ]
+}
+function checkSiblingOwnership(left: object, right: object, cut: string) {
+  atOracleCheckpoint(`independent successful outputs`, cut, () => {
+    expect(left, `every successful sibling owns its output`).not.toBe(right)
+  })
+}
+const siblingStates = [
+  `co-mounted pending peers`,
+  `shared boundary`,
+  `separate boundaries`,
+  `same query`,
+  `different queries`,
+  `staggered readiness`,
+  `same-pass readiness`,
+  `both committed`,
+  `exclusive outputs`,
+  `retained peer move`,
+  `seed isolated during peer move`,
+  `private startup handoff`,
+  `lagging source readiness`,
+  `ready source`,
+] as const
+async function checkSiblings(
+  history: SiblingsHistory,
+  scope: Scope,
+  keyed: boolean,
+  reach: ReturnType<typeof createOracleReach<(typeof siblingStates)[number]>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  let mounted: ReturnType<typeof render> | undefined
+  lifetime.defer(() => mounted?.unmount())
+  const client = scope === `none` ? undefined : new DbClient()
+  if (client) lifetime.defer(() => client.cleanup())
+  await lifetime.run(async () => {
+    const rows: Array<WindowRow> = Array.from({ length: 12 }, (_, rank) => ({
+      id: String(rank),
+      rank,
+    }))
+    const releases: Array<() => void> = []
+    const demands: Array<Array<() => void>> = [[], []]
+    const sources = [0, 1].map((slot) =>
+      createCollection<WindowRow, string>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const value of rows)
+              write({ type: `insert`, value: { ...value } })
+            commit()
+            releases[slot] = () => {
+              if (history.sourceReady) markReady()
+              for (const release of demands[slot]!.splice(0)) release()
+            }
+            return {
+              loadSubset: () =>
+                new Promise<void>((resolve) => {
+                  demands[slot]!.push(resolve)
+                }),
+            }
+          },
+        },
+      }),
+    )
+    lifetime.defer(async () => {
+      for (const source of sources) await source.cleanup({ dependents: true })
+    })
+    const records: Array<{
+      result?: {
+        data: unknown
+        state: ReadonlyMap<unknown, unknown>
+        collection: object
+      }
+    }> = [{}, {}]
+    const rendered = [0, 0]
+    function Consumer({ slot, offset }: { slot: number; offset: number }) {
+      rendered[slot]!++
+      const sourceSlot = history.sameQuery ? 0 : slot
+      const result = useLiveSuspenseQuery({
+        ...(scope === `explicit` ? { client } : {}),
+        ...(keyed ? { queryKey: [`siblings`, sourceSlot, offset] } : {}),
+        query: (q) =>
+          q
+            .from({ row: sources[sourceSlot]! })
+            .orderBy(({ row }) => row.rank)
+            .limit(history.width)
+            .offset(offset)
+            .select(({ row }) => ({ id: row.id, rank: row.rank })),
+      })
+      useLayoutEffect(() => {
+        const peer = records[1 - slot]!.result
+        if (peer)
+          checkSiblingOwnership(
+            result.collection,
+            peer.collection,
+            `successful layout commit`,
+          )
+        records[slot]!.result = result
+      })
+      return <output data-slot={slot} data-phase="ready" />
+    }
+    const fallback = <output data-phase="pending" />
+    const tree = (offset: number) => {
+      const children = [0, 1].map((slot) => (
+        <Consumer
+          key={slot}
+          slot={slot}
+          offset={slot === history.first ? offset : 0}
+        />
+      ))
+      const body = history.sharedBoundary ? (
+        <Suspense fallback={fallback}>{children}</Suspense>
+      ) : (
+        children.map((child, slot) => (
+          <Suspense key={slot} fallback={fallback}>
+            {child}
+          </Suspense>
+        ))
+      )
+      return scope === `provider` ? (
+        <DbProvider client={client!}>{body}</DbProvider>
+      ) : (
+        <>{body}</>
+      )
+    }
+    mounted = render(tree(0))
+    await settle()
+    expect(
+      rendered.every((n) => n > 0),
+      `React attempted both co-mounted peers`,
+    ).toBe(true)
+    expect(
+      mounted.container.querySelectorAll('[data-phase="ready"]'),
+    ).toHaveLength(0)
+    reach.reach(`co-mounted pending peers`)
+    reach.reach(
+      history.sharedBoundary ? `shared boundary` : `separate boundaries`,
+    )
+    reach.reach(history.sameQuery ? `same query` : `different queries`)
+    if (!history.sameQuery && !history.simultaneous) {
+      await act(() => releases[history.first]!())
+      await settle()
+      if (history.sharedBoundary) {
+        expect(
+          records.every((record) => record.result === undefined),
+          `no sibling has committed through the shared pending boundary`,
+        ).toBe(true)
+      }
+      reach.reach(`staggered readiness`)
+    }
+    await act(() => {
+      for (const release of releases) release()
+    })
+    await settle()
+    for (
+      let turn = 0;
+      turn < 4 &&
+      mounted.container.querySelectorAll('[data-phase="ready"]').length < 2;
+      turn++
+    ) {
+      await act(() => {
+        for (const release of releases) release()
+      })
+      await settle()
+    }
+    // This bounded cut asks for host progress, not a particular retry count.
+    // A fallback after every requested source is ready violates the model's view.
+    expect(
+      mounted.container.querySelectorAll('[data-phase="ready"]'),
+      `both initial obligations made retry progress`,
+    ).toHaveLength(2)
+    reach.reach(`both committed`)
+    reach.reach(
+      history.sourceReady ? `ready source` : `lagging source readiness`,
+    )
+    if (history.sameQuery || history.simultaneous)
+      reach.reach(`same-pass readiness`)
+    const expected = (offset: number) =>
+      windowRows(
+        rows,
+        {
+          offset,
+          limit: history.width,
+          minimum: -1,
+          descending: false,
+          nestedLimit: rows.length,
+        },
+        false,
+      )
+    const before = records.map((record) => record.result!.collection)
+    const comparePeers = (offset: number, cut: string) => {
+      for (const slot of [0, 1]) {
+        const record = records[slot]!.result!
+        const page = slot === history.first ? offset : 0
+        checkWindowObservation(
+          { rows: record.data, collection: record.collection },
+          {
+            rows: expected(page),
+            previousCollection: before[slot],
+            retain: true,
+          },
+          `${cut}/${slot}`,
+        )
+        checkWindowState(record.state, expected(page), `${cut}/${slot}`)
+      }
+      checkSiblingOwnership(
+        records[0]!.result!.collection,
+        records[1]!.result!.collection,
+        cut,
+      )
+    }
+    comparePeers(0, `co-mounted exclusive outputs`)
+    reach.reach(`exclusive outputs`)
+    await act(() => mounted!.rerender(tree(history.offset)))
+    // A same-query peer may still be acquiring its private output's first
+    // subset. Keep that oldest demand held while the first output moves.
+    const held =
+      history.sameQuery && history.first === 0 ? demands[0]![0] : undefined
+    for (let turn = 0; turn < 4; turn++) {
+      await settle()
+      await act(() => {
+        for (const pending of demands) {
+          const deliver = pending.filter((release) => release !== held)
+          pending.splice(
+            0,
+            pending.length,
+            ...pending.filter((release) => release === held),
+          )
+          for (const release of deliver) release()
+        }
+      })
+    }
+    await settle()
+    if (held) {
+      // Re-read both hooks after the moved output publishes, while the private
+      // startup demand remains held. An unchanged-input host render must not
+      // replace the peer's copied rows with the moved output's live snapshot.
+      await act(() => mounted!.rerender(tree(history.offset)))
+      await settle()
+      comparePeers(history.offset, `seed while successful peer has moved`)
+      reach.reach(`seed isolated during peer move`)
+      await act(() => {
+        for (const release of releases) release()
+      })
+      await settle()
+      comparePeers(history.offset, `private startup handoff`)
+      reach.reach(`private startup handoff`)
+    }
+    comparePeers(history.offset, `co-mounted page independence`)
+    expect(
+      mounted.container.querySelectorAll('[data-phase="ready"]'),
+    ).toHaveLength(2)
+    reach.reach(`retained peer move`)
+  })
+}
+for (const scope of [`none`, `provider`, `explicit`] as const)
+  for (const keyed of [false, true])
+    for (const campaign of [`fixed`, `fresh`] as const) {
+      const property = `react.suspense-siblings`
+      const test =
+        campaign === `fixed`
+          ? oracleReplayTest(it)
+          : oracleReplayTest(it, property)
+      test(`co-mounted siblings/${scope}/${keyed}/${campaign}`, async () => {
+        const reach = createOracleReach(
+          `${property}/${scope}/${keyed}/${campaign}`,
+          siblingStates,
+        )
+        const fidelity = createOracleFailureFidelity<SiblingsHistory>()
+        try {
+          await fidelity.assert(() =>
+            fc.assert(
+              fc.asyncProperty(siblingsArbitrary, async (history) => {
+                for (const member of siblingHistories(history)) {
+                  reach.beginHistory()
+                  await fidelity.run(member, () =>
+                    checkSiblings(member, scope, keyed, reach),
+                  )
+                }
+              }),
+              campaign === `fixed`
+                ? { numRuns: oracleRuns(8), seed: 2348 }
+                : oraclePropertyOptions(8, property),
+            ),
+          )
+          reach.assertReached()
+        } finally {
+          console.info(
+            `sibling reach ${scope}/${keyed}/${campaign}`,
+            Object.fromEntries(reach.counts()),
+          )
+        }
+      }, 60_000)
+    }
+declareOracle({
+  grammar: [siblingsArbitrary, siblingHistories],
+  check: [checkSiblings, checkSiblingOwnership],
 })

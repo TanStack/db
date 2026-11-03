@@ -609,7 +609,7 @@ export function useLiveQueryImpl(
 
     // Check if we need to create/recreate the collection
     let needsNewCollection =
-      suspense?.ownedByPeer ||
+      suspense?.needsOwnCollection ||
       !instance.collection ||
       (inputIsCollection
         ? instance.config !== configOrQueryOrCollection
@@ -630,6 +630,12 @@ export function useLiveQueryImpl(
 
     let queryHash = instance.queryHash
     let commitWindow: (() => void) | undefined
+    let compile:
+      | ((
+          ownsCollection: boolean,
+          windowOwner: object,
+        ) => Collection<object, string | number, {}> | null)
+      | undefined
     if (needsNewCollection) {
       // Preparation rejects unhashable derived inputs; keyed inputs must hash.
       queryHash = queryKey
@@ -664,7 +670,7 @@ export function useLiveQueryImpl(
         configOrQueryOrCollection.startSyncImmediate()
         instance.collection = configOrQueryOrCollection
       } else {
-        const compile = (ownsCollection: boolean, windowOwner: object) => {
+        compile = (ownsCollection: boolean, windowOwner: object) => {
           // A keyed query claims nothing, so it reports an unbound descriptor
           // here; the other forms reported it when they claimed.
           if (!dbClient && queryKey !== undefined) {
@@ -717,7 +723,7 @@ export function useLiveQueryImpl(
     if (commitWindow && !dbClient) needsNewCollection = false
     let observer = instance.observer!
     let subscribe = instance.subscribe!
-    if (needsNewCollection) {
+    const watchCollection = () => {
       // Recreate the observer when the underlying collection changes. The observer
       // is not disposed explicitly here or on unmount: `useSyncExternalStore`
       // unsubscribes it when the subscribe changes or the component unmounts, which
@@ -743,11 +749,8 @@ export function useLiveQueryImpl(
         resumeDeferredCollections()
         return unsubscribe
       }
-      if (!commitWindow) {
-        instance.observer = observer
-        instance.subscribe = subscribe
-      }
     }
+    if (needsNewCollection) watchCollection()
     // Until commit, a proposed page's observer and transport identity belong
     // only to this render. Cancellation must leave the committed seed intact.
     useWindowCommitEffect(() => {
@@ -772,12 +775,24 @@ export function useLiveQueryImpl(
       observer.preload().catch(() => {})
     }
 
+    const privateCollection = compile && suspense?.forkReady(observer, compile)
+    if (privateCollection) {
+      instance.collection = privateCollection
+      watchCollection()
+    }
+    if (!commitWindow) {
+      instance.observer = observer
+      instance.subscribe = subscribe
+    }
     const returned = useSyncExternalStore(
       subscribe,
-      () => observer.getSnapshot(),
-      () => observer.getServerSnapshot(forSuspense),
+      () => suspense?.read(observer.getSnapshot()) ?? observer.getSnapshot(),
+      () =>
+        suspense?.read(observer.getServerSnapshot(forSuspense)) ??
+        observer.getServerSnapshot(forSuspense),
     )
-    if (returned.isReady) suspense?.claim()
+    const claim = returned.isReady ? suspense?.claim() : undefined
+    useWindowCommitEffect(() => claim?.())
     // Pass render-local metadata directly to the Suspense wrapper. The public
     // hook returns the observer's stable snapshot without a wrapper allocation.
     if (forSuspense) {

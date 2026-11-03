@@ -18,6 +18,8 @@ import type {
   HealthNode,
   InferResultType,
   InitialQueryBuilder,
+  LiveQueryObserver,
+  LiveQuerySnapshot,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -27,7 +29,8 @@ type SuspenseCollection = Collection<object, string | number, {}>
 type SuspenseCollectionEntry = {
   collection: SuspenseCollection
   windowOwner: object
-  owner?: object
+  owner?: SuspenseBinding
+  observer?: LiveQueryObserver<object, string | number>
   release: () => void
 }
 
@@ -54,8 +57,8 @@ function getSourceQualifiedSuspenseKey(
   } = (preparedValue as { query?: unknown } | null | undefined)?.query
     ? (preparedValue as Record<string, unknown>)
     : {}
-  // Local output options qualify sharing; query identity still binds mounted
-  // options. Object/function declarations compare by exact runtime reference.
+  // Local output options qualify pending retry adoption; query identity binds
+  // mounted options. Object/function declarations compare by exact runtime reference.
   options.autoIndex ??= `off`
   for (const key in options) {
     const value = options[key]
@@ -69,15 +72,17 @@ function getSourceQualifiedSuspenseKey(
   return getStableValueHash([sourceIds, options, queryHash])
 }
 
-/** Retry work can be borrowed only until one binding exposes its output. */
+/** Uncommitted retries may adopt work; successful outputs have one owner. */
 export class SuspenseBinding {
   private entry?: SuspenseCollectionEntry
+  private seed?: LiveQuerySnapshot<object, string | number>
+  private seedObserver?: LiveQueryObserver<object, string | number>
   collection?: Collection<any, any, any>
   promise?: Promise<void>
   ready = false
 
-  get ownedByPeer(): boolean {
-    return this.entry?.owner !== undefined && this.entry.owner !== this
+  get needsOwnCollection(): boolean {
+    return this.entry !== undefined && this.entry.owner !== this
   }
 
   resolve(
@@ -97,9 +102,12 @@ export class SuspenseBinding {
     const cached = owned ? undefined : cache.get(key)
     if (cached) return (this.entry = cached).collection
 
-    // The resolver token follows an adopted preload's compiled plan.
-    const windowOwner = owned ? this.entry!.windowOwner : this
+    // A new attempt gets a fresh resolver token. Adoption retains that token;
+    // another attempt must not overwrite the adopted Collection's plan.
+    const windowOwner = owned ? this.entry!.windowOwner : {}
     const collection = compile(owned, windowOwner)
+    if (owned && collection === this.entry!.collection) return collection
+    this.seed = undefined
     if (collection && this.entry?.collection !== collection) {
       const release = () => {
         if (cache.get(key) === entry) cache.delete(key)
@@ -121,11 +129,65 @@ export class SuspenseBinding {
     return collection
   }
 
-  claim(): void {
-    if (this.entry) {
+  // The first successful candidate may keep the preload. Other candidates get
+  // private outputs seeded from its completed snapshot. Keep the retry entry
+  // available until commit, since React can discard a successful candidate.
+  forkReady(
+    observer: LiveQueryObserver<object, string | number>,
+    compile: (owned: boolean, windowOwner: object) => SuspenseCollection | null,
+  ): SuspenseCollection | undefined {
+    if (!this.entry || this.entry.owner === this) return
+    const resource = (this.entry.observer ??= observer)
+    const snapshot =
+      typeof window === `undefined`
+        ? resource.getServerSnapshot(true)
+        : resource.getSnapshot()
+    if (!snapshot.isReady) return
+    if (!this.entry.owner) {
       this.entry.owner = this
-      this.entry.release()
+      return
     }
+    const windowOwner = {}
+    const collection = compile(false, windowOwner)
+    if (!collection) return
+    this.seed = { ...snapshot, collection }
+    this.seedObserver = resource
+    this.entry = {
+      collection,
+      windowOwner,
+      owner: this,
+      release: this.entry.release,
+    }
+    return collection
+  }
+
+  read(snapshot: LiveQuerySnapshot<object, string | number>) {
+    if (snapshot.isReady || snapshot.isCrashed) {
+      this.seed = undefined
+      this.seedObserver = undefined
+    }
+    // Keep source health current while the private output acquires its first
+    // subset. Its seed rows stay fixed: the successful peer may move its page.
+    const source = this.seedObserver?.getSnapshot()
+    if (
+      this.seed &&
+      source?.isReady &&
+      (source.health !== this.seed.health ||
+        source.isSyncError !== this.seed.isSyncError)
+    ) {
+      this.seed = {
+        ...this.seed,
+        health: source.health,
+        isSyncError: source.isSyncError,
+      }
+    }
+    return this.seed ?? snapshot
+  }
+
+  claim(): (() => void) | undefined {
+    // Capture this render's entry: React can replay an older commit's effect
+    // after a replacement suspends. That effect must release only its entry.
+    return this.entry?.release
   }
 }
 

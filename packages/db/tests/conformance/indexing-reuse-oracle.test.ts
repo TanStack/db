@@ -29,17 +29,17 @@ declareOracle({
 
 test.each(histories)(
   `identity comparison rejects the opposite relation: %j`,
-  ({ first, second, identity }) => {
+  ({ first, second }) => {
     const left = expectedIndexing(first).rejects ? undefined : {}
     const right = expectedIndexing(second).rejects ? undefined : {}
     if (!left || !right) {
       expect(() =>
-        expectIndependentIndexingOutputs(left, right, first, second, identity),
+        expectIndependentIndexingOutputs(left, right, first, second),
       ).not.toThrow()
     } else {
       const wrong = left
       expect(() =>
-        expectIndependentIndexingOutputs(left, wrong, first, second, identity),
+        expectIndependentIndexingOutputs(left, wrong, first, second),
       ).toThrow()
     }
   },

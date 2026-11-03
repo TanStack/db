@@ -4,7 +4,12 @@
  * readiness and fresh old-page readers. The independent sort/slice judgment
  * and history grammar are shared with React; this does not claim hydrate().
  */
-import { BTreeIndex, DbClient, collectionOptions } from '@tanstack/db'
+import {
+  BTreeIndex,
+  DbClient,
+  collectionOptions,
+  createCollection,
+} from '@tanstack/db'
 import { flushSync } from 'svelte'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
@@ -28,7 +33,10 @@ import {
   oracleReplayTest,
   oracleRuns,
 } from '../../db/tests/oracle-config'
-import type { InitialQueryBuilder } from '@tanstack/db'
+import type {
+  InitialQueryBuilder,
+  LiveQueryCollectionUtils,
+} from '@tanstack/db'
 import type { WindowRow } from '../../db/tests/conformance/window-history-oracle'
 import type { ClientWindowHistory as History } from '../../db/tests/conformance/client-window-history-oracle'
 // Client switching has its own React scope driver; this receiver measures only
@@ -270,3 +278,199 @@ describe(`Svelte client page identity`, () => {
     }
 })
 declareOracle({ check: [checkClientWindowHistory] })
+
+/** An unchanged explicit client key retains the authored input, including after
+ * a rejected key read. Recovery must not replay a prior declarative move over
+ * an imperative window change. The shared page model judges that retained view.
+ * Changing the key instead admits the proposed query. Body/deps proposals
+ * behind an equal key intentionally retain the authored plan.
+ */
+const recoveryArbitrary = fc.record({
+  width: fc.integer({ min: 1, max: 3 }),
+  offset: fc.integer({ min: 1, max: 3 }),
+  imperative: fc.integer({ min: 4, max: 6 }),
+})
+type RecoveryHistory = {
+  width: number
+  offset: number
+  imperative: number
+  changeKey: boolean
+  proposal: `body` | `deps`
+}
+// Cross both proposal paths with key equality in every generated family.
+// Separate marginal reaches could otherwise miss same-key dependency recovery.
+function recoveryHistories(
+  values: Omit<RecoveryHistory, `changeKey` | `proposal`>,
+): Array<RecoveryHistory> {
+  return ([`body`, `deps`] as const).flatMap((proposal) =>
+    [false, true].map((changeKey) => ({ ...values, proposal, changeKey })),
+  )
+}
+const recoveryStates = [
+  `committed move`,
+  `imperative move`,
+  `rejected read`,
+  `same-key recovery`,
+  `changed-key recovery`,
+  `body`,
+  `deps`,
+  `same-key body`,
+  `same-key deps`,
+  `changed-key body`,
+  `changed-key deps`,
+] as const
+async function checkRecovery(
+  history: RecoveryHistory,
+  reach: ReturnType<typeof createOracleReach<(typeof recoveryStates)[number]>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  let dispose: (() => void) | undefined
+  lifetime.defer(() => dispose?.())
+  const client = new DbClient()
+  lifetime.defer(() => client.cleanup())
+  await lifetime.run(async () => {
+    const rows: Array<WindowRow> = Array.from({ length: 12 }, (_, rank) => ({
+      id: String(rank),
+      rank,
+    }))
+    const source = createCollection({
+      getKey: (row: WindowRow) => row.id,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const value of rows)
+            write({ type: `insert`, value: { ...value } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    lifetime.defer(() => source.cleanup({ dependents: true }))
+    let offset = $state(0)
+    let key = $state(0)
+    let failed = $state(false)
+    let dep = $state(0)
+    const failure = new Error(`key read rejected`)
+    let result!: {
+      data: unknown
+      state: ReadonlyMap<unknown, unknown>
+      collection: { utils: object }
+    }
+    dispose = $effect.root(() => {
+      result = useLiveQuery(
+        {
+          client,
+          queryKey: () => {
+            if (failed) throw failure
+            return [`recovery`, key]
+          },
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.rank)
+              .limit(history.width)
+              .offset(offset + dep)
+              .select(({ row }) => ({ id: row.id, rank: row.rank })),
+        },
+        [() => dep],
+      )
+    })
+    const settle = async () => {
+      await Promise.resolve()
+      flushSync()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      flushSync()
+    }
+    flushSync()
+    await settle()
+    const first = result.collection
+    offset = history.offset
+    key = 1
+    flushSync()
+    await settle()
+    const expected = (page: number) =>
+      windowRows(
+        rows,
+        {
+          offset: page,
+          limit: history.width,
+          minimum: -1,
+          descending: false,
+          nestedLimit: rows.length,
+        },
+        false,
+      )
+    const compare = (page: number, cut: string) => {
+      checkWindowObservation(
+        { rows: result.data, collection: result.collection },
+        { rows: expected(page), previousCollection: first, retain: true },
+        cut,
+      )
+      checkWindowState(result.state, expected(page), cut)
+    }
+    compare(history.offset, `Svelte committed declarative move`)
+    reach.reach(`committed move`)
+    await (result.collection.utils as LiveQueryCollectionUtils).setWindow({
+      offset: history.imperative,
+      limit: history.width,
+    })
+    await settle()
+    compare(history.imperative, `imperative window before rejected input`)
+    reach.reach(`imperative move`)
+    failed = true
+    // Read the rejected lazy value twice, then run the throwing native effect.
+    expect(() => result.data).toThrow(failure)
+    expect(() => result.collection).toThrow(failure)
+    expect(() => flushSync()).toThrow(failure)
+    reach.reach(`rejected read`)
+    failed = false
+    if (history.proposal === `body`) offset = 9
+    else dep = 9 - history.offset
+    if (history.changeKey) key = 2
+    flushSync()
+    await settle()
+    compare(history.changeKey ? 9 : history.imperative, `recovered client key`)
+    reach.reach(
+      history.changeKey ? `changed-key recovery` : `same-key recovery`,
+    )
+    reach.reach(history.proposal)
+    reach.reach(
+      `${history.changeKey ? `changed-key` : `same-key`} ${history.proposal}`,
+    )
+  })
+}
+for (const campaign of [`fixed`, `fresh`] as const) {
+  const property = `svelte.client-window-recovery`
+  const test =
+    campaign === `fixed` ? oracleReplayTest(it) : oracleReplayTest(it, property)
+  test(`client key recovery/${campaign}`, async () => {
+    const reach = createOracleReach(`${property}/${campaign}`, recoveryStates)
+    const fidelity = createOracleFailureFidelity<RecoveryHistory>()
+    try {
+      await fidelity.assert(() =>
+        fc.assert(
+          fc.asyncProperty(recoveryArbitrary, async (history) => {
+            for (const member of recoveryHistories(history)) {
+              reach.beginHistory()
+              await fidelity.run(member, () => checkRecovery(member, reach))
+            }
+          }),
+          campaign === `fixed`
+            ? { numRuns: oracleRuns(24), seed: 2348 }
+            : oraclePropertyOptions(24, property),
+        ),
+      )
+      reach.assertReached()
+    } finally {
+      console.info(
+        `Svelte recovery reach/${campaign}`,
+        Object.fromEntries(reach.counts()),
+      )
+    }
+  })
+}
+declareOracle({
+  grammar: [recoveryArbitrary, recoveryHistories],
+  check: [checkRecovery],
+})
