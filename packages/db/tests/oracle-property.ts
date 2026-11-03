@@ -74,11 +74,13 @@
  *   must reject it: a `corrupt` function that alters a recorded trace, as an
  *   observation mutant does, or a hostile `driver`, such as production set up
  *   wrongly. The calibration test finds a history where the corruption
- *   applies, requires the clean trace to pass, and requires the check to report
- *   that law for the corrupted one (rubric, ORC-006).
+ *   applies and the clean trace passes (it skips a candidate whose clean trace
+ *   fails), and requires the check to report that law for the corrupted one
+ *   (rubric, ORC-006).
  * - **Determinism.** A `determinism` test runs some histories twice and
  *   requires the same trace: every pin and segment history of a generated
- *   source, or up to eight evenly spaced enumerated histories. A trace that
+ *   source and three generated histories, or up to eight evenly spaced
+ *   enumerated histories. A trace that
  *   differs between runs of one history breaks replay, shrinking, and the gap
  *   report's comparison, so a driver records relations (before and after,
  *   same or different id) rather than clock readings or random ids.
@@ -86,6 +88,8 @@
  *   Once a history fails one way, a setup error, a missed segment state, or
  *   one law, a smaller history that fails another way counts as passing, so
  *   the reported counterexample still shows the first failure (ORC-010).
+ *   Within one history a driver error decides first, then a law violation,
+ *   then a missed segment state.
  *
  * The `oracle/no-unit-test` lint rule treats an `oracleProperty` call as an
  * oracle test whose parts are its arguments, when its options are an object
@@ -551,15 +555,14 @@ function calibrationTests<History, Expected, Plan>(
           )
           const corrupted = calibration.corrupt(observations, plan)
           if (corrupted === undefined) continue
-          // A calibration is meaningful only where the true trace passes.
-          const clean = judge(options, plan, observations, driverError).verdict
-          if (clean.kind === `violation`)
-            throw failure(
-              options,
-              clean,
-              history,
-              `the calibration's history "${name}"`,
-            )
+          // A calibration is meaningful only where the true trace passes, so
+          // a candidate whose clean trace fails, or whose driver throws, is
+          // skipped; that history fails in its own test.
+          if (
+            driverError ||
+            judge(options, plan, observations).verdict.kind !== `pass`
+          )
+            continue
           const wrong = judge(options, plan, corrupted).verdict
           if (wrong.kind === `violation` && lawOf(wrong) === calibration.law)
             return
@@ -567,13 +570,20 @@ function calibrationTests<History, Expected, Plan>(
             `${id}: calibration "${calibration.name}" corrupted the trace of "${name}", but the check ${wrong.kind === `pass` ? `passed it` : `reported law "${lawOf(wrong)}"`}. It must report law "${calibration.law}".`,
           )
         }
+        // The real driver's trace of the candidate must pass first.
+        const clean = await recordGuarded(options.driver, plan)
+        if (
+          clean.driverError ||
+          judge(options, plan, clean.observations).verdict.kind !== `pass`
+        )
+          continue
         const { verdict } = await runOne(options, history, calibration.driver)
         if (verdict.kind === `pass`) continue
         if (lawOf(verdict) === calibration.law) return
         seen.push(`"${name}" reported law "${lawOf(verdict)}"`)
       }
       throw new Error(
-        `${id}: calibration "${calibration.name}" found no history where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a pin or segment that reaches the state its wrong answer changes.`,
+        `${id}: calibration "${calibration.name}" found no history whose clean trace passes and where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a passing pin or segment that reaches the state its wrong answer changes.`,
       )
     },
   }))
@@ -677,17 +687,16 @@ function generatedTests<History, Expected, Plan>(
           )
         counts.set(state, (counts.get(state) ?? 0) + 1)
       }
-      const segment = segmentOf.get(history)
-      if (segment !== undefined) {
-        const missing = segment.enters.filter((state) => !reached.has(state))
-        if (missing.length > 0) {
-          if (!keeps(`segment-reach`)) return
-          throw new Error(
-            `${id}: segment "${segment.name}" did not enter ${missing.join(`, `)}. A segment must reach every state it names.`,
-          )
-        }
+      // A law violation outranks a missed segment state.
+      if (verdict.kind === `pass`) {
+        const segment = segmentOf.get(history)
+        const missing =
+          segment?.enters.filter((state) => !reached.has(state)) ?? []
+        if (missing.length === 0 || !keeps(`segment-reach`)) return
+        throw new Error(
+          `${id}: segment "${segment!.name}" did not enter ${missing.join(`, `)}. A segment must reach every state it names.`,
+        )
       }
-      if (verdict.kind === `pass`) return
       if (!keeps(`law:${lawOf(verdict)}`)) return
       throw failure(
         options,
@@ -800,7 +809,14 @@ function generatedTests<History, Expected, Plan>(
       })),
     ]
   }
-  const determinism = determinismTest(options, fixedHistories)
+  // Determinism also covers three generated histories, so a property whose
+  // driver varies is caught even without pins or segments.
+  const determinism = determinismTest(options, () => [
+    ...fixedHistories(),
+    ...fc
+      .sample(source.arbitrary, { seed: source.fixedSeeds[0] ?? 0, numRuns: 3 })
+      .map((history, index) => ({ name: `generated ${index}`, history })),
+  ])
   // A calibration also tries a fixed sample of generated histories.
   const calibrations = calibrationTests(options, () => [
     ...fixedHistories(),

@@ -213,6 +213,7 @@ type Kind =
   | `determinism`
   | `calibration-passed`
   | `calibration-wrong-law`
+  | `calibration-none`
 type Outcome = { kind: Kind; law?: `three` | `four` }
 type LogEntry = { id: string; test: string; history: SyntheticHistory }
 
@@ -233,7 +234,13 @@ const reaches = (history: SyntheticHistory, states: ReadonlyArray<string>) =>
 const label = (history: SyntheticHistory) => `items ${history.join(` | `)}`
 
 type SpecExpectation =
-  { loads: false } | { loads: true; tests: Map<string, Outcome> }
+  | { loads: false }
+  | {
+      loads: true
+      tests: Map<string, Outcome>
+      /** Histories a passing determinism test must run, each twice. */
+      determinismRuns?: number
+    }
 
 function predictSpec(
   spec: SyntheticSpec,
@@ -247,11 +254,14 @@ function predictSpec(
       )
       .map((entry) => entry.history)
   const tests = new Map<string, Outcome>()
+  // A calibration needs a candidate whose clean trace passes; it skips the
+  // others (maintainer decision, 2026-11-03). Every history has an item, so
+  // the corruption applies to every candidate.
   const calibrate = (name: string, kind: (typeof calibrationKinds)[number]) => {
-    const first = ran(`calibration: ${name}`)[0]
-    if (!first) return { kind: `pass` } as Outcome
-    const clean = verdictOf(first)
-    if (clean.kind !== `pass`) return clean
+    const used = ran(`calibration: ${name}`).find(
+      (history) => verdictOf(history).kind === `pass`,
+    )
+    if (!used) return { kind: `calibration-none` } as Outcome
     if (kind === `right`) return { kind: `pass` } as Outcome
     return {
       kind: kind === `no-op` ? `calibration-passed` : `calibration-wrong-law`,
@@ -259,12 +269,17 @@ function predictSpec(
   }
   // The determinism test runs each of its histories twice, in order; the
   // log names them, including segment histories built from generated ones.
+  // A generated property's determinism test also runs three generated
+  // histories (maintainer decision, 2026-11-03), so a nondeterministic driver
+  // fails it even without pins or segments.
   const determinism = (): Outcome => {
     const histories = ran(`determinism`).filter((_, at) => at % 2 === 0)
     for (const history of histories) {
       if (history.includes(6)) return { kind: `setup` }
       if (spec.nondeterministic) return { kind: `determinism` }
     }
+    if (spec.nondeterministic && spec.source.kind === `generated`)
+      return { kind: `determinism` }
     return { kind: `pass` }
   }
   if (spec.source.kind === `enumerated`) {
@@ -286,9 +301,12 @@ function predictSpec(
   const lane = (test: string): Outcome => {
     if (spec.segments.some((segment) => !member(segment.prefix)))
       return { kind: `segment-membership` }
+    // A driver error decides a history first, then a law violation, then a
+    // missed segment state: a violation outranks a reach failure (maintainer
+    // decision, 2026-11-03).
     for (const [at, history] of ran(test).entries()) {
       const verdict = verdictOf(history)
-      if (verdict.kind === `setup`) return verdict
+      if (verdict.kind !== `pass`) return verdict
       const segment = spec.segments[at]
       if (
         at < spec.segments.length &&
@@ -296,7 +314,6 @@ function predictSpec(
         !reaches(history, segment.enters)
       )
         return { kind: `segment-reach` }
-      if (verdict.kind === `violation`) return verdict
     }
     return { kind: `pass` }
   }
@@ -321,7 +338,11 @@ function predictSpec(
   for (const { name, kind } of spec.calibrations)
     tests.set(`calibration: ${name}`, calibrate(name, kind))
   tests.set(`determinism`, determinism())
-  return { loads: true, tests }
+  return {
+    loads: true,
+    tests,
+    determinismRuns: spec.pins.length + spec.segments.length + 3,
+  }
 }
 
 function suiteModel(
@@ -427,12 +448,13 @@ function classify(error: ReportedError | undefined): Failure {
                 ? `determinism`
                 : text.includes(`but the check passed it`)
                   ? `calibration-passed`
-                  : text.includes(`but the check reported law`) ||
-                      text.includes(`found no history`)
+                  : text.includes(`but the check reported law`)
                     ? `calibration-wrong-law`
-                    : text.includes(`synthetic driver failed`)
-                      ? `setup`
-                      : `other`
+                    : text.includes(`found no history`)
+                      ? `calibration-none`
+                      : text.includes(`synthetic driver failed`)
+                        ? `setup`
+                        : `other`
   return { kind, ...(law ? { law } : {}), ...facts }
 }
 
@@ -651,6 +673,23 @@ function checkSuite(
             : lawOfTest(test.name),
           { actual: failure ?? { kind: `pass` }, expected: outcome },
         )
+      // A passing determinism test ran every history it owes.
+      if (
+        test.name === `determinism` &&
+        test.state === `passed` &&
+        owed.determinismRuns !== undefined
+      ) {
+        const runs = run.log.filter(
+          (entry) =>
+            entry.id === spec.id && entry.test === `${spec.id} > determinism`,
+        ).length
+        if (runs !== 2 * owed.determinismRuns)
+          return violation(
+            `run`,
+            `${spec.id} determinism ran ${runs / 2} histories, owed ${owed.determinismRuns}`,
+            `determinism`,
+          )
+      }
       // A lane's counterexample keeps the first failure's law.
       if (failure?.counterexample && outcome.law) {
         const shrunk = JSON.parse(failure.counterexample) as [SyntheticHistory]
@@ -795,6 +834,34 @@ oracleProperty({
             }),
           ],
         },
+      },
+      {
+        name: `a calibration skips a candidate whose clean trace fails`,
+        history: {
+          drafts: [
+            generatedDraft({
+              pins: [
+                { history: [3], enters: null },
+                { history: [0], enters: null },
+              ],
+              calibrations: [`right`],
+            }),
+          ],
+        },
+      },
+      {
+        name: `a law violation outranks a missed segment state`,
+        history: {
+          drafts: [
+            generatedDraft({
+              segments: [{ prefix: [3, 0, 0], enters: [`saw-1`] }],
+            }),
+          ],
+        },
+      },
+      {
+        name: `the determinism test also samples generated histories`,
+        history: { drafts: [generatedDraft({ nondeterministic: true })] },
       },
       {
         name: `calibrations need the named law`,
