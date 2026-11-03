@@ -85,7 +85,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
     `live-query-observer`,
-    `retained-snapshot row-container-sharing`,
+    `retained-snapshot row-container-sharing capture-paths`,
   ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
@@ -796,6 +796,10 @@ const replayTestNames = new Map([
   [
     `live-query-observer.row-container-sharing`,
     `reuses rows across metadata changes.*random`,
+  ],
+  [
+    `live-query-observer.capture-paths`,
+    `checks query capture boundaries.*random`,
   ],
   [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
   [

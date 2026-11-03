@@ -224,8 +224,12 @@ class LiveQueryObserverImpl<
             entries && collection
               ? this.getCollectionRevision(collection)
               : undefined
+          const layoutRevision =
+            entries && collection
+              ? this.getCollectionLayoutRevision(collection)
+              : undefined
           if (entries) {
-            this.updateCachedEntries(entries, revision)
+            this.updateCachedEntries(entries, revision, layoutRevision)
             this.snapshotDirty = true
           }
           this.emit(
@@ -234,9 +238,7 @@ class LiveQueryObserverImpl<
             entries,
             collection?.status,
             revision,
-            entries && collection
-              ? this.getCollectionLayoutRevision(collection)
-              : undefined,
+            layoutRevision,
             entries !== undefined,
           )
         },
@@ -380,36 +382,45 @@ class LiveQueryObserverImpl<
     collection: Collection<T, TKey, any>,
   ): Array<[TKey, T]> {
     const { entries, revision } = this.readEntries(collection)
-    this.updateCachedEntries(entries, revision)
+    this.updateCachedEntries(
+      entries,
+      revision,
+      this.getCollectionLayoutRevision(collection),
+    )
     return entries
   }
 
   private updateCachedEntries(
     entries: Array<[TKey, T]>,
     revision: number | undefined,
+    layoutRevision: number | undefined,
   ): void {
     const previous = this.cachedEntries
     const changed =
-      (revision !== undefined && revision !== this.cachedCollectionRevision) ||
-      previous?.length !== entries.length ||
-      entries.some(
-        ([key, value], index) =>
-          previous[index]![0] !== key || previous[index]![1] !== value,
-      )
+      revision !== undefined
+        ? previous === undefined ||
+          revision !== this.cachedCollectionRevision ||
+          layoutRevision !== this.cachedCollectionLayoutRevision
+        : previous?.length !== entries.length ||
+          entries.some(
+            ([key, value], index) =>
+              previous[index]![0] !== key || previous[index]![1] !== value,
+          )
 
-    // Keep identity on unchanged reattachment. Comparing entries when the row
-    // revision is equal also detects layout-only moves and revisionless inputs.
+    // Row and layout clocks are authoritative even if a source recaptured
+    // equal rows into fresh wrappers. Only revisionless inputs need comparison.
     if (changed) {
       this.cachedEntries = entries
       this.snapshotDirty = true
     }
     this.cachedCollectionRevision = revision
+    this.cachedCollectionLayoutRevision = layoutRevision
   }
 
   /**
    * While detached there is no delivered-publication clock, so fall back to
-   * the collection revision. Compatible cross-copy collections that predate
-   * `_stateRevision` are compared structurally instead.
+   * the collection revision. Inputs without the optional `_stateRevision`
+   * clock are compared structurally instead.
    */
   private refreshDetachedState(collection: Collection<T, TKey, any>): void {
     const status = collection.status
@@ -423,12 +434,10 @@ class LiveQueryObserverImpl<
         layoutRevision !== this.cachedCollectionLayoutRevision
       ) {
         this.captureEntries(collection)
-        this.cachedCollectionLayoutRevision = layoutRevision
-        this.snapshotDirty = true
       }
     } else {
       const entries = Array.from(collection.entries()) as Array<[TKey, T]>
-      this.updateCachedEntries(entries, undefined)
+      this.updateCachedEntries(entries, undefined, layoutRevision)
     }
 
     // A health-only change moves no row or status. Trees keep their identity
@@ -649,8 +658,7 @@ class LiveQueryObserverImpl<
         layoutRevision !== this.cachedCollectionLayoutRevision
       ) {
         const { entries } = this.readEntries(collection)
-        this.updateCachedEntries(entries, revision)
-        this.cachedCollectionLayoutRevision = layoutRevision
+        this.updateCachedEntries(entries, revision, layoutRevision)
       }
     }
     if (this.clientBinding?.seed) {
@@ -707,11 +715,8 @@ class LiveQueryObserverImpl<
           this.updateCachedEntries(
             publication.entries,
             publication.collectionRevision,
+            publication.collectionLayoutRevision,
           )
-        }
-        if (publication.collectionLayoutRevision !== undefined) {
-          this.cachedCollectionLayoutRevision =
-            publication.collectionLayoutRevision
         }
         if (publication.layoutChanged) {
           this.snapshotDirty = true

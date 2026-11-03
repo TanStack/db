@@ -269,3 +269,227 @@ remains explicitly core-only, so it transfers no controlled premise to a host.
 ORC-016's readiness-only and attachment regressions are inputs to the shared
 model and checker. ORC-001/002/003/009/011 retain their original evidence and
 limits; no new shared semantic fault requiring a second formulation was found.
+
+## 2026-11-03: equal-revision capture and ten-finding review
+
+This entry supersedes earlier statements about equal-revision entry comparison,
+reach, and size. The external review covered PR head
+`e02e09c70ada77d5bbc52b51ebcdd4ee801fe028`. The repair is identified by these
+SHA-256 source identities, so a later documentation commit cannot obscure the
+tested implementation:
+
+- Observer: `ef53f61c31e43ee6a35d48fbf19024c98ee6890c17954a3eecf60359ba378cef`.
+- Snapshot oracle: `89dd68d82c8d355b63ea10aa5f111537fc0e974600456c91d9cdb1743ed411c9`.
+- Replay manifest: `df193e11916eacb35c2ff980cc481a6464b61ff1e60308bfc7eee306009acec1`.
+
+### Law, experiment, and inference
+
+The authority remains `LiveQuerySnapshot` and the maintainer's 2026-11-01
+sharing decision. Unchanged public rows preserve containers across metadata
+and same-run ownership changes. Changes to values or ordered keys remain
+visible. An action that changes no public fact also preserves full-snapshot
+identity. Retained snapshots continue to expose their captured rows.
+
+The reviewed code compared wrapper identities even when the Collection's row
+revision was unchanged. An equal-content sync write can discard a virtual-row
+wrapper without advancing that revision. A later granular attachment captured
+the new wrapper. A health report then exposed newly allocated containers for
+unchanged rows. The old grammar had no equal-content source write, and its
+sharing assertions omitted full-snapshot identity on no-op actions.
+
+Before any production edit, the primary owner gained a generated `refresh`
+action and no-op identity comparison. A second driver in that same owner added
+real ordered projection and findOne paths, provisional hydration-seed handoff,
+optional row-clock absence, and rank-only source writes. It uses the existing
+`modelRows` and `checkRead` judgment. Source ranks independently determine order
+but are absent from the selected public Row. The independent version map changes
+only on value writes. Both maps are necessary: a move distinguishes equal
+versions at different ranks, while a value write distinguishes equal ranks.
+
+The initial receiving fixture supplied an invalid two-row seed to findOne. It
+was corrected to one selected row before the production gate. That setup failure
+is not RED evidence. The corrected receiving campaigns passed on unchanged
+production. The six-suite pre-edit gate recorded 116 passes and two failures,
+both at the sharing comparison described below, with no type errors.
+
+The repair uses the captured row and layout clocks together for revisioned
+inputs. Equal clocks preserve the existing capture despite re-enriched wrappers.
+A changed layout clock still replaces the capture on an order-only move. Only
+inputs without the optional row clock need key/value identity comparison.
+Queued delivery uses the clocks captured with its entries. The update method
+stores both clocks and sets the dirty flag, removing redundant assignments in
+detached refresh and attachment. No expectation or run budget was weakened.
+
+### Reach and grammar controls
+
+The sharing property retains 24 examples plus 40 generated histories in each
+campaign, fixed seed 1101. Its added `refresh` action reconstructs the reported
+trace and can cross reports and arbitrary attachment changes. Its bounds remain
+zero through three initial rows and at most twelve suffix actions. Equal writes
+change no model fact. A legal readiness prefix excludes health reporting before
+readiness. Removing refresh loses wrapper re-enrichment; removing ownership
+transitions loses its later recapture; removing the no-op assertion admits the
+snapshot-cloning mutant below. Existing axes retain their prior justification.
+
+The capture-path property runs 16 examples plus 40 generated histories in each
+campaign, fixed seed 2346. It generates two or three rows, string keys a..c,
+and at most twelve actions. The two-row case is the smallest order-only witness;
+three rows challenge a larger reordered tail. A move changes rank between -1
+and 100, crossing the other rows. Rank ties and invalid multirow findOne seeds
+are outside this grammar. Removing query shape loses the single-result
+projection, mode loses a subscription path, clock absence loses structural
+fallback, hydration loses seed/live capture separation, and read order loses
+one lazy Map path. Move, write, refresh, metadata and ownership actions each
+distinguish a neighboring layout, row, identity or attachment rule.
+
+Checks follow each direct Collection action or the real query's queued
+publication, then reread every retained seed/live snapshot. The query driver
+checks row values/order, state/data identity, full-snapshot no-ops,
+layoutRevision and health freshness. Its task-boundary wait is calibrated by
+the order-only mutant, which reaches and fails that post-publication comparison.
+It establishes no intermediate-publication timing guarantee.
+
+Every declared state must also occur in a shared example. Counts below are
+histories, from the final normal run on restored production:
+
+| Sharing state | Fixed | Random |
+| --- | ---: | ---: |
+| attached | 51 | 50 |
+| detached | 45 | 44 |
+| granular | 37 | 31 |
+| wholesale | 27 | 33 |
+| empty | 15 | 20 |
+| health-only | 34 | 34 |
+| status-only | 64 | 64 |
+| value-only | 34 | 31 |
+| attach-granular | 13 | 11 |
+| attach-wholesale | 8 | 11 |
+| detach-granular | 12 | 8 |
+| detach-wholesale | 10 | 10 |
+| reattach-granular | 6 | 7 |
+| reattach-wholesale | 5 | 8 |
+| noop-granular | 37 | 26 |
+| noop-wholesale | 27 | 31 |
+| equal-revision-reenrichment | 30 | 23 |
+
+| Capture-path state | Fixed | Random |
+| --- | ---: | ---: |
+| ordered-granular | 13 | 12 |
+| ordered-wholesale | 16 | 14 |
+| single-granular | 17 | 19 |
+| single-wholesale | 10 | 11 |
+| revisionless-granular | 14 | 17 |
+| revisionless-wholesale | 12 | 13 |
+| hydrated-ordered | 12 | 13 |
+| hydrated-single | 17 | 14 |
+| layout-only-granular-attached | 4 | 3 |
+| layout-only-granular-detached | 2 | 3 |
+| layout-only-wholesale-attached | 3 | 2 |
+| layout-only-wholesale-detached | 5 | 3 |
+| metadata-ordered-granular | 6 | 10 |
+| metadata-ordered-wholesale | 9 | 8 |
+| metadata-single-granular | 12 | 13 |
+| metadata-single-wholesale | 5 | 9 |
+
+### RED, GREEN, and calibration
+
+From `packages/db`, the six-suite gate command is:
+
+```sh
+pnpm exec vitest run tests/live-query-observer-snapshot-oracle.property.test.ts tests/live-query-observer-history-oracle.property.test.ts tests/live-query-observer-hydration-oracle.property.test.ts tests/live-query-observer.test.ts tests/live-query-observer-snapshot.test.ts tests/live-query-order-only-move.test.ts --coverage.enabled=false --maxWorkers=2
+```
+
+- **Parent RED:** reviewed observer e02e09c70 fails `metadata keeps data`, seed
+  1101, path `2:4:5:6:8:5`. Reduced history: granular, detached, one row,
+  state-first, `[refresh, subscribe, report]` after readiness. This is also the
+  original-defect mutant, rerun after repair and rejected at the same comparison.
+- **Narrow-repair mutant:** ignore the layout clock while trusting the row
+  clock. The new capture-path checker rejects stale ordered rows after one
+  `move`: ordered, granular, revisioned, unhydrated, two rows, state-first.
+  Seed 2346, path `0:2:0:1:1:0`. This distinguishes the repair from a patch
+  that fixes wrapper churn but loses layout-only changes.
+- **No-op mutant:** return a fresh shallow full-snapshot object on every read.
+  It passes the original sharing lane. The extended lane rejects it at
+  `no-op keeps snapshot`, seed 1101, path `0:0:1:0:0:0:2`, granular, detached,
+  empty, state-first, `[healthy, report]` after readiness.
+- **Repaired GREEN:** restored production passes all 118 tests in the six
+  suites, with no reported type errors. The intended comparisons, not a setup
+  error or timeout, reject all three mutants. No mutants remain installed.
+
+Both recorded production failures were also checked through guarded direct
+replay. Each runs exactly one random property witness: it fails with its
+mutant and passes with repaired production. Substitute the capture-path
+property, seed 2346 and path `0:2:0:1:1:0` for the second replay:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=live-query-observer.row-container-sharing \
+TANSTACK_DB_ORACLE_SEED=1101 TANSTACK_DB_ORACLE_PATH=2:4:5:6:8:5 \
+node --import tsx tests/oracle-replay.ts tests/live-query-observer-snapshot-oracle.property.test.ts --coverage.enabled=false
+```
+
+### Lossless review dispositions
+
+The user supplied ten findings in source order. The task-local ledger preserves
+their exact text and initial experiment plan. This table preserves each claim's
+judgment, action and useful remainder without merging overlapping IDs.
+
+| ID | Claim and evidence | Disposition and action | Durable value |
+| --- | --- | --- | --- |
+| HR-01 | Equal-revision re-enrichment invalidates containers. Parent RED and guarded replay confirm it. | fixed-now: authoritative row/layout clocks preserve unchanged captures. | Generated refresh/attachment/metadata histories and declared reach. |
+| HR-02 | The sharing lane omitted layout-only, revisionless, hydration handoff and findOne paths. Existing neighboring tests did not cross the changed identity law. | fixed-now: capture-path driver adds each boundary before production edits. | Real-query receiving comparison, sixteen reach states and narrow-mutant kill. |
+| HR-03 | Metadata snapshots share mutable JS containers. The probe confirms sharing. Calling Map.delete through a cast affects the peer. | accepted-design: LiveQuerySnapshot and window snapshots expose ReadonlyMap/ReadonlyArray. Caller mutation violates that API, while same-revision sharing is explicitly approved. | Retained-snapshot checks reject production mutation. Runtime freezing or hostile caller isolation is a separate API proposal. |
+| HR-04 | Ordered-key and key/value loops look similar. | refuted as a useful shared semantic helper: layout depends only on ordered keys, while revisionless capture also depends on values. Keep the short separate comparisons. | Value-only histories require stable layoutRevision. The clock repair removes the second loop entirely for revisioned sources. |
+| HR-05 | Detached refresh redundantly sets snapshotDirty after captureEntries. | fixed-now as simplification. No independent wrong public result was demonstrated. | updateCachedEntries owns capture invalidation and both clocks. |
+| HR-06 | The two capture references differ only during hydration. A probe finds them different after an ordinary published value write before getSnapshot. | refuted: cachedEntries is the live capture and cachedRows.entries is the last materialized visible capture. They reference arrays, rather than duplicate them. | Preserve pending materialization and seed/live distinctions when simplifying. |
+| HR-07 | Equal-clock captures add a linear key/value scan. A deterministic tuple-value probe records 3n reads before and n after, at n=1/8/32. | fixed-now: revisioned comparison uses clocks. Entry capture itself remains O(n), so the total path did not change from O(1) to O(n). | Work-count evidence separates redundant work from an asymptotic or elapsed-time claim. |
+| HR-08 | No-op full-snapshot identity was unasserted. The cloning mutant passes the old lane and fails the extended one. | fixed-now: shared comparison checks ownership and repeated metadata no-ops. | Generated no-op actions and reach in both modes. |
+| HR-09 | Fixed-history attribution could count shrink/replay runs as examples. | refuted for installed fast-check 3.23.2: examples run first, a failed campaign throws before aggregate reach, and path replay disables aggregate reach. | Successful, failing, shrinking and replay probes preserve the assumption. A code comment documents it. |
+| HR-10 | Window data/pages are recopied on metadata. A real window-controller probe confirms fresh arrays and shared state. | accepted-design under this PR's observer-only promise: its Changeset explicitly names live-query observer containers. The infinite contract requires page contents and metadata, not page-array identity across metadata. | Window page sharing remains a separate potential optimization. No infinite-container sharing claim is made here. |
+
+Loss audit: **10 = 5 fixed-now + 3 refuted + 2 accepted-design**. There are no
+deferred items, unresolved in-scope defects, or new sibling violations from
+these experiments. The reviewer found a real subtle bug and two useful coverage
+gaps. Several correctness labels instead described approved sharing, a redundant
+assignment, or an unpromised downstream optimization. The work claim needed
+asymptotic qualification. Recommendation: hire with reservations for adversarial
+review, with a second reviewer for contract interpretation and prioritization.
+
+### Production size and remaining limits
+
+`pnpm size:compare --packages db --files` uses merge-base
+`15d2d2d328db6f5a4ea0f1a48528c6c5137a1716`, matching production defines and
+compression. Observer minified bytes decrease by **99**, DB gzip by **40**,
+and DB brotli by **97**. The typical app decreases by 32 gzip bytes and
+increases by 11 brotli bytes. All eight app scenarios decrease by 31–57 gzip
+bytes; brotli deltas range from -78 to +125. Compression reductions are not
+universal across applications.
+
+The closure boundary is observer row sharing and no-op identity across the
+declared direct-Collection and real-query histories, at the named snapshot cuts.
+Existing queued listener, hydration-error and retained-snapshot owners protect
+neighboring promises. The optional-clock seam stays within one DB instance.
+This does not claim multiple-copy interoperability, arbitrary concurrency,
+intermediate query publications, framework rendering, external-provider timing,
+cleanup/reset sharing, runtime protection against caller mutation, or infinite
+page-array identity. No accepted in-scope counterexample remains.
+
+The ORC requirements retain prior evidence with these updates: ORC-001/002/003
+use the same authority, independent version/rank model and visible shared
+judgment; ORC-004 controls appear above; ORC-005 has real-query receiving paths
+and explicit post-publication checks, with no concrete missing-input hypothesis
+at those cuts; ORC-006 adds three assertion failures and old-lane survival;
+ORC-007 adds guarded replay for both changed properties; ORC-008/009 justify
+version/rank state and the clock-absence seam; ORC-010 retains finishHistory;
+ORC-011 has no new named shared semantic fault needing a second formulation;
+ORC-012 uses the source identities and this append-only audit; ORC-013 separates
+equal-content refresh from value change and order-only move; ORC-014 transfers
+the direct premise into actual query drivers but makes no host/provider claim;
+ORC-015 reports all 33 reach states; ORC-016 keeps fixed witnesses on the shared
+model, production driver and comparison. No run budget decreased.
+
+Final local verification also passes focused TypeScript compilation, ESLint,
+`pnpm lint:changed`, the 41-test `tests/oracle-replay.test.ts` suite,
+`pnpm --filter @tanstack/db... build:minified`, `pnpm check:mangle` (436 names),
+and `pnpm test:minified-db` (113 error names plus index/query/live-update checks).
+The full workspace suite did not run locally. CI for the follow-up head must be
+checked separately; previous-head CI is not evidence for this semantic change.

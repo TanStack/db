@@ -1507,7 +1507,10 @@ Its `live-query-observer.row-container-sharing` lane also checks the maintainer'
 keep data/Map references, while value writes replace them and retained snapshots
 keep their old rows. Fixed and random histories cross subscribe/unsubscribe
 transitions in granular/wholesale mode, zero through three rows, and
-data-first/state-first reads. Each campaign runs 24 shared examples and 40
+data-first/state-first reads. Equal-content source writes can replace virtual
+row wrappers without advancing the row revision. The lane crosses that refresh
+with attachment and metadata, and checks full-snapshot identity after actions
+that change no public fact. Each campaign runs 24 shared examples and 40
 generated histories. Nonempty attach, detach, and reattach have declared reach
 in each mode, including reach from fixed examples. Each history begins with
 readiness before health reports; only writes change the independent key/version
@@ -1515,9 +1518,23 @@ model. A failure-list model checks fresh metadata and counts health-only
 transitions independently. Readiness-only histories cannot satisfy that reach.
 The original fresh-container implementation, same-cardinality reuse, and
 unconditional entry replacement on attachment fail the shared comparison.
-The guarded replay manifest selects only this lane's random campaign.
+Equal-revision wrapper comparison also fails; always cloning the full snapshot
+survives the old sharing lane but fails its added no-op assertion.
+The same owner's `live-query-observer.capture-paths` property uses modelRows and
+checkRead through an additional real-query driver. Versions and source ranks
+independently predict ordered projection/findOne rows. Each fixed/random
+campaign runs 16 shared examples and 40 generated histories, with two or three
+rows and up to twelve actions. Histories cross optional row-clock absence,
+provisional hydration-seed handoff, equal writes, value writes, rank-only moves,
+metadata and ownership actions. Declared reach distinguishes both observer
+modes, both query shapes, revisionless inputs, both hydrated shapes, metadata
+for every shape/mode, and attached/detached layout-only moves in both modes.
+Checks after queued query publication compare rows, container identity, full
+snapshot no-ops, layoutRevision, health freshness and retained seed/live views.
+A narrow repair that trusts only the row clock fails the order-only comparison.
+The guarded replay manifest selects each property's random campaign directly.
 Cleanup/reset may discard a row revision and is outside its sharing law.
-Existing hydration and observer/layout witnesses retain their scopes. This core-only lane adds no new
+Existing hydration and observer/layout witnesses retain their scopes. These core-only lanes add no new
 framework scheduling promise. The independent Angular PR projects observer
 row-state identity before copying its Map; combined integration evidence is
 recorded separately from either branch's standalone validation.
