@@ -6821,6 +6821,18 @@ Render-time retry-cache eviction, an effect-only ownership fix, and copying a
 peer's moving rows all fail this receiver. These are finite React 19/jsdom
 histories with controlled on-demand requests, not arbitrary scheduler coverage.
 
+Copied ready rows do not establish the private output's initial-query readiness.
+The sibling grammar also rejects its held first acquisition before or after a
+peer page move, with Error, record and undefined provider causes. Each client/key
+mode declares and measures both rejection schedules. The existing initial-view
+model distinguishes a provisional seed from owned readiness: a first-load error
+ends the seed and reaches the real React ErrorBoundary; a source failure after
+owned readiness keeps data and appears in health. This receives the observer
+hydration owner's failure-ending-seed law. It reads the private Collection's
+public normalized failure as input and checks the boundary's cause; it does not
+reimplement core's provider-error normalization. Both the original hidden error
+and a repair that clears the seed without resetting readiness fail this receiver.
+
 Each receiving campaign declares reach and replays fixed examples through the
 same model/checker. Five hostile mutations fail at retry progress, successful
 peer ownership, replacement pending, restart pending, and late preload rejection.

@@ -1368,7 +1368,7 @@ initial-error, retry and post-success health promises.
 | --- | --- | --- | --- |
 | Retry progress and exclusive successful outputs, R1/R3/R8 | The peer mounted in a separate root after the first success. Initial shared-boundary retries were absent. | Co-mount both hooks, vary one/two boundaries, equal/different queries, readiness order and source readiness. Check every successful layout commit's Collection ownership. | Original code fails progress in shared-boundary histories. Keep retry work available until commit, reserve it once, and give competing successful candidates private seeded outputs. |
 | Page ownership persists through another compiler's retry, R4/R7 | Only the original compiler moved after adoption. | A borrower finishes pending work, original compiler retries, borrower moves first, then original moves. Run borrower-first and co-ready schedules. | Original code replaces the borrower's Collection. Each new retry resource now gets a unique resolver token that follows its adopted output. |
-| Copied ready rows cannot follow another binding's page, sibling enforcement gap | Initial seed fixture did not force a read after peer publication. | Keep private startup pending while the peer moves, then rerender both unchanged inputs. Cross lagging and ready source Collections. | A live-row seed mutant initially survived. The added render rejects it at ordered rows for the unchanged peer. The repair retains copied rows while tracking source health. |
+| Copied ready rows cannot follow another binding's page, sibling enforcement gap | Initial seed fixture did not force a read after peer publication. | Keep private startup pending while the peer moves, then rerender both unchanged inputs. Cross source Collections that still report loading with Collections that report ready. | A mutant that refreshes copied rows from the peer observer initially survived. The added render rejects it at ordered rows for the unchanged peer. The repair retains copied rows while tracking source health. |
 | A cancelled client page proposal preserves the committed seed, R2/R8 | Already enforced by the interrupted-render client receiver. | Speculative offset/limit/combined move, post-hook suspension, urgent original-page render with local readiness held. | Current input passes all 48 campaigns. Reintroducing render-time observer/hash assignment fails all 48. No additional production repair is needed. |
 | Equal client keys retain authored input through error recovery, R5/R6 | General immutable-key and rejection owners covered the separate rules. | Declarative move, imperative move, throwing key read twice, throwing native pre-effect, equal/changed-key recovery with changed body/deps. | Original Svelte passes. Removing stable-key retention fails the retained imperative page. No Svelte production change is justified. |
 
@@ -1593,3 +1593,150 @@ Final pushed-head CI status is separate from this finite evidence. The full
 monorepo `pnpm test` command did not run, and its PR checklist remains unchecked.
 
 Source snapshot for this amendment: `d70fdf29acd5de0c9e24322f6a5e271a93e35d08ac1300657101c3be7781d657` across 29 source, grammar, contract and coverage files. The companion manifest records each file hash, excludes itself and this report, and preserves the earlier manifests.
+
+
+## CodeRabbit review 5756985798: failed private startup under a copied result
+
+The reviewed input is `2c605f92bd26ce722448446f6102b5e19d7f6919`.
+The complete formal review, associated inline 4458423132, and mutable summary
+6608664047 at 17:48:08 UTC were preserved before experiments. This amendment
+records their lossless dispositions. It supersedes earlier sibling closure
+claims for failed private startup; all earlier process qualifications remain.
+
+### Law, distinguishing histories and pre-edit evidence
+
+A copied ready snapshot is provisional until the owned query reaches
+initial-query readiness. Its failed first load must end the seed and reach
+React's ErrorBoundary. After owned readiness, an ordinary source problem keeps
+the data and appears in health. Authority: materialization architecture laws
+10/16, the observer hydration oracle's failure-ending-seed laws 1–2, the
+error-handling guide's Suspense boundary contract, and the hook JSDoc.
+
+The earlier sibling receiver fulfilled private startup but never rejected it.
+Its public view model also did not distinguish copied readiness from owned
+initial-query readiness. The model now keeps that one additional fact. A seed
+and an owned ready result can show equal rows, but the next first-load failure
+requires different boundary observations. The model has no cache, resolver
+or observer algorithm. Existing source failures after owned readiness remain
+health observations; no comparison or campaign budget is removed.
+
+Before production edits, the existing sibling grammar was extended with held
+private first acquisitions and Error/record/undefined rejections through real
+React boundaries in all six client/key modes, in fixed and fresh campaigns.
+Explicit React typechecking passed. Running
+`pnpm --filter @tanstack/react-db test tests/suspense-lifecycle-oracle.test.tsx --maxWorkers=2`
+on unchanged `2c605f92b` failed all 12 sibling campaigns at
+`current Suspense attempt` / `private startup rejects after seed commit`:
+expected `error`, observed `ready`. All 18 neighboring lifecycle tests passed.
+The public private Collection was verified `loading` before rejection and
+`error` afterward. The failure did not require the peer or source to fail.
+
+An earlier diagnostic used the general post-data health rule and found the
+hidden private failure, but that did not settle which view was owed. Before
+production changes, the narrower seeded-observer authority corrected that
+interpretation. The credited pre-edit RED uses the boundary rule above.
+The first repair exposed a driver-input mistake: subset acquisition normalizes
+non-Error provider rejections before the adapter receives them. This receiver
+now takes the Collection's public failure cause as input, then checks boundary
+Error identity/wrapping through the same model and comparison. It does not
+reimplement core normalization or claim its raw provider-cause semantics.
+The original pre-edit failure was already at the phase comparison, before
+that cause check. Later calibration also rejects the original source with this
+corrected input boundary.
+
+Production now ends a copied seed on `isLoadingError` and clears the hook's
+ready latch at that same boundary. Clearing only the seed still returns a
+successful hook result because the latch blocks error handling. No hash,
+public API, Svelte production code or extra retry state is added.
+
+### Generated reach and hostile calibration
+
+Each generated family now contains six histories: its unconstrained member,
+the existing shared/separate and equal/different neighbors, a fulfilled private
+startup, and guaranteed private rejections before and after a peer page move.
+Eight families produce 48 histories per campaign. The existing page comparison
+still checks seed rows, ordered rows, state and independent/retained Collections.
+The lifecycle comparison checks the real boundary and normalized public cause
+after rejection. The pre-move schedule was added during calibration, after the
+initial production repair; it is not claimed as part of the original RED gate.
+Each declared new state has minimum one per receiving campaign.
+
+| Client / keyed / campaign | Histories | Private pending after success | Private rejection | Before peer move | After peer move |
+| --- | --- | --- | --- | --- | --- |
+| none/false/fixed | 48 | 25 | 16 | 8 | 8 |
+| none/false/fresh | 48 | 25 | 17 | 8 | 9 |
+| none/true/fixed | 48 | 25 | 16 | 8 | 8 |
+| none/true/fresh | 48 | 27 | 19 | 11 | 8 |
+| provider/false/fixed | 48 | 25 | 16 | 8 | 8 |
+| provider/false/fresh | 48 | 26 | 16 | 8 | 8 |
+| provider/true/fixed | 48 | 25 | 16 | 8 | 8 |
+| provider/true/fresh | 48 | 26 | 18 | 9 | 9 |
+| explicit/false/fixed | 48 | 25 | 16 | 8 | 8 |
+| explicit/false/fresh | 48 | 27 | 18 | 8 | 10 |
+| explicit/true/fixed | 48 | 25 | 16 | 8 | 8 |
+| explicit/true/fresh | 48 | 26 | 17 | 8 | 9 |
+
+Both source mutants pass explicit React typechecking, then all 12 sibling
+campaigns fail the boundary phase comparison: (1) restore the original seed
+handling; (2) end the seed on error but leave the ready latch set. These are
+assertion failures, not setup errors, timeouts or missed paths. The restored
+source passes all 30 lifecycle tests. Direct replay of
+`react.suspense-siblings`, seed `2348`, path `0:0:0:0:0:0:0:0`, filter
+`co-mounted siblings/none/false/fresh`, gives original-source RED and repaired
+GREEN. Replays use `TANSTACK_DB_ORACLE_PROPERTY`, `TANSTACK_DB_ORACLE_SEED`
+and `TANSTACK_DB_ORACLE_PATH`; no normal campaign runs first.
+
+### Finding ledger and reviewer assessment
+
+| ID | Original claim / proposed action | Technical judgment and PR action | Durable destination |
+| --- | --- | --- | --- |
+| CR1 | Report row 1371 uses ambiguous source-readiness and mutant phrases; make both explicit. | **fixed-now**, prose only. The row now states loading versus ready Collections and names copying peer rows as the mutant behavior. | Existing report row; no behavioral test needed. |
+| CR2 | A private output's failed first load stays hidden by the copied seed and latched readiness; ending the seed alone is insufficient. Surface the initial error and reset/bypass readiness. | **fixed-now**, confirmed through all client/key receivers. End both seed and ready latch; retain post-owned-readiness health behavior. | Lifecycle model, sibling grammar/reach, boundary comparison, typed original and seed-only mutants. |
+| S1 | Scope warning asks to split Suspense, keyed enablement, hydration handoff and immutable keys from issue 2345. | **accepted-design** under the maintainer's explicit requests in this session. The issue scope is narrower than the authorized PR scope. | PR behavior/scope description and preceding decision records. |
+| S2 | Default docstring warning reports 18.52%, 27 functions/26 files, two unsupported, against an 80% threshold; add blanket docstrings. | **refuted** as a repository requirement. The summary applies defaults and no repository configuration; no such repository gate exists. The reported metric is preserved, not independently reproduced. Required law/model/driver prose is retained. | Full raw summary and prior default-warning assessments. |
+| S3 | One evidence file was not fully reviewed; coverage/manifest skipped as similar, two files had no reviewable changes. | **refuted** as a code-repair obligation; accepted as external-review coverage metadata. Do not call the whole report externally reviewed. | This review limit and the independently checked source manifest. |
+
+The summary repeats CR2; that duplicate links to its inline finding without
+creating a second repair obligation. Passed checks, generic bot controls and
+promotional links add no findings. All five source claims are accounted for:
+two fixed-now, one accepted-design, two refuted as repair obligations; zero
+confirmed-open, deferred or unresolved design decisions.
+
+Reviewer assessment: hire for correctness review. The seed/latch finding is
+accurate, local and includes the needed warning against an incomplete fix.
+Its static evidence needed the executable receiving witness supplied here.
+The scope/default docstring warnings add little signal under this task's
+explicit authorization. The prose clarification is valid and inexpensive.
+
+### Evidence bounds and self-review
+
+This is a self-review, not an independent review. ORC-001/002 trace the law to
+seeded failure authority and keep the model independent; core's public failure
+is the declared input boundary. ORC-003/009 keep model, source facts, grammar,
+host driver and comparison distinct. ORC-004/008 reconstruct both rejection
+schedules and preserve the seed/owned distinction because the next failure
+separates them. Removing rejection, timing or owned readiness loses those
+witnesses. Widths 1–3 and offsets 1–4 retain their existing page domain;
+rejection after a demand aborted is excluded because it has no authority.
+ORC-005/014 use real React 19/jsdom boundaries, public private status/health
+and actual source promises; no external provider claim follows. ORC-006/007
+have typed hostile assertion failures, matching fixed/fresh budgets and direct
+RED/GREEN replay. ORC-010 retains failure fidelity and ScenarioLifetime cleanup.
+ORC-011 has no named shared semantic fault needing a second independent model;
+the existing owned-readiness health histories distinguish the rival rule that
+all failures throw. ORC-012 records finite scope and source snapshot here;
+ORC-013/015 have both first-failure and post-ready neighbors plus measured reach.
+ORC-016 keeps the regression in the shared model/driver/comparison, without a
+separate hand-written expected answer.
+
+Limits: finite one-source queries and controlled subset work in React/jsdom;
+no arbitrary scheduler, native hydration, external provider, raw provider-error
+normalization, crash-recovery expansion or exact garbage-collection claim.
+The core hydration/status owners retain their neighboring contracts. This
+amendment does not erase the original Svelte pre-edit type-gate qualification.
+Green local checks and complete review accounting do not establish green CI or
+whole-PR readiness at a newly pushed head.
+
+Final local verification for this follow-up: full React `pnpm --filter @tanstack/react-db test --maxWorkers=2` passes **4,823 tests in 40 files**, including all 30 lifecycle campaigns, with no type errors. Explicit React `tsc --noEmit`, focused ESLint, Prettier and `pnpm lint:changed` pass. The same shared page and conformance suites run in that full package command. No Svelte runtime changed; its preceding 542-test run remains the recorded Svelte evidence. The full monorepo `pnpm test` command was not run. Raw RED, GREEN, type, reach, hostile-mutant and replay logs remain in the task-local `2345-ci-loop` directory under the `5756985798-` prefix.
+
+Source snapshot for this follow-up: `c970caa0f5dc74b6fbc04da7c1092cf57ea7d2ec2fe7c05cbf195534bf3f79f5` across 30 files. The companion manifest preserves the preceding snapshots and records every source hash.

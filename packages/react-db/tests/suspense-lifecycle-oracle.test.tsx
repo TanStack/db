@@ -8,8 +8,11 @@
  * inputs own distinct Collections. Authority: error-handling.md, “Using Suspense
  * and Error Boundaries”, hook JSDoc, shared conformance contract, and the existing
  * useLiveSuspenseQuery-recovery.test.tsx replacement/cleanup promises.
+ * Copied ready rows remain provisional until the owned query's initial load
+ * succeeds. The observer hydration oracle's failure-ending-seed law also applies
+ * here: a failed first load ends that view, while later source problems are health.
  *
- * The model below retains only the newest attempt and its public view. It has no
+ * The model retains the newest attempt, its public view and initial readiness. It has no
  * cache, resolver token, observer or subscription state. Real React boundaries
  * receive controlled source-demand and client-request histories. Query-only
  * preload failures use the public Collection preload seam; no external provider,
@@ -68,10 +71,14 @@ type View = {
 // `attempt` is a model-only initial-view obligation. It combines a boundary
 // reset with the source sync run or client request it now waits for. It does
 // not represent an acquisition attempt, observer, or internal resolver token.
-type Model = View & { attempt: number }
+// A copied result can be visible before this query's initial readiness. This
+// splits the public view from the initial-query gate (hydration oracle laws 1–2).
+// The next first-load rejection distinguishes that state from owned readiness.
+type Model = View & { attempt: number; queryReady: boolean }
 type Event =
   | { type: `start`; attempt: number }
   | { type: `ready`; attempt: number; rows: Array<Row> }
+  | { type: `seed`; attempt: number; rows: Array<Row> }
   | {
       type: `failure`
       attempt: number
@@ -89,11 +96,18 @@ function advance(model: Model, event: Event): Model {
       rows: [],
       wrapCause: false,
       healthError: false,
+      queryReady: false,
     }
   if (event.attempt !== model.attempt) return model
-  if (event.type === `ready`)
-    return { ...model, phase: `ready`, rows: event.rows, cause: undefined }
-  if (model.phase === `ready` && event.origin === `source`)
+  if (event.type === `ready` || event.type === `seed`)
+    return {
+      ...model,
+      phase: `ready`,
+      rows: event.rows,
+      cause: undefined,
+      queryReady: event.type === `ready`,
+    }
+  if (model.queryReady && event.origin === `source`)
     return { ...model, cause: event.cause, healthError: true }
   return {
     ...model,
@@ -109,6 +123,7 @@ const initial = (): Model => ({
   rows: [],
   wrapCause: false,
   healthError: false,
+  queryReady: false,
 })
 function makeCause(kind: CauseKind, version: number): unknown {
   return kind === `Error`
@@ -179,7 +194,7 @@ function compare(
       expectKeyedRows(record.result!.state, model.rows)
       if (model.healthError) {
         const problem = record.result!.health?.sources[0]?.error
-        expect(problem, `a stopped source has a health problem`).toBeDefined()
+        expect(problem, `a stopped source has a health problem`).toBeTruthy()
         expect(problem?.cause).toBe(model.cause)
       }
     }
@@ -953,6 +968,9 @@ describe(`Suspense lifecycle histories`, () => {
  * Source Collection readiness can lag settled on-demand subsets. A private
  * output keeps its completed seed's rows through a peer move and a later render
  * until its own startup settles; source readiness cannot hide that handoff.
+ * A copied seed does not establish the private query's initial readiness.
+ * Its first-load rejection ends the provisional seed and reaches the boundary,
+ * as in the observer hydration oracle; failure after owned readiness is health.
  * Unlike the old peer lane, both hooks are present before any successful commit.
  */
 const siblingsArbitrary = fc.record({
@@ -963,6 +981,9 @@ const siblingsArbitrary = fc.record({
   simultaneous: fc.boolean(),
   width: fc.integer({ min: 1, max: 3 }),
   offset: fc.integer({ min: 1, max: 4 }),
+  startup: fc.constantFrom(`fulfill` as const, `reject` as const),
+  rejectBeforeMove: fc.boolean(),
+  cause: fc.constantFrom<CauseKind>(`Error`, `record`, `undefined`),
 })
 type SiblingsHistory = HistoryOf<typeof siblingsArbitrary>
 // Each generated family includes the reported shapes plus its unconstrained
@@ -976,6 +997,25 @@ function siblingHistories(history: SiblingsHistory): Array<SiblingsHistory> {
       sameQuery: true,
       first: 0,
       sourceReady: false,
+      startup: `fulfill`,
+    },
+    {
+      ...history,
+      sharedBoundary: true,
+      sameQuery: true,
+      first: 0,
+      sourceReady: false,
+      startup: `reject`,
+      rejectBeforeMove: true,
+    },
+    {
+      ...history,
+      sharedBoundary: true,
+      sameQuery: true,
+      first: 0,
+      sourceReady: false,
+      startup: `reject`,
+      rejectBeforeMove: false,
     },
     { ...history, sharedBoundary: true, sameQuery: false, simultaneous: false },
     {
@@ -1007,6 +1047,10 @@ const siblingStates = [
   `private startup handoff`,
   `lagging source readiness`,
   `ready source`,
+  `private startup pending after success`,
+  `private startup rejection after success`,
+  `private rejection before peer move`,
+  `private rejection after peer move`,
 ] as const
 async function checkSiblings(
   history: SiblingsHistory,
@@ -1025,7 +1069,9 @@ async function checkSiblings(
       rank,
     }))
     const releases: Array<() => void> = []
-    const demands: Array<Array<() => void>> = [[], []]
+    const demands: Array<
+      Array<{ fulfill: () => void; reject: (cause: unknown) => void }>
+    > = [[], []]
     const sources = [0, 1].map((slot) =>
       createCollection<WindowRow, string>({
         getKey: (row) => row.id,
@@ -1039,12 +1085,12 @@ async function checkSiblings(
             commit()
             releases[slot] = () => {
               if (history.sourceReady) markReady()
-              for (const release of demands[slot]!.splice(0)) release()
+              for (const demand of demands[slot]!.splice(0)) demand.fulfill()
             }
             return {
               loadSubset: () =>
-                new Promise<void>((resolve) => {
-                  demands[slot]!.push(resolve)
+                new Promise<void>((resolve, reject) => {
+                  demands[slot]!.push({ fulfill: resolve, reject })
                 }),
             }
           },
@@ -1057,11 +1103,15 @@ async function checkSiblings(
     const records: Array<{
       result?: {
         data: unknown
-        state: ReadonlyMap<unknown, unknown>
-        collection: object
+        state: ReadonlyMap<string | number, object>
+        collection: { status: string; health: HealthNode }
+        health: HealthNode | undefined
       }
     }> = [{}, {}]
     const rendered = [0, 0]
+    const failure: Recorded = {}
+    const diagnostics = vi.spyOn(console, `error`).mockImplementation(() => {})
+    lifetime.defer(() => diagnostics.mockRestore())
     function Consumer({ slot, offset }: { slot: number; offset: number }) {
       rendered[slot]!++
       const sourceSlot = history.sameQuery ? 0 : slot
@@ -1106,10 +1156,11 @@ async function checkSiblings(
           </Suspense>
         ))
       )
+      const guarded = <Boundary record={failure}>{body}</Boundary>
       return scope === `provider` ? (
-        <DbProvider client={client!}>{body}</DbProvider>
+        <DbProvider client={client!}>{guarded}</DbProvider>
       ) : (
-        <>{body}</>
+        guarded
       )
     }
     mounted = render(tree(0))
@@ -1200,6 +1251,62 @@ async function checkSiblings(
     }
     comparePeers(0, `co-mounted exclusive outputs`)
     reach.reach(`exclusive outputs`)
+    const rejectPrivate = async (
+      held: { reject: (cause: unknown) => void },
+      offset: number,
+    ) => {
+      const privateResult = records[1]!.result!
+      expect(
+        privateResult.collection.status,
+        `private output startup is held`,
+      ).toBe(`loading`)
+      reach.reach(`private startup pending after success`)
+      const cause = makeCause(history.cause, history.offset)
+      await act(() => held.reject(cause))
+      await settle()
+      await act(() => mounted!.rerender(tree(offset)))
+      await settle()
+      expect(privateResult.collection.status, `private first load failed`).toBe(
+        `error`,
+      )
+      reach.reach(`private startup rejection after success`)
+      // Subset acquisition normalizes provider rejections in core. This
+      // receiver judges the adapter against the Collection's public failure;
+      // it does not duplicate core's normalization of non-Error values.
+      const problem = privateResult.collection.health.error
+      expect(problem, `the private Collection exposes its failure`).toBeTruthy()
+      const model = advance(
+        advance(initial(), { type: `seed`, attempt: 0, rows: [] }),
+        {
+          type: `failure`,
+          attempt: 0,
+          origin: `source`,
+          cause: problem!.cause,
+        },
+      )
+      compare(
+        mounted!.container,
+        failure,
+        model,
+        `private startup rejects after seed commit`,
+      )
+      reach.reach(
+        history.rejectBeforeMove
+          ? `private rejection before peer move`
+          : `private rejection after peer move`,
+      )
+    }
+    if (
+      history.sameQuery &&
+      history.first === 0 &&
+      history.startup === `reject` &&
+      history.rejectBeforeMove
+    ) {
+      const pending = demands[0]![0]
+      expect(pending, `private startup has outstanding work`).toBeDefined()
+      await rejectPrivate(pending!, 0)
+      return
+    }
     await act(() => mounted!.rerender(tree(history.offset)))
     // A same-query peer may still be acquiring its private output's first
     // subset. Keep that oldest demand held while the first output moves.
@@ -1215,7 +1322,7 @@ async function checkSiblings(
             pending.length,
             ...pending.filter((release) => release === held),
           )
-          for (const release of deliver) release()
+          for (const demand of deliver) demand.fulfill()
         }
       })
     }
@@ -1228,6 +1335,16 @@ async function checkSiblings(
       await settle()
       comparePeers(history.offset, `seed while successful peer has moved`)
       reach.reach(`seed isolated during peer move`)
+      const privateResult = records[1]!.result!
+      expect(
+        privateResult.collection.status,
+        `private output startup is held`,
+      ).toBe(`loading`)
+      reach.reach(`private startup pending after success`)
+      if (history.startup === `reject`) {
+        await rejectPrivate(held, history.offset)
+        return
+      }
       await act(() => {
         for (const release of releases) release()
       })

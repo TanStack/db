@@ -162,7 +162,10 @@ export class SuspenseBinding {
   }
 
   read(snapshot: LiveQuerySnapshot<object, string | number>) {
-    if (snapshot.isReady || snapshot.isCrashed) {
+    if (snapshot.isReady || snapshot.isLoadingError || snapshot.isCrashed) {
+      // A copied ready view is provisional until this output's first load.
+      // Its failure must end both the seed and the hook's ready latch.
+      if (this.seed && snapshot.isLoadingError) this.ready = false
       this.seed = undefined
       this.seedObserver = undefined
     }
