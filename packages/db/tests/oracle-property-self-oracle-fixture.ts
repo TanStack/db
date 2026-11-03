@@ -14,8 +14,11 @@
  * A segment builds its history as its prefix followed by a generated history,
  * cut to three items. The driver appends every history it runs, with the running test's name, to
  * the file named by SELF_ORACLE_LOG, so the self-oracle knows which
- * histories each lane ran. A `nondeterministic` spec also records a counter
- * that changes on every run.
+ * histories each lane ran. A `nondeterministic` spec also records, last, a
+ * counter that changes on every run. A spec reports reach through the
+ * property's `reached` part or, as the framework's default, through the
+ * driver's `observe("reach", state)`. A `slow` spec's driver takes about
+ * 300 ms per history, so a small `timeout` fails every test that runs one.
  *
  * The synthetic ids come from a fixed pool, registered in oracle-config.
  */
@@ -54,8 +57,13 @@ export type SyntheticSpec = {
   nondeterministic: boolean
   calibrations: ReadonlyArray<{
     name: string
-    kind: `right` | `wrong-law` | `no-op`
+    kind: `right` | `wrong-law` | `no-op` | `driver`
   }>
+  /** `observe`: the driver reports reach itself, the framework's default. */
+  reachVia: `reached` | `observe`
+  /** Each history takes about 300 ms; with `timeout`, tests outlive it. */
+  slow?: boolean
+  timeout?: number
 }
 
 /** The synthetic language: one to three items, mostly ordinary ones. */
@@ -70,8 +78,15 @@ export const syntheticArbitrary: fc.Arbitrary<SyntheticHistory> = fc.array(
 const allStates = [`saw-0`, `saw-1`, `saw-2`]
 let nonce = 0
 
-function syntheticDriver(spec: SyntheticSpec) {
-  return (
+const reachedStates = (history: SyntheticHistory) =>
+  allStates.filter((state) => history.includes(Number(state.slice(4))))
+
+/**
+ * The synthetic driver. `hostile` records a 3 in place of the first item, the
+ * wrong answer a driver calibration supplies.
+ */
+function syntheticDriver(spec: SyntheticSpec, hostile = false) {
+  return async (
     history: SyntheticHistory,
     observe: (checkpoint: string, value: unknown) => void,
   ) => {
@@ -81,12 +96,16 @@ function syntheticDriver(spec: SyntheticSpec) {
         log,
         `${JSON.stringify({ id: spec.id, test: expect.getState().currentTestName ?? ``, history })}\n`,
       )
-    if (spec.nondeterministic) observe(`nonce`, nonce++)
+    if (spec.slow) await new Promise((resolve) => setTimeout(resolve, 300))
+    if (spec.reachVia === `observe`)
+      for (const state of reachedStates(history)) observe(`reach`, state)
     for (const [index, item] of history.entries()) {
-      observe(`item ${index}`, item)
+      observe(`item ${index}`, hostile && index === 0 ? 3 : item)
       if (item === 6)
         throw new Error(`synthetic driver failed at item ${index}`)
     }
+    // Last, so a comparison of only the first observations misses it.
+    if (spec.nondeterministic) observe(`nonce`, nonce++)
   }
 }
 
@@ -113,29 +132,37 @@ function syntheticCheck(
 function syntheticCalibrations(
   spec: SyntheticSpec,
 ): Array<Calibration<SyntheticHistory, SyntheticHistory>> {
-  return spec.calibrations.map(({ name, kind }) => ({
-    name,
-    law: kind === `wrong-law` ? `four` : `three`,
-    corrupt: (trace) => {
-      const at = trace.findIndex(({ checkpoint }) =>
-        checkpoint.startsWith(`item`),
-      )
-      if (at < 0) return undefined
-      if (kind === `no-op`) return [...trace]
-      return trace.map((entry, index) =>
-        index === at ? { ...entry, value: 3 } : entry,
-      )
+  return spec.calibrations.map(
+    ({ name, kind }): Calibration<SyntheticHistory, SyntheticHistory> => {
+      // A hostile driver records a 3 in place of the first item.
+      if (kind === `driver`)
+        return { name, law: `three`, driver: syntheticDriver(spec, true) }
+      return {
+        name,
+        law: kind === `wrong-law` ? `four` : `three`,
+        corrupt: (trace) => {
+          const at = trace.findIndex(({ checkpoint }) =>
+            checkpoint.startsWith(`item`),
+          )
+          if (at < 0) return undefined
+          if (kind === `no-op`) return [...trace]
+          return trace.map((entry, index) =>
+            index === at ? { ...entry, value: 3 } : entry,
+          )
+        },
+      }
     },
-  }))
+  )
 }
 
 export function syntheticProperty(spec: SyntheticSpec): void {
   const parts = {
     model: () => undefined,
-    reached: (history: SyntheticHistory) =>
-      allStates.filter((state) => history.includes(Number(state.slice(4)))),
+    // Without `reached`, the framework counts the driver's `reach` records.
+    ...(spec.reachVia === `reached` ? { reached: reachedStates } : {}),
     driver: syntheticDriver(spec),
     calibrations: syntheticCalibrations(spec),
+    ...(spec.timeout !== undefined ? { timeout: spec.timeout } : {}),
   }
   const law = {
     statement: `A synthetic history holds no 3 and no 4.`,

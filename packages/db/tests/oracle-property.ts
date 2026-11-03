@@ -17,11 +17,11 @@
  *   with a run budget, fixed seeds, required segments, and pins (below).
  * - `model` gives the expected result of a history and its recorded trace,
  *   without production. A model that answers from the history alone ignores
- *   the trace; a model of an environment the driver observes reads it
- *   (oracle-framework design, R7).
+ *   the trace; a model of an environment the driver observes reads it, and
+ *   reads only the inputs the driver recorded, never what production showed.
  * - `driver` runs one history through production and records public
  *   observations with `observe(checkpoint, value)`. It returns nothing, so it
- *   cannot decide a verdict (oracle-framework design, decision D10). A
+ *   cannot decide a verdict. A
  *   production error that the law cares about is an observation the driver
  *   records. An error that escapes the driver is a setup error, unless the
  *   trace recorded before it already violates the law: then the violation is
@@ -54,7 +54,7 @@
  *   from a generated history, and names those states. Every lane runs every
  *   segment once as an example, and a segment run that does not enter a named
  *   state fails. Only segments make reach required: a state that random
- *   histories reach is measured, never gated (design, D21). So every state in
+ *   histories reach is measured, never gated. So every state in
  *   `states` must be named by a segment, and a state the property only
  *   measures is declared in `measured` instead (ORC-015). Half of a lane's
  *   generated histories also go through a segment, so the histories after
@@ -63,7 +63,8 @@
  *   states it `enters`, which its run must reach. A pin and a segment's
  *   history must be histories the arbitrary could generate
  *   (`canShrinkWithoutContext`), so they shrink like generated ones and cannot
- *   cover a dimension that the grammar lacks (design, R8).
+ *   cover a dimension that the grammar lacks; such a dimension belongs in the
+ *   grammar, or in the property's stated limits.
  * - **Resolution.** A history can name its actions indirectly, such as "settle
  *   the second active transaction". `resolve(history)` turns it into the plan
  *   of concrete actions that the driver runs and that the model and check read.
@@ -90,6 +91,10 @@
  *   the reported counterexample still shows the first failure (ORC-010).
  *   Within one history a driver error decides first, then a law violation,
  *   then a missed segment state.
+ *
+ * `oracle-property-self-oracle.test.ts` checks these promises the way an
+ * oracle checks production: it runs synthetic properties under real Vitest
+ * and compares what Vitest reports with an independent model.
  *
  * The `oracle/no-unit-test` lint rule treats an `oracleProperty` call as an
  * oracle test whose parts are its arguments, when its options are an object
@@ -149,7 +154,7 @@ export function violation(
 }
 
 /**
- * History checking against allowed cuts (oracle-framework design, form F-E).
+ * History checking against allowed cuts.
  * A model can often name, in order, the states an observer may see after a
  * step without fixing which of them it sees: a publication may skip a state
  * but never go back to an earlier one. `forwardCut` returns the index of the
@@ -169,7 +174,7 @@ export function forwardCut<State>(
 }
 
 /**
- * Logical time for drivers (oracle-framework design, form F-F). A driver that
+ * Logical time for drivers. A driver that
  * must not hang when production never settles a promise waits with
  * `withinTurns(promise, turns)`: it resolves `true` as soon as the promise
  * settles, at the same microtask an `await` would, or `false` after `turns`

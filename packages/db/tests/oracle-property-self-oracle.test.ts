@@ -5,34 +5,44 @@
  * This oracle checks them the way every other oracle checks production: it
  * writes synthetic properties, runs them under real Vitest in a child
  * process, and compares what Vitest reports with what an independent model
- * predicts. The laws, each judged per test:
+ * predicts. The laws, each judged per test or per probe:
  *
  * - `registration`: a property registers its lanes, pins, calibrations, and
  *   determinism test, or fails to load when a required state has no segment
  *   or a segment names an undeclared state.
  * - `verdict`: a test fails with a violation of law L exactly when its first
- *   failing history violates L; a driver error fails it as a setup error
- *   unless a recorded item already violated a law, which then wins.
+ *   failing history violates L. Within one history a driver error decides
+ *   first, then a law violation, then a missed segment state; a driver error
+ *   after a recorded violation becomes that violation's cause.
  * - `shrink`: a lane's reported failure keeps the kind and law of its first
  *   failure, and its counterexample still has them.
- * - `membership` and `reach`: a pin or segment outside the language fails,
- *   and a pin or segment that does not enter a state it names fails.
- * - `calibration`: a calibration passes only when its candidate's clean trace
- *   passes and the corrupted one fails with the named law.
- * - `determinism`: the determinism test fails for a driver whose trace
- *   changes between runs of one history, and passes otherwise.
- * - `replay`: replaying a fixed lane's reported seed and path runs only the
- *   random lane of that property and reproduces the same counterexample.
- * - `rerun`: a failure's printed rerun command runs exactly that test.
+ * - `membership`: a pin, or a segment's history, outside the language fails.
+ * - `reach`: a pin or segment that does not enter a state it names fails, and
+ *   a passing lane reports how many of its histories entered each declared
+ *   state, whether the property names reach itself or the driver records it.
+ * - `calibration`: a calibration uses the first candidate whose clean trace
+ *   passes, and passes only when its wrong answer (a corrupted trace or a
+ *   hostile driver) fails with the named law.
+ * - `determinism`: the determinism test runs every pin and segment history
+ *   and three generated ones, and fails for a driver whose trace changes.
+ * - `timeout`: a property's `timeout` limits every test it registers.
+ * - `replay`: replaying a failing lane's seed and path runs only that
+ *   property's random lane, starts from the counterexample itself, and
+ *   reproduces it.
+ * - `rerun`: a violation's printed rerun command runs exactly that test.
  *
- * Authority: the contract in the header of `oracle-property.ts`, and the
- * oracle rubric's replay (ORC-007), calibration (ORC-006), and declared-reach
- * (ORC-015) rules.
+ * Authority: the contract in the header of `oracle-property.ts`; the
+ * maintainer decisions of 2026-11-03 on calibration candidates, failure
+ * precedence, and determinism scope; and the oracle rubric's replay
+ * (ORC-007), calibration (ORC-006), and declared-reach (ORC-015) rules.
  *
- * Limits: synthetic properties only, with histories of one to three
- * integers; one or two properties per run; the model predicts which histories
- * a lane fails on from the histories the synthetic driver logged, not the
- * order fast-check draws them in.
+ * Limits: synthetic properties with histories of one to three integers, one
+ * or two per run. The model learns which histories a test ran from the
+ * synthetic driver's log, and relies on fast-check running a lane's examples
+ * (its segment histories) first, in order. A replay or rerun probe covers
+ * every failing lane but only the first violating pin or history of each
+ * property. The gap report's observation hook, `forwardCut`, and `withinTurns`
+ * have no law here.
  */
 import { spawnSync } from 'node:child_process'
 import {
@@ -59,9 +69,14 @@ import type {
 // ---------------------------------------------------------------------------
 // History: a suite of one or two synthetic property drafts
 // ---------------------------------------------------------------------------
+//
+// A draft chooses a generated or enumerated source, how its declared states
+// relate to its segments, segments and pins (inside or outside the language),
+// whether its driver varies between runs, how it reports reach, whether it is
+// slow under a small timeout, and its calibrations.
 
 const allStates = [`saw-0`, `saw-1`, `saw-2`]
-const calibrationKinds = [`right`, `wrong-law`, `no-op`] as const
+const calibrationKinds = [`right`, `wrong-law`, `no-op`, `driver`] as const
 type Draft = {
   source:
     | { kind: `generated`; runs: number; seed: number }
@@ -71,11 +86,14 @@ type Draft = {
   segments: Array<{ prefix: SyntheticHistory; enters: Array<string> }>
   pins: Array<{ history: SyntheticHistory; enters: Array<string> | null }>
   nondeterministic: boolean
+  reachVia: `reached` | `observe`
+  /** `slow`: 300 ms per history under a 100 ms timeout. */
+  timing: `normal` | `slow`
   calibrations: Array<(typeof calibrationKinds)[number]>
 }
 type Suite = { drafts: Array<Draft> }
 
-// A pin may lie outside the synthetic language: an item 5, or four items.
+// Outside the synthetic language: an item 5, or four items.
 const outside = fc.oneof(
   fc.constantFrom(5).map(
     (item) => [item],
@@ -86,6 +104,11 @@ const outside = fc.oneof(
   ),
   fc.array(fc.integer({ min: 0, max: 2 }), { minLength: 4, maxLength: 4 }),
 )
+const insideOrOutside = (insideWeight: number) =>
+  fc.oneof(
+    { arbitrary: syntheticArbitrary, weight: insideWeight },
+    { arbitrary: outside, weight: 1 },
+  )
 const draft: fc.Arbitrary<Draft> = fc.record({
   source: fc.oneof(
     fc.record({
@@ -110,21 +133,12 @@ const draft: fc.Arbitrary<Draft> = fc.record({
     },
   ),
   segments: fc.array(
-    fc.record({
-      prefix: syntheticArbitrary,
-      enters: fc.subarray(allStates),
-    }),
+    fc.record({ prefix: insideOrOutside(6), enters: fc.subarray(allStates) }),
     { maxLength: 2 },
   ),
   pins: fc.array(
     fc.record({
-      history: fc.oneof(
-        {
-          arbitrary: syntheticArbitrary,
-          weight: 4,
-        },
-        { arbitrary: outside, weight: 1 },
-      ),
+      history: insideOrOutside(4),
       enters: fc.option(fc.subarray(allStates), { freq: 2 }),
     }),
     { maxLength: 2 },
@@ -132,6 +146,14 @@ const draft: fc.Arbitrary<Draft> = fc.record({
   nondeterministic: fc.oneof(
     { arbitrary: fc.constant(false), weight: 4 },
     { arbitrary: fc.constant(true), weight: 1 },
+  ),
+  reachVia: fc.oneof(
+    { arbitrary: fc.constant(`reached` as const), weight: 3 },
+    { arbitrary: fc.constant(`observe` as const), weight: 1 },
+  ),
+  timing: fc.oneof(
+    { arbitrary: fc.constant(`normal` as const), weight: 12 },
+    { arbitrary: fc.constant(`slow` as const), weight: 1 },
   ),
   calibrations: fc.array(fc.constantFrom(...calibrationKinds), {
     maxLength: 3,
@@ -183,6 +205,8 @@ function resolveSuite({ drafts }: Suite): Plan {
             }))
           : [],
         nondeterministic: d.nondeterministic,
+        reachVia: d.reachVia,
+        ...(d.timing === `slow` ? { slow: true, timeout: 100 } : {}),
         calibrations: d.calibrations.map((kind, at) => ({
           name: `cal-${at}`,
           kind,
@@ -198,9 +222,11 @@ function resolveSuite({ drafts }: Suite): Plan {
 //
 // The synthetic laws are simple enough to state directly: the first 3, 4, or
 // 6 in a history decides it (law `three`, law `four`, or a driver error), and
-// a history reaches `saw-k` when it holds k. The model reads the histories
-// the synthetic driver logged for a test only to learn which histories that
-// test ran; it never reads what Vitest reported.
+// a history reaches `saw-k` when it holds k. The model reads the synthetic
+// driver's log only to learn which histories a test ran; it never reads what
+// Vitest reported. From the predicted failures it also owes the probes: a
+// replay of every lane it predicts to fail, and a rerun of each property's
+// first predicted violation among its pins or enumerated histories.
 
 type Kind =
   | `pass`
@@ -214,24 +240,41 @@ type Kind =
   | `calibration-passed`
   | `calibration-wrong-law`
   | `calibration-none`
-type Outcome = { kind: Kind; law?: `three` | `four` }
+  | `timeout`
+type Outcome = {
+  kind: Kind
+  law?: `three` | `four`
+  /** A violation whose driver threw afterwards carries that error. */
+  cause?: `driver`
+}
 type LogEntry = { id: string; test: string; history: SyntheticHistory }
 
+const allowed = (item: number) => [0, 1, 2, 3, 4, 6].includes(item)
 const member = (history: SyntheticHistory) =>
-  history.length >= 1 &&
-  history.length <= 3 &&
-  history.every((item) => [0, 1, 2, 3, 4, 6].includes(item))
+  history.length >= 1 && history.length <= 3 && history.every(allowed)
+// A segment's history is its prefix followed by a generated history, cut to
+// three items; generated items are always allowed.
+const segmentMember = (prefix: SyntheticHistory) =>
+  prefix.length >= 1 && prefix.slice(0, 3).every(allowed)
 function verdictOf(history: SyntheticHistory): Outcome {
-  for (const item of history) {
-    if (item === 3) return { kind: `violation`, law: `three` }
-    if (item === 4) return { kind: `violation`, law: `four` }
+  for (const [at, item] of history.entries()) {
+    if (item === 3 || item === 4)
+      return {
+        kind: `violation`,
+        law: item === 3 ? `three` : `four`,
+        ...(history.slice(at + 1).includes(6) ? { cause: `driver` } : {}),
+      }
     if (item === 6) return { kind: `setup` }
   }
   return { kind: `pass` }
 }
+const statesOf = (history: SyntheticHistory) =>
+  allStates.filter((state) => history.includes(Number(state.slice(4))))
 const reaches = (history: SyntheticHistory, states: ReadonlyArray<string>) =>
-  states.every((state) => history.includes(Number(state.slice(4))))
+  states.every((state) => statesOf(history).includes(state))
 const label = (history: SyntheticHistory) => `items ${history.join(` | `)}`
+const isLane = (name: string) =>
+  name.startsWith(`fixed seed`) || name === `random seed`
 
 type SpecExpectation =
   | { loads: false }
@@ -240,6 +283,11 @@ type SpecExpectation =
       tests: Map<string, Outcome>
       /** Histories a passing determinism test must run, each twice. */
       determinismRuns?: number
+      /** For each passing lane, the histories entering each state. */
+      reach: Map<string, Record<string, number>>
+      /** Lanes owed a replay probe, and the test owed a rerun probe. */
+      replays: Array<string>
+      rerun?: string
     }
 
 function predictSpec(
@@ -254,6 +302,35 @@ function predictSpec(
       )
       .map((entry) => entry.history)
   const tests = new Map<string, Outcome>()
+  const generated = spec.source.kind === `generated`
+  if (generated) {
+    const declared = new Set(spec.states)
+    const entered = new Set(spec.segments.flatMap((segment) => segment.enters))
+    if (
+      spec.states.some((state) => !entered.has(state)) ||
+      [...entered].some((state) => !declared.has(state))
+    )
+      return { loads: false }
+  }
+  const names =
+    spec.source.kind === `enumerated`
+      ? spec.source.histories.map(label)
+      : [
+          `fixed seed ${spec.source.seed}`,
+          `random seed`,
+          ...spec.pins.map((pin) => `pin: ${pin.name}`),
+        ]
+  const all = [
+    ...names,
+    ...spec.calibrations.map(({ name }) => `calibration: ${name}`),
+    `determinism`,
+  ]
+  // A slow driver outlives the 100 ms limit in every test that runs a
+  // history, and every test runs at least one.
+  if (spec.slow) {
+    for (const name of all) tests.set(name, { kind: `timeout` })
+    return { loads: true, tests, reach: new Map(), replays: [] }
+  }
   // A calibration needs a candidate whose clean trace passes; it skips the
   // others (maintainer decision, 2026-11-03). Every history has an item, so
   // the corruption applies to every candidate.
@@ -262,13 +339,12 @@ function predictSpec(
       (history) => verdictOf(history).kind === `pass`,
     )
     if (!used) return { kind: `calibration-none` } as Outcome
-    if (kind === `right`) return { kind: `pass` } as Outcome
+    if (kind === `right` || kind === `driver`)
+      return { kind: `pass` } as Outcome
     return {
       kind: kind === `no-op` ? `calibration-passed` : `calibration-wrong-law`,
     } as Outcome
   }
-  // The determinism test runs each of its histories twice, in order; the
-  // log names them, including segment histories built from generated ones.
   // A generated property's determinism test also runs three generated
   // histories (maintainer decision, 2026-11-03), so a nondeterministic driver
   // fails it even without pins or segments.
@@ -278,70 +354,88 @@ function predictSpec(
       if (history.includes(6)) return { kind: `setup` }
       if (spec.nondeterministic) return { kind: `determinism` }
     }
-    if (spec.nondeterministic && spec.source.kind === `generated`)
-      return { kind: `determinism` }
+    if (spec.nondeterministic && generated) return { kind: `determinism` }
     return { kind: `pass` }
   }
-  if (spec.source.kind === `enumerated`) {
-    const { histories } = spec.source
-    for (const history of histories)
-      tests.set(label(history), verdictOf(history))
-    for (const { name, kind } of spec.calibrations)
-      tests.set(`calibration: ${name}`, calibrate(name, kind))
-    tests.set(`determinism`, determinism())
-    return { loads: true, tests }
-  }
-  const declared = new Set(spec.states)
-  const entered = new Set(spec.segments.flatMap((segment) => segment.enters))
-  if (
-    spec.states.some((state) => !entered.has(state)) ||
-    [...entered].some((state) => !declared.has(state))
-  )
-    return { loads: false }
+  // A driver error decides a history first, then a law violation, then a
+  // missed segment state (maintainer decision, 2026-11-03). A lane runs its
+  // segment histories first, in order.
   const lane = (test: string): Outcome => {
-    if (spec.segments.some((segment) => !member(segment.prefix)))
+    if (spec.segments.some((segment) => !segmentMember(segment.prefix)))
       return { kind: `segment-membership` }
-    // A driver error decides a history first, then a law violation, then a
-    // missed segment state: a violation outranks a reach failure (maintainer
-    // decision, 2026-11-03).
     for (const [at, history] of ran(test).entries()) {
-      const verdict = verdictOf(history)
+      const { cause: _shrinkable, ...verdict } = verdictOf(history)
       if (verdict.kind !== `pass`) return verdict
       const segment = spec.segments[at]
-      if (
-        at < spec.segments.length &&
-        segment &&
-        !reaches(history, segment.enters)
-      )
+      if (segment && !reaches(history, segment.enters))
         return { kind: `segment-reach` }
     }
     return { kind: `pass` }
   }
-  tests.set(
-    `fixed seed ${spec.source.seed}`,
-    lane(`fixed seed ${spec.source.seed}`),
-  )
-  tests.set(`random seed`, lane(`random seed`))
-  for (const pin of spec.pins) {
-    const verdict = verdictOf(pin.history)
-    tests.set(
-      `pin: ${pin.name}`,
-      !member(pin.history)
-        ? { kind: `pin-membership` }
-        : verdict.kind !== `pass`
-          ? verdict
-          : !reaches(pin.history, pin.enters ?? [])
-            ? { kind: `pin-reach` }
-            : { kind: `pass` },
-    )
+  if (spec.source.kind === `enumerated`)
+    for (const history of spec.source.histories)
+      tests.set(label(history), verdictOf(history))
+  else {
+    tests.set(names[0]!, lane(names[0]!))
+    tests.set(`random seed`, lane(`random seed`))
+    for (const pin of spec.pins) {
+      const verdict = verdictOf(pin.history)
+      tests.set(
+        `pin: ${pin.name}`,
+        !member(pin.history)
+          ? { kind: `pin-membership` }
+          : verdict.kind !== `pass`
+            ? verdict
+            : !reaches(pin.history, pin.enters ?? [])
+              ? { kind: `pin-reach` }
+              : { kind: `pass` },
+      )
+    }
   }
   for (const { name, kind } of spec.calibrations)
     tests.set(`calibration: ${name}`, calibrate(name, kind))
   tests.set(`determinism`, determinism())
+  // The determinism and calibration tests build segment histories too, so a
+  // segment outside the language fails them the same way it fails a lane.
+  if (spec.segments.some((segment) => !segmentMember(segment.prefix)))
+    for (const name of all.filter(
+      (name) => name === `determinism` || name.startsWith(`calibration:`),
+    ))
+      tests.set(name, { kind: `segment-membership` })
+  // A passing lane counts, for every declared and measured state, the
+  // histories it ran that entered it.
+  const reach = new Map<string, Record<string, number>>()
+  for (const name of names.filter(isLane))
+    if (tests.get(name)!.kind === `pass`)
+      reach.set(
+        name,
+        Object.fromEntries(
+          allStates.map((state) => [
+            state,
+            ran(name).filter((history) => statesOf(history).includes(state))
+              .length,
+          ]),
+        ),
+      )
+  // A lane that fails inside fast-check reports a seed and path to replay; a
+  // segment outside the language fails before fast-check runs.
+  const replays = names.filter(
+    (name) =>
+      isLane(name) &&
+      [`violation`, `setup`, `segment-reach`].includes(tests.get(name)!.kind),
+  )
+  const rerun = names.find(
+    (name) => !isLane(name) && tests.get(name)!.kind === `violation`,
+  )
   return {
     loads: true,
     tests,
-    determinismRuns: spec.pins.length + spec.segments.length + 3,
+    reach,
+    replays,
+    ...(rerun ? { rerun } : {}),
+    ...(generated
+      ? { determinismRuns: spec.pins.length + spec.segments.length + 3 }
+      : {}),
   }
 }
 
@@ -355,15 +449,95 @@ function suiteModel(
   return new Map(plan.specs.map((spec) => [spec.id, predictSpec(spec, logged)]))
 }
 
+// The self-oracle's own reach: states of the framework that its laws are
+// about. Each pin names the state it witnesses, so every one is reached on
+// every run; lanes count them.
+const frameworkStates = [
+  `registration-error`,
+  `lane-violation`,
+  `lane-setup-failure`,
+  `replay-probe`,
+  `rerun-probe`,
+  `cause-attached`,
+  `segment-reach-failure`,
+  `pin-reach-failure`,
+  `pin-membership-failure`,
+  `segment-membership-failure`,
+  `calibration-applied`,
+  `calibration-rejected`,
+  `calibration-skipped-candidate`,
+  `determinism-caught`,
+  `observed-reach`,
+  `timeout`,
+] as const
+
+function frameworkReach(
+  plan: Plan,
+  trace: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+  expected: ReturnType<typeof suiteModel>,
+): Iterable<string> {
+  const reached = new Set<string>()
+  const run = trace.find(({ checkpoint }) => checkpoint === `run`)?.value as
+    SuiteRun | undefined
+  for (const spec of plan.specs) {
+    const owed = expected.get(spec.id)!
+    if (!owed.loads) {
+      reached.add(`registration-error`)
+      continue
+    }
+    for (const [name, outcome] of owed.tests) {
+      if (isLane(name) && outcome.kind === `violation`)
+        reached.add(`lane-violation`)
+      if (isLane(name) && outcome.kind === `setup`)
+        reached.add(`lane-setup-failure`)
+      if (outcome.cause) reached.add(`cause-attached`)
+      if (outcome.kind === `timeout`) reached.add(`timeout`)
+      if (outcome.kind === `determinism`) reached.add(`determinism-caught`)
+      const failure = {
+        'segment-reach': `segment-reach-failure`,
+        'pin-reach': `pin-reach-failure`,
+        'pin-membership': `pin-membership-failure`,
+        'segment-membership': `segment-membership-failure`,
+        'calibration-passed': `calibration-rejected`,
+        'calibration-wrong-law': `calibration-rejected`,
+      }[outcome.kind as string]
+      if (failure) reached.add(failure)
+      if (name.startsWith(`calibration:`) && outcome.kind === `pass`)
+        reached.add(`calibration-applied`)
+      if (name.startsWith(`calibration:`)) {
+        const tried = (run?.log ?? []).filter(
+          (entry) =>
+            entry.id === spec.id && entry.test === `${spec.id} > ${name}`,
+        )
+        if (tried.length > 1) reached.add(`calibration-skipped-candidate`)
+      }
+    }
+    if (spec.reachVia === `observe` && owed.reach.size > 0)
+      reached.add(`observed-reach`)
+  }
+  if (trace.some(({ checkpoint }) => checkpoint === `replay`))
+    reached.add(`replay-probe`)
+  if (trace.some(({ checkpoint }) => checkpoint === `rerun`))
+    reached.add(`rerun-probe`)
+  return reached
+}
+
 // ---------------------------------------------------------------------------
 // Production driver: real Vitest in a child process
 // ---------------------------------------------------------------------------
 //
 // The driver writes each spec to its own test file in a fresh directory
 // under tests/, runs Vitest once over them with the self-oracle reporter, and
-// records each file's load errors and each test's state and failure. It then
-// probes replay (one failing fixed lane's seed and path) and rerun (one
-// failing test's printed `-t` command), and records what ran.
+// records each file's load errors, each test's state and failure (with the
+// cause fast-check attaches), each passing lane's printed reach counts, and
+// the synthetic driver's log. Then it probes:
+// - replay: for every failing lane with a reported seed and path, Vitest runs
+//   all the files again with that replay selected and its own log, which
+//   shows the history the replay started from;
+// - rerun: for each property's first failure that printed a rerun command,
+//   Vitest runs that file with the command's `-t` pattern.
+// Child runs fix the random lane's seed (a seed without a path selects no
+// replay), so a child run records the same facts every time.
 
 type ReportedError = { name?: string; message?: string; cause?: ReportedError }
 type ReportedTest = {
@@ -376,32 +550,38 @@ type ReportedFile = {
   errors: Array<ReportedError>
   tests: Array<ReportedTest>
 }
+type Report = { files: Array<ReportedFile>; stdout: string }
+type Failure = {
+  kind: Kind | `other`
+  law?: string
+  cause?: `driver`
+  counterexample?: string
+  seed?: number
+  path?: string
+  rerun?: string
+}
 type SuiteRun = {
   files: Record<
     string,
     {
       loaded: boolean
       tests: Array<{ name: string; state: string; failure?: Failure }>
+      reach: Record<string, Record<string, number>>
     }
   >
   log: Array<LogEntry>
 }
-type Failure = {
-  kind: Kind | `other`
-  law?: string
-  counterexample?: string
-  seed?: number
-  path?: string
-  rerun?: string
-}
 type ProbeRun = {
   id: string
-  /** Each test's state in the probe run, by name without the property prefix. */
-  states: Record<string, string>
-  failure?: Failure
-  /** The probe target's failure in the first run. */
+  /** The probed test: a lane for replay, a pin or history for rerun. */
   target: string
-  original?: Failure
+  original: Failure
+  /** Each test's state in the probe run, by property id and name. */
+  states: Array<[string, string, string]>
+  /** The probed test's failure in the probe run. */
+  failure?: Failure
+  /** Histories the replayed random lane ran, in order. */
+  ran?: Array<SyntheticHistory>
 }
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -414,8 +594,6 @@ let runCount = 0
 
 function classify(error: ReportedError | undefined): Failure {
   if (!error) return { kind: `other` }
-  // fast-check reports a property failure and attaches the property's error
-  // as its cause; the cause carries the framework's own failure.
   const outer = error.message ?? ``
   // Only fast-check's wrapper carries the framework's failure as its cause;
   // the framework's own errors may carry a driver error as theirs.
@@ -426,36 +604,45 @@ function classify(error: ReportedError | undefined): Failure {
   const path = /path: "([\d:]+)"/.exec(outer)?.[1]
   const counterexample = /Counterexample: (.*)/.exec(outer)?.[1]
   const rerun = /Rerun: -t ("(?:[^"\\]|\\.)*")/.exec(text)?.[1]
-  const facts = {
+  const law = /\(law: ([^)]+)\)/.exec(text)?.[1]
+  const cause =
+    inner.name === `OracleViolation` &&
+    (inner.cause?.message ?? ``).includes(`synthetic driver failed`)
+      ? (`driver` as const)
+      : undefined
+  const kind: Kind | `other` =
+    inner.name === `OracleViolation`
+      ? `violation`
+      : /timed out in \d+ms/.test(text) || /timed out in \d+ms/.test(outer)
+        ? `timeout`
+        : text.includes(`is not a history the arbitrary can generate`)
+          ? `pin-membership`
+          : text.includes(`built a history the arbitrary cannot generate`)
+            ? `segment-membership`
+            : text.includes(`did not enter`) && text.includes(`: pin "`)
+              ? `pin-reach`
+              : text.includes(`did not enter`) && text.includes(`: segment "`)
+                ? `segment-reach`
+                : text.includes(`two runs of`)
+                  ? `determinism`
+                  : text.includes(`but the check passed it`)
+                    ? `calibration-passed`
+                    : text.includes(`but the check reported law`)
+                      ? `calibration-wrong-law`
+                      : text.includes(`found no history`)
+                        ? `calibration-none`
+                        : text.includes(`synthetic driver failed`)
+                          ? `setup`
+                          : `other`
+  return {
+    kind,
+    ...(law ? { law } : {}),
+    ...(cause ? { cause } : {}),
     ...(seed !== undefined ? { seed: Number(seed) } : {}),
     ...(path !== undefined ? { path } : {}),
     ...(counterexample !== undefined ? { counterexample } : {}),
     ...(rerun !== undefined ? { rerun: JSON.parse(rerun) as string } : {}),
   }
-  const law = /\(law: ([^)]+)\)/.exec(text)?.[1]
-  const kind: Kind | `other` =
-    inner.name === `OracleViolation`
-      ? `violation`
-      : text.includes(`is not a history the arbitrary can generate`)
-        ? `pin-membership`
-        : text.includes(`built a history the arbitrary cannot generate`)
-          ? `segment-membership`
-          : text.includes(`did not enter`) && text.includes(`: pin "`)
-            ? `pin-reach`
-            : text.includes(`did not enter`) && text.includes(`: segment "`)
-              ? `segment-reach`
-              : text.includes(`two runs of`)
-                ? `determinism`
-                : text.includes(`but the check passed it`)
-                  ? `calibration-passed`
-                  : text.includes(`but the check reported law`)
-                    ? `calibration-wrong-law`
-                    : text.includes(`found no history`)
-                      ? `calibration-none`
-                      : text.includes(`synthetic driver failed`)
-                        ? `setup`
-                        : `other`
-  return { kind, ...(law ? { law } : {}), ...facts }
 }
 
 function runVitest(
@@ -463,7 +650,7 @@ function runVitest(
   files: Array<string>,
   env: Record<string, string>,
   args: Array<string> = [],
-) {
+): Report {
   const report = join(directory, `report-${runCount++}.json`)
   const childEnv = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -485,8 +672,6 @@ function runVitest(
     ],
     {
       cwd: packageDirectory,
-      // A seed without a path selects no replay; it only fixes the random
-      // lane's seed, so a child run records the same facts every time.
       env: {
         ...childEnv,
         TANSTACK_DB_ORACLE_SEED: `20251103`,
@@ -503,12 +688,33 @@ function runVitest(
     throw new Error(
       `the child Vitest run wrote no report:\n${run.stdout}\n${run.stderr}`,
     )
-  return JSON.parse(readFileSync(report, `utf8`)) as {
+  // The framework prints reach counts straight to stdout, past Vitest's
+  // console capture, so they arrive in the child's own output.
+  const { files: reported } = JSON.parse(readFileSync(report, `utf8`)) as {
     files: Array<ReportedFile>
   }
+  return { files: reported, stdout: run.stdout }
 }
 
 const short = (id: string, name: string) => name.replace(`${id} > `, ``)
+const readLog = (log: string): Array<LogEntry> =>
+  existsSync(log)
+    ? readFileSync(log, `utf8`)
+        .trim()
+        .split(`\n`)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as LogEntry)
+    : []
+const statesIn = (report: Report, plan: Plan, files: Array<string>) =>
+  plan.specs.flatMap((spec, index) =>
+    (report.files.find((file) => file.file === files[index])?.tests ?? []).map(
+      (test): [string, string, string] => [
+        spec.id,
+        short(spec.id, test.name),
+        test.state,
+      ],
+    ),
+  )
 
 async function driveSuite(
   plan: Plan,
@@ -527,16 +733,17 @@ async function driveSuite(
       return file
     })
     const report = runVitest(directory, files, { SELF_ORACLE_LOG: log })
-    const logged: Array<LogEntry> = existsSync(log)
-      ? readFileSync(log, `utf8`)
-          .trim()
-          .split(`\n`)
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as LogEntry)
-      : []
-    const run: SuiteRun = { files: {}, log: logged }
+    const run: SuiteRun = { files: {}, log: readLog(log) }
     for (const [index, spec] of plan.specs.entries()) {
       const reported = report.files.find((file) => file.file === files[index])
+      // A passing lane prints `<id> <lane> reach {...}`.
+      const reach: Record<string, Record<string, number>> = {}
+      for (const line of report.stdout.split(`\n`)) {
+        const match =
+          /^(\S+) (fixed seed -?\d+|random seed) reach (\{.*\})$/.exec(line)
+        if (match?.[1] === spec.id)
+          reach[match[2]!] = JSON.parse(match[3]!) as Record<string, number>
+      }
       run.files[spec.id] = {
         loaded: reported !== undefined && reported.errors.length === 0,
         tests: (reported?.tests ?? []).map((test) => ({
@@ -546,68 +753,54 @@ async function driveSuite(
             ? { failure: classify(test.errors[0]) }
             : {}),
         })),
+        reach,
       }
     }
     observe(`run`, run)
-    // Replay: the first failing fixed lane that reported a seed and path.
-    for (const [index, spec] of plan.specs.entries()) {
-      const lane = run.files[spec.id]!.tests.find(
-        (test) =>
-          test.name.startsWith(`fixed seed`) &&
-          test.failure?.path !== undefined,
-      )
-      if (!lane) continue
-      const replay = runVitest(directory, [files[index]!], {
-        TANSTACK_DB_ORACLE_SEED: String(lane.failure!.seed),
-        TANSTACK_DB_ORACLE_PATH: lane.failure!.path!,
-        TANSTACK_DB_ORACLE_PROPERTY: spec.id,
-      }).files[0]
-      const states = Object.fromEntries(
-        (replay?.tests ?? []).map((test) => [
-          short(spec.id, test.name),
-          test.state,
-        ]),
-      )
-      const random = replay?.tests.find((test) =>
-        test.name.endsWith(`random seed`),
-      )
-      const probe: ProbeRun = {
-        id: spec.id,
-        states,
-        target: lane.name,
-        original: lane.failure,
-        ...(random?.state === `failed`
-          ? { failure: classify(random.errors[0]) }
-          : {}),
+    for (const spec of plan.specs) {
+      for (const lane of run.files[spec.id]!.tests) {
+        if (!isLane(lane.name) || lane.failure?.path === undefined) continue
+        const replayLog = join(directory, `replay-${runCount}.jsonl`)
+        const replay = runVitest(directory, files, {
+          TANSTACK_DB_ORACLE_SEED: String(lane.failure.seed),
+          TANSTACK_DB_ORACLE_PATH: lane.failure.path,
+          TANSTACK_DB_ORACLE_PROPERTY: spec.id,
+          SELF_ORACLE_LOG: replayLog,
+        })
+        const index = plan.specs.indexOf(spec)
+        const random = replay.files
+          .find((file) => file.file === files[index])
+          ?.tests.find((test) => test.name.endsWith(`random seed`))
+        observe(`replay`, {
+          id: spec.id,
+          target: lane.name,
+          original: lane.failure,
+          states: statesIn(replay, plan, files),
+          ...(random?.state === `failed`
+            ? { failure: classify(random.errors[0]) }
+            : {}),
+          ran: readLog(replayLog)
+            .filter((entry) => entry.test === `${spec.id} > random seed`)
+            .map((entry) => entry.history),
+        } satisfies ProbeRun)
       }
-      observe(`replay`, probe)
-      break
-    }
-    // Rerun: the first failing pin or enumerated history with a rerun command.
-    for (const [index, spec] of plan.specs.entries()) {
       const target = run.files[spec.id]!.tests.find(
         (test) => test.failure?.rerun !== undefined,
       )
       if (!target) continue
-      const pattern = target.failure!.rerun!
-      const rerun = runVitest(directory, [files[index]!], {}, [`-t`, pattern])
-        .files[0]
-      const states = Object.fromEntries(
-        (rerun?.tests ?? []).map((test) => [
-          short(spec.id, test.name),
-          test.state,
-        ]),
-      )
-      const ran = rerun?.tests.find((test) => test.state === `failed`)
-      const probe: ProbeRun = {
+      const index = plan.specs.indexOf(spec)
+      const rerun = runVitest(directory, [files[index]!], {}, [
+        `-t`,
+        target.failure!.rerun!,
+      ])
+      const ran = rerun.files[0]?.tests.find((test) => test.state === `failed`)
+      observe(`rerun`, {
         id: spec.id,
-        states,
         target: target.name,
-        original: target.failure,
+        original: target.failure!,
+        states: statesIn(rerun, plan, files),
         ...(ran ? { failure: classify(ran.errors[0]) } : {}),
-      }
-      observe(`rerun`, probe)
-      break
+      } satisfies ProbeRun)
     }
   } finally {
     rmSync(directory, { recursive: true, force: true })
@@ -617,13 +810,32 @@ async function driveSuite(
 // ---------------------------------------------------------------------------
 // Check
 // ---------------------------------------------------------------------------
+//
+// For each property: it loads exactly when the model says so; it registers
+// exactly the owed tests; each test passes, or fails with the owed kind, law,
+// and cause; a lane's counterexample still violates the owed law; a passing
+// determinism test ran every history it owes; and each passing lane printed
+// the owed reach counts. Then the probes: the replays and reruns the model
+// owes all happened; in each, every other test stood aside; the probed test
+// failed again the same way; and a replay started from the counterexample
+// itself, as a direct replay must, and reported the same one.
 
 const lawOfTest = (name: string) =>
   name.startsWith(`calibration:`)
     ? `calibration`
     : name === `determinism`
       ? `determinism`
-      : `verdict`
+      : isLane(name)
+        ? `shrink`
+        : `verdict`
+const lawOfKind = (kind: string, name: string) =>
+  kind === `timeout`
+    ? `timeout`
+    : kind.endsWith(`membership`)
+      ? `membership`
+      : kind.endsWith(`reach`)
+        ? `reach`
+        : lawOfTest(name)
 
 function checkSuite(
   plan: Plan,
@@ -633,6 +845,12 @@ function checkSuite(
   const run = trace.find(({ checkpoint }) => checkpoint === `run`)?.value as
     SuiteRun | undefined
   if (!run) return violation(`run`, `the driver recorded no run`, `trace`)
+  const probes = trace
+    .filter(({ checkpoint }) => checkpoint !== `run`)
+    .map(({ checkpoint, value }) => ({
+      checkpoint,
+      probe: value as ProbeRun,
+    }))
   for (const spec of plan.specs) {
     const owed = expected.get(spec.id)!
     const seen = run.files[spec.id]!
@@ -663,17 +881,18 @@ function checkSuite(
         test.state === `passed` ? `pass` : (failure?.kind ?? `other`)
       if (
         observedKind !== outcome.kind ||
-        (outcome.law !== undefined && failure?.law !== outcome.law)
+        (outcome.law !== undefined && failure?.law !== outcome.law) ||
+        (!isLane(test.name) && failure?.cause !== outcome.cause)
       )
         return violation(
           `run`,
           `${spec.id} "${test.name}" ${test.state} as ${JSON.stringify(failure ?? null)}, owed ${JSON.stringify(outcome)}`,
-          test.name.startsWith(`fixed seed`) || test.name === `random seed`
-            ? `shrink`
-            : lawOfTest(test.name),
+          lawOfKind(
+            outcome.kind === `pass` ? observedKind : outcome.kind,
+            test.name,
+          ),
           { actual: failure ?? { kind: `pass` }, expected: outcome },
         )
-      // A passing determinism test ran every history it owes.
       if (
         test.name === `determinism` &&
         test.state === `passed` &&
@@ -690,7 +909,6 @@ function checkSuite(
             `determinism`,
           )
       }
-      // A lane's counterexample keeps the first failure's law.
       if (failure?.counterexample && outcome.law) {
         const shrunk = JSON.parse(failure.counterexample) as [SyntheticHistory]
         if (verdictOf(shrunk[0]).law !== outcome.law)
@@ -701,27 +919,60 @@ function checkSuite(
           )
       }
     }
-  }
-  for (const { checkpoint, value } of trace) {
-    if (checkpoint !== `replay` && checkpoint !== `rerun`) continue
-    const probe = value as ProbeRun
-    const others = Object.entries(probe.states).filter(([name]) =>
-      checkpoint === `replay` ? name !== `random seed` : name !== probe.target,
+    for (const [lane, counts] of owed.reach)
+      if (JSON.stringify(seen.reach[lane]) !== JSON.stringify(counts))
+        return violation(
+          `run`,
+          `${spec.id} "${lane}" printed reach ${JSON.stringify(seen.reach[lane] ?? null)}, owed ${JSON.stringify(counts)}`,
+          `reach`,
+          { actual: seen.reach[lane], expected: counts },
+        )
+    for (const lane of owed.replays)
+      if (
+        !probes.some(
+          ({ checkpoint, probe }) =>
+            checkpoint === `replay` &&
+            probe.id === spec.id &&
+            probe.target === lane,
+        )
+      )
+        return violation(
+          `replay`,
+          `${spec.id} "${lane}" failed but was never replayed`,
+          `replay`,
+        )
+    if (
+      owed.rerun &&
+      !probes.some(
+        ({ checkpoint, probe }) =>
+          checkpoint === `rerun` && probe.id === spec.id,
+      )
     )
-    if (others.some(([, state]) => state !== `skipped`))
+      return violation(
+        `rerun`,
+        `${spec.id} "${owed.rerun}" printed no rerun command`,
+        `rerun`,
+      )
+  }
+  for (const { checkpoint, probe } of probes) {
+    const probed = checkpoint === `replay` ? `random seed` : probe.target
+    const others = probe.states.filter(
+      ([id, name]) => !(id === probe.id && name === probed),
+    )
+    if (others.some(([, , state]) => state !== `skipped`))
       return violation(
         checkpoint,
-        `${probe.id}: other tests ran: ${JSON.stringify(Object.fromEntries(others))}`,
+        `${probe.id} ${checkpoint} of "${probe.target}": other tests ran: ${JSON.stringify(others.filter(([, , state]) => state !== `skipped`))}`,
         checkpoint,
       )
     if (!probe.failure)
       return violation(
         checkpoint,
-        `${probe.id}: "${checkpoint === `replay` ? `random seed` : probe.target}" did not fail again: ${JSON.stringify(probe.states)}`,
+        `${probe.id} ${checkpoint} of "${probe.target}": "${probed}" did not fail again`,
         checkpoint,
       )
     if (
-      probe.failure.kind !== probe.original?.kind ||
+      probe.failure.kind !== probe.original.kind ||
       probe.failure.law !== probe.original.law
     )
       return violation(
@@ -729,13 +980,22 @@ function checkSuite(
         `${probe.id}: reproduced ${JSON.stringify(probe.failure)}, first failure ${JSON.stringify(probe.original)}`,
         checkpoint,
       )
-    if (
-      checkpoint === `replay` &&
-      probe.failure.counterexample !== probe.original.counterexample
-    )
+    if (checkpoint !== `replay`) continue
+    if (probe.failure.counterexample !== probe.original.counterexample)
       return violation(
         checkpoint,
-        `${probe.id}: replay counterexample ${probe.failure.counterexample}, fixed lane ${probe.original.counterexample}`,
+        `${probe.id}: replay counterexample ${probe.failure.counterexample}, "${probe.target}" ${probe.original.counterexample}`,
+        `replay`,
+      )
+    // fast-check walks the recorded path through the shrink tree without
+    // running the property, so a direct replay runs the counterexample first.
+    const counterexample = (
+      JSON.parse(probe.original.counterexample!) as [SyntheticHistory]
+    )[0]
+    if (JSON.stringify(probe.ran?.[0]) !== JSON.stringify(counterexample))
+      return violation(
+        checkpoint,
+        `${probe.id}: the replay first ran ${JSON.stringify(probe.ran?.[0] ?? null)}, not the counterexample ${JSON.stringify(counterexample)}`,
         `replay`,
       )
   }
@@ -745,6 +1005,9 @@ function checkSuite(
 // ---------------------------------------------------------------------------
 // Property
 // ---------------------------------------------------------------------------
+//
+// Pins replay the regressions the framework has had and witness every
+// framework state the laws are about; each names the state it witnesses.
 
 const generatedDraft = (overrides: Partial<Draft>): Draft => ({
   source: { kind: `generated`, runs: 2, seed: 7 },
@@ -752,132 +1015,148 @@ const generatedDraft = (overrides: Partial<Draft>): Draft => ({
   segments: [],
   pins: [],
   nondeterministic: false,
+  reachVia: `reached`,
+  timing: `normal`,
   calibrations: [],
   ...overrides,
 })
+const pin = (
+  name: string,
+  enters: Array<(typeof frameworkStates)[number]>,
+  ...drafts: Array<Draft>
+) => ({ name, enters, history: { drafts } })
+const at = (history: SyntheticHistory) => ({ history, enters: null })
 
 oracleProperty({
   id: `self-oracle.framework`,
   law: {
-    statement: `oracleProperty registers, fails, shrinks, replays, reruns, calibrates, and checks determinism and reach as its contract states.`,
-    authority: `packages/db/tests/oracle-property.ts header; oracle rubric ORC-006, ORC-007, ORC-015`,
-    limits: `Synthetic properties with histories of one to three integers, one or two per run; real Vitest child processes.`,
+    statement: `oracleProperty registers, fails, shrinks, replays, reruns, calibrates, times out, and checks determinism, membership, and reach as its contract states.`,
+    authority: `packages/db/tests/oracle-property.ts header; maintainer decisions of 2026-11-03; oracle rubric ORC-006, ORC-007, ORC-015`,
+    limits: `Synthetic properties with histories of one to three integers, one or two per run; real Vitest child processes; one rerun probe per property.`,
     owner: `oracleProperty framework`,
   },
   histories: {
     arbitrary: suite,
     states: [],
+    measured: frameworkStates,
     runs: 3,
     fixedSeeds: [1],
     pins: [
-      {
-        name: `a rerun command escapes a label with |`,
-        history: {
-          drafts: [
-            {
-              ...generatedDraft({}),
-              source: { kind: `enumerated`, histories: [[3, 1]] },
-            },
+      pin(`a rerun command escapes a label with |`, [`rerun-probe`], {
+        ...generatedDraft({}),
+        source: {
+          kind: `enumerated`,
+          histories: [
+            [3, 1],
+            [3, 2],
           ],
         },
-      },
-      {
-        name: `a driver error after a violation reports the violation`,
-        history: {
-          drafts: [
-            generatedDraft({ pins: [{ history: [3, 6], enters: null }] }),
-          ],
-        },
-      },
-      {
-        name: `shrinking keeps the first failure's law`,
-        history: {
-          drafts: [
-            generatedDraft({ segments: [{ prefix: [4, 3], enters: [] }] }),
-          ],
-        },
-      },
-      {
-        name: `a replayed fixed-lane failure reproduces in the random lane`,
-        history: {
-          drafts: [
-            generatedDraft({
-              segments: [{ prefix: [1, 3], enters: [`saw-1`] }],
-            }),
-          ],
-        },
-      },
-      {
-        name: `shrinking keeps a setup error a setup error`,
-        history: {
-          drafts: [generatedDraft({ segments: [{ prefix: [6], enters: [] }] })],
-        },
-      },
-      {
-        name: `the determinism test rejects a nondeterministic driver`,
-        history: {
-          drafts: [
-            generatedDraft({
-              nondeterministic: true,
-              pins: [{ history: [0], enters: null }],
-            }),
-          ],
-        },
-      },
-      {
-        name: `a required state needs a segment`,
-        history: {
-          drafts: [
-            generatedDraft({
-              statesMode: `extra`,
-              segments: [{ prefix: [0], enters: [`saw-0`] }],
-            }),
-          ],
-        },
-      },
-      {
-        name: `a calibration skips a candidate whose clean trace fails`,
-        history: {
-          drafts: [
-            generatedDraft({
-              pins: [
-                { history: [3], enters: null },
-                { history: [0], enters: null },
-              ],
-              calibrations: [`right`],
-            }),
-          ],
-        },
-      },
-      {
-        name: `a law violation outranks a missed segment state`,
-        history: {
-          drafts: [
-            generatedDraft({
-              segments: [{ prefix: [3, 0, 0], enters: [`saw-1`] }],
-            }),
-          ],
-        },
-      },
-      {
-        name: `the determinism test also samples generated histories`,
-        history: { drafts: [generatedDraft({ nondeterministic: true })] },
-      },
-      {
-        name: `calibrations need the named law`,
-        history: {
-          drafts: [
-            generatedDraft({
-              pins: [{ history: [0], enters: null }],
-              calibrations: [`right`, `wrong-law`, `no-op`],
-            }),
-          ],
-        },
-      },
+      }),
+      pin(
+        `a driver error after a violation is the violation's cause`,
+        [`cause-attached`],
+        generatedDraft({ pins: [at([3, 6])] }),
+      ),
+      pin(
+        `shrinking keeps the first failure's law`,
+        [`lane-violation`, `replay-probe`],
+        generatedDraft({ segments: [{ prefix: [4, 3], enters: [] }] }),
+      ),
+      pin(
+        `a replayed lane failure reproduces its path`,
+        [`replay-probe`],
+        generatedDraft({ segments: [{ prefix: [1, 3], enters: [`saw-1`] }] }),
+      ),
+      pin(
+        `shrinking keeps a setup error a setup error`,
+        [`lane-setup-failure`],
+        generatedDraft({ segments: [{ prefix: [6], enters: [] }] }),
+      ),
+      pin(
+        `the determinism test rejects a nondeterministic driver`,
+        [`determinism-caught`],
+        generatedDraft({ nondeterministic: true, pins: [at([0])] }),
+      ),
+      pin(
+        `the determinism test also samples generated histories`,
+        [`determinism-caught`],
+        generatedDraft({ nondeterministic: true }),
+      ),
+      pin(
+        `a required state needs a segment`,
+        [`registration-error`],
+        generatedDraft({
+          statesMode: `extra`,
+          segments: [{ prefix: [0], enters: [`saw-0`] }],
+        }),
+      ),
+      pin(
+        `a calibration skips a candidate whose clean trace fails`,
+        [`calibration-skipped-candidate`, `calibration-applied`],
+        generatedDraft({ pins: [at([3]), at([0])], calibrations: [`right`] }),
+      ),
+      pin(
+        `calibrations need the named law`,
+        [`calibration-applied`, `calibration-rejected`],
+        generatedDraft({
+          pins: [at([0])],
+          calibrations: [`right`, `wrong-law`, `no-op`],
+        }),
+      ),
+      pin(
+        `a hostile driver calibration`,
+        [`calibration-applied`],
+        generatedDraft({ pins: [at([0])], calibrations: [`driver`] }),
+      ),
+      pin(
+        `a law violation outranks a missed segment state`,
+        [`lane-violation`],
+        generatedDraft({
+          segments: [{ prefix: [3, 0, 0], enters: [`saw-1`] }],
+        }),
+      ),
+      pin(
+        `a segment must enter the states it names`,
+        [`segment-reach-failure`],
+        generatedDraft({
+          segments: [{ prefix: [0, 0, 0], enters: [`saw-1`] }],
+        }),
+      ),
+      pin(
+        `a pin must enter the states it names`,
+        [`pin-reach-failure`],
+        generatedDraft({ pins: [{ history: [0], enters: [`saw-1`] }] }),
+      ),
+      pin(
+        `a pin outside the language fails`,
+        [`pin-membership-failure`],
+        generatedDraft({ pins: [at([5])] }),
+      ),
+      pin(
+        `a segment outside the language fails`,
+        [`segment-membership-failure`],
+        generatedDraft({ segments: [{ prefix: [5], enters: [] }] }),
+      ),
+      pin(
+        `reach the driver records counts like reach the property names`,
+        [`observed-reach`],
+        generatedDraft({
+          reachVia: `observe`,
+          segments: [{ prefix: [0, 0, 0], enters: [`saw-0`] }],
+        }),
+      ),
+      pin(
+        `a property timeout limits every test it registers`,
+        [`timeout`],
+        generatedDraft({ timing: `slow`, pins: [at([0])] }),
+      ),
     ],
   },
   resolve: resolveSuite,
   model: suiteModel,
+  reached: frameworkReach,
   driver: driveSuite,
   check: checkSuite,
+  // Each history spawns one to five child Vitest runs.
+  timeout: 600_000,
 })
