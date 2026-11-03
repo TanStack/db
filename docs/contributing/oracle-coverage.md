@@ -7325,14 +7325,20 @@ decision 2026-11-03, keeping the documented rule in
 `packages/db/tests/proxy-detachment-contract-oracle.test.ts`); the core owner
 `optimistic-history-oracle` now generates that removal (an optional `d`, set
 and then removed with `delete draft.d`), compares rows by own fields, and
-counts its reach (`removedFieldEdits`). Limits: one pending mutation per
-key; commits by another client only while no mutation is pending (a commit
-held behind a pending mutation is core's MUT-5); no manual transactions,
-confirmation through sync (MUT-7), schema validation, or an update that
-changes no field; multi-mutation transactions, so MUT-8's mutation order
-within one transaction; a newer backend value in a disjoint field (commits
-by another client arrive only while nothing is pending); server-generated
-keys.
+counts its reach (`removedFieldEdits`). A write may follow pending ones on
+its key (reach `same-key-pending`, and a grammar arm that writes one key twice
+in a row) when their plans accept them; for an adapter that does not order
+writes, only once they are answered. After a rejected insert or delete, what a
+provider does with the next write on that key is the law set's per-adapter
+`unknownKeyUpdate` (MUT-10), which no driver declares, so those histories are
+not generated. Every provider keeps one key's copies in commit order, so a
+copy waits behind an undelivered one for its key. An update removes `note`
+only when the held row holds a note value, in the model and every writer.
+Limits: commits by another client only while no mutation is pending, so MUT-11
+is not checked (a commit held behind a pending mutation is core's MUT-5); no
+manual or multi-mutation transactions, so MUT-8's mutation order within one
+transaction is not checked; no schema validation or update that changes no
+field; a newer backend value in a disjoint field; server-generated keys.
 
 TrailBase (`undefinedField: 'null'`, `field-updates`, `held-echoes`, and every
 other mutation capability): the driver's RecordApi acts as a TrailBase
@@ -7345,12 +7351,17 @@ failed MUT-8 (a removed field was sent as an empty patch, so the service kept
 it), 27 failed MUT-10 (writes did not wait for the earlier one), and 5 failed
 MUT-1 (a write was confirmed by an earlier event on the same key, so its
 optimistic row dropped before its own event arrived). The adapter now sends
-a removed field as `null`, runs each write after the earlier one settles,
-and confirms a write only by an event after it began; a mutant that keeps the
-old confirmation fails MUT-1. A write starts after the earlier one's HTTP
+a removed field as `null` and starts each write after the earlier one's HTTP
 response, not after its change event; the version that waited for the event
-fails the fixed campaign (a request owed after the answer is missing). The record API is a test double that bypasses
-the SDK's fetch and SSE decoding.
+fails the fixed campaign (a request owed after the answer is missing). Its
+change stream is in commit order (`log-ordered-echoes`). The adapter confirms
+the n-th answered write on a key by the n-th change event on that key, so an
+earlier write's late event cannot confirm a later write on the key; with same-key
+histories, the version that confirmed by any event after the write began
+failed MUT-1 and MUT-7, and a mutant keeping it is rejected. Events from
+another client while a write is pending are outside these histories (MUT-11).
+The record API is a test double that bypasses the SDK's fetch and SSE
+decoding.
 
 PowerSync (`undefinedField: 'null'`, `field-updates`, `write-rejection`,
 `foreign-commits`): the driver runs a real local PowerSync database, which is

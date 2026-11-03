@@ -143,10 +143,12 @@ export function trailBaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
 
-  // Each key's latest change event, by its sequence number. It is kept only
-  // while a write waits for its confirmation, which must be an event after
-  // the write began, not an earlier one on the same key (MUT-7).
+  // Change events per key, and this client's answered writes per key,
+  // counted while a write is admitted. Each answered write on a key produces
+  // one event there, in order, so a write is confirmed by the event its
+  // answer is numbered for, not by an earlier write's late one (MUT-7).
   const seenIds = new Store(new Map<string, number>())
+  const answeredIds = new Map<string, number>()
   let eventSequence = 0
   // Writes admitted and not yet settled.
   let writes = 0
@@ -156,11 +158,15 @@ export function trailBaseCollectionOptions<
 
   const awaitIds = (
     ids: Array<string>,
-    after: number,
     timeout: number = 120 * 1000,
   ): Promise<void> => {
+    const tickets = ids.map((id) => {
+      const ticket = (answeredIds.get(id) ?? 0) + 1
+      answeredIds.set(id, ticket)
+      return [id, ticket] as const
+    })
     const completed = (value: Map<string, number>) =>
-      ids.every((id) => (value.get(id) ?? 0) > after)
+      tickets.every(([id, ticket]) => (value.get(id) ?? 0) >= ticket)
     if (completed(seenIds.state)) {
       return Promise.resolve()
     }
@@ -191,18 +197,18 @@ export function trailBaseCollectionOptions<
   const persist = async (write: () => Promise<Array<string>>) => {
     writes++
     try {
-      const send = async () => {
-        const after = eventSequence
-        return { ids: await write(), after }
-      }
-      const sent = (sending++ === 0 ? send() : turn.then(send)).finally(() => {
-        sending--
-      })
+      const sent = (sending++ === 0 ? write() : turn.then(write)).finally(
+        () => {
+          sending--
+        },
+      )
       turn = sent.catch(() => {})
-      const { ids, after } = await sent
-      await awaitIds(ids, after)
+      await awaitIds(await sent)
     } finally {
-      if (--writes === 0) seenIds.setState(() => new Map())
+      if (--writes === 0) {
+        seenIds.setState(() => new Map())
+        answeredIds.clear()
+      }
     }
   }
 
@@ -436,10 +442,12 @@ export function trailBaseCollectionOptions<
             const sequence = ++eventSequence
             if (loadsInFlight > 0)
               eventSequenceByKey.set(getKey(value), sequence)
-            if (writes > 0)
+            if (writes > 0) {
+              const id = String(getKey(value))
               seenIds.setState((curr: Map<string, number>) =>
-                new Map(curr).set(String(getKey(value)), sequence),
+                new Map(curr).set(id, (curr.get(id) ?? 0) + 1),
               )
+            }
           }
         }
       }
