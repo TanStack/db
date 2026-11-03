@@ -210,6 +210,7 @@ const staticOracleProperties = [
   `adapter-conformance.mutations.trailbase`,
   `adapter-conformance.mutations.powersync`,
   `adapter-conformance.mutations.electric`,
+  `adapter-conformance.mutations.convex`,
   `adapter-conformance.eager-live-source.neon-realtime`,
   `adapter-conformance.eager-live-source.trailbase`,
   `adapter-conformance.eager-live-source.rxdb`,

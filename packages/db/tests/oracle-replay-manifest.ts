@@ -812,6 +812,11 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.mutations`,
     `electric`,
   ],
+  [
+    `convex-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `convex`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -913,7 +918,7 @@ const replayTestNames = new Map([
         `conforms on a random campaign or a replayed seed`,
       ] as const,
   ),
-  ...[`reference`, `rxdb`, `trailbase`, `powersync`, `electric`].map(
+  ...[`reference`, `rxdb`, `trailbase`, `powersync`, `electric`, `convex`].map(
     (driver) =>
       [
         `adapter-conformance.mutations.${driver}`,

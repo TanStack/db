@@ -7225,9 +7225,11 @@ and a SQL provider), against RxDB in
 `packages/trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`
 (`adapter-conformance.mutations.trailbase`), against PowerSync in
 `packages/powersync-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.powersync`), and against Electric in
+(`adapter-conformance.mutations.powersync`), against Electric in
 `packages/electric-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.electric`). It checks auto-transaction
+(`adapter-conformance.mutations.electric`), and against Convex in
+`packages/convex-db-collection/tests/mutation-conformance-oracle.property.test.ts`
+(`adapter-conformance.mutations.convex`). It checks auto-transaction
 writes on a ready Collection whose adapter persists them itself: MUT-1 (the
 public rows show the optimistic state while the mutation function runs, and
 no publication shows the earlier synced value when it fulfills), MUT-2 (a
@@ -7384,3 +7386,21 @@ whose txid evidence check accepts any txid fails MUT-1 at the first insert.
 The existing `tests/documented-mutations-oracle.test.ts` owner keeps the
 documented guidance handlers. Limits: one sync run (no reconnect or
 must-refetch while a write waits); `awaitMatch` is not exercised.
+
+Convex (`application-handlers`, `ordered-answers`, `log-ordered-echoes`,
+`held-echoes`, `undefinedField: 'absent'`, `write-rejection`, `held-writes`,
+`foreign-commits`, `server-rewrites`): the driver runs the real Convex
+JavaScript client over a controlled WebSocket and plays the server. The
+application's handlers call one Convex mutation per write with the complete
+row as Convex values; the server runs one client's mutations in arrival order,
+answers each by plan (a rejection is a failed `MutationResponse`), and commits
+an acceptance at a new timestamp, whose `Transition` carries the query's
+complete result after the response. The client resolves a mutation only at a
+transition that reaches its timestamp, so transitions are the copies; a held
+echo stalls them. GREEN with no adapter change; an adapter that does not
+await the application's handler fails MUT-1. Limits: an adapter that skips
+its wait for the source after the handler survives both campaigns, because
+the histories keep one subscription whose result the client applies before it
+resolves the mutation; the cached-listener path that wait protects is owned by
+`tests/collection.test.ts` and the ownership oracle, which reject that mutant.
+The JavaScript client only; no reconnect while a mutation waits.
