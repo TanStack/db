@@ -182,20 +182,28 @@ export function trailBaseCollectionOptions<
   }
 
   // Writes reach TrailBase in author order: a write starts at once when no
-  // other is admitted, and otherwise after the earlier one is confirmed or
-  // rejected (MUT-10). A write returns the ids it wrote and settles once the
-  // change stream carries each of them (MUT-7).
+  // other is being sent, and otherwise after the earlier one's response
+  // (MUT-10). It does not wait for the earlier one's change event. A write
+  // returns the ids it wrote and settles once the change stream carries each
+  // of them (MUT-7).
+  let sending = 0
   let turn: Promise<unknown> = Promise.resolve()
-  const persist = (write: () => Promise<Array<string>>): Promise<void> => {
-    const start = async () => {
-      const after = eventSequence
-      await awaitIds(await write(), after)
-    }
-    const run = (writes++ === 0 ? start() : turn.then(start)).finally(() => {
+  const persist = async (write: () => Promise<Array<string>>) => {
+    writes++
+    try {
+      const send = async () => {
+        const after = eventSequence
+        return { ids: await write(), after }
+      }
+      const sent = (sending++ === 0 ? send() : turn.then(send)).finally(() => {
+        sending--
+      })
+      turn = sent.catch(() => {})
+      const { ids, after } = await sent
+      await awaitIds(ids, after)
+    } finally {
       if (--writes === 0) seenIds.setState(() => new Map())
-    })
-    turn = run.catch(() => {})
-    return run
+    }
   }
 
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
