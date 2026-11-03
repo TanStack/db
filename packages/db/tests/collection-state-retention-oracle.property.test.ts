@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
@@ -69,17 +69,10 @@ const retainedRowArbitrary = fc.record({
   ),
 })
 
-const retentionReach = createOracleReach(
-  `collection-state.retention`,
-  [`sign-only-reinsert`],
-  { minimum: 5 },
-)
-// Only the generated campaigns owe the reach; a focused run of a pinned
-// test checks nothing here.
-let generatedHistories = 0
-afterAll(() => {
-  if (generatedHistories > 0) retentionReach.assertReached()
-})
+// Each generated campaign declares its own reach and checks it when it
+// ends; pinned replays record none.
+let retentionReach:
+  ReturnType<typeof createOracleReach<`sign-only-reinsert`>> | undefined
 
 function snapshotRetainedRow(row: RetainedRow): RetainedRow {
   return { id: row.id, value: row.value }
@@ -167,7 +160,7 @@ function applyAction(
         previous.value === action.row.value &&
         !Object.is(previous.value, action.row.value)
       ) {
-        retentionReach.reach(`sign-only-reinsert`)
+        retentionReach?.reach(`sign-only-reinsert`)
       }
       if (
         previous !== undefined &&
@@ -247,7 +240,7 @@ declareOracle({ check: [expectRetainedState] })
 async function runRetentionHistory(
   actions: ReadonlyArray<RetentionAction>,
 ): Promise<void> {
-  retentionReach.beginHistory()
+  retentionReach?.beginHistory()
   const harness = createRetentionHarness()
   const { collection } = harness
   const model = new Map<number, RetainedRow>()
@@ -488,23 +481,33 @@ const retentionHistory = fc
   )
   .map((elements) => elements.flat())
 
-fcTest.prop([retentionHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
-  `matches retained authoritative state with a fixed seed`,
-  async (actions) => {
-    generatedHistories++
-    await runRetentionHistory(actions)
-  },
-)
-fcTest.prop(
-  [retentionHistory],
-  oraclePropertyOptions(100, `collection-state.retention`),
-)(
-  `matches retained authoritative state with a random or replayed seed`,
-  async (actions) => {
-    generatedHistories++
-    await runRetentionHistory(actions)
-  },
-)
+async function retentionCampaign(
+  campaign: string,
+  options: Parameters<typeof fc.assert>[1],
+): Promise<void> {
+  retentionReach = createOracleReach(
+    `collection-state.retention (${campaign})`,
+    [`sign-only-reinsert`],
+    { minimum: 5 },
+  )
+  try {
+    await fc.assert(
+      fc.asyncProperty(retentionHistory, runRetentionHistory),
+      options,
+    )
+    retentionReach.assertReached()
+  } finally {
+    retentionReach = undefined
+  }
+}
+
+it(`matches retained authoritative state with a fixed seed`, () =>
+  retentionCampaign(`fixed`, { numRuns: oracleRuns(100), seed: 1_902 }))
+it(`matches retained authoritative state with a random or replayed seed`, () =>
+  retentionCampaign(
+    `random`,
+    oraclePropertyOptions(100, `collection-state.retention`),
+  ))
 
 // The partial-update lane reuses those histories and marks source batches
 // partial from a separate stream, so the full-mode campaigns keep their
