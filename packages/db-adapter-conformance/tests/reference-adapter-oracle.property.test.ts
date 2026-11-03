@@ -154,6 +154,25 @@ describe(`eager live-source conformance: reference adapter`, () => {
   )
 })
 
+// The prompt restart's own cut (LIFE-5). A run that reports ready at its
+// start and then receives an empty delivery matches the model at the next
+// cut, so in this history only the synchronous check at the restart rejects
+// it; in a campaign a non-prompt restart rejects it too.
+describe(`eager live-source conformance: prompt restart cut`, () => {
+  oracleReplayTest(it)(
+    `rejects a run that is ready at its prompt restart`,
+    async () => {
+      await expect(
+        checkEagerLiveSourceHistory(referenceDriver(`ready-at-restart`), [
+          { kind: `fail` },
+          { kind: `restart`, prompt: true },
+          { kind: `snapshot`, rows: [] },
+        ]),
+      ).rejects.toMatchObject({ law: `LIFE-5 (prompt restart)` })
+    },
+  )
+})
+
 // PUB-1 has two commit granularities. The per-change reference adapter
 // commits each change of a batch alone; it must conform, and a variant that
 // commits them out of order must be rejected by the per-change comparison.

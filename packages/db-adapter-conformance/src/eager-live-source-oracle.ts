@@ -2556,17 +2556,24 @@ export async function checkEagerLiveSourceHistory(
           preload = recordSettlement(collection.preload())
           events = foldChanges(collection)
           // LIFE-5 at a prompt restart's own cut: no turn passes before the
-          // next step, which may otherwise hide an early ready.
+          // next step, which may otherwise hide an early ready. A fresh run
+          // also shows no problem from the failed one.
           if (done.prompt) {
             const restarted = {
               status: collection.status,
               rows: observedRows(collection),
+              problem:
+                collection.health.error ?? collection.health.failureReason,
             }
-            if (restarted.status !== `loading` || restarted.rows.length > 0) {
+            if (
+              restarted.status !== `loading` ||
+              restarted.rows.length > 0 ||
+              restarted.problem !== null
+            ) {
               throw violation(
                 `LIFE-5 (prompt restart)`,
                 index,
-                { status: `loading`, rows: [] },
+                { status: `loading`, rows: [], problem: null },
                 restarted,
               )
             }
