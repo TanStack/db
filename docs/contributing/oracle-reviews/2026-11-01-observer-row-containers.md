@@ -1306,3 +1306,8 @@ shape fix remains outside this PR by maintainer decision, and combined #2327
 integration is unverified. General readiness remains unproven; green CI for an
 older head does not validate this new tree. CodeRabbit remains paused at its
 earlier covered production commit.
+
+Four-agent implementation stamp:
+`ba336f4b22e002e9836a81fc79783b21f8694395` contains the sparse-array repair,
+oracle observations, CI fixtures, coverage and evidence evaluated in this
+supplement. The following documentation-only commit names that exact head.
