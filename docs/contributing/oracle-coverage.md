@@ -7223,9 +7223,11 @@ and a SQL provider), against RxDB in
 `packages/rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`
 (`adapter-conformance.mutations.rxdb`), against TrailBase in
 `packages/trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.trailbase`), and against PowerSync in
+(`adapter-conformance.mutations.trailbase`), against PowerSync in
 `packages/powersync-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.powersync`). It checks auto-transaction
+(`adapter-conformance.mutations.powersync`), and against Electric in
+`packages/electric-db-collection/tests/mutation-conformance-oracle.property.test.ts`
+(`adapter-conformance.mutations.electric`). It checks auto-transaction
 writes on a ready Collection whose adapter persists them itself: MUT-1 (the
 public rows show the optimistic state while the mutation function runs, and
 no publication shows the earlier synced value when it fulfills), MUT-2 (a
@@ -7261,7 +7263,17 @@ mutation stays pending until its copy arrives. MUT-10's "the earlier one
 decides" is the provider's answer, so a later write's request is owed once
 the earlier write is answered, without waiting for its copy (maintainer
 decision 2026-11-03: core does not chain independent transactions; an
-application that needs that chains them itself). A driver can declare several `rejectionKinds`, each reached. Reach: each of insert, update, and delete
+application that needs that chains them itself). With `application-handlers`
+the application's own handlers persist writes and the adapter only confirms
+them, so each write's request goes out when it is made and MUT-10 is the
+application's; with `ordered-answers` the provider answers requests in arrival
+order. With `log-ordered-echoes` the change feed delivers copies in commit
+order, so a withheld copy holds back every later one. When one step settles
+several writes, they settle in an order no law fixes, so the publication check
+compares each row's own sequence of values instead of the whole publication
+sequence (by the same maintainer decision): it still rejects an earlier synced
+value or an extra change on any row. A step that settles one write keeps the
+whole-sequence comparison. A driver can declare several `rejectionKinds`, each reached. Reach: each of insert, update, and delete
 accepted, a rejected write, a held write, a write queued behind a held one, a
 held write rejected, a commit by another client, an accepted field removal, a
 held optimistic row, a copy the provider rewrote, an answered write whose copy
@@ -7357,3 +7369,18 @@ declared, because one watcher callback applies every committed write;
 `server-rewrites` is not declared, because the local database rewrites
 nothing; removal by assigning `null` and multi-mutation transactions are not
 generated.
+
+Electric (`application-handlers`, `log-ordered-echoes`, `held-echoes`,
+`undefinedField: 'null'`, `write-rejection`, `held-writes`, `foreign-commits`,
+`server-rewrites`): Electric does not persist writes. The driver's application
+handlers write the complete SQL row through a backend API that answers by plan
+with the commit's txid, then await the adapter's `awaitTxId`; the shape stream
+is the real `@electric-sql/client` `ShapeStream` over a controlled
+`fetchClient`, each commit one batch with its txid, in commit order, stalled
+at a held echo until `deliver`. This checks what Electric owns, confirmation
+through its shape stream (MUT-7), with the handlers' requests and the
+backend's rows as the application's. GREEN with no adapter change; a mutant
+whose txid evidence check accepts any txid fails MUT-1 at the first insert.
+The existing `tests/documented-mutations-oracle.test.ts` owner keeps the
+documented guidance handlers. Limits: one sync run (no reconnect or
+must-refetch while a write waits); `awaitMatch` is not exercised.
