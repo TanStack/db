@@ -965,3 +965,177 @@ intended work-observation failure, not a timeout or setup failure. Production
 was restored byte-for-byte afterward. The unchanged bounded equality/work law
 and its limits above continue to apply; this change only reduces checker
 overhead.
+
+## 2026-11-03: Third external review — Set scale and equality scope
+
+Reviewed and starting head: `22da3b06ea96da2ddaf01fe32f567461e9d7f577`.
+The external reviewer supplied seven findings and contextual validation claims.
+It reported 3,000-object Set timings of 16,483 ms (interchangeable) and 1,442 ms
+(distinct paired members), versus 39/38 ms on main. Those exact old-head timings
+were not independently repeated. Deterministic work observations below establish
+the regression without depending on host timing. This supplement supersedes the
+prior section's generic prototype policy and twelve-state Set model; its original
+experimental record remains historical evidence.
+
+### Laws, experiments, and limits
+
+**Authority and domain:** the maintainer approved prototype-sensitive Collection
+row publication, not a change to exported generic `deepEquals`. Generic equality
+retains its keyed-class/plain/null/cross-realm bridge. `sameRowValue` preserves
+exact record prototypes. Draft and persisted-snapshot comparisons keep their
+separate policies. The utility oracle now models these domains separately.
+AGENTS.md's efficiency rule excludes combinatorial search. For equal corresponding
+Set members, a linear scalar-read ceiling protects the common paired-input family.
+The general fallback must still find a bijection: a greedy first assignment can
+fail when a plain record can match either class and a class can match only itself.
+
+The existing `utils.42` count model becomes a count/capacity formulation. Row
+comparison requires exact shape/value counts; generic comparison allows unmatched
+class counts to fit opposite plain/null capacity. This independent arithmetic
+model imports no production equality or matching algorithm. Its generated width
+6–12, value 1–5 and rotation 0–12 dimensions retain empty/singleton, equality,
+unmatched, deficit, and root-linked-cycle neighbors. A derived reassignment case
+uses a plain record and class A against classes A and B. Its general equality is
+true although the first greedy assignment fails; row equality is false.
+
+New `utils.43` generates widths 1,024–3,072 and values 1–5. Every history crosses
+distinct/interchangeable scalar members, acyclic/root-linked forms, both equality
+APIs and both directions. The same bag checker observes exact equality and a
+`4 * width` scalar-read ceiling. This claims linear work only for equal paired
+members, not arbitrary reordered or unequal Sets, nested-value traversal, graph
+isomorphism, allocations, or a wall-clock bound. Width zero and one stay in the
+small owner. Independent arbitrary cycle topologies remain outside its model.
+
+**Reach:** `utils.42` keeps 100 fixed and 100 random histories. Each of its thirteen
+states reaches 200 histories, including reassignment. `utils.43` runs ten fixed
+and ten random histories; each of its eight declared states reaches 20. The new
+budget does not reduce any existing budget or renumber earlier replay IDs.
+Generic record comparisons also require same-class, plain-class, null-plain,
+foreign-plain and row-prototype constructions in every input.
+
+**RED before production:** the extended utility/observer/draft gate had six
+intended failures and 143 passes across three files. The large Set lane fails at
+read 4,097 against ceiling 4,096 (fixed seed `20260911`, path `0:0`; width 1,024,
+value 1). Generic record equality fails for an equal keyed class/plain pair
+(`utils.29`, fixed seed `20260911`, path `0:0`, input `[["a","a",1,1]]`).
+The unchanged snapshot and draft-revert owners pass. The reassignment comparison
+was already in this gate; its named reach flag was added immediately afterward.
+
+The observer's separate constructor invariant comes from AGENTS.md's requirement
+to reject contradictory collaborators before mutation. Ordinary invariant
+witnesses hide one real Collection clock with undefined, null, a string, NaN or
+Infinity. They require rejection before client binding, enumeration, subscription
+or sync activation. These are deliberately invalid inputs, not supported
+Collection histories or cross-copy interoperability. All ten witnesses fail
+before the constructor repair because construction does not throw. This focused
+RED was obtained after the independent Set/shape repairs but before editing the
+constructor. The first GREEN attempt exposed a fixture assumption: the generic
+source helper had already started sync. An explicit idle Collection now supplies
+the precondition; it does not relax the rejection or resource assertions.
+Real Collection and pooled drivers provide the neighboring valid-input evidence.
+No per-value instance tracking or structural compatibility fallback was added.
+
+**Production repair:** try paired Set equality before building candidate lists;
+prefer free candidates before reassignment; reuse the ancestor cycle map because
+recursive comparisons remove their own pairs. Restore generic record bridging
+while keeping row prototypes strict. Route detached refresh and the attach
+handshake through `captureEntries`, leaving separate capture-time and queued
+publication-time clock checks for their distinct responsibilities. Reject
+absent/non-finite clocks at observer construction. Error 262 follows the existing
+coded production-message contract; generated error-page freshness belongs to the
+release pipeline, so this source change updates only its catalog.
+
+**GREEN:** the final seven-file command passes 381 tests:
+
+```sh
+pnpm exec vitest run tests/live-query-observer.test.ts tests/live-query-observer-snapshot-oracle.property.test.ts tests/utils-oracle.property.test.ts tests/utils.test.ts tests/query/pooled-live-query-oracle.property.test.ts tests/production-error-messages-oracle.test.ts tests/proxy-revert-oracle.property.test.ts --coverage.enabled=false --maxWorkers=2
+```
+
+Run from `packages/db`. TypeScript and focused ESLint pass. Changed-file oracle
+lint, minified public API, production-error erasure and mangle checks pass. The
+public API check covers 113 error names; the erasure check covers 265 literals in
+ESM and CommonJS. Existing snapshot sharing, no-op, shape, capture and pooled
+receiving comparisons retain their earlier laws. The capture probe observes one
+unchanged granular-attachment enumeration (Collection bootstrap), zero wholesale
+attachment enumerations, and one hydration-handoff cache update.
+
+**Calibration:** direct guarded replay rejects removal of the paired fast path
+at read 4,097/4,096 (`utils.43`, seed `20260911`, path `0:0`); strict generic
+prototypes fail equal-record comparison (`utils.29`, same seed/path); greedy-only
+matching fails bag equality (`utils.42`, path `0:0:0`). Restoring the original
+factorial matcher still fails at read 2,049/2,048 (`utils.42`, same seed/path).
+All are intended assertion/work-observation failures, not timeouts or setup
+failures. Every mutation restores production byte-for-byte. A first scratch
+benchmark failed ESM setup and supplies no evidence; the corrected benchmark
+succeeds. Five-run medians at 3,000 members are 0.843/0.511 ms repaired versus
+32.140/30.286 ms main for interchangeable/distinct paired objects, respectively.
+These timings supplement rather than define the work law.
+
+**Size:** `pnpm size:compare --files --packages db,react-db --base origin/main
+--exact-base` uses exact main `1443dc92e5417394acbdc98b782caa9802848ce6`.
+Observer −408, Collection changes −7, equality utility +153 = **−262 minified
+production bytes**. DB export gzip −109 and brotli −93; React is unchanged.
+All eight app scenarios shrink by 62–98 gzip bytes. Brotli deltas range −130 to
++41; Effect +41, group-by +26 and optimistic-action +16 are compression increases.
+Test and documentation growth is separate from shipped production weight.
+
+### Lossless finding audit
+
+| ID | Original claim | Technical verdict and action | Durable value / destination |
+| --- | --- | --- | --- |
+| R3-01 | utils:203 eager N² pairs and augmentation cause the reported large equal-Set slowdown; width-12 oracle misses it | Confirmed common-case work regression; fixed-now with paired linear path and free-candidate preference. Exact reported times unverified, deterministic RED/GREEN and large paired benchmark executed. | `utils.43` scale dimension; retain small deficit/bijection law and explicit general-fallback limits. |
+| R3-02 | utils:296 prototype distinction broadens public deepEquals and changes foreign/null plain-record comparison without release disclosure | Confirmed scope error; fixed-now by restoring generic bridging, preserving strict Collection rows, and documenting each comparison domain. | Generated real foreign record plus class/plain/null neighbors; main's persisted-snapshot unit expectation restored. |
+| R3-03 | utils:205 per-pair new Map(visited) wastes allocation because recursion removes additions | Confirmed from every normal return path; fixed-now. Existing ring and Set-cycle comparisons pass using the shared ancestor map. | Reuse ancestor bookkeeping; already-visited pairs are never overwritten and throwing comparisons abort the operation. No allocation-count claim. |
+| R3-04 | proxy:334 nested classes/null records become plain during optimistic writes; confirmation can add an event | Shape bug confirmed; extra-event regression unproved (plain control also emits two). Deferred with explicit maintainer agreement, tracked in #2349. No proxy source change. | Maintainer: “clearly a bug” and “outside the scope of our current PR.” Issue includes held-update/confirmation trace, original-shape controls, isolation requirement, and draft/revert oracle work. Resume in that issue with generated sibling edits and pending/confirmed shape cuts. |
+| R3-05 | observer:302 shared mutable containers allow one consumer's mutation to affect peer snapshots; repeated in all three reviews | Sharing observation is true; accepted-design under approved same-revision sharing and ReadonlyMap/ReadonlyArray API. No runtime-freezing or hostile caller-mutation isolation promise. | Earlier HR-03 remains canonical. Retained snapshots reject production mutation; runtime freezing would be a separate API proposal. |
+| R3-06 | observer:401 missing clocks silently stale instead of failing fast after fallback removal | Confirmed invariant gap for an invalid collaborator; fixed-now at construction, before resource effects. | Ordinary invariant witnesses plus real Collection and pooled positive drivers. No support promised for dynamically corrupted or lying finite clocks. |
+| R3-07 | observer:619 duplicates clock checks and writes out captureEntries in attach | Confirmed simplification; fixed-now for refresh/handshake. Two remaining checks serve capture and queued-publication responsibilities. | Existing publication/reentry/capture law and deterministic enumeration/handoff probe. |
+| R3-08 | Scope grew 8→17 files; reviewer ran no tests, six non-benchmark findings were code readings, and its throwaway benchmark restored the worktree | Accepted contextual report, not an independent product finding. Local validation is separate from the external review. | Preserve reviewed head, reported times and lack of review test execution; no benchmark file enters the PR. |
+
+Seven explicit findings = five fixed-now + one accepted-design + one explicitly
+deferred bug. Including contextual R3-08 gives eight items = five fixed-now + two
+accepted-design/context + one deferred. #2349's remaining risk is temporary loss
+of nested runtime type during optimistic sibling edits; the user approved keeping
+this existing draft bug outside this PR. Its concrete resumption condition and
+oracle owner are named above and in the coverage map; no universal draft repair
+or extra-notification claim is made.
+
+Reviewer assessment: **hire** for the measured Set regression, public-helper scope
+analysis and reusable invariant/simplification observations. The strong findings
+are actionable and expose missing scale/domain distinctions. The draft finding
+correctly identifies shape loss but overstates untested event consequences. The
+repeated mutable-container finding ignores the approved readonly sharing contract.
+Six findings had no executed tests; this evaluation supplies independent probes
+and law coverage rather than treating code inspection as proof.
+
+### Oracle review and readiness boundary
+
+ORC-001/002/003: authority, independent capacity arithmetic, and literate model,
+grammar, driver/checkpoint prose are in the utility owner. ORC-004: the grammar
+reconstructs reported paired scale, adds reassignment, retains deficit/rotation
+and zero/one neighbors; unique object members exclude duplicate identities in a
+Set. Ablating width loses scale, kind loses bridging/reassignment, rotation loses
+unordered comparison, and root links lose cycle bookkeeping. ORC-005/006: both
+real equality APIs/directions execute every case and the named wrong designs fail
+the intended comparison. ORC-007: fixed/fresh campaigns share all mechanics and
+budgets; guarded seed/path replays above execute directly. ORC-008 does not apply
+to stateless bag arithmetic; ORC-009 maps kind/value counts to authored distinct
+members without adopting production assignment state. ORC-010: aggregate errors
+retain comparator/direction failures; these synchronous utility cases acquire no
+resources. Observer/draft drivers keep their existing cleanup. ORC-011: the
+capacity model differs from production search and exposes the shared greedy-fault
+hypothesis; no additional provider model is needed. ORC-012/013: this record names
+law × inputs × API × return-cut bounds, adjacent witnesses and unresolved limits.
+ORC-014 has no external provider premise for direct equality; Collection/pooled
+receivers exercise supported inputs. ORC-015 reach counts are reported above.
+ORC-016: fixed and generated inputs use the shared model/checker; invalid-input
+unit witnesses stay outside oracle files.
+
+The previous pushed head `22da3b06e` has 25 successful checks and one skipped
+CodeRabbit check. Those checks do not validate this new semantic tree. CI for its
+new pushed head must run. CodeRabbit's last covered production commit remains
+`162eebf39`; automatic review is paused. No later review is implied.
+No counterexample remains in the declared metadata-sharing, discarded-publication
+or paired-Set work scope. General readiness remains unproven: separate #2334
+cleanup/restart freshness still has its recorded counterexample, #2349 now owns
+the explicitly excluded draft bug, and the combined Angular #2327 tree is untested.

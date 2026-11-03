@@ -28,7 +28,7 @@ export type DurationFields = Record<(typeof durationFields)[number], number>
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
- * Record prototypes are observable shape; different prototypes are unequal.
+ * Plain records can compare by keys with keyed class instances and records from other realms.
  *
  * @param a - First value to compare
  * @param b - Second value to compare
@@ -49,7 +49,8 @@ export function deepEquals(a: any, b: any): boolean {
 
 /**
  * @internal Whether a synced row changed observably: deep equality that
- * tells -0 from 0, as row values do (FID-1; maintainer decision 2026-10-29).
+ * tells -0 from 0 and preserves record prototypes, as public row values do.
+ * Maintainer decisions: FID-1, 2026-10-29; record shape, 2026-11-03.
  */
 export function sameRowValue(a: unknown, b: unknown): boolean {
   return deepEqualsInternal(a, b, ROW)
@@ -198,18 +199,32 @@ export function deepEqualsInternal(
       return aValues.every((val) => b.has(val))
     }
 
-    // Compare each candidate pair once, with independent cycle bookkeeping.
-    // Augmenting paths find a bijection without enumerating permutations.
+    // A paired equality is already a bijection. Keep common equal inputs linear.
+    if (
+      aValues.every((value, index) =>
+        deepEqualsInternal(value, bValues[index], mode, visited),
+      )
+    ) {
+      visited.delete(a)
+      return true
+    }
+
+    // Recursive comparisons remove their own pairs before returning. Reuse the
+    // ancestor map; only failed assignments need augmenting-path search.
     const candidates = aValues.map((value) =>
       bValues.flatMap((candidate, index) =>
-        deepEqualsInternal(value, candidate, mode, new Map(visited))
-          ? [index]
-          : [],
+        deepEqualsInternal(value, candidate, mode, visited) ? [index] : [],
       ),
     )
     const assigned = new Map<number, number>()
-    const match = (index: number, seen: Set<number>): boolean =>
-      candidates[index]!.some((candidate) => {
+    const match = (index: number, seen: Set<number>): boolean => {
+      const options = candidates[index]!
+      const free = options.find((candidate) => !assigned.has(candidate))
+      if (free !== undefined) {
+        assigned.set(free, index)
+        return true
+      }
+      return options.some((candidate) => {
         if (seen.has(candidate)) return false
         seen.add(candidate)
         const previous = assigned.get(candidate)
@@ -217,6 +232,7 @@ export function deepEqualsInternal(
         assigned.set(candidate, index)
         return true
       })
+    }
     const result = aValues.every((_, index) => match(index, new Set()))
     visited.delete(a)
     return result
@@ -287,13 +303,16 @@ export function deepEqualsInternal(
   }
   // Handle objects
   if (typeof a === `object`) {
-    // Public record shape includes its prototype. Only draft reconstruction
-    // bridges class instances and plain records (JSON snapshots erase classes).
+    // Row publication preserves record prototypes. Generic equality and draft
+    // reconstruction keep their established plain-record/class bridge.
     const prototype = Object.getPrototypeOf(a)
     const prototypeB = Object.getPrototypeOf(b)
     const plain = isPlainPrototype(prototype)
     const plainB = isPlainPrototype(prototypeB)
-    if (prototype !== prototypeB && (!draft || (!plain && !plainB)))
+    if (
+      prototype !== prototypeB &&
+      ((mode & ROW && !draft) || (!plain && !plainB))
+    )
       return false
     if (mode & PUBLICATION && !(plain && plainB)) return false
 

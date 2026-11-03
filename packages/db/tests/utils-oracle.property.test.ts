@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
@@ -20,8 +21,9 @@ import { declareOracle } from './oracle-declaration.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
- * established examples in `utils.test.ts`, promises change-event equality for
- * its supported value classes. This oracle checks bounded equality and
+ * established examples in `utils.test.ts`, promises generic value equality.
+ * `sameRowValue` additionally preserves record prototypes and signed zero for
+ * Collection change events. This oracle checks bounded equality and
  * inequality laws for those classes, not general graph isomorphism.
  * Independent value constructors exercise reflexivity, symmetry, copied
  * structure, and changed-leaf inequality for primitives, arrays, records,
@@ -54,7 +56,11 @@ let nextPropertyId = 0
 function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   [K in keyof Ts]: fc.Arbitrary<Ts[K]>
 }) {
-  return (name: string, check: (...values: Ts) => void): void => {
+  return (
+    name: string,
+    check: (...values: Ts) => void,
+    runs = campaignRuns,
+  ): void => {
     const id = ++nextPropertyId
     const property = `utils.${id}`
     const label = `${id}: ${name}`
@@ -64,11 +70,11 @@ function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
 
     oracleReplayTest(fcTest).prop([argumentsArbitrary], {
       seed: fixedSeed,
-      numRuns: oracleRuns(campaignRuns),
+      numRuns: oracleRuns(runs),
     })(`${label} fixed`, (values) => check(...values))
     oracleReplayTest(fcTest, property).prop(
       [argumentsArbitrary],
-      oraclePropertyOptions(campaignRuns, property),
+      oraclePropertyOptions(runs, property),
     )(`${label} random`, (values) => check(...values))
   }
 }
@@ -612,6 +618,8 @@ describe(`deepEquals property-based tests`, () => {
           `same-class`,
           `plain-class`,
           `null-plain`,
+          `foreign-plain`,
+          `row-prototypes`,
         ])
         reach.beginHistory()
         class Secret {
@@ -648,18 +656,27 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(secret, new Secret(w), false)
         expectEqualityPair({ s: secret }, { s: new Secret(v) }, false)
         expectEqualityPair(new Secret(v), {}, false)
-        // Maintainer decision 2026-11-03: change-event equality preserves
-        // record prototypes. Draft equality retains its separate JSON bridge.
+        // Generic equality retains main's JSON/record bridge. The approved
+        // publication decision changes row equality, not the exported helper.
         expectEqualityPair(new Point(v), new Point(w), v === w)
         reach.reach(`same-class`)
-        expectEqualityPair(new Point(v), { a: w }, false)
+        expectEqualityPair(new Point(v), { a: w }, v === w)
         reach.reach(`plain-class`)
         expectEqualityPair(new Point(v), new Other(v), false)
-        // A null-prototype record has a different observable shape.
         const bare = Object.assign(Object.create(null), { a: v })
-        expectEqualityPair(bare, { a: w }, false)
-        expectEqualityPair(Object.create(null), {}, false)
+        expectEqualityPair(bare, { a: w }, v === w)
+        expectEqualityPair(Object.create(null), {}, true)
         reach.reach(`null-plain`)
+        const foreign = runInNewContext(`({})`) as { a: number }
+        foreign.a = v
+        expectEqualityPair(foreign, { a: w }, v === w)
+        reach.reach(`foreign-plain`)
+        for (const record of [new Point(v), bare, foreign]) {
+          expect(sameRowValue(record, { a: w })).toBe(false)
+          expect(sameRowValue({ a: w }, record)).toBe(false)
+        }
+        expect(sameRowValue(new Point(v), new Point(w))).toBe(v === w)
+        reach.reach(`row-prototypes`)
         reach.assertReached()
       },
     )
@@ -846,33 +863,73 @@ describe(`typed-array value class`, () => {
 /**
  * Object-valued Sets compare unordered structural members with multiplicity:
  * distinct objects with equal fields still occupy distinct Set positions.
- * The approved record-prototype rule distinguishes plain/class/null records.
+ * Row equality distinguishes plain/class/null records; generic equality keeps
+ * the established plain-record/class bridge.
  * AGENTS.md's Algorithm Efficiency rule excludes combinatorial assignment
  * searches. Scalar record comparisons below get a generous cubic field-read
  * ceiling; this is a work measure, not elapsed time or a nested-value bound.
  *
- * The model counts authored shape/value tokens. It neither searches candidate
- * assignments nor calls production equality. Generated widths and values
+ * The model counts authored shape/value tokens. Row equality requires exact
+ * counts. Generic equality permits a plain/null record to bridge either keyed
+ * class, so each side's excess class counts must fit the other's plain slots.
+ * This counts capacity without searching assignments or calling production.
+ * Generated widths and values
  * construct equal bags, a late unmatched prototype, and a count deficit where
  * every member has some candidate. Rotation challenges insertion order. Empty
  * and singleton neighbors use the same model. Optional parent links close a
  * cycle through the compared Sets without changing token identity.
  */
-type SetRecord = { kind: `plain` | `class` | `null`; value: number }
+type SetRecord = { kind: `plain` | `class` | `other` | `null`; value: number }
 const ambiguousSets = fc.record({
   width: fc.integer({ min: 6, max: 12 }),
   value: fc.integer({ min: 1, max: 5 }),
   rotation: fc.nat(12),
 })
-function setBag(records: ReadonlyArray<SetRecord>): Array<[string, number]> {
-  const counts = new Map<string, number>()
+function setBag(records: ReadonlyArray<SetRecord>) {
+  const counts = new Map<number, Record<SetRecord[`kind`], number>>()
   for (const { kind, value } of records) {
-    const token = `${kind}:${value}`
-    counts.set(token, (counts.get(token) ?? 0) + 1)
+    const entry = counts.get(value) ?? { plain: 0, class: 0, other: 0, null: 0 }
+    entry[kind]++
+    counts.set(value, entry)
   }
-  return [...counts].sort(([a], [b]) => a.localeCompare(b))
+  return counts
+}
+function setBagsEqual(
+  left: ReadonlyArray<SetRecord>,
+  right: ReadonlyArray<SetRecord>,
+  preserveShape: boolean,
+): boolean {
+  if (left.length !== right.length) return false
+  const a = setBag(left)
+  const b = setBag(right)
+  if (a.size !== b.size) return false
+  for (const [value, x] of a) {
+    const y = b.get(value)
+    if (!y) return false
+    if (preserveShape) {
+      if (
+        (Object.keys(x) as Array<SetRecord[`kind`]>).some(
+          (kind) => x[kind] !== y[kind],
+        )
+      )
+        return false
+    } else {
+      const total = (counts: typeof x) =>
+        Object.values(counts).reduce((sum, count) => sum + count, 0)
+      const excess = (from: typeof x, to: typeof x) =>
+        Math.max(0, from.class - to.class) + Math.max(0, from.other - to.other)
+      if (
+        total(x) !== total(y) ||
+        excess(x, y) > y.plain + y.null ||
+        excess(y, x) > x.plain + x.null
+      )
+        return false
+    }
+  }
+  return true
 }
 class SetPayload {}
+class OtherSetPayload {}
 const setReachStates = [
   `empty`,
   `singleton`,
@@ -880,6 +937,7 @@ const setReachStates = [
   `equal`,
   `unmatched`,
   `deficit`,
+  `reassignment`,
   `cyclic`,
   `acyclic`,
   `general-forward`,
@@ -892,14 +950,14 @@ function checkSetBag(
   right: ReadonlyArray<SetRecord>,
   cyclic: boolean,
   reach: (state: (typeof setReachStates)[number]) => void,
+  workLimit?: number,
 ): void {
-  const expected =
-    JSON.stringify(setBag(left)) === JSON.stringify(setBag(right))
   const errors: Array<Error> = []
   for (const [name, equal] of [
     [`general`, deepEquals],
     [`row`, sameRowValue],
   ] as const) {
+    const expected = setBagsEqual(left, right, name === `row`)
     for (const [a, b, direction] of [
       [left, right, `forward`],
       [right, left, `reverse`],
@@ -907,16 +965,18 @@ function checkSetBag(
       try {
         reach(`${name}-${direction}`)
         let reads = 0
-        const ceiling = 4 * (Math.max(a.length, b.length) + 1) ** 3
+        const ceiling = workLimit ?? 4 * (Math.max(a.length, b.length) + 1) ** 3
         const make = (records: ReadonlyArray<SetRecord>) => {
           const result = new Set<object>()
           for (const spec of records) {
             const member: object =
               spec.kind === `class`
                 ? new SetPayload()
-                : spec.kind === `null`
-                  ? (Object.create(null) as object)
-                  : {}
+                : spec.kind === `other`
+                  ? new OtherSetPayload()
+                  : spec.kind === `null`
+                    ? (Object.create(null) as object)
+                    : {}
             Object.defineProperty(member, `value`, {
               enumerable: true,
               get() {
@@ -951,7 +1011,7 @@ function checkSetBag(
     })
 }
 declareOracle({
-  model: [setBag],
+  model: [setBag, setBagsEqual],
   check: [checkSetBag],
   grammar: [ambiguousSets],
 })
@@ -1003,8 +1063,83 @@ describe(`object Set matching work`, () => {
           reach.reach,
         )
         reach.reach(`deficit`)
+        // A greedy first match needs reassignment: the plain member can use
+        // either class, but the class member can use only its own class.
+        checkSetBag(
+          [
+            { kind: `plain`, value },
+            { kind: `class`, value },
+          ],
+          [
+            { kind: `class`, value },
+            { kind: `other`, value },
+          ],
+          cyclic,
+          reach.reach,
+        )
+        reach.reach(`reassignment`)
       }
       reach.assertReached()
     },
+  )
+})
+
+/**
+ * Equal Sets whose corresponding members are equal need no assignment search.
+ * The field-read bound is linear for this common paired-input family. It does
+ * not impose linear work on arbitrary unordered or unequal Sets. The same
+ * independent bag model checks distinct and interchangeable scalar members,
+ * with and without links back to the root Set, through both equality APIs.
+ * Width varies across 1,024–3,072, including the reported 3,000-member scale.
+ */
+const pairedSets = fc.record({
+  width: fc.integer({ min: 1024, max: 3072 }),
+  value: fc.integer({ min: 1, max: 5 }),
+})
+declareOracle({ grammar: [pairedSets] })
+describe(`paired object Set matching work`, () => {
+  const reach = createOracleReach(`utils.paired-set-matching`, [
+    ...setReachStates.filter((state) =>
+      [
+        `general-forward`,
+        `general-reverse`,
+        `row-forward`,
+        `row-reverse`,
+      ].includes(state),
+    ),
+    `distinct`,
+    `interchangeable`,
+    `cyclic`,
+    `acyclic`,
+  ])
+  afterAll(() => {
+    if (reach.counts().get(`distinct`)) {
+      reach.assertReached()
+      process.stdout.write(
+        `Paired Set reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    }
+  })
+  utilsProperty([pairedSets])(
+    `paired equal Sets use linear scalar reads at large widths`,
+    ({ width, value }) => {
+      reach.beginHistory()
+      for (const distinct of [false, true]) {
+        const records: Array<SetRecord> = Array.from(
+          { length: width },
+          (_, at) => ({
+            kind: `plain`,
+            value: value + (distinct ? at : 0),
+          }),
+        )
+        for (const cyclic of [false, true]) {
+          checkSetBag(records, records, cyclic, reach.reach, 4 * width)
+          reach.reach(cyclic ? `cyclic` : `acyclic`)
+        }
+        reach.reach(distinct ? `distinct` : `interchangeable`)
+      }
+      reach.assertReached()
+    },
+    10,
   )
 })

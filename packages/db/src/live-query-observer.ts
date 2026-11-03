@@ -1,4 +1,5 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
+import { codedMessage, devBuild } from './error-message.js'
 import { runAllCallbacks } from './utils/callbacks.js'
 import {
   getLiveQueryStatusFlags,
@@ -207,6 +208,17 @@ class LiveQueryObserverImpl<
     onPreload: (() => void) | undefined,
     suspendUntilReady: boolean,
   ) {
+    if (
+      collection &&
+      (!Number.isFinite(collection._stateRevision) ||
+        !Number.isFinite(collection._layoutRevision))
+    ) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `LiveQueryObserver requires finite Collection row and layout revision clocks`
+          : codedMessage(262),
+      )
+    }
     this.collection = collection
     this.wholesale = wholesale
     this.onPreload = onPreload
@@ -401,15 +413,7 @@ class LiveQueryObserverImpl<
    */
   private refreshDetachedState(collection: Collection<T, TKey, any>): void {
     const status = collection.status
-    const revision = collection._stateRevision
-    const layoutRevision = collection._layoutRevision
-
-    if (
-      this.cachedEntries === undefined ||
-      revision !== this.cachedCollectionRevision ||
-      layoutRevision !== this.cachedCollectionLayoutRevision
-    )
-      this.captureEntries(collection)
+    this.captureEntries(collection)
 
     // A health-only change moves no row or status. Trees keep their identity
     // until their content changes, so identity tells whether it went stale.
@@ -615,16 +619,7 @@ class LiveQueryObserverImpl<
       // immediately after subscribe returns.
       this.flushPublications(!this.wholesale)
       // The render-time read is still current unless the handshake published.
-      const revision = collection._stateRevision
-      const layoutRevision = collection._layoutRevision
-      if (
-        this.cachedEntries === undefined ||
-        revision !== this.cachedCollectionRevision ||
-        layoutRevision !== this.cachedCollectionLayoutRevision
-      ) {
-        const { entries } = this.readEntries(collection)
-        this.updateCachedEntries(entries, revision, layoutRevision)
-      }
+      this.captureEntries(collection)
     }
     if (this.clientBinding?.seed) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)

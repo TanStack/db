@@ -20,6 +20,39 @@ const SEED: Array<Row> = [
 ]
 
 let seq = 0
+
+// Clocks are a Collection invariant, not a compatibility extension point.
+// Reject a contradictory collaborator before binding the client or starting
+// any Collection resource (AGENTS.md: fail before mutation).
+describe(`observer Collection revision invariant`, () => {
+  for (const clock of [`_stateRevision`, `_layoutRevision`] as const) {
+    it.each([undefined, null, `0`, NaN, Infinity])(
+      `rejects ${clock}=%s before acquiring resources`,
+      (invalid) => {
+        const collection = createCollection<Row, string>({
+          getKey: (row) => row.id,
+          startSync: false,
+          sync: { sync: () => {} },
+        })
+        vi.spyOn(collection, clock, `get`).mockReturnValue(invalid as number)
+        const entries = vi.spyOn(collection, `entries`)
+        const subscribe = vi.spyOn(collection, `subscribeChanges`)
+        const start = vi.spyOn(collection, `startSyncImmediate`)
+        const client = new DbClient()
+        const bind = vi.spyOn(client, `_bindLiveQueryObserver`)
+        expect(() => createLiveQueryObserver(collection, { client })).toThrow(
+          /revision clocks/,
+        )
+        expect(bind).not.toHaveBeenCalled()
+        expect(entries).not.toHaveBeenCalled()
+        expect(subscribe).not.toHaveBeenCalled()
+        expect(start).not.toHaveBeenCalled()
+        expect(collection.status).toBe(`idle`)
+      },
+    )
+  }
+})
+
 function makeSource(data: Array<Row> = SEED) {
   return createCollection(
     mockSyncCollectionOptions<Row>({
