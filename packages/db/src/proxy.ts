@@ -3,7 +3,7 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEqualsInternal, isTemporal } from './utils'
+import { DRAFT, ROW, deepEqualsInternal, isTemporal } from './utils'
 import { codedMessage, devBuild } from './error-message'
 
 // Resolve draft handles before calling native Map/Set membership methods.
@@ -364,7 +364,7 @@ function draftValuesEqual(
   right: unknown,
   paired?: Map<object, object>,
 ): boolean {
-  return deepEqualsInternal(left, right, paired, true, false, `row`)
+  return deepEqualsInternal(left, right, DRAFT | ROW, paired)
 }
 
 /**
@@ -924,16 +924,8 @@ export function withFlatChangeTracking<T extends object>(
     for (const key in draft) {
       const value = (draft as Record<string, unknown>)[key]
       const before = original[key]
-      // Only a hidden field can hold an object; compare it as the proxy does.
-      if (
-        !Object.hasOwn(original, key) ||
-        !(
-          Object.is(value, before) ||
-          (typeof before === `object` &&
-            before !== null &&
-            draftValuesEqual(value, before))
-        )
-      ) {
+      // Compare as the proxy does; only a hidden field can hold an object.
+      if (!Object.hasOwn(original, key) || !draftValuesEqual(value, before)) {
         defineDataProperty(changes, key, value)
         if (value !== null && typeof value === `object`) assignedObject = true
       }
