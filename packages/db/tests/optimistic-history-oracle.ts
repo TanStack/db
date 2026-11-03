@@ -140,7 +140,17 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * fields.
  */
 
-export type HistoryRow = { id: number; a: number; b: number; c: number }
+// `d` is optional: only an application's edit sets it, and an edit can
+// remove it again. The update API represents a removed field as an own
+// `undefined` field in the row and in `changes` (the documented rule in
+// proxy-detachment-contract-oracle.test.ts; maintainer decision 2026-11-03).
+export type HistoryRow = {
+  id: number
+  a: number
+  b: number
+  c: number
+  d?: number
+}
 type Fields = Partial<Omit<HistoryRow, `id`>>
 type SourceOperation =
   { type: `row`; row: HistoryRow } | { type: `delete`; key: number }
@@ -183,6 +193,8 @@ export type OptimisticStep =
       // Replace `fields` with the visible row's zero fields, signs flipped.
       // A missing row, or one with no zero, keeps `fields`.
       flipZeros?: boolean
+      // The draft also deletes `d` (`delete draft.d`).
+      removesD?: boolean
     }
   | {
       type: `delete`
@@ -332,16 +344,20 @@ class HistoryModel {
       row &&
       Object.entries(step.fields).every(([key, value]) =>
         Object.is(row[key as keyof Fields], value),
-      )
+      ) &&
+      !(step.removesD && Object.hasOwn(row, `d`))
     )
       return
+    const authored: HistoryRow = {
+      ...(row ?? { id: step.key, a: 0, b: 0, c: this.insertDefault }),
+      ...(step.type === `edit` ? step.fields : {}),
+    }
+    if (step.type === `edit` && step.removesD && Object.hasOwn(authored, `d`))
+      authored.d = undefined
     this.transactions.push({
       key: step.key,
       kind: step.type === `delete` ? `delete` : row ? `update` : `insert`,
-      row: {
-        ...(row ?? { id: step.key, a: 0, b: 0, c: this.insertDefault }),
-        ...(step.type === `edit` ? step.fields : {}),
-      },
+      row: authored,
       optimistic: step.optimistic,
       state: step.type === `edit` && step.pending ? `pending` : `persisting`,
       held: false,
@@ -517,7 +533,14 @@ class HistoryModel {
   }
 }
 
-const plain = ({ id, a, b, c }: HistoryRow): HistoryRow => ({ id, a, b, c })
+const plain = (row: HistoryRow): HistoryRow => ({
+  id: row.id,
+  a: row.a,
+  b: row.b,
+  c: row.c,
+  // An own `d`, even `undefined`, stays; an absent one stays absent.
+  ...(Object.hasOwn(row, `d`) ? { d: row.d } : {}),
+})
 const observed = (
   row: HistoryRow & {
     $origin: `local` | `remote`
@@ -729,13 +752,37 @@ export const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       key: fc.integer({ min: 1, max: 3 }),
       fields: fc
         .record(
-          { a: fieldValue, b: fieldValue, c: fieldValue },
+          // `d` too, so a later edit often finds a field to remove.
+          { a: fieldValue, b: fieldValue, c: fieldValue, d: fieldValue },
           { requiredKeys: [] },
         )
         .filter((fields) => Object.keys(fields).length > 0),
       optimistic: fc.boolean(),
       inHandler: handlerSourceBatch,
     }),
+  },
+  {
+    // An edit that sets the optional `d`, or removes it with `delete`
+    // (`removesD`). Removal needs a row that holds `d`, so both arms share
+    // a key range small enough to revisit.
+    weight: 2,
+    arbitrary: fc.oneof(
+      fc.record({
+        type: fc.constant(`edit` as const),
+        key: fc.integer({ min: 1, max: 3 }),
+        fields: fieldValue.map((d): Fields => ({ d })),
+        optimistic: fc.boolean(),
+        inHandler: fc.constant(undefined),
+      }),
+      fc.record({
+        type: fc.constant(`edit` as const),
+        key: fc.integer({ min: 1, max: 3 }),
+        fields: fc.constant({}),
+        optimistic: fc.boolean(),
+        inHandler: fc.constant(undefined),
+        removesD: fc.constant(true),
+      }),
+    ),
   },
   {
     // An edit that changes only the sign of the row's zeros (-0 and 0 are
@@ -785,7 +832,26 @@ export const optimisticHistory = fc.record({
     selector: (row) => row.id,
     maxLength: 3,
   }),
-  steps: fc.array(optimisticStep, { minLength: 2, maxLength: 24 }),
+  steps: fc
+    .array(optimisticStep, { minLength: 2, maxLength: 24 })
+    // A removal of `d` follows an edit that sets it on the same key, so the
+    // removal finds a field to remove; random steps rarely line them up.
+    .map((steps) =>
+      steps.flatMap((step): Array<OptimisticStep> =>
+        step.type === `edit` && step.removesD
+          ? [
+              {
+                type: `edit`,
+                key: step.key,
+                fields: { d: 1 },
+                optimistic: step.optimistic,
+                inHandler: undefined,
+              },
+              step,
+            ]
+          : [step],
+      ),
+    ),
 })
 // The core grammar plus store steps. While a hold is outstanding, an
 // in-handler batch does not await acceptance.
@@ -997,6 +1063,7 @@ export async function runOptimisticHistory(
             a: z.number(),
             b: z.number(),
             c: z.number().default(options.insertDefault),
+            d: z.number().optional(),
           }),
         })
   const collection =
@@ -1049,6 +1116,8 @@ export async function runOptimisticHistory(
     // visible row changed only by the sign of a zero: no pending-writes flag
     // changes, so only value equality can publish the change.
     zeroSignEditsOverPending: 0,
+    // Accepted edits that remove `d` from a row holding it.
+    removedFieldEdits: 0,
     // Drains that kept a settled row held for a deferred transaction.
     deferredHolds: 0,
     abortedDeferred: 0,
@@ -1394,18 +1463,19 @@ export async function runOptimisticHistory(
         expect(
           actual,
           `${label}: reads ${JSON.stringify(actual)} expected ${JSON.stringify(expected)}`,
-        ).toEqual(expected)
-        expect(sorted(replica.values()), `${label}: event replica`).toEqual(
-          expected,
-        )
+        ).toStrictEqual(expected)
+        expect(
+          sorted(replica.values()),
+          `${label}: event replica`,
+        ).toStrictEqual(expected)
         expect(
           sorted(rawReplica.values()),
           `${label}: raw event replica`,
-        ).toEqual(expected)
+        ).toStrictEqual(expected)
         expect(
           sorted([...downstream.values()].map(plain)),
           `${label}: downstream`,
-        ).toEqual(expected.map(plain))
+        ).toStrictEqual(expected.map(plain))
         // Every per-mutation pass walks the tracked transactions, so the
         // Collection tracks exactly its unsettled transactions. A held row
         // outlives its completed transaction in the held-row layer, not here.
@@ -1451,6 +1521,13 @@ export async function runOptimisticHistory(
           if (index === undefined) continue
           const intent = model.transactions[index]!
           const was = before.find((row) => row.id === step.key)
+          if (
+            step.type === `edit` &&
+            step.removesD &&
+            was !== undefined &&
+            Object.hasOwn(was, `d`)
+          )
+            counts.removedFieldEdits++
           const now = model.visible().get(step.key)
           if (
             inFlight &&
@@ -1499,7 +1576,10 @@ export async function runOptimisticHistory(
                 : collection.update(
                     step.key,
                     { optimistic: step.optimistic },
-                    (draft) => Object.assign(draft, step.fields),
+                    (draft) => {
+                      Object.assign(draft, step.fields)
+                      if (step.removesD) delete draft.d
+                    },
                   )
           const manual = step.type === `edit` && step.pending === true
           const tx = manual
@@ -1517,7 +1597,9 @@ export async function runOptimisticHistory(
             expect(
               live && plain(live),
               `${position}: optimistic mutation is live in the same tick`,
-            ).toEqual(step.type === `delete` ? undefined : plain(intent.row))
+            ).toStrictEqual(
+              step.type === `delete` ? undefined : plain(intent.row),
+            )
           }
           const operation: (typeof operations)[number] = {
             tx,
@@ -1544,9 +1626,10 @@ export async function runOptimisticHistory(
                     : plain(intent.row)
                   : // An authored field is a change unless it is the same
                     // value; -0 and 0 are distinct row values (maintainer
-                    // decision, 2026-10-29).
-                    Object.fromEntries(
-                      Object.entries(step.fields).filter(
+                    // decision, 2026-10-29). A removed field is a change
+                    // marked `undefined`.
+                    Object.fromEntries([
+                      ...Object.entries(step.fields).filter(
                         ([key, value]) =>
                           !Object.is(
                             before.find((row) => row.id === intent.key)?.[
@@ -1555,7 +1638,14 @@ export async function runOptimisticHistory(
                             value,
                           ),
                       ),
-                    ),
+                      ...(step.removesD &&
+                      before.some(
+                        (row) =>
+                          row.id === intent.key && Object.hasOwn(row, `d`),
+                      )
+                        ? [[`d`, undefined]]
+                        : []),
+                    ]),
           }
           operations.push(operation)
           expect(

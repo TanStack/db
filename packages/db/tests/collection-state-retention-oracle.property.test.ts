@@ -809,6 +809,19 @@ it(`writes zero-sign edits over in-flight writes in the fixed campaign`, async (
   expect(zeroSignEdits).toBeGreaterThan(0)
 })
 
+// Reach: an edit that removes a field the row holds. The update API keeps
+// the removed field as an own `undefined`, which only strict row comparisons
+// distinguish from an absent one.
+it(`removes a held field in the fixed campaign`, async () => {
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  let removedFieldEdits = 0
+  for (const { initial, steps } of histories) {
+    const counts = await runOptimisticHistory(initial, steps)
+    removedFieldEdits += counts.removedFieldEdits
+  }
+  expect(removedFieldEdits).toBeGreaterThan(0)
+})
+
 // Pinned replays for a source delete of a key the source never held. The
 // backend accepted an optimistic insert, then deleted the row before the
 // source streamed it. The model's drain applies the delete to the applied
