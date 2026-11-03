@@ -8,8 +8,9 @@
  * predicts. The laws, each judged per test or per probe:
  *
  * - `registration`: a property registers its lanes, pins, calibrations, and
- *   determinism test, or fails to load when a required state has no segment
- *   or a segment names an undeclared state.
+ *   determinism test, or fails to load when its id is not a registered
+ *   oracle property, a required state has no segment, or a segment names an
+ *   undeclared state.
  * - `verdict`: a test fails with a violation of law L exactly when its first
  *   failing history violates L. Within one history a driver error decides
  *   first, then a law violation, then a missed segment state; a driver error
@@ -93,6 +94,8 @@ type Draft = {
   /** `slow`: 300 ms per history under a 100 ms timeout. */
   timing: `normal` | `slow`
   calibrations: Array<(typeof calibrationKinds)[number]>
+  /** An id no oracle configuration registers. */
+  unregistered: boolean
 }
 type Suite = { drafts: Array<Draft> }
 
@@ -161,6 +164,11 @@ const draft: fc.Arbitrary<Draft> = fc.record({
   calibrations: fc.array(fc.constantFrom(...calibrationKinds), {
     maxLength: 3,
   }),
+  // Rare: a property under an id no oracle configuration registers.
+  unregistered: fc.oneof(
+    { weight: 9, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
 })
 const suite: fc.Arbitrary<Suite> = fc.record({
   drafts: fc.array(draft, { minLength: 1, maxLength: 2 }),
@@ -209,6 +217,7 @@ function resolveSuite({ drafts }: Suite): Plan {
           : [],
         nondeterministic: d.nondeterministic,
         reachVia: d.reachVia,
+        ...(d.unregistered ? { unregistered: true } : {}),
         ...(d.timing === `slow` ? { slow: true, timeout: 100 } : {}),
         calibrations: d.calibrations.map((kind, at) => ({
           name: `cal-${at}`,
@@ -306,6 +315,8 @@ function predictSpec(
       .map((entry) => entry.history)
   const tests = new Map<string, Outcome>()
   const generated = spec.source.kind === `generated`
+  // Every source, enumerated or generated, must name a registered property.
+  if (spec.unregistered) return { loads: false }
   if (generated) {
     const declared = new Set(spec.states)
     const entered = new Set(spec.segments.flatMap((segment) => segment.enters))
@@ -885,7 +896,7 @@ function checkSuite(
       if (seen.loaded)
         return violation(
           `run`,
-          `${spec.id} loaded, but a required state has no segment or a segment names an undeclared state`,
+          `${spec.id} loaded, but its id is unregistered, a required state has no segment, or a segment names an undeclared state`,
           `registration`,
         )
       continue
@@ -1066,6 +1077,7 @@ const generatedDraft = (overrides: Partial<Draft>): Draft => ({
   reachVia: `reached`,
   timing: `normal`,
   calibrations: [],
+  unregistered: false,
   ...overrides,
 })
 const pin = (
@@ -1137,6 +1149,17 @@ oracleProperty({
           statesMode: `extra`,
           segments: [{ prefix: [0], enters: [`saw-0`] }],
         }),
+      ),
+      // An enumerated source has no random lane, which is where an id was
+      // checked before; registration itself must check it.
+      pin(
+        `an unregistered enumerated property fails to load`,
+        [`registration-error`],
+        {
+          ...generatedDraft({}),
+          source: { kind: `enumerated`, histories: [[0], [1]] },
+          unregistered: true,
+        },
       ),
       pin(
         `a calibration skips a candidate whose clean trace fails`,

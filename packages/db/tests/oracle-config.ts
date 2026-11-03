@@ -212,6 +212,8 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `sqlite-persistence.setup-reopen`,
+  `adapter.handler-types`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.required-history`,
@@ -278,6 +280,8 @@ const staticOracleProperties = [
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
   `local-storage.value-fidelity`,
+  `local-storage.peers`,
+  `local-storage.write-order`,
   `live-query-observer.hydration-terminal`,
   `optimistic-history.core`,
   `self-oracle.synthetic-0`,
@@ -550,7 +554,7 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...includesMatrixProperties,
 ])
 
-function assertRegisteredOracleProperty(property: string): void {
+export function assertRegisteredOracleProperty(property: string): void {
   if (!registeredOracleProperties.has(property)) {
     throw new Error(`unknown oracle property: ${property}`)
   }

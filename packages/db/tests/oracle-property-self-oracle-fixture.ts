@@ -64,6 +64,8 @@ export type SyntheticSpec = {
   /** Each history takes about 300 ms; with `timeout`, tests outlive it. */
   slow?: boolean
   timeout?: number
+  /** Registers under an id no oracle configuration knows. */
+  unregistered?: boolean
 }
 
 /** The synthetic language: one to three items, mostly ordinary ones. */
@@ -156,6 +158,7 @@ function syntheticCalibrations(
 }
 
 export function syntheticProperty(spec: SyntheticSpec): void {
+  const id = spec.unregistered ? `self-oracle.unregistered` : spec.id
   const parts = {
     model: () => undefined,
     // Without `reached`, the framework counts the driver's `reach` records.
@@ -172,7 +175,7 @@ export function syntheticProperty(spec: SyntheticSpec): void {
   }
   if (spec.source.kind === `enumerated`) {
     oracleProperty({
-      id: spec.id,
+      id,
       law,
       histories: spec.source.histories,
       // A label with `|`, which a rerun command must escape.
@@ -183,7 +186,7 @@ export function syntheticProperty(spec: SyntheticSpec): void {
     return
   }
   oracleProperty({
-    id: spec.id,
+    id,
     law,
     histories: {
       arbitrary: syntheticArbitrary,

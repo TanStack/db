@@ -472,6 +472,16 @@ const ownerGroups: ReadonlyArray<
     `optimistic-history`,
   ],
   [
+    `db-sqlite-persistence-core/tests/collection-setup-reopen-oracle.test.ts`,
+    `sqlite-persistence`,
+    `setup-reopen`,
+  ],
+  [
+    `db/tests/mutation-handler-types-oracle.test.ts`,
+    `adapter`,
+    `handler-types`,
+  ],
+  [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
     `managed-claim-read retired-storage`,
@@ -530,6 +540,12 @@ const ownerGroups: ReadonlyArray<
     `db/tests/local-storage-value-fidelity-oracle.property.test.ts`,
     `local-storage`,
     `value-fidelity`,
+  ],
+  [`db/tests/local-storage-peers-oracle.test.ts`, `local-storage`, `peers`],
+  [
+    `db/tests/local-storage-write-order-oracle.test.ts`,
+    `local-storage`,
+    `write-order`,
   ],
   [
     `db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,

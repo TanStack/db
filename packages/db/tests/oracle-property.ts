@@ -107,6 +107,7 @@ import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import {
+  assertRegisteredOracleProperty,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
@@ -415,6 +416,9 @@ interface PropertyTest {
 export function oracleProperty<History, Expected, Plan = History>(
   options: OraclePropertyOptions<History, Expected, Plan>,
 ): void {
+  // Every source names a registered property, so its replay and manifest
+  // entries exist; an enumerated source has no random lane to check it.
+  assertRegisteredOracleProperty(options.id)
   const { id, histories } = options
   recordRegistration(id, options.law, histories)
   // The tests are built as data first, so every one registers unconditionally
