@@ -19,7 +19,8 @@ import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
  * query changes, so `useSyncExternalStore`-style consumers can compare by
  * reference. Each snapshot owns a captured view of `state`/`data`, so reading
  * an older snapshot cannot expose rows from a later revision.
- * Metadata-only changes replace the snapshot while retaining its row containers.
+ * Within one row revision, metadata-only changes retain the row containers.
+ * Cleanup/reset may discard that revision even when its rows were empty.
  */
 export interface LiveQuerySnapshot<
   T extends object,
@@ -173,11 +174,10 @@ class LiveQueryObserverImpl<
     | {
         entries: Array<[TKey, T]>
         data: Array<T>
-        readonly state: Map<TKey, T>
+        state?: Map<TKey, T>
       }
     | undefined
   private layoutRevision = 0
-  private lastLayoutKeys: Array<TKey> | undefined
   private deliveredLayoutRevision: number | undefined
   private readonly subscriptions = new Set<SubscriptionRecord<T, TKey>>()
   // Publications are dispatched FIFO: an emit that happens while another
@@ -267,17 +267,22 @@ class LiveQueryObserverImpl<
       const entries = this.getVisibleEntries(collection)
       // Capture each row revision once. Sharing this value across metadata
       // snapshots keeps rows lazy and avoids retaining a chain of old snapshots.
-      let state: Map<TKey, T> | undefined
-      const rows =
-        this.cachedRows?.entries === entries
-          ? this.cachedRows
-          : (this.cachedRows = {
-              entries,
-              data: entries.map(([, value]) => value),
-              get state() {
-                return (state ??= new Map(entries))
-              },
-            })
+      let rows = this.cachedRows
+      if (!rows || rows.entries !== entries) {
+        // Captured entries already contain the previous ordered keys. Compare
+        // keys directly: serialized signatures can collide for string keys.
+        const previous = rows?.entries
+        if (
+          previous?.length !== entries.length ||
+          entries.some(([key], index) => previous[index]![0] !== key)
+        ) {
+          this.layoutRevision++
+        }
+        rows = this.cachedRows = {
+          entries,
+          data: entries.map(([, value]) => value),
+        }
+      }
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
       // The seed stands in only for a result that is still coming, so an
@@ -291,35 +296,12 @@ class LiveQueryObserverImpl<
           : liveStatus
       this.cachedServerView = forServerSnapshot
 
-      // Bump the layout revision when the ordered key sequence changes
-      // (membership, ordering, or an order-only move). Compare the key sequence
-      // directly rather than via a serialized signature: a joined-with-separator
-      // signature can collide when a key value equals the concatenation of
-      // neighboring keys around the separator. Comparing keys also avoids
-      // materializing a large string on every rebuild; a new key array is only
-      // allocated when the layout actually moved.
-      const prevKeys = this.lastLayoutKeys
-      let layoutChanged =
-        prevKeys === undefined || prevKeys.length !== entries.length
-      if (!layoutChanged) {
-        for (let i = 0; i < entries.length; i++) {
-          if (prevKeys![i] !== entries[i]![0]) {
-            layoutChanged = true
-            break
-          }
-        }
-      }
-      if (layoutChanged) {
-        this.lastLayoutKeys = entries.map(([key]) => key)
-        this.layoutRevision++
-      }
-
       const health = this.publishedHealth
         ? this.publishedHealth.tree
         : (collection as { health?: HealthNode }).health
       this.cachedSnapshot = {
         get state() {
-          return rows.state
+          return (rows.state ??= new Map(rows.entries))
         },
         data: singleResult ? rows.data[0] : rows.data,
         collection: getPublicCollection(collection),
@@ -367,7 +349,7 @@ class LiveQueryObserverImpl<
     collection: Collection<T, TKey, any>,
   ): Array<[TKey, T]> {
     if (this.clientBinding?.seed) return this.clientBinding.seed.entries
-    return this.cachedEntries ?? this.captureEntries(collection).entries
+    return this.cachedEntries ?? this.captureEntries(collection)
   }
 
   private getCollectionRevision(
@@ -394,39 +376,34 @@ class LiveQueryObserverImpl<
     return { entries, revision }
   }
 
-  private captureEntries(collection: Collection<T, TKey, any>): {
-    entries: Array<[TKey, T]>
-    revision?: number
-  } {
+  private captureEntries(
+    collection: Collection<T, TKey, any>,
+  ): Array<[TKey, T]> {
     const { entries, revision } = this.readEntries(collection)
     this.updateCachedEntries(entries, revision)
-    return { entries, revision }
+    return entries
   }
 
   private updateCachedEntries(
     entries: Array<[TKey, T]>,
     revision: number | undefined,
   ): void {
+    const previous = this.cachedEntries
     const changed =
       (revision !== undefined && revision !== this.cachedCollectionRevision) ||
-      !this.entriesEqual(this.cachedEntries, entries)
+      previous?.length !== entries.length ||
+      entries.some(
+        ([key, value], index) =>
+          previous[index]![0] !== key || previous[index]![1] !== value,
+      )
 
     // Keep identity on unchanged reattachment. Comparing entries when the row
     // revision is equal also detects layout-only moves and revisionless inputs.
-    if (changed) this.cachedEntries = entries
+    if (changed) {
+      this.cachedEntries = entries
+      this.snapshotDirty = true
+    }
     this.cachedCollectionRevision = revision
-    if (changed) this.snapshotDirty = true
-  }
-
-  private entriesEqual(
-    left: Array<[TKey, T]> | undefined,
-    right: Array<[TKey, T]>,
-  ): boolean {
-    if (!left || left.length !== right.length) return false
-    return left.every(
-      ([key, value], index) =>
-        right[index]![0] === key && right[index]![1] === value,
-    )
   }
 
   /**
@@ -588,11 +565,9 @@ class LiveQueryObserverImpl<
         this.deliveredLayoutRevision = layoutRevision
       }
       const captured =
-        changes !== undefined
+        changes !== undefined || status === `cleaned-up`
           ? this.readEntries(collection)
-          : status === `cleaned-up`
-            ? this.readEntries(collection)
-            : undefined
+          : undefined
       this.emit(
         changes,
         undefined,

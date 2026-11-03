@@ -1505,12 +1505,19 @@ getters. It does not model provisional hydration replacement or host scheduling.
 Its `live-query-observer.row-container-sharing` lane also checks the maintainer's
 2026-11-01 metadata-sharing contract: loading-to-ready and health-only changes
 keep data/Map references, while value writes replace them and retained snapshots
-keep their old rows. Fixed and random histories cross attached/detached,
-granular/wholesale, zero through three rows, and data-first/state-first reads.
-Each begins with readiness before health reports; only writes change the
-independent key/version model. The original fresh-container implementation and
-same-cardinality reuse both fail the shared comparison. Existing hydration and
-observer/layout witnesses retain their scopes. This core-only lane adds no new
+keep their old rows. Fixed and random histories cross subscribe/unsubscribe
+transitions in granular/wholesale mode, zero through three rows, and
+data-first/state-first reads. Each campaign runs 24 shared examples and 40
+generated histories. Nonempty attach, detach, and reattach have declared reach
+in each mode, including reach from fixed examples. Each history begins with
+readiness before health reports; only writes change the independent key/version
+model. A failure-list model checks fresh metadata and counts health-only
+transitions independently. Readiness-only histories cannot satisfy that reach.
+The original fresh-container implementation, same-cardinality reuse, and
+unconditional entry replacement on attachment fail the shared comparison.
+The guarded replay manifest selects only this lane's random campaign.
+Cleanup/reset may discard a row revision and is outside its sharing law.
+Existing hydration and observer/layout witnesses retain their scopes. This core-only lane adds no new
 framework scheduling promise. The independent Angular PR projects observer
 row-state identity before copying its Map; combined integration evidence is
 recorded separately from either branch's standalone validation.

@@ -648,17 +648,22 @@ describe(`a snapshot shows the current health tree`, () => {
 })
 
 /**
- * Metadata changes replace the full snapshot but retain its row containers.
+ * Within one row revision, metadata changes replace the full snapshot but
+ * retain its row containers. Cleanup/reset can discard that revision.
  * Authority: maintainer decision 2026-11-01, preserving point-in-time rows while
  * preventing status/health changes from invalidating row-only consumers.
  * A value write must still create fresh containers, even with the same keys.
  *
  * This extends the retained-snapshot owner with a direct Collection boundary:
  * Every history first marks the source ready without writing rows; its suffix
- * may then report health legally. These metadata actions do not write rows. The independent model
- * is modelRows' key/version map; only `write` changes it. At every action the
+ * may then report health legally. Subscribe/unsubscribe actions cross the
+ * attach cut without ending the sync run. Repeated subscription actions are
+ * idempotent in this single-subscriber driver. The independent model is
+ * modelRows' key/version map; only `write` changes it. At every action the
  * driver compares row values and container identities, then checks all retained
- * snapshots again to reject a mutable shared Map. Attached/detached and both
+ * snapshots again to reject a mutable shared Map. The failure list changes
+ * only on reports and clears; readiness cannot count as health-only reach.
+ * Attached/detached transitions and both
  * observer modes cross distinct cache paths. Empty and nonempty rows test lazy
  * Map materialization. Query shapes and hydration handoff retain their existing
  * owners above; this lane does not claim provider or framework scheduling.
@@ -668,10 +673,17 @@ const containerHistory = fc.record({
   attached: fc.boolean(),
   count: fc.integer({ min: 0, max: 3 }),
   dataFirst: fc.boolean(),
-  commands: fc.array(fc.constantFrom(`report`, `healthy`, `ready`, `write`), {
-    minLength: 1,
-    maxLength: 12,
-  }),
+  commands: fc.array(
+    fc.constantFrom(
+      `report`,
+      `healthy`,
+      `ready`,
+      `write`,
+      `subscribe`,
+      `unsubscribe`,
+    ),
+    { minLength: 1, maxLength: 12 },
+  ),
 })
 type ContainerHistory =
   typeof containerHistory extends fc.Arbitrary<infer T> ? T : never
@@ -684,6 +696,12 @@ type ContainerReach =
   | `health-only`
   | `status-only`
   | `value-only`
+  | `attach-granular`
+  | `attach-wholesale`
+  | `detach-granular`
+  | `detach-wholesale`
+  | `reattach-granular`
+  | `reattach-wholesale`
 
 async function checkContainerHistory(
   scenario: ContainerHistory,
@@ -711,7 +729,11 @@ async function checkContainerHistory(
     },
   })
   const observer = createLiveQueryObserver(source, { mode: scenario.mode })
-  const stop = scenario.attached ? observer.subscribe(() => {}) : undefined
+  let stop = scenario.attached ? observer.subscribe(() => {}) : undefined
+  let hasAttached = scenario.attached
+  let failures: Array<Error> = []
+  let expectedHealthOnly = 0
+  let observedHealthOnly = 0
   const retained: Array<Captured> = []
   reach.reach(scenario.attached ? `attached` : `detached`)
   reach.reach(scenario.mode)
@@ -731,6 +753,8 @@ async function checkContainerHistory(
       ...scenario.commands,
     ].entries()) {
       const input = controls!
+      const hadRow = model.has(`a`)
+      const wasAttached = stop !== undefined
       if (step === `write`) {
         const version = (model.get(`a`) ?? -1) + 1
         input.begin()
@@ -740,10 +764,21 @@ async function checkContainerHistory(
         })
         input.commit()
         model.set(`a`, version)
-      } else if (step === `report`)
-        input.reportError(new Error(`problem ${index}`))
-      else if (step === `healthy`) input.reportHealthy()
-      else input.markReady()
+      } else if (step === `report`) {
+        const error = new Error(`problem ${index}`)
+        failures.push(error)
+        input.reportError(error)
+        expectedHealthOnly++
+      } else if (step === `healthy`) {
+        if (failures.length > 0) expectedHealthOnly++
+        failures = []
+        input.reportHealthy()
+      } else if (step === `subscribe`) {
+        stop ??= observer.subscribe(() => {})
+      } else if (step === `unsubscribe`) {
+        stop?.()
+        stop = undefined
+      } else input.markReady()
       const after = observer.getSnapshot()
       const read = checkRead(
         `ordered`,
@@ -751,6 +786,20 @@ async function checkContainerHistory(
         scenario.dataFirst,
         `step ${index}`,
       )
+      // The direct source is ready after the legal prefix. Attachment never
+      // changes its status or failure frame; each read must show fresh metadata.
+      expect(after.status, `step ${index}: status`).toBe(`ready`)
+      expect(after.isSyncError, `step ${index}: sync error`).toBe(
+        failures.length > 0,
+      )
+      expect(after.health?.hasErrors, `step ${index}: health`).toBe(
+        failures.length > 0,
+      )
+      expect(
+        after.health?.failureReason?.errors.map((error) => error.cause) ?? [],
+        `step ${index}: reported failures`,
+      ).toEqual(failures)
+      reach.reach(stop ? `attached` : `detached`)
       if (step === `write`) {
         expect(read.data, `value writes replace data`).not.toBe(beforeRead.data)
         expect(read.state, `value writes replace state`).not.toBe(
@@ -761,16 +810,40 @@ async function checkContainerHistory(
         expect(read.data, `metadata keeps data`).toBe(beforeRead.data)
         expect(read.state, `metadata keeps state`).toBe(beforeRead.state)
         if (after.status !== before.status) reach.reach(`status-only`)
-        if (after.health !== before.health) reach.reach(`health-only`)
+        if (after.status === before.status && after.health !== before.health) {
+          reach.reach(`health-only`)
+          observedHealthOnly++
+        }
         if (after.status !== before.status || after.health !== before.health)
           expect(after).not.toBe(before)
       }
+      if (step !== `write` || hadRow)
+        expect(after.layoutRevision, `unchanged ordered keys`).toBe(
+          before.layoutRevision,
+        )
+      else
+        expect(after.layoutRevision, `new key changes layout`).toBeGreaterThan(
+          before.layoutRevision,
+        )
+      if (model.size > 0 && !wasAttached && stop) {
+        reach.reach(`attach-${scenario.mode}`)
+        if (hasAttached) reach.reach(`reattach-${scenario.mode}`)
+        hasAttached = true
+      }
+      if (model.size > 0 && wasAttached && !stop)
+        reach.reach(`detach-${scenario.mode}`)
       retained.push({ snapshot: after, rows: modelRows(model) })
       before = after
       beforeRead = read
     }
     for (const [index, captured] of retained.entries())
       checkRead(`ordered`, captured, !scenario.dataFirst, `retained ${index}`)
+    // Calibrate reach through the same model and driver, including histories
+    // containing only readiness: loading -> ready is never health-only.
+    expect(
+      observedHealthOnly,
+      `health-only transitions exclude readiness`,
+    ).toBe(expectedHealthOnly)
   } catch (error) {
     failure = { error }
   }
@@ -787,18 +860,36 @@ describe(`metadata snapshots share immutable row containers`, () => {
     [`granular`, `wholesale`] as const
   ).flatMap((mode) =>
     [false, true].flatMap((attached) =>
-      [0, 1, 3].map(
-        (count) =>
-          [
-            {
-              mode,
-              attached,
-              count,
-              dataFirst: count % 2 === 0,
-              commands: [`report`, `ready`, `write`, `healthy`, `write`],
-            },
-          ] as [ContainerHistory],
-      ),
+      [0, 1, 3].flatMap((count) => [
+        [
+          {
+            mode,
+            attached,
+            count,
+            dataFirst: count % 2 === 0,
+            commands: [
+              `unsubscribe`,
+              `subscribe`,
+              `unsubscribe`,
+              `subscribe`,
+              `report`,
+              `ready`,
+              `write`,
+              `healthy`,
+              `write`,
+            ],
+          },
+        ] as [ContainerHistory],
+        [
+          {
+            mode,
+            attached,
+            count,
+            dataFirst: count % 2 === 0,
+            commands: [`ready`],
+          },
+        ] as [ContainerHistory],
+      ]),
     ),
   )
   for (const campaign of [`fixed`, `random`] as const) {
@@ -819,11 +910,19 @@ describe(`metadata snapshots share immutable row containers`, () => {
           `health-only`,
           `status-only`,
           `value-only`,
+          `attach-granular`,
+          `attach-wholesale`,
+          `detach-granular`,
+          `detach-wholesale`,
+          `reattach-granular`,
+          `reattach-wholesale`,
         ],
+        { fixedHistories: examples.length },
       )
+      let histories = 0
       await fc.assert(
         fc.asyncProperty(containerHistory, async (scenario) => {
-          reach.beginHistory()
+          reach.beginHistory({ fixed: histories++ < examples.length })
           await checkContainerHistory(scenario, reach)
         }),
         {

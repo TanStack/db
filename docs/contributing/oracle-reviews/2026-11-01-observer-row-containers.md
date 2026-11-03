@@ -81,3 +81,191 @@ receiving behavior and can merge in either order.
 | ORC-014 | Core-only synchronous Collection boundary; no unverified host/provider transfer is claimed. |
 | ORC-015 | Eight declared reach states, including metadata transitions and value-only changes. |
 | ORC-016 | Fixed and generated histories use the same model and comparison; ordinary examples remain in the ordinary test file. |
+
+
+## 2026-11-03: review repairs and smaller production cache
+
+This entry supersedes the original reach counts and size measurements above.
+The reviewed working tree starts at PR head
+`62d15faa1295671b176b7736118d29a4865c805a`. SHA-256 identities for this revision:
+
+- Observer: `047ddcb95c44eed8338c2cb7d3e6e38e18cddbd6b0132c52d740f8dd5a7c71f2`.
+- Snapshot oracle: `6aa5be1bdc005ed5d2001cb3ef0c52b8dff005d4937eb56cbefae518d70519e8`.
+- Replay manifest: `ff0f9da90a4ee739e2664dd4185eb67bc999ee45f02b6e6c9f5eb1302b9609a3`.
+
+### Law, repair, and pre-edit gate
+
+The authority remains the maintainer's 2026-11-01 row-container decision and
+`LiveQuerySnapshot`. Within one row revision, status/health updates preserve
+both containers. Value writes replace them. Subscribe/unsubscribe changes
+observer ownership without changing rows or ending the sync run. Cleanup/reset
+can discard a row revision, even for an empty Collection; sharing across that
+boundary is not promised. The interface now states that limit explicitly.
+
+The old sharing grammar chose attachment once. It could not reconstruct a
+ready detached read followed by attach and a health report. Unconditionally
+replacing cached entries therefore survived all 14 tests in the old snapshot
+owner. The extended grammar includes subscribe/unsubscribe. Its shared examples
+force nonempty attach, detach, and reattach in both modes. Repeated subscription
+actions are idempotent in this single-subscriber driver. Every action ends with
+a public snapshot comparison, and retained snapshots are read again at the end.
+
+The old health-only reach classifier counted loading-to-ready when the health
+tree identity also changed. The new classifier requires unchanged status and
+rows. An independent failure-list model checks health freshness and predicts
+the exact number of report/clear transitions. The shared comparison checks that
+count against observed health-only transitions. Twelve readiness-only examples
+exercise the exclusion through the same driver and judgment as every other
+history. The other twelve examples exercise ownership transitions and health.
+Health reports before readiness remain excluded by the legal readiness prefix.
+
+Before editing production, the expanded oracle and neighboring observer suites
+passed all 100 tests on the PR implementation. The unchanged original observer
+and the attachment and reach-classifier mutants then failed the expanded
+comparison. Thus the test path and neighboring guarantees were established
+before simplifying production.
+
+### Reach
+
+Each fixed/random campaign runs 24 shared examples plus 40 generated histories.
+Seed 1101 remains the fixed seed. The grammar, budget, examples, driver, and
+comparison are identical across campaigns. All declared states must occur in a
+fixed example as well as meet their minimum count of one history.
+The final five-suite normal run recorded:
+
+| Declared state | Fixed | Random |
+| --- | ---: | ---: |
+| attached | 49 | 49 |
+| detached | 49 | 49 |
+| granular | 37 | 38 |
+| wholesale | 27 | 26 |
+| empty | 15 | 21 |
+| health-only | 34 | 39 |
+| status-only | 64 | 64 |
+| value-only | 35 | 30 |
+| attach-granular | 15 | 11 |
+| attach-wholesale | 6 | 8 |
+| detach-granular | 16 | 12 |
+| detach-wholesale | 8 | 7 |
+| reattach-granular | 8 | 7 |
+| reattach-wholesale | 5 | 5 |
+
+Counts are histories entering a state, not action counts. Attachment reaches
+require a nonempty result. Health-only reach excludes writes and status changes.
+The separate per-history transition-count assertion also rejects a readiness
+transition being counted as health-only. The original 52/52 health-only counts
+included readiness and must not be cited as measured health-only evidence.
+
+### RED, mutants, and direct replay
+
+From `packages/db`, the normal sharing command is:
+
+```sh
+pnpm exec vitest run tests/live-query-observer-snapshot-oracle.property.test.ts --coverage.enabled=false -t 'metadata snapshots'
+```
+
+All four controls below fail assertions at the intended comparison, rather
+than failing setup or timing out:
+
+- **Original implementation RED:** observer source from merge-base
+  `15d2d2d328db6f5a4ea0f1a48528c6c5137a1716` fails `metadata keeps data` at
+  loading-to-ready. Seed 1101, path `0:0:0:0`, reduced input: granular, detached,
+  empty rows, state-first, commands `[report]` after the readiness prefix.
+- **Attachment mutant RED:** replace cached entries unconditionally while
+  retaining the original dirty-flag condition. Seed 1101, path
+  `2:3:1:6:4:3`, reduced input: granular, detached, one row, state-first,
+  commands `[subscribe, report]`. The fresh health snapshot exposes replaced
+  row containers and fails `metadata keeps data`. This is the mutant that
+  survived the old owner. It also fails guarded replay with one executed
+  property and one failed witness.
+- **Same-cardinality mutant RED:** replace the row cache only when its length
+  changes. Seed 1101, path `0:0:1:0:2`, reduced input: granular, detached, empty
+  rows, state-first, commands `[write, write]`. The second write leaves version
+  zero visible when the model requires one; `step 2: state rows` rejects it.
+- **Reach-classifier mutant RED:** remove the unchanged-status condition.
+  Seed 1101, path `0:0:0:0`. The model expects one health-only transition,
+  while the observation counter records two; the transition-count comparison
+  rejects the extra readiness credit.
+
+The guarded owner/selector repair is checked with:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=live-query-observer.row-container-sharing \
+TANSTACK_DB_ORACLE_SEED=1101 TANSTACK_DB_ORACLE_PATH=2:3:1:6:4:3 \
+node --import tsx tests/oracle-replay.ts tests/live-query-observer-snapshot-oracle.property.test.ts --coverage.enabled=false
+```
+
+This command runs only the requested random campaign: one test passes, thirteen
+are skipped, and the wrapper records `executions: 1`, `numRuns: 1`, and
+`failed: false` after restoration. With the attachment mutant, the same command
+records `failed: true` and rejects the same identity violation. Using
+`node --import tsx` avoids the CLI's sandbox-restricted IPC listener.
+
+### GREEN and production size
+
+The row cache now supplies the previous ordered entries for layout comparison.
+This removes `lastLayoutKeys` and its allocation. Metadata-only rebuilds skip
+key scanning when the capture is unchanged. The snapshot's state getter lazily
+fills the shared row cache directly, removing the second getter and closure.
+The single entry-comparison call is inlined, entry capture returns its array
+without a redundant result wrapper, and identical notification capture branches
+are combined. Both removed private names leave the mangle cache.
+
+The last materialized row cache is an immutable ordered capture. It supplies the
+same key sequence that the removed key array held. Value-only writes retain
+layoutRevision; membership and order changes advance it. The initial empty
+capture still advances it once. Older snapshots retain their own cache, with no
+chain of snapshot references. No contract or model expectation was weakened to
+permit these reductions.
+
+Validation on the restored final source:
+
+- Five observer suites: **112 tests pass**, including ordinary layout/order,
+  hydration, retained-snapshot, health, and history checks.
+- Replay-manifest checks: **6 tests pass**; the new guarded replay also passes.
+- Focused TypeScript compilation and ESLint, minified package build, `pnpm check:mangle`
+  (436 names), `pnpm test:minified-db`, and `pnpm lint:changed` pass.
+- Two independent follow-up reviewers found no new actionable issue in the
+  oracle repair or layout/cache simplification.
+
+`pnpm size:compare --packages db --files` compares against the same merge-base,
+with production defines and identical minification/compression:
+
+| Measurement | Delta from original baseline |
+| --- | ---: |
+| Observer module, minified | -75 bytes |
+| DB export bundle, gzip | -34 bytes |
+| DB export bundle, brotli | -111 bytes |
+| Typical app, gzip | -27 bytes |
+| Typical app, brotli | +79 bytes |
+
+All eight measured app scenarios decrease in gzip by 26–30 bytes. Brotli
+scenario deltas vary from -117 to +79 bytes; the reduction is not universal
+across compressed applications. This is net-negative shipped observer code and
+DB package bytes, without relying on source comments or formatting.
+
+### Limits and rubric update
+
+The closure boundary is metadata sharing across legal same-run row, readiness,
+health, and single-subscriber attachment histories at the synchronous direct
+Collection's post-action snapshot cut. Zero through three initial string-keyed
+rows and same-key writes are covered. The existing query/retained and hydration
+owners still cover their stated paths; this lane adds no framework scheduling,
+SSR, provider, arbitrary subscriber concurrency, cleanup/restart sharing, or
+universal performance claim. Layout/order-only behavior retains its ordinary
+observer witnesses; the new lane additionally checks layout stability on
+metadata and value-only writes and advancement on insertion.
+
+The original ORC table remains applicable with these corrections: ORC-004 now
+reconstructs attachment transitions and readiness-only exclusion; ORC-006 adds
+the attachment and classifier kills; ORC-007 adds the guarded owner and selector;
+ORC-015 now has fourteen states with fixed-example reach. ORC-008's only new
+model state is the failure list and its transition count: report/clear actions
+can distinguish clear from nonempty failure frames, independently of row state.
+ORC-010 retains `finishHistory` for primary failure and cleanup fidelity.
+ORC-012 uses this source-identified append-only record. ORC-013 distinguishes
+unchanged rows across attach from changed values with identical keys. ORC-014
+remains explicitly core-only, so it transfers no controlled premise to a host.
+ORC-016's readiness-only and attachment regressions are inputs to the shared
+model and checker. ORC-001/002/003/009/011 retain their original evidence and
+limits; no new shared semantic fault requiring a second formulation was found.
