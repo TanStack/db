@@ -1,4 +1,4 @@
-import { equalRowValues } from '../hashing/hash.js'
+import { compareHashValues } from '../hashing/hash.js'
 import { TopKArray } from './topKArray.js'
 import type { MultiSet } from '../multiset.js'
 import type { IndexedValue } from './topKArray.js'
@@ -26,7 +26,7 @@ export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
       // Compare only versions of the same key. A per-key scan keeps normal
       // replacements cheap and never merges keys on a hash collision.
       const previous = entries.find(([candidate]) =>
-        equalRowValues(candidate[1], value[1]),
+        compareHashValues(candidate[1], value[1], true),
       )
       if (previous) previous[1] += weight
       else entries.push([value, weight])

@@ -6905,7 +6905,8 @@ live query (`orderBy`, with or without `limit`) dropped a source update that
 changes only a zero's sign: its top-K batch merged a key's versions by D2
 value identity, where -0 equals 0, while an unordered query delivered it.
 Maintainer decision 2026-11-02: live-query rows tell -0 from 0, so top-K
-compares a key's versions as row values (`equalRowValues`); D2 value
+compares a key's versions as row values (D2's structural comparison with
+`signedZero`, which tells -0 from 0 at a leaf); D2 value
 identity, which join, distinct, and grouping keys use, keeps -0 equal to 0.
 The Effect-callback oracle's `source-zero` representation stores the signed
 zero in the source row, so each update changes the row only by its sign

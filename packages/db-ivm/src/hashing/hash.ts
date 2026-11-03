@@ -237,14 +237,6 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
   return compareHashValues(left, right)
 }
 
-/**
- * @internal `equalHashValues` for row values, which tell -0 from 0 and treat
- * NaN as equal to NaN, at a leaf or in a header such as `lastIndex`.
- */
-export function equalRowValues(left: unknown, right: unknown): boolean {
-  return compareHashValues(left, right, undefined, true)
-}
-
 function enumerableKeys(value: object): Array<PropertyKey> {
   return Reflect.ownKeys(value).filter((key) =>
     Object.prototype.propertyIsEnumerable.call(value, key),
@@ -253,17 +245,18 @@ function enumerableKeys(value: object): Array<PropertyKey> {
 
 // Allocate pair memoization only when structural bodies need comparison. A
 // module-level recursion also avoids rebuilding the worker for every call.
-function compareHashValues(
+// With `signedZero`, it compares row values: a leaf tells -0 from 0. Headers
+// still compare with `===`: core's row equality ignores a RegExp's
+// `lastIndex`, so a change of only a header's zero sign never reaches here.
+/** @internal */
+export function compareHashValues(
   a: unknown,
   b: unknown,
+  signedZero?: boolean,
   compared?: Map<object, Set<object>>,
-  signedZero = false,
 ): boolean {
-  if (
-    (signedZero ? Object.is(a, b) : a === b) ||
-    (Number.isNaN(a) && Number.isNaN(b))
-  )
-    return true
+  // `Object.is` also makes NaN equal to NaN; row values tell -0 from 0.
+  if ((!signedZero && a === b) || Object.is(a, b)) return true
   if (
     a === null ||
     b === null ||
@@ -286,9 +279,7 @@ function compareHashValues(
   const [bMarker, bHeader, bBody] = objectParts(b)
   if (
     aMarker !== bMarker ||
-    !aHeader.every((value, index) =>
-      signedZero ? Object.is(value, bHeader[index]) : value === bHeader[index],
-    )
+    !aHeader.every((value, index) => value === bHeader[index])
   )
     return false
   if (!aBody || !bBody) return true
@@ -303,8 +294,8 @@ function compareHashValues(
         compareHashValues(
           aBody[key as keyof object],
           bBody[key as keyof object],
-          compared,
           signedZero,
+          compared,
         ),
     )
   )

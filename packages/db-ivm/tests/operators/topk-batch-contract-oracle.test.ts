@@ -109,25 +109,25 @@ const valueRelations: Array<{
     },
   },
   {
-    // A header such as `lastIndex` follows the same signed-zero rule.
+    // Headers compare with ===, as in D2 value identity. Core's row equality
+    // ignores a RegExp's lastIndex, so a version that changes only it never
+    // reaches top-K.
     name: `regexp position signed zero`,
     pair: () => {
       const left = /same/g
       const right = /same/g
       left.lastIndex = -0
       right.lastIndex = 0
-      return [left, right, false]
+      return [left, right, true]
     },
   },
   {
-    // Row values treat NaN as equal to NaN, in a header as at a leaf
-    // (`sameRowValue`); D2 value identity keeps a NaN header distinct.
     name: `regexp position NaN`,
     pair: () => {
       const left = /same/g
       const right = /same/g
       left.lastIndex = right.lastIndex = NaN
-      return [left, right, true]
+      return [left, right, false]
     },
   },
   {
