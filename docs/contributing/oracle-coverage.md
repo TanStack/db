@@ -7300,3 +7300,29 @@ the replay can still be taken for it (open limit). A cached valid result served 
 client-cache behavior and is not generated, because the model starts a
 restarted run empty. A fixed-seed campaign runs the React client
 (`watchQuery`).
+
+### Ordered-loader authority CI counterexample, 2026-11-03
+
+Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+property `ordered-loader.request-authority`. CI run `41699469835` on
+`5911d5e00` fails the no-leak check: requests `[2,3]` remain held after
+authoritative request 4 succeeds. Direct replay reproduces on the PR and an
+untouched archive of exact main `1443dc92e5417394acbdc98b782caa9802848ce6`:
+
+```sh
+TANSTACK_DB_ORACLE_SEED=-416164704 TANSTACK_DB_ORACLE_PATH=2540:0:3:3:8:8:12:12:13 TANSTACK_DB_ORACLE_PROPERTY=ordered-loader.request-authority pnpm exec vitest run tests/query/ordered-source-loader-state-oracle.test.ts -t 'holds, retires, and recovers requests under generated settlement orders' --coverage.enabled=false --typecheck.enabled=false --maxWorkers=1
+```
+
+Input: `indexed=false`, `limit=1`, `settledFirst=true`, `releaseFault=false`,
+`syncRepair=true`, `requiresFullSource=false`, `joined=true`, `snapshotRows=1`,
+`needsMore=true`, `retryTimer=false`, `releaseTruncates=false`, `offset=0`,
+`releaseReenters=true`, `releaseDisposes=false`, `releaseInvalidates=false`.
+History: `truncate; settle(0, success); invalidateThenFailOldest; move(-1);
+joinedBusy; settle(0, success)`.
+
+Status: confirmed baseline oracle failure, underlying repair location unresolved.
+Next witness: distinguish whether the final authoritative read covers the held
+requests while joined work defers a reentrant pass, then check the real
+subscription receiving path. This remains separate from PR #2346's observer
+metadata-sharing and discarded-publication scope. The test, grammar and run
+budget remain unchanged; a green later random campaign does not close it.

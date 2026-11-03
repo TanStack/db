@@ -1843,7 +1843,9 @@ async function checkSparsePublication(
         gcTime: Infinity,
       })
     : undefined
-  const observer = createLiveQueryObserver(query ?? source, { mode })
+  const observer = query
+    ? createLiveQueryObserver(query, { mode })
+    : createLiveQueryObserver(source, { mode })
   const mirror = new Map(source.entries())
   const subscription = source.subscribeChanges(
     (changes) => {
@@ -1855,8 +1857,17 @@ async function checkSparsePublication(
     { includeInitialState: false },
   )
   const stop = attached ? observer.subscribe(() => {}) : undefined
+  type SparseSnapshot = Pick<
+    LiveQuerySnapshot<SparseRow, string | number>,
+    `data` | `state`
+  >
+  const rows = (snapshot: SparseSnapshot): ReadonlyArray<SparseRow> => {
+    if (!Array.isArray(snapshot.data))
+      throw new Error(`ordered sparse snapshot must contain an array`)
+    return snapshot.data
+  }
   const retained: Array<{
-    snapshot: LiveQuerySnapshot<SparseRow, string | number>
+    snapshot: SparseSnapshot
     values: Array<number | undefined>
   }> = []
   let failure: { error: unknown } | undefined
@@ -1883,7 +1894,7 @@ async function checkSparsePublication(
       expect([...source.keys()], `source membership`).toEqual([`a`])
       expect([...mirror.keys()], `change-message membership`).toEqual([`a`])
       expect(
-        snapshot.data!.map((value) => value.id),
+        rows(snapshot).map((value) => value.id),
         `snapshot membership`,
       ).toEqual([`a`])
       expect([...snapshot.state!.keys()], `snapshot state membership`).toEqual([
@@ -1892,7 +1903,7 @@ async function checkSparsePublication(
       const observations = [
         source.get(`a`)!.payload,
         mirror.get(`a`)!.payload,
-        snapshot.data![0]!.payload,
+        rows(snapshot)[0]!.payload,
         snapshot.state!.get(`a`)!.payload,
       ]
       const errors: Array<unknown> = []
@@ -1927,7 +1938,7 @@ async function checkSparsePublication(
       previous = snapshot
     }
     for (const { snapshot, values } of retained) {
-      checkSparseArray(snapshot.data![0]!.payload, values, carrier)
+      checkSparseArray(rows(snapshot)[0]!.payload, values, carrier)
       checkSparseArray(snapshot.state!.get(`a`)!.payload, values, carrier)
     }
   } catch (error) {

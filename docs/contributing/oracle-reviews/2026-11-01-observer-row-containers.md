@@ -1311,3 +1311,28 @@ Four-agent implementation stamp:
 `ba336f4b22e002e9836a81fc79783b21f8694395` contains the sparse-array repair,
 oracle observations, CI fixtures, coverage and evidence evaluated in this
 supplement. The following documentation-only commit names that exact head.
+
+### CI follow-up on `5911d5e00`, 2026-11-03
+
+CI run `41699469835` exposed five source-type errors in the sparse receiving
+driver. The earlier Vitest output's “no type errors” did not establish that
+these source diagnostics were absent. An explicit `tsc --noEmit -p
+tsconfig.test.json` reproduced all five. Separate observer construction for
+source and projected Collections preserves their inferred key types. Retained
+observations use only data/state, and ordered data is checked as an array before
+indexing. No comparison, budget, or production behavior changes. Both sparse
+campaigns pass again, with every declared receiving state reaching 20 histories
+per campaign. Both the focused TypeScript project and the full DB
+`tsc --noEmit -p tsconfig.test.json` check pass.
+
+The same CI run found a separate ordered-loader counterexample after 2,541
+generated histories: seed `-416164704`, path `2540:0:3:3:8:8:12:12:13`, property
+`ordered-loader.request-authority`. Direct replay fails at the no-leak
+comparison: requests `[2,3]` remain held after authoritative request 4 succeeds.
+The identical replay fails on an untouched Git archive of exact main
+`1443dc92e5417394acbdc98b782caa9802848ce6`, with the same comparison and request
+IDs. This establishes a baseline counterexample, not whether production or the
+oracle's coverage premise needs repair. The owning oracle and loader are
+unchanged by this PR. The coverage map preserves the full trace and next
+experiment. No test is skipped, no seed is substituted, and no loader repair is
+included in this observer change.
