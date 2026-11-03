@@ -81,6 +81,13 @@ source. To reuse an ID within that hook,
 unmount it, clean up its source and client scope, then mount the replacement.
 Separate hooks and independent client scopes can use the same ID.
 
+A mounted binding keeps its Collection options until query identity changes.
+Independent Suspense bindings share a Collection only when their supplied
+Collection options agree. Object and function options use reference equality.
+Cached `DbClient` results additionally reject conflicting `getKey` or `schema`
+references under the same query identity; use distinct query keys for those
+callers.
+
 #### Collection Hooks
 
 `useLiveQuery` resolves collection descriptors from `DbProvider` automatically. Create small collection hooks when components need imperative collection methods like `insert`, `update`, `delete`, or `preload`:

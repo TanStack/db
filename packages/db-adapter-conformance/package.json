@@ -1,0 +1,59 @@
+{
+  "name": "@tanstack/db-adapter-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Conformance oracles that check a TanStack DB sync adapter against the adapter law set",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/db-adapter-conformance"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "tanstack-db",
+    "conformance",
+    "oracle",
+    "sync-adapter"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "lint": "eslint . --fix",
+    "test": "vitest --run",
+    "test:oracles": "vitest run tests/reference-adapter-oracle.property.test.ts",
+    "test:neon": "vitest run --config vitest.neon.config.ts"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@tanstack/db": "workspace:*",
+    "fast-check": "^3.23.0"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "^0.4.1",
+    "@neon/realtime": "0.1.2",
+    "@standard-schema/spec": "^1.1.0",
+    "@vitest/coverage-istanbul": "^4.1.12"
+  }
+}

@@ -660,3 +660,38 @@ all changed reach states; ORC-016 retains fixed examples on the shared model,
 driver and comparison. Whole-workspace local testing did not run. Final-head CI
 and readiness are reported separately; the green checks on `71bb4c659` are only
 previous-head evidence after this semantic change.
+
+
+## 2026-11-03: integration with current main
+
+After pushing `e5c2d6d3c`, GitHub reported a conflict with main at
+`1443dc92e`. A normal merge retains main's comparison-mode refactor, signed-zero
+row fidelity, and Effect publication identity policy. The only conflict was in
+the generic record predicate: preserve this PR's prototype distinction and
+main's separate `PUBLICATION` condition. Main already moved cycle detection
+above the value-class dispatch, so the old duplicate check is unnecessary.
+The glossary now names `sameRowValue` as Collection's change-event comparison.
+No framework adapter production edits belong to this PR's diff against main.
+
+The merged gate passes **1,868 tests in 16 files**, including the original
+15-suite gate plus the Effect metadata/callback owner. Both fixed and random
+snapshot campaigns meet every declared reach minimum. The three hostile
+mutants were repeated against the merged tree: row rollback fails at version
+freshness, the layout-fence omission fails ordering after that value step passes,
+and the old prototype predicate fails both direct and projected-query shape
+comparisons. Guarded replay passes after each restoration. Focused TypeScript,
+changed-file oracle lint, ESLint, minified public API validation and the
+433-name mangle cache pass. The earlier minified API invocation during mutation
+correctly rejected a stale dist; rebuilding after restoration supplies the
+successful result. Production utility SHA256 is now
+`0aef2b8fdfd4cbbf78eb348ca2bd245dec6e5ca85e98709e382e5bcf2b3b32ab`;
+observer and Collection changes hashes above remain unchanged.
+
+The rebuilt comparison against exact current main `1443dc92e` still yields
+**−339 minified production bytes** (observer −338, Collection changes −7,
+utility +6). DB gzip is **−126** and brotli **−27**. All eight app scenarios
+shrink in gzip, by 104–141 bytes. Brotli ranges from −240 to +23 bytes: the
+group-by scenario grows 23 bytes, while the other seven shrink. These current
+compression results supersede the earlier baseline's measurements for the
+merged tree. Full workspace local testing and the combined Angular #2327 tree
+remain unverified. Exact pushed-head CI is tracked separately.

@@ -5,12 +5,69 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `pagination.limit-admission-replay-pending-negative`,
+  `pagination.limit-admission-replay-pending-valid`,
+  `pagination.limit-admission-builder-negative`,
+  `pagination.limit-admission-builder-valid`,
+  `pagination.limit-admission-unstarted-negative`,
+  `pagination.limit-admission-unstarted-valid`,
+  `pagination.limit-admission-ready-negative`,
+  `pagination.limit-admission-ready-valid`,
+  `pagination.limit-admission-initial-pending-negative`,
+  `pagination.limit-admission-initial-pending-valid`,
+  `pagination.limit-admission-move-pending-negative`,
+  `pagination.limit-admission-move-pending-valid`,
+  `framework.react.result-shape`,
+  `framework.react-dependency-list.result-shape`,
+  `framework.preact.result-shape`,
+  `framework.vue.result-shape`,
+  `framework.solid.result-shape`,
+  `framework.angular.result-shape`,
+  `framework.svelte.result-shape`,
+  `ivm.topk-negative-window-array`,
+  `ivm.topk-negative-window-grouped`,
+  `ivm.topk-negative-window-orderBy`,
+  `framework.react.window-history`,
+  `framework.react.pending-window-history`,
+  `framework.react.publication-window-history`,
+  `framework.react-dependency-list.window-history`,
+  `framework.react-dependency-list.pending-window-history`,
+  `framework.react-dependency-list.publication-window-history`,
+  `framework.preact.window-history`,
+  `framework.preact.pending-window-history`,
+  `framework.preact.publication-window-history`,
+  `framework.vue.window-history`,
+  `framework.vue.pending-window-history`,
+  `framework.vue.publication-window-history`,
+  `framework.solid.window-history`,
+  `framework.solid.pending-window-history`,
+  `framework.solid.publication-window-history`,
+  `framework.angular.window-history`,
+  `framework.angular.pending-window-history`,
+  `framework.angular.publication-window-history`,
+  `framework.svelte.window-history`,
+  `framework.svelte.pending-window-history`,
+  `framework.svelte.publication-window-history`,
+  `react.window-render`,
+  `preact.window-render`,
   `lint.part-reach`,
   `oracle.declared-reach`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
   `scripts.release-version`,
   `scripts.release-seed-failure`,
+  `react.ssr-effects-react18-ordinary-provider`,
+  `react.ssr-effects-react18-ordinary-explicit`,
+  `react.ssr-effects-react18-suspense-provider`,
+  `react.ssr-effects-react18-suspense-explicit`,
+  `react.ssr-effects-react18-standalone`,
+  `react.ssr-effects-react18-supplied`,
+  `react.ssr-effects-current-ordinary-provider`,
+  `react.ssr-effects-current-ordinary-explicit`,
+  `react.ssr-effects-current-suspense-provider`,
+  `react.ssr-effects-current-suspense-explicit`,
+  `react.ssr-effects-current-standalone`,
+  `react.ssr-effects-current-supplied`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
   `react.ssr-stream-cut`,
@@ -55,8 +112,12 @@ const staticOracleProperties = [
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
   `query-db.refetch-ordered-prefix`,
+  `query-db.refetch-held-page-end`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
+  `ordered-loader.replay-continuation`,
+  `ordered-loader.retirement-invalidation`,
+  `ordered-loader.retirement-receiver`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
   `replay.ordered-preload-recovery`,
@@ -146,6 +207,13 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `adapter-conformance.eager-live-source.reference`,
+  `adapter-conformance.eager-live-source.neon-realtime`,
+  `adapter-conformance.eager-live-source.trailbase`,
+  `adapter-conformance.eager-live-source.rxdb`,
+  `adapter-conformance.eager-live-source.powersync`,
+  `adapter-conformance.eager-live-source.electric`,
+  `adapter-conformance.eager-live-source.convex`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.required-history`,
@@ -244,6 +312,14 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-peers`,
   `sync-metadata-session.persisted-peers-full`,
   `sync-metadata-session.persisted-peers-on-demand`,
+  `sync-metadata-session.persisted-seed-reinsert-reload`,
+  `sync-metadata-session.sqlite-seed-reinsert-reload`,
+  `sync-metadata-session.persisted-kept-metadata-durability`,
+  `sync-metadata-session.persisted-queued-metadata-repair`,
+  `sync-metadata-session.sqlite-kept-metadata-durability`,
+  `sync-metadata-session.sqlite-recovery-schedules`,
+  `sync-metadata-session.persisted-missing-row-metadata`,
+  `sync-metadata-session.sqlite-missing-row-metadata`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
   `d2-source.exact-retractions`,
@@ -346,6 +422,7 @@ const staticOracleProperties = [
   `includes.bucket-collisions`,
   `query.distinct-collisions`,
   `ivm.topk-support-window`,
+  `ivm.topk-numeric-window`,
   `opfs.close`,
   `opfs.failure-cleanup`,
   `opfs.mixed-execute`,
@@ -369,7 +446,7 @@ const publicationProperties = [
 
 // utils-oracle and comparison-oracle number their properties in file order.
 const utilsProperties = Array.from(
-  { length: 40 },
+  { length: 41 },
   (_, index) => `utils.${index + 1}`,
 )
 const comparisonProperties = Array.from(
@@ -662,6 +739,23 @@ export function readOracleRunConfig(
   return { multiplier, replaySeed, replayPath, replayProperty }
 }
 
+/**
+ * Select a fresh campaign seed unless the caller supplied one. Report the
+ * selection before fast-check runs: a later reach failure is outside its
+ * reporter and must still be replayable. This line records selection, not
+ * execution; guarded replay witnesses remain the execution evidence.
+ */
+export function oracleCampaignSeed(
+  seed: number | undefined,
+  property: string | undefined,
+): number {
+  const selected = seed ?? Math.floor(Math.random() * 0x100000000) - 0x80000000
+  console.info(
+    `ORACLE_SEED ${JSON.stringify({ property: property ?? null, seed: selected })}`,
+  )
+  return selected
+}
+
 type OracleRunParameters = {
   numRuns: number
   seed?: number
@@ -706,9 +800,10 @@ function randomParameters<TExample>(
           replayPath: undefined,
           replayProperty: undefined,
         }
+  const selectedSeed = oracleCampaignSeed(replaySeed, property)
   const parameters: OracleRunParameters =
     replaySeed === undefined
-      ? { numRuns }
+      ? { numRuns, seed: selectedSeed }
       : {
           numRuns,
           seed: replaySeed,

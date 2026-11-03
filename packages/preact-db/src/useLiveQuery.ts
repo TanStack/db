@@ -4,6 +4,7 @@ import {
   createLiveQuerySourceIdClaims,
   getLiveQueryHash,
   getLiveQueryKey,
+  getStableValueHash,
   identifyLiveQuery,
   isCollection,
   prepareLiveQueryValue,
@@ -238,7 +239,7 @@ export function useLiveQuery(
   const identity = isCollection(input)
     ? input
     : queryKey
-      ? getLiveQueryHash(preparedValue, queryKey)
+      ? getStableValueHash([`queryKey`, queryKey], `queryKey`)
       : identifyLiveQuery(
           preparedValue,
           {
@@ -251,17 +252,30 @@ export function useLiveQuery(
 
   const bindingRef = useRef<LiveQueryBinding | null>(null)
   let binding = bindingRef.current
+  let commitWindow: (() => void) | undefined
   if (binding?.identity !== identity) {
-    binding = bindingRef.current = {
-      identity,
-      // Wholesale mode publishes nothing during subscribe; the hook re-reads
-      // the observer's snapshot on each notification.
-      observer: createLiveQueryObserver(
-        resolveLiveQueryValue(preparedValue, { gcTime: DEFAULT_GC_TIME_MS }),
-        { mode: `wholesale` },
-      ),
+    const collection = resolveLiveQueryValue(preparedValue, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection: binding?.collection ?? null,
+      windowOwner: bindingRef,
+      onWindowChange: (move) => {
+        commitWindow = move
+      },
+    })
+    if (!binding || collection !== binding.collection) {
+      binding = bindingRef.current = {
+        identity,
+        collection,
+        observer: createLiveQueryObserver(collection, { mode: `wholesale` }),
+      }
     }
   }
+  useLayoutEffect(() => {
+    if (commitWindow) {
+      binding.identity = identity
+      commitWindow()
+    }
+  })
 
   const { observer } = binding
   const snapshot = observer.getSnapshot()
@@ -283,5 +297,6 @@ export function useLiveQuery(
 /** The live query one hook instance reads until its identity changes. */
 interface LiveQueryBinding {
   identity: unknown
+  collection: ReturnType<typeof resolveLiveQueryValue>
   observer: LiveQueryObserver<object, string | number>
 }

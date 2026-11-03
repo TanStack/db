@@ -7,6 +7,7 @@ import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -18,6 +19,7 @@ import {
 } from './electric-sdk-delivery-support'
 import {
   atCheckpoint,
+  startUnmetWaits,
   withElectricCleanup,
   withElectricSetup,
 } from './electric-oracle-lifecycle'
@@ -135,6 +137,9 @@ declareOracle({
   model: [createRetryModel, applyRetryModel, expectedRetryObservation],
 })
 
+// Scaled with the run multiplier, so stress campaigns keep their budget.
+const campaignTimeoutMs = oracleRuns(30_000)
+
 function sdkCampaigns(
   propertyId: string,
   name: string,
@@ -152,8 +157,18 @@ function sdkCampaigns(
   }
   // A path replay of the property runs only the random campaign, from its
   // path. The fixed campaign stands aside during every path replay.
-  oracleReplayTest(it)(`${name} (fixed)`, () => runCampaign(fixedSeed))
-  oracleReplayTest(it, propertyId)(`${name} (random)`, () => runCampaign())
+  // A campaign answers dozens of histories over real client backoff, so it
+  // can outlast the default timeout on a loaded runner.
+  oracleReplayTest(it)(
+    `${name} (fixed)`,
+    () => runCampaign(fixedSeed),
+    campaignTimeoutMs,
+  )
+  oracleReplayTest(it, propertyId)(
+    `${name} (random)`,
+    () => runCampaign(),
+    campaignTimeoutMs,
+  )
 }
 
 function violationCheckpoint(error: unknown): string {
@@ -221,14 +236,56 @@ function resetResumeMetadata(): SyncMetadataApi<string | number> {
   }
 }
 
+type SnapshotReachState =
+  | `subset-attempts-past-threshold`
+  | `live-pauses-past-threshold`
+  | `live-outage`
+  | `live-outage-with-synchronous-throws`
+  | `live-outage-led-by-throw`
+  | `live-outage-crossed-by-throw`
+  | `retired-evidence-after-restart`
+const createSnapshotReach = () =>
+  createOracleReach<SnapshotReachState>(`electric.sdk-snapshot-delivery`, [
+    `subset-attempts-past-threshold`,
+    `live-pauses-past-threshold`,
+    `live-outage`,
+    `live-outage-with-synchronous-throws`,
+    `live-outage-led-by-throw`,
+    `live-outage-crossed-by-throw`,
+    `retired-evidence-after-restart`,
+  ])
+// Each campaign declares its own reach.
+let snapshotReach = createSnapshotReach()
+
+/**
+ * Retried subset attempts: how many HTTP 503 responses each subset request
+ * gets before its snapshot, and how many empty loads follow the three
+ * ordered ones, each pausing the live request.
+ */
+type SubsetRetries = {
+  failures: ReadonlyArray<number>
+  extraLoads: number
+  /**
+   * Failed live attempts after the first load, in order: an HTTP 503, or the
+   * app's `fetchClient` throwing before it returns a request.
+   */
+  live?: ReadonlyArray<`http` | `throw`>
+}
+
 async function checkSnapshots(
   width: number,
   name: string,
   dropRows = false,
   cleanupFailure?: Error,
   setupFault?: { primary: Error; cleanup?: Error },
+  retries: SubsetRetries = { failures: [], extraLoads: 0 },
 ) {
+  snapshotReach.beginHistory()
   const http = controlledHttp()
+  // Live attempts the app's fetchClient still throws on, and every failed
+  // live attempt the provider made, in order.
+  let liveThrows = 0
+  const made: Array<`http` | `throw`> = []
   const batches: Array<Array<Message<Item>>> = []
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
@@ -272,7 +329,18 @@ async function checkSnapshots(
         shapeOptions: {
           url: `http://test-url/snapshot-${sequence}`,
           params: { table: `rows` },
-          fetchClient: http.fetchClient,
+          // A live attempt can throw before it returns a request.
+          // Only shape-log requests carry a signal. A prefetch is one too, and
+          // counts (maintainer decision 2026-11-02); `made` records it.
+          fetchClient: (input, init) => {
+            if (liveThrows > 0 && init?.signal) {
+              liveThrows--
+              made.push(`throw`)
+              throw new TypeError(`offline`)
+            }
+            return http.fetchClient(input, init)
+          },
+          backoffOptions: { initialDelay: 1, maxDelay: 2, multiplier: 1 },
         },
         syncMode: `on-demand`,
         startSync: true,
@@ -306,7 +374,37 @@ async function checkSnapshots(
     // poll is still pending; requestSnapshot owns pausing that poll.
     await atCheckpoint(http.take(), `initial live request`)
     expect(rows()).toEqual([])
-    for (const [index, lowerBound] of [1, 2, width + 1].entries()) {
+    // After ready, five live attempts in a row that the client retries are
+    // a source outage (Electric's threshold, maintainer decision
+    // 2026-10-30). Only the live stream's up-to-date ends it; a subset's
+    // end does not.
+    let outage = false
+    // HEALTH-4: the outage shows the attempt that crossed the threshold: the
+    // client's error for a 503 response, which names the status and the
+    // request, or the error the app's fetchClient threw.
+    const sourceHealth = (label: string) => {
+      expect(collection.health.failureReason !== null, label).toBe(outage)
+      if (outage) {
+        expect(collection.health.failureReason?.message, label).toMatch(
+          made[4] === `throw` ? /^offline$/ : /^HTTP Error 503 at http\S+$/,
+        )
+      }
+    }
+    const lowerBounds = [
+      1,
+      2,
+      ...Array.from(
+        { length: retries.extraLoads + 1 },
+        (_, i) => width + 1 + i,
+      ),
+    ]
+    // Each load pauses the live request; five pause it past the threshold.
+    if (lowerBounds.length >= 5)
+      snapshotReach.reach(`live-pauses-past-threshold`)
+    for (const [index, lowerBound] of lowerBounds.entries()) {
+      if ((retries.failures[index] ?? 0) >= 5) {
+        snapshotReach.reach(`subset-attempts-past-threshold`)
+      }
       // Distinct predicates prevent request deduplication; the second response
       // overlaps prior rows and changes their payload, and the last is empty.
       if (index === 1) for (const item of source) item.name += `-changed`
@@ -326,7 +424,22 @@ async function checkSnapshots(
         () => ({ ok: true as const }),
         (error: unknown) => ({ ok: false as const, error }),
       )
-      const request = await atCheckpoint(http.take(true), `snapshot request`)
+      let request = await atCheckpoint(http.take(true), `snapshot request`)
+      // A subset request's attempts that the client retries belong to that
+      // request, not to the source: the source node shows no problem
+      // (glossary, request error), however many fail in a row.
+      for (
+        let attempt = 0;
+        attempt < (retries.failures[index] ?? 0);
+        attempt++
+      ) {
+        request.respond(new Response(`transient`, { status: 503 }))
+        request = await atCheckpoint(
+          http.take(true),
+          `retried snapshot request`,
+        )
+        sourceHealth(`snapshot ${index} attempt ${attempt} source health`)
+      }
       expect(
         request.url.searchParams.get(`subset__where`),
         `snapshot ${index} request predicate`,
@@ -368,13 +481,136 @@ async function checkSnapshots(
       expect(rows(), `snapshot ${index} applied rows`).toEqual(
         [...expected.values()].sort((a, b) => a.id - b.id),
       )
+      sourceHealth(`snapshot ${index} source health`)
+      const attempts = index === 0 ? (retries.live ?? []) : []
+      // Leading throws hit the live request that resumes after this load.
+      let next = attempts.findIndex((kind) => kind === `http`)
+      if (next === -1) next = attempts.length
+      liveThrows = next
       const outcome = await atCheckpoint(
         completion,
         `snapshot request completion`,
       )
       if (!outcome.ok) throw outcome.error
+      if (attempts.length > 0) {
+        let live = await atCheckpoint(http.take(), `resumed live request`)
+        // Each 503 is followed by the throws that come before the next one.
+        while (next < attempts.length) {
+          live.respond(new Response(`transient`, { status: 503 }))
+          made.push(`http`)
+          let throws = 0
+          while (attempts[++next] === `throw`) throws++
+          liveThrows = throws
+          live = await atCheckpoint(http.take(), `retried live request`)
+        }
+        // The outage follows the attempts the provider made, not the plan.
+        outage = made.length >= 5
+        if (outage) snapshotReach.reach(`live-outage`)
+        if (outage && made.slice(0, 5).includes(`throw`)) {
+          snapshotReach.reach(`live-outage-with-synchronous-throws`)
+        }
+        if (outage && made[0] === `throw`) {
+          snapshotReach.reach(`live-outage-led-by-throw`)
+        }
+        if (made[4] === `throw`) {
+          snapshotReach.reach(`live-outage-crossed-by-throw`)
+        }
+        sourceHealth(`source health after live attempts`)
+      }
     }
     await atCheckpoint(http.take(), `resumed live request`)
+
+    // EVID-2 across a restart (maintainer decision 2026-10-30): the
+    // snapshots' boundary (xmin 10) shows txid 5 committed, and imported sync
+    // metadata (META-1) shows txid 25, which no snapshot boundary covers
+    // (xmax 20). A restarted run counts that retired
+    // evidence once it is ready, because its rows are read after it.
+    collection.config.sync.importSyncMeta?.({ version: 1, seenTxids: [25] })
+    for (const txid of [5, 25]) {
+      expect(
+        await collection.utils.awaitTxId(txid, 50),
+        `txid ${txid} before the restart`,
+      ).toBe(true)
+    }
+    await collection.cleanup()
+    void collection.preload()
+    const restartedLive = await atCheckpoint(
+      http.take(),
+      `restarted live request`,
+    )
+    const retired = [5, 25].map((txid) => {
+      const wait = {
+        settled: `pending` as `pending` | `fulfilled` | `rejected`,
+      }
+      collection.utils.awaitTxId(txid, 5_000).then(
+        () => (wait.settled = `fulfilled`),
+        () => (wait.settled = `rejected`),
+      )
+      return wait
+    })
+    for (let turn = 0; turn < 5; turn++)
+      await new Promise((r) => setTimeout(r, 0))
+    expect(
+      retired.map((wait) => wait.settled),
+      `retired evidence before the restarted run is ready`,
+    ).toEqual([`pending`, `pending`])
+    // META-1 with EVID-2: exported sync metadata claims a txid only when
+    // this Collection's `awaitTxId` accepts it now, and claims each accepted
+    // txid evidence, so a Collection that imports it, as hydration does,
+    // accepts no more. The format carries txids only, so snapshot evidence
+    // (txid 5) is not exported.
+    const acceptedAfterImport = async () => {
+      const fresh = createCollection(
+        electricCollectionOptions<Item>({
+          id: `snapshot-meta-import-${++sequence}`,
+          shapeOptions: {
+            url: `http://test-url/unused`,
+            params: { table: `rows` },
+          },
+          getKey: (row) => row.id,
+        }),
+      )
+      fresh.config.sync.importSyncMeta?.(
+        collection.config.sync.exportSyncMeta?.(),
+      )
+      return Promise.all(
+        [5, 25].map((txid) =>
+          // Imported evidence answers at once; 1 ms bounds a refusal.
+          fresh.utils.awaitTxId(txid, 1).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      )
+    }
+    expect(
+      await acceptedAfterImport(),
+      `exported evidence before the restarted run is ready`,
+    ).toEqual([false, false])
+    // The restarted run becomes ready on its live up-to-date, which carries
+    // no evidence for either txid: only the retired evidence can fulfill
+    // the waits.
+    restartedLive.respond(
+      new Response(
+        JSON.stringify([
+          { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+        ]),
+        { headers: headers(lowerBounds.length + 2) },
+      ),
+    )
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+    for (let turn = 0; turn < 5; turn++)
+      await new Promise((r) => setTimeout(r, 0))
+    expect(collection.status, `restarted status`).toBe(`ready`)
+    expect(
+      retired.map((wait) => wait.settled),
+      `retired evidence once the restarted run is ready`,
+    ).toEqual([`fulfilled`, `fulfilled`])
+    expect(
+      (await acceptedAfterImport())[1],
+      `exported txid evidence once the restarted run is ready`,
+    ).toBe(true)
+    snapshotReach.reach(`retired-evidence-after-restart`)
   }, [
     { label: `snapshot collection`, release: () => collection.cleanup() },
     {
@@ -410,13 +646,40 @@ async function checkSnapshots(
 // requested lower bound is excluded by construction. This bounded grammar
 // does not claim arbitrary predicate orders or provider snapshots. The row at
 // id=2 distinguishes id>=2 from a misplaced exclusive boundary at snapshot 1.
+// Retries: each subset request gets 0..7 HTTP 503 responses that the client
+// retries before its snapshot, so five or more in a row are common; 0..3
+// extra empty loads (id>=width+2 on) pause the live request up to six times
+// between its responses. After the first load, the live stream makes 0..7
+// failed attempts the client retries, each an HTTP 503 or a throw of the
+// app's fetchClient before it returns a request, in any order: a throw can
+// lead, cross the threshold, or follow a 503. Five or more in a row are a
+// source outage, which shows the attempt that crossed the threshold
+// (HEALTH-4). The expected outage follows the attempts the provider
+// actually made.
+// The source node shows a problem exactly when the live stream had that
+// outage: a subset request's retried attempts and a live pause are not
+// failures of the source, and a subset's end does not end its outage.
 const snapshotViolation = sameViolation()
 const snapshotProperty = fc.asyncProperty(
   fc.integer({ min: 2, max: 4 }),
   fc.string({ maxLength: 10 }),
-  (width, name) =>
-    snapshotViolation.check({ width, name }, () =>
-      checkSnapshots(width, name, replayFault === `snapshot-rows`),
+  fc.record({
+    failures: fc.array(fc.nat(7), { maxLength: 6 }),
+    extraLoads: fc.nat(3),
+    live: fc.array(fc.constantFrom(`http` as const, `throw` as const), {
+      maxLength: 7,
+    }),
+  }),
+  (width, name, retries) =>
+    snapshotViolation.check({ width, name, retries }, () =>
+      checkSnapshots(
+        width,
+        name,
+        replayFault === `snapshot-rows`,
+        undefined,
+        undefined,
+        retries,
+      ),
     ),
 )
 sdkCampaigns(
@@ -424,11 +687,14 @@ sdkCampaigns(
   `applies installed-SDK snapshot deliveries against an independent overlapping source`,
   20260917,
   snapshotViolation,
-  (seed) =>
-    fc.assert(snapshotProperty, {
-      ...oraclePropertyOptions(12, `electric.sdk-snapshot-delivery`),
+  async (seed) => {
+    snapshotReach = createSnapshotReach()
+    await fc.assert(snapshotProperty, {
+      ...oraclePropertyOptions(40, `electric.sdk-snapshot-delivery`),
       ...(seed === undefined ? {} : { seed }),
-    }),
+    })
+    snapshotReach.assertReached()
+  },
 )
 
 fixedCase(`detects dropped snapshot rows`, async () => {
@@ -727,7 +993,9 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * first ready, so its demand is the readiness wait (`preload()`).
  *
  * At each checkpoint the lane compares the Collection status, each demand's
- * settlement, and whether the snapshot's row is visible with the model:
+ * settlement, whether the snapshot's row is visible, and two pairs of waits
+ * that no evidence satisfies, one started with the history and one started
+ * at the checkpoint, with the model:
  * after the first error reaches `onError`, after an asynchronous decision,
  * after the outcome, and after the later demand. It also checks that a
  * full-log Collection requests the full log, and that a client that gave up
@@ -757,6 +1025,9 @@ function clientObservation(observation: RetryObservation): RetryObservation {
   return {
     status: observation.status,
     rowVisible: observation.rowVisible,
+    waits: observation.waits,
+    lateWaits: observation.lateWaits,
+    health: observation.health,
     demands: observation.demands.map((settlement) =>
       settlement.startsWith(`rejected`) ? `rejected:any` : settlement,
     ),
@@ -813,6 +1084,9 @@ async function runClientRetryCell(
         : originalSync,
   })
   const model: RetryModel = createRetryModel(false)
+  // Waits that no evidence satisfies: one pair started with the history,
+  // and one started at each checkpoint, after its step.
+  const waits = startUnmetWaits(collection.utils)
   const settlements: Array<`pending` | `fulfilled` | `rejected:any`> = []
   const track = (result: unknown) => {
     const slot = settlements.push(`pending`) - 1
@@ -836,11 +1110,21 @@ async function runClientRetryCell(
   const check = async (label: string) => {
     await turn()
     await turn()
+    const lateWaits = startUnmetWaits(collection.utils)
+    await turn()
     expect(
       clientObservation({
         status: collection.status,
         demands: [...settlements],
         rowVisible: collection.has(1),
+        waits: waits(),
+        lateWaits: lateWaits(),
+        health:
+          collection.status === `ready`
+            ? collection.health.error
+              ? `error`
+              : `none`
+            : undefined,
       }),
       `${outcome} ${mode} ${decision}: ${label}`,
     ).toEqual(clientObservation(expectedRetryObservation(model, false)))

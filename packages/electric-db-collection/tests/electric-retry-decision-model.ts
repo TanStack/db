@@ -45,6 +45,14 @@ export type RetryObservation = {
   // A readiness wait started with the history. It rejects with the same
   // cause as every waiting demand. Not compared after cleanup.
   preload?: RetrySettlement
+  // An `awaitTxId` and an `awaitMatch` that no evidence satisfies, started
+  // with the history: both `pending`, or both `rejected`.
+  waits?: `pending` | `rejected`
+  // The same pair started at this checkpoint, after the step. Not compared
+  // after cleanup, when a later run could still supply the evidence.
+  lateWaits?: `pending` | `rejected`
+  // While `ready`, whether the source node shows an `error`.
+  health?: `error` | `none`
 }
 
 export type RetryModel = {
@@ -58,6 +66,9 @@ export type RetryModel = {
   committed: boolean
   // The source stopped after its first snapshot was committed.
   stopped: boolean
+  // The source gave up after the Collection became ready, or while its
+  // first snapshot's acceptance was pending and that acceptance succeeded.
+  gaveUpAfterReady: boolean
   ready: boolean
   visible: boolean
   held: boolean
@@ -77,7 +88,12 @@ export function retryModelFail(model: RetryModel, cause: string): void {
     model.stopped = true
     return
   }
-  if (model.ready || model.failed !== undefined) return
+  // HEALTH-1: a give-up after ready is the source node's error.
+  if (model.ready) {
+    model.gaveUpAfterReady = true
+    return
+  }
+  if (model.failed !== undefined) return
   model.failed = cause
   model.demands = model.demands.map((settlement): RetrySettlement =>
     settlement === `pending` ? `rejected:${cause}` : settlement,
@@ -174,8 +190,11 @@ export function applyRetryModel(
       return
     case `accept`:
       // The committed snapshot is usable: the Collection is ready, whatever
-      // errors, retries, or give-ups arrived while it waited.
+      // errors, retries, or give-ups arrived while it waited. READY-9: a
+      // give-up or an external abort while it waited is then a post-ready
+      // failure (HEALTH-1).
       model.ready = true
+      if (model.stopped) model.gaveUpAfterReady = true
       return
     case `accept-fails`: {
       // The snapshot never became usable, so this is an initial failure with
@@ -201,8 +220,11 @@ export function applyRetryModel(
     case `abort`:
       // An external abort is a provider failure. Before the first ready it
       // fails the initial sync. After it, the snapshot has already arrived,
-      // so a waiting demand still settles when its rows apply.
-      if (!model.ready) retryModelFail(model, `StreamAbortedError`)
+      // so a waiting demand still settles when its rows apply, and the
+      // source no longer syncs: the node's error (HEALTH-1; maintainer
+      // decision 2026-11-02, deliberate or not, an aborted stream is not
+      // syncing).
+      retryModelFail(model, `StreamAbortedError`)
       model.aborted = true
       if (model.committed) model.stopped = true
       return
@@ -214,6 +236,8 @@ export function expectedRetryObservation(
   cleanupRequested: boolean,
 ): RetryObservation {
   const cleanedUp = cleanupRequested || model.cleanedUp
+  const stopped =
+    model.failed !== undefined || model.gaveUpAfterReady || model.aborted
   return {
     preload: cleanedUp
       ? undefined
@@ -240,6 +264,17 @@ export function expectedRetryObservation(
         : settlement,
     ),
     rowVisible: !cleanedUp && model.visible,
+    // EVID-2: a sync run retires when it fails or is cleaned up, and its
+    // pending waits reject then (maintainer decision 2026-10-30). A wait
+    // started after the failure rejects as well: no evidence can arrive.
+    waits: cleanedUp || stopped ? `rejected` : `pending`,
+    lateWaits: cleanedUp ? undefined : stopped ? `rejected` : `pending`,
+    health:
+      !cleanedUp && model.ready && model.failed === undefined
+        ? model.gaveUpAfterReady
+          ? `error`
+          : `none`
+        : undefined,
   }
 }
 
@@ -263,6 +298,7 @@ export function createRetryModel(
     acceptanceArmed: false,
     committed: false,
     stopped: false,
+    gaveUpAfterReady: false,
     ready: false,
     visible: false,
     held: false,

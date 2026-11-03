@@ -496,6 +496,11 @@ describe(`descriptor error handoff at React commit`, () => {
       return this.state.failed ? null : this.props.children
     }
   }
+  type ErrorHandoffHistory = {
+    outcome: `fail` | `throw`
+    cause: `error` | `undefined`
+    timing: `before-release` | `during-release`
+  }
   const properties = {
     'error-surface': `react.descriptor-error-surface`,
     ownership: `react.descriptor-ownership`,
@@ -513,7 +518,7 @@ describe(`descriptor error handoff at React commit`, () => {
           ])
           await fc.assert(
             fc.asyncProperty(
-              fc.record({
+              fc.record<ErrorHandoffHistory>({
                 outcome: fc.constantFrom(`fail` as const, `throw` as const),
                 cause: fc.constantFrom(`error` as const, `undefined` as const),
                 timing: fc.constantFrom(
@@ -641,9 +646,22 @@ describe(`descriptor error handoff at React commit`, () => {
                 }
               },
             ),
+            // The random campaign runs every one of the eight histories first,
+            // so its reach does not depend on the seed: 30 biased draws over
+            // eight histories can miss one.
             campaign === `fixed`
               ? { numRuns: oracleRuns(30), seed: 2229 }
-              : oraclePropertyOptions(30, properties[observation]),
+              : oraclePropertyOptions(30, properties[observation], {
+                  examples: ([`fail`, `throw`] as const).flatMap((outcome) =>
+                    ([`error`, `undefined`] as const).flatMap((cause) =>
+                      ([`before-release`, `during-release`] as const).map(
+                        (timing): [ErrorHandoffHistory] => [
+                          { outcome, cause, timing },
+                        ],
+                      ),
+                    ),
+                  ),
+                }),
           )
           reach.assertReached()
           console.info(

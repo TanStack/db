@@ -149,7 +149,7 @@ describe(`oracle run configuration`, () => {
 
     expect(
       oracleRandomParameters(40, ordinaryRun, `includes.incremental-history`),
-    ).toEqual({ numRuns: 40 })
+    ).toEqual({ numRuns: 40, seed: expect.any(Number) })
     expect(
       oracleRandomParameters(40, replayRun, `includes.alpha-renaming`),
     ).toEqual({

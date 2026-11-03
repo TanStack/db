@@ -7,7 +7,7 @@ title: UseLiveQueryFlags
 type UseLiveQueryFlags = object & { [K in keyof LiveQueryStatusFlags]: ComputedRef<LiveQueryStatusFlags[K]> };
 ```
 
-Defined in: [useLiveQuery.ts:59](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L59)
+Defined in: [useLiveQuery.ts:49](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L49)
 
 The status and flag refs every `useLiveQuery` result has.
 

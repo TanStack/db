@@ -20,7 +20,7 @@
  *
  * Model: `expectedChanges` folds every row's operations, in callback order,
  * over plain copies of the rows. It keeps enumerable fields whose final value
- * differs under `===` or `Object.is` from the row's own field, or, for the
+ * differs under `Object.is` from the row's own field, or, for the
  * object a non-enumerable field holds, by contents; plus deleted enumerable
  * fields. A copy holds no non-enumerable field, so reading one gives
  * `undefined`, deleting one does nothing, and writing one is a change unless
@@ -50,14 +50,16 @@
  * `withArrayChangeTracking` and `withChangeTracking` run the same operations.
  *
  * Refinement check: the flat result, the proxy result, and the model are
- * strictly equal, including present `undefined` fields and the cycles a
- * stored draft creates, except that `0` and `-0` compare equal and
- * prototypes are ignored: collection equality does not distinguish them, and
- * the proxy skips writing a value equal to the current one. Mutating an
- * assigned object after the callback leaves both results unchanged.
+ * strictly equal, including present `undefined` fields, zero signs, and the
+ * cycles a stored draft creates, except that prototypes are ignored:
+ * collection equality does not distinguish them. `-0` and `0` are distinct
+ * row values (maintainer decision, 2026-10-29), so writing one over the
+ * other is a change, as `NaN` over `NaN` is not. Mutating an assigned object
+ * after the callback leaves both results unchanged.
  *
- * Calibration: a flat diff with `!==` reports unchanged `NaN` fields, one with
- * `Object.is` alone reports `-0` written over `0`, one that skips deletions
+ * Calibration: a flat diff with `!==` reports unchanged `NaN` fields, one
+ * that also accepts `===` drops `-0` written over `0` (the behavior before
+ * the 2026-10-29 decision, in both trackers), one that skips deletions
  * loses removed fields, one that ignores whether the row owns a field drops
  * added `undefined` fields, and one that edits rows in place breaks the throw
  * and stored-draft histories; each fails a pinned history and the fixed
@@ -137,8 +139,10 @@ type History = {
 // Model
 // ---------------------------------------------------------------------------
 
+// The same value: `NaN` is itself, and `-0` is not `0` (maintainer
+// decision, 2026-10-29: they are distinct row values).
 function sameValue(a: unknown, b: unknown): boolean {
-  return a === b || Object.is(a, b)
+  return Object.is(a, b)
 }
 
 // Only a non-enumerable field holds an object, always `{ nested: 1 }`; an
@@ -242,10 +246,9 @@ function applyOperation(
   }
 }
 
-// Collection equality does not distinguish -0 from 0 or prototypes. A
-// stored draft can make a change set cyclic, so the copy keeps cycles.
+// Collection equality does not distinguish prototypes. A stored draft can
+// make a change set cyclic, so the copy keeps cycles.
 function normalize(value: unknown, copies = new Map<object, Row>()): unknown {
-  if (value === 0) return 0
   if (value === null || typeof value !== `object`) return value
   const existing = copies.get(value)
   if (existing) return existing
@@ -413,7 +416,7 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
-    name: `-0 written over 0 is not a change`,
+    name: `-0 written over 0 is a change`,
     history: {
       rows: [plainRow([0, 1, MISSING])],
       operations: [[{ kind: `set`, field: `a`, value: -0 }]],
