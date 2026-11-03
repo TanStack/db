@@ -29,6 +29,10 @@
  *   (`upsert`, or `remove` of the found document), as a second tab or a
  *   replication writes into the database. It bypasses the plans and the
  *   request log;
+ * - a rewrite (`server-rewrites`) is RxDB's `preInsert` and `preSave` hooks,
+ *   which change a document before RxDB writes it, as an application's
+ *   hooks for defaults or normalization do. The request keeps the document
+ *   as the adapter sent it;
  * - the provider's rows are the storage's non-deleted documents, read from
  *   the storage instance rather than RxDB's document cache.
  *
@@ -46,7 +50,11 @@ import { createCollection } from '@tanstack/db'
 import { createRxDatabase, prepareQuery } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { rxdbCollectionOptions } from '../src/rxdb'
-import { conformanceKey, observedView } from '../../db-adapter-conformance/src'
+import {
+  conformanceKey,
+  observedView,
+  rewriteRow,
+} from '../../db-adapter-conformance/src'
 import type {
   BulkWriteRow,
   RxCollection,
@@ -83,6 +91,7 @@ const schema = {
 const acceptAtOnce: WritePlan = {
   outcome: `accept`,
   held: false,
+  rewrite: `none`,
   error: new Error(`unplanned write`),
 }
 
@@ -105,13 +114,19 @@ function document(row: ConformanceRow): Doc {
   }
 }
 
-function writeRequest(row: BulkWriteRow<Doc>): WriteRequest {
+/**
+ * The request a write row makes. Its row is the document as the adapter sent
+ * it, before RxDB's hooks rewrote it (`sent`), stored as JSON.
+ */
+function writeRequest(row: BulkWriteRow<Doc>, sent?: Doc): WriteRequest {
   const id = conformanceKey(row.document.id)
   if (row.document._deleted) return { type: `delete`, id }
   return {
     type: row.previous && !row.previous._deleted ? `update` : `insert`,
     id,
-    row: conformanceRow(row.document),
+    row: conformanceRow(
+      sent ? (JSON.parse(JSON.stringify(sent)) as Doc) : row.document,
+    ),
   }
 }
 
@@ -175,6 +190,8 @@ class RxdbMutationProvider implements MutationProvider {
   private readonly held: Array<() => void> = []
   private readonly log: Array<WriteRequest> = []
   private foreign = false
+  /** Each pending write's document as the adapter sent it, before hooks. */
+  private readonly sent = new Map<string, Doc>()
   private instance: RxStorageInstance<Doc, unknown, unknown> | undefined
   rxCollection: RxCollection<Doc> | undefined
 
@@ -219,7 +236,8 @@ class RxdbMutationProvider implements MutationProvider {
         response.error.push(...(await bulkWrite([row], context)).error)
         continue
       }
-      this.log.push(writeRequest(row))
+      this.log.push(writeRequest(row, this.sent.get(row.document.id)))
+      this.sent.delete(row.document.id)
       const plan = this.plans.shift() ?? acceptAtOnce
       if (plan.held) {
         await new Promise<void>((resolve) => this.held.push(resolve))
@@ -236,6 +254,28 @@ class RxdbMutationProvider implements MutationProvider {
   private async holds(id: string): Promise<boolean> {
     const found = await this.instance!.findDocumentsById([id], true)
     return found.length > 0
+  }
+
+  /**
+   * RxDB's `preInsert` and `preSave` hooks, which change a document before
+   * RxDB writes it: the server-side rewrite (`server-rewrites`). Each keeps
+   * the document as sent for the request, then applies the next plan's
+   * rewrite. A conflicting insert that RxDB retries as an update runs both
+   * hooks; the first keeps the document as sent, and rewrites are
+   * idempotent.
+   */
+  installHooks(rxCollection: RxCollection<Doc>): void {
+    const hook = (data: Doc) => {
+      if (this.foreign || (data as { _deleted?: boolean })._deleted) return
+      if (!this.sent.has(data.id)) this.sent.set(data.id, { ...data })
+      const rewrite = this.plans[0]?.rewrite ?? `none`
+      const row = rewriteRow(conformanceRow(data), rewrite)
+      data.title = row.title
+      if (row.note === undefined) delete data.note
+      else data.note = row.note
+    }
+    rxCollection.preInsert(hook, false)
+    rxCollection.preSave(hook, false)
   }
 
   plan(plan: WritePlan): void {
@@ -302,6 +342,7 @@ export function rxdbMutationDriver(): MutationDriver {
       `write-rejection`,
       `held-writes`,
       `foreign-commits`,
+      `server-rewrites`,
     ]),
     // A JSON document has no `undefined`: a removed field is absent.
     undefinedField: `absent`,
@@ -318,6 +359,7 @@ export function rxdbMutationDriver(): MutationDriver {
       })
       const rxCollection = conformance as RxCollection<Doc>
       provider.rxCollection = rxCollection
+      provider.installHooks(rxCollection)
       await provider.seed(seed)
       const collection = createCollection(
         rxdbCollectionOptions<Doc>({ rxCollection, syncMode: `eager` }),

@@ -38,8 +38,11 @@
  * - **FID-5.** At a quiescent cut the public rows, the exposed authoritative
  *   base (`collection.base`), and the provider's rows are identical, and all
  *   three equal the model: the provider's starting rows with every accepted
- *   write folded in author order, plus commits from other clients. A
- *   rejected write leaves no effect in the provider's rows.
+ *   write's copy folded in author order, plus commits from other clients. A
+ *   rejected write leaves no effect in the provider's rows. A provider may
+ *   store a row that differs from the authored one (`server-rewrites`: a
+ *   server default, trigger, or normalization); its copy is then the row's
+ *   value, and the optimistic row gives way to it when the copy applies.
  * - **HEALTH-5.** No history causes an unhandled rejection or an undeclared
  *   error- or warning-level console diagnostic.
  *
@@ -84,6 +87,11 @@ export type MutationCapability =
   | `held-writes`
   /** The provider can commit a change made by another client. */
   | `foreign-commits`
+  /**
+   * The provider can store an accepted write's row with its own changes, as
+   * server defaults, triggers, and normalization do (`ServerRewrite`).
+   */
+  | `server-rewrites`
 
 /** The optimistic transaction a write call returns. */
 export interface MutationReceipt {
@@ -108,9 +116,44 @@ export interface WriteRequest {
   readonly row?: ConformanceRow
 }
 
+/**
+ * A change the provider makes to an accepted insert's or update's row before
+ * it stores it. Its copy, not the authored row, is then the row's value:
+ *
+ * - `none`: the provider stores the row as sent;
+ * - `retitle`: it normalizes the title to upper case;
+ * - `drop-note`: it does not store `note`;
+ * - `set-note`: it sets `note` to `server`, as a server default does.
+ */
+export type ServerRewrite = `none` | `retitle` | `drop-note` | `set-note`
+
+/** The row a provider stores for `row` under `rewrite`. */
+export function rewriteRow(
+  row: ConformanceRow,
+  rewrite: ServerRewrite,
+): ConformanceRow {
+  switch (rewrite) {
+    case `none`:
+      return row
+    case `retitle`:
+      return { ...row, title: row.title.toUpperCase() }
+    case `drop-note`: {
+      const { note: _dropped, ...rest } = row
+      return rest
+    }
+    case `set-note`:
+      return { ...row, note: `server` }
+  }
+}
+
 /** The provider's answer to the next write request. */
 export interface WritePlan {
   readonly outcome: `accept` | `reject`
+  /**
+   * What an accepted insert or update stores (`server-rewrites`); `none`
+   * otherwise. The request still carries the authored row.
+   */
+  readonly rewrite: ServerRewrite
   /** Answer only at `release`, so the write stays pending until then. */
   readonly held: boolean
   /** The error a rejection answers with. */
@@ -192,7 +235,8 @@ export interface MutationDriver {
  *   of a key they hold, with no other pending mutation on that key. An update
  *   that changes no field is not generated. An update without `note` of a
  *   row that holds one removes the field. Its plan rejects only with
- *   `write-rejection` and is held only with `held-writes`.
+ *   `write-rejection`, is held only with `held-writes`, and rewrites an
+ *   accepted insert's or update's row only with `server-rewrites`.
  * - `release`: the provider answers the oldest held request (`held-writes`).
  * - `foreign`: another client commits an upsert or a delete while no
  *   mutation is pending (`foreign-commits`).
@@ -200,7 +244,9 @@ export interface MutationDriver {
  * After the last step the check releases every held request, reaching a
  * quiescent cut. Keys range over 1..4 and titles over three values, so writes
  * revisit keys; a row carries `note` half the time, so an update can add or
- * remove a field.
+ * remove a field, and a separate arm generates updates without `note` so
+ * that removals are common. With `server-rewrites`, half of the plans
+ * rewrite an accepted row.
  */
 export type MutationStep =
   | {
@@ -211,6 +257,7 @@ export type MutationStep =
       readonly note?: string
       readonly outcome: `accept` | `reject`
       readonly held: boolean
+      readonly rewrite: ServerRewrite
     }
   | { readonly kind: `release` }
   | { readonly kind: `foreign`; readonly change: ProviderChange }
@@ -250,8 +297,18 @@ export function mutationHistoryArb(
           )
         : fc.constant(`accept` as const),
       held: capabilities.has(`held-writes`) ? fc.boolean() : fc.constant(false),
+      rewrite: capabilities.has(`server-rewrites`)
+        ? fc.constantFrom<ServerRewrite>(
+            `none`,
+            `none`,
+            `none`,
+            `retitle`,
+            `drop-note`,
+            `set-note`,
+          )
+        : fc.constant<ServerRewrite>(`none`),
     })
-    .map(({ type, row, outcome, held }): MutationStep => ({
+    .map(({ type, row, outcome, held, rewrite }): MutationStep => ({
       kind: `write`,
       type,
       id: row.id,
@@ -259,11 +316,32 @@ export function mutationHistoryArb(
       ...(row.note === undefined ? {} : { note: row.note }),
       outcome,
       held,
+      rewrite: type === `delete` ? `none` : rewrite,
     }))
   const steps: Array<{
     weight: number
     arbitrary: fc.Arbitrary<MutationStep>
-  }> = [{ weight: 6, arbitrary: write }]
+  }> = [
+    { weight: 6, arbitrary: write },
+    // An update without `note`: it removes the field when the row holds one.
+    {
+      weight: 2,
+      arbitrary: write.map(
+        (step): MutationStep =>
+          step.kind === `write`
+            ? {
+                kind: `write`,
+                type: `update`,
+                id: step.id,
+                title: step.title,
+                outcome: step.outcome,
+                held: step.held,
+                rewrite: step.rewrite,
+              }
+            : step,
+      ),
+    },
+  ]
   if (capabilities.has(`held-writes`)) {
     steps.push({
       weight: 3,
@@ -333,8 +411,10 @@ interface PendingWrite {
   readonly id: number
   /** The authored row's model value; absent for a delete. */
   readonly value?: string
-  /** The provider's copy of the authored row; absent for a delete. */
-  readonly stored?: string
+  /** The row its request carries: the authored row in the provider's value domain. */
+  readonly sent?: string
+  /** The row the provider stores if it accepts: `sent` under the plan's rewrite. */
+  readonly copy?: string
   readonly plan: WritePlan
   requested: boolean
 }
@@ -345,9 +425,12 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  * The model holds only what a legal next step can observe:
  *
  * - `provider` is the provider's committed rows: the seed, every accepted
- *   write's stored copy, and every commit from another client, in commit
- *   order. A write's stored copy is its authored row under the driver's
- *   `undefinedField` rule.
+ *   write's copy, and every commit from another client, in commit order. A
+ *   write's copy is its authored row under the driver's `undefinedField`
+ *   rule and then its plan's `ServerRewrite`: after a rewrite the
+ *   provider's copy, not the authored row, is the row's value (FID-5).
+ * - `rewritten` counts accepted writes whose copy differs from their
+ *   authored row, for reach.
  * - `pending` lists the mutations not yet decided, in author order. MUT-10
  *   orders their requests: the first is requested at once, and each later
  *   one only after every earlier one is decided.
@@ -376,6 +459,7 @@ interface MutationModel {
   applied: Map<number, string>
   heldRows: Array<PendingWrite>
   pending: Array<PendingWrite>
+  rewritten: number
   requests: Array<{ type: WriteRequest[`type`]; id: number; value?: string }>
   settlements: Array<ExpectedSettlement>
 }
@@ -391,6 +475,7 @@ function initialModel(
     applied: new Map(provider),
     heldRows: [],
     pending: [],
+    rewritten: 0,
     requests: [],
     settlements: [],
   }
@@ -452,7 +537,8 @@ function visible(state: MutationModel): RowState {
 function decide(state: MutationModel, write: PendingWrite): void {
   if (write.plan.outcome === `accept`) {
     if (write.type === `delete`) state.provider.delete(write.id)
-    else state.provider.set(write.id, write.stored!)
+    else state.provider.set(write.id, write.copy!)
+    if (write.copy !== write.value) state.rewritten++
     state.heldRows.push(write)
     state.settlements[write.index] = `fulfilled`
   } else {
@@ -482,7 +568,7 @@ function advance(state: MutationModel): Array<RowState> {
       state.requests.push({
         type: first.type,
         id: first.id,
-        ...(first.stored === undefined ? {} : { value: first.stored }),
+        ...(first.sent === undefined ? {} : { value: first.sent }),
       })
     }
     if (first.plan.held) return states
@@ -537,7 +623,10 @@ function stepModel(
         id: step.id,
         ...(row && {
           value: rowValue(row),
-          stored: rowValue(storedRow(row, state.undefinedField)),
+          sent: rowValue(storedRow(row, state.undefinedField)),
+          copy: rowValue(
+            rewriteRow(storedRow(row, state.undefinedField), step.rewrite),
+          ),
         }),
         plan: plan(step),
         requested: false,
@@ -616,6 +705,7 @@ export const mutationReachStates = [
   `foreign-commit`,
   `field-removed`,
   `held-optimistic-row`,
+  `server-rewrote-copy`,
   `quiescent-after-writes`,
 ] as const
 
@@ -630,6 +720,7 @@ const capabilityOfState: Partial<
   'held-write-rejected': `held-writes`,
   'foreign-commit': `foreign-commits`,
   'held-optimistic-row': `held-writes`,
+  'server-rewrote-copy': `server-rewrites`,
 }
 
 /** The declared states a driver's capabilities let histories reach. */
@@ -872,6 +963,7 @@ export async function checkMutationHistory(
     if (!ok) throw violation(`${law} (publication)`, stepIndex, owed, got)
   }
 
+  let rewritten = 0
   // The plan the model decided the last write by; the provider gets it too.
   let lastPlan: WritePlan | undefined
   const planFor = (
@@ -879,7 +971,12 @@ export async function checkMutationHistory(
   ): WritePlan => {
     const error = new Error(`conformance write rejected ${failures.length}`)
     failures.push(error)
-    lastPlan = { outcome: step.outcome, held: step.held, error }
+    lastPlan = {
+      outcome: step.outcome,
+      held: step.held,
+      rewrite: step.rewrite,
+      error,
+    }
     return lastPlan
   }
 
@@ -938,6 +1035,8 @@ export async function checkMutationHistory(
           break
       }
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
+      if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+      rewritten = state.rewritten
       await compare(index)
       checkPublications(index, owedPublications(before, result.published), law)
     }
@@ -947,6 +1046,8 @@ export async function checkMutationHistory(
       const result = stepModel(state, { kind: `release` }, planFor)
       if (result === undefined) break
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
+      if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+      rewritten = state.rewritten
       await provider.release()
       await compare(steps.length)
       checkPublications(

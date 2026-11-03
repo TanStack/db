@@ -560,8 +560,21 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     value domain), and the model holds an accepted write's sync transaction
     while another mutation persists (the glossary's held optimistic row). A
     JSON-provider reference campaign and an eighth mutant calibrate both.
-  - **Open, needs a maintainer decision:** a storage `bulkWrite` that throws
-    wedges RxDB 17.1.0's incremental write queue, so `incrementalPatch`
-    never settles. The adapter could update through `patch`, which gives up
-    RxDB's conflict retry. Not generated until decided.
+  - **Decided 2026-11-03:** a storage `bulkWrite` that throws wedges the
+    incremental write queue of RxDB 17.1.0 to 17.5.0, so `incrementalPatch`
+    never settles (pubkey/rxdb#9025, fixed in 17.6.0). The adapter keeps
+    `incrementalPatch`. Thrown storage errors are generated once the RxDB
+    dev dependency reaches 17.6.0.
   - **Size:** rxdb-db-collection +43 gzip bytes for MUT-10.
+- **2026-11-03, mutations family, server rewrites.** A new capability,
+  `server-rewrites`: an accepted insert's or update's plan can rewrite the
+  stored row (normalize the title, drop `note`, set `note`), as server
+  defaults, triggers, and normalization do. The request still carries the
+  authored row; the provider's copy is the row's value. New reach state
+  `server-rewrote-copy`, and a grammar arm for updates without `note`.
+  - **Calibration:** the reference mutant `writes-back-authored` survives
+    without the capability and fails FID-5 with it. RxDB rewrites through
+    its `preInsert` and `preSave` hooks; with no-op hooks the fixed campaign
+    fails FID-5.
+  - **Result:** the reference adapter and RxDB are GREEN, with no
+    production change.

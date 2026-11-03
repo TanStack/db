@@ -7242,21 +7242,32 @@ provider stores an authored `undefined` field (`undefinedField`, from FID-1's
 value domain): `own`, as a structured clone keeps it, or `absent`, as a JSON
 document must. Under `absent`, a removed field is absent from the request and
 the provider's copy, and the copy publishes one more change of row values when
-it replaces the held optimistic row. Reach: each of insert, update, and delete
+it replaces the held optimistic row. With `server-rewrites`, an accepted
+insert's or update's plan can also rewrite the stored row (normalize the
+title, drop `note`, or set `note` as a server default): the request still
+carries the authored row (MUT-8), and the provider's copy, not the authored
+row, is the row's value once it applies (MUT-1, FID-5). Reach: each of insert, update, and delete
 accepted, a rejected write, a held write, a write queued behind a held one, a
 held write rejected, a commit by another client, an accepted field removal, a
-held optimistic row, and a quiescent cut after writes, at least five
-histories each per campaign. Calibration: eight reference mutants each fail
+held optimistic row, a copy the provider rewrote, and a quiescent cut after
+writes, at least five histories each per campaign; a grammar arm generates
+updates without `note`, so removals are common. Calibration: nine reference
+mutants each fail
 with their law (an applied copy after the mutation function settles, a
 swallowed or wrapped rejection, a duplicated insert request, writes that do
 not wait for the earlier one, a skipped delete, an update that sends only
-changed fields, and, under a JSON provider, a change feed that carries the
-authored row instead of the stored copy). Before the held-row rule, the
+changed fields, under a JSON provider a change feed that carries the
+authored row instead of the stored copy, and an adapter that writes the
+authored row into its synced rows after the provider accepts). The last
+survives the fixed campaign without `server-rewrites` and fails FID-5 with
+it. Before the held-row rule, the
 JSON-provider campaign failed MUT-1 on a fulfilled removal behind a pending
 write.
 
-RxDB (`undefinedField: 'absent'`): the driver runs a real RxDB database on
-memory storage. The provider wraps that storage's `bulkWrite`, stores
+RxDB (`undefinedField: 'absent'`, `server-rewrites`): the driver runs a real
+RxDB database on memory storage, and a rewrite is RxDB's `preInsert` and
+`preSave` hooks; the request keeps the document as the adapter sent it. With
+the hooks made no-ops, the fixed campaign fails FID-5. The provider wraps that storage's `bulkWrite`, stores
 documents as JSON as RxDB's persistent storages do, rejects a request with a
 per-row write error (status 422, as schema validation reports), and reads its
 rows from the storage instance rather than RxDB's document cache. MUT-2's
@@ -7266,13 +7277,14 @@ failed MUT-10 (a write reached RxDB while an earlier one was pending) and 24
 failed MUT-2 (a rejected delete rejected with an array of write errors). The
 adapter now runs each write after the earlier one is decided and rejects a
 failed delete with RxDB's `RxError`. RxDB limits: a `bulkWrite` that throws is
-not generated. RxDB 17.1.0's incremental write queue does not catch it: the
-throw is an unhandled rejection, `incrementalPatch` never settles, and every
-later incremental write on the collection waits forever (trace: seed row 4,
-an update of row 4 whose storage write throws). Fixing it in the adapter means
-an update through `patch` instead of `incrementalPatch`, which gives up
-RxDB's conflict retry when another tab writes; that needs a maintainer
-decision. A conflict (status 409) is not generated, and an update of a
+not generated. RxDB 17.1.0 to 17.5.0's incremental write queue does not catch
+it: the throw is an unhandled rejection, `incrementalPatch` never settles, and
+every later incremental write on the collection waits forever (trace: seed row
+4, an update of row 4 whose storage write throws). This is RxDB issue
+pubkey/rxdb#9025, fixed in RxDB 17.6.0 (pubkey/rxdb#9058). The adapter keeps
+`incrementalPatch` and its conflict retry (maintainer decision 2026-11-03);
+generating thrown storage errors waits for the repository's RxDB dev
+dependency to reach 17.6.0. A conflict (status 409) is not generated, and an update of a
 document that another client deleted while the update was pending (the
 adapter skips it and fulfills) is outside the grammar.
 A removed field is an own `undefined` in the authored row (maintainer

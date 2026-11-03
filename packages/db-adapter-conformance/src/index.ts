@@ -41,6 +41,7 @@ export {
   mutationProperty,
   mutationReachStates,
   mutationReachStatesFor,
+  rewriteRow,
 } from './mutation-oracle'
 export type {
   MutationCapability,
@@ -54,6 +55,7 @@ export type {
   MutationReceipt,
   MutationStep,
   MutationWriter,
+  ServerRewrite,
   WritePlan,
   WriteRequest,
 } from './mutation-oracle'

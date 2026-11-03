@@ -13,7 +13,7 @@
  * publication that applies it (MUT-1).
  */
 import { createCollection } from '@tanstack/db'
-import { observedView } from '../src'
+import { observedView, rewriteRow } from '../src'
 import type {
   ConformanceRow,
   MutationDriver,
@@ -45,10 +45,16 @@ export type ReferenceMutationMutant =
    * copy, so a JSON provider's removed field stays an own `undefined`.
    */
   | `echoes-authored-row`
+  /**
+   * FID-5: after the provider accepts, the adapter writes the authored row
+   * into its synced rows, over the provider's rewritten copy.
+   */
+  | `writes-back-authored`
 
 const acceptAtOnce: WritePlan = {
   outcome: `accept`,
   held: false,
+  rewrite: `none`,
   error: new Error(`unplanned write`),
 }
 
@@ -103,7 +109,7 @@ export class ControlledMutationProvider implements MutationProvider {
         this.commit(
           request.type === `delete`
             ? { type: `delete`, id: request.id }
-            : { type: `upsert`, row: request.row! },
+            : { type: `upsert`, row: rewriteRow(request.row!, plan.rewrite) },
         )
         resolve()
       }
@@ -169,6 +175,12 @@ function referenceCollection(
       throw error
     }
   }
+  // The `writes-back-authored` mutant writes through the sync run's apply.
+  let applyChange: ((change: ProviderChange) => void) | undefined
+  const writeBack = (row: ConformanceRow) => {
+    if (mutant === `writes-back-authored`)
+      applyChange?.({ type: `upsert`, row: structuredClone(row) })
+  }
   const collection = createCollection<ConformanceRow, number>({
     id: `reference-mutations-${++sequence}`,
     getKey: (row) => row.id,
@@ -197,6 +209,7 @@ function referenceCollection(
         }
         void commit()
         markReady()
+        applyChange = apply
         return provider.subscribe((change) => {
           if (mutant === `applies-copy-late`) setTimeout(() => apply(change), 0)
           else apply(change)
@@ -214,6 +227,7 @@ function referenceCollection(
             }
             await provider.write(request)
             if (mutant === `writes-insert-twice`) await provider.write(request)
+            writeBack(mutation.modified)
           }
         }),
       ),
@@ -232,6 +246,7 @@ function referenceCollection(
                     } as ConformanceRow)
                   : structuredClone(mutation.modified),
             })
+            writeBack(mutation.modified)
           }
         }),
       ),
@@ -260,6 +275,7 @@ export function referenceMutationDriver(
       `write-rejection`,
       `held-writes`,
       `foreign-commits`,
+      `server-rewrites`,
     ]),
     create(seed): MutationFixture {
       const provider = new ControlledMutationProvider(

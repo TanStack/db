@@ -98,6 +98,7 @@ describe(`mutation conformance: reference adapter`, () => {
     [`skips-delete`, /MUT-8|FID-5/],
     [`sends-changes-only`, `MUT-8`],
     [`echoes-authored-row`, /FID-5/],
+    [`writes-back-authored`, /FID-5/],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
