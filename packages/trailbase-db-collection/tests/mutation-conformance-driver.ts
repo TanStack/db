@@ -21,8 +21,10 @@
  *   plan's error, and a held request waits until `release`. An accepted
  *   write commits and sends its change event at once, or, with a held echo,
  *   only at `deliver`, as an event can trail the HTTP response
- *   (`held-echoes`); TrailBase confirms each write through its change
- *   stream (the law set's `confirm-through-sync`);
+ *   (`held-echoes`). The change stream is in commit order, so a held event
+ *   stalls it and later events wait behind it (`log-ordered-echoes`);
+ *   TrailBase confirms each write through its change stream (the law set's
+ *   `confirm-through-sync`);
  * - a rewrite (`server-rewrites`) is the service changing the stored row, as
  *   a column default, trigger, or check does; its event carries the stored
  *   row;
@@ -85,7 +87,8 @@ class TrailBaseMutationProvider implements MutationProvider {
   private readonly table = new Map<number, ConformanceRecord>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
-  private readonly withheld: Array<() => void> = []
+  /** Events the stream holds at a held echo; `own` marks the holding one. */
+  private readonly withheld: Array<{ send: () => void; own: boolean }> = []
   private readonly log: Array<WriteRequest> = []
   private controller: ReadableStreamDefaultController<Event> | undefined
 
@@ -174,7 +177,9 @@ class TrailBaseMutationProvider implements MutationProvider {
       event = held ? { Update: asSent(record) } : { Insert: asSent(record) }
     }
     const send = () => this.controller?.enqueue(event)
-    if (withhold) this.withheld.push(send)
+    // The change stream is in commit order: an event waits behind a held one.
+    if (withhold || this.withheld.length > 0)
+      this.withheld.push({ send, own: withhold })
     else send()
   }
 
@@ -189,11 +194,13 @@ class TrailBaseMutationProvider implements MutationProvider {
   /** Answers every held request and sends every withheld event. */
   drain(): void {
     for (const answer of this.held.splice(0)) answer()
-    for (const send of this.withheld.splice(0)) send()
+    for (const { send } of this.withheld.splice(0)) send()
   }
 
   deliver(): void {
-    this.withheld.shift()?.()
+    this.withheld.shift()?.send()
+    while (this.withheld[0] && !this.withheld[0].own)
+      this.withheld.shift()!.send()
   }
 
   foreignCommit(change: ProviderChange): void {
@@ -219,6 +226,7 @@ export function trailBaseMutationDriver(): MutationDriver {
       `server-rewrites`,
       `field-updates`,
       `held-echoes`,
+      `log-ordered-echoes`,
     ]),
     undefinedField: `null`,
     create(seed): MutationFixture {
@@ -250,11 +258,8 @@ export function trailBaseMutationDriver(): MutationDriver {
           delete: (id) => collection.delete(id),
         },
         provider,
-        dispose: async () => {
-          // A write waiting for its event would otherwise outlive the history.
-          provider.drain()
-          await collection.cleanup()
-        },
+        drain: () => provider.drain(),
+        dispose: () => collection.cleanup(),
       }
     },
   }

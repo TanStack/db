@@ -127,7 +127,11 @@ export class ControlledMutationProvider implements MutationProvider {
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
   /** Copies not yet fed, in commit order; `own` marks a plan's withholding. */
-  private readonly withheld: Array<{ feed: () => void; own: boolean }> = []
+  private readonly withheld: Array<{
+    feed: () => void
+    own: boolean
+    id: number
+  }> = []
   private readonly log: Array<WriteRequest> = []
   private listener:
     ((change: ProviderChange, sequence: number) => void) | undefined
@@ -241,9 +245,14 @@ export class ControlledMutationProvider implements MutationProvider {
         ? change
         : { ...change, row: this.stored(change.row) }
     const feed = () => this.listener?.(fed, sequence)
-    // A log feeds in commit order, so a copy waits behind a withheld one.
-    if (withhold || (this.options.log && this.withheld.length > 0))
-      this.withheld.push({ feed, own: withhold })
+    // A copy waits behind a withheld one: any, from a log, or one for its
+    // key, since a provider keeps one key's copies in commit order.
+    const id = change.type === `delete` ? change.id : change.row.id
+    if (
+      withhold ||
+      this.withheld.some((entry) => this.options.log || entry.id === id)
+    )
+      this.withheld.push({ feed, own: withhold, id })
     else feed()
     return sequence
   }
@@ -260,8 +269,17 @@ export class ControlledMutationProvider implements MutationProvider {
 
   deliver(): void {
     this.withheld.shift()?.feed()
-    while (this.options.log && this.withheld[0] && !this.withheld[0].own)
-      this.withheld.shift()!.feed()
+    for (;;) {
+      const index = this.withheld.findIndex(
+        (entry, at) =>
+          !entry.own &&
+          this.withheld
+            .slice(0, at)
+            .every((earlier) => !this.options.log && earlier.id !== entry.id),
+      )
+      if (index < 0) return
+      this.withheld.splice(index, 1)[0]!.feed()
+    }
   }
 
   foreignCommit(change: ProviderChange): void {
@@ -521,7 +539,8 @@ export function referenceMutationDriver(
             collection.update(row.id, (draft) => {
               draft.title = row.title
               if (Object.hasOwn(row, `note`)) draft.note = row.note
-              else delete draft.note
+              // Only a held note value is removed.
+              else if (typeof draft.note === `string`) delete draft.note
             }),
           delete: (id) => collection.delete(id),
         },

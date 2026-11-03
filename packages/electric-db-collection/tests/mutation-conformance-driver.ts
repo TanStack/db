@@ -414,12 +414,8 @@ export function electricMutationDriver(): MutationDriver {
         },
         provider,
         settle: provider.settle,
-        dispose: async () => {
-          // A handler waiting on a held request or echo would outlive the
-          // history.
-          provider.drain()
-          await collection.cleanup()
-        },
+        drain: () => provider.drain(),
+        dispose: () => collection.cleanup(),
       }
     },
   }

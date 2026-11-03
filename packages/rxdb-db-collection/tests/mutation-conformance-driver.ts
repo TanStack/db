@@ -381,7 +381,8 @@ export function rxdbMutationDriver(): MutationDriver {
             collection.update(String(row.id), (draft) => {
               draft.title = row.title
               if (Object.hasOwn(row, `note`)) draft.note = row.note
-              else delete draft.note
+              // Only a held note value is removed.
+              else if (typeof draft.note === `string`) delete draft.note
             }),
           delete: (id) => collection.delete(String(id)),
         },

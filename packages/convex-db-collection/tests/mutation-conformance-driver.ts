@@ -444,15 +444,16 @@ export function convexMutationDriver(): MutationDriver {
               collection.update(row.id, (draft) => {
                 draft.title = row.title
                 if (Object.hasOwn(row, `note`)) draft.note = row.note
-                else delete draft.note
+                // Only a held note value is removed.
+                else if (typeof draft.note === `string`) delete draft.note
               }),
             ),
           delete: (id) => provider.track(collection.delete(id)),
         },
         provider,
         settle: provider.settle,
+        drain: () => provider.drain(),
         dispose: async () => {
-          provider.drain()
           await collection.cleanup()
           await provider.dispose()
         },

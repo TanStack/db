@@ -62,13 +62,15 @@
  * next write request, which the check hands the provider before the write: it
  * accepts or rejects, at once or after a `release`.
  *
- * Boundary. The oracle checks auto-transaction writes (`collection.insert`,
- * `update`, `delete`) on a ready Collection whose adapter persists them
- * itself. It does not check manual transactions, confirmation through sync
- * (MUT-7, a later capability), schema validation, or a mutation on a key that
- * already has a pending mutation. Commits from other clients arrive only
- * while no mutation is pending; a commit held behind a pending mutation is
- * core's MUT-5.
+ * Boundary. The oracle checks auto-transaction writes of one row
+ * (`collection.insert`, `update`, `delete`) on a ready Collection whose
+ * adapter persists them itself or, with `application-handlers`, confirms the
+ * writes the application's handlers persist. A write may follow a pending
+ * one on the same key. With `held-echoes` it checks confirmation through
+ * sync (MUT-7). It does not check manual or multi-mutation transactions,
+ * schema validation, or `awaitMatch`. Commits from other clients arrive only
+ * while no mutation is pending, so MUT-11 is not checked; a commit held
+ * behind a pending mutation is core's MUT-5.
  */
 import fc from 'fast-check'
 import { ConformanceViolation } from './eager-live-source-oracle'
@@ -140,7 +142,11 @@ export interface MutationReceipt {
 /** The driver's writes, through the adapter's Collection. */
 export interface MutationWriter {
   insert: (row: ConformanceRow) => MutationReceipt
-  /** Replace the held row's fields with `row`'s: a complete authored row. */
+  /**
+   * Replace the held row's fields with `row`'s: a complete authored row. A
+   * `row` without `note` removes a note value the held row holds; a held
+   * row without one is left as it is.
+   */
   update: (row: ConformanceRow) => MutationReceipt
   delete: (id: number) => MutationReceipt
 }
@@ -240,6 +246,11 @@ export interface MutationFixture {
   base: () => Iterable<ConformanceRow>
   writer: MutationWriter
   provider: MutationProvider
+  /**
+   * Answers every held request and delivers every withheld copy. The check
+   * calls it before cleanup, so no write outlives the history waiting on one.
+   */
+  drain?: () => void | Promise<void>
   /** The adapter's propagation step, awaited before every comparison. */
   settle?: () => Promise<void>
   dispose?: () => void | Promise<void>
@@ -293,7 +304,9 @@ export interface MutationDriver {
  * shrinking.
  *
  * - `write`: an insert of a key the public rows lack, or an update or delete
- *   of a key they hold, with no other pending mutation on that key. An update
+ *   of a key they hold, also while earlier mutations on that key are
+ *   pending, as long as their plans accept them; an arm generates two writes
+ *   on one key in a row. An update
  *   that changes no field is not generated. An update without `note` of a
  *   row that holds one removes the field. Its plan rejects only with
  *   `write-rejection`, in one of the driver's `rejectionKinds` when it
@@ -462,9 +475,29 @@ export function mutationHistoryArb(
       ),
     })
   }
+  // Two writes on one key in a row, so a write often follows a pending one
+  // on its key.
+  const sameKeyPair = fc
+    .tuple(write, write)
+    .map(([first, second]): Array<MutationStep> =>
+      first.kind === `write` && second.kind === `write`
+        ? [first, { ...second, id: first.id }]
+        : [first, second],
+    )
   return fc.record({
     seed: fc.uniqueArray(rowArb, { selector: (row) => row.id, maxLength: 3 }),
-    steps: fc.array(fc.oneof(...steps), { minLength: 1, maxLength: 10 }),
+    steps: fc
+      .array(
+        fc.oneof(
+          ...steps.map(({ weight, arbitrary }) => ({
+            weight,
+            arbitrary: arbitrary.map((step) => [step]),
+          })),
+          { weight: 2, arbitrary: sameKeyPair },
+        ),
+        { minLength: 1, maxLength: 10 },
+      )
+      .map((groups) => groups.flat()),
   })
 }
 
@@ -603,6 +636,8 @@ interface MutationModel {
   pending: Array<PendingWrite>
   /** Answered writes whose copies are not delivered, in commit order. */
   echoes: Array<PendingWrite>
+  /** Every write, by index. */
+  writes: Array<PendingWrite>
   rewritten: number
   requests: Array<{ type: WriteRequest[`type`]; id: number; value?: string }>
   settlements: Array<ExpectedSettlement>
@@ -624,6 +659,7 @@ function initialModel(
     heldRows: [],
     pending: [],
     echoes: [],
+    writes: [],
     rewritten: 0,
     requests: [],
     settlements: [],
@@ -640,6 +676,8 @@ function authoredRow(
   step: Extract<MutationStep, { kind: `write` }>,
   held: string | undefined,
 ): ConformanceRow {
+  // A held `note` stays an own `undefined`: removed when it held a value,
+  // kept when it already was one.
   const removesNote =
     step.type === `update` &&
     step.note === undefined &&
@@ -746,8 +784,13 @@ function decide(state: MutationModel, write: PendingWrite): void {
     state.provider.set(write.id, copy)
     if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
   }
-  // A copy is withheld by its own plan or, from a log, by an earlier one.
-  if (write.plan.echoHeld || (state.logOrdered && state.echoes.length > 0)) {
+  // A copy is withheld by its own plan or waits behind an undelivered one:
+  // any earlier one from a log, an earlier one for its key otherwise, since
+  // every provider keeps one key's copies in commit order.
+  if (
+    write.plan.echoHeld ||
+    state.echoes.some((earlier) => blocks(state, earlier, write))
+  ) {
     write.answered = true
     write.withheld = write.plan.echoHeld
     state.echoes.push(write)
@@ -758,10 +801,31 @@ function decide(state: MutationModel, write: PendingWrite): void {
  * The oldest withheld copy arrives, and from a log every later copy queued
  * behind it, up to the next one its own plan withheld.
  */
-function deliverEchoes(state: MutationModel): void {
+function deliverEchoes(state: MutationModel): Array<RowState> {
   confirm(state, state.echoes.shift()!)
-  while (state.logOrdered && state.echoes[0] && !state.echoes[0].withheld)
-    confirm(state, state.echoes.shift()!)
+  const states = [visible(state)]
+  for (;;) {
+    const next = state.echoes.find(
+      (write, index) =>
+        !write.withheld &&
+        state.echoes
+          .slice(0, index)
+          .every((earlier) => !blocks(state, earlier, write)),
+    )
+    if (!next) return states
+    state.echoes.splice(state.echoes.indexOf(next), 1)
+    confirm(state, next)
+    states.push(visible(state))
+  }
+}
+
+/** Whether an undelivered copy holds back a later write's copy. */
+function blocks(
+  state: MutationModel,
+  earlier: PendingWrite,
+  later: PendingWrite,
+): boolean {
+  return state.logOrdered || earlier.id === later.id
 }
 
 /** An accepted write's copy arrives: it fulfills. */
@@ -835,6 +899,8 @@ type StepDone =
       outcome: WritePlan[`outcome`]
       held: boolean
       queued: boolean
+      /** An earlier mutation on the same key was still pending. */
+      sameKeyPending: boolean
       /** An update that removes `note`, authored as an own `undefined`. */
       removesField: boolean
     }
@@ -855,7 +921,24 @@ function stepModel(
   switch (step.kind) {
     case `write`: {
       const held = new Map(visible(state))
-      const busy = state.pending.some((write) => write.id === step.id)
+      // A write may follow a pending one on the same key: core layers their
+      // optimistic states in author order.
+      const sameKey = state.pending.filter((write) => write.id === step.id)
+      const sameKeyPending = sameKey.length > 0
+      // Only behind writes the provider will accept: after a rejected insert
+      // or delete, what a provider does with the next write on that key is
+      // the law set's per-adapter `unknownKeyUpdate`, which no driver here
+      // declares.
+      if (sameKey.some((write) => write.plan.outcome === `reject`))
+        return undefined
+      // Requests that go out at once can reach the provider out of author
+      // order, so a write follows one on its key only once that is answered.
+      if (
+        !state.ordered &&
+        !state.answersInOrder &&
+        sameKey.some((write) => !write.answered)
+      )
+        return undefined
       const legal =
         step.type === `insert` ? !held.has(step.id) : held.has(step.id)
       const over = held.get(step.id)
@@ -864,8 +947,12 @@ function stepModel(
       // An update that changes no field records no mutation in core; no law
       // fixes its persistence, so the grammar leaves it out.
       const noop = step.type === `update` && over === value
-      if (busy || !legal || noop) return undefined
-      const queued = state.pending.length > 0
+      if (!legal || noop) return undefined
+      // MUT-10 holds this write back: the adapter orders writes and an earlier
+      // one waits for its held answer.
+      const queued =
+        state.ordered &&
+        state.pending.some((write) => !write.answered && write.plan.held)
       const fields =
         row && step.type === `update` && state.fieldUpdates
           ? changedFields(row, rowOf(step.id, over!))
@@ -885,6 +972,7 @@ function stepModel(
       }
       state.settlements.push(`pending`)
       state.pending.push(write)
+      state.writes.push(write)
       // The optimistic state publishes when the write call returns.
       const published = [visible(state), ...advance(state)]
       return {
@@ -894,10 +982,14 @@ function stepModel(
           outcome: step.outcome,
           held: step.held,
           queued,
+          sameKeyPending,
+          // Only a held note value is removed.
           removesField:
-            row !== undefined &&
-            Object.hasOwn(row, `note`) &&
-            row.note === undefined,
+            step.type === `update` &&
+            step.note === undefined &&
+            over !== undefined &&
+            typeof (JSON.parse(over) as [string, Array<unknown>])[1][0] ===
+              `string`,
         },
         published,
       }
@@ -917,8 +1009,7 @@ function stepModel(
     }
     case `deliver`: {
       if (state.echoes.length === 0) return undefined
-      deliverEchoes(state)
-      const published = [visible(state), ...advance(state)]
+      const published = [...deliverEchoes(state), ...advance(state)]
       return { done: { kind: `deliver` }, published }
     }
     case `foreign`: {
@@ -932,26 +1023,63 @@ function stepModel(
   }
 }
 
+/** The model state a step starts from, for the settlement check. */
+interface StepStart {
+  readonly pending: ReadonlyArray<PendingWrite>
+  readonly heldRows: ReadonlyArray<PendingWrite>
+  readonly applied: ReadonlyMap<number, string>
+  readonly writes: number
+}
+
+function stepStart(state: MutationModel): StepStart {
+  return {
+    pending: [...state.pending],
+    heldRows: [...state.heldRows],
+    applied: new Map(state.applied),
+    writes: state.writes.length,
+  }
+}
+
 /**
- * Each row's sequence of values from `start` through `states`, a value that
- * repeats counted once; an absent row is `null`.
+ * The writes a step settled, and each row's values while they settle in any
+ * order: the public rows with any subset of them settled. Settlements at one
+ * step are in no order a law fixes, so a publication may show any of these.
  */
-function rowPaths(start: RowState, states: ReadonlyArray<RowState>): string {
-  const valueOf = (rows: RowState, id: number) =>
-    rows.find(([key]) => key === id)?.[1] ?? null
-  const ids = [
-    ...new Set([start, ...states].flatMap((rows) => rows.map(([id]) => id))),
-  ].sort((a, b) => a - b)
-  return JSON.stringify(
-    ids.map((id) => {
-      const path = [valueOf(start, id)]
-      for (const rows of states) {
-        const value = valueOf(rows, id)
-        if (value !== path.at(-1)) path.push(value)
-      }
-      return [id, path]
-    }),
+function settlementValues(
+  state: MutationModel,
+  start: StepStart,
+): { settled: number; values: Map<number, Set<string | null>> } {
+  const pending = [...start.pending, ...state.writes.slice(start.writes)]
+  const settled = pending.filter(
+    (write) => state.settlements[write.index] !== `pending`,
   )
+  const values = new Map<number, Set<string | null>>()
+  for (let mask = 0; mask < 1 << settled.length; mask++) {
+    const done = new Set(settled.filter((_, bit) => mask & (1 << bit)))
+    const still = pending.filter((write) => !done.has(write))
+    // Held rows and the applied rows change only when nothing is pending.
+    const rows =
+      still.length === 0
+        ? state.applied
+        : fold(
+            fold(start.applied, [
+              ...start.heldRows,
+              ...pending.filter(
+                (write) =>
+                  done.has(write) &&
+                  state.settlements[write.index] === `fulfilled`,
+              ),
+            ]),
+            still,
+          )
+    const ids = new Set([...rows.keys(), ...start.applied.keys()])
+    for (const id of [...ids, ...pending.map((write) => write.id)]) {
+      const set = values.get(id) ?? new Set()
+      set.add(rows.get(id) ?? null)
+      values.set(id, set)
+    }
+  }
+  return { settled: settled.length, values }
 }
 
 /**
@@ -987,6 +1115,7 @@ export const mutationReachStates = [
   `held-write-rejected`,
   `foreign-commit`,
   `field-removed`,
+  `same-key-pending`,
   `held-optimistic-row`,
   `server-rewrote-copy`,
   `echo-held`,
@@ -1009,7 +1138,7 @@ const capabilityOfState: Partial<
   'held-optimistic-row': `held-writes`,
   'server-rewrote-copy': `server-rewrites`,
   'echo-held': `held-echoes`,
-  'echo-queued-behind-withheld': `log-ordered-echoes`,
+  'echo-queued-behind-withheld': `held-echoes`,
 }
 
 /** The declared states a driver's capabilities let histories reach. */
@@ -1028,6 +1157,18 @@ export function mutationReachStatesFor(
         return (
           domain.capabilities.has(`held-writes`) &&
           domain.capabilities.has(`write-rejection`)
+        )
+      // Only an adapter that orders writes holds one back (MUT-10).
+      if (state === `write-queued-behind-held`)
+        return (
+          domain.capabilities.has(`held-writes`) &&
+          !domain.capabilities.has(`application-handlers`)
+        )
+      // A write stays pending past its step only when held or confirmed late.
+      if (state === `same-key-pending`)
+        return (
+          domain.capabilities.has(`held-writes`) ||
+          domain.capabilities.has(`held-echoes`)
         )
       return capability === undefined || domain.capabilities.has(capability)
     }),
@@ -1255,7 +1396,7 @@ export async function checkMutationHistory(
     stepIndex: number,
     owed: ReadonlyArray<RowState>,
     law: string,
-    settledSeveral: boolean,
+    from: StepStart,
   ) => {
     // Each change of row values, in order; a publication of the same row
     // values (a virtual row field change) is not one.
@@ -1265,18 +1406,33 @@ export async function checkMutationHistory(
       if (!sameRows(rows, got.at(-1) ?? published)) got.push(rows)
     }
     published = got.at(-1) ?? published
-    // Writes that settle at one step settle in an order no law fixes, so
-    // then each row's own sequence of values is compared: it does not depend
-    // on that order, and it still shows an earlier synced value or an extra
-    // change.
-    const ok = settledSeveral
-      ? rowPaths(start, got) === rowPaths(start, owed)
-      : got.length === owed.length &&
-        got.every((rows, index) => sameRows(rows, owed[index]!))
+    // Writes that settle at one step settle in an order no law fixes. Then
+    // each row may show only a value it has with some of them settled, and
+    // changes at most once per settled write and once for the step's own
+    // optimistic state; an earlier synced value or an extra change still
+    // shows.
+    const { settled, values } = settlementValues(state, from)
+    const ok =
+      settled > 1
+        ? [...values].every(([id, allowed]) => {
+            const path = [start, ...got].map(
+              (rows) => rows.find(([key]) => key === id)?.[1] ?? null,
+            )
+            const changes = path.filter(
+              (value, index) => index > 0 && value !== path[index - 1],
+            ).length
+            return (
+              path.every((value) => allowed.has(value)) &&
+              changes <= settled + 1
+            )
+          }) &&
+          [...got.flatMap((rows) => rows.map(([id]) => id))].every((id) =>
+            values.has(id),
+          )
+        : got.length === owed.length &&
+          got.every((rows, index) => sameRows(rows, owed[index]!))
     if (!ok) throw violation(`${law} (publication)`, stepIndex, owed, got)
   }
-  const settledCount = () =>
-    state.settlements.filter((settlement) => settlement !== `pending`).length
 
   let rewritten = 0
   // The plan the model decided the last write by; the provider gets it too.
@@ -1305,7 +1461,7 @@ export async function checkMutationHistory(
     await compare(-1)
     for (const [index, step] of steps.entries()) {
       const before = visible(state)
-      const settledBefore = settledCount()
+      const from = stepStart(state)
       const result = stepModel(state, step, planFor)
       if (result === undefined) {
         skipped++
@@ -1340,6 +1496,7 @@ export async function checkMutationHistory(
           } else if (!write.held) reach(`${write.type}-accepted` as const)
           if (done.removesField && write.outcome === `accept`)
             reach(`field-removed`)
+          if (done.sameKeyPending) reach(`same-key-pending`)
           if (write.outcome === `reject` && !write.held) law = `MUT-2`
           break
         }
@@ -1371,14 +1528,14 @@ export async function checkMutationHistory(
         index,
         owedPublications(before, result.published),
         law,
-        settledCount() - settledBefore > 1,
+        from,
       )
     }
     // Answer every held request and deliver every withheld copy, reaching a
     // quiescent cut (FID-5).
     while (state.pending.length > 0) {
       const before = visible(state)
-      const settledBefore = settledCount()
+      const from = stepStart(state)
       const step: MutationStep = undecided(state)
         ? { kind: `release` }
         : { kind: `deliver` }
@@ -1397,7 +1554,7 @@ export async function checkMutationHistory(
         steps.length,
         owedPublications(before, result.published),
         `MUT-1`,
-        settledCount() - settledBefore > 1,
+        from,
       )
     }
   } catch (error) {
@@ -1407,6 +1564,7 @@ export async function checkMutationHistory(
   const cleanupErrors: Array<unknown> = []
   try {
     publications?.stop()
+    await fixture.drain?.()
     await collection.cleanup()
     await settle(fixture)
     if (primary === undefined && detached.found().length > 0) {
