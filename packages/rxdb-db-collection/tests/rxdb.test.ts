@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection, createTransaction } from '@tanstack/db'
+import {
+  UpdateKeyNotFoundError,
+  createCollection,
+  createTransaction,
+} from '@tanstack/db'
 import {
   addRxPlugin,
   createRxDatabase,
@@ -743,6 +747,31 @@ describe(`RxDB Integration`, () => {
   })
 
   describe(`error handling`, () => {
+    it(`rejects an update whose document another client deleted`, async () => {
+      const { collection, rxCollection, db } = await createTestState([
+        { id: `1`, name: `first` },
+      ])
+      try {
+        // Another tab deleted the document before the update's handler ran.
+        const findOne = rxCollection.findOne.bind(rxCollection)
+        vi.spyOn(rxCollection, `findOne`).mockImplementationOnce((id) => {
+          const query = findOne(id as string)
+          return Object.assign(query, {
+            exec: () => Promise.resolve(null),
+          }) as unknown as ReturnType<typeof findOne>
+        })
+        const tx = collection.update(`1`, (draft) => {
+          draft.name = `second`
+        })
+        // The write is not persisted, so it must not report success.
+        await expect(tx.when(`settled`)).rejects.toBeInstanceOf(
+          UpdateKeyNotFoundError,
+        )
+      } finally {
+        await db.remove()
+      }
+    })
+
     function expectAdditionalPropertyError(error: unknown, id: string) {
       expect(error).toBeInstanceOf(Error)
       expect(error).toHaveProperty(

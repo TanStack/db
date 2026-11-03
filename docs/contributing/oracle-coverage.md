@@ -7317,9 +7317,12 @@ and every later incremental write on the collection waits forever
 campaigns failed HEALTH-5 at an update whose storage write throws. The adapter
 keeps `incrementalPatch` and its conflict retry, and its RxDB dev dependency
 and peer range are now 17.6.0 and `>=17.6.0` (maintainer decision
-2026-11-03); both campaigns pass. A conflict (status 409) is not generated, and an update of a
-document that another client deleted while the update was pending (the
-adapter skips it and fulfills) is outside the grammar.
+2026-11-03); both campaigns pass. A conflict (status 409) is not generated. An update of a
+document that another client deleted while the update was pending now
+rejects with `UpdateKeyNotFoundError` (maintainer decision 2026-11-03; it
+used to fulfill without persisting); commits by another client while a write
+is pending are outside the grammar (MUT-11), so `rxdb.test.ts` holds the
+supplemental witness, RED on the parent.
 A removed field is an own `undefined` in the authored row (maintainer
 decision 2026-11-03, keeping the documented rule in
 `packages/db/tests/proxy-detachment-contract-oracle.test.ts`); the core owner

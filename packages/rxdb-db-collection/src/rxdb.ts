@@ -7,7 +7,10 @@ import {
   rxStorageWriteErrorToRxError,
 } from 'rxdb/plugins/core'
 import DebugModule from 'debug'
-import { withCollectionConfigFactory } from '@tanstack/db'
+import {
+  UpdateKeyNotFoundError,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import { stripRxdbFields } from './helper'
 import type {
   FilledMangoQuery,
@@ -339,9 +342,9 @@ export function rxdbCollectionOptions(
           const newValue = stripRxdbFields(mutation.modified)
           const id = getKey(newValue)
           const doc = await rxCollection.findOne(id).exec()
-          if (!doc) {
-            continue
-          }
+          // Another client deleted it while the update waited: the update
+          // cannot persist, so it fails rather than report success.
+          if (!doc) throw new UpdateKeyNotFoundError(id)
           await doc.incrementalPatch(newValue)
         }
       }),
