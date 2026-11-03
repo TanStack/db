@@ -532,8 +532,9 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  *   accepted), stored under the driver's `undefinedField` rule and then the
  *   plan's `ServerRewrite`: after a rewrite the provider's copy, not the
  *   authored row, is the row's value (FID-5).
- * - `rewritten` counts accepted writes whose copy differs from their
- *   authored row, for reach.
+ * - `rewritten` counts accepted writes whose plan's rewrite made their copy
+ *   differ from their authored row, for reach. A copy can also differ by
+ *   the value domain alone, as a removed field does under `null`.
  * - `pending` lists the mutations not yet settled, in author order. MUT-10
  *   orders their requests: the first is requested at once, and each later
  *   one only after every earlier one is decided. An accepted write whose
@@ -703,7 +704,7 @@ function decide(state: MutationModel, write: PendingWrite): void {
   else {
     const copy = rowValue(copyOf(state, write))
     state.provider.set(write.id, copy)
-    if (copy !== write.value) state.rewritten++
+    if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
   }
   if (write.plan.echoHeld) write.answered = true
   else confirm(state, write)
