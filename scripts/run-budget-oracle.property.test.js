@@ -3,7 +3,8 @@
  * scripts/check-oracle-run-counts.mjs, wherever it is written. A budget is the
  * numRuns of a fixed-seed campaign, or the run count of a registered property,
  * whether the property passes it to `oraclePropertyOptions` or declares it as
- * `oracleProperty({ id, histories: { runs } })`.
+ * `oracleProperty({ id, histories: { runs } })`; a fixed seed in that
+ * definition's `fixedSeeds` runs `runs` histories.
  * When the branch lowers a budget, or removes it from every tracked oracle
  * file, the script reports it, so the change is visible to the reviewer.
  *
@@ -207,9 +208,10 @@ function resolveBudget(skeleton, index, sources, files) {
   return {
     index,
     form: skeleton.form,
-    // A property budget written through `oraclePropertyOptions` at base that
-    // is an `oracleProperty` definition at head.
-    migrates: skeleton.form === `property` && skeleton.migrates,
+    // A property budget written through `oraclePropertyOptions`, or a
+    // fixed-seed campaign, at base that is an `oracleProperty` definition at
+    // head: the property's `runs`, or a seed in its `fixedSeeds`.
+    migrates: skeleton.form !== `framework` && skeleton.migrates,
     source,
     keySource: skeleton.keySource,
     wrapped: skeleton.form !== `framework` && skeleton.wrapped,
@@ -341,7 +343,12 @@ function renderFiles(program, revision) {
     const seed = 1000 + i
     // The definition of an imported key and count lives in support module A.
     // The form a budget is written in at this revision.
-    const form = isHead && budget.migrates ? `framework` : budget.form
+    const form =
+      isHead && budget.migrates
+        ? budget.form === `seed`
+          ? `framework-seed`
+          : `framework`
+        : budget.form
     if (budget.keySource === `imported`) {
       support.line(
         budget.form !== `seed`
@@ -385,7 +392,7 @@ function renderFiles(program, revision) {
         : use(`RUNS_${i}`, files.support)
     // A migrated budget drops its oracleRuns wrapper, as the framework scales.
     const runs =
-      budget.wrapped && form !== `framework`
+      budget.wrapped && !form.startsWith(`framework`)
         ? `oracleRuns(${countText})`
         : countText
     const keyText =
@@ -399,7 +406,9 @@ function renderFiles(program, revision) {
         ? `export const opts${i} = oraclePropertyOptions(${runs}, ${keyText})`
         : form === `framework`
           ? `export const opts${i} = oracleProperty({ id: ${keyText}, law: {}, histories: { arbitrary: fc.integer(), runs: ${runs} } })`
-          : `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), { numRuns: ${runs}, seed: ${keyText} }) }`
+          : form === `framework-seed`
+            ? `export const opts${i} = oracleProperty({ id: 'seeded.${i}', law: {}, histories: { arbitrary: fc.integer(), runs: ${runs}, fixedSeeds: [${keyText}] } })`
+            : `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), { numRuns: ${runs}, seed: ${keyText} }) }`
     hostText.line(call)
     // The oracle file uses a campaign in A by importing it.
     if (inSupport) {
@@ -407,7 +416,9 @@ function renderFiles(program, revision) {
         .get(files.oracle)
         .import(
           supportSpecifier,
-          budget.form !== `seed` ? `opts${i}` : `campaign${i}`,
+          budget.form !== `seed` || (isHead && budget.migrates)
+            ? `opts${i}`
+            : `campaign${i}`,
         )
     }
   }
@@ -553,6 +564,7 @@ const STATES = [
   `imported-key`,
   `framework-definition`,
   `migrated-to-framework`,
+  `seed-migrated-to-framework`,
   `support-only-change`,
   `oracle-and-support-change`,
   `lowered-budget`,
@@ -579,7 +591,12 @@ function recordStates(program) {
     if (budget.source === `reexported`) states.add(`re-exported-count`)
     if (budget.keySource === `imported`) states.add(`imported-key`)
     if (budget.form === `framework`) states.add(`framework-definition`)
-    if (budget.migrates) states.add(`migrated-to-framework`)
+    if (budget.migrates)
+      states.add(
+        budget.form === `seed`
+          ? `seed-migrated-to-framework`
+          : `migrated-to-framework`,
+      )
     if (budget.after < budget.before) states.add(`lowered-budget`)
     if (budget.callAt === `support`) states.add(`campaign-in-support`)
     if (budget.callAt === `oracle` && budget.fate === `swap`) {

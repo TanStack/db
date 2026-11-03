@@ -15,8 +15,9 @@
  * A budget is keyed by its registered property where the code names one
  * (`oraclePropertyOptions(n, 'p')`, `oracleRandomParameters(n, _, 'p')`,
  * `{ property: 'p', defaultRuns: n }`, or the framework definition
- * `oracleProperty({ id: 'p', histories: { runs: n } })`), and otherwise by its fixed seed
- * (`{ seed: s, numRuns: oracleRuns(n) }`). A key or count is a literal, a
+ * `oracleProperty({ id: 'p', histories: { runs: n } })`), and otherwise by its
+ * fixed seed (`{ seed: s, numRuns: oracleRuns(n) }`, or a seed `s` in that
+ * definition's `fixedSeeds`, whose lane runs the same `n`). A key or count is a literal, a
  * constant in the same file, or a constant that the file imports. An import
  * follows relative re-exports (`export { x } from`, `export * from`), so a
  * constant defined in a support module is tracked where the oracle uses it.
@@ -330,14 +331,22 @@ function runBudgets(file, revision, reader) {
             !candidate.computed &&
             nameOf(candidate.key) === `histories`,
         )?.value
-        if (
-          typeof property === `string` &&
-          histories?.type === `ObjectExpression`
-        )
-          record(
-            `property ${property}`,
-            propertyValue(histories, `runs`, file, reader, revision),
-          )
+        if (histories?.type === `ObjectExpression`) {
+          const runs = propertyValue(histories, `runs`, file, reader, revision)
+          if (typeof property === `string`) record(`property ${property}`, runs)
+          // Each fixed seed's lane runs the same `runs` histories.
+          const fixedSeeds = histories.properties.find(
+            (candidate) =>
+              candidate.type === `Property` &&
+              !candidate.computed &&
+              nameOf(candidate.key) === `fixedSeeds`,
+          )?.value
+          if (fixedSeeds?.type === `ArrayExpression`)
+            for (const element of fixedSeeds.elements) {
+              const seed = value(element)
+              if (typeof seed === `number`) record(`fixed seed ${seed}`, runs)
+            }
+        }
       }
       if (node.callee.name === `oracleRandomParameters`) {
         const property = value(third)
