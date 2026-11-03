@@ -226,8 +226,8 @@ type Mode =
   `keyed` | `keyedCollision` | `numbers` | `strings` | `structural` | `fallback`
 // `keyedCollision` selects grammar witnesses; it exercises the same keyed
 // production path as `keyed`. `caseName` labels a replay, not product state.
-// A `keyedCollision` history has one step: the witness index and the scale
-// of its multiplicities.
+// A `keyedCollision` history has one step: `[[name, opposed], scale]`, the
+// witness's name and how its multiplicities are signed and scaled.
 type History = {
   mode: Mode
   steps: Array<[unknown, number]>
@@ -293,7 +293,7 @@ const collisionCases: Array<{ name: string; records: MultiSetArray<Data> }> = [
     ],
   },
 ]
-// Keyed witnesses whose records the generated keyed grammar cannot build:
+// More keyed witnesses, which the generated `keyed` steps cannot build:
 // reference-identity values that must still merge with themselves, a signed
 // zero key, non-finite keys, and a delimiter key beside an object tuple.
 const delimiterFirst = { v: 1 }
@@ -343,13 +343,19 @@ collisionCases.push(
     ],
   },
 )
-// A witness is named by index, and its multiplicities are scaled, so the
-// history is plain data and a pinned witness is a member of the language.
+// A witness is named by its case name, and its multiplicities are scaled,
+// so the history is plain data and a pinned witness is a member of the
+// language. `opposed` gives the first record the scale and every later one
+// its negation, so distinct identities would cancel if wrongly merged;
+// otherwise each record keeps its own multiplicity times the scale.
 const collisionHistoryArb: fc.Arbitrary<History> = fc.record({
   mode: fc.constant(`keyedCollision` as const),
   steps: fc.tuple(
     fc.tuple(
-      fc.integer({ min: 0, max: collisionCases.length - 1 }),
+      fc.tuple(
+        fc.constantFrom(...collisionCases.map(({ name }) => name)),
+        fc.boolean(),
+      ),
       fc.constantFrom(-2, -1, 1, 2),
     ),
   ),
@@ -461,13 +467,24 @@ function buildRecords(history: History): MultiSetArray<Data> {
   // One non-keyed record makes the whole multiset unkeyed.
   if (history.mode === `fallback`) records.push([{ v: 1 }, 1])
   if (history.mode === `keyedCollision`) {
-    const [[caseIndex, scale]] = history.steps as [[number, number]]
-    return collisionCases[caseIndex]!.records.map(([data, m]) => [
-      Array.isArray(data) && Array.isArray(data[1])
-        ? [data[0], [...data[1]]]
-        : data,
-      m * scale,
-    ])
+    const [[[name, opposed], scale]] = history.steps as [
+      [[string, boolean], number],
+    ]
+    // Fresh objects per history, with each original object mapped to one
+    // clone, so references a witness shares stay shared within a history.
+    const clones = new Map<object, object>()
+    const fresh = (value: Data): Data =>
+      Array.isArray(value)
+        ? value.map(fresh)
+        : value !== null && typeof value === `object`
+          ? (clones.get(value) ?? clones.set(value, { ...value }).get(value)!)
+          : value
+    return collisionCases
+      .find((entry) => entry.name === name)!
+      .records.map(([data, m], index) => [
+        fresh(data),
+        opposed ? (index === 0 ? scale : -scale) : m * scale,
+      ])
   }
   return records
 }
@@ -645,7 +662,7 @@ const modes = [
 ] as const
 const witness = (name: string): History => ({
   mode: `keyedCollision`,
-  steps: [[collisionCases.findIndex((entry) => entry.name === name), 1]],
+  steps: [[[name, false], 1]],
 })
 
 oracleProperty({
@@ -653,7 +670,7 @@ oracleProperty({
   law: {
     statement: `MultiSet.consolidate() keeps one record per identity, the first in input order (with -0 written as 0 for unkeyed numbers), with the summed multiplicity; an identity whose sum is zero is absent; identity is keyed, single-primitive, or structural by the shape of the whole multiset; the input is unchanged.`,
     authority: `the contract comment on MultiSet.consolidate() in packages/db-ivm/src/multiset.ts (b5d92ceb)`,
-    limits: `Output order is not part of the law. MultiSet directly, not the query shapes that produce these records. Structural identity uses a 32-bit hash; the small domain makes a collision unlikely, not impossible. Key order only for one collation tie.`,
+    limits: `Output order is not part of the law. The keyed grammar includes the type, reference, and delimiter collisions of #1948 and non-finite numeric keys; MultiSet directly, not the query shapes that produce these records. Structural identity uses a 32-bit hash; the small domain makes a collision unlikely, not impossible. Key order only for one collation tie.`,
     owner: `Structural values and ordered primitives`,
   },
   histories: {
@@ -667,6 +684,8 @@ oracleProperty({
     ],
     runs: 300,
     fixedSeeds: [2026929],
+    // Pinned witnesses for each identity rule. Generated histories can reach
+    // many of these, but pinning them makes each rule visible and stable.
     pins: [
       ...collisionCases.map(({ name }) => ({
         name,

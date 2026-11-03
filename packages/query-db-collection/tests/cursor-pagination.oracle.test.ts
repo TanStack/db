@@ -341,7 +341,10 @@ describe(`opaque cursor adapter`, () => {
 //
 // Model: `expectedRows` for each valid window, `RangeError` for each invalid
 // one, and the page count from the backend's page sizes alone (the model
-// never sees tokens). Driver: the production pager over the opaque backend;
+// never sees tokens). That the count is the shortest covering prefix is not
+// one README sentence: it follows from its transport rules with the exact
+// counts the previous fixed tests pinned (three peer windows on pages of two
+// fetch 4 pages; a drained source fetches every page). Driver: the production pager over the opaque backend;
 // it records each read's rows or error name and the backend's call count
 // after each step. Limits: one scope per pager, no reset, faults, or
 // cancellation (the reset and failure properties below own those).
@@ -367,7 +370,8 @@ type ReadHistory = {
 }
 const readArbitrary: fc.Arbitrary<Read> = fc.oneof(
   { weight: 6, arbitrary: fc.record({ window: windowArbitrary }) },
-  // The window whose end is the largest safe integer is valid.
+  // The window whose end is the largest safe integer is valid. A pager that
+  // rejected at MAX_SAFE_INTEGER would still pass every invalid window.
   {
     weight: 1,
     arbitrary: fc.record({
@@ -398,7 +402,9 @@ const readHistory: fc.Arbitrary<ReadHistory> = fc.record({
       reads: fc.array(readArbitrary, { minLength: 1, maxLength: 3 }),
       changeAfterCall: fc.boolean(),
     }),
-    { minLength: 1, maxLength: 6 },
+    // Up to 30 reads, past the 20 sequential windows the previous history
+    // property drew.
+    { minLength: 1, maxLength: 10, size: `medium` },
   ),
 })
 
@@ -474,14 +480,22 @@ async function driveReads(
   const settle = (promise: Promise<Array<Row>>) =>
     promise.then(
       (rows): ReadResult => ({ rows }),
+      // An invalid window must reject with a RangeError instance; any other
+      // rejection keeps its name and message for the failure.
       (error: unknown): ReadResult => ({
-        error: error instanceof Error ? error.name : String(error),
+        error:
+          error instanceof RangeError
+            ? `RangeError`
+            : error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error),
       }),
     )
   for (const [index, { reads, changeAfterCall }] of history.steps.entries()) {
     const windows = reads.map((read) => ({ ...windowOf(read) }))
     const pending = windows.map((window) => settle(pager.read(window)))
-    // A pager captures each requested window when it is called.
+    // Reads of one pager queue behind each other, so a window must be
+    // captured when it is called, not when its queued work starts.
     if (changeAfterCall)
       for (const window of windows) {
         window.offset = 7
@@ -559,7 +573,7 @@ oracleProperty({
   id: `cursor-pagination.history`,
   law: {
     statement: `A cursor pager returns exactly the requested slice of the whole filtered ordered relation, rejects an invalid window with RangeError before transport, captures each window when called, and fetches only the shortest prefix of backend pages that covers what was read, reusing fetched pages.`,
-    authority: `packages/query-db-collection/tests/cursor-pagination/README.md, "Contract before implementation"; the exported createCursorPager API`,
+    authority: `packages/query-db-collection/tests/cursor-pagination/README.md, "Contract before implementation" (transport rules) and "Chosen implementation" (loading more fetches the missing suffix); the exact page counts the previous fixed tests pinned; the exported createCursorPager API`,
     limits: `One scope per pager; no reset, faults, or cancellation in this property; a stable backend relation, not snapshot consistency for changing endpoints.`,
     owner: `Opaque backend pagination`,
   },
@@ -605,11 +619,15 @@ oracleProperty({
       pinned(`a window changed after its call`, 2, [
         { reads: [{ window: { offset: 1, limit: 3 } }], changeAfterCall: true },
       ]),
-      ...invalidWindows.map((_, invalid) =>
-        pinned(`invalid window ${invalid} rejects before transport`, 2, [
-          { reads: [{ invalid }], changeAfterCall: false },
-          readsOf({ offset: 0, limit: 2 }),
-        ]),
+      ...invalidWindows.map(({ offset, limit }, invalid) =>
+        pinned(
+          `invalid window ${offset}/${limit} rejects before transport`,
+          2,
+          [
+            { reads: [{ invalid }], changeAfterCall: false },
+            readsOf({ offset: 0, limit: 2 }),
+          ],
+        ),
       ),
     ],
   },

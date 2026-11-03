@@ -38,7 +38,8 @@ import type { Observation as TraceEntry } from '../../db/tests/oracle-property.j
  * the reopened schema with it (a differential law), and the fresh install's
  * objects with the model's.
  *
- * History grammar, on one node:sqlite database:
+ * History grammar, each on its own node:sqlite database (the driver also
+ * opens a second one for the fresh install it compares with):
  * - Interrupted setup: the registry row exists and setup stopped after the
  *   first k of the nine facts, for k in 0..9, in production setup order. No
  *   rows exist yet, because no write can precede complete setup.
@@ -434,7 +435,7 @@ function checkReopen(
   const wrong =
     differs(
       `fresh install`,
-      `setup`,
+      `fresh-install`,
       fresh.map(({ type, name, tbl_name }) => ({ type, name, tbl_name })),
       owed.objects,
       `a fresh install created other schema objects than the model names`,
@@ -476,9 +477,9 @@ function checkReopen(
 oracleProperty({
   id: `sqlite-persistence.setup-reopen`,
   law: {
-    statement: `After a fresh adapter's first read of a registered Collection, its schema objects equal a fresh install's, both bookkeeping rows exist, and stored rows are unchanged, from every legal starting state; when all nine setup facts already hold, the read issues no DDL or writes and costs at most one call more than a cached read.`,
+    statement: `After a fresh adapter's first read of a registered Collection, its schema objects are exactly a fresh install's (same type, name, table, and SQL), both bookkeeping rows exist, and stored rows are unchanged, from every legal starting state; when all nine setup facts already hold for the registered schema version, the read issues no DDL or writes and costs at most one call more than a cached read. A partial state may cost more.`,
     authority: `the SQLite core adapter's per-Collection setup contract; the accepted persistence goal that reloads are fast (issue #2204)`,
-    limits: `One node:sqlite database; no cache-generation claims, concurrent adapters, or dropped row tables that still hold rows. SQL text is checked against a production fresh install, not absolute definitions.`,
+    limits: `In-memory node:sqlite databases; no cache-generation claims, concurrent adapters, or dropped row tables that still hold rows. SQL text is checked against a production fresh install, not absolute definitions.`,
     owner: `SQLite persistence`,
   },
   histories: starts,
