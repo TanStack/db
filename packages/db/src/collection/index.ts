@@ -585,7 +585,8 @@ export class CollectionImpl<
 
   /**
    * Monotonic revision of the collection's visible state; advances once per
-   * committed batch of changes and cleanup, even while nothing is subscribed.
+   * committed batch of changes, cleanup, and discarded layout epochs, even
+   * while nothing is subscribed.
    * Internal — used by the live-query observer's snapshot cache.
    */
   public get _stateRevision(): number {
@@ -593,8 +594,9 @@ export class CollectionImpl<
   }
 
   /**
-   * Monotonic revision of explicit layout-only publications.
-   * Internal — used to distinguish them from empty ready events.
+   * Revision of explicit layout-only publications, restored on discarded
+   * delivery. _stateRevision stays monotonic across that discard.
+   * Internal — used to distinguish layout publications from empty ready events.
    */
   public get _layoutRevision(): number {
     return this._changes.layoutRevision

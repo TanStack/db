@@ -982,8 +982,8 @@ describe(`metadata snapshots share immutable row containers`, () => {
 })
 
 /**
- * The same snapshot laws also cross query projection, findOne, an absent row
- * clock, and hydration. This driver adds those receiving paths to checkRead;
+ * The same snapshot laws also cross query projection, findOne, initial
+ * attachment, and hydration. This driver adds those receiving paths to checkRead;
  * it does not give them a second expected answer. Source rank is deliberately
  * absent from the selected Row, so moving it can change only ordered keys.
  *
@@ -992,15 +992,19 @@ describe(`metadata snapshots share immutable row containers`, () => {
  * A hydration seed is an earlier capture with version -1; the ready live view
  * replaces it and must leave that retained seed unchanged. Checks occur after
  * the query's queued publication, not at an intermediate source callback.
- * Hiding only the optional revision getter exercises the established
- * revisionless observer boundary within this one DB instance.
+ * A discarded delivery deferral keeps committed state (Collection's
+ * _deferPublication contract). A detached read inside it and a later write
+ * must remain distinct captures even when no read observes the close.
+ * The discard actions cross this schedule with value and layout changes.
+ * Reattachment after discard is the neighboring delivery path.
  */
 const capturePathHistory = fc.record({
   shape: fc.constantFrom(`ordered` as const, `single` as const),
   mode: fc.constantFrom(`granular` as const, `wholesale` as const),
-  revisionless: fc.boolean(),
+  attached: fc.boolean(),
   hydrated: fc.boolean(),
   count: fc.integer({ min: 2, max: 3 }),
+  deferralDepth: fc.integer({ min: 1, max: 2 }),
   dataFirst: fc.boolean(),
   commands: fc.array(
     fc.constantFrom(
@@ -1012,6 +1016,8 @@ const capturePathHistory = fc.record({
       `subscribe`,
       `unsubscribe`,
       `ready`,
+      `discard-write`,
+      `discard-move`,
     ),
     { minLength: 1, maxLength: 12 },
   ),
@@ -1019,12 +1025,15 @@ const capturePathHistory = fc.record({
 type CapturePathHistory =
   typeof capturePathHistory extends fc.Arbitrary<infer T> ? T : never
 type CapturePathReach =
+  | `nested-discard`
   | `ordered-granular`
   | `ordered-wholesale`
   | `single-granular`
   | `single-wholesale`
-  | `revisionless-granular`
-  | `revisionless-wholesale`
+  | `initial-attached-granular`
+  | `initial-attached-wholesale`
+  | `initial-detached-granular`
+  | `initial-detached-wholesale`
   | `hydrated-ordered`
   | `hydrated-single`
   | `layout-only-granular-attached`
@@ -1035,6 +1044,14 @@ type CapturePathReach =
   | `metadata-ordered-wholesale`
   | `metadata-single-granular`
   | `metadata-single-wholesale`
+  | `discarded-write-granular-attached`
+  | `discarded-write-granular-detached`
+  | `discarded-write-wholesale-attached`
+  | `discarded-write-wholesale-detached`
+  | `discarded-move-granular-attached`
+  | `discarded-move-granular-detached`
+  | `discarded-move-wholesale-attached`
+  | `discarded-move-wholesale-detached`
 
 async function checkCapturePathHistory(
   scenario: CapturePathHistory,
@@ -1082,8 +1099,6 @@ async function checkCapturePathHistory(
     gcTime: Infinity,
     startSync: true,
   })
-  if (scenario.revisionless)
-    Object.defineProperty(query, `_stateRevision`, { get: () => undefined })
   const client = scenario.hydrated ? new DbClient() : undefined
   const queryHash = `capture-path-${sequence++}`
   const seedRows = expectedRows()
@@ -1124,9 +1139,15 @@ async function checkCapturePathHistory(
       await query.preload()
       await settle()
       reach.reach(`hydrated-${scenario.shape}`)
-    } else stop = observer.subscribe(() => {})
+    } else if (scenario.attached) stop = observer.subscribe(() => {})
+    if (!scenario.attached) {
+      stop?.()
+      stop = undefined
+    }
     reach.reach(`${scenario.shape}-${scenario.mode}`)
-    if (scenario.revisionless) reach.reach(`revisionless-${scenario.mode}`)
+    reach.reach(
+      `initial-${scenario.attached ? `attached` : `detached`}-${scenario.mode}`,
+    )
     let before = observer.getSnapshot()
     let hasErrors = false
     let beforeRows = expectedRows()
@@ -1137,21 +1158,50 @@ async function checkCapturePathHistory(
       `initial live`,
     )
     retained.push({ snapshot: before, rows: beforeRows })
+    const change = (kind: `move` | `write` | `refresh`) => {
+      if (kind === `move`) ranks.set(`a`, ranks.get(`a`)! < 50 ? 100 : -1)
+      if (kind === `write`) versions.set(`a`, versions.get(`a`)! + 1)
+      controls!.begin()
+      controls!.write({
+        type: `update`,
+        value: { id: `a`, version: versions.get(`a`)!, rank: ranks.get(`a`)! },
+      })
+      controls!.commit()
+    }
     for (const [index, step] of scenario.commands.entries()) {
       const revision = query._stateRevision
-      if (step === `move` || step === `write` || step === `refresh`) {
-        if (step === `move`) ranks.set(`a`, ranks.get(`a`)! < 50 ? 100 : -1)
-        if (step === `write`) versions.set(`a`, versions.get(`a`)! + 1)
-        controls!.begin()
-        controls!.write({
-          type: `update`,
-          value: {
-            id: `a`,
-            version: versions.get(`a`)!,
-            rank: ranks.get(`a`)!,
-          },
-        })
-        controls!.commit()
+      if (step === `discard-write` || step === `discard-move`) {
+        stop?.()
+        stop = undefined
+        const deferrals = Array.from({ length: scenario.deferralDepth }, () =>
+          query._deferPublication(),
+        )
+        const kind = step === `discard-write` ? `write` : `move`
+        try {
+          change(kind)
+          await settle()
+          before = observer.getSnapshot()
+          beforeRows = expectedRows()
+          beforeRead = checkRead(
+            scenario.shape,
+            { snapshot: before, rows: beforeRows },
+            scenario.dataFirst,
+            `inside deferral ${index}`,
+          )
+          retained.push({ snapshot: before, rows: beforeRows })
+        } finally {
+          for (const deferral of deferrals.reverse()) deferral.discard()
+          if (deferrals.length > 1) reach.reach(`nested-discard`)
+        }
+        // No read sees the close before the next write. A snapshot cache
+        // cannot rely on observing every intermediate Collection transition.
+        if (scenario.attached) stop = observer.subscribe(() => {})
+        change(kind)
+        reach.reach(
+          `discarded-${kind}-${scenario.mode}-${stop ? `attached` : `detached`}`,
+        )
+      } else if (step === `move` || step === `write` || step === `refresh`) {
+        change(step)
       } else if (step === `report`) {
         hasErrors = true
         controls!.reportError(new Error(`path ${index}`))
@@ -1210,7 +1260,7 @@ async function checkCapturePathHistory(
         expect(after.layoutRevision, `query layout advances`).toBeGreaterThan(
           before.layoutRevision,
         )
-        if (!scenario.revisionless && query._stateRevision === revision)
+        if (query._stateRevision === revision)
           reach.reach(
             `layout-only-${scenario.mode}-${stop ? `attached` : `detached`}`,
           )
@@ -1251,20 +1301,50 @@ declareOracle({
 })
 
 describe(`snapshot capture paths preserve row and layout laws`, () => {
+  // These replay the same driver/check before the broad campaign so a value
+  // failure cannot hide the distinct layout premise during RED verification.
+  for (const action of [`discard-write`, `discard-move`] as const)
+    it(`reads committed rows after ${action}`, async () => {
+      const reach = createOracleReach<CapturePathReach>(
+        `capture-discard-replay`,
+        [
+          `ordered-granular`,
+          `initial-detached-granular`,
+          `discarded-write-granular-detached`,
+          `discarded-move-granular-detached`,
+          `layout-only-granular-detached`,
+        ],
+      )
+      reach.beginHistory()
+      await checkCapturePathHistory(
+        {
+          shape: `ordered`,
+          mode: `granular`,
+          attached: false,
+          hydrated: false,
+          count: 2,
+          deferralDepth: 1,
+          dataFirst: false,
+          commands: [action],
+        },
+        reach,
+      )
+    })
   const examples: Array<[CapturePathHistory]> = (
     [`ordered`, `single`] as const
   ).flatMap((shape) =>
     ([`granular`, `wholesale`] as const).flatMap((mode) =>
-      [false, true].flatMap((revisionless) =>
+      [false, true].flatMap((attached) =>
         [false, true].map(
           (hydrated) =>
             [
               {
                 shape,
                 mode,
-                revisionless,
+                attached,
                 hydrated,
                 count: 2,
+                deferralDepth: hydrated ? 2 : 1,
                 dataFirst: false,
                 commands: [
                   `unsubscribe`,
@@ -1278,6 +1358,8 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
                   `unsubscribe`,
                   `subscribe`,
                   `ready`,
+                  `discard-write`,
+                  `discard-move`,
                 ],
               },
             ] as [CapturePathHistory],
@@ -1293,12 +1375,15 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
       const reach = createOracleReach<CapturePathReach>(
         `live-query-observer.capture-paths`,
         [
+          `nested-discard`,
           `ordered-granular`,
           `ordered-wholesale`,
           `single-granular`,
           `single-wholesale`,
-          `revisionless-granular`,
-          `revisionless-wholesale`,
+          `initial-attached-granular`,
+          `initial-attached-wholesale`,
+          `initial-detached-granular`,
+          `initial-detached-wholesale`,
           `hydrated-ordered`,
           `hydrated-single`,
           `layout-only-granular-attached`,
@@ -1309,6 +1394,14 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
           `metadata-ordered-wholesale`,
           `metadata-single-granular`,
           `metadata-single-wholesale`,
+          `discarded-write-granular-attached`,
+          `discarded-write-granular-detached`,
+          `discarded-write-wholesale-attached`,
+          `discarded-write-wholesale-detached`,
+          `discarded-move-granular-attached`,
+          `discarded-move-granular-detached`,
+          `discarded-move-wholesale-attached`,
+          `discarded-move-wholesale-detached`,
         ],
         { fixedHistories: examples.length },
       )
@@ -1328,6 +1421,347 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
       reach.assertReached()
       process.stdout.write(
         `observer capture paths ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+      )
+    })
+})
+
+/**
+ * A public row's nested record prototype is observable shape. Maintainer
+ * decision 2026-11-03: replacing a plain record with a class instance (or the
+ * reverse) publishes an update even when enumerable fields match. Draft
+ * snapshots keep their separate class/plain reconstruction equivalence.
+ *
+ * The model is a shape name and one number; neither comes from production's
+ * equality function. Fresh values of the same shape and number are no-ops.
+ * Records, array elements, Map values and Set members carry the nested value.
+ * Direct Collections and projected live queries receive the same authored
+ * changes. At each applied checkpoint, both snapshot views and a granular
+ * consumer must agree with the model, and all earlier snapshots stay intact.
+ * No same-object promise joins a raw granular change to an older equal capture.
+ * This bounded grammar covers keyed record prototypes, not exotic built-in
+ * subclasses, descriptors, or arbitrary reference-sensitive query expressions.
+ */
+class ShapePayload {
+  constructor(public value: number) {}
+}
+const payloadKinds = [`plain`, `class`, `null`] as const
+const payloadCarriers = [`record`, `array`, `map`, `set`] as const
+type PayloadKind = (typeof payloadKinds)[number]
+type PayloadCarrier = (typeof payloadCarriers)[number]
+type PayloadSpec = { kind: PayloadKind; value: number }
+const payloadSpec = fc.record({
+  kind: fc.constantFrom(...payloadKinds),
+  value: fc.integer({ min: 0, max: 2 }),
+})
+const payloadHistory = fc.record({
+  mode: fc.constantFrom(`granular` as const, `wholesale` as const),
+  attached: fc.boolean(),
+  carrier: fc.constantFrom(...payloadCarriers),
+  initial: payloadSpec,
+  commands: fc.array(
+    fc.oneof(
+      payloadSpec,
+      fc.constantFrom(
+        `refresh` as const,
+        `subscribe` as const,
+        `unsubscribe` as const,
+        `report` as const,
+        `healthy` as const,
+      ),
+    ),
+    { minLength: 1, maxLength: 12 },
+  ),
+})
+type PayloadHistory =
+  typeof payloadHistory extends fc.Arbitrary<infer T> ? T : never
+type PayloadReach =
+  | `source-granular`
+  | `source-wholesale`
+  | `query-granular`
+  | `query-wholesale`
+  | `plain-class`
+  | `class-plain`
+  | `plain-null`
+  | `same-shape-copy`
+  | PayloadCarrier
+function makePayload(spec: PayloadSpec, carrier: PayloadCarrier): object {
+  const leaf =
+    spec.kind === `class`
+      ? new ShapePayload(spec.value)
+      : spec.kind === `null`
+        ? Object.assign(Object.create(null) as object, { value: spec.value })
+        : { value: spec.value }
+  if (carrier === `array`) return [leaf]
+  if (carrier === `map`) return new Map([[`leaf`, leaf]])
+  if (carrier === `set`) return new Set([leaf])
+  return { leaf }
+}
+function payloadObservation(
+  payload: object,
+  carrier: PayloadCarrier,
+): PayloadSpec {
+  const leaf: { value: number } =
+    carrier === `array`
+      ? (payload as Array<{ value: number }>)[0]!
+      : carrier === `map`
+        ? (payload as Map<string, { value: number }>).get(`leaf`)!
+        : carrier === `set`
+          ? (payload as Set<{ value: number }>).values().next().value!
+          : (payload as { leaf: { value: number } }).leaf
+  const prototype: unknown = Object.getPrototypeOf(leaf)
+  expect(
+    [Object.prototype, ShapePayload.prototype, null],
+    `authored prototype`,
+  ).toContain(prototype)
+  return {
+    kind:
+      prototype === ShapePayload.prototype
+        ? `class`
+        : prototype === null
+          ? `null`
+          : `plain`,
+    value: leaf.value,
+  }
+}
+async function checkPayloadHistory(
+  scenario: PayloadHistory & { query: boolean },
+  reach: ReturnType<typeof createOracleReach<PayloadReach>>,
+): Promise<void> {
+  type PayloadRow = Row & { payload: object }
+  let model = scenario.initial
+  let controls!: Parameters<SyncConfig<PayloadRow, string>[`sync`]>[0]
+  const source = createCollection<PayloadRow, string>({
+    getKey: (row) => row.id,
+    startSync: true,
+    gcTime: Infinity,
+    sync: {
+      sync(input) {
+        controls = input
+        input.begin()
+        input.write({
+          type: `insert`,
+          value: {
+            id: `a`,
+            version: 0,
+            payload: makePayload(model, scenario.carrier),
+          },
+        })
+        input.commit()
+        input.markReady()
+      },
+    },
+  })
+  const query = scenario.query
+    ? createLiveQueryCollection({
+        query: new Query().from({ row: source }).select(({ row }) => ({
+          id: row.id,
+          version: row.version,
+          payload: row.payload,
+        })),
+        getKey: (row) => row.id,
+        gcTime: Infinity,
+        startSync: true,
+      })
+    : undefined
+  if (query) await query.preload()
+  const observer = query
+    ? createLiveQueryObserver(query, { mode: scenario.mode })
+    : createLiveQueryObserver(source, { mode: scenario.mode })
+  const granular = new Map<string | number, PayloadRow>()
+  const subscribe = () =>
+    observer.subscribe((changes) => {
+      for (const change of changes ?? []) {
+        if (change.type === `delete`) granular.delete(change.key)
+        else granular.set(change.key, change.value)
+      }
+    })
+  let stop = scenario.attached ? subscribe() : undefined
+  type PayloadSnapshot = Pick<
+    LiveQuerySnapshot<PayloadRow, string | number>,
+    `state` | `data`
+  >
+  const retained: Array<{ snapshot: PayloadSnapshot; spec: PayloadSpec }> = []
+  const check = (
+    snapshot: PayloadSnapshot,
+    spec: PayloadSpec,
+    label: string,
+  ) => {
+    checkRead(
+      `ordered`,
+      { snapshot, rows: [{ id: `a`, version: 0 }] },
+      false,
+      label,
+    )
+    const data = snapshot.data as ReadonlyArray<PayloadRow>
+    expect(
+      payloadObservation(data[0]!.payload, scenario.carrier),
+      `${label}: data shape and value`,
+    ).toEqual(spec)
+    expect(
+      payloadObservation(snapshot.state!.get(`a`)!.payload, scenario.carrier),
+      `${label}: state shape and value`,
+    ).toEqual(spec)
+  }
+  let failure: { error: unknown } | undefined
+  try {
+    reach.reach(`${scenario.query ? `query` : `source`}-${scenario.mode}`)
+    reach.reach(scenario.carrier)
+    let before = observer.getSnapshot()
+    retained.push({ snapshot: before, spec: model })
+    for (const [index, step] of scenario.commands.entries()) {
+      const next = typeof step === `object` ? step : model
+      const changed = next.kind !== model.kind || next.value !== model.value
+      if (typeof step === `object` || step === `refresh`) {
+        if (next.value === model.value) {
+          if (model.kind === `plain` && next.kind === `class`)
+            reach.reach(`plain-class`)
+          if (model.kind === `class` && next.kind === `plain`)
+            reach.reach(`class-plain`)
+          if (model.kind === `plain` && next.kind === `null`)
+            reach.reach(`plain-null`)
+          if (!changed) reach.reach(`same-shape-copy`)
+        }
+        controls.begin()
+        controls.write({
+          type: `update`,
+          value: {
+            id: `a`,
+            version: 0,
+            payload: makePayload(next, scenario.carrier),
+          },
+        })
+        controls.commit()
+        model = next
+      } else if (step === `subscribe`) stop ??= subscribe()
+      else if (step === `unsubscribe`) {
+        stop?.()
+        stop = undefined
+        granular.clear()
+      } else if (step === `report`)
+        controls.reportError(new Error(`payload ${index}`))
+      else controls.reportHealthy()
+      if (query) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const after = observer.getSnapshot()
+      check(
+        after,
+        model,
+        `${scenario.query ? `query` : `source`} payload ${index}`,
+      )
+      if (changed) {
+        expect(after.data, `shape/value changes replace data`).not.toBe(
+          before.data,
+        )
+        expect(after.state, `shape/value changes replace state`).not.toBe(
+          before.state,
+        )
+      } else {
+        expect(after.data, `same rows keep data`).toBe(before.data)
+        expect(after.state, `same rows keep state`).toBe(before.state)
+      }
+      if (stop && scenario.mode === `granular`) {
+        expect([...granular.keys()], `granular membership`).toEqual([`a`])
+        expect(
+          payloadObservation(granular.get(`a`)!.payload, scenario.carrier),
+          `granular agrees with snapshot shape and value`,
+        ).toEqual(model)
+      }
+      retained.push({ snapshot: after, spec: model })
+      before = after
+    }
+    for (const [index, entry] of retained.entries())
+      check(entry.snapshot, entry.spec, `retained payload ${index}`)
+  } catch (error) {
+    failure = { error }
+  }
+  await finishHistory(
+    [
+      () => stop?.(),
+      () => observer.dispose(),
+      () => query?.cleanup(),
+      () => source.cleanup(),
+    ],
+    failure,
+  )
+}
+declareOracle({ check: [checkPayloadHistory], grammar: [payloadHistory] })
+describe(`publications preserve nested record shape`, () => {
+  const examples: Array<[PayloadHistory]> = (
+    [`granular`, `wholesale`] as const
+  ).flatMap((mode) =>
+    [false, true].flatMap((attached) =>
+      payloadCarriers.map((carrier): [PayloadHistory] => [
+        {
+          mode,
+          attached,
+          carrier,
+          initial: { kind: `plain`, value: 0 },
+          commands: [
+            { kind: `class`, value: 0 },
+            `refresh`,
+            `report`,
+            { kind: `plain`, value: 0 },
+            { kind: `null`, value: 0 },
+            `subscribe`,
+            { kind: `class`, value: 0 },
+            `unsubscribe`,
+            { kind: `plain`, value: 0 },
+            `healthy`,
+          ],
+        },
+      ]),
+    ),
+  )
+  for (const campaign of [`fixed`, `random`] as const)
+    oracleReplayTest(
+      it,
+      ...(campaign === `fixed` ? [] : [`live-query-observer.record-shape`]),
+    )(`compares authored shape at every read (${campaign})`, async () => {
+      const reach = createOracleReach<PayloadReach>(
+        `live-query-observer.record-shape`,
+        [
+          `source-granular`,
+          `source-wholesale`,
+          `query-granular`,
+          `query-wholesale`,
+          `plain-class`,
+          `class-plain`,
+          `plain-null`,
+          `same-shape-copy`,
+          ...payloadCarriers,
+        ],
+        { fixedHistories: examples.length },
+      )
+      let histories = 0
+      await fc.assert(
+        fc.asyncProperty(payloadHistory, async (scenario) => {
+          reach.beginHistory({ fixed: histories++ < examples.length })
+          // Both receiving paths run before reporting a mismatch, so an early
+          // direct-Collection failure cannot hide the query's pre-edit result.
+          const results = await Promise.allSettled(
+            [false, true].map((query) =>
+              checkPayloadHistory({ ...scenario, query }, reach),
+            ),
+          )
+          const errors = results.flatMap((result) =>
+            result.status === `rejected` ? [result.reason] : [],
+          )
+          if (errors.length)
+            throw new AggregateError(
+              errors,
+              `source and query shape comparisons: ${errors.map(String).join(`; `)}`,
+              { cause: errors[0] },
+            )
+        }),
+        {
+          ...oraclePropertyOptions(40, `live-query-observer.record-shape`, {
+            examples,
+          }),
+          ...(campaign === `fixed` ? { seed: 234602 } : {}),
+        },
+      )
+      reach.assertReached()
+      process.stdout.write(
+        `observer record shape ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
       )
     })
 })

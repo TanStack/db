@@ -933,7 +933,7 @@ describe(`persisted-snapshot prototype equality`, () => {
       rank: 7,
     })
 
-    expect(deepEquals(authored, durable)).toBe(true)
+    expect(deepEquals(authored, durable)).toBe(false)
     expect(equalPersistedSnapshotValues(authored, durable)).toBe(false)
     expect(equalPersistedSnapshotValues(authored, sameShape)).toBe(true)
     expect(

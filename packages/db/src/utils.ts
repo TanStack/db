@@ -27,6 +27,7 @@ export type DurationFields = Record<(typeof durationFields)[number], number>
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
+ * Record prototypes are observable shape; different prototypes are unequal.
  *
  * @param a - First value to compare
  * @param b - Second value to compare
@@ -318,14 +319,14 @@ export function deepEqualsInternal(
   }
   // Handle objects
   if (typeof a === `object`) {
-    // Instances of two different classes differ. A plain or null-prototype
-    // object, from any realm, compares by keys with any class: a draft
-    // snapshot and plain JSON both hold class instances as plain objects.
+    // Public record shape includes its prototype. Only draft reconstruction
+    // bridges class instances and plain records (JSON snapshots erase classes).
     const prototype = Object.getPrototypeOf(a)
     const prototypeB = Object.getPrototypeOf(b)
     const plain = isPlainPrototype(prototype)
     const plainB = isPlainPrototype(prototypeB)
-    if (prototype !== prototypeB && !plain && !plainB) return false
+    if (prototype !== prototypeB && (!draft || (!plain && !plainB)))
+      return false
 
     // Check for circular references
     if (visited?.has(a)) {

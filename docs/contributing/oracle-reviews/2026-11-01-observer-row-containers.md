@@ -493,3 +493,170 @@ Final local verification also passes focused TypeScript compilation, ESLint,
 and `pnpm test:minified-db` (113 error names plus index/query/live-update checks).
 The full workspace suite did not run locally. CI for the follow-up head must be
 checked separately; previous-head CI is not evidence for this semantic change.
+
+## 2026-11-03: nine-finding follow-up and record-shape decision
+
+This evaluates the second high-effort review of `71bb4c659`. The task-local
+append-only ledger preserves all nine raw findings and three supplementary
+claims. Production and oracle repairs follow that ledger's whole-review plan.
+The user approved publishing prototype changes on 2026-11-03, after discussing
+cost. This changes change-event equality for record-shaped objects; it does
+not revise draft reconstruction or the specialized built-in value comparisons.
+
+### Laws, experiment, and inference
+
+**Fresh captures.** Collection's `_deferPublication()` promises to defer delivery
+while rows and indexes commit normally. `_stateRevision` promises monotonic
+invalidation. A detached snapshot read during a deferral must not retain that
+capture after another committed write. The old discard rewound both clocks;
+a later write could reuse the cached numbers. Keeping the committed row clock
+fixes value captures. When restoring a discarded layout clock, advancing the
+row clock also fences the old layout capture. Failed facade flushes still
+restore rows and publish neither events nor a layout revision.
+
+The primary snapshot owner's capture-path grammar now generates `discard-write`
+and `discard-move`, including one or two nested deferrals, both observer modes,
+ordered/findOne projections, hydration, and optional reattachment. It captures
+inside the hold, discards it, then writes again without an intervening read.
+It compares public rows, containers, layout and retained snapshots after the
+query's queued publication. These additions expose the real counter reuse;
+assigning arbitrary numbers to private counters is unnecessary.
+
+**Record shape.** The approved rule distinguishes plain, class and null-prototype
+records even when their enumerable fields match. Fresh equal values of one
+prototype still suppress changes. `live-query-observer.record-shape` models a
+shape name and one numeric leaf independently of production equality. Each
+history runs through both a direct Collection and a projected live query.
+Records, arrays, Map values and Set members carry that nested value. Both modes
+cross refresh, replacement, attachment and health. At every applied checkpoint,
+`data` and `state`, and an attached granular mirror, match the model's exact
+prototype and numeric value; all retained snapshots are checked again.
+
+The utility equality owner updates the prior explicit class/plain equivalence
+under this maintainer decision. Each of its 100 generated cases per campaign
+reaches same-class, plain/class and null/plain comparisons, with a per-case
+minimum of one for each construction. The draft-revert owner remains unchanged
+and passes: a draft's serialized plain representation still reconstructs a
+class instance under its separate equality domain.
+
+**Distinct APIs.** An observer snapshot retains a row revision's capture.
+Granular listeners receive raw Collection changes. Equal re-enrichment can
+produce distinct objects under those two contracts; neither contract promises
+cross-API reference identity. The new receiving lane enforces agreement on
+shape and values, while the existing sharing lane keeps the old equal capture.
+The raw-change distinction is now explicit in the observer interface.
+
+### Evidence block
+
+- **Law:** monotonic capture invalidation and committed reads, from Collection's
+  revision/deferral API; retained snapshots and metadata sharing, from the
+  existing observer contract; record-prototype publication, from the user's
+  2026-11-03 decision. The architecture's failed-facade layout law is preserved.
+- **Reach:** row-sharing keeps 24 examples plus 40 generated histories per
+  campaign. Capture paths keep 16 examples plus 40 generated histories; fixed
+  seed 2346 reaches all 27 states, including 21 nested-discard histories and
+  7–14 histories in each of the eight discarded-change/mode/reattachment cells.
+  Shape uses 16 examples plus 40 generated histories per campaign, each with
+  both receiving drivers. Fixed seed 234602 reaches source/query granular in
+  27 histories each and source/query wholesale in 29 each; plain→class and
+  class→plain each reach 18, plain→null 20, and equal-shape copies 33. Record,
+  array, Map and Set carriers reach 18/11/16/11. Both fresh campaigns also pass
+  all declared minima and fixed-example reach. No run budget decreases.
+- **RED:** on unchanged `71bb4c659` production, the five-owner pre-edit gate has
+  8 assertion failures and 296 passes. The new snapshot cases reject both
+  discarded value and layout captures. Seed 2346/path `0` keeps version 2 where
+  version 3 is owed. Shape seed 234602/path `0:1:0:2:2` rejects plain→class with
+  equal leaf 0 in **both** direct and query receiving paths. The utility owner
+  rejects its newly approved shape expectation in both campaigns. Draft revert,
+  facade rollback and Collection lifecycle publication pass before production
+  changes. Earlier CLI-option and concurrent-coverage setup errors are excluded.
+- **GREEN:** all 1,423 tests in 15 relevant suites pass, including all observer
+  owners, snapshot and order-only tests, window controller, utilities, draft
+  revert, facade rollback, Collection publication/reentrancy, change-message
+  reconstruction and replay manifest. Focused TypeScript, ESLint, changed-file
+  oracle lint, minified build/API checks and the 434-name mangle cache pass.
+- **Mutant:** restoring the original Collection changes manager fails at the
+  second post-discard value capture. Keeping row monotonicity but omitting the
+  discarded-layout fence passes that value case and fails the following
+  order comparison. Restoring class/plain equality fails both shape receivers.
+  These are assertion failures at the intended comparisons. Guarded direct
+  replay reproduces each clock/shape defect and passes after restoration, with
+  one requested witness per replay. No mutant remains installed.
+- **Limits:** one/two nested deferrals, two/three query rows, bounded generated
+  actions and specified queued-publication cuts. Shape checks cover sync writes
+  with keyed record prototypes and four carriers; they do not establish exotic
+  built-in subclasses, descriptors, arbitrary cycles, optimistic draft
+  assignment policy, intermediate query publications, or host/provider timing.
+  Cleanup/reset sharing and infinite page-array identity remain outside this
+  PR's promise. The new combined tree with Angular #2327 has not been rerun.
+
+The gate runs from `packages/db` with `pnpm exec vitest run
+--coverage.enabled=false --maxWorkers=2` over the snapshot, utility, draft,
+facade-rollback and Collection lifecycle publication owners. The final gate adds
+ordinary observer/snapshot/order/window, hydration/history, Collection reentrancy,
+change-event history and replay tests. Guarded replay uses the existing
+`tests/oracle-replay.ts` interface with property, seed and path. The new manifest
+selector isolates `live-query-observer.record-shape`'s random test.
+
+### Lossless dispositions
+
+| ID | Technical verdict and evidence | Action | Durable value |
+| --- | --- | --- | --- |
+| SR-01 | Confirmed: a real discard/read/write history reuses clocks and retains stale rows. | fixed-now at Collection invalidation, with generated value/layout histories and two clock mutants. | Revision monotonicity must include rollback of delivery, independent of event publication. |
+| SR-02 | Confirmed observation; the old equality oracle deliberately allowed it. Nested rather than root prototypes provide the actual witness. | fixed-now under the explicit record-shape decision; both source and query receivers reject the original and pass. | Keep change-event and draft equality domains distinct. |
+| SR-03 | Confirmed object divergence, but no cross-API reference-identity guarantee was established. Content and virtual values agree, and raw changes match Collection reads. | accepted-design under raw granular delivery and approved per-revision snapshot sharing. Clarify the interface and enforce shape/value agreement. | Do not repair identity divergence by reintroducing equal-write snapshot churn. |
+| SR-04 | Confirmed unsupported compatibility machinery: all typed inputs are concrete Collections; the original rationale was cross-copy support forbidden by AGENTS.md. | fixed-now: remove optional clocks/channel and structural fallback. | State supported inputs explicitly. |
+| SR-05 | Refuted as duplicate storage: live capture and last materialized visible capture differ after ordinary writes, as well as with seeds. They are references, not duplicate arrays. | Keep both references; document their distinction. Removing unsupported fallback also removes the second comparison loop. | Preserve materialization and hydration boundaries when simplifying. |
+| SR-06 | Confirmed redundant enumeration. Before/after deterministic granular attach counts are 2→1; wholesale stays 0. The remaining granular scan is subscription bootstrap. | fixed-now: check both clocks before enumerating an unchanged capture. | Preserve a fresh capture for each queued newer publication. No elapsed-time or universal complexity claim follows. |
+| SR-07 | Confirmed duplicate client cache update, 2→1 at real hydration handoff. | fixed-now: queued flush applies the capture once. Existing reentrant/hydration owners pass. | Avoid pre-applying a later queued publication during listener delivery. |
+| SR-08 | Confirmed ambiguous ownership wording. | fixed-now: snapshots retain a captured view and metadata snapshots may share its readonly containers. | Separate capture-time isolation from exclusive container ownership. |
+| SR-09 | Partly valid: the synthetic input is unsupported. Its hidden row clock did execute the structural branch, contrary to “never run”; the remaining layout channel did not prevent that branch. | fixed-now: replace the invented axis with real initial attachment, retaining both campaign budgets and 16 examples. The ordinary fake-Collection test now checks committed writes and retained rows through a real Collection. | Executing a branch cannot establish a supported production input. |
+| SR-10 | Supplementary common-cause claim overlaps SR-01/02/03, but conflates clock rollback, an intentional equality policy and an unpromised identity relation. | duplicate, with these distinctions retained. | Mechanism overlap is not shared contract authority. |
+| SR-11 | The review reported 119 passing tests and no parent RED in its own run. That report is historical, not current evidence; it does not erase the prior review's recorded RED. | stale; the new unchanged-production gate and final checks replace it. | Preserve tested head and whether a reviewer actually calibrated the instrument. |
+| SR-12 | The earlier spurious-dirty repair works; the new findings target freshness premises exposed by trusting clocks. | duplicate of SR-01/02, preserving the before/after explanation. | Repair upstream invalidation rather than restore unconditional recapture. |
+
+Raw explicit findings: **9 = 7 fixed-now + 1 accepted-design + 1 refuted**.
+Including supplementary claims: **12 = 7 fixed-now + 1 accepted-design +
+1 refuted + 1 stale + 2 duplicates**. No deferrals or known accepted-contract
+counterexamples remain within the stated boundary. The reviewer found two real
+freshness hazards and useful work/scope cleanup, but promoted identity divergence
+to correctness without authority and misstated fallback execution. Recommendation:
+hire with reservations for adversarial discovery; require contract and execution
+verification before treating every label as a defect.
+
+### Size, provenance, and conformance
+
+Against merge-base `15d2d2d328db6f5a4ea0f1a48528c6c5137a1716`,
+`pnpm size:compare --packages db --files` reports observer **−338** minified
+bytes, Collection changes **−7**, utility **+6**, net **−339**. DB gzip is
+**−130** and brotli **−171**. All eight app scenarios also shrink: gzip
+−109…−142, brotli −15…−119. The prototype distinction adds no traversal;
+its cost is a predicate on prototypes the record comparison already reads.
+
+Reviewed production SHA256: observer
+`ba784a54a5b28d79c98e2a39783dbd00782d9584a85717a793b60c0863cd2c7a`,
+Collection changes `2824f649107b52a3b24a911b3d3c62baabd5b38f00da083ba51432a8d96551c0`,
+utility `9605eb9c38a7c759e2acc757856685d2f46081d161b271c854271563e68f6188`.
+
+ORC-001/002/003 use the stated authority, small independent version/rank and
+shape/number models, and adjacent executable prose. ORC-004 reconstruction adds
+both reported traces, ablation separates row versus layout clocks and shape
+versus numeric change, and range includes empty earlier sharing cases plus
+2/3-row query captures and all record carriers; unsupported clockless objects
+and cross-copy Collections are excluded by API/AGENTS authority, rather than
+quiet test narrowing. ORC-005 checks the real source and query paths at named
+cuts; no concrete missing-input hypothesis remains there. ORC-006/007 have three
+mutant assertion failures and guarded RED/GREEN replay. ORC-008/009 retain
+version/rank separation and add a model-only shape name, declared above; nested
+holds belong to the driver schedule, not copied cache state. ORC-010 preserves
+failure/cleanup fidelity with finishHistory and AggregateError. ORC-011 adds no
+second reference algorithm: the named shared-fault hypothesis is precisely
+class/plain equality, challenged independently by constructor tags and a numeric
+model through both production paths. ORC-012 is this versioned record.
+ORC-013 uses equal and changed same-prototype neighbors plus an independent
+layout-only mutant. ORC-014 transfers the controlled sync premise to actual
+projected queries; it claims no external host/provider contract. ORC-015 reports
+all changed reach states; ORC-016 retains fixed examples on the shared model,
+driver and comparison. Whole-workspace local testing did not run. Final-head CI
+and readiness are reported separately; the green checks on `71bb4c659` are only
+previous-head evidence after this semantic change.

@@ -30,6 +30,7 @@ const staticOracleProperties = [
   `live-query-observer.hydration-error-timing`,
   `live-query-observer.row-container-sharing`,
   `live-query-observer.capture-paths`,
+  `live-query-observer.record-shape`,
   `subscription-lifecycle.notification-error`,
   `live-query.start-handoff`,
   `react.descriptor-error-surface`,

@@ -1268,39 +1268,21 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
-  it(`invalidates snapshots for compatible collections without a state revision`, () => {
-    const rows = new Map<string, Row>([[`1`, { id: `1`, name: `A` }]])
-    const listeners = new Set<
-      (changes: Array<ChangeMessage<Row, string>>) => void
-    >()
-    const collection = {
-      status: `ready`,
-      entries: () => rows.entries(),
-      on: () => () => {},
-      subscribeChanges: (
-        listener: (changes: Array<ChangeMessage<Row, string>>) => void,
-      ) => {
-        listeners.add(listener)
-        return { unsubscribe: () => listeners.delete(listener) }
-      },
-      preload: async () => {},
-    }
-    const observer = createLiveQueryObserver<Row, string>(collection as any, {
-      mode: `wholesale`,
-    })
+  it(`invalidates snapshots after committed Collection writes`, async () => {
+    const { collection, writeRow } = makeLoadSubsetSource()
+    const observer = createLiveQueryObserver(collection, { mode: `wholesale` })
     observer.subscribe(() => {})
-    const before = observer.getSnapshot()
-
-    const row = { id: `2`, name: `B` }
-    rows.set(row.id, row)
-    for (const listener of listeners) {
-      listener([{ type: `insert`, key: row.id, value: row }])
+    try {
+      const before = observer.getSnapshot()
+      writeRow(`insert`, { id: `3`, name: `C` })
+      const after = observer.getSnapshot()
+      expect(after).not.toBe(before)
+      expect(after.data).toHaveLength(3)
+      expect(before.data).toHaveLength(2)
+    } finally {
+      observer.dispose()
+      await collection.cleanup()
     }
-
-    const after = observer.getSnapshot()
-    expect(after).not.toBe(before)
-    expect(after.data).toHaveLength(2)
-    observer.dispose()
   })
 
   it(`does not expose a truncate while its subscription is buffering a refetch`, async () => {

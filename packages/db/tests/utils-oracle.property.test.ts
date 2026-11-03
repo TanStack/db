@@ -15,6 +15,7 @@ import {
   expectEqualityPair,
   expectRingLaw,
 } from './deep-equals-support'
+import { createOracleReach } from './oracle-reach.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -603,6 +604,14 @@ describe(`deepEquals property-based tests`, () => {
     ])(
       `objects compare by class and keys, and keyless instances by identity`,
       (pathA, pathB, v, w) => {
+        // Every generated value pair exercises all three record relations.
+        // Per-case reach prevents a campaign from losing one construction.
+        const reach = createOracleReach(`utils.record-prototypes`, [
+          `same-class`,
+          `plain-class`,
+          `null-plain`,
+        ])
+        reach.beginHistory()
         class Secret {
           #v: number
           constructor(value: number) {
@@ -637,16 +646,19 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(secret, new Secret(w), false)
         expectEqualityPair({ s: secret }, { s: new Secret(v) }, false)
         expectEqualityPair(new Secret(v), {}, false)
-        // Class instances with keys compare by keys within their class, and
-        // with a plain object, which is how JSON and draft snapshots hold
-        // them. Two different classes differ.
+        // Maintainer decision 2026-11-03: change-event equality preserves
+        // record prototypes. Draft equality retains its separate JSON bridge.
         expectEqualityPair(new Point(v), new Point(w), v === w)
-        expectEqualityPair(new Point(v), { a: w }, v === w)
+        reach.reach(`same-class`)
+        expectEqualityPair(new Point(v), { a: w }, false)
+        reach.reach(`plain-class`)
         expectEqualityPair(new Point(v), new Other(v), false)
-        // Plain and null-prototype objects are one class.
+        // A null-prototype record has a different observable shape.
         const bare = Object.assign(Object.create(null), { a: v })
-        expectEqualityPair(bare, { a: w }, v === w)
-        expectEqualityPair(Object.create(null), {}, true)
+        expectEqualityPair(bare, { a: w }, false)
+        expectEqualityPair(Object.create(null), {}, false)
+        reach.reach(`null-plain`)
+        reach.assertReached()
       },
     )
 
