@@ -1,215 +1,498 @@
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
+import { vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { OutboxManager } from '../src/outbox/OutboxManager'
-import { oracleReplayTest } from '../../db/tests/oracle-config'
+import { NonRetriableError } from '../src/types'
+import {
+  differs,
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-property'
 import { FakeStorageAdapter } from './harness'
-import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
+import type { Observation } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
 
 /**
- * # Why does a ready transaction wait?
+ * # Why does a ready transaction wait, and what stops the queue?
  *
- * The scheduler executes transactions in first-in, first-out order. A later
- * transaction must not pass the first transaction when the first transaction
- * has a retry delay.
+ * Contract (the package README: "FIFO Sequential Processing", "Retry
+ * decisions", and the offline-execution settlement section):
+ * - The executor runs one transaction at a time, in creation order. A later
+ *   transaction does not pass an earlier one that has a retry delay, and a
+ *   retried transaction keeps its FIFO position.
+ * - A retriable provider failure retries the same transaction after its
+ *   backoff; nothing behind it runs first.
+ * - A `NonRetriableError` removes its row and rejects its caller with that
+ *   error; queued rows then continue in creation order.
+ * - Success means the provider returned and the storage adapter acknowledged
+ *   the outbox deletion. If recording the `deletion-pending` phase or
+ *   removing the row fails, the caller rejects with the storage error and
+ *   the executor stops: it processes no queued peer.
  *
- * The executor must execute nothing before the head is eligible. Under the
- * controlled virtual clock, advancing to that deadline must execute all
- * transactions in queue order and remove them from the outbox.
+ * Fault injection: each transaction's attempt plan is part of the history.
+ * The provider fails a planned number of times with a retriable error, then
+ * succeeds or fails permanently; a successful transaction may also have a
+ * planned storage fault on its phase write or its deletion. The faults are
+ * data, so a history replays exactly.
  *
- * The package README's FIFO sequential-processing and automatic-retry
- * contracts supply the order and eventual-retry laws. The established
- * `KeyScheduler-oracle.property.test.ts` supplies the `nextAttemptAt` eligibility
- * boundary.
- * Advancing fake timers to that boundary is a bounded executor liveness check,
- * not a user-facing wall-clock latency guarantee. Timer count and polling
- * strategy are implementation details outside this oracle's judgment.
- * This oracle covers an online executor with successful mutation functions,
- * one delayed head, and ready tails. It does not judge failed mutation
- * functions, leadership changes, or real browser timer scheduling.
+ * History grammar: two to five transactions with increasing `createdAt`; only
+ * the head has a future `nextAttemptAt` (2 to 10,000 ms), and the tail is
+ * ready. The delay axis moves the head's eligibility boundary; the
+ * checkpoints at delay-1 and delay distinguish early and late wakeups.
  *
- * Input grammar: 2–5 distinct transactions have increasing `createdAt`; only
- * the head has a future `nextAttemptAt` (2–10,000 ms). A count of 2 is the
- * smallest head/tail witness; larger counts challenge complete tail draining.
- * The delay axis moves the boundary while preserving the order law. Every
- * generated pair reconstructs the delayed-head/ready-tail history. Removing
- * either the tail or delay loses that history. A tail before the head by
- * `createdAt`, duplicate IDs, or a ready head is outside this grammar; each
- * changes the premise. The checkpoints at delay−1 and delay distinguish early
- * and late wakeups, including the 2 ms marginal delay.
+ * Model: the attempt order and outcomes follow from the plans alone, without
+ * the scheduler, timers, or the outbox. At the deadline, attempts run until
+ * the first retriable failure (whose backoff is at least a second) or a
+ * storage fault; after every timer has run, every plan has played out up to
+ * the first storage fault.
  *
- * fast-check varies the queue length and the retry delay. `expectedStateAt`
- * models time without using the scheduler, timers, or the outbox.
+ * Driver: a real `TransactionExecutor`, `KeyScheduler`, and `OutboxManager`
+ * over fake storage that fails as planned, with a controlled virtual clock
+ * and jitter off. It records provider calls, the outbox, and each caller's
+ * settlement at each checkpoint.
+ *
+ * Limits: an online executor with one mutation function; no leadership
+ * changes, no `shouldRetry` or `beforeRetry` hooks, no storage fault on a
+ * permanent failure's removal, and no real browser timers. Backoff lengths
+ * are not judged, only that a retry waits past the deadline cut.
  */
 
-type ExpectedState = {
-  calls: Array<string>
-  outboxCount: number
-}
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
 
-const FIFO_RETRY_PROPERTY = `offline.fifo-retry`
-const fifoRetryOracle = readOfflineOracleConfig({
-  property: FIFO_RETRY_PROPERTY,
-  defaultRuns: 30,
+type Plan = {
+  /** Retriable provider failures before the final attempt. */
+  failures: number
+  final: `success` | `permanent`
+  /** A storage fault after a successful provider call. */
+  storageFault: `none` | `phase` | `delete`
+}
+type History = { delay: number; plans: Array<Plan> }
+
+const plan: fc.Arbitrary<Plan> = fc.oneof(
+  // Most transactions succeed at once, so a queue often drains past a fault.
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      failures: fc.constant(0),
+      final: fc.constant(`success` as const),
+      storageFault: fc.constant(`none` as const),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      failures: fc.integer({ min: 0, max: 2 }),
+      final: fc.constantFrom(`success` as const, `permanent` as const),
+      storageFault: fc.constant(`none` as const),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      failures: fc.integer({ min: 0, max: 1 }),
+      final: fc.constant(`success` as const),
+      storageFault: fc.constantFrom(`phase` as const, `delete` as const),
+    }),
+  },
+)
+const fifoHistory: fc.Arbitrary<History> = fc.record({
+  delay: fc.integer({ min: 2, max: 10000 }),
+  plans: fc.array(plan, { minLength: 2, maxLength: 5 }),
 })
 
-function expectedStateAt(
-  elapsed: number,
-  delay: number,
-  transactionIds: ReadonlyArray<string>,
-): ExpectedState {
-  const deadlinePassed = elapsed >= delay
-  return {
-    calls: deadlinePassed ? [...transactionIds] : [],
-    outboxCount: deadlinePassed ? 0 : transactionIds.length,
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+
+type Settlement = {
+  id: string
+  outcome: `fulfilled` | `rejected`
+  message?: string
+}
+type State = {
+  calls: Array<string>
+  outbox: Array<string>
+  settled: Array<Settlement>
+}
+const idOf = (index: number) => `tx-${index}`
+const retriable = (index: number, attempt: number) =>
+  `retriable failure ${idOf(index)} attempt ${attempt}`
+const permanent = (index: number) => `permanent failure ${idOf(index)}`
+const storageFailure = (index: number) => `storage failed for ${idOf(index)}`
+
+/**
+ * What the public observations show after the plans have run, either only
+ * up to the first retriable failure (`untilRetry`, the deadline cut) or to
+ * the end.
+ */
+function playOut({ plans }: History, untilRetry: boolean): State {
+  const calls: Array<string> = []
+  const settled: Array<Settlement> = []
+  const remaining = new Set(plans.map((_, index) => idOf(index)))
+  for (const [index, { failures, final, storageFault }] of plans.entries()) {
+    const id = idOf(index)
+    if (untilRetry && failures > 0) {
+      calls.push(id)
+      break
+    }
+    for (let attempt = 0; attempt <= failures; attempt++) calls.push(id)
+    if (final === `permanent`) {
+      remaining.delete(id)
+      settled.push({ id, outcome: `rejected`, message: permanent(index) })
+      continue
+    }
+    if (storageFault !== `none`) {
+      // The row stays, and the executor stops before any queued peer.
+      settled.push({ id, outcome: `rejected`, message: storageFailure(index) })
+      break
+    }
+    remaining.delete(id)
+    settled.push({ id, outcome: `fulfilled` })
+  }
+  return { calls, outbox: [...remaining], settled }
+}
+
+function fifoModel(history: History) {
+  const queued: State = {
+    calls: [],
+    outbox: history.plans.map((_, index) => idOf(index)),
+    settled: [],
+  }
+  return new Map<string, State>([
+    [`before deadline`, queued],
+    [`just before deadline`, queued],
+    [`at deadline`, playOut(history, true)],
+    [`after every retry`, playOut(history, false)],
+  ])
+}
+
+// Reach: which fault paths a history takes, from its plans.
+const states = [
+  `retried head`,
+  `retried tail`,
+  `permanent failure before a peer`,
+  `phase write fault`,
+  `deletion fault`,
+  `fault before a queued peer`,
+] as const
+function reachedBy({ plans }: History): Array<string> {
+  const reached: Array<string> = []
+  const stop = plans.findIndex(
+    (entry) => entry.final === `success` && entry.storageFault !== `none`,
+  )
+  const played = stop < 0 ? plans : plans.slice(0, stop + 1)
+  if (played[0]!.failures > 0) reached.push(`retried head`)
+  if (played.slice(1).some((entry) => entry.failures > 0))
+    reached.push(`retried tail`)
+  if (played.slice(0, -1).some((entry) => entry.final === `permanent`))
+    reached.push(`permanent failure before a peer`)
+  if (stop >= 0) {
+    reached.push(
+      plans[stop]!.storageFault === `phase`
+        ? `phase write fault`
+        : `deletion fault`,
+    )
+    if (stop < plans.length - 1) reached.push(`fault before a queued peer`)
+  }
+  return reached
+}
+
+// ---------------------------------------------------------------------------
+// Production driver
+// ---------------------------------------------------------------------------
+
+async function driveFifo(
+  { delay, plans }: History,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  vi.useFakeTimers()
+  // A storage fault stops the executor, which logs the failed retry batch.
+  const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let executor: TransactionExecutor | undefined
+  try {
+    // Fails the planned phase write or deletion for one transaction.
+    const storage = new (class extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        const index = plans.findIndex((_, i) => key.endsWith(idOf(i)))
+        if (
+          index >= 0 &&
+          plans[index]!.storageFault === `phase` &&
+          value.includes(`"deletion-pending"`)
+        )
+          throw new Error(storageFailure(index))
+        return super.set(key, value)
+      }
+      override async delete(key: string): Promise<void> {
+        const index = plans.findIndex((_, i) => key.endsWith(idOf(i)))
+        if (index >= 0 && plans[index]!.storageFault === `delete`)
+          throw new Error(storageFailure(index))
+        return super.delete(key)
+      }
+    })()
+    const outbox = new OutboxManager(storage, {})
+    const scheduler = new KeyScheduler()
+    const calls: Array<string> = []
+    const attempts = new Map<string, number>()
+    const settled: Array<Settlement> = []
+    executor = new TransactionExecutor(
+      scheduler,
+      outbox,
+      {
+        collections: {},
+        jitter: false,
+        mutationFns: {
+          persist: ({ transaction }) => {
+            const id = transaction.id
+            calls.push(id)
+            const attempt = attempts.get(id) ?? 0
+            attempts.set(id, attempt + 1)
+            const index = Number(id.slice(3))
+            const { failures, final } = plans[index]!
+            // An attempt the plan does not have never settles, so a runaway
+            // executor stops at its first extra call, which the trace shows.
+            if (attempt > failures) return new Promise<void>(() => {})
+            if (attempt < failures)
+              return Promise.reject(new Error(retriable(index, attempt)))
+            if (final === `permanent`)
+              return Promise.reject(new NonRetriableError(permanent(index)))
+            return Promise.resolve()
+          },
+        },
+      },
+      {
+        isOfflineEnabled: true,
+        resolveTransaction: (id) => settled.push({ id, outcome: `fulfilled` }),
+        rejectTransaction: (id, error) =>
+          settled.push({ id, outcome: `rejected`, message: error.message }),
+        registerRestorationTransaction: () => {},
+        isOnline: () => true,
+      },
+    )
+    const record = async (checkpoint: string) =>
+      observe(checkpoint, {
+        calls: [...calls],
+        outbox: (await outbox.getAll()).map((entry) => entry.id),
+        settled: [...settled],
+      } satisfies State)
+
+    for (const [index] of plans.entries()) {
+      const transaction: OfflineTransaction = {
+        id: idOf(index),
+        mutationFnName: `persist`,
+        mutations: [],
+        keys: [],
+        idempotencyKey: `key-${index}`,
+        createdAt: new Date(index),
+        nextAttemptAt: Date.now() + (index === 0 ? delay : 0),
+        retryCount: 0,
+        version: 1,
+      }
+      await outbox.add(transaction)
+      scheduler.schedule(transaction)
+    }
+    await executor.executeAll()
+    await record(`before deadline`)
+    await vi.advanceTimersByTimeAsync(delay - 1)
+    await record(`just before deadline`)
+    await vi.advanceTimersByTimeAsync(1)
+    await record(`at deadline`)
+    // Backoff doubles from a second to a minute; run every retry timer.
+    for (let round = 0; round < 20 && vi.getTimerCount() > 0; round++)
+      await vi.advanceTimersByTimeAsync(60_000)
+    await record(`after every retry`)
+  } finally {
+    executor?.clear()
+    warn.mockRestore()
+    vi.useRealTimers()
   }
 }
 
-function expectState(actual: ExpectedState, expected: ExpectedState): void {
-  expect(actual.calls).toEqual(expected.calls)
-  expect(actual.outboxCount).toBe(expected.outboxCount)
+// ---------------------------------------------------------------------------
+// Check
+// ---------------------------------------------------------------------------
+//
+// At each checkpoint the provider calls, the outbox, and the settlements
+// equal the model's. Calls that are not a prefix of the full attempt order
+// break the FIFO law; a correct prefix of the wrong length at a cut breaks
+// the progress law (a late wakeup, or a queue that stalls); settlements and the outbox after a fault are the stop law.
+
+function checkFifo(
+  _history: History,
+  trace: ReadonlyArray<Observation>,
+  owed: ReturnType<typeof fifoModel>,
+) {
+  const order = owed.get(`after every retry`)!.calls
+  for (const [checkpoint, expected] of owed) {
+    const seen = trace.find((entry) => entry.checkpoint === checkpoint)
+      ?.value as State | undefined
+    if (!seen)
+      return violation(
+        checkpoint,
+        `the driver recorded no "${checkpoint}"`,
+        `trace`,
+      )
+    // Calls in the full attempt order, but too few or too many for this cut,
+    // break progress; any other difference breaks FIFO order.
+    const callLaw = seen.calls.every((id, index) => id === order[index])
+      ? `progress`
+      : `fifo`
+    const wrong =
+      differs(
+        checkpoint,
+        callLaw,
+        seen.calls,
+        expected.calls,
+        `provider calls differ from creation order and the attempt plans`,
+      ) ??
+      differs(
+        checkpoint,
+        `settlement`,
+        seen.settled,
+        expected.settled,
+        `caller settlements differ from the plans`,
+      ) ??
+      differs(
+        checkpoint,
+        `stop`,
+        seen.outbox,
+        expected.outbox,
+        `the outbox differs from the plans`,
+      )
+    if (wrong) return wrong
+  }
+  return pass
 }
 
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of FIFO_RETRY_PROPERTY.
-async function checkFifoRetry(seed: number | undefined): Promise<void> {
-  await fc.assert(
-    fc.asyncProperty(
-      fc.integer({ min: 2, max: 5 }),
-      fc.integer({ min: 2, max: 10000 }),
-      async (count, delay) => {
-        let clearExecutor: (() => void) | undefined
-        let primaryFailure: unknown
-        let failed = false
-        try {
-          vi.useFakeTimers()
-          const scheduler = new KeyScheduler()
-          const outbox = new OutboxManager(new FakeStorageAdapter(), {})
-          const calls: Array<string> = []
+// ---------------------------------------------------------------------------
+// Property
+// ---------------------------------------------------------------------------
 
-          // Record each transaction when the production executor runs it.
-          const executor = new TransactionExecutor(
-            scheduler,
-            outbox,
-            {
-              collections: {},
-              mutationFns: {
-                persist: ({ transaction }) => {
-                  calls.push(transaction.id)
-                  return Promise.resolve()
-                },
-              },
-            },
-            {
-              isOfflineEnabled: true,
-              resolveTransaction: () => {},
-              rejectTransaction: () => {},
-              registerRestorationTransaction: () => {},
-              isOnline: () => true,
-            },
-          )
-          clearExecutor = () => executor.clear()
-          const transactions: Array<OfflineTransaction> = Array.from(
-            { length: count },
-            (_unused, index) => ({
-              id: `tx-${index}`,
-              mutationFnName: `persist`,
-              mutations: [],
-              keys: [],
-              idempotencyKey: `key-${index}`,
-              createdAt: new Date(index),
-              nextAttemptAt: Date.now() + (index === 0 ? delay : 0),
-              retryCount: 0,
-              version: 1,
-            }),
-          )
-          const transactionIds = transactions.map(
-            (transaction) => transaction.id,
-          )
+const ok: Plan = { failures: 0, final: `success`, storageFault: `none` }
 
-          for (const transaction of transactions) {
-            await outbox.add(transaction)
-            scheduler.schedule(transaction)
-          }
-          await executor.executeAll()
-
-          // A ready tail waits for the delayed head. The virtual-clock cuts
-          // distinguish early execution from failure to wake when eligible.
-          const beforeDeadline = expectedStateAt(0, delay, transactionIds)
-          const observedBeforeDeadline = {
-            calls: [...calls],
-            outboxCount: await outbox.count(),
-          }
-          expectState(observedBeforeDeadline, beforeDeadline)
-          // A scheduler that lets a ready tail bypass the delayed head
-          // reaches this checkpoint with an extra call. Calibrate the same
-          // comparison against that plausible wrong observation.
-          expect(() =>
-            expectState(
-              { ...observedBeforeDeadline, calls: [transactionIds[1]!] },
-              beforeDeadline,
-            ),
-          ).toThrow()
-          await vi.advanceTimersByTimeAsync(delay - 1)
-          const nearDeadline = expectedStateAt(delay - 1, delay, transactionIds)
-          expectState(
-            { calls: [...calls], outboxCount: await outbox.count() },
-            nearDeadline,
-          )
-          await vi.advanceTimersByTimeAsync(1)
-          const atDeadline = expectedStateAt(delay, delay, transactionIds)
-          const observedAtDeadline = {
-            calls: [...calls],
-            outboxCount: await outbox.count(),
-          }
-          expectState(observedAtDeadline, atDeadline)
-          // A scheduler that never wakes at eligibility leaves the whole
-          // queue untouched at this controlled-clock checkpoint.
-          expect(() =>
-            expectState(
-              { calls: [], outboxCount: transactionIds.length },
-              atDeadline,
-            ),
-          ).toThrow()
-        } catch (error) {
-          primaryFailure = error
-          failed = true
-        }
-
-        const cleanupFailures: Array<Error> = []
-        const cleanups: Array<[string, (() => void) | undefined]> = [
-          [`executor.clear`, clearExecutor],
-          [`real timer restore`, () => vi.useRealTimers()],
-        ]
-        for (const [name, cleanup] of cleanups) {
-          if (!cleanup) continue
-          try {
-            cleanup()
-          } catch (error) {
-            cleanupFailures.push(new Error(`${name} failed`, { cause: error }))
-          }
-        }
-        if (cleanupFailures.length > 0) {
-          throw new AggregateError(
-            cleanupFailures,
-            `FIFO retry oracle cleanup failed`,
-            { cause: failed ? primaryFailure : undefined },
-          )
-        }
-        if (failed) throw primaryFailure
-      },
+oracleProperty({
+  id: `offline.fifo-retry`,
+  law: {
+    statement: `The executor runs transactions one at a time in creation order: a ready tail waits for a delayed or retrying head, a permanent failure lets queued rows continue, and a failed phase write or deletion rejects its caller with the storage error and stops the queue.`,
+    authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement`,
+    limits: `An online executor with one mutation function and no retry hooks; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths are not judged.`,
+    owner: `Offline execution`,
+  },
+  histories: {
+    arbitrary: fifoHistory,
+    states: [`phase write fault`, `fault before a queued peer`],
+    measured: states.filter(
+      (state) =>
+        state !== `phase write fault` && state !== `fault before a queued peer`,
     ),
-    oracleLaneOptions(fifoRetryOracle, seed),
-  )
-}
-
-oracleReplayTest(it).each([20260916])(
-  `waits for the FIFO head and executes eligible work at its deadline (seed %s)`,
-  checkFifoRetry,
-)
-oracleReplayTest(it, FIFO_RETRY_PROPERTY).each([undefined])(
-  `waits for the FIFO head and executes eligible work at its deadline (seed %s)`,
-  checkFifoRetry,
-)
+    runs: 60,
+    fixedSeeds: [20260916],
+    // A storage fault in the middle of the queue: the stop law needs a peer
+    // behind the fault.
+    segments: [
+      {
+        name: `a phase write fault before a queued peer`,
+        enters: [`phase write fault`, `fault before a queued peer`],
+        build: (generated: History): History => ({
+          delay: generated.delay,
+          plans: [
+            { ...ok },
+            { failures: 0, final: `success`, storageFault: `phase` },
+            ...generated.plans.slice(0, 3),
+          ],
+        }),
+      },
+    ],
+    pins: [
+      {
+        name: `a ready tail waits for a delayed head with the smallest delay`,
+        history: { delay: 2, plans: [{ ...ok }, { ...ok }] },
+      },
+      {
+        name: `a retried head keeps its place`,
+        enters: [`retried head`],
+        history: {
+          delay: 500,
+          plans: [
+            { failures: 2, final: `success`, storageFault: `none` },
+            { ...ok },
+            { ...ok },
+          ],
+        },
+      },
+      {
+        name: `a permanent failure lets the queue continue`,
+        enters: [`permanent failure before a peer`],
+        history: {
+          delay: 10,
+          plans: [
+            { ...ok },
+            { failures: 1, final: `permanent`, storageFault: `none` },
+            { ...ok },
+          ],
+        },
+      },
+      {
+        name: `a failed deletion stops the queue`,
+        enters: [`deletion fault`, `fault before a queued peer`],
+        history: {
+          delay: 10,
+          plans: [
+            { failures: 0, final: `success`, storageFault: `delete` },
+            { ...ok },
+          ],
+        },
+      },
+    ],
+  },
+  model: fifoModel,
+  reached: (history) => reachedBy(history),
+  driver: driveFifo,
+  check: checkFifo,
+  // Wrong answers the check must reject: a ready tail that passes the
+  // delayed head, a scheduler that never wakes at eligibility, and a queue
+  // that keeps running after a storage fault.
+  calibrations: [
+    {
+      name: `a ready tail passes the delayed head`,
+      law: `fifo`,
+      corrupt: (trace) =>
+        trace.map((entry) =>
+          entry.checkpoint === `before deadline`
+            ? {
+                ...entry,
+                value: { ...(entry.value as State), calls: [idOf(1)] },
+              }
+            : entry,
+        ),
+    },
+    {
+      name: `the head never wakes at its deadline`,
+      law: `progress`,
+      corrupt: (trace) =>
+        trace.map((entry) =>
+          entry.checkpoint === `at deadline`
+            ? { ...entry, value: { ...(entry.value as State), calls: [] } }
+            : entry,
+        ),
+    },
+    {
+      name: `the queue continues past a storage fault`,
+      law: `stop`,
+      corrupt: (trace) => {
+        const last = trace.find(
+          ({ checkpoint }) => checkpoint === `after every retry`,
+        )?.value as State | undefined
+        if (!last || last.outbox.length < 2) return undefined
+        return trace.map((entry) =>
+          entry.checkpoint === `after every retry`
+            ? { ...entry, value: { ...last, outbox: last.outbox.slice(0, 1) } }
+            : entry,
+        )
+      },
+    },
+  ],
+})
