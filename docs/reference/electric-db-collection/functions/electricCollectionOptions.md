@@ -9,7 +9,7 @@ title: electricCollectionOptions
 function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "utils" | "onInsert" | "onUpdate" | "onDelete"> & Pick<ElectricCollectionConfig<InferSchemaOutput<T>, T>, "onInsert" | "onUpdate" | "onDelete"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:1150](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1150)
+Defined in: [packages/electric-db-collection/src/electric.ts:1207](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1207)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -41,7 +41,7 @@ Collection options with utilities
 function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "utils" | "onInsert" | "onUpdate" | "onDelete"> & Pick<ElectricCollectionConfig<T, never>, "onInsert" | "onUpdate" | "onDelete"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:1168](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1168)
+Defined in: [packages/electric-db-collection/src/electric.ts:1225](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1225)
 
 Creates Electric collection options for use with a standard Collection
 

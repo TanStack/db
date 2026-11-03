@@ -3,7 +3,7 @@ id: UseLiveQueryResult
 title: UseLiveQueryResult
 ---
 
-Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L72)
+Defined in: [useLiveQuery.ts:73](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L73)
 
 The result of a live query that is always enabled.
 
@@ -37,7 +37,7 @@ The result of a live query that is always enabled.
 collection: TCollection;
 ```
 
-Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L80)
+Defined in: [useLiveQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L81)
 
 ***
 
@@ -47,7 +47,7 @@ Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packag
 data: TData;
 ```
 
-Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L79)
+Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L80)
 
 ***
 
@@ -57,7 +57,7 @@ Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packag
 isEnabled: true;
 ```
 
-Defined in: [useLiveQuery.ts:82](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L82)
+Defined in: [useLiveQuery.ts:83](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L83)
 
 ***
 
@@ -67,7 +67,7 @@ Defined in: [useLiveQuery.ts:82](https://github.com/TanStack/db/blob/main/packag
 state: ReadonlyMap<TKey, TResult>;
 ```
 
-Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L78)
+Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L79)
 
 ***
 
@@ -77,4 +77,4 @@ Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packag
 status: CollectionStatus;
 ```
 
-Defined in: [useLiveQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L81)
+Defined in: [useLiveQuery.ts:82](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L82)
