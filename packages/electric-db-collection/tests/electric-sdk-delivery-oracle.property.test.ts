@@ -7,6 +7,7 @@ import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -136,7 +137,8 @@ declareOracle({
   model: [createRetryModel, applyRetryModel, expectedRetryObservation],
 })
 
-const campaignTimeoutMs = 30_000
+// Scaled with the run multiplier, so stress campaigns keep their budget.
+const campaignTimeoutMs = oracleRuns(30_000)
 
 function sdkCampaigns(
   propertyId: string,
@@ -549,7 +551,8 @@ async function checkSnapshots(
       )
       return Promise.all(
         [5, 25].map((txid) =>
-          fresh.utils.awaitTxId(txid, 20).then(
+          // Imported evidence answers at once; 1 ms bounds a refusal.
+          fresh.utils.awaitTxId(txid, 1).then(
             () => true,
             () => false,
           ),
