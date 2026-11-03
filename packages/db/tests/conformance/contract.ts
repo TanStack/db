@@ -31,8 +31,16 @@
  * projections, predicates, order, nested windows and Collection options still
  * require compilation. An unchanged
  * explicit key keeps its authored input, and changed opaque keyed inputs compile.
- * DbClient and Suspense result sharing retain their identity-based behavior;
- * they are outside this adapter-owned optimization.
+ * An initially disabled input has no authored plan to retain: enabling it admits
+ * its first plan even with the same key.
+ * The same law applies to every client-backed adapter (issue #2345) and to
+ * Suspense hooks (maintainer decision, 2026-11-03). Independent query inputs
+ * own distinct live-query Collections, even under equal keys and options.
+ * Each moved client input uses the new page's preload/hydration identity;
+ * transported page snapshots keep their original identities. An explicitly
+ * supplied Collection remains caller-owned and may be shared. Before an initial
+ * Suspense render succeeds, only its fallback is public; retry progress is owed,
+ * but retention of an uncommitted Collection is not.
  *
  * A window move requires a committed host update and runs after any current
  * Collection publication. A speculative React or Preact render cannot move the
@@ -237,6 +245,8 @@ export interface LiveQueryHandle {
    * still tell a loading error (`isLoadingError`) from a crash (`isCrashed`).
    */
   statusSurface?: () => ConformanceStatusSurface
+  /** Public fallback visibility for a hook that suspends before initial readiness. */
+  isSuspended?: () => boolean
   /** The live-query Collection currently backing this result. */
   collection: () => Collection<any, any, any> | null
   /** Let the framework scheduler + core sync settle, then resolve. */
@@ -387,9 +397,8 @@ export interface LiveQueryDriver {
    * Whether the binding compares query identity to decide when to compile
    * again (see the opening query-identity law). The driver declares the
    * adapter's documented policy for the inputs it mounts; the suite does not
-   * infer it from observed output. Svelte compares identity only for a query
-   * that a `DbClient` backs, and its shared drivers mount none, so they
-   * declare `false`.
+   * infer it from observed output. Svelte compares identity for client-backed queries; the driver declares
+   * this per input mode rather than per framework.
    */
   comparesQueryIdentity: boolean
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */
@@ -404,6 +413,8 @@ export interface LiveQueryDriver {
   features?: {
     serverSnapshot?: boolean
     suspense?: boolean
+    /** A successful return is the initial-readiness observation; pending reads expose a fallback. */
+    suspendsUntilReady?: boolean
     /**
      * Public sharing policy: queries whose config passes `pooledLiveQueries`
      * and that filter only by `eq` on one source share one source subscription

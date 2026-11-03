@@ -58,7 +58,7 @@ function TodoList() {
 
 ### Query Identity
 
-React live query hooks derive the live query identity from structured query IR by default. The hook runs the query builder, normalizes the resulting IR, and uses that as the identity. When the derived identity changes, the old live query collection is cleaned up and a new one is created.
+React live query hooks derive the live query identity from structured query IR by default. The hook runs the query builder, normalizes the resulting IR, and uses that as the identity. A changed query plan creates a new live-query Collection. Changing only a finite outer limit or offset moves the existing Collection's window.
 
 That means normal structured queries do not need a separate `queryKey`. Collection descriptors provide stable collection IDs, and captured values inside structured expressions become part of the derived identity:
 
@@ -82,8 +82,11 @@ unmount it, clean up its source and client scope, then mount the replacement.
 Separate hooks and independent client scopes can use the same ID.
 
 A mounted binding keeps its Collection options until query identity changes.
-Independent Suspense bindings share a Collection only when their supplied
-Collection options agree. Object and function options use reference equality.
+Independent query inputs to `useLiveQuery` and `useLiveSuspenseQuery` receive
+their own live-query Collections, even with equal query keys and options. Their
+source Collections can be shared. Passing the same pre-created Collection to
+both hooks explicitly shares that Collection. Changing only the outer finite
+limit or offset retains each hook's Collection, including under `DbProvider`.
 Cached `DbClient` results additionally reject conflicting `getKey` or `schema`
 references under the same query identity; use distinct query keys for those
 callers.
@@ -129,11 +132,11 @@ as a performance escape hatch.
 
 #### What Happens When Identity Changes
 
-When the derived identity or explicit query key changes:
-1. The previous live query collection is cleaned up
-2. A new query is created with the updated values
-3. The component re-renders with the new data
-4. The hook suspends (for `useLiveSuspenseQuery`) or shows loading state
+When an identity change requires a new query plan, the hook replaces its
+live-query Collection and renders the new result. While its initial result
+loads, `useLiveSuspenseQuery` shows the Suspense fallback and `useLiveQuery`
+reports loading. A finite outer limit or offset change retains the Collection
+and moves its window after commit.
 
 #### Best Practices
 
@@ -224,4 +227,7 @@ function App() {
 }
 ```
 
-When the derived identity or explicit `queryKey` changes, `useLiveSuspenseQuery` will re-suspend, showing your Suspense fallback until the new data is ready.
+When a changed query plan creates a new live-query Collection,
+`useLiveSuspenseQuery` shows your Suspense fallback until its initial result
+is ready. Finite outer-window moves retain the Collection and follow its
+window publication policy.

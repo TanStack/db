@@ -79,6 +79,11 @@ const ownerGroups: ReadonlyArray<
     `db/tests/conformance/window-history-oracle.ts`,
   ],
   [`react-db/tests/window-render-oracle.test.tsx`, `react`, `window-render`],
+  [
+    `react-db/tests/suspense-lifecycle-oracle.test.tsx`,
+    `react`,
+    `suspense-retry-history suspense-replacement-history suspense-preload-restart-history`,
+  ],
   [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
   [
     `react-db/tests/ssr-effects-oracle.test.ts`,

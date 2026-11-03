@@ -114,38 +114,16 @@ export function expectIndexingConfiguration(
   expect(collection.config.defaultIndexType).toBe(expected.constructor)
 }
 
-// Existing Suspense sharing remains available to separate bindings with the
-// same query identity and compatible effective indexing declarations. An
-// omitted mode means off; constructor identity is reference equality.
-export function expectedIndexingReuse(
-  first: IndexSettings,
-  second: IndexSettings,
-  identity: ReturnType<typeof indexConfigurationPairs>[number][`identity`],
-): boolean {
-  const left = expectedIndexing(first)
-  const right = expectedIndexing(second)
-  return (
-    identity !== `different-key` &&
-    !left.rejects &&
-    !right.rejects &&
-    left.mode === right.mode &&
-    left.constructor === right.constructor
-  )
-}
-
-export function expectIndexingReuse(
+// Independent Suspense bindings own distinct outputs (maintainer decision,
+// 2026-11-03). Effective indexing equality never authorizes mutable sharing.
+export function expectIndependentIndexingOutputs(
   firstOutput: object | undefined,
   secondOutput: object | undefined,
   first: IndexSettings,
   second: IndexSettings,
-  identity: ReturnType<typeof indexConfigurationPairs>[number][`identity`],
+  _identity: ReturnType<typeof indexConfigurationPairs>[number][`identity`],
 ): void {
-  if (expectedIndexingReuse(first, second, identity))
-    expect(secondOutput).toBe(firstOutput)
-  else if (
-    !expectedIndexing(first).rejects &&
-    !expectedIndexing(second).rejects
-  )
+  if (!expectedIndexing(first).rejects && !expectedIndexing(second).rejects)
     expect(secondOutput).not.toBe(firstOutput)
 }
 
@@ -167,12 +145,12 @@ declareOracle({
     indexConfigurationPairs,
     indexOptionAbsencePairs,
   ],
-  model: [expectedIndexing, expectedIndexingReuse],
+  model: [expectedIndexing],
   check: [
     expectIndexing,
     expectIndexingAdmission,
     expectIndexingConfiguration,
-    expectIndexingReuse,
+    expectIndependentIndexingOutputs,
   ],
 })
 

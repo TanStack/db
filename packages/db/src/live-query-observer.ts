@@ -632,7 +632,16 @@ class LiveQueryObserverImpl<
     // still being created. Register the release hook up front; if detach()
     // ran during that replay (collectionUnsub no longer points at our hook),
     // undo the subscription as soon as the call returns.
-    if (this.clientBinding) ownRelease(this.clientBinding.subscribe())
+    if (this.clientBinding) {
+      ownRelease(this.clientBinding.subscribe())
+      // A retained ready Collection can settle subset work without another
+      // row or status change. That settlement must release its hydration seed.
+      ownRelease(
+        collection.on(`loadingSubset:change`, () => {
+          if (this.clientBinding?.seed) this.clientBinding.scheduleHandoff()
+        }),
+      )
+    }
     const subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
       { includeInitialState: !this.wholesale && !attachedWithHydrationSeed },
