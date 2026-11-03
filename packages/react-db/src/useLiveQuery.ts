@@ -628,10 +628,11 @@ export function useLiveQueryImpl(
       )
     }
 
+    let queryHash = instance.queryHash
     let commitWindow: (() => void) | undefined
     if (needsNewCollection) {
       // Preparation rejects unhashable derived inputs; keyed inputs must hash.
-      const queryHash = queryKey
+      queryHash = queryKey
         ? getLiveQueryHash(preparedQueryValue, queryKey)
         : getStableValueHash(
             inputIsCollection
@@ -708,19 +709,14 @@ export function useLiveQueryImpl(
       }
       instance.config = configOrQueryOrCollection
       instance.client = dbClient
-      instance.queryHash = queryHash
+      if (!commitWindow) instance.queryHash = queryHash
     }
 
     // A client-backed move retains the graph but binds a fresh observer to the
     // requested page's transport hash. Peers keep their own snapshots/observers.
     if (commitWindow && !dbClient) needsNewCollection = false
-    useWindowCommitEffect(() => {
-      if (commitWindow) {
-        instance.identityDeps = [...identityDeps]
-        commitWindow()
-      }
-    })
-
+    let observer = instance.observer!
+    let subscribe = instance.subscribe!
     if (needsNewCollection) {
       // Recreate the observer when the underlying collection changes. The observer
       // is not disposed explicitly here or on unmount: `useSyncExternalStore`
@@ -734,24 +730,35 @@ export function useLiveQueryImpl(
       // hook's pre-observer loading policy, and — because wholesale delivers
       // nothing synchronously during subscribe — never notifies
       // useSyncExternalStore inside its own subscribe call.
-      const observer = (instance.observer = createLiveQueryObserver(
-        instance.collection,
-        {
-          mode: `wholesale`,
-          client: dbClient,
-          queryHash: instance.queryHash,
-          onPreload: resumeDeferredCollections,
-          suspendUntilReady: forSuspense,
-        },
-      ))
+      observer = createLiveQueryObserver(instance.collection, {
+        mode: `wholesale`,
+        client: dbClient,
+        queryHash,
+        onPreload: resumeDeferredCollections,
+        suspendUntilReady: forSuspense,
+      })
       // The subscribe function stays bound to the observer that created it.
-      instance.subscribe = (onStoreChange: () => void) => {
+      subscribe = (onStoreChange: () => void) => {
         const unsubscribe = observer.subscribe(onStoreChange)
         resumeDeferredCollections()
         return unsubscribe
       }
+      if (!commitWindow) {
+        instance.observer = observer
+        instance.subscribe = subscribe
+      }
     }
-    const observer = instance.observer!
+    // Until commit, a proposed page's observer and transport identity belong
+    // only to this render. Cancellation must leave the committed seed intact.
+    useWindowCommitEffect(() => {
+      if (commitWindow) {
+        instance.identityDeps = [...identityDeps]
+        instance.queryHash = queryHash
+        instance.observer = observer
+        instance.subscribe = subscribe
+        commitWindow()
+      }
+    })
     // A Suspense render asks for its data. Preloading starts the sync run, so a
     // source that already holds the rows makes it ready before the snapshot is
     // read instead of suspending once. useLiveSuspenseQuery surfaces failures.
@@ -766,7 +773,7 @@ export function useLiveQueryImpl(
     }
 
     const returned = useSyncExternalStore(
-      instance.subscribe!,
+      subscribe,
       () => observer.getSnapshot(),
       () => observer.getServerSnapshot(forSuspense),
     )
@@ -777,7 +784,7 @@ export function useLiveQueryImpl(
       return {
         result: returned,
         client: dbClient,
-        queryHash: instance.queryHash,
+        queryHash,
         observer,
         deferredCollections: instance.deferredCollections,
       }

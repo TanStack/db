@@ -170,7 +170,7 @@ join/filter, width 20 and ten page changes over three runs.
 
 | ID | Original claim and remedy | Technical verdict and action | Durable value/destination |
 | --- | --- | --- | --- |
-| R1 | `forSuspense || dbClient` prevents previous-Collection reuse; provider/Start and descriptor paths rebuild every page. Reported 11 Collections vs 1, 113–120 ms vs 5.5–5.7 ms. Expected automatic setWindow reuse. | Functional claim confirmed by preproduction retention failures; **fixed-now** under maintainer's contract extension. Numeric timing and exact workload were not independently measured. | Shared client/Suspense mode registration, real React descriptor/provider/explicit cuts, and Svelte client receiving path. |
+| R1 | `forSuspense \|\| dbClient` prevents previous-Collection reuse; provider/Start and descriptor paths rebuild every page. Reported 11 Collections vs 1, 113–120 ms vs 5.5–5.7 ms. Expected automatic setWindow reuse. | Functional claim confirmed by preproduction retention failures; **fixed-now** under maintainer's contract extension. Numeric timing and exact workload were not independently measured. | Shared client/Suspense mode registration, real React descriptor/provider/explicit cuts, and Svelte client receiving path. |
 | R2 | Registry hash includes outer page and is used by preload/dehydrate/hydrate. Suggest re-registering the moved Collection under the new hash. | Identity concern valid; re-registration is unnecessary because ordinary outputs are local. **accepted-design**: preserve snapshots and rebind the observer. S1's separate hash mismatch is repaired below. | JSON seeded-page histories, immutable server snapshots, peer independence, and same-source client switch. |
 | R3 | A stable key plus layout-effect imperative setWindow retains one client-backed Collection; window engine works and adapter admission is missing. Reported 5.6–6.5 ms. | Imperative behavior confirmed by shared client peer histories; **accepted-design**. Timings not independently measured. Automatic invalidated-page reuse repaired under R1. | Declarative and imperative moves judged by the same model; stable-key authored-input control retained. |
 | S1, discovered sibling | React keyed hook hash omits outer page, missing keyed preload seeds. | **fixed-now**; first-seed RED and keyed-hash mutant reject the defect. | React JSON page receiver; canonical public transport hash on invalidation. |
@@ -1035,3 +1035,146 @@ The refreshed manifest pins **26 source/contract/coverage files**, combined
 SHA256 `d4899416d330bf345599932475fd273aa124e4ecb0f51ecf508162d87edc27d2`. It preserves the prior 24-file snapshot alongside
 the earlier 18-file and 19-file snapshots. This report and the manifest remain
 self-excluded. The unchanged base is `1443dc92e5417394acbdc98b782caa9802848ce6`.
+
+
+## CodeRabbit review and cancelled-page receiving repair (PR #2348)
+
+Reviewed commit: `8cf448391e59c0ebdf6a05c2fa2fa7f8dadae711`.
+Review [5755501550](https://github.com/TanStack/db/pull/2348#pullrequestreview-5755501550)
+contains three inline findings. The mutable summary at 2026-11-03T16:05:57Z
+adds two policy/scope warnings. The task-local audit preserved their complete
+raw bodies before tests or edits. This entry records all five items and the
+resulting source snapshot. It does not replace the earlier evidence.
+
+### Law, experiment, and inference
+
+A speculative page render cannot replace the committed page's observable
+snapshot. The shared conformance contract requires a committed host update for
+a window move and preserves each page's preload/hydration identity. This is
+an enforcement gap in that accepted law, not a new product decision.
+
+The old cancellation receiver compared local Collection rows and acquisition.
+The old transported-page receiver checked only committed moves. Their separate
+green results missed the crossing: a source whose readiness is held, distinct
+server page seeds, an attempted page render that suspends after the hook, then
+an original-page render that cancels it. The local Collection stays on the
+original page while its observer can retain the abandoned page's seed.
+
+The existing React client receiver now drives that history through real React
+in jsdom. It reuses `clientWindowArbitrary`, `windowRows`,
+`checkWindowObservation`, and `checkWindowState`. Each history checks data,
+keyed state, and Collection identity after cancellation, then continues the
+existing committed move, peer, handoff, return and client-switch checks.
+Offset-only, limit-only and combined proposals have separate campaigns, as do
+ordinary/Suspense hooks, provider/explicit clients and derived/keyed identity.
+The proposed page is preloaded under the same public API as the original page.
+The fixture supplies source rows before readiness but holds readiness through
+cancellation, so later local rows cannot conceal the wrong seed.
+
+All 48 campaigns rejected unchanged production at `ordered window rows /
+matching seed after cancelled page`. One concrete observation was server rows
+`s2,s3,s4` instead of `s0,s1`. The shrunk seed/path `2345 / 0:0:0:0` preserves
+that law and checkpoint, including an empty abandoned page versus original
+row `s0`. This is a public snapshot mismatch, not a setup failure or timeout.
+
+The repair keeps each proposed observer, subscribe function, and query hash
+local to its render. A retained move saves those values only at commit. The
+same render reads its proposed observer, so legitimate committed moves still
+select the correct page seed. No key hashing was added.
+
+### Evidence block
+
+- **Law:** Committed page snapshots survive discarded window renders. Authority:
+  the existing shared committed-update and transported-page contracts above.
+- **Reach:** 48 fixed/fresh campaigns, each with six generated histories plus
+  two shared examples: 384 histories, 288 generated and 96 fixed replays.
+  Each of nine declared states reaches eight histories in every campaign:
+  first seed, suspended seed, cancelled seed, moved seed, fresh old-page lookup,
+  local handoff, peer isolation, returned page and client scope switch.
+- **RED:** `pnpm --filter @tanstack/react-db exec vitest run
+  tests/client-window-oracle.test.tsx --maxWorkers=2 --coverage.enabled=false`
+  rejects all 48 campaigns on reviewed production. The final unchanged-source
+  TypeScript check passes before that repeated RED. Exact source was restored
+  from `8cf448391`, not approximated with a mutant.
+- **GREEN:** The same 48 campaigns pass after the repair. The final full React
+  run passes 4,793 tests in 40 files; explicit React TypeScript passes. The full
+  guarded replay suite passes 110 tests. ESLint, Prettier, `pnpm lint:changed`
+  and diff checks pass. The size command builds the affected packages.
+- **Mutant:** Reintroducing render-time writes of the proposed observer,
+  subscribe function and hash rejects `react.client-window`, seed `2345`, path
+  `0:0:0:0`, at the same cancelled-seed comparison. Guarded replay records one
+  failed execution. Restoring production records one successful execution.
+- **Limits:** Finite one-source page inputs, JSON-transported preloads, held
+  readiness and this real React transition/cancellation schedule. No native
+  `hydrateRoot`, actual Electric/Start provider, arbitrary concurrent schedule,
+  exact GC deadline, infinite window or mutable nested-key promise is added.
+  No oracle run budget decreased.
+
+The first runtime REDs preceded the repair, but their Vitest "no type errors"
+summary did not expose a reach-counter annotation mismatch. An explicit `tsc`
+check later found it. The annotation now accepts the receiver's full state
+union. With production temporarily restored to the exact reviewed commit,
+`tsc` passes and all 48 comparisons reproduce RED before restoring the repair.
+The initial attempt's missing explicit type check remains a process
+qualification; the repeated typed witness does not rewrite that chronology.
+
+Commands and outcomes remain in the task-local `2345-ci-loop` directory:
+`cancel-typed-unchanged-tsc.log`, `cancel-typed-unchanged-red.log`,
+`cancel-typed-restored-tsc.log`, `cancel-mutant-red.log`,
+`cancel-restored-green.log`, `react-full-final.log`, and
+`replay-full-final.log`. The guarded command, from `packages/react-db`, is:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=react.client-window TANSTACK_DB_ORACLE_SEED=2345 TANSTACK_DB_ORACLE_PATH=0:0:0:0 node --import tsx ../db/tests/oracle-replay.ts tests/client-window-oracle.test.tsx -t 'derived/ordinary/provider/both/fresh' --maxWorkers=2 --coverage.enabled=false
+```
+
+### Lossless review ledger
+
+| ID/source | Claim and suggested change | Verdict and completed action | Durable value |
+| --- | --- | --- | --- |
+| CR1 / inline 4457228450, evidence report:173, minor | The unescaped boolean-expression pipes split the issue-ledger row and lose its verdict/destination cells. Escape both pipes. | **fixed-now**. Escaped both pipes. Prettier's Markdown parser reads R1 as four cells and preserves the original expression. No product behavior changes. | Preserve readable source/decision evidence. |
+| CR2 / inline 4457228468, oracle-config.ts:51, major | New DbClient/Suspense window, peer and admission names lack replay owners. Add each real runner and extend the driver matrix; inspect other new names too. | **fixed-now**. The existing owner check rejects 32 missing routes. All 32 now map to their actual owner and shared source. Added originating-driver cases, direct fresh-lane selectors and computed-name provenance checks. Full replay suite: 110 passed. | Every registered property needs a named executable owner; a registered name alone proves no execution. |
+| CR3 / inline 4457228488, useLiveQuery.ts:714–716, major | A retained move stores its proposed observer/hash during render. Cancellation can keep those abandoned values because identity dependencies remain committed. Keep them render-local until commit. | **fixed-now**. All 48 unchanged-source receiving campaigns reject the wrong cancelled seed. Commit-only saving passes them; guarded original-behavior mutant fails and restored replay passes. | Cross cancellation with held page seeds; correct local Collection rows do not prove correct transported identity. |
+| CR4 / summary scope warning | Suspense ownership, keyed disabled admission and seed handoff exceed #2345. Remove/split them or supply scope authority. | **accepted-design**. The maintainer explicitly requested independent Suspense outputs, Svelte DbClient support and stronger coverage. Admission and handoff are accepted-contract siblings found during that receiving work. The PR body lists the broader scope. No source removal. | Distinguish issue scope from explicit maintainer scope and identify neighboring fixes honestly. |
+| CR5 / summary documentation warning | Bot reports 19.05% documentation against an 80% threshold over 21 functions. Add missing docstrings. | **refuted** as a repository requirement. That percentage was not independently reproduced. No repository CodeRabbit policy or 80% docstring gate applies. Existing literate owner/driver prose explains laws and cuts; the changed cancellation path adds purpose prose. No blanket duplicate docstrings. | Retain the clarity question without treating a bot default as contract authority. |
+
+CR2's actual receiving checks use guarded seed/path replay for all four new
+modes: React DbClient, React Suspense, React Suspense with DbClient and Svelte
+DbClient. Each records eight successful direct/nested window executions.
+Additional guarded checks pass for client peer history, Svelte keyed admission,
+React retry ownership, Svelte transported pages and core subset handoff. Source
+checking formerly required literal driver names; its explicit finite-product
+check now requires React's two boolean axes and exact name expression. Runtime
+replays establish those computed names actually execute.
+
+### Reviewer assessment and final loss audit
+
+Hire recommendation: positive for correctness review. All three actionable
+findings are valid, and the cancellation finding distinguishes observer data
+from retained Collection rows. Its proposed render-local repair is sound. The
+replay suggestion also asks to inspect other new names, which exposes the full
+32-route omission. The scope warning lacks the conversation's authorization;
+the docstring threshold is a bot default. Those warnings have less signal than
+the three precise source findings. The reviewer does not itself supply the
+required generated RED or mutant evidence; the repair adds those instruments.
+
+The final audit returned to the full review body, all inline bodies and the
+mutable summary. The overview repeats the three inline findings. Passed title,
+description and linked-issue checks add no hidden obligations. Generic bot
+controls offer docstrings, unit tests and automation; they are not additional
+technical findings. Accounting: five items = three fixed-now + one
+accepted-design + one refuted. No confirmed-open repair, unapproved deferral,
+unaccounted footnote or product decision required for this repair remains.
+The optional mutable nested-key policy is unchanged.
+
+The measured typical React application remains smaller than `1443dc92e` by
+121 gzip bytes and 73 brotli bytes. React's separately compressed package is
+18 gzip bytes smaller. These measurements do not imply that every package or
+the sum of separately compressed packages shrinks. Command:
+`node scripts/size-compare.mjs --base 1443dc92e --exact-base --packages db,react-db,preact-db`.
+
+Source snapshot: a431a728438cb265f55001ef18d214794c6d78a543db18285b42b6f4a481e1e1. It covers 27 source/contract/coverage
+files and adds the replay enforcement test to the prior 26-file snapshot.
+The report and manifest exclude themselves. Earlier manifests remain in
+`priorManifests`. PR readiness still requires pushed-head CI; these local
+results alone do not establish that status.

@@ -7,12 +7,16 @@
  *
  * This receiver reuses the window owner's independent sort/slice judgment.
  * Server preload snapshots cross JSON into a real React hook while the browser
- * source's readiness is held. The first render and a page move before source
- * readiness must show the matching server page. After readiness, rows follow
+ * source's readiness is held. A speculative offset/limit move suspends after
+ * the hook returns, then is cancelled. Its seed cannot replace the committed
+ * page, including on the next original-page render. Provider and explicit
+ * clients receive the same histories. Committed moves before source readiness
+ * must show the matching server page. After readiness, rows follow
  * the browser source. A peer remains on its original page. No Electric SDK or
  * arbitrary concurrent scheduler behavior is claimed by this finite host model.
  */
 import { act, renderHook } from '@testing-library/react'
+import { Suspense, startTransition } from 'react'
 import {
   BTreeIndex,
   DbClient,
@@ -49,11 +53,20 @@ import type { WindowRow } from '../../db/tests/conformance/window-history-oracle
 
 import type { ClientWindowHistory as History } from '../../db/tests/conformance/client-window-history-oracle'
 
+// An abandoned render cannot change the committed page's transported view.
+// These host cuts supplement the shared settled-page states: local rows remain
+// held, so a wrong page hash cannot hide behind an already-ready Collection.
+const reactStates = [...states, `suspended seed`, `cancelled seed`] as const
+type ClientMode = `provider` | `explicit`
+type Move = `offset` | `limit` | `both`
+
 async function checkClientWindowHistory(
   history: History,
   keyed: boolean,
   suspense: boolean,
-  reach: ReturnType<typeof createOracleReach<(typeof states)[number]>>,
+  clientMode: ClientMode,
+  move: Move,
+  reach: ReturnType<typeof createOracleReach<(typeof reactStates)[number]>>,
 ) {
   const lifetime = new ScenarioLifetime()
   const unmounts: Array<() => void> = []
@@ -89,6 +102,10 @@ async function checkClientWindowHistory(
     }))
     const first = { offset: history.offset, limit: history.width }
     const next = { offset: first.offset + history.jump, limit: first.limit + 1 }
+    const abandoned = {
+      offset: move === `limit` ? first.offset : next.offset,
+      limit: move === `offset` ? first.limit : next.limit,
+    }
     const build = (q: InitialQueryBuilder, page: typeof first) =>
       q
         .from({ row: descriptor })
@@ -102,7 +119,11 @@ async function checkClientWindowHistory(
         ? { queryKey: [`client-window`, page.offset, page.limit] }
         : {}),
     })
-    for (const page of [first, next])
+    const hookConfig = (page: typeof first) => ({
+      ...config(page),
+      ...(clientMode === `explicit` ? { client: browser } : {}),
+    })
+    for (const page of [first, next, abandoned])
       await server.preloadLiveQuery(config(page))
     const transport = JSON.parse(JSON.stringify(server.dehydrate()))
     browser.hydrate(transport)
@@ -113,18 +134,29 @@ async function checkClientWindowHistory(
         false,
       )
     let firstRender: { data: unknown; collection: unknown } | undefined
+    const never = new Promise<void>(() => {})
+    let suspended = 0
     const usePage = suspense ? useLiveSuspenseQuery : useLiveQuery
     const hook = renderHook(
-      ({ page }) => {
-        const result = usePage(config(page))
+      ({ page, suspend }) => {
+        const result = usePage(hookConfig(page))
         firstRender ??= result
+        if (suspend) {
+          suspended++
+          throw never
+        }
         return result
       },
       {
-        initialProps: { page: first },
-        wrapper: ({ children }: { children: ReactNode }) => (
-          <DbProvider client={browser}>{children}</DbProvider>
-        ),
+        initialProps: { page: first, suspend: false },
+        wrapper: ({ children }: { children: ReactNode }) => {
+          const boundary = <Suspense fallback={null}>{children}</Suspense>
+          return clientMode === `provider` ? (
+            <DbProvider client={browser}>{boundary}</DbProvider>
+          ) : (
+            boundary
+          )
+        },
       },
     )
     unmounts.push(() => hook.unmount())
@@ -155,7 +187,7 @@ async function checkClientWindowHistory(
         checkpoint,
       )
     }
-    const peer = renderHook(() => usePage(config(first)), {
+    const peer = renderHook(() => usePage(hookConfig(first)), {
       wrapper: ({ children }: { children: ReactNode }) => (
         <DbProvider client={browser}>{children}</DbProvider>
       ),
@@ -175,10 +207,19 @@ async function checkClientWindowHistory(
         cut,
       )
     comparePeer(serverRows, `peer before move`)
+    await act(() =>
+      startTransition(() => hook.rerender({ page: abandoned, suspend: true })),
+    )
+    expect(suspended, `React attempted the abandoned page`).toBeGreaterThan(0)
+    compare(serverRows, first, `committed seed during suspended page`)
+    reach.reach(`suspended seed`)
+    await act(() => hook.rerender({ page: first, suspend: false }))
+    compare(serverRows, first, `matching seed after cancelled page`)
+    reach.reach(`cancelled seed`)
     // Both hook kinds own independent Collections. Moving one hook leaves
     // the other hook on its original page.
     await act(() => {
-      hook.rerender({ page: next })
+      hook.rerender({ page: next, suspend: false })
     })
     compare(
       serverRows,
@@ -189,7 +230,7 @@ async function checkClientWindowHistory(
     reach.reach(`moved seed`)
     comparePeer(serverRows, `peer while local readiness is held`)
     for (let index = 0; index < history.latePeers; index++) {
-      const late = renderHook(() => usePage(config(first)), {
+      const late = renderHook(() => usePage(hookConfig(first)), {
         wrapper: ({ children }: { children: ReactNode }) => (
           <DbProvider client={browser}>{children}</DbProvider>
         ),
@@ -226,7 +267,7 @@ async function checkClientWindowHistory(
     comparePeer(browserRows, `peer after handoff`)
     reach.reach(`peer isolation`)
     await act(() => {
-      hook.rerender({ page: first })
+      hook.rerender({ page: first, suspend: false })
     })
     compare(browserRows, first, `return to first page`)
     reach.reach(`returned page`)
@@ -241,7 +282,7 @@ async function checkClientSwitch(
   history: History,
   keyed: boolean,
   suspense: boolean,
-  reach: ReturnType<typeof createOracleReach<(typeof states)[number]>>,
+  reach: ReturnType<typeof createOracleReach<(typeof reactStates)[number]>>,
 ) {
   const lifetime = new ScenarioLifetime()
   let unmount: (() => void) | undefined
@@ -322,52 +363,61 @@ async function checkClientSwitch(
 describe(`client page identity`, () => {
   for (const keyed of [false, true])
     for (const suspense of [false, true])
-      for (const campaign of [`fixed`, `fresh`] as const) {
-        const property = `react.client-window`
-        const test =
-          campaign === `fixed`
-            ? oracleReplayTest(it)
-            : oracleReplayTest(it, property)
-        test(`${keyed ? `keyed` : `derived`}/${suspense ? `suspense` : `ordinary`}/${campaign}`, async () => {
-          const reach = createOracleReach(
-            `${property}/${keyed}/${suspense}/${campaign}`,
-            states,
-            { fixedHistories: examples.length },
-          )
-          let index = 0
-          const fidelity = createOracleFailureFidelity<History>()
-          const propertyUnderTest = fc.asyncProperty(
-            clientWindowArbitrary,
-            async (history) => {
-              reach.beginHistory({ fixed: index++ < examples.length })
-              await fidelity.run(history, async () => {
-                await checkClientWindowHistory(history, keyed, suspense, reach)
-                await checkClientSwitch(history, keyed, suspense, reach)
-              })
-            },
-          )
-          try {
-            await fidelity.assert(() =>
-              fc.assert(
-                propertyUnderTest,
-                campaign === `fixed`
-                  ? {
-                      numRuns: oracleRuns(6) + examples.length,
-                      seed: 2345,
-                      examples,
-                    }
-                  : oraclePropertyOptions(6, property, { examples }),
-              ),
-            )
-          } finally {
-            console.info(
-              `client window reach ${keyed}/${suspense}/${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
+      for (const clientMode of [`provider`, `explicit`] as const)
+        for (const move of [`offset`, `limit`, `both`] as const)
+          for (const campaign of [`fixed`, `fresh`] as const) {
+            const property = `react.client-window`
+            const test =
+              campaign === `fixed`
+                ? oracleReplayTest(it)
+                : oracleReplayTest(it, property)
+            test(`${keyed ? `keyed` : `derived`}/${suspense ? `suspense` : `ordinary`}/${clientMode}/${move}/${campaign}`, async () => {
+              const reach = createOracleReach(
+                `${property}/${keyed}/${suspense}/${clientMode}/${move}/${campaign}`,
+                reactStates,
+                { fixedHistories: examples.length },
+              )
+              let index = 0
+              const fidelity = createOracleFailureFidelity<History>()
+              const propertyUnderTest = fc.asyncProperty(
+                clientWindowArbitrary,
+                async (history) => {
+                  reach.beginHistory({ fixed: index++ < examples.length })
+                  await fidelity.run(history, async () => {
+                    await checkClientWindowHistory(
+                      history,
+                      keyed,
+                      suspense,
+                      clientMode,
+                      move,
+                      reach,
+                    )
+                    await checkClientSwitch(history, keyed, suspense, reach)
+                  })
+                },
+              )
+              try {
+                await fidelity.assert(() =>
+                  fc.assert(
+                    propertyUnderTest,
+                    campaign === `fixed`
+                      ? {
+                          numRuns: oracleRuns(6) + examples.length,
+                          seed: 2345,
+                          examples,
+                        }
+                      : oraclePropertyOptions(6, property, { examples }),
+                  ),
+                )
+              } finally {
+                console.info(
+                  `client window reach ${keyed}/${suspense}/${clientMode}/${move}/${campaign}`,
+                  Object.fromEntries(reach.counts()),
+                )
+              }
+              reach.assertReached()
+            })
           }
-          reach.assertReached()
-        })
-      }
 })
 declareOracle({
   grammar: [clientWindowArbitrary],
