@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 1.0.0-rc.1.3
+
+### Patch Changes
+
+- Keep live-query Collections across finite page changes under a DbClient, including React Suspense and Svelte, while preserving page-specific preload and hydration snapshots. Give independent React Suspense queries separate successful Collections so one query cannot move another query's page. Surface a private Suspense output's failed first load while it is showing copied ready rows, and keep its health independent of a peer's page-request failures. Fix initially disabled keyed query admission in Preact and Svelte, and finish hydration seed handoff when subset work settles without a row or status change. ([#2348](https://github.com/TanStack/db/pull/2348))
+
+- Updated dependencies [[`8a31870`](https://github.com/TanStack/db/commit/8a318707b2debe080195ae422a63982d118cf72f), [`70a744b`](https://github.com/TanStack/db/commit/70a744b3a4022b6df41b9717108f3e44b999af46)]:
+  - @tanstack/db@1.0.0-rc.1.3
+
 ## 1.0.0-rc.1.2
 
 ### Patch Changes

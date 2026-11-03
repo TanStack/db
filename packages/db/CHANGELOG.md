@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 1.0.0-rc.1.3
+
+### Patch Changes
+
+- Keep live-query Collections across finite page changes under a DbClient, including React Suspense and Svelte, while preserving page-specific preload and hydration snapshots. Give independent React Suspense queries separate successful Collections so one query cannot move another query's page. Surface a private Suspense output's failed first load while it is showing copied ready rows, and keep its health independent of a peer's page-request failures. Fix initially disabled keyed query admission in Preact and Svelte, and finish hydration seed handoff when subset work settles without a row or status change. ([#2348](https://github.com/TanStack/db/pull/2348))
+
+- Preserve live-query observer data arrays and lazy state Maps across status-only and health-only snapshot updates. Keep value and ordering changes visible while retaining point-in-time snapshots. ([#2346](https://github.com/TanStack/db/pull/2346))
+
+  Keep snapshot invalidation fresh across discarded Collection publications. Publish nested record prototype changes, while preserving equal writes with the same shape.
+
+  Keep common equal object-valued Set comparisons linear, with polynomial matching for ambiguous unordered members. Preserve the exported deepEquals record policy while distinguishing prototype changes in Collection rows. Reject observer inputs without valid Collection revision clocks. Keep pooled live-query observers working when layout changes use their ordinary change stream.
+
+  Compare every array position so replacing a hole with a defined value publishes the change and refreshes observers.
+
 ## 1.0.0-rc.1.2
 
 ### Patch Changes
