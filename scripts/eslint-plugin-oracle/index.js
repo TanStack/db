@@ -1,5 +1,7 @@
 import noDisabled from './rules/no-disabled.js'
 import noUnitTest from './rules/no-unit-test.js'
+import pureModel from './rules/pure-model.js'
+import replayableSeed from './rules/replayable-seed.js'
 
 /**
  * Lint rules for oracle files.
@@ -27,6 +29,8 @@ const plugin = {
   rules: {
     'no-disabled': noDisabled,
     'no-unit-test': noUnitTest,
+    'pure-model': pureModel,
+    'replayable-seed': replayableSeed,
   },
 }
 
@@ -38,6 +42,8 @@ plugin.configs = {
     rules: {
       'oracle/no-disabled': `error`,
       'oracle/no-unit-test': `error`,
+      'oracle/pure-model': `error`,
+      'oracle/replayable-seed': `error`,
     },
   },
 }

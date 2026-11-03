@@ -19,7 +19,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { withChangeTracking } from '../src/proxy.js'
-import { oracleRuns } from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import {
   cycleContainer,
   cycleKinds,
@@ -202,8 +202,9 @@ describe(`Mutation result detachment`, () => {
           },
         ),
         {
-          seed,
-          numRuns: oracleRuns(100),
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, `proxy.json-data-keys`)
+            : { seed, numRuns: oracleRuns(100) }),
           examples: [[`__proto__`, 1, false]],
         },
       )

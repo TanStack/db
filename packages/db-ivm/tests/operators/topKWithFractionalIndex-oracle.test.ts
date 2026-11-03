@@ -7,7 +7,10 @@ import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalI
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import { join, map, output } from '../../src/operators/index.js'
 import { assertOnlyKeysAffected } from '../test-utils.js'
-import { oracleRuns } from '../../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+} from '../../../db/tests/oracle-config.js'
 import { TopKMessageTracker, TopKRelation } from './topk-relation-oracle.js'
 
 // Helper function to check if indices are in lexicographic order
@@ -73,9 +76,9 @@ const groupedWindow: typeof topKWithFractionalIndex = (comparator, options) =>
   })
 
 describe.each([
-  { name: `array`, topK: topKWithFractionalIndex },
-  { name: `grouped array`, topK: groupedWindow },
-])('Generated fractional $name windows', ({ topK }) => {
+  { name: `array`, key: `array`, topK: topKWithFractionalIndex },
+  { name: `grouped array`, key: `grouped`, topK: groupedWindow },
+])('Generated fractional $name windows', ({ key, topK }) => {
   it.each([409036, undefined])(
     `preserves cyclic payloads through replacements and fresh transients (seed %s)`,
     (seed) => {
@@ -159,8 +162,9 @@ describe.each([
           },
         ),
         {
-          seed,
-          numRuns: oracleRuns(30),
+          ...(seed === undefined
+            ? oraclePropertyOptions(30, `ivm.topk-cyclic-payloads-${key}`)
+            : { seed, numRuns: oracleRuns(30) }),
           examples: [
             [
               false,
@@ -239,8 +243,12 @@ describe.each([
           },
         ),
         {
-          seed,
-          numRuns: oracleRuns(100),
+          ...(seed === undefined
+            ? oraclePropertyOptions(
+                100,
+                `ivm.topk-outer-join-replacements-${key}`,
+              )
+            : { seed, numRuns: oracleRuns(100) }),
           examples: [
             [
               1,

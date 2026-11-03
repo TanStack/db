@@ -63,6 +63,12 @@
  *   history must be histories the arbitrary could generate
  *   (`canShrinkWithoutContext`), so they shrink like generated ones and cannot
  *   cover a dimension that the grammar lacks (design, R8).
+ * - **Determinism.** A `determinism` test runs some histories twice and
+ *   requires the same trace: every pin and segment history of a generated
+ *   source, or up to eight evenly spaced enumerated histories. A trace that
+ *   differs between runs of one history breaks replay, shrinking, and the gap
+ *   report's comparison, so a driver records relations (before and after,
+ *   same or different id) rather than clock readings or random ids.
  * - **Shrinking keeps the law.** A violation can name the law it broke. Once
  *   a history violates one law, a smaller history that violates a different
  *   law counts as passing, so the reported counterexample still shows the
@@ -228,7 +234,24 @@ function enumeratedTests<History, Expected>(
   options: OraclePropertyOptions<History, Expected>,
   histories: ReadonlyArray<History>,
 ): Array<PropertyTest> {
-  return histories.map((history) => {
+  const spacing = Math.max(1, Math.ceil(histories.length / 8))
+  const sampled = histories.filter((_, index) => index % spacing === 0)
+  return [
+    ...histories.map((history) => enumeratedTest(options, history)),
+    determinismTest(options, () =>
+      sampled.map((history) => ({
+        name: options.label?.(history) ?? JSON.stringify(history),
+        history,
+      })),
+    ),
+  ]
+}
+
+function enumeratedTest<History, Expected>(
+  options: OraclePropertyOptions<History, Expected>,
+  history: History,
+): PropertyTest {
+  {
     const name = options.label?.(history) ?? JSON.stringify(history)
     return {
       name,
@@ -244,7 +267,74 @@ function enumeratedTests<History, Expected>(
           )
       },
     }
+  }
+}
+
+/** Runs only the driver, for a history's recorded trace. */
+async function recordTrace<History>(
+  driver: OraclePropertyOptions<History, unknown>[`driver`],
+  history: History,
+): Promise<Array<Observation>> {
+  const observations: Array<Observation> = []
+  await driver(history, (checkpoint, value) => {
+    observations.push({ checkpoint, value })
   })
+  return observations
+}
+
+// A stable text for an observation: Maps, Sets, undefined, bigints, and
+// errors keep their distinctions, which JSON alone drops.
+function traceText(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => {
+    if (item === undefined) return `$undefined`
+    if (typeof item === `bigint`) return `$bigint:${item}`
+    if (item instanceof Map) return { $map: [...item] }
+    if (item instanceof Set) return { $set: [...item] }
+    if (item instanceof Error)
+      return { $error: item.name, message: item.message }
+    return item
+  })
+}
+
+function determinismTest<History, Expected>(
+  options: OraclePropertyOptions<History, Expected>,
+  histories: () => ReadonlyArray<{ name: string; history: History }>,
+): PropertyTest {
+  return {
+    name: `determinism`,
+    replays: [],
+    run: async () => {
+      for (const { name, history } of histories()) {
+        const [first, second] = [
+          await recordTrace(options.driver, history),
+          await recordTrace(options.driver, history),
+        ]
+        const length = Math.max(first.length, second.length)
+        for (let index = 0; index < length; index += 1) {
+          const [a, b] = [first[index], second[index]]
+          const [textA, textB] = [traceText(a), traceText(b)]
+          if (textA === textB) continue
+          const error = new Error(
+            [
+              `${options.id}: two runs of "${name}" recorded different traces at observation ${index}${a ? ` ("${a.checkpoint}")` : ``}.`,
+              `First run:  ${textA.slice(0, 2000)}`,
+              `Second run: ${textB.slice(0, 2000)}`,
+              `History: ${traceText(history)}`,
+              `A driver records relations, such as before and after or same and different, instead of clock readings or random ids.`,
+            ].join(`\n`),
+          ) as Error & {
+            actual?: unknown
+            expected?: unknown
+            showDiff?: boolean
+          }
+          error.actual = b
+          error.expected = a
+          error.showDiff = true
+          throw error
+        }
+      }
+    },
+  }
 }
 
 /** Runs one history: the driver records, the model predicts, the check judges. */
@@ -484,7 +574,22 @@ function generatedTests<History, Expected>(
         )
     },
   }))
-  return [...fixedLanes, randomLane, ...pins]
+  // Segment histories come from the first fixed seed, so the check is
+  // reproducible; they are built when the test runs, like a lane's.
+  const determinism = determinismTest(options, () => {
+    const { examples, segmentOf } = examplesFor(source.fixedSeeds[0] ?? 0)
+    return [
+      ...(source.pins ?? []).map(({ name, history }) => ({
+        name: `pin: ${name}`,
+        history,
+      })),
+      ...examples.map(([history]) => ({
+        name: `segment: ${segmentOf.get(history)!.name}`,
+        history,
+      })),
+    ]
+  })
+  return [...fixedLanes, randomLane, ...pins, determinism]
 }
 
 // A collect-only run (ORACLE_MANIFEST set) records each registration, so the

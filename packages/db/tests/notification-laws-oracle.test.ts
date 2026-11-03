@@ -23,7 +23,7 @@ import {
   expectNotificationsStopped,
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
-import { oracleRuns } from './oracle-config'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 
 type Row = { id: string; count: number }
@@ -110,8 +110,9 @@ it.each([20260913, undefined])(
         },
       ),
       {
-        seed,
-        numRuns: oracleRuns(30),
+        ...(seed === undefined
+          ? oraclePropertyOptions(30, `notification-laws.query-publications`)
+          : { seed, numRuns: oracleRuns(30) }),
         examples: [
           [1, [2, null]],
           [1, [null]],
@@ -177,7 +178,14 @@ it.each([20260913, undefined])(
           ).toThrow()
         },
       ),
-      { seed, numRuns: oracleRuns(100) },
+      {
+        ...(seed === undefined
+          ? oraclePropertyOptions(
+              100,
+              `notification-laws.publication-histories`,
+            )
+          : { seed, numRuns: oracleRuns(100) }),
+      },
     )
   },
 )
@@ -251,7 +259,11 @@ it.each([20260913, undefined])(
           expectNotificationHistory([], [...callbacks, callbacks[1]!], [next]),
         ).toThrow()
       }),
-      { seed, numRuns: oracleRuns(50) },
+      {
+        ...(seed === undefined
+          ? oraclePropertyOptions(50, `notification-laws.corrupt-prior-values`)
+          : { seed, numRuns: oracleRuns(50) }),
+      },
     )
   },
 )
