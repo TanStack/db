@@ -655,6 +655,64 @@ oracleProperty({
       })),
     ),
   },
+  // Wrong answers the check must reject: a failure shown as `ready` under
+  // the seed (law 1), and a change the listener never heard about (law 4).
+  calibrations: [
+    {
+      name: `failure shown as ready`,
+      law: `view`,
+      corrupt: (trace) => {
+        const at = trace.findIndex(({ value }) => {
+          const record = value as StepRecord
+          return !(`skipped` in record) && failures.has(record.input.after)
+        })
+        if (at < 0) return undefined
+        return trace.map((entry, index) => {
+          if (index !== at) return entry
+          const record = entry.value as Extract<StepRecord, { input: unknown }>
+          return {
+            ...entry,
+            value: {
+              ...record,
+              output: {
+                ...record.output,
+                view: { ...record.output.view, status: `ready` },
+              },
+            },
+          }
+        })
+      },
+    },
+    {
+      name: `unannounced change`,
+      law: `announcement`,
+      corrupt: (trace) => {
+        const at = trace.findIndex(({ value }) => {
+          const record = value as StepRecord
+          return (
+            !(`skipped` in record) &&
+            record.output.lastRead !== undefined &&
+            record.output.view.rows.length > 0
+          )
+        })
+        if (at < 0) return undefined
+        return trace.map((entry, index) => {
+          if (index !== at) return entry
+          const record = entry.value as Extract<StepRecord, { input: unknown }>
+          return {
+            ...entry,
+            value: {
+              ...record,
+              output: {
+                ...record.output,
+                lastRead: { ...record.output.lastRead!, rows: [] },
+              },
+            },
+          }
+        })
+      },
+    },
+  ],
   model: hydrationModel,
   reached: (_history, _trace, expected) => expected.reached,
   driver: driveHistory,

@@ -59,10 +59,23 @@
  *   measures is declared in `measured` instead (ORC-015). Half of a lane's
  *   generated histories also go through a segment, so the histories after
  *   each required state are explored, not visited once.
- * - A **pin** is a fixed history, such as a regression. A pin and a segment's
+ * - A **pin** is a fixed history, such as a regression. It may name the
+ *   states it `enters`, which its run must reach. A pin and a segment's
  *   history must be histories the arbitrary could generate
  *   (`canShrinkWithoutContext`), so they shrink like generated ones and cannot
  *   cover a dimension that the grammar lacks (design, R8).
+ * - **Resolution.** A history can name its actions indirectly, such as "settle
+ *   the second active transaction". `resolve(history)` turns it into the plan
+ *   of concrete actions that the driver runs and that the model and check read.
+ *   The plan holds actions, never expected observations, so the driver still
+ *   decides nothing. A history shrinks before resolution, so every shrunk
+ *   history still resolves to a legal plan.
+ * - **Calibration.** A `calibration` names a wrong answer and the law that
+ *   must reject it: a `corrupt` function that alters a recorded trace, as an
+ *   observation mutant does, or a hostile `driver`, such as production set up
+ *   wrongly. The calibration test finds a history where the corruption
+ *   applies, requires the clean trace to pass, and requires the check to report
+ *   that law for the corrupted one (rubric, ORC-006).
  * - **Determinism.** A `determinism` test runs some histories twice and
  *   requires the same trace: every pin and segment history of a generated
  *   source, or up to eight evenly spaced enumerated histories. A trace that
@@ -218,10 +231,36 @@ export interface GeneratedHistories<History> {
   /** One fixed lane per seed, beside the random lane. */
   fixedSeeds: ReadonlyArray<number>
   segments?: ReadonlyArray<Segment<History>>
-  pins?: ReadonlyArray<{ name: string; history: History }>
+  pins?: ReadonlyArray<Pin<History>>
 }
 
-export interface OraclePropertyOptions<History, Expected> {
+/** A fixed history, such as a regression, and the states it must enter. */
+export interface Pin<History> {
+  name: string
+  history: History
+  enters?: ReadonlyArray<string>
+}
+
+/** A wrong answer and the law that must reject it (ORC-006). */
+export type Calibration<History, Plan> = {
+  name: string
+  /** The law the check must report. */
+  law: string
+} & (
+  | {
+      /** A corrupted copy of the trace, or undefined when nothing applies. */
+      corrupt: (
+        trace: ReadonlyArray<Observation>,
+        plan: Plan,
+      ) => ReadonlyArray<Observation> | undefined
+    }
+  | {
+      /** A hostile driver, such as production configured wrongly. */
+      driver: OraclePropertyOptions<History, unknown, Plan>[`driver`]
+    }
+)
+
+export interface OraclePropertyOptions<History, Expected, Plan = History> {
   /** A stable identifier, used in failures, the manifest, and replay. */
   id: string
   law: OracleLaw
@@ -229,22 +268,25 @@ export interface OraclePropertyOptions<History, Expected> {
   histories: ReadonlyArray<History> | GeneratedHistories<History>
   /** A short, unique test name for an enumerated history. */
   label?: (history: History) => string
-  model: (history: History, trace: ReadonlyArray<Observation>) => Expected
+  /** The plan of concrete actions; required when Plan is not History. */
+  resolve?: (history: History) => Plan
+  model: (plan: Plan, trace: ReadonlyArray<Observation>) => Expected
   /** The states the history entered. Defaults to the trace's `reach` values. */
   reached?: (
-    history: History,
+    plan: Plan,
     trace: ReadonlyArray<Observation>,
     expected: Expected,
   ) => Iterable<string>
   driver: (
-    history: History,
+    plan: Plan,
     observe: (checkpoint: string, value: unknown) => void,
   ) => Promise<void> | void
   check: (
-    history: History,
+    plan: Plan,
     observations: ReadonlyArray<Observation>,
     expected: Expected,
   ) => Verdict
+  calibrations?: ReadonlyArray<Calibration<History, Plan>>
 }
 
 declare global {
@@ -262,8 +304,8 @@ interface PropertyTest {
   timeout?: number
 }
 
-export function oracleProperty<History, Expected>(
-  options: OraclePropertyOptions<History, Expected>,
+export function oracleProperty<History, Expected, Plan = History>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
 ): void {
   const { id, histories } = options
   recordRegistration(id, options.law, histories)
@@ -278,14 +320,20 @@ export function oracleProperty<History, Expected>(
   })
 }
 
-function enumeratedTests<History, Expected>(
-  options: OraclePropertyOptions<History, Expected>,
+function enumeratedTests<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
   histories: ReadonlyArray<History>,
 ): Array<PropertyTest> {
   const spacing = Math.max(1, Math.ceil(histories.length / 8))
   const sampled = histories.filter((_, index) => index % spacing === 0)
   return [
     ...histories.map((history) => enumeratedTest(options, history)),
+    ...calibrationTests(options, () =>
+      histories.map((history) => ({
+        name: options.label?.(history) ?? JSON.stringify(history),
+        history,
+      })),
+    ),
     determinismTest(options, () =>
       sampled.map((history) => ({
         name: options.label?.(history) ?? JSON.stringify(history),
@@ -295,8 +343,8 @@ function enumeratedTests<History, Expected>(
   ]
 }
 
-function enumeratedTest<History, Expected>(
-  options: OraclePropertyOptions<History, Expected>,
+function enumeratedTest<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
   history: History,
 ): PropertyTest {
   {
@@ -319,15 +367,28 @@ function enumeratedTest<History, Expected>(
 }
 
 /** Runs only the driver, for a history's recorded trace. */
-async function recordTrace<History>(
-  driver: OraclePropertyOptions<History, unknown>[`driver`],
-  history: History,
+async function recordTrace<Plan>(
+  driver: (
+    plan: Plan,
+    observe: (checkpoint: string, value: unknown) => void,
+  ) => Promise<void> | void,
+  plan: Plan,
 ): Promise<Array<Observation>> {
   const observations: Array<Observation> = []
-  await driver(history, (checkpoint, value) => {
+  await driver(plan, (checkpoint, value) => {
     observations.push({ checkpoint, value })
   })
   return observations
+}
+
+/** The plan a history resolves to; a history is its own plan by default. */
+function planOf<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
+  history: History,
+): Plan {
+  return options.resolve
+    ? options.resolve(history)
+    : (history as unknown as Plan)
 }
 
 // A stable text for an observation: Maps, Sets, undefined, bigints, and
@@ -344,8 +405,8 @@ function traceText(value: unknown): string {
   })
 }
 
-function determinismTest<History, Expected>(
-  options: OraclePropertyOptions<History, Expected>,
+function determinismTest<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
   histories: () => ReadonlyArray<{ name: string; history: History }>,
 ): PropertyTest {
   return {
@@ -353,9 +414,10 @@ function determinismTest<History, Expected>(
     replays: [],
     run: async () => {
       for (const { name, history } of histories()) {
+        const plan = planOf(options, history)
         const [first, second] = [
-          await recordTrace(options.driver, history),
-          await recordTrace(options.driver, history),
+          await recordTrace(options.driver, plan),
+          await recordTrace(options.driver, plan),
         ]
         const length = Math.max(first.length, second.length)
         for (let index = 0; index < length; index += 1) {
@@ -386,25 +448,55 @@ function determinismTest<History, Expected>(
 }
 
 /** Runs one history: the driver records, the model predicts, the check judges. */
-async function runOne<History, Expected>(
-  options: OraclePropertyOptions<History, Expected>,
+async function runOne<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
   history: History,
+  driver: OraclePropertyOptions<
+    History,
+    Expected,
+    Plan
+  >[`driver`] = options.driver,
 ): Promise<{ verdict: Verdict; reached: Set<string> }> {
+  const plan = planOf(options, history)
+  const { observations, driverError } = await recordGuarded(driver, plan)
+  return judge(options, plan, observations, driverError)
+}
+
+/** Runs the driver and keeps an error that escapes it beside the trace. */
+async function recordGuarded<Plan>(
+  driver: (
+    plan: Plan,
+    observe: (checkpoint: string, value: unknown) => void,
+  ) => Promise<void> | void,
+  plan: Plan,
+): Promise<{
+  observations: Array<Observation>
+  driverError?: { error: unknown }
+}> {
   const observations: Array<Observation> = []
-  let driverError: { error: unknown } | undefined
   try {
-    await options.driver(history, (checkpoint, value) => {
+    await driver(plan, (checkpoint, value) => {
       observations.push({ checkpoint, value })
       globalThis.__oracleObserve?.(checkpoint, value)
     })
   } catch (error) {
-    driverError = { error }
+    return { observations, driverError: { error } }
   }
+  return { observations }
+}
+
+/** The model predicts and the check judges a recorded trace. */
+function judge<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
+  plan: Plan,
+  observations: ReadonlyArray<Observation>,
+  driverError?: { error: unknown },
+): { verdict: Verdict; reached: Set<string> } {
   let expected: Expected
   let verdict: Verdict
   try {
-    expected = options.model(history, observations)
-    verdict = options.check(history, observations, expected)
+    expected = options.model(plan, observations)
+    verdict = options.check(plan, observations, expected)
   } catch (error) {
     // A partial trace the model or check cannot read is still a setup error.
     throw driverError ? driverError.error : error
@@ -420,12 +512,67 @@ async function runOne<History, Expected>(
     verdict = { ...verdict, cause: driverError.error }
   }
   const reached = new Set(
-    options.reached?.(history, observations, expected) ??
+    options.reached?.(plan, observations, expected) ??
       observations
         .filter((entry) => entry.checkpoint === `reach`)
         .map((entry) => String(entry.value)),
   )
   return { verdict, reached }
+}
+
+const lawOf = (verdict: Extract<Verdict, { kind: `violation` }>) =>
+  verdict.law ?? verdict.checkpoint
+
+/**
+ * One test per calibration. It tries candidate histories in order until the
+ * wrong answer applies, and requires the check to report the named law.
+ */
+function calibrationTests<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
+  candidates: () => ReadonlyArray<{ name: string; history: History }>,
+): Array<PropertyTest> {
+  const { id } = options
+  return (options.calibrations ?? []).map((calibration) => ({
+    name: `calibration: ${calibration.name}`,
+    replays: [],
+    timeout: 120_000,
+    run: async () => {
+      const seen: Array<string> = []
+      for (const { name, history } of candidates()) {
+        const plan = planOf(options, history)
+        if (`corrupt` in calibration) {
+          const { observations, driverError } = await recordGuarded(
+            options.driver,
+            plan,
+          )
+          const corrupted = calibration.corrupt(observations, plan)
+          if (corrupted === undefined) continue
+          // A calibration is meaningful only where the true trace passes.
+          const clean = judge(options, plan, observations, driverError).verdict
+          if (clean.kind === `violation`)
+            throw failure(
+              options,
+              clean,
+              history,
+              `the calibration's history "${name}"`,
+            )
+          const wrong = judge(options, plan, corrupted).verdict
+          if (wrong.kind === `violation` && lawOf(wrong) === calibration.law)
+            return
+          throw new Error(
+            `${id}: calibration "${calibration.name}" corrupted the trace of "${name}", but the check ${wrong.kind === `pass` ? `passed it` : `reported law "${lawOf(wrong)}"`}. It must report law "${calibration.law}".`,
+          )
+        }
+        const { verdict } = await runOne(options, history, calibration.driver)
+        if (verdict.kind === `pass`) continue
+        if (lawOf(verdict) === calibration.law) return
+        seen.push(`"${name}" reported law "${lawOf(verdict)}"`)
+      }
+      throw new Error(
+        `${id}: calibration "${calibration.name}" found no history where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a pin or segment that reaches the state its wrong answer changes.`,
+      )
+    },
+  }))
 }
 
 function failure<History>(
@@ -461,8 +608,8 @@ function rerunByName(name: string): string {
   return `-t ${JSON.stringify(`^${pattern}$`)}`
 }
 
-function generatedTests<History, Expected>(
-  options: OraclePropertyOptions<History, Expected>,
+function generatedTests<History, Expected, Plan>(
+  options: OraclePropertyOptions<History, Expected, Plan>,
   source: GeneratedHistories<History>,
 ): Array<PropertyTest> {
   const { id } = options
@@ -612,7 +759,7 @@ function generatedTests<History, Expected>(
         throw new Error(
           `${id}: pin "${pin.name}" is not a history the arbitrary can generate. A pin must stay inside the generated language, or the property must declare the missing dimension as a limit.`,
         )
-      const { verdict } = await runOne(options, pin.history)
+      const { verdict, reached } = await runOne(options, pin.history)
       if (verdict.kind === `violation`)
         throw failure(
           options,
@@ -620,11 +767,16 @@ function generatedTests<History, Expected>(
           pin.history,
           rerunByName(`${id} pin: ${pin.name}`),
         )
+      const missing = (pin.enters ?? []).filter((state) => !reached.has(state))
+      if (missing.length > 0)
+        throw new Error(
+          `${id}: pin "${pin.name}" did not enter ${missing.join(`, `)}. A pin must reach every state it names.`,
+        )
     },
   }))
-  // Segment histories come from the first fixed seed, so the check is
-  // reproducible; they are built when the test runs, like a lane's.
-  const determinism = determinismTest(options, () => {
+  // Pins and the segment histories of the first fixed seed, so these checks
+  // are reproducible; they are built when a test runs, like a lane's.
+  const fixedHistories = () => {
     const { examples, segmentOf } = examplesFor(source.fixedSeeds[0] ?? 0)
     return [
       ...(source.pins ?? []).map(({ name, history }) => ({
@@ -636,8 +788,19 @@ function generatedTests<History, Expected>(
         history,
       })),
     ]
-  })
-  return [...fixedLanes, randomLane, ...pins, determinism]
+  }
+  const determinism = determinismTest(options, fixedHistories)
+  // A calibration also tries a fixed sample of generated histories.
+  const calibrations = calibrationTests(options, () => [
+    ...fixedHistories(),
+    ...fc
+      .sample(source.arbitrary, {
+        seed: source.fixedSeeds[0] ?? 0,
+        numRuns: 100,
+      })
+      .map((history, index) => ({ name: `sample ${index}`, history })),
+  ])
+  return [...fixedLanes, randomLane, ...pins, ...calibrations, determinism]
 }
 
 // A collect-only run (ORACLE_MANIFEST set) records each registration, so the
