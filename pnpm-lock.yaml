@@ -1584,6 +1584,15 @@ importers:
         specifier: ^12.6.2
         version: 12.8.0
 
+  packages/powersync-direct-collection:
+    dependencies:
+      '@powersync/standalone-client':
+        specifier: ^0.1.1
+        version: 0.1.1(react@19.2.4)
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+
   packages/preact-db:
     dependencies:
       '@tanstack/db':
@@ -5430,6 +5439,22 @@ packages:
 
   '@powersync/shared-internals@1.0.1':
     resolution: {integrity: sha512-0IIuZbDwLEIaSAzvp8z8+CrjKnjja6BPv9WMtF1eExQVTBVOx1TXK4E3iLrEdLceByRcSFlQ0TmPNkPRe5BDow==}
+
+  '@powersync/shared-internals@1.6.0':
+    resolution: {integrity: sha512-UduDSVv9qfonIezOklBUR6c3KNlwOQ8/XCsTDwrBUXnVv4wmAZuIDO7C2hX2KKcQGKn+rU0Z5R9uPtgl1uK7Vg==}
+    peerDependencies:
+      '@powersync/common': ^2.5.0
+    peerDependenciesMeta:
+      '@powersync/common':
+        optional: true
+
+  '@powersync/standalone-client@0.1.1':
+    resolution: {integrity: sha512-SSCFzNJ7GvqOyK4edl7Ymot53mheEYCNJcefxoEOAu3qV+8YeRkvGME8GVlm2Ye2A7bJXRuDdAupzenFhWCFjQ==}
+    peerDependencies:
+      react: '*'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@publint/pack@0.1.4':
     resolution: {integrity: sha512-HDVTWq3H0uTXiU0eeSQntcVUTPP3GamzeXI41+x7uU9J65JgWQh3qWZHblR1i0npXfFtF+mxBiU2nJH8znxWnQ==}
@@ -17966,6 +17991,16 @@ snapshots:
       better-sqlite3: 12.8.0
 
   '@powersync/shared-internals@1.0.1': {}
+
+  '@powersync/shared-internals@1.6.0': {}
+
+  '@powersync/standalone-client@0.1.1(react@19.2.4)':
+    dependencies:
+      '@powersync/shared-internals': 1.6.0
+    optionalDependencies:
+      react: 19.2.4
+    transitivePeerDependencies:
+      - '@powersync/common'
 
   '@publint/pack@0.1.4': {}
 
