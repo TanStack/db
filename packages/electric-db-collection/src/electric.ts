@@ -1997,11 +1997,13 @@ function createElectricSync<T extends Row<unknown>>(
       abortController.abort()
       if (active) {
         const error = new StreamAbortedError(collectionId)
-        // The waits end with the stream, also while READY-9 defers the
-        // Collection's failure.
-        lifecycle.fail(lifecycleEpoch, error)
         if (ready) giveUp(error)
-        else failInitialSync(error)
+        else {
+          // The waits end with the stream, also while READY-9 defers the
+          // Collection's failure.
+          lifecycle.fail(lifecycleEpoch, error)
+          failInitialSync(error)
+        }
       }
       // A source that stops must end its reserved transaction. The initial
       // failure decides first: abandoning commits.
