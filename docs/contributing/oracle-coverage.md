@@ -7218,7 +7218,10 @@ restarted run empty. A fixed-seed campaign runs the React client
 Owner: `packages/db-adapter-conformance/src/mutation-oracle.ts`, run against
 the reference adapter in
 `packages/db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`
-(`adapter-conformance.mutations.reference`). It checks auto-transaction
+(`adapter-conformance.mutations.reference`, with a structured-clone and a JSON
+provider) and against RxDB in
+`packages/rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`
+(`adapter-conformance.mutations.rxdb`). It checks auto-transaction
 writes on a ready Collection whose adapter persists them itself: MUT-1 (the
 public rows show the optimistic state while the mutation function runs, and
 no publication shows the earlier synced value when it fulfills), MUT-2 (a
@@ -7232,13 +7235,46 @@ plan the check hands it before the write: accept or reject, at once or held
 until a `release`. Publications compare row values; a publication of the same
 row values, such as core's `$hasPendingWrites` update when a write is
 confirmed, counts as no change here (the virtual-row-field owner judges it).
-Reach: each of insert, update, and delete accepted, a rejected write, a held
-write, a write queued behind a held one, a held write rejected, a commit by
-another client, and a quiescent cut after writes, at least five histories
-each per campaign. Calibration: seven reference mutants each fail with their
-law (an applied copy after the mutation function settles, a swallowed or
-wrapped rejection, a duplicated insert request, writes that do not wait for
-the earlier one, a skipped delete, an update that sends only changed fields).
+The model follows the glossary's accepted sync transaction: an accepted
+write's provider copy is held while any mutation is persisting, and the
+write's held optimistic row stays until it applies. A driver declares how its
+provider stores an authored `undefined` field (`undefinedField`, from FID-1's
+value domain): `own`, as a structured clone keeps it, or `absent`, as a JSON
+document must. Under `absent`, a removed field is absent from the request and
+the provider's copy, and the copy publishes one more change of row values when
+it replaces the held optimistic row. Reach: each of insert, update, and delete
+accepted, a rejected write, a held write, a write queued behind a held one, a
+held write rejected, a commit by another client, an accepted field removal, a
+held optimistic row, and a quiescent cut after writes, at least five
+histories each per campaign. Calibration: eight reference mutants each fail
+with their law (an applied copy after the mutation function settles, a
+swallowed or wrapped rejection, a duplicated insert request, writes that do
+not wait for the earlier one, a skipped delete, an update that sends only
+changed fields, and, under a JSON provider, a change feed that carries the
+authored row instead of the stored copy). Before the held-row rule, the
+JSON-provider campaign failed MUT-1 on a fulfilled removal behind a pending
+write.
+
+RxDB (`undefinedField: 'absent'`): the driver runs a real RxDB database on
+memory storage. The provider wraps that storage's `bulkWrite`, stores
+documents as JSON as RxDB's persistent storages do, rejects a request with a
+per-row write error (status 422, as schema validation reports), and reads its
+rows from the storage instance rather than RxDB's document cache. MUT-2's
+relation is the `RxError` whose `parameters.writeError` is the storage's error
+object. On the parent of the fix, 38 of the fixed campaign's 300 histories
+failed MUT-10 (a write reached RxDB while an earlier one was pending) and 24
+failed MUT-2 (a rejected delete rejected with an array of write errors). The
+adapter now runs each write after the earlier one is decided and rejects a
+failed delete with RxDB's `RxError`. RxDB limits: a `bulkWrite` that throws is
+not generated. RxDB 17.1.0's incremental write queue does not catch it: the
+throw is an unhandled rejection, `incrementalPatch` never settles, and every
+later incremental write on the collection waits forever (trace: seed row 4,
+an update of row 4 whose storage write throws). Fixing it in the adapter means
+an update through `patch` instead of `incrementalPatch`, which gives up
+RxDB's conflict retry when another tab writes; that needs a maintainer
+decision. A conflict (status 409) is not generated, and an update of a
+document that another client deleted while the update was pending (the
+adapter skips it and fulfills) is outside the grammar.
 A removed field is an own `undefined` in the authored row (maintainer
 decision 2026-11-03, keeping the documented rule in
 `packages/db/tests/proxy-detachment-contract-oracle.test.ts`); the core owner
@@ -7248,5 +7284,5 @@ counts its reach (`removedFieldEdits`). Limits: one pending mutation per
 key; commits by another client only while no mutation is pending (a commit
 held behind a pending mutation is core's MUT-5); no manual transactions,
 confirmation through sync (MUT-7), schema validation, or an update that
-changes no field; no published adapter driver yet.
+changes no field; only the RxDB adapter driver so far.
 

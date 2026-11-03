@@ -13,6 +13,7 @@ import type {
   FilledMangoQuery,
   RxCollection,
   RxDocumentData,
+  RxStorageWriteError,
 } from 'rxdb/plugins/core'
 import type { Subscription } from 'rxjs'
 
@@ -300,47 +301,60 @@ export function rxdbCollectionOptions(
     rowUpdateMode: `full`,
   }
 
+  // Writes reach RxDB in author order: each starts after the earlier one is
+  // decided, whether it fulfilled or rejected.
+  let turn: Promise<unknown> = Promise.resolve()
+  const inTurn = (write: () => Promise<void>): Promise<void> => {
+    const run = turn.then(write)
+    turn = run.catch(() => {})
+    return run
+  }
+  const throwWriteError = (result: {
+    error: Array<RxStorageWriteError<Row>>
+  }) => {
+    if (result.error.length > 0) {
+      throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
+    }
+  }
+
   const collectionConfig: CollectionConfig<Row, string> = {
     ...restConfig,
     getKey,
     sync,
-    onInsert: async (params) => {
-      debug(`insert`, params)
-      const newItems = params.transaction.mutations.map((m) => m.modified)
-      const result = await rxCollection.bulkUpsert(newItems)
-      if (result.error.length > 0) {
-        throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
-      }
-    },
-    onUpdate: async (params) => {
-      debug(`update`, params)
-      const mutations = params.transaction.mutations.filter(
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        (m) => m.type === `update`,
-      )
+    onInsert: (params) =>
+      inTurn(async () => {
+        debug(`insert`, params)
+        const newItems = params.transaction.mutations.map((m) => m.modified)
+        throwWriteError(await rxCollection.bulkUpsert(newItems))
+      }),
+    onUpdate: (params) =>
+      inTurn(async () => {
+        debug(`update`, params)
+        const mutations = params.transaction.mutations.filter(
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          (m) => m.type === `update`,
+        )
 
-      for (const mutation of mutations) {
-        const newValue = stripRxdbFields(mutation.modified)
-        const id = getKey(newValue)
-        const doc = await rxCollection.findOne(id).exec()
-        if (!doc) {
-          continue
+        for (const mutation of mutations) {
+          const newValue = stripRxdbFields(mutation.modified)
+          const id = getKey(newValue)
+          const doc = await rxCollection.findOne(id).exec()
+          if (!doc) {
+            continue
+          }
+          await doc.incrementalPatch(newValue)
         }
-        await doc.incrementalPatch(newValue)
-      }
-    },
-    onDelete: async (params) => {
-      debug(`delete`, params)
-      const mutations = params.transaction.mutations.filter(
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        (m) => m.type === `delete`,
-      )
-      const ids = mutations.map((mutation) => getKey(mutation.original))
-      const result = await rxCollection.bulkRemove(ids)
-      if (result.error.length > 0) {
-        throw result.error
-      }
-    },
+      }),
+    onDelete: (params) =>
+      inTurn(async () => {
+        debug(`delete`, params)
+        const mutations = params.transaction.mutations.filter(
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          (m) => m.type === `delete`,
+        )
+        const ids = mutations.map((mutation) => getKey(mutation.original))
+        throwWriteError(await rxCollection.bulkRemove(ids))
+      }),
   }
   return withCollectionConfigFactory(collectionConfig, () =>
     rxdbCollectionOptions(config),

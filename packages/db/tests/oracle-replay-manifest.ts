@@ -792,6 +792,11 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.mutations`,
     `reference`,
   ],
+  [
+    `rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `rxdb`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -893,10 +898,13 @@ const replayTestNames = new Map([
         `conforms on a random campaign or a replayed seed`,
       ] as const,
   ),
-  [
-    `adapter-conformance.mutations.reference`,
-    `conforms on a random campaign or a replayed seed`,
-  ],
+  ...[`reference`, `rxdb`].map(
+    (driver) =>
+      [
+        `adapter-conformance.mutations.${driver}`,
+        `conforms on a random campaign or a replayed seed`,
+      ] as const,
+  ),
   [
     `query-db.refetch-held-page-end`,
     `generated same-key page shifts.*replay campaign`,

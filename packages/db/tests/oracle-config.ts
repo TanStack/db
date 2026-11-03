@@ -206,6 +206,7 @@ const staticOracleProperties = [
   `sqlite-persistence.optimistic-history`,
   `adapter-conformance.eager-live-source.reference`,
   `adapter-conformance.mutations.reference`,
+  `adapter-conformance.mutations.rxdb`,
   `adapter-conformance.eager-live-source.neon-realtime`,
   `adapter-conformance.eager-live-source.trailbase`,
   `adapter-conformance.eager-live-source.rxdb`,
