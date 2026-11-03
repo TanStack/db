@@ -1,0 +1,422 @@
+/**
+ * Production driver for the shared mutation oracle
+ * (`packages/db-adapter-conformance/src/mutation-oracle.ts`). It runs the real
+ * PowerSync adapter in eager mode over a real local PowerSync database
+ * (SQLite through `@powersync/node`), as `conformance-driver.ts` does. The
+ * adapter persists a write to that database and settles once its own diff
+ * trigger has observed it, so the provider is the local database; uploading
+ * to a PowerSync service is the SDK's upload queue, outside this oracle.
+ *
+ * The oracle's steps map onto PowerSync like this:
+ *
+ * - a write request is one `INSERT`, `UPDATE`, or `DELETE` statement the
+ *   adapter executes on the table inside its write transaction. An insert
+ *   sends every column; an update sets only its changed columns
+ *   (`field-updates`); the request carries the bound values;
+ * - a plan answers the next request inside the adapter's transaction: a
+ *   rejection throws the plan's error from the statement, as SQLite does for
+ *   a failed write, which rolls the transaction back; a held request waits
+ *   until `release`, holding the write lock as a slow disk does;
+ * - the adapter applies the database's changes through its change watcher
+ *   (`onChangeWithCallback`). With a held echo, the watcher's next callback
+ *   waits until `deliver` (`held-echoes`), as a throttled or busy watcher
+ *   delays it; the adapter must not settle the write before (MUT-7);
+ * - a commit by another client is a write to the table that is not the
+ *   adapter's, as the SDK's download of server changes is;
+ * - the provider's rows are the table's rows. `note` is a nullable text
+ *   column, so an absent `note` is SQL `NULL` (`undefinedField: 'null'`,
+ *   `toSqlRow`, `fromSqlRow`).
+ *
+ * PowerSync keys are strings, so row `n` is id `"n"`. The application
+ * inserts an absent `note` as `null` and removes a held one by assigning
+ * `undefined`, the update API's removed field; removal by assigning `null`
+ * is not generated. The local database does not rewrite rows, so the driver
+ * does not declare `server-rewrites`.
+ */
+import { randomUUID } from 'node:crypto'
+import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import { createCollection } from '@tanstack/db'
+import { powerSyncCollectionOptions } from '../src'
+import {
+  conformanceKey,
+  fromSqlRow,
+  observedView,
+  toSqlRow,
+} from '../../db-adapter-conformance/src'
+import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
+import type { LockContext } from '@powersync/node'
+import type {
+  ConformanceRow,
+  MutationDriver,
+  MutationFixture,
+  MutationProvider,
+  ProviderChange,
+  WritePlan,
+  WriteRequest,
+} from '../../db-adapter-conformance/src'
+
+const SCHEMA = new Schema({
+  rows: new Table({
+    title: column.text,
+    note: column.text,
+  }),
+})
+
+type Record = { id: string; title: string | null; note: string | null }
+
+const acceptAtOnce: WritePlan = {
+  outcome: `accept`,
+  held: false,
+  echoHeld: false,
+  rewrite: `none`,
+  error: new Error(`unplanned write`),
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const drainTimeoutMs = 5_000
+// How long nothing must change before a cut with a held request or echo.
+const quietMs = 25
+
+/** Field names in a statement, without the quoting `sanitizeSQL` adds. */
+const unquote = (name: string) => name.trim().replace(/^['"]|['"]$/g, ``)
+const names = (list: string) => list.split(`,`).map(unquote)
+
+/**
+ * The request an adapter statement makes, or undefined for a statement that
+ * is not a write to the table.
+ */
+function writeRequest(
+  sql: string,
+  params: ReadonlyArray<unknown>,
+): WriteRequest | undefined {
+  const insert = /^\s*INSERT\s+into\s+['"]?rows['"]?\s*\(([^)]*)\)/i.exec(sql)
+  if (insert) {
+    const row = Object.fromEntries(
+      names(insert[1]!).map((name, index) => [name, params[index]]),
+    ) as Record
+    return {
+      type: `insert`,
+      id: conformanceKey(row.id),
+      row: { ...row, id: conformanceKey(row.id) } as Partial<ConformanceRow>,
+    }
+  }
+  const update =
+    /^\s*UPDATE\s+['"]?rows['"]?\s+SET\s+([\s\S]*?)\s+WHERE\s+id\s*=\s*\?/i.exec(
+      sql,
+    )
+  if (update) {
+    const fields = names(update[1]!).map((set) => set.split(`=`)[0]!.trim())
+    const id = conformanceKey(String(params.at(-1)))
+    return {
+      type: `update`,
+      id,
+      row: {
+        id,
+        ...Object.fromEntries(
+          fields.map((field, index) => [unquote(field), params[index]]),
+        ),
+      } as Partial<ConformanceRow>,
+    }
+  }
+  const remove =
+    /^\s*DELETE\s+FROM\s+['"]?rows['"]?\s+WHERE\s+id\s*=\s*\?/i.exec(sql)
+  if (remove) return { type: `delete`, id: conformanceKey(String(params[0])) }
+  return undefined
+}
+
+class PowerSyncMutationProvider implements MutationProvider {
+  readonly database: PowerSyncDatabase
+  readonly file: string
+  private readonly plans: Array<WritePlan> = []
+  private readonly held: Array<() => void> = []
+  private readonly log: Array<WriteRequest> = []
+  /** Opens the watcher's next callback when an echo is withheld. */
+  private echoes: Array<() => void> = []
+  private gate: Promise<void> | undefined
+  private running = 0
+  private drained = 0
+  private drainTarget: number | undefined
+  private readonly rawWriteTransaction: PowerSyncDatabase[`writeTransaction`]
+
+  constructor() {
+    if (!TEST_DATABASE_IMPLEMENTATION) {
+      throw new Error(`no SQLite implementation is available`)
+    }
+    this.file = `mutations-${randomUUID()}.sqlite`
+    this.database = new PowerSyncDatabase({
+      database: {
+        dbFilename: this.file,
+        dbLocation: tmpdir(),
+        implementation: TEST_DATABASE_IMPLEMENTATION,
+      },
+      schema: SCHEMA,
+    })
+    this.rawWriteTransaction = this.database.writeTransaction.bind(
+      this.database,
+    )
+    // The adapter's write transactions: each table write is a request.
+    this.database.writeTransaction = (async (
+      callback: (tx: LockContext) => Promise<unknown>,
+      lockTimeout?: number,
+    ) => {
+      // Set by the statement wrapper inside the transaction callback.
+      let wrote = false as boolean
+      const result = await this.rawWriteTransaction(async (tx) => {
+        const execute = tx.execute.bind(tx)
+        const guarded = Object.create(tx) as LockContext
+        guarded.execute = async (sql: string, params: Array<unknown> = []) => {
+          const request = writeRequest(sql, params)
+          if (!request) return execute(sql, params)
+          this.log.push(request)
+          const plan = this.plans.shift() ?? acceptAtOnce
+          if (plan.held)
+            await new Promise<void>((resolve) => this.held.push(resolve))
+          if (plan.outcome === `reject`) throw plan.error
+          if (plan.echoHeld) this.withholdEcho()
+          wrote = true
+          return execute(sql, params)
+        }
+        return callback(guarded)
+      }, lockTimeout)
+      if (wrote) this.expectDrain()
+      return result
+    }) as PowerSyncDatabase[`writeTransaction`]
+    // The adapter's change watcher: count its drains, and hold its next
+    // callback while an echo is withheld.
+    const register = this.database.onChangeWithCallback.bind(this.database)
+    this.database.onChangeWithCallback = (handler, options) =>
+      register(
+        {
+          ...handler,
+          onChange: async (event) => {
+            this.running++
+            try {
+              await this.gate
+              await handler?.onChange(event)
+            } finally {
+              this.running--
+              this.drained++
+            }
+          },
+        },
+        options,
+      )
+  }
+
+  /**
+   * A commit is applied by a watcher callback that starts after it: one
+   * already running read the tracking table before the commit.
+   */
+  private expectDrain(): void {
+    this.drainTarget = this.drained + this.running + 1
+  }
+
+  private withholdEcho(): void {
+    this.gate = new Promise<void>((resolve) => this.echoes.push(resolve))
+  }
+
+  /**
+   * Writes that are not the adapter's: the seed and other clients. A table
+   * is a view, so an upsert is an update or an insert. A delete of a row the
+   * table lacks changes nothing, so the watcher has nothing to drain.
+   */
+  private async write(change: ProviderChange): Promise<void> {
+    const changed = await this.rawWriteTransaction(async (tx) => {
+      // A view's `INSTEAD OF` trigger reports no affected rows, so the row's
+      // presence decides whether the write changes anything.
+      if (change.type === `delete`) {
+        const id = String(change.id)
+        const held = await tx.getOptional(`SELECT id FROM rows WHERE id = ?`, [
+          id,
+        ])
+        if (held) await tx.execute(`DELETE FROM rows WHERE id = ?`, [id])
+        return held !== null
+      }
+      const { id, title, note } = toSqlRow(change.row)
+      const held = await tx.getOptional(`SELECT id FROM rows WHERE id = ?`, [
+        String(id),
+      ])
+      if (held)
+        await tx.execute(`UPDATE rows SET title = ?, note = ? WHERE id = ?`, [
+          title,
+          note,
+          String(id),
+        ])
+      else
+        await tx.execute(
+          `INSERT INTO rows (id, title, note) VALUES (?, ?, ?)`,
+          [String(id), title, note],
+        )
+      return true
+    })
+    if (changed) this.expectDrain()
+  }
+
+  /** Writes made through the Collection whose receipts have not settled. */
+  private unsettled = 0
+
+  /** Counts a write's receipt until it settles. */
+  track<T extends { when: (state: `settled`) => Promise<unknown> }>(
+    receipt: T,
+  ): T {
+    this.unsettled++
+    receipt.when(`settled`).then(
+      () => this.unsettled--,
+      () => this.unsettled--,
+    )
+    return receipt
+  }
+
+  async seed(rows: ReadonlyArray<ConformanceRow>): Promise<void> {
+    for (const row of rows) await this.write({ type: `upsert`, row })
+    this.drainTarget = undefined
+  }
+
+  plan(plan: WritePlan): void {
+    this.plans.push(plan)
+  }
+
+  release(): void {
+    this.held.shift()?.()
+  }
+
+  deliver(): void {
+    this.echoes.shift()?.()
+    if (this.echoes.length === 0) this.gate = undefined
+  }
+
+  /** Answers every held request and opens every withheld echo. */
+  drain(): void {
+    for (const answer of this.held.splice(0)) answer()
+    for (const open of this.echoes.splice(0)) open()
+    this.gate = undefined
+  }
+
+  foreignCommit(change: ProviderChange): Promise<void> {
+    return this.write(change)
+  }
+
+  async rows(): Promise<ReadonlyArray<ConformanceRow>> {
+    const records = await this.database.getAll<Record>(
+      `SELECT id, title, note FROM rows ORDER BY id`,
+    )
+    return records.map(conformanceRow)
+  }
+
+  requests(): ReadonlyArray<WriteRequest> {
+    return this.log
+  }
+
+  /**
+   * The propagation step (`propagationStep`: the diff-trigger watch). The
+   * adapter reaches its write transaction a few milliseconds after a write,
+   * so the step waits until every write's receipt has settled and the
+   * watcher has drained every commit. While a request or an echo is held,
+   * some writes legitimately wait, so it waits instead until the request
+   * log, the watcher, and the receipts are quiet.
+   */
+  settle = async () => {
+    const deadline = Date.now() + drainTimeoutMs
+    const state = () =>
+      `${this.log.length} ${this.drained} ${this.running} ${this.unsettled}`
+    let last = state()
+    let quietSince = Date.now()
+    while (Date.now() < deadline) {
+      const drainedAll =
+        (this.drainTarget === undefined || this.drained >= this.drainTarget) &&
+        this.running === 0
+      if (this.unsettled === 0 && drainedAll) {
+        this.drainTarget = undefined
+        return
+      }
+      const blocked = this.held.length > 0 || this.gate !== undefined
+      if (blocked && Date.now() - quietSince >= quietMs) return
+      await sleep(5)
+      const now = state()
+      if (now !== last) {
+        last = now
+        quietSince = Date.now()
+      }
+    }
+  }
+
+  dispose = async () => {
+    await this.database.disconnectAndClear()
+    await this.database.close()
+    await rm(join(tmpdir(), this.file), { force: true })
+  }
+}
+
+/** A table row as a conformance row: key `"n"` is row id `n`. */
+function conformanceRow(record: Partial<Record>): ConformanceRow {
+  return fromSqlRow({ ...record, id: conformanceKey(String(record.id)) })
+}
+
+export function powerSyncMutationDriver(): MutationDriver {
+  return {
+    adapter: `@tanstack/powersync-db-collection (eager)`,
+    capabilities: new Set([
+      `write-rejection`,
+      `held-writes`,
+      `foreign-commits`,
+      `field-updates`,
+      `held-echoes`,
+    ]),
+    undefinedField: `null`,
+    async create(seed): Promise<MutationFixture> {
+      const provider = new PowerSyncMutationProvider()
+      await provider.seed(seed)
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: provider.database,
+          table: SCHEMA.props.rows,
+        }),
+      )
+      const view = observedView(collection, {
+        row: conformanceRow,
+        key: conformanceKey,
+      })
+      // A held request holds the write lock, which cleanup waits for; a
+      // history that ends early with one held must answer it first.
+      const cleanup = view.cleanup.bind(view)
+      view.cleanup = () => {
+        provider.drain()
+        return cleanup()
+      }
+      return {
+        collection: view,
+        base: () => [...collection.base.values()].map(conformanceRow),
+        writer: {
+          insert: (row) => {
+            const { id, title, note } = toSqlRow(row)
+            return provider.track(
+              collection.insert({ id: String(id), title, note }),
+            )
+          },
+          update: (row) =>
+            provider.track(
+              collection.update(String(row.id), (draft) => {
+                draft.title = row.title
+                if (Object.hasOwn(row, `note`)) draft.note = row.note ?? null
+                // A `NULL` note is already absent; only a held one is removed.
+                else if (typeof draft.note === `string`)
+                  (draft as { note?: string | null }).note = undefined
+              }),
+            ),
+          delete: (id) => provider.track(collection.delete(String(id))),
+        },
+        provider,
+        settle: provider.settle,
+        dispose: async () => {
+          // A write waiting for its echo would otherwise outlive the history.
+          provider.drain()
+          await collection.cleanup()
+          await provider.dispose()
+        },
+      }
+    },
+  }
+}

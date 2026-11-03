@@ -7221,9 +7221,11 @@ the reference adapter in
 (`adapter-conformance.mutations.reference`, with a structured-clone, a JSON,
 and a SQL provider), against RxDB in
 `packages/rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.rxdb`), and against TrailBase in
+(`adapter-conformance.mutations.rxdb`), against TrailBase in
 `packages/trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`
-(`adapter-conformance.mutations.trailbase`). It checks auto-transaction
+(`adapter-conformance.mutations.trailbase`), and against PowerSync in
+`packages/powersync-db-collection/tests/mutation-conformance-oracle.property.test.ts`
+(`adapter-conformance.mutations.powersync`). It checks auto-transaction
 writes on a ready Collection whose adapter persists them itself: MUT-1 (the
 public rows show the optimistic state while the mutation function runs, and
 no publication shows the earlier synced value when it fulfills), MUT-2 (a
@@ -7331,3 +7333,21 @@ and confirms a write only by an event after it began; a mutant that keeps the
 old confirmation fails MUT-1. The record API is a test double that bypasses
 the SDK's fetch and SSE decoding.
 
+PowerSync (`undefinedField: 'null'`, `field-updates`, `held-echoes`,
+`write-rejection`, `held-writes`, `foreign-commits`): the driver runs a real
+local PowerSync database, which is the adapter's provider; uploading to a
+PowerSync service is the SDK's upload queue and is outside this owner. A
+request is one `INSERT`, `UPDATE`, or `DELETE` the adapter executes on the
+table inside its write transaction; a rejection throws from that statement,
+and a held request holds the write lock. A held echo holds the change
+watcher's next callback until `deliver`. The propagation step waits until
+every write's receipt settles, or, while a request or echo is held, until the
+request log, the watcher, and the receipts are quiet. The local database does
+not rewrite rows, so `server-rewrites` is not declared. On the parent of the
+fix, both campaigns failed MUT-10: a write started once the earlier one
+committed locally, before its diff trigger observed it. MUT-10's "decides"
+is settlement (the law set counts a synchronously failed handler as decided
+before its receipt settles, as the exception). The adapter now runs each
+write after the earlier one settles. Removal binds an own `undefined` as
+`NULL`, so MUT-8 holds. Limits: removal by assigning `null` and
+multi-mutation transactions are not generated.
