@@ -118,6 +118,8 @@ describe(`mutation conformance: reference adapter`, () => {
     [`sends-complete-row`, `MUT-8 (provider requests)`],
     [`drops-removal`, `MUT-8 (provider requests)`],
     [`settles-on-answer`, /MUT-1|MUT-7/],
+    [`chains-on-confirmation`, /MUT-8|MUT-10/],
+    [`confirms-by-high-water`, /MUT-1|MUT-7/],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,

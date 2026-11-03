@@ -25,7 +25,9 @@
  *   them into its row (`field-updates`). The provider can answer before its
  *   change feed delivers the copy (`held-echoes`), so the adapter confirms
  *   each write through sync: its mutation function returns when its own
- *   sync run has applied that write's copy (MUT-7).
+ *   sync run has applied that write's copy (MUT-7). The next write starts
+ *   when the provider answers, without waiting for that confirmation
+ *   (MUT-10).
  */
 import { createCollection } from '@tanstack/db'
 import { observedView, rewriteRow } from '../src'
@@ -78,6 +80,17 @@ export type ReferenceMutationMutant =
    * before its copy arrives through sync.
    */
   | `settles-on-answer`
+  /**
+   * MUT-10 (SQL): a write waits for the earlier one's confirmation through
+   * sync, not only for the provider's answer, so it reaches the provider
+   * late.
+   */
+  | `chains-on-confirmation`
+  /**
+   * MUT-7 (SQL): a write counts as confirmed once any later commit's copy
+   * has applied, so a withheld copy is skipped.
+   */
+  | `confirms-by-high-water`
 
 export interface ReferenceMutationOptions {
   /** A JSON provider. */
@@ -236,13 +249,22 @@ function referenceCollection(
   mutant: ReferenceMutationMutant | undefined,
   { sql = false }: ReferenceMutationOptions,
 ) {
-  // MUT-10: each write waits for the earlier one to be decided.
+  // MUT-10: each write waits for the earlier one to be decided, by the
+  // provider's answer. A write's turn covers sending it; its confirmation
+  // (SQL) follows after the turn.
   let turn: Promise<unknown> = Promise.resolve()
-  const persist = (send: () => Promise<void>): Promise<void> => {
-    if (mutant === `writes-concurrently`) return send()
-    const run = turn.then(send)
-    turn = run.catch(() => undefined)
-    return run
+  const persist = async (
+    sendAll: () => Promise<Array<number>>,
+  ): Promise<void> => {
+    if (mutant === `writes-concurrently`) {
+      await confirmAll(await sendAll())
+      return
+    }
+    const sent = turn.then(sendAll)
+    const chained =
+      mutant === `chains-on-confirmation` ? sent.then(confirmAll) : sent
+    turn = chained.catch(() => undefined)
+    await confirmAll(await sent)
   }
   const answer = async (sent: Promise<void>): Promise<void> => {
     try {
@@ -256,17 +278,22 @@ function referenceCollection(
   }
   // MUT-7 (SQL): a write is confirmed when this sync run has applied the
   // commit its answer names.
-  let applied = 0
-  const confirmations: Array<{ sequence: number; resolve: () => void }> = []
+  // Copies can arrive out of commit order, since a withheld one trails later
+  // ones, so each write waits for its own commit, not for the highest seen.
+  const applied = new Set<number>()
+  let highest = 0
+  const confirmations = new Map<number, () => void>()
+  const isApplied = (commit: number) =>
+    mutant === `confirms-by-high-water`
+      ? highest >= commit
+      : applied.has(commit)
   const confirmed = (commit: number): Promise<void> => {
-    if (!sql || mutant === `settles-on-answer` || applied >= commit)
+    if (!sql || mutant === `settles-on-answer` || isApplied(commit))
       return Promise.resolve()
-    return new Promise((resolve) =>
-      confirmations.push({ sequence: commit, resolve }),
-    )
+    return new Promise((resolve) => confirmations.set(commit, resolve))
   }
-  const send = async (request: WriteRequest) =>
-    confirmed(await provider.write(request))
+  const confirmAll = (commits: Array<number>) =>
+    Promise.all(commits.map(confirmed)).then(() => undefined)
   // The `writes-back-authored` mutant writes through the sync run's apply.
   let applyChange: ((change: ProviderChange) => void) | undefined
   const writeBack = (row: ConformanceRow) => {
@@ -325,10 +352,13 @@ function referenceCollection(
         applyChange = apply
         const receive = (change: ProviderChange, commitSequence: number) => {
           apply(change)
-          applied = commitSequence
-          for (const waiting of confirmations.splice(0))
-            if (waiting.sequence <= applied) waiting.resolve()
-            else confirmations.push(waiting)
+          applied.add(commitSequence)
+          highest = Math.max(highest, commitSequence)
+          for (const [commit, resolve] of confirmations)
+            if (isApplied(commit)) {
+              confirmations.delete(commit)
+              resolve()
+            }
         }
         return provider.subscribe((change, commitSequence) => {
           if (mutant === `applies-copy-late`)
@@ -340,6 +370,7 @@ function referenceCollection(
     onInsert: ({ transaction }) =>
       answer(
         persist(async () => {
+          const commits: Array<number> = []
           for (const mutation of transaction.mutations) {
             const request = {
               type: `insert` as const,
@@ -349,32 +380,42 @@ function referenceCollection(
                 ? { note: null as unknown as undefined, ...mutation.modified }
                 : structuredClone(mutation.modified),
             }
-            await send(request)
-            if (mutant === `writes-insert-twice`) await send(request)
+            commits.push(await provider.write(request))
+            if (mutant === `writes-insert-twice`)
+              commits.push(await provider.write(request))
             writeBack(mutation.modified)
           }
+          return commits
         }),
       ),
     onUpdate: ({ transaction }) =>
       answer(
         persist(async () => {
+          const commits: Array<number> = []
           for (const mutation of transaction.mutations) {
-            await send({
-              type: `update`,
-              id: mutation.key,
-              row: updateRow(mutation),
-            })
+            commits.push(
+              await provider.write({
+                type: `update`,
+                id: mutation.key,
+                row: updateRow(mutation),
+              }),
+            )
             writeBack(mutation.modified)
           }
+          return commits
         }),
       ),
     onDelete: ({ transaction }) =>
       answer(
         persist(async () => {
-          if (mutant === `skips-delete`) return
+          if (mutant === `skips-delete`) return []
+          const commits: Array<number> = []
           for (const mutation of transaction.mutations) {
-            await send({ type: `delete`, id: mutation.key })
+            commits.push(
+              await provider.write({ type: `delete`, id: mutation.key }),
+            )
           }
+          return commits
         }),
       ),
   })
@@ -385,6 +426,8 @@ const sqlMutants = new Set<ReferenceMutationMutant | undefined>([
   `sends-complete-row`,
   `drops-removal`,
   `settles-on-answer`,
+  `chains-on-confirmation`,
+  `confirms-by-high-water`,
 ])
 
 /** A production driver for the reference adapter, optionally mutated. */

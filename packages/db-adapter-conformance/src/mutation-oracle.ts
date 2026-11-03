@@ -34,7 +34,10 @@
  *   as an own `undefined`. A driver declares this with `undefinedField`.
  * - **MUT-10.** Writes are ordered per Collection: a write submitted while an
  *   earlier one is pending reaches the provider only after the earlier one
- *   is decided, accepted or rejected.
+ *   is decided, accepted or rejected by the provider's answer. A write does
+ *   not wait for an earlier one's confirmation through sync: core does not
+ *   chain independent transactions, and an application that needs that
+ *   chains them itself (maintainer decision 2026-11-03).
  * - **FID-5.** At a quiescent cut the public rows, the exposed authoritative
  *   base (`collection.base`), and the provider's rows are identical, and all
  *   three equal the model: the provider's starting rows with every accepted
@@ -100,7 +103,9 @@ export type MutationCapability =
   /**
    * The provider can answer an accepted write before its change feed
    * delivers the copy, which it then delivers at `deliver`. Declare it only
-   * for an adapter that confirms writes through sync (MUT-7).
+   * for an adapter that confirms writes through sync (MUT-7), and only when
+   * the provider can withhold each write's copy on its own: later writes
+   * proceed while a copy is withheld, and `deliver` delivers the oldest.
    */
   | `held-echoes`
 
@@ -537,9 +542,10 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  *   the value domain alone, as a removed field does under `null`.
  * - `pending` lists the mutations not yet settled, in author order. MUT-10
  *   orders their requests: the first is requested at once, and each later
- *   one only after every earlier one is decided. An accepted write whose
- *   copy the provider withholds is `answered`: it stays pending, and so
- *   holds later writes, until the copy arrives (MUT-7).
+ *   one only after every earlier one is decided. A write is decided when
+ *   the provider answers it. An accepted write whose copy the provider
+ *   withholds is `answered`: it is decided, so the next write is
+ *   requested, but it stays pending until its copy arrives (MUT-7).
  * - `requests` is every write request MUT-8 and MUT-10 allow so far.
  * - `settlements` is each write's `when('settled')` settlement.
  * - `applied` is the synced rows core has applied. An accepted write's
@@ -728,30 +734,34 @@ function retire(state: MutationModel, write: PendingWrite): void {
 }
 
 /**
- * MUT-10: request the first pending mutation if it has not been; a request
- * answered at once is decided at once, which admits the next unless its
- * copy is withheld. Returns the public rows after each decision, for the
- * publication check.
+ * MUT-10: request the oldest undecided mutation if it has not been; a request
+ * answered at once is decided at once, which admits the next. A write is
+ * decided when the provider answers it, also when its copy is withheld
+ * (maintainer decision 2026-11-03). Returns the public rows after each
+ * decision, for the publication check.
  */
 function advance(state: MutationModel): Array<RowState> {
   const states: Array<RowState> = []
   for (;;) {
-    const first = state.pending[0]
-    if (!first || first.answered) return states
-    if (!first.requested) {
-      first.requested = true
+    const next = undecided(state)
+    if (!next) return states
+    if (!next.requested) {
+      next.requested = true
       state.requests.push({
-        type: first.type,
-        id: first.id,
-        ...(first.sent === undefined
-          ? {}
-          : { value: requestValue(first.sent) }),
+        type: next.type,
+        id: next.id,
+        ...(next.sent === undefined ? {} : { value: requestValue(next.sent) }),
       })
     }
-    if (first.plan.held) return states
-    decide(state, first)
+    if (next.plan.held) return states
+    decide(state, next)
     states.push(visible(state))
   }
+}
+
+/** The oldest pending write the provider has not answered. */
+function undecided(state: MutationModel): PendingWrite | undefined {
+  return state.pending.find((write) => !write.answered)
 }
 
 /** What a step did, for reach and law names. */
@@ -829,20 +839,19 @@ function stepModel(
       }
     }
     case `release`: {
-      const first = state.pending[0]
-      if (!first?.requested || first.answered || !first.plan.held)
-        return undefined
-      decide(state, first)
+      const next = undecided(state)
+      if (!next?.requested || !next.plan.held) return undefined
+      decide(state, next)
       const published = [visible(state), ...advance(state)]
       return {
-        done: { kind: `release`, outcome: first.plan.outcome },
+        done: { kind: `release`, outcome: next.plan.outcome },
         published,
       }
     }
     case `deliver`: {
-      const first = state.pending[0]
-      if (!first?.answered) return undefined
-      confirm(state, first)
+      const oldest = state.pending.find((write) => write.answered)
+      if (!oldest) return undefined
+      confirm(state, oldest)
       const published = [visible(state), ...advance(state)]
       return { done: { kind: `deliver` }, published }
     }
@@ -1266,9 +1275,9 @@ export async function checkMutationHistory(
     // quiescent cut (FID-5).
     while (state.pending.length > 0) {
       const before = visible(state)
-      const step: MutationStep = state.pending[0]!.answered
-        ? { kind: `deliver` }
-        : { kind: `release` }
+      const step: MutationStep = undecided(state)
+        ? { kind: `release` }
+        : { kind: `deliver` }
       const result = stepModel(state, step, planFor)
       if (result === undefined) break
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
