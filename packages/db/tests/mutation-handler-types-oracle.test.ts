@@ -13,9 +13,9 @@
  * Diagnostics must match exactly the rejected candidate lines; missing imports
  * or unrelated compiler failures never count as rejection evidence. Built
  * declarations, npm resolution, and actual application migrations remain
- * separate receivers.
+ * separate receivers (the coverage map's O22 boundary).
  */
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import ts from 'typescript'
 import { oracleProperty, pass, violation } from './oracle-property'
 import type { Observation } from './oracle-property'
@@ -255,10 +255,10 @@ function compileHandlerConsumer(source: string): ReadonlyArray<ts.Diagnostic> {
 }
 
 // The driver compiles the plan's source and records every diagnostic as
-// plain data: whether it is in the generated file, its line, span, code, and
-// message.
+// plain data: its file (the generated consumer, another file by name, or
+// none), its line, span, code, and message.
 type Diagnostic = {
-  generated: boolean
+  file: string
   line: number | undefined
   start: number | undefined
   length: number
@@ -272,7 +272,12 @@ function compileDriver(
 ) {
   const diagnostics = compileHandlerConsumer(plan.source).map(
     (diagnostic): Diagnostic => ({
-      generated: diagnostic.file?.fileName === filename,
+      file:
+        diagnostic.file === undefined
+          ? `(no file)`
+          : diagnostic.file.fileName === filename
+            ? `(generated consumer)`
+            : relative(packageRoot, diagnostic.file.fileName),
       line:
         diagnostic.file && diagnostic.start !== undefined
           ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
@@ -359,10 +364,10 @@ function checkHandlerAdmission(
     const candidate = plan.candidates.find(
       (entry) => entry.line === diagnostic.line,
     )
-    if (!diagnostic.generated || !candidate)
+    if (diagnostic.file !== `(generated consumer)` || !candidate)
       return violation(
         `diagnostics`,
-        `unexpected diagnostic at line ${diagnostic.line}: TS${diagnostic.code} ${diagnostic.message}`,
+        `unexpected diagnostic in ${diagnostic.file} at line ${diagnostic.line}: TS${diagnostic.code} ${diagnostic.message}`,
         `candidate-diagnostics`,
       )
     if (admitted.get(candidate.id))
@@ -395,10 +400,11 @@ function checkHandlerAdmission(
     (diagnostic) =>
       `${diagnostic.start}/${diagnostic.length}/${diagnostic.code}/${diagnostic.message}`,
   )
-  if (new Set(texts).size !== texts.length)
+  const repeated = texts.filter((text, index) => texts.indexOf(text) !== index)
+  if (repeated.length > 0)
     return violation(
       `diagnostics`,
-      `a diagnostic was reported twice`,
+      `${repeated.length} of ${texts.length} diagnostics were reported again: ${repeated.join(`; `)}`,
       `distinct-diagnostics`,
     )
   const owed = [...admitted]
@@ -530,7 +536,7 @@ oracleProperty({
     statement: `Query and Electric handlers admit exactly the results that Promise<void> accepts: a handler that returns a value, or a synchronous handler that returns, is rejected at its CRUD property with a Promise<void> diagnostic, and no other diagnostic appears.`,
     authority: `the approved RC handler migration and the public QueryCollectionConfig and ElectricCollectionConfig types`,
     limits: `Source entries only; built declarations, npm resolution, and application migrations are separate receivers.`,
-    owner: `Adapter handler types`,
+    owner: `RC public mutation-handler type admission`,
   },
   histories: typeShapes,
   label: ({ adapter, key, scalar, schema, data }) =>

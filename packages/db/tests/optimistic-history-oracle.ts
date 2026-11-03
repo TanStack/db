@@ -1903,6 +1903,20 @@ function replayOptimisticHistory(history: OptimisticHistory) {
   const visible = () => sorted(model.visible().values())
   let cuts = [visible()]
   const owe = (checkpoint: string, extra: Partial<OwedCheckpoint> = {}) => {
+    // The model keeps two accounts of each request, its owed outcome and its
+    // transaction state; they must agree, or the model itself is wrong.
+    for (const [index, entry] of model.transactions.entries()) {
+      const status =
+        entry.state === `pending` || entry.state === `persisting`
+          ? `pending`
+          : entry.state === `completed`
+            ? `fulfilled`
+            : `rejected`
+      if (outcomes[index]?.status !== status)
+        throw new Error(
+          `The model owes request ${index} ${outcomes[index]?.status} at ${checkpoint}, but its transaction is ${entry.state}`,
+        )
+    }
     owed.set(checkpoint, {
       cuts,
       visible: visible(),
@@ -2895,6 +2909,7 @@ export function checkOptimisticHistory(
         checkpoint,
         `external completion was ${seen.completion}, owed ${owed.completion}`,
         `external-completion`,
+        { actual: seen.completion, expected: owed.completion },
       )
     if (owed.settledRows && !same(seen.settledRows, owed.settledRows))
       return violation(
@@ -2983,6 +2998,7 @@ export function checkOptimisticHistory(
           checkpoint,
           `request ${index} state ${request.state}, owed ${owedRequest.state}`,
           `transaction-state`,
+          { actual: request.state, expected: owedRequest.state },
         )
       if (!same(request.modified, owedRequest.row))
         return violation(
@@ -3032,12 +3048,14 @@ export function checkOptimisticHistory(
         checkpoint,
         `tracked transactions ${JSON.stringify(tracked)}, unsettled ${JSON.stringify(owed.unsettled)}`,
         `tracked-transactions`,
+        { actual: tracked, expected: owed.unsettled },
       )
     if (owed.quiet && seen.deliveries !== deliveries)
       return violation(
         checkpoint,
         `${seen.deliveries - deliveries} deliveries for a settlement that changed no visible row`,
         `quiet-settlement`,
+        { actual: seen.deliveries, expected: deliveries },
       )
     deliveries = seen.deliveries
   }

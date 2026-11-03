@@ -17,7 +17,7 @@
  */
 import fc from 'fast-check'
 import { oracleRuns } from '../oracle-config'
-import { oracleProperty, pass, violation } from '../oracle-property'
+import { differs, oracleProperty, pass, violation } from '../oracle-property'
 import { selectedRowKeys } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
 import type { Observation } from '../oracle-property'
@@ -175,8 +175,10 @@ function shapeModel(history: ShapeHistory) {
 // framework's native observation callback, in the history's read order, and
 // records the shape and the mode the query callback last compiled; after the
 // switch settles it records how many native observations ran and the settled
-// projection. Rows are recorded as plain selected values; the driver
-// decides nothing.
+// projection. Rows are recorded as plain selected values, with the enumerable
+// symbol keys a binding exposes; the driver decides nothing. Each native
+// observation also records the framework's name for its native cut, which a
+// failure prints.
 
 type Shape = `array` | `undefined` | `null` | `object` | `other`
 const shapeOf = (value: unknown): Shape =>
@@ -192,9 +194,10 @@ const shapeOf = (value: unknown): Shape =>
 const plainRow = (row: unknown): unknown =>
   row !== null && typeof row === `object`
     ? Object.fromEntries(
-        selectedRowKeys(row)
-          .filter((key) => typeof key === `string`)
-          .map((key) => [key, (row as Record<PropertyKey, unknown>)[key]]),
+        selectedRowKeys(row).map((key) => [
+          key,
+          (row as Record<PropertyKey, unknown>)[key],
+        ]),
       )
     : row
 const byId = (a: { id: unknown }, b: { id: unknown }) =>
@@ -207,6 +210,8 @@ type Settled = {
   state: Array<{ id: unknown; value: unknown }> | null
 }
 type Native = {
+  /** The framework's native cut, from its conformance driver. */
+  cut: string
   shape: Shape
   compiledMode: Mode | undefined
   readError?: string
@@ -269,13 +274,26 @@ function resultShapeDriver(driver: LiveQueryDriver) {
             if (history.order === `Collection first`) mounted.collection()
             const result = mounted.current()
             if (history.order === `data first`) mounted.collection()
-            native = { shape: shapeOf(result.data), compiledMode }
+            native = {
+              cut: driver.parameterObservationCut,
+              shape: shapeOf(result.data),
+              compiledMode,
+            }
           } catch (error) {
-            native = { shape: `other`, compiledMode, readError: String(error) }
+            native = {
+              cut: driver.parameterObservationCut,
+              shape: `other`,
+              compiledMode,
+              readError: String(error),
+            }
           }
         })
         observe(`${index}: ${transition}; native`, {
-          ...(native ?? { shape: `other`, compiledMode }),
+          ...(native ?? {
+            cut: driver.parameterObservationCut,
+            shape: `other`,
+            compiledMode,
+          }),
           observations,
         } satisfies Native)
         settled(`${index}: ${transition}; settled`)
@@ -298,7 +316,6 @@ const projects = (shape: Shape, mode: Mode) =>
   mode === `list`
     ? shape === `array`
     : shape === `undefined` || shape === `object`
-const json = (value: unknown) => JSON.stringify(value)
 
 function checkResultShape(
   _history: ShapeHistory,
@@ -350,26 +367,26 @@ function checkResultShape(
         `current query projection`,
         { actual: seen.shape, expected: expected.mode },
       )
+    // The selected rows are owed in order. An undefined findOne records no
+    // rows, so an empty findOne that exposes a row fails here.
     const rows = expected.rows!
-    const selected =
-      expected.mode === `single` && rows.length === 0
-        ? seen.shape === `undefined`
-        : json(seen.rows) === json(rows)
-    if (!selected)
-      return violation(
-        checkpoint,
-        `selected rows ${json(seen.rows)}, owed ${json(rows)}`,
-        `settled selected rows`,
-        { actual: seen.rows, expected: rows },
-      )
     const keyed = rows.map((row) => ({ id: row.id, value: row })).sort(byId)
-    if (json(seen.state) !== json(keyed))
-      return violation(
+    const wrong =
+      differs(
         checkpoint,
-        `keyed state ${json(seen.state)}, owed ${json(keyed)}`,
+        `settled selected rows`,
+        seen.rows,
+        rows,
+        `the selected rows differ from the source model`,
+      ) ??
+      differs(
+        checkpoint,
         `settled keyed rows`,
-        { actual: seen.state, expected: keyed },
+        seen.state,
+        keyed,
+        `the keyed state differs from the source model`,
       )
+    if (wrong) return wrong
   }
   for (const checkpoint of owed.keys())
     if (!trace.some((entry) => entry.checkpoint === checkpoint))
@@ -425,29 +442,42 @@ const resultShapeHistories = {
 }
 
 // Wrong answers the check must reject: the previous mode's projection at a
-// native cut, in either direction, and stale rows at a settled cut.
-const resultShapeCalibrations = [
-  {
-    name: `previous projection at the native cut`,
-    law: `current query projection`,
-    corrupt: (trace: ReadonlyArray<Observation>) => {
-      const at = trace.findIndex(({ checkpoint }) =>
-        checkpoint.endsWith(`native`),
-      )
-      if (at < 0) return undefined
-      return trace.map((entry, index) => {
-        if (index !== at) return entry
-        const native = entry.value as Native
-        return {
-          ...entry,
-          value: {
-            ...native,
-            shape: native.shape === `array` ? `object` : `array`,
-          },
-        }
-      })
-    },
+// native cut, in each direction, and stale rows at a settled cut. Both wrong
+// directions keep the selected rows and differ only in array-versus-row
+// projection, which row normalization would erase. Each direction corrupts
+// the first native cut that projects its mode, so the framework picks a
+// candidate history that has one.
+const previousProjection = (
+  name: string,
+  current: (shape: Shape) => boolean,
+  previous: Shape,
+) => ({
+  name,
+  law: `current query projection`,
+  corrupt: (trace: ReadonlyArray<Observation>) => {
+    const at = trace.findIndex(
+      ({ checkpoint, value }) =>
+        checkpoint.endsWith(`native`) && current((value as Native).shape),
+    )
+    if (at < 0) return undefined
+    return trace.map((entry, index) =>
+      index === at
+        ? { ...entry, value: { ...(entry.value as Native), shape: previous } }
+        : entry,
+    )
   },
+})
+const resultShapeCalibrations = [
+  previousProjection(
+    `a list keeps the findOne projection at the native cut`,
+    (shape) => shape === `array`,
+    `object`,
+  ),
+  previousProjection(
+    `a findOne keeps the list projection at the native cut`,
+    (shape) => shape === `object` || shape === `undefined`,
+    `array`,
+  ),
   {
     name: `stale rows at a settled cut`,
     law: `settled selected rows`,
@@ -477,10 +507,10 @@ export function registerResultShapeOracle(driver: LiveQueryDriver): void {
   oracleProperty({
     id: `framework.${id}.result-shape`,
     law: {
-      statement: `A binding projects data through its current authored query: a list exposes an array and findOne a row or undefined, at the native cut after a mode change and after it settles, where the selected rows and keyed state equal the source model.`,
+      statement: `A binding projects data through its current authored query: a list exposes an array and findOne a row or undefined, at the native cut after a mode change, where only the shape is owed, and after it settles, where the selected rows and keyed state equal the source model.`,
       authority: `packages/db/tests/conformance/contract.ts and each adapter's public result type`,
-      limits: `Enabled callback queries over one source of zero to four rows; no disabled inputs, errors, supplied Collections, or DbClient. No promise of synchronous row freshness or identical host scheduling.`,
-      owner: `Framework conformance`,
+      limits: `Enabled callback queries over one source of zero to four rows; disabled inputs, errors, supplied Collections, and DbClient stay with their existing conformance owners. No promise of synchronous row freshness or identical host scheduling.`,
+      owner: `Frameworks`,
     },
     histories: resultShapeHistories,
     model: shapeModel,
