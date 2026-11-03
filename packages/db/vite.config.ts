@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { transform } from 'esbuild'
-import { defineConfig, mergeConfig } from 'vitest/config'
+import { configDefaults, defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
 import packageJson from './package.json'
@@ -49,6 +49,12 @@ const config = defineConfig({
     },
     typecheck: { enabled: true, tsconfig: `./tsconfig.test.json` },
     setupFiles: [`./tests/test-setup.ts`],
+    // The oracleProperty self-oracle spawns real Vitest runs and takes about
+    // two minutes; `pnpm test:oracle-framework` runs it on its own.
+    exclude: [
+      ...configDefaults.exclude,
+      `**/oracle-property-self-oracle.test.ts`,
+    ],
   },
 })
 
