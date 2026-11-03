@@ -787,6 +787,11 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.eager-live-source`,
     `convex`,
   ],
+  [
+    `db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `reference`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -888,6 +893,10 @@ const replayTestNames = new Map([
         `conforms on a random campaign or a replayed seed`,
       ] as const,
   ),
+  [
+    `adapter-conformance.mutations.reference`,
+    `conforms on a random campaign or a replayed seed`,
+  ],
   [
     `query-db.refetch-held-page-end`,
     `generated same-key page shifts.*replay campaign`,

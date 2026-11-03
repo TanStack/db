@@ -7212,3 +7212,41 @@ the replay can still be taken for it (open limit). A cached valid result served 
 client-cache behavior and is not generated, because the model starts a
 restarted run empty. A fixed-seed campaign runs the React client
 (`watchQuery`).
+
+## Adapter conformance: mutations (#2118)
+
+Owner: `packages/db-adapter-conformance/src/mutation-oracle.ts`, run against
+the reference adapter in
+`packages/db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`
+(`adapter-conformance.mutations.reference`). It checks auto-transaction
+writes on a ready Collection whose adapter persists them itself: MUT-1 (the
+public rows show the optimistic state while the mutation function runs, and
+no publication shows the earlier synced value when it fulfills), MUT-2 (a
+provider rejection rejects `when('settled')` with the provider's error and
+publishes exactly the inverse), MUT-8, MUT-10, and MUT-13 (each write is one
+provider request of its type with the authored row, in author order, issued
+only after the earlier write is decided), and FID-5 (at a quiescent cut the
+public rows, `collection.base`, and the provider's rows are identical and
+equal the fold of accepted writes). The provider answers each request by a
+plan the check hands it before the write: accept or reject, at once or held
+until a `release`. Publications compare row values; a publication of the same
+row values, such as core's `$hasPendingWrites` update when a write is
+confirmed, counts as no change here (the virtual-row-field owner judges it).
+Reach: each of insert, update, and delete accepted, a rejected write, a held
+write, a write queued behind a held one, a held write rejected, a commit by
+another client, and a quiescent cut after writes, at least five histories
+each per campaign. Calibration: seven reference mutants each fail with their
+law (an applied copy after the mutation function settles, a swallowed or
+wrapped rejection, a duplicated insert request, writes that do not wait for
+the earlier one, a skipped delete, an update that sends only changed fields).
+A removed field is an own `undefined` in the authored row (maintainer
+decision 2026-11-03, keeping the documented rule in
+`packages/db/tests/proxy-detachment-contract-oracle.test.ts`); the core owner
+`optimistic-history-oracle` now generates that removal (an optional `d`, set
+and then removed with `delete draft.d`), compares rows by own fields, and
+counts its reach (`removedFieldEdits`). Limits: one pending mutation per
+key; commits by another client only while no mutation is pending (a commit
+held behind a pending mutation is core's MUT-5); no manual transactions,
+confirmation through sync (MUT-7), schema validation, or an update that
+changes no field; no published adapter driver yet.
+

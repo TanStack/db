@@ -1,0 +1,959 @@
+/**
+ * # Does a sync adapter persist an application's mutations faithfully?
+ *
+ * An application writes to a Collection with `insert`, `update`, and
+ * `delete`. Each write is an optimistic transaction: core overlays its
+ * optimistic state on the applied synced rows at once, and the adapter's
+ * mutation function persists it to the provider. This oracle checks the laws
+ * that every adapter which persists its own writes owes, whatever its
+ * provider:
+ *
+ * - **MUT-1.** While a mutation function runs, the public rows show its
+ *   optimistic state. When it fulfills, no publication shows the earlier
+ *   synced value: the optimistic row drops in the same publication that
+ *   applies the sync transaction carrying the provider's copy of the write.
+ *   A one-row write publishes exactly one change of row values. Core also
+ *   publishes an update when only a virtual row field changes, such as
+ *   `$hasPendingWrites` when the write is confirmed; the check compares row
+ *   values only, so such a publication counts as no change here, and the
+ *   virtual-row-field owner (`packages/db/tests/query/virtual-row-fields-oracle.test.ts`)
+ *   judges it.
+ * - **MUT-2.** When the provider rejects a write, `when('settled')` rejects
+ *   with the provider's error (or, under `matchesFailure`, the value the driver's
+ *   relation names), the optimistic state drops in one publication that is
+ *   exactly its inverse, and other pending mutations stay.
+ * - **MUT-13, MUT-3, MUT-8.** Each write reaches the provider as exactly one
+ *   request of its type for its key, carrying the authored row (an update
+ *   sends the complete authored row).
+ * - **MUT-10.** Writes are ordered per Collection: a write submitted while an
+ *   earlier one is pending reaches the provider only after the earlier one
+ *   is decided, accepted or rejected.
+ * - **FID-5.** At a quiescent cut the public rows, the exposed authoritative
+ *   base (`collection.base`), and the provider's rows are identical, and all
+ *   three equal the model: the provider's starting rows with every accepted
+ *   write folded in author order, plus commits from other clients. A
+ *   rejected write leaves no effect in the provider's rows.
+ * - **HEALTH-5.** No history causes an unhandled rejection or an undeclared
+ *   error- or warning-level console diagnostic.
+ *
+ * Authority: the adapter conformance law set (issue #2118), section 9 and
+ * FID-5; the optimistic state, held optimistic row, and accepted sync
+ * transaction terms in `docs/contributing/glossary.md`. Core owns joining a
+ * transaction (MUT-4) and holding synced commits behind pending optimistic
+ * state (MUT-5) in `packages/db/tests/optimistic-history-oracle.ts`.
+ *
+ * Model terms. A **quiescent cut** is model-only: no mutation function is
+ * pending, the provider has delivered every change, and every committed sync
+ * transaction has applied. A **write request** is one call the adapter makes
+ * to the provider for one mutation. A **plan** is the provider's answer to the
+ * next write request, which the check hands the provider before the write: it
+ * accepts or rejects, at once or after a `release`.
+ *
+ * Boundary. The oracle checks auto-transaction writes (`collection.insert`,
+ * `update`, `delete`) on a ready Collection whose adapter persists them
+ * itself. It does not check manual transactions, confirmation through sync
+ * (MUT-7, a later capability), schema validation, or a mutation on a key that
+ * already has a pending mutation. Commits from other clients arrive only
+ * while no mutation is pending; a commit held behind a pending mutation is
+ * core's MUT-5.
+ */
+import fc from 'fast-check'
+import { ConformanceViolation } from './eager-live-source-oracle'
+import type {
+  ConformanceRow,
+  ObservedCollection,
+  ProviderChange,
+} from './eager-live-source-oracle'
+
+// ---------------------------------------------------------------------------
+// Driver contract
+// ---------------------------------------------------------------------------
+
+/** Optional capabilities a driver declares; the grammar uses only these. */
+export type MutationCapability =
+  /** The provider can reject a write request (MUT-2). */
+  | `write-rejection`
+  /** The provider can hold a write request until `release` (MUT-1, MUT-10). */
+  | `held-writes`
+  /** The provider can commit a change made by another client. */
+  | `foreign-commits`
+
+/** The optimistic transaction a write call returns. */
+export interface MutationReceipt {
+  readonly state: string
+  /** Settles when the mutation function settles, with its outcome. */
+  when: (state: `settled`) => Promise<unknown>
+}
+
+/** The driver's writes, through the adapter's Collection. */
+export interface MutationWriter {
+  insert: (row: ConformanceRow) => MutationReceipt
+  /** Replace the held row's fields with `row`'s: a complete authored row. */
+  update: (row: ConformanceRow) => MutationReceipt
+  delete: (id: number) => MutationReceipt
+}
+
+/** One write request the adapter made to the provider. */
+export interface WriteRequest {
+  readonly type: `insert` | `update` | `delete`
+  readonly id: number
+  /** The row the request carries; absent for a delete. */
+  readonly row?: ConformanceRow
+}
+
+/** The provider's answer to the next write request. */
+export interface WritePlan {
+  readonly outcome: `accept` | `reject`
+  /** Answer only at `release`, so the write stays pending until then. */
+  readonly held: boolean
+  /** The error a rejection answers with. */
+  readonly error: Error
+}
+
+/**
+ * The provider a driver controls. It answers write requests by plan, in the
+ * order they arrive, and delivers every accepted write and every commit from
+ * another client through the adapter's sync subscription, as a provider's
+ * change feed does. It records every request; it must not merge, reorder, or
+ * drop them.
+ */
+export interface MutationProvider {
+  /** Queue the answer to the next write request that arrives. */
+  plan: (plan: WritePlan) => void
+  /** Answer the oldest held request by its plan. */
+  release: () => void | Promise<void>
+  /** Commit a change made by another client (`foreign-commits`). */
+  foreignCommit?: (change: ProviderChange) => void | Promise<void>
+  /** The provider's committed rows. */
+  rows: () =>
+    ReadonlyArray<ConformanceRow> | Promise<ReadonlyArray<ConformanceRow>>
+  /** Every write request so far, in arrival order. */
+  requests: () => ReadonlyArray<WriteRequest>
+}
+
+export interface MutationFixture {
+  /** The adapter's Collection, read as conformance rows. */
+  collection: ObservedCollection
+  /** The exposed authoritative base (`collection.base`) as conformance rows. */
+  base: () => Iterable<ConformanceRow>
+  writer: MutationWriter
+  provider: MutationProvider
+  /** The adapter's propagation step, awaited before every comparison. */
+  settle?: () => Promise<void>
+  dispose?: () => void | Promise<void>
+}
+
+export interface MutationDriver {
+  readonly adapter: string
+  readonly capabilities: ReadonlySet<MutationCapability>
+  /**
+   * When the adapter reports its own error for a provider rejection, the
+   * relation that names the value owed (MUT-2's named error). Without it,
+   * `when('settled')` must reject with the provider's error by identity.
+   */
+  readonly matchesFailure?: (reported: unknown, failure: Error) => boolean
+  /** Console diagnostics the adapter declares (HEALTH-5). */
+  readonly declaredDiagnostic?: (
+    level: `error` | `warn`,
+    args: ReadonlyArray<unknown>,
+  ) => boolean
+  /** A ready-to-preload fixture whose provider starts with `seed`. */
+  create: (
+    seed: ReadonlyArray<ConformanceRow>,
+  ) => MutationFixture | Promise<MutationFixture>
+}
+
+// ---------------------------------------------------------------------------
+// History grammar
+// ---------------------------------------------------------------------------
+
+/**
+ * A history starts with the provider's seed rows, preloads the Collection,
+ * and applies these steps. The model decides which steps are legal now; an
+ * illegal step is skipped and counted, so a list stays meaningful after
+ * shrinking.
+ *
+ * - `write`: an insert of a key the public rows lack, or an update or delete
+ *   of a key they hold, with no other pending mutation on that key. An update
+ *   that changes no field is not generated. An update without `note` of a
+ *   row that holds one removes the field. Its plan rejects only with
+ *   `write-rejection` and is held only with `held-writes`.
+ * - `release`: the provider answers the oldest held request (`held-writes`).
+ * - `foreign`: another client commits an upsert or a delete while no
+ *   mutation is pending (`foreign-commits`).
+ *
+ * After the last step the check releases every held request, reaching a
+ * quiescent cut. Keys range over 1..4 and titles over three values, so writes
+ * revisit keys; a row carries `note` half the time, so an update can add or
+ * remove a field.
+ */
+export type MutationStep =
+  | {
+      readonly kind: `write`
+      readonly type: `insert` | `update` | `delete`
+      readonly id: number
+      readonly title: string
+      readonly note?: string
+      readonly outcome: `accept` | `reject`
+      readonly held: boolean
+    }
+  | { readonly kind: `release` }
+  | { readonly kind: `foreign`; readonly change: ProviderChange }
+
+export interface MutationHistory {
+  readonly seed: ReadonlyArray<ConformanceRow>
+  readonly steps: ReadonlyArray<MutationStep>
+}
+
+const rowArb: fc.Arbitrary<ConformanceRow> = fc.record(
+  {
+    id: fc.integer({ min: 1, max: 4 }),
+    title: fc.constantFrom(`a`, `b`, `c`),
+    note: fc.constantFrom(`x`, `y`),
+  },
+  { requiredKeys: [`id`, `title`] },
+)
+
+/** Generates histories whose steps use only the driver's capabilities. */
+export function mutationHistoryArb(
+  domain: Pick<MutationDriver, `capabilities`>,
+): fc.Arbitrary<MutationHistory> {
+  const { capabilities } = domain
+  const write = fc
+    .record({
+      type: fc.constantFrom(
+        `insert` as const,
+        `update` as const,
+        `delete` as const,
+      ),
+      row: rowArb,
+      outcome: capabilities.has(`write-rejection`)
+        ? fc.constantFrom(
+            `accept` as const,
+            `accept` as const,
+            `reject` as const,
+          )
+        : fc.constant(`accept` as const),
+      held: capabilities.has(`held-writes`) ? fc.boolean() : fc.constant(false),
+    })
+    .map(({ type, row, outcome, held }): MutationStep => ({
+      kind: `write`,
+      type,
+      id: row.id,
+      title: row.title,
+      ...(row.note === undefined ? {} : { note: row.note }),
+      outcome,
+      held,
+    }))
+  const steps: Array<{
+    weight: number
+    arbitrary: fc.Arbitrary<MutationStep>
+  }> = [{ weight: 6, arbitrary: write }]
+  if (capabilities.has(`held-writes`)) {
+    steps.push({
+      weight: 3,
+      arbitrary: fc.constant({ kind: `release` as const }),
+    })
+  }
+  if (capabilities.has(`foreign-commits`)) {
+    steps.push({
+      weight: 2,
+      arbitrary: fc.oneof(
+        rowArb.map((row): MutationStep => ({
+          kind: `foreign`,
+          change: { type: `upsert`, row },
+        })),
+        fc.integer({ min: 1, max: 4 }).map((id): MutationStep => ({
+          kind: `foreign`,
+          change: { type: `delete`, id },
+        })),
+      ),
+    })
+  }
+  return fc.record({
+    seed: fc.uniqueArray(rowArb, { selector: (row) => row.id, maxLength: 3 }),
+    steps: fc.array(fc.oneof(...steps), { minLength: 1, maxLength: 10 }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Independent model
+// ---------------------------------------------------------------------------
+
+/**
+ * A row as the model compares it: its title, and its note or the note's
+ * absence. Fields compare by own property, so an own `undefined` note differs
+ * from an absent one (FID-1).
+ */
+function rowValue(row: ConformanceRow): string {
+  return JSON.stringify([
+    row.title,
+    Object.hasOwn(row, `note`) ? [row.note ?? null] : [],
+  ])
+}
+
+type RowState = ReadonlyArray<[number, string]>
+
+function rowState(rows: ReadonlyMap<number, string>): RowState {
+  return [...rows].sort(([a], [b]) => a - b)
+}
+
+function rowsOf(rows: Iterable<ConformanceRow>): RowState {
+  return rowState(new Map([...rows].map((row) => [row.id, rowValue(row)])))
+}
+
+function sameRows(a: RowState, b: RowState): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      ([id, value], index) => b[index]![0] === id && b[index]![1] === value,
+    )
+  )
+}
+
+/** A mutation whose plan has not decided it yet. */
+interface PendingWrite {
+  readonly index: number
+  readonly type: `insert` | `update` | `delete`
+  readonly id: number
+  /** The authored row's model value; absent for a delete. */
+  readonly value?: string
+  readonly plan: WritePlan
+  requested: boolean
+}
+
+type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
+
+/**
+ * The model holds only what a legal next step can observe:
+ *
+ * - `provider` is the provider's committed rows: the seed, every accepted
+ *   write, and every commit from another client, in commit order.
+ * - `pending` lists the mutations not yet decided, in author order. MUT-10
+ *   orders their requests: the first is requested at once, and each later
+ *   one only after every earlier one is decided.
+ * - `requests` is every write request MUT-8 and MUT-10 allow so far.
+ * - `settlements` is each write's `when('settled')` settlement.
+ *
+ * The public rows are `provider` with `pending` folded on in author order:
+ * core shows a mutation's optimistic state until its mutation function
+ * settles, and a fulfilled write's provider copy replaces it in the same
+ * publication. Nothing else is state: a decided write is either in
+ * `provider` or gone.
+ */
+interface MutationModel {
+  provider: Map<number, string>
+  pending: Array<PendingWrite>
+  requests: Array<{ type: WriteRequest[`type`]; id: number; value?: string }>
+  settlements: Array<ExpectedSettlement>
+}
+
+function initialModel(seed: ReadonlyArray<ConformanceRow>): MutationModel {
+  return {
+    provider: new Map(seed.map((row) => [row.id, rowValue(row)])),
+    pending: [],
+    requests: [],
+    settlements: [],
+  }
+}
+
+/**
+ * The row a write authors. An update that drops `note` from a row holding one
+ * removes the field, which the update API represents as an own `undefined`
+ * field (the documented rule in packages/db/tests/proxy-detachment-contract-oracle.test.ts;
+ * maintainer decision 2026-11-03).
+ */
+function authoredValue(
+  step: Extract<MutationStep, { kind: `write` }>,
+  held: string | undefined,
+): string {
+  const removesNote =
+    step.type === `update` &&
+    step.note === undefined &&
+    held !== undefined &&
+    (JSON.parse(held) as [string, Array<unknown>])[1].length > 0
+  return rowValue({
+    id: step.id,
+    title: step.title,
+    ...(step.note === undefined
+      ? removesNote
+        ? { note: undefined }
+        : {}
+      : { note: step.note }),
+  })
+}
+
+function fold(
+  rows: ReadonlyMap<number, string>,
+  writes: ReadonlyArray<PendingWrite>,
+): Map<number, string> {
+  const folded = new Map(rows)
+  for (const write of writes) {
+    if (write.type === `delete`) folded.delete(write.id)
+    else folded.set(write.id, write.value!)
+  }
+  return folded
+}
+
+/** The public rows the model predicts. */
+function visible(state: MutationModel): RowState {
+  return rowState(fold(state.provider, state.pending))
+}
+
+/** Decide a write by its plan: an accepted one enters the provider's rows. */
+function decide(state: MutationModel, write: PendingWrite): void {
+  if (write.plan.outcome === `accept`) {
+    if (write.type === `delete`) state.provider.delete(write.id)
+    else state.provider.set(write.id, write.value!)
+    state.settlements[write.index] = `fulfilled`
+  } else {
+    state.settlements[write.index] = { rejected: write.plan.error }
+  }
+  state.pending.splice(state.pending.indexOf(write), 1)
+}
+
+/**
+ * MUT-10: request the first pending mutation if it has not been; a request
+ * answered at once is decided at once, which admits the next. Returns the
+ * public rows after each decision, for the publication check.
+ */
+function advance(state: MutationModel): Array<RowState> {
+  const states: Array<RowState> = []
+  for (;;) {
+    const first = state.pending[0]
+    if (!first) return states
+    if (!first.requested) {
+      first.requested = true
+      state.requests.push({
+        type: first.type,
+        id: first.id,
+        ...(first.value === undefined ? {} : { value: first.value }),
+      })
+    }
+    if (first.plan.held) return states
+    decide(state, first)
+    states.push(visible(state))
+  }
+}
+
+/** What a step did, for reach and law names. */
+type StepDone =
+  | {
+      kind: `write`
+      type: PendingWrite[`type`]
+      outcome: WritePlan[`outcome`]
+      held: boolean
+      queued: boolean
+    }
+  | { kind: `release`; outcome: WritePlan[`outcome`] }
+  | { kind: `foreign` }
+
+/**
+ * Applies one step to the model. Returns undefined when the step is not
+ * legal now, without moving the model, and otherwise what it did and the
+ * public rows after each change it publishes, in order.
+ */
+function stepModel(
+  state: MutationModel,
+  step: MutationStep,
+  plan: (step: Extract<MutationStep, { kind: `write` }>) => WritePlan,
+): { done: StepDone; published: Array<RowState> } | undefined {
+  switch (step.kind) {
+    case `write`: {
+      const held = new Map(visible(state))
+      const busy = state.pending.some((write) => write.id === step.id)
+      const legal =
+        step.type === `insert` ? !held.has(step.id) : held.has(step.id)
+      const value =
+        step.type === `delete`
+          ? undefined
+          : authoredValue(step, held.get(step.id))
+      // An update that changes no field records no mutation in core; no law
+      // fixes its persistence, so the grammar leaves it out.
+      const noop = step.type === `update` && held.get(step.id) === value
+      if (busy || !legal || noop) return undefined
+      const queued = state.pending.length > 0
+      const write: PendingWrite = {
+        index: state.settlements.length,
+        type: step.type,
+        id: step.id,
+        ...(value === undefined ? {} : { value }),
+        plan: plan(step),
+        requested: false,
+      }
+      state.settlements.push(`pending`)
+      state.pending.push(write)
+      // The optimistic state publishes when the write call returns.
+      const published = [visible(state), ...advance(state)]
+      return {
+        done: {
+          kind: `write`,
+          type: step.type,
+          outcome: step.outcome,
+          held: step.held,
+          queued,
+        },
+        published,
+      }
+    }
+    case `release`: {
+      const first = state.pending[0]
+      if (!first?.requested || !first.plan.held) return undefined
+      decide(state, first)
+      const published = [visible(state), ...advance(state)]
+      return {
+        done: { kind: `release`, outcome: first.plan.outcome },
+        published,
+      }
+    }
+    case `foreign`: {
+      if (state.pending.length > 0) return undefined
+      if (step.change.type === `upsert`)
+        state.provider.set(step.change.row.id, rowValue(step.change.row))
+      else state.provider.delete(step.change.id)
+      return { done: { kind: `foreign` }, published: [visible(state)] }
+    }
+  }
+}
+
+/**
+ * The publications a step owes: each change of the public rows, in order. A
+ * change that leaves the rows as they were publishes nothing, as an accepted
+ * write whose provider copy equals its optimistic state does.
+ */
+function owedPublications(
+  before: RowState,
+  states: ReadonlyArray<RowState>,
+): Array<RowState> {
+  const owed: Array<RowState> = []
+  let last = before
+  for (const next of states) {
+    if (!sameRows(next, last)) owed.push(next)
+    last = next
+  }
+  return owed
+}
+
+// ---------------------------------------------------------------------------
+// Refinement check
+// ---------------------------------------------------------------------------
+
+/** Declared states whose laws need generated histories to reach them. */
+export const mutationReachStates = [
+  `insert-accepted`,
+  `update-accepted`,
+  `delete-accepted`,
+  `write-rejected`,
+  `held-write-pending`,
+  `write-queued-behind-held`,
+  `held-write-rejected`,
+  `foreign-commit`,
+  `quiescent-after-writes`,
+] as const
+
+export type MutationReachState = (typeof mutationReachStates)[number]
+
+const capabilityOfState: Partial<
+  Record<MutationReachState, MutationCapability>
+> = {
+  'write-rejected': `write-rejection`,
+  'held-write-pending': `held-writes`,
+  'write-queued-behind-held': `held-writes`,
+  'held-write-rejected': `held-writes`,
+  'foreign-commit': `foreign-commits`,
+}
+
+/** The declared states a driver's capabilities let histories reach. */
+export function mutationReachStatesFor(
+  domain: Pick<MutationDriver, `capabilities`>,
+): Array<MutationReachState> {
+  return mutationReachStates.filter((state) => {
+    const capability = capabilityOfState[state]
+    if (state === `held-write-rejected`)
+      return (
+        domain.capabilities.has(`held-writes`) &&
+        domain.capabilities.has(`write-rejection`)
+      )
+    return capability === undefined || domain.capabilities.has(capability)
+  })
+}
+
+type Settlement = `pending` | `fulfilled` | { rejected: unknown }
+
+function recordSettlement(promise: Promise<unknown>): { current: Settlement } {
+  const record: { current: Settlement } = { current: `pending` }
+  promise.then(
+    () => {
+      record.current = `fulfilled`
+    },
+    (error: unknown) => {
+      record.current = { rejected: error }
+    },
+  )
+  return record
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * The checkpoint premise: an adapter answers its provider and applies the
+ * provider's change within a few event-loop turns, or within the
+ * propagation step its fixture declares. A slower adapter shows as a
+ * mismatch at this cut, not as a pass.
+ */
+async function settle(fixture: MutationFixture): Promise<void> {
+  for (let turn = 0; turn < 3; turn++) await sleep(0)
+  await fixture.settle?.()
+}
+
+/**
+ * Records the public rows after each change publication (MUT-1, MUT-2). A
+ * subscription forwards changes only for keys it has sent, so it starts with
+ * the initial state, which is the baseline and not a publication.
+ */
+function recordPublications(collection: ObservedCollection) {
+  const rows = new Map<number, string>()
+  let inconsistent = false
+  let initial = true
+  let publications: Array<RowState> = []
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      if (initial) {
+        initial = false
+        for (const change of changes)
+          rows.set(change.key, rowValue(change.value))
+        return
+      }
+      if (changes.length === 0) return
+      for (const change of changes) {
+        if (change.type === `delete`) {
+          if (!rows.delete(change.key)) inconsistent = true
+        } else {
+          if ((change.type === `insert`) === rows.has(change.key))
+            inconsistent = true
+          rows.set(change.key, rowValue(change.value))
+        }
+      }
+      publications.push(
+        inconsistent ? [[-1, `inconsistent change events`]] : rowState(rows),
+      )
+    },
+    { includeInitialState: true },
+  )
+  // An empty Collection's initial state is no callback at all.
+  initial = false
+  return {
+    take: () => {
+      const taken = publications
+      publications = []
+      return taken
+    },
+    stop: () => subscription.unsubscribe(),
+  }
+}
+
+function watchDetachedFailures(driver: MutationDriver) {
+  const found: Array<string> = []
+  const onRejection = (reason: unknown) => {
+    found.push(`unhandled rejection: ${String(reason)}`)
+  }
+  const hasProcess = typeof process !== `undefined`
+  if (hasProcess) process.on(`unhandledRejection`, onRejection)
+  const original = { error: console.error, warn: console.warn }
+  for (const level of [`error`, `warn`] as const) {
+    console[level] = (...args: Array<unknown>) => {
+      if (!driver.declaredDiagnostic?.(level, args)) {
+        found.push(`console.${level}: ${args.map(String).join(` `)}`)
+      }
+    }
+  }
+  return {
+    found: () => found,
+    stop: () => {
+      if (hasProcess) process.off(`unhandledRejection`, onRejection)
+      console.error = original.error
+      console.warn = original.warn
+    },
+  }
+}
+
+export interface MutationCheckOptions {
+  /** Called when the history enters a declared state (ORC-015). */
+  reach?: (state: MutationReachState) => void
+}
+
+/**
+ * Runs one history through a driver and compares every checkpoint with the
+ * model. Throws a `ConformanceViolation` naming the first violated law. The
+ * fixture is always cleaned up; a cleanup failure after a violation is kept
+ * as a secondary error (ORC-010).
+ */
+export async function checkMutationHistory(
+  driver: MutationDriver,
+  history: MutationHistory,
+  options: MutationCheckOptions = {},
+): Promise<{ accepted: number; skipped: number }> {
+  const reach = options.reach ?? (() => {})
+  const detached = watchDetachedFailures(driver)
+  let created: MutationFixture | undefined
+  try {
+    created = await driver.create(structuredClone(history.seed))
+  } catch (error) {
+    detached.stop()
+    throw error
+  }
+  const fixture = created
+  const { collection, provider, writer } = fixture
+  const state = initialModel(history.seed)
+  const receipts: Array<{ current: Settlement }> = []
+  const failures: Array<Error> = []
+  let accepted = 0
+  let skipped = 0
+  let wrote = 0
+  let primary: unknown
+  let publications: ReturnType<typeof recordPublications> | undefined
+
+  const steps = history.steps
+  const violation = (law: string, step: number, want: unknown, got: unknown) =>
+    new ConformanceViolation(law, step, want, got, history)
+  const matches = (reported: unknown, failure: Error) =>
+    driver.matchesFailure
+      ? driver.matchesFailure(reported, failure)
+      : reported === failure
+
+  /** MUT-1, MUT-2, MUT-8, MUT-10, MUT-13, FID-5, HEALTH-5 at one cut. */
+  const compare = async (stepIndex: number) => {
+    await settle(fixture)
+    const found = detached.found()
+    if (found.length > 0)
+      throw violation(`HEALTH-5`, stepIndex, `no detached failure`, found)
+    // The provider's request log first: it observes MUT-8, MUT-10, and
+    // MUT-13 directly, where the rows show their effect only later.
+    const requests = provider.requests().map((request) => ({
+      type: request.type,
+      id: request.id,
+      ...(request.row === undefined ? {} : { value: rowValue(request.row) }),
+    }))
+    if (JSON.stringify(requests) !== JSON.stringify(state.requests))
+      throw violation(
+        requests.length > state.requests.length
+          ? `MUT-10/MUT-13 (provider requests)`
+          : `MUT-8 (provider requests)`,
+        stepIndex,
+        state.requests,
+        requests,
+      )
+    const quiescent = state.pending.length === 0
+    const rows = rowsOf(collection.values())
+    if (!sameRows(rows, visible(state)))
+      throw violation(
+        quiescent ? `FID-5 (public rows)` : `MUT-1 (public rows)`,
+        stepIndex,
+        visible(state),
+        rows,
+      )
+    state.settlements.forEach((expected, index) => {
+      const got = receipts[index]!.current
+      const ok =
+        expected === `pending` || expected === `fulfilled`
+          ? got === expected
+          : typeof got === `object` && matches(got.rejected, expected.rejected)
+      if (!ok)
+        throw violation(
+          typeof expected === `object`
+            ? `MUT-2 (settlement)`
+            : `MUT-13 (settlement)`,
+          stepIndex,
+          typeof expected === `object` ? expected.rejected.message : expected,
+          typeof got === `object` ? String(got.rejected) : got,
+        )
+    })
+    if (!quiescent) return
+    // FID-5 at a quiescent cut: public rows, base, and provider are one.
+    const base = rowsOf(fixture.base())
+    if (!sameRows(base, rowState(state.provider)))
+      throw violation(`FID-5 (base)`, stepIndex, rowState(state.provider), base)
+    const providerRows = rowsOf(await provider.rows())
+    if (!sameRows(providerRows, rowState(state.provider)))
+      throw violation(
+        `FID-5 (provider rows)`,
+        stepIndex,
+        rowState(state.provider),
+        providerRows,
+      )
+    if (wrote > 0) reach(`quiescent-after-writes`)
+  }
+
+  let published = visible(state)
+  const checkPublications = (
+    stepIndex: number,
+    owed: ReadonlyArray<RowState>,
+    law: string,
+  ) => {
+    // Each change of row values, in order; a publication of the same row
+    // values (a virtual row field change) is not one.
+    const got: Array<RowState> = []
+    for (const rows of publications!.take()) {
+      if (!sameRows(rows, got.at(-1) ?? published)) got.push(rows)
+    }
+    published = got.at(-1) ?? published
+    const ok =
+      got.length === owed.length &&
+      got.every((rows, index) => sameRows(rows, owed[index]!))
+    if (!ok) throw violation(`${law} (publication)`, stepIndex, owed, got)
+  }
+
+  // The plan the model decided the last write by; the provider gets it too.
+  let lastPlan: WritePlan | undefined
+  const planFor = (
+    step: Extract<MutationStep, { kind: `write` }>,
+  ): WritePlan => {
+    const error = new Error(`conformance write rejected ${failures.length}`)
+    failures.push(error)
+    lastPlan = { outcome: step.outcome, held: step.held, error }
+    return lastPlan
+  }
+
+  try {
+    await collection.preload()
+    publications = recordPublications(collection)
+    await compare(-1)
+    for (const [index, step] of steps.entries()) {
+      const before = visible(state)
+      const result = stepModel(state, step, planFor)
+      if (result === undefined) {
+        skipped++
+        continue
+      }
+      accepted++
+      const { done } = result
+      let law = `MUT-1`
+      switch (done.kind) {
+        case `write`: {
+          const write = step as Extract<MutationStep, { kind: `write` }>
+          provider.plan(lastPlan!)
+          const row: ConformanceRow = {
+            id: write.id,
+            title: write.title,
+            ...(write.note === undefined ? {} : { note: write.note }),
+          }
+          const receipt =
+            write.type === `insert`
+              ? writer.insert(row)
+              : write.type === `update`
+                ? writer.update(row)
+                : writer.delete(write.id)
+          receipts.push(recordSettlement(receipt.when(`settled`)))
+          wrote++
+          if (write.held) reach(`held-write-pending`)
+          if (done.queued) reach(`write-queued-behind-held`)
+          if (write.outcome === `reject`) reach(`write-rejected`)
+          else if (!write.held) reach(`${write.type}-accepted` as const)
+          if (write.outcome === `reject` && !write.held) law = `MUT-2`
+          break
+        }
+        case `release`:
+          await provider.release()
+          if (done.outcome === `reject`) {
+            reach(`held-write-rejected`)
+            law = `MUT-2`
+          }
+          break
+        case `foreign`:
+          await provider.foreignCommit!(
+            (step as Extract<MutationStep, { kind: `foreign` }>).change,
+          )
+          reach(`foreign-commit`)
+          break
+      }
+      await compare(index)
+      checkPublications(index, owedPublications(before, result.published), law)
+    }
+    // Answer every held request, reaching a quiescent cut (FID-5).
+    while (state.pending.length > 0) {
+      const before = visible(state)
+      const result = stepModel(state, { kind: `release` }, planFor)
+      if (result === undefined) break
+      await provider.release()
+      await compare(steps.length)
+      checkPublications(
+        steps.length,
+        owedPublications(before, result.published),
+        `MUT-1`,
+      )
+    }
+  } catch (error) {
+    primary = error
+  }
+
+  const cleanupErrors: Array<unknown> = []
+  try {
+    publications?.stop()
+    await collection.cleanup()
+    await settle(fixture)
+    if (primary === undefined && detached.found().length > 0) {
+      primary = violation(
+        `HEALTH-5`,
+        steps.length,
+        `no detached failure`,
+        detached.found(),
+      )
+    }
+  } catch (error) {
+    cleanupErrors.push(error)
+  } finally {
+    detached.stop()
+  }
+  try {
+    await fixture.dispose?.()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  if (primary !== undefined) {
+    if (cleanupErrors.length === 0) throw primary
+    throw new AggregateError(cleanupErrors, `conformance violation`, {
+      cause: primary,
+    })
+  }
+  if (cleanupErrors.length > 0) throw cleanupErrors[0]
+  return { accepted, skipped }
+}
+
+/** A reach counter, such as the one `createOracleReach` returns. */
+export interface MutationReachCounter {
+  beginHistory: () => void
+  reach: (state: MutationReachState) => void
+}
+
+/**
+ * The generated property every driver runs. Shrinking keeps the first
+ * violated law (ORC-010): a smaller history that fails a different law
+ * counts as passing.
+ */
+export function mutationProperty(
+  driver: MutationDriver,
+  reach?: MutationReachCounter,
+) {
+  let target: string | undefined
+  return fc.asyncProperty(mutationHistoryArb(driver), async (history) => {
+    reach?.beginHistory()
+    try {
+      await checkMutationHistory(driver, history, { reach: reach?.reach })
+    } catch (error) {
+      const law =
+        error instanceof ConformanceViolation
+          ? error.law
+          : `failure outside the comparison`
+      target ??= law
+      if (law === target) throw error
+    }
+  })
+}
+
+// Exported for calibration tests: the model's prediction for a history.
+export const mutationModel = {
+  initial: initialModel,
+  step: stepModel,
+  visible,
+  owedPublications,
+}

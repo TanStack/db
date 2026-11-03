@@ -34,3 +34,26 @@ export {
   toSqlRow,
 } from './observed-view'
 export type { AdapterCollection } from './observed-view'
+export {
+  checkMutationHistory,
+  mutationHistoryArb,
+  mutationModel,
+  mutationProperty,
+  mutationReachStates,
+  mutationReachStatesFor,
+} from './mutation-oracle'
+export type {
+  MutationCapability,
+  MutationCheckOptions,
+  MutationDriver,
+  MutationFixture,
+  MutationHistory,
+  MutationProvider,
+  MutationReachCounter,
+  MutationReachState,
+  MutationReceipt,
+  MutationStep,
+  MutationWriter,
+  WritePlan,
+  WriteRequest,
+} from './mutation-oracle'

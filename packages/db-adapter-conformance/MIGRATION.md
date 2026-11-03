@@ -534,3 +534,13 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     replay, or skip the check on the React path, are rejected. A fixed-seed
     campaign now runs the React client.
   - **Size:** convex-db-collection +26 gzip bytes for LIFE-10.
+- **2026-11-03, mutations family, reference adapter.** The family's oracle
+  and reference adapter are GREEN on both campaigns, with every declared
+  reach state met, and seven mutants each rejected with their law.
+  - **Oracle changes this run exposed:** a publication of unchanged row values
+    (core's `$hasPendingWrites` update) is not a change of row values; a
+    subscription forwards changes only for keys it sent, so the recorder
+    starts from the initial state.
+  - **Maintainer decision:** a removed field stays an own `undefined`, the
+    documented rule; the core owner `optimistic-history-oracle` now generates
+    field removal.
