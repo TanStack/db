@@ -1,7 +1,9 @@
 /**
  * Law (L5): every run budget that an oracle property uses is tracked by
  * scripts/check-oracle-run-counts.mjs, wherever it is written. A budget is the
- * numRuns of a fixed-seed campaign, or the run count of a registered property.
+ * numRuns of a fixed-seed campaign, or the run count of a registered property,
+ * whether the property passes it to `oraclePropertyOptions` or declares it as
+ * `oracleProperty({ id, histories: { runs } })`.
  * When the branch lowers a budget, or removes it from every tracked oracle
  * file, the script reports it, so the change is visible to the reviewer.
  *
@@ -26,7 +28,10 @@
  * key is unique to its budget, except that a fixed seed can be shared with an
  * unrelated campaign in the second oracle file. Then the removal law treats
  * the seed as still present, and the model follows it. Star re-exports are not
- * generated. A count may be wrapped in oracleRuns. The model judges the
+ * generated. A count may be wrapped in oracleRuns, except in `oracleProperty`,
+ * whose framework scales `runs` itself. An `oracleProperty` call is generated
+ * with inline `histories`; a `histories` object held in a constant, and an id
+ * built by a template with expressions, are not. The model judges the
  * reported budget, its base value, and its head value or removal; it does not
  * predict the wording of a line.
  *
@@ -41,8 +46,8 @@
  */
 import { execFile } from 'node:child_process'
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -79,6 +84,9 @@ const LARGE_PADDING = 1_100_000
 
 // -- 1. Grammar ---------------------------------------------------------------
 //
+// A property budget is written through `oraclePropertyOptions` or as an
+// `oracleProperty` definition, and a property budget may migrate from the
+// first form at base to the second at head, as a port onto the framework does.
 // A budget's count is written inline, in support module A, or in A and passed
 // on by support module B's re-export. Its key is inline or imported from A. A
 // change edits the count where it is defined, or writes a literal at the call.
@@ -88,7 +96,8 @@ const LARGE_PADDING = 1_100_000
 // A are `.ts` or `.js`; an import names A with or without the `.js` suffix.
 
 const budgetSkeleton = fc.record({
-  form: fc.constantFrom(`property`, `seed`),
+  form: fc.constantFrom(`property`, `framework`, `seed`),
+  migrates: fc.boolean(),
   source: fc.constantFrom(`inline`, `imported`, `reexported`),
   keySource: fc.constantFrom(`inline`, `imported`),
   wrapped: fc.boolean(),
@@ -198,9 +207,12 @@ function resolveBudget(skeleton, index, sources, files) {
   return {
     index,
     form: skeleton.form,
+    // A property budget written through `oraclePropertyOptions` at base that
+    // is an `oracleProperty` definition at head.
+    migrates: skeleton.form === `property` && skeleton.migrates,
     source,
     keySource: skeleton.keySource,
-    wrapped: skeleton.wrapped,
+    wrapped: skeleton.form !== `framework` && skeleton.wrapped,
     before: skeleton.base,
     after: headValue,
     changed: headValue !== skeleton.base,
@@ -218,7 +230,7 @@ function resolveBudget(skeleton, index, sources, files) {
       skeleton.fate !== `other-oracle` &&
       !files.otherNew,
     key:
-      skeleton.form === `property`
+      skeleton.form !== `seed`
         ? `property budget.${skeleton.keySource === `imported` ? `q` : `p`}${index}`
         : `fixed seed ${1000 + index}`,
   }
@@ -328,9 +340,11 @@ function renderFiles(program, revision) {
     const count = isHead ? budget.after : budget.before
     const seed = 1000 + i
     // The definition of an imported key and count lives in support module A.
+    // The form a budget is written in at this revision.
+    const form = isHead && budget.migrates ? `framework` : budget.form
     if (budget.keySource === `imported`) {
       support.line(
-        budget.form === `property`
+        budget.form !== `seed`
           ? `export const PROP_${i} = 'budget.q${i}'`
           : `export const SEED_${i} = ${seed}`,
       )
@@ -369,20 +383,23 @@ function renderFiles(program, revision) {
       : budget.source === `reexported` && !inSupport
         ? use(`RUNS_${i}`, files.reexport)
         : use(`RUNS_${i}`, files.support)
-    const runs = budget.wrapped ? `oracleRuns(${countText})` : countText
+    // A migrated budget drops its oracleRuns wrapper, as the framework scales.
+    const runs =
+      budget.wrapped && form !== `framework`
+        ? `oracleRuns(${countText})`
+        : countText
     const keyText =
       budget.keySource === `imported`
-        ? use(
-            budget.form === `property` ? `PROP_${i}` : `SEED_${i}`,
-            files.support,
-          )
-        : budget.form === `property`
+        ? use(budget.form !== `seed` ? `PROP_${i}` : `SEED_${i}`, files.support)
+        : budget.form !== `seed`
           ? `'budget.p${i}'`
           : `${seed}`
     const call =
-      budget.form === `property`
+      form === `property`
         ? `export const opts${i} = oraclePropertyOptions(${runs}, ${keyText})`
-        : `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), { numRuns: ${runs}, seed: ${keyText} }) }`
+        : form === `framework`
+          ? `export const opts${i} = oracleProperty({ id: ${keyText}, law: {}, histories: { arbitrary: fc.integer(), runs: ${runs} } })`
+          : `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), { numRuns: ${runs}, seed: ${keyText} }) }`
     hostText.line(call)
     // The oracle file uses a campaign in A by importing it.
     if (inSupport) {
@@ -390,7 +407,7 @@ function renderFiles(program, revision) {
         .get(files.oracle)
         .import(
           supportSpecifier,
-          budget.form === `property` ? `opts${i}` : `campaign${i}`,
+          budget.form !== `seed` ? `opts${i}` : `campaign${i}`,
         )
     }
   }
@@ -534,6 +551,8 @@ const STATES = [
   `imported-count`,
   `re-exported-count`,
   `imported-key`,
+  `framework-definition`,
+  `migrated-to-framework`,
   `support-only-change`,
   `oracle-and-support-change`,
   `lowered-budget`,
@@ -559,6 +578,8 @@ function recordStates(program) {
     if (budget.source === `imported`) states.add(`imported-count`)
     if (budget.source === `reexported`) states.add(`re-exported-count`)
     if (budget.keySource === `imported`) states.add(`imported-key`)
+    if (budget.form === `framework`) states.add(`framework-definition`)
+    if (budget.migrates) states.add(`migrated-to-framework`)
     if (budget.after < budget.before) states.add(`lowered-budget`)
     if (budget.callAt === `support`) states.add(`campaign-in-support`)
     if (budget.callAt === `oracle` && budget.fate === `swap`) {
