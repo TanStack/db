@@ -234,9 +234,10 @@ export function rxdbCollectionOptions(
           next: (ev) => {
             const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
             switch (ev.operation) {
+              // The initial read can already hold a document whose insert
+              // event was buffered, so an insert writes as an update. Core
+              // inserts an updated key it does not hold.
               case `INSERT`:
-                queue({ type: `insert`, value: cur })
-                break
               case `UPDATE`:
                 queue({ type: `update`, value: cur })
                 break
@@ -294,8 +295,9 @@ export function rxdbCollectionOptions(
 
       return stopOngoingFetch
     },
-    // Expose the getSyncMetadata function
-    getSyncMetadata: undefined,
+    // An RxDB event carries the whole document, so an update replaces the
+    // row and a field the document no longer has goes.
+    rowUpdateMode: `full`,
   }
 
   const collectionConfig: CollectionConfig<Row, string> = {

@@ -4,7 +4,7 @@ import { PropRef, Value, getPropRefPropertyPath } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
-import { deepEquals } from '../utils.js'
+import { sameRowValue } from '../utils.js'
 import { normalizeError } from '../utils/error.js'
 import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
@@ -827,7 +827,7 @@ export class CollectionSubscription
           key,
           value: previousValue,
         })
-      } else if (!deepEquals(value, previousValue)) {
+      } else if (!sameRowValue(value, previousValue)) {
         replacement.push({
           type: `update`,
           key,
@@ -1911,7 +1911,7 @@ export class CollectionSubscription
         })
       } else if (
         this.truncateReplayState?.privateRows ||
-        !deepEquals(previous, change.value)
+        !sameRowValue(previous, change.value)
       ) {
         // An equal retained row still belongs in the private replacement.
         // Its final diff suppresses the redundant public update.

@@ -204,6 +204,13 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `adapter-conformance.eager-live-source.reference`,
+  `adapter-conformance.eager-live-source.neon-realtime`,
+  `adapter-conformance.eager-live-source.trailbase`,
+  `adapter-conformance.eager-live-source.rxdb`,
+  `adapter-conformance.eager-live-source.powersync`,
+  `adapter-conformance.eager-live-source.electric`,
+  `adapter-conformance.eager-live-source.convex`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.required-history`,
@@ -436,7 +443,7 @@ const publicationProperties = [
 
 // utils-oracle and comparison-oracle number their properties in file order.
 const utilsProperties = Array.from(
-  { length: 40 },
+  { length: 41 },
   (_, index) => `utils.${index + 1}`,
 )
 const comparisonProperties = Array.from(

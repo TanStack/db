@@ -139,9 +139,14 @@ type PendingReplay = {
   settled: boolean
 }
 
+// Values include -0, a distinct row value from 0 (maintainer decision,
+// 2026-10-29), so a replay can replace a row that differs only by a zero's
+// sign.
+const replayValue = fc.oneof(fc.integer({ min: -2, max: 2 }), fc.constant(-0))
+
 const rowArbitrary: fc.Arbitrary<ReplayRow> = fc.record({
   id: fc.constantFrom(`one` as const, `two` as const),
-  value: fc.integer({ min: -2, max: 2 }),
+  value: replayValue,
 })
 
 const rowsArbitrary = fc.uniqueArray(rowArbitrary, {
@@ -156,7 +161,7 @@ function replayLoadArbitrary(
   return fc.record({
     demandId: fc.constant(demandId),
     rows: fc
-      .option(fc.integer({ min: -2, max: 2 }), { nil: undefined })
+      .option(replayValue, { nil: undefined })
       .map((value) => (value === undefined ? [] : [{ id: demandId, value }])),
     outcome: fc.constantFrom(`resolve` as const, `reject` as const),
     writeBeforeSettlement: fc.boolean(),
@@ -168,7 +173,7 @@ function sourceActionArbitrary(
 ): fc.Arbitrary<SourceAction> {
   return fc.oneof(
     fc
-      .tuple(fc.constantFrom(...demandIds), fc.integer({ min: -2, max: 2 }))
+      .tuple(fc.constantFrom(...demandIds), replayValue)
       .map(([id, value]) => ({ type: `put` as const, row: { id, value } })),
     fc
       .constantFrom(...demandIds)
@@ -307,6 +312,9 @@ function rowsById(
   return new Map(rows.map((row) => [row.id, { ...row }]))
 }
 
+// Reach: replacements in which a row changed only by the sign of a zero.
+let zeroSignReplacements = 0
+
 function publicationDiff(
   baseline: ReadonlyMap<string | number, ReplayRow>,
   finalRows: ReadonlyMap<string | number, ReplayRow>,
@@ -320,7 +328,9 @@ function publicationDiff(
         key,
         value: { ...previousValue },
       })
-    } else if (value.value !== previousValue.value) {
+    } else if (!Object.is(value.value, previousValue.value)) {
+      // -0 and 0 are distinct row values.
+      if (value.value === previousValue.value) zeroSignReplacements++
       changes.push({
         type: `update`,
         key,
@@ -526,7 +536,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     }
 
     const previous = sourceRows.get(action.row.id)
-    if (previous?.value === action.row.value) return false
+    // A put of the value the source holds writes nothing; -0 is not 0.
+    if (previous !== undefined && Object.is(previous.value, action.row.value))
+      return false
     applyRows([action.row], { type: `ordinary` })
     return true
   }
@@ -2048,6 +2060,20 @@ describe(`CollectionSubscription replay oracle`, () => {
     numRuns: generatedRuns,
     seed: 1756,
   })(`matches replay and ownership laws for a fixed seed`, runReplayScenario)
+
+  // The fixed campaign's histories reach a replacement that changes a row
+  // only by a zero's sign, where a diff without signed zeros publishes
+  // nothing.
+  it(`reaches a zero-sign replacement in the fixed campaign`, async () => {
+    zeroSignReplacements = 0
+    for (const scenario of fc.sample(replayScenarioArbitrary, {
+      seed: 1756,
+      numRuns: generatedRuns,
+    })) {
+      await runReplayScenario(scenario)
+    }
+    expect(zeroSignReplacements).toBeGreaterThan(0)
+  })
 
   fcTest.prop(
     [replayScenarioArbitrary],

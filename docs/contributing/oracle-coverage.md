@@ -1880,7 +1880,7 @@ generic visitor behavior outside the named collectors.
 | Pooled live queries | [pooled live query oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pooled-live-query-oracle.property.test.ts) | An independent `eq` model (nullish UNKNOWN, Date as timestamp, `NaN` equal to `NaN`, `-0` equal to `0`) gives membership; a live-query Collection compiled for the same query gives order, values, and status. Histories mix sync transactions, optimistic writes confirmed or rolled back, peer mounts and unmounts, and source cleanup and restart, including cleanup while a write is pending and a mount between cleanup and restart. Wholesale observers must match after every step, granular changes must match a reference observer by type, key, value, and previous value and replay to the model's rows, the layout revision must advance when keys reorder, and observing must never build the live-query Collection. Peers may add a residual `not(eq(...))` conjunct, which the model evaluates itself; a view that ignores it, reports an unfiltered `entries()`, or delivers a row entering or leaving it as an update fails it. Other residual operators use the same compiler evaluator but are not generated. Peers may also order their rows by `id` or by a `g` that can be null, with explicit `nulls`; order comes from the reference. A comparator that ignores direction or `nulls`, an order left out of the partition key, and key order instead of the query's order each fail the pinned reorder history and both campaigns. A partition that ignores a row's previous group, orders by arrival, skips normalization, skips the initial snapshot, follows the source's status after cleanup, or never terminates fails it. Two shared conformance scenarios (`eq-filter-rows`, `eq-filter-peers`) run the pooled path under React, Vue, Solid, Svelte, and Angular; a partition that ignores a row's previous group fails both under every adapter, and `eq-filter-peers` checks through `subscriberCount` that each adapter shares one source subscription per partition while mounted and releases every source subscription after the final framework unmount. The [resource-lifetime oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pooled-live-query-gc-oracle.test.ts) compares when a pooled query and a live-query Collection release their sources across `gcTime` 1, 100, 0, and `Infinity`, with and without a subscriber, and with no `gcTime`, where both use the live-query Collection default, checks that a partition waits for its views' longest `gcTime`, checks that a view resubscribed after its partition released follows later source writes as its live-query Collection does, including a view with a residual conjunct, and checks that a partition that subscribes again still serves new mounts from one source subscription. A generated cleanup-admission lane (`pooled-live-query.cleanup-admission`) crosses 2–3 views of one partition, observed or not, read by a subscribed live query or not, and view cleanups with or without `dependents`; it checks the model's rejection rule and rows and status against live-query Collections. A view that gives up its partition share when its cleanup rejects fails it. A view whose own cleanup fulfilled must show `cleaned-up` with no rows (law 14, maintainer decision), checked against the model and the live-query Collection; a view that keeps its source's status or its group's rows fails it. Further focused witnesses check that a partition keeps groups only for values that have rows or watchers, that a detached reader never sees a dropped group's revision reused, keep a pooled query's public Collection live while the view is observed, accept it as a query source, and check that a pooled query turns terminal when source cleanup starts while the adapter's cleanup is still pending, as a live-query Collection does. A detached wholesale reader of every view, kept after its peer unmounts, must match the live-query Collection at every checkpoint, and generated histories cross the dependents cascade with readers on watched and unwatched groups that hold rows (declared reach); a cleanup that empties groups without advancing their revisions, or advances only watched groups, fails it. Every view and its live-query Collection also carry an app status listener that throws; each listener gets its own call and the throw is reported uncaught, so a view that lets a listener's throw stop the others or reject the source's cleanup fails it. Generated callback-boundary histories also compare ordinary compiled and pooled core observers across return/throw, Error/undefined, zero through three healthy peers, callback position before/after peers, and `gcTime` 1–3. Failed granular bootstrap retains no unreturned ownership after grace; a held cascade cleanup (`cleanup({ dependents: true })`) gives every admitted wholesale observer one terminal `cleaned-up` snapshot/callback despite a sibling throw, and an ended partition stops following its source's health, and preserves the exact failure at settlement. Original production and independent rollback-only or all-peer-only repairs fail the respective ownership or cleanup-start comparisons. These controlled core receiving paths do not establish framework schedules, arbitrary callback programs or provider shutdown. A pinned oracle witness checks that an `eq` path whose getter throws excludes the row on both paths; a pooled path that rethrows fails it. The pooled oracle's grammar never releases a partition, so release and resubscribe histories rely on these fixed witnesses; a fixed delay, a missing unsubscribed floor, a last-`gcTime`-wins rule, and releasing at `gcTime` 0 each fail it. Removing the partition's final-listener release survives the mounted row checks but fails the shared framework unmount checkpoint and core release-timing owner. The [2026-10-01 review](oracle-reviews/2026-10-01-pooled-live-queries.md) records each ORC outcome. The shared adapter conformance suite checks the opt-in boundary in every framework: queries without `pool` keep a source subscription each in the function, config, and parameterized forms, and a pooled parameterized query follows its parameter between pool groups beside an unchanged peer. Pooling every query by default, a pooled identity that ignores literal values (React then reuses the old query), and an Angular `params` form that drops `pool` each fail it. `pooled-param-change` also reads each driver's publication log: every value published after a switch holds only the new group's rows. Each driver also logs its keyed `state` map at the same points, and the law applies to it. A pooled view that serves the previous view's rows until a later task replaces them passes every final-state check and fails only the log, in all six drivers. A view that sends the previous rows as its first change set fails the `state` log in Vue; Solid rebuilds its map from a snapshot within the same turn, and Angular builds its map from `entries()`, so that mutant cannot reach them. The `invalid-pool` scenario requires `InvalidPoolOptionError` for `true` and for `false` (the value adapters pass to say a hook cannot pool), alone, beside `gcTime`, beside `queryKey`, on a parameterized query, and on a disabled config or parameterized query, in all six drivers; a check in only one of the three readers of `pool` fails it in four of them, and Angular's `params` form failed the `false` and disabled cases until it checked its pool first. The shared `grouping-operator-switch` scenario re-renders a grouped query without `groupKeys()`, and `compile-error-after-rerender` re-renders to a select that mixes a source field with an aggregate; both require the error and no rows after it. A binding that keeps its last compiled query when compilation throws fails both in Solid, Svelte, and Angular; one that throws once and then serves that query fails the no-rows check in Solid and Svelte, and cannot occur in Angular, whose `computed` rethrows a cached error until an input changes. In `grouping-operator-switch`, React and Preact kept the grouped query before query identity held operator code, and Vue served the previous rows before its compile error stopped reaching readers through a throwing computed (also on `main` at `5649a07d4`). |
 | Live-query deferred acquisition | [deferred acquisition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/live-query-deferred-acquisition-oracle.test.ts), [React Suspense warm-cache witness](https://github.com/TanStack/db/blob/main/packages/react-db/tests/suspense-warm-cache.test.tsx) | An independent model of the law that a live-query Collection starts no provider work before a subscriber or a preload in its current sync run crosses seven source states (eager or on-demand, idle, already started or render-deferred, and an on-demand source that already holds the rows), an unordered query and an ordered window, one or two live-query levels, and eleven histories: start and read, subscribe or preload after a start, subscribe or preload without one, deferred subscription and resumption with or without a start, cleanup before a subscriber, peer start, source truncate, and restart after a run that had one. After every command it checks source sync-run starts, acquisition attempts, readiness when the call returns (the synchronous observation cut), settled readiness, and rows. A pooled block checks that building a pooled view starts no idle eager source until a view subscribes or preloads, and eight DbClient histories check that a preload answered by a pending or settled stream still resumes acquisition across eager/on-demand idle and render-deferred sources. The React streaming witness receives the on-demand render-deferral premise, starts local acquisition before the stream settles, and retains server rows until browser acquisition completes. Mutants that never defer, keep the subscriber-or-preload fact across cleanup, ignore preload, never resume a builder's subscriptions, let a deferring subscriber start a base source, build a pooled partition without deferral, never resume it, mark a preload one microtask late, or drop the stream's preload mark each fail it. The React witness checks that `useLiveSuspenseQuery` over a source that already holds the rows renders without the fallback, for eager and on-demand sources and both shapes; creating the Suspense collection started, or not preloading it in render, fails it. A later review added `peer` and `truncate` commands: a peer that starts an idle on-demand source, or a truncate on a running one, made the live query acquire before any subscriber, and both guards are killed separately. Pinned blocks check that a subscriber surviving cleanup is served after a restart while a surviving deferring subscriber is not, and that `toArrayWhenReady()` and `stateWhenReady()` count as a preload. A pinned block checks that a deferring live query is not counted in its source's `subscriberCount` or `subscribers:change` until its first subscriber, while still keeping the source from garbage collection; a Query Collection test checks that it causes no refetch. Another pinned block checks that a preload or subscriber requested by an inner live query's status handler, while the outer query creates its subscription to it, still resumes acquisition. Solid's Suspense receiving witnesses check that a resource whose preload settles first retains its live-query Collection while its sibling remains pending past the unsubscribed floor, then releases that temporary owner on both commit and abandonment, and that a preload settling after its owner unmounts cannot publish an error through the abandoned result. Open: source failure and asynchronous loads before resumption, which the subscription lifecycle oracle owns once acquisition resumes; a resume that throws, which leaves later sources unstarted only for a live query that is already in error; asynchronous sources; and arbitrary Suspense schedules with a `DbClient` beyond the bounded abandoned-render and streaming handoffs recorded above. |
 | Live-query notification algebra | [real-query and checker calibration](https://github.com/TanStack/db/blob/main/packages/db/tests/notification-laws-oracle.test.ts), [independent Map checker](https://github.com/TanStack/db/blob/main/packages/db-collection-e2e/src/utils/notification-laws-oracle.ts) | One-key synchronous source histories check exact live-query callback reconstruction and unsubscribe silence. Synthetic multi-key histories calibrate the checker; direct source Collection events remain with the change-event history owner. |
-| Flat-row change tracking | [flat change tracking oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/flat-change-tracking-oracle.property.test.ts) | Generated callbacks over flat rows, frozen or not and with or without a non-enumerable field (assignments of `0`, `-0`, `NaN`, `undefined`, functions, and fresh objects; reverts; deletions; added fields; data and accessor `defineProperty`; stored drafts; throws), run through the flat tracker, the draft proxy, and an independent model, which must report the same change sets with `0` and `-0` equal, or throw the same error and leave the rows unchanged. Defining a field acts as assigning it, and a non-enumerable field is row data only once written; the proxy broke three of those laws on `main` and the flat tracker one. Diffs using `!==`, `Object.is` alone, or no deletions fail it. It found that the proxy dropped a field added as `undefined` when another field reverted; the pinned history and both campaigns fail without that fix. Non-flat rows must fall back. The [2026-10-01 review](oracle-reviews/2026-10-01-pooled-live-queries.md) records each ORC outcome. |
+| Flat-row change tracking | [flat change tracking oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/flat-change-tracking-oracle.property.test.ts) | Generated callbacks over flat rows, frozen or not and with or without a non-enumerable field (assignments of `0`, `-0`, `NaN`, `undefined`, functions, and fresh objects; reverts; deletions; added fields; data and accessor `defineProperty`; stored drafts; throws), run through the flat tracker, the draft proxy, and an independent model, which must report the same change sets, with `0` and `-0` distinct (maintainer decision, 2026-10-29: writing one over the other is a change), or throw the same error and leave the rows unchanged. Defining a field acts as assigning it, and a non-enumerable field is row data only once written; the proxy broke three of those laws on `main` and the flat tracker one. Diffs using `!==`, `Object.is` alone, or no deletions fail it. It found that the proxy dropped a field added as `undefined` when another field reverted; the pinned history and both campaigns fail without that fix. Non-flat rows must fall back. The [2026-10-01 review](oracle-reviews/2026-10-01-pooled-live-queries.md) records each ORC outcome. |
 | Virtual props cache | [cache laws](https://github.com/TanStack/db/blob/main/packages/db/tests/virtual-props-cache.test.ts) | Focused laws for the per-key cache of rows read with virtual props: a change's published value is the row later `get` and `toArray` reads return, for every subscriber, after sync and local writes, and a key that is deleted or rolled back leaves the cache. Enriching the value before the previous value fails the first two; skipping the drop on delete events fails the third. Rows read with virtual props through other paths, such as joins, are outside these laws. |
 | LocalStorage Collection | [mutation order](../../packages/db/tests/local-storage-order-oracle.test.ts), [peer snapshots and ownership](../../packages/db/tests/local-storage-peer-history.test.ts) (fixed tests; no oracle owner (tracked in #2264)) | Finite two-write histories compare authored same/disjoint-key updates, both handler completion orders, and all four application-decision pairs against public rows, durable rows, caller settlement, and fresh restore. A nested fire-and-forget admission checks that the outer write reaches storage first; awaiting the nested receipt inside its earlier handler is an excluded dependency cycle. Handler-free direct insert, update, and delete are checked at the method-return boundary for synchronous Storage effects. A later handler failure is checked while its earlier handler remains held: its receipt rejects and its optimistic row rolls back promptly, while the durable predecessor remains pending. Fixed tests in `packages/db/tests/local-storage-order.test.ts` (no oracle owner (tracked in #2264)) cover the next two histories. An automatic insert followed by manual acceptance crosses same-key update versus disjoint insert and both earlier-handler decisions; manual settlement waits behind that handler, and public, durable, and fresh-restore rows match the authored fold. Un-awaited manual acceptance crosses direct and held-predecessor paths with success or Storage failure: both commit and persistence receipts wait for every registered write, report the exact fault on failure, and agree with durable and public rows at settlement. A two-Collection witness checks that one manual receipt waits for both un-awaited acceptances. Peer witnesses check serialized disjoint typed-key writes before delayed event delivery, equal-ID manual Collection ownership, construction-time rejection of direct or shallow-copy reuse before or after first preload with the first Collection still writable, a peer insert during pending local insert, listener release across cleanup/restart, malformed startup snapshots, transient startup read failures and restart, the null-versus-empty storage sentinel, local and peer clear publication with subsequent public/durable agreement and a pending optimistic mutation across clear, and storage/parser read failures during writes and event delivery. Reload witnesses let another tab (a second Storage object over the same bytes) update or delete a kept row and insert a row, or clear storage, while no event reaches the first tab, with and without a prior local edit of the kept row: `reload()` must resolve with the Collection `ready` and its public rows equal to the durable rows and a fresh restore, and the reloaded run must confirm a later write. The adapter that re-inserted stored rows in each run crashed on the update histories and kept the deleted row; a snapshot only for non-empty storage fails the clear histories. The [same-tab audit](oracle-reviews/2026-10-08-localstorage-same-tab.md) records witnesses that withhold events through each persistence receipt: disjoint typed keys, a manually accepted same-key update followed by automatic update and delete, clear, a rejected Storage write, a pending same-key optimistic insert, cleanup/restart, and a write started by a ready-status listener compare public snapshots with the authored durable fold. A default jsdom Storage witness receives a same-tab write. The old event-only adapter fails seven no-event checkpoints. The original adapter also fails the second-handler-first, delayed-peer, equal-ID, listener-release, read-failure, synchronous direct-write, prompt-failure, mixed manual/automatic order, un-awaited manual receipt, reused-options admission, malformed-startup, and clear-publication witnesses. A failed write read rejects without replacing durable rows; a failed event read retains the public snapshot until a later valid event. These checks do not establish simultaneous cross-tab read-modify-write atomicity, atomic acceptance across distinct storage keys, manual acceptance without a mutation Collection owner, arbitrary long histories, native browser scheduling, or synchronization across distinct custom Storage wrapper objects. Existing LocalStorage failure and CRUD tests remain supporting examples. |
 | LocalStorage value fidelity | [JSON value model](../../packages/db/tests/local-storage-value-fidelity-oracle.property.test.ts) | With the default JSON parser, an insert, update, manual insert, or manual update is accepted only if a fresh restore can return the row. A recursive value grammar labels each generated value, while it is built, with its expected JSON form or as lost. Lost: functions, symbols, enumerable symbol keys, `NaN` and infinities (also boxed), `undefined` and missing array entries, arrays with extra or symbol properties, a `toJSON` that returns `undefined` in an array, and Map, Set, WeakMap, Promise, RegExp, Uint8Array, and SharedArrayBuffer values. Normalized: `toJSON` values (Date, a plain object, and a function with its own `toJSON`), `undefined` properties and `toJSON` results, `-0`, boxed finite numbers, and non-enumerable symbol keys. Histories cross the four entry paths with and without an automatic handler. At `when('settled')` settlement, an accepted row must keep the authored writer value, store the model's form durably, and restore it in a fresh Collection; a lost row must reject with `SerializationError`, leave the writer's predecessor and storage bytes unchanged, and never call the handler. Pinned witnesses cover every lost kind and normalization on each path, with and without a handler; a fixed-seed and a random campaign of 300 histories run under `local-storage.value-fidelity`. A pinned witness per entry path uses a `toJSON` that changes after its first call: storage must hold the JSON the check accepted, and serializing the row again during the key check or the snapshot write each fails it. The stringify-only check on `main` fails 162 of 230 cells. The first walker in this PR failed 66 cells of the expanded grammar. Mutants that reject `undefined` properties, accept `undefined` array entries, skip boxed-number unwrapping, treat non-enumerable symbol keys as lost, skip the array-property check, or shrink the opaque-type list each fail at least six cells. Open: custom parsers, including a wrapper around `JSON` (accepted by design, documented); class instances (accepted by design; the guide states they restore as plain objects); cross-realm natives; getters; non-enumerable string data; update payloads whose shape the draft copy changes (array extra properties and symbol keys are dropped, and a hidden symbol key becomes enumerable, so an update of an object with a hidden symbol key rejects although its insert succeeds), which the proxy detachment owner must decide; peer or event delivery of a rejected write, which never reaches storage; and peer delivery of normalized values: the peer owner checks only `Date` at that boundary, so a peer receiving witness for the generated value grammar remains with the peer owner. IndexedDB clone rejection is owned by the IndexedDB settlement and values oracles, which require `SerializationError`; local-only rows keep values by reference, pinned in `local-only.test.ts`. |
@@ -6338,6 +6338,24 @@ sources and actual React hook commits; other providers/frameworks, arbitrary
 schedules and ordered repair semantics retain their existing limits. See the
 [key-only review evidence](oracle-reviews/effect-startup-delta.md#review-of-2b3dd8c2d-key-only-unordered-results).
 
+Ordered callback histories (2026-11-02): the callback-profile grammar now
+crosses an unordered and an ordered query (`orderBy` with `limit`) and adds a
+`signed-zero` payload that alternates 0 and -0, distinct row values (maintainer
+decision 2026-10-29); 120 histories on each path. An ordered Effect delivers an
+update only when its projection changed. On unchanged `f06ee8fdd` the ordered
+`signed-zero` histories fail (an update that flips only a zero's sign was
+dropped); comparing with `sameRowValue` repairs them. That payload's source
+row also changes its `version`; the `source-zero` representation changes the
+source row only by a zero's sign, which the ordered query's top-K dropped
+before the 2026-11-02 decision (see the adapter conformance entry's
+signed-zero paragraph). An ordered Effect also
+dropped an update whose change is private or non-enumerable state, so the
+consumer kept a stale value (`private` and `prototype` payloads, 20 ordered
+histories, RED on `370e029db`). Maintainer decision 2026-11-02: the ordered
+comparison (`samePublishedValue`) treats a class instance as equal only to
+itself, so its update is delivered; an ordered repair may then deliver an
+update for an unchanged class instance.
+
 ### RC bound schema mutation receivers (2026-10-28)
 
 Owner: `packages/db/tests/live-query-bound-options-oracle.ts`; shared driver:
@@ -6973,3 +6991,224 @@ fixed/random actual overwrite reaches are repair 25/18 and callback 25/25.
 These boundaries retain their controlled core and Node-host SQLite/Electric
 limits. No HTTP, framework, browser-process, or arbitrary-shape closure follows.
 See the [versioned amendment](oracle-reviews/2026-10-30-release-replay-retention.md#final-catch-up-provenance-and-deferred-sibling-resumption-review-2026-11-02).
+
+## Adapter conformance: eager live sources (#2118)
+
+`packages/db-adapter-conformance/src/eager-live-source-oracle.ts` owns the
+shared eager live-source laws from the adapter conformance law set (v18):
+READY-2/3/4, HEALTH-1, PUB-1/2/3/7, FID-4, LIFE-2/5/10, HEALTH-5, EVID-1/2/3
+(`await-evidence`), HEALTH-2 and RETRY-1 for retried failures
+(`retry-policy`), RECON-1 (`transport-reconnect`), RENEW-1
+(`capability-renewal`), READY-8/10 with PUB-5/9 for batches committed
+during the initial fetch (`listen-before-fetch`), FID-1 removal of an
+optional field, and FID-1 typed values per declared `valueKinds` on the
+initial load and live changes. Its reference driver is also the generated
+witness for core's synced commit change detection with `-0` and `0`
+(maintainer decision 2026-10-29: distinct row values; `sameRowValue`).
+The decision covers user writes too (2026-10-29): the draft proxy
+(`proxy-oracle`, `flat-change-tracking-oracle`), optimistic change
+detection (`optimistic-history-oracle`, with a `flipZeros` edit and
+`zeroSignEditsOverPending` reach), subscription truncate replay
+(`collection-subscription-replay-oracle`), and stale-row reconciliation
+(`collection-subscription-lifecycle-publication-oracle`) all compare row
+values with signed zeros. A source insert of a held key is an equal
+re-insert only for an equal row value: the state-retention oracle
+(`collection-state.retention`) generates zeros of both signs and a write of
+one zero followed by an insert of the other (reach `sign-only-reinsert`, 92
+histories over its fixed and random campaigns); the deep-equality check
+accepted such an insert as an equal re-insert instead of throwing
+`DuplicateKeySyncError` (RED at `[update {0: 0}, insert {0: -0}]`). An ordered
+live query (`orderBy`, with or without `limit`) dropped a source update that
+changes only a zero's sign: its top-K batch merged a key's versions by D2
+value identity, where -0 equals 0, while an unordered query delivered it.
+Maintainer decision 2026-11-02: live-query rows tell -0 from 0, so top-K
+compares a key's versions as row values (D2's structural comparison with
+`signedZero`, which tells -0 from 0 at a leaf); D2 value
+identity, which join, distinct, and grouping keys use, keeps -0 equal to 0.
+The Effect-callback oracle's `source-zero` representation stores the signed
+zero in the source row, so each update changes the row only by its sign
+(RED: all 10 ordered `source-zero` histories in the core and React drivers;
+unordered ones passed), and the top-K batch contract oracle's `signed zero`
+and nested relations now expect a replacement. Open: generated publication histories never write
+over a row a failed replay retained (the random grammar inserts source
+writes into green lifecycle histories), so the stale reconcile is reached
+only by pinned replays, including a `-0` one. A generated failed-replay
+history reached an open counterexample: after a failed, released replay, a
+write equal to the committed row leaves the subscriber at its older retained
+value while a direct read returns the new one, against the law that a
+subscriber equals a direct read. That contradicts ARCHITECTURE.md law 9's
+retention rule, so the generator is held back until the replay-convergence
+law is settled with #2294 (owner: the lifecycle publication oracle; witness
+needed: a generated failed-replay history; shrunk trace: source `a`=0, request,
+settle resolve, truncate, source `a`=5, settle reject, release, source `a`=5). Every driver is also
+checked for the rows at the moment status becomes `ready`. Its model is an independent row Map and sync-run
+phase; drivers supply only a controlled provider and declare whether they
+commit per batch or per change. PUB-1 checks every change publication during
+a step, not only the settled checkpoint. The reference push adapter
+(`tests/reference-adapter-oracle.property.test.ts`,
+`adapter-conformance.eager-live-source.reference`) runs fixed and random
+campaigns of 600 histories with declared reach, a per-change variant, an
+outage-threshold variant with client-created values, and 45 law-named
+hostile mutants, with ORC-004 reconstruction, exclusion, and
+ablation controls. The Neon Realtime receiving driver
+(`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
+`@neon/realtime-tanstack` 0.1.1 vendored at neon-pkgs `7ac55e3e` and is RED on
+READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
+(subscription kept open after an error state) behind them. Limits: no
+on-demand loading, mutation handlers, or reload; publications are observed
+through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
+that rejects before its timeout; FID-1 covers eleven value kinds (with `Float64Array`), not
+Temporal, Map, Set, other typed arrays, class instances, or field identity; PUB-4 covers a
+complete delivery with two rows for one key, under each driver's
+`duplicateInsert` (TrailBase `replace`, reference `error`), not malformed
+keys, undecodable rows, or FID-3 out-of-domain values; the Neon and TrailBase claims cover
+controlled providers, not real clients. Owner:
+`packages/db-adapter-conformance`. Evidence: the package README.
+Migration goal (maintainer, 2026-10-29): every collection adapter gets a
+driver for each conformance family it declares; the plan and per-adapter
+status are in `packages/db-adapter-conformance/MIGRATION.md`. Existing
+adapter oracles keep their laws until a shared family checks the same law,
+history, path, and observation. TrailBase (eager mode, per-change commits,
+`adapter-conformance.eager-live-source.trailbase`) is GREEN; its lifecycle
+oracle keeps its laws, so eager startup failure and stream-end health have
+two owners until this entry moves them. RxDB
+(`adapter-conformance.eager-live-source.rxdb`, per-change commits, a
+controlled RxCollection with RxDB's own query matcher and sort comparator,
+`listen-before-fetch`) is GREEN after a fix for a buffered insert that the
+initial read already reflects; `rxdb.test.ts` holds a receiving witness for
+it on memory storage. PowerSync (`adapter-conformance.eager-live-source.powersync`,
+eager mode over a real local PowerSync database, per-batch commits, a
+database-side propagation step) is GREEN after a fix: a failed first load now
+releases the run's change watcher (LIFE-10). Its startup failures in
+on-demand mode, cleanup waiting on an unsettled `onLoad`, and post-ready
+change-handler errors are logged only; they belong to the on-demand and
+lifecycle families, which are not built. PowerSync also runs typed fields (string, integer, float,
+boolean as INTEGER 0/1, Date as ISO TEXT) through user deserialization and
+output schemas. Excluded by `excludesValue` (platform limit, not adapter
+behavior): numbers PowerSync's storage does not keep at full precision. Its
+table views keep 15 significant digits (9007199254740991 reads back as
+9007199254740990, 0.30000000000000004 as 0.3) and reject Number.MAX_VALUE
+(`powersync_diff: number out of range`); owner: the PowerSync driver;
+evidence: a direct write and read through `@powersync/node` 0.20.0.
+Electric (`adapter-conformance.eager-live-source.electric`, eager mode over
+the installed `@electric-sql/client` and a controlled `fetchClient` that
+answers the HTTP protocol, per-batch commits, typed Postgres columns for
+nine kinds) is GREEN after fixes from two rounds. Maintainer decisions
+(2026-10-30) that the shared model and Electric's driver encode: only an
+extended outage reports, five shape-log attempts in a row for Electric
+(`retryReportAfter: 5`; a threshold is each adapter's choice: a
+connection-aware source can report at once), with the attempt that crossed
+it as the failure, any accepted response restarting the count, and an
+applied up-to-date clearing it at once; a sync run retires when it fails,
+so its pending waits reject then and later unmet waits reject; a retired
+run's evidence fulfills a wait once the current run is ready (revising law
+set v18 EVID-2, which said never); and a throwing `onError` gives up with
+its own error. Attempt kinds are generated (`transientVariants`: HTTP 503,
+HTTP 429 with `Retry-After`, a rejected fetch, an HTTP 400 that `onError`
+retries), and outages land anywhere in a history, also a second time in a
+run, after a live batch, and in a later run. Failure values are compared
+through the driver's `matchesFailure`: each failed response carries the
+injected failure's index in a header, and a thrown give-up is compared by
+identity. The on-demand subset lane of `electric-sdk-delivery-oracle`
+(`electric.sdk-snapshot-delivery`) adds retried subset attempts (0..7 per
+request), up to six live pauses, and a live outage after the first load,
+and checks that the source node shows a problem exactly when the live
+stream had an outage. Excluded by `excludesValue` (column domains, not
+adapter behavior): int4 values outside 32 bits, and a `-0` nested in an
+array or object for the float8 column. Updates carry only the changed
+columns, as Electric's default replica mode sends them, so the adapter's
+merge is exercised. An `empty-response` step (HTTP 204, accepted, with no
+change) restarts the attempt count. Give-ups come as an HTTP 400 or as the
+client's `maxRetries` bound (85), with `onError` returning nothing or
+throwing, and a second campaign runs the default configuration without an
+app `onError`, declaring the adapter's give-up log. The on-demand lane also
+restarts the Collection and checks that a retired run's snapshot-boundary
+evidence (txid 5 below `xmin` 10) and imported sync metadata (txid 25) stay
+pending until the restarted run is ready, then fulfill. Its live attempts after the first load are a
+generated sequence of 0..7 HTTP 503s and synchronous throws of the app's
+`fetchClient`, in any order; the expected outage and the message of the
+attempt that crossed the threshold (HEALTH-4) follow the attempts the
+provider recorded, with reach for an outage led by a throw and one crossed
+by a throw. A success between failed attempts is not generated in this lane;
+the eager lane's empty response covers the reset. At both cuts a
+fresh Collection imports the exported sync metadata, as hydration does, and
+must accept no txid the source does not accept then: the export carried the
+retired run's txids before the restarted run was ready (RED: txid 25
+accepted after import), and a mutant that never exports them fails after
+ready. The metadata format carries txids only, so snapshot evidence is not
+exported, as on `main`. Maintainer decision 2026-11-02: a failed catch-up
+prefetch attempt counts toward the outage threshold, as any failed
+shape-log request does; no driver response spans several chunks, so no
+history prefetches. It declares reach
+for a subset request's five retried attempts, five live pauses, a live
+outage, and that restart. The retry-decision model
+(`electric-retry-decision-model.ts`, shared by the controlled lane of
+`electric-oracle.property.test.ts` and the installed-client lane) now
+observes an `awaitTxId` and an `awaitMatch` that reject when the run fails
+or is cleaned up, and the source node's `error` while ready (READY-9: a
+give-up while the first snapshot's acceptance is pending is a post-ready
+failure once it is accepted). An external abort after ready is the
+source node's `error` too (maintainer decision 2026-11-02: deliberate or
+not, an aborted stream no longer syncs). Its controlled driver now reports a give-up
+decision to the subscriber, as the installed client does; before, a
+give-up after ready never reached the adapter's failure path in that lane.
+Both lanes also start a second pair of those waits at every checkpoint,
+after its step: a run that stopped rejects them too (EVID-2), except after
+cleanup. Reach (`electric.retry-decision`, fixed and random campaigns
+together): a loading failure 16, a give-up after ready 14, an external
+abort after ready 4, and an abort while READY-9 defers the failure 2, the
+last two from named examples. An abort retired the run before its failure
+was recorded, so a later wait waited for its timeout: RED at
+`[demand, hold, up-to-date, abort]` (late waits `pending`). Two mutants
+fail it: a retirement that advances the run's epoch again (abort after
+ready), and an abort that does not record the failure for the waits
+(`[demand, hold-acceptance, up-to-date, abort, accept]`). The other paths
+that abort before failing, a rejected applied receipt and a rejected or
+invalidated resume, share the repaired lifecycle rule; no generated history
+reaches them.
+Limits: no persisted resume or held commit receipt in the eager lane; no
+real Electric server;  without an app `onError`, the driver detects a
+give-up from the adapter's log, so an adapter that stops logging times out
+rather than failing a law. The shared check refuses `retryReportAfter`
+above 1 with `transport-reconnect` or `capability-renewal`: no law fixes
+whether a reconnect or a renewal ends an outage a threshold is counting. Typed arrays (maintainer decision 2026-11-02): -0 and 0
+are distinct inside them as row values too; the `float-array` value kind
+(a `Float64Array`) makes the reference driver the generated witness (RED on
+`370e029db`: PUB-2 after a retouch that flipped a zero inside one). A
+reload's give-up while its first commit's acceptance is pending fails at once
+when the Collection is already ready (maintainer decision 2026-11-02: READY-9's
+deferral applies to the first load); no generated history reloads with a held
+acceptance.
+Convex (`adapter-conformance.eager-live-source.convex`, eager mode over the
+real Convex JavaScript client and a controlled WebSocket that answers the
+sync protocol, complete results, per-batch commits, Convex value kinds as
+values and typed fields) is GREEN after a fix: a failed first load now
+releases the query subscription (LIFE-10). It declares `delivery-error` (a
+`QueryFailed` after ready, cleared by the next result) and reports a
+rejected delivery after ready (`rejectedDelivery: reported`, the law set's
+default `errorMapping`). Limits: no transport reconnect, no on-demand or
+paginated mode, no deployment; the truncate on a restarted run's first
+result is not distinguished, because an eager restart starts empty. While
+the client's result is a failure, the driver acknowledges a query removal
+only with its next transition, so a restart finds the failed query's cached
+error: maintainer decision 2026-11-02, a cached error does not fail a new
+subscription, which waits for the server (reach `restart-after-failure`,
+both clients). With `prompt-after-restart`, the new run's first transition
+can arrive before the client's replay of that cached error (reach
+`prompt-failure-after-failed-run`, 36 of 400 histories per client at seed
+2118). Skipping the first error after a cached one lost a fresh failure
+there: RED `READY-4 (status)` at `[fail, prompt restart, fail]`, status
+`loading` and not `error`. The adapter now names the cached result by the
+identity of its log lines, read through the base client, because the
+`onUpdate` handle's `getQueryLogs` looks up the wrong query in Convex
+1.47.0; a version that skips nothing fails `LIFE-2/LIFE-5 (status)` at
+`[fail, restart, changes]`. Behind an app's wrapper that exposes only
+`onUpdate` the accessor is missing, so the adapter falls back to the earlier
+rule (no current value until the server's first callback, and the first
+error taken for the replay); a fixed campaign over such a wrapper checks it
+(RED before the fallback: `[fail, restart]` ends in `error`). The wrapper does
+not declare `prompt-after-restart`: there a server answer that comes before
+the replay can still be taken for it (open limit). A cached valid result served to a restarted run is accepted
+client-cache behavior and is not generated, because the model starts a
+restarted run empty. A fixed-seed campaign runs the React client
+(`watchQuery`).

@@ -1,4 +1,4 @@
-import { equalHashValues } from '../hashing/hash.js'
+import { compareHashValues } from '../hashing/hash.js'
 import { TopKArray } from './topKArray.js'
 import type { MultiSet } from '../multiset.js'
 import type { IndexedValue } from './topKArray.js'
@@ -8,8 +8,10 @@ type TopKOutput<K, T> = Array<[[K, IndexedValue<T>], number]>
 /** Apply a keyed batch's retractions before additions. An outer join can emit
  * a replacement in the opposite order; key multiplicity alone would hide it.
  * Consolidate first so a transient value added and removed in this same turn
- * cannot be mistaken for the final replacement. Use structural relation
- * identity: map can allocate a fresh value for each side of a cancelling pair.
+ * cannot be mistaken for the final replacement. Use structural identity of
+ * row values: map can allocate a fresh value for each side of a cancelling
+ * pair, and -0 and 0 are distinct row values (maintainer decision
+ * 2026-11-02), so a change of only a zero's sign is a replacement.
  * No state survives the run.
  */
 export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
@@ -24,7 +26,7 @@ export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
       // Compare only versions of the same key. A per-key scan keeps normal
       // replacements cheap and never merges keys on a hash collision.
       const previous = entries.find(([candidate]) =>
-        equalHashValues(candidate[1], value[1]),
+        compareHashValues(candidate[1], value[1], true),
       )
       if (previous) previous[1] += weight
       else entries.push([value, weight])

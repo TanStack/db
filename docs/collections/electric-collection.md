@@ -341,11 +341,16 @@ await todosCollection.utils.awaitMatch(
 
 ### Cleanup and resume safety
 
-Transaction evidence and pending `awaitTxId`/`awaitMatch` calls belong to one
-collection lifecycle. Explicit cleanup and automatic garbage collection reject
-pending waits with `StreamAbortedError`; callbacks from the retired stream cannot
-settle waits in a restarted collection. Observe these promises even when the
-component or collection may be disposed before they settle.
+Pending `awaitTxId`/`awaitMatch` calls belong to one collection lifecycle.
+Explicit cleanup and automatic garbage collection reject pending waits with
+`StreamAbortedError`; callbacks from the retired stream cannot settle waits in
+a restarted collection. A txid the retired stream delivered still counts after
+a restart or reload, but only once the restarted collection is ready again,
+because its rows are read after that txid; until then `awaitTxId` waits. When
+the stream fails or gives up, pending waits reject with the failure, and a
+later `awaitTxId` or `awaitMatch` rejects unless its evidence was already
+seen. Observe these promises even when the component or collection may be
+disposed before they settle.
 
 An on-demand Collection with managed SQLite persistence can also replace its
 Electric provider session within the same Collection sync run when its cached
@@ -436,10 +441,29 @@ source node shows an `error` in `collection.health` and in each live query's
 `health` tree. This does not silently retry the failed stream;
 `collection.reload()` refetches.
 
-While the Electric stream retries a failed request, the Collection reports
-nothing: it stays `loading` before its first up-to-date, and keeps its health tree
-unchanged afterward. When the stream gives up, it calls `fail()`: a failed first load
-before readiness, or the source node's `error` after it. Complete updates from an explicit `replica: 'full'` stream remain valid.
+While the Electric stream retries a failed request, the Collection stays
+`loading` before its first up-to-date. After it, a short outage leaves the
+health tree unchanged, so a blip does not flap it. Once five requests to the
+shape log in a row have failed, whether the client retried them or your
+`onError` returned a retry, the source node shows the outage as its
+`failureReason`, with the error of the fifth attempt; the next applied
+up-to-date clears it. Any response the client accepts, such as a
+`must-refetch`, starts the count again. With the default backoff, five failed
+attempts take from under a second to about 15 seconds, because each retry
+waits a random part of a doubling delay. A source that keeps failing five
+times and then succeeding once shows and clears the outage each time. A
+subset snapshot request that the client retries does not count: its failure
+belongs to the live query that requested it. While the stream catches up on
+a log that spans several responses, such as after a `must-refetch`, the
+client also prefetches the next responses, and each failed prefetch attempt
+counts too, so the outage can show sooner than five rounds of retries. When the stream gives up, it
+calls `fail()` with the error, or with the error your `onError` threw: a
+failed first load before readiness, or the source node's `error` after it. A give-up while a persistence wrapper is
+still accepting the first snapshot fails the Collection once that acceptance
+makes it ready. Aborting `shapeOptions.signal` stops the stream for
+good: before readiness the first load fails, and after it the source node
+shows an `error`, because the Collection no longer syncs, whether or not the
+abort was deliberate. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
 Outside scoped recovery, complete rows published by persistence reloads or

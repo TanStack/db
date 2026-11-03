@@ -752,6 +752,41 @@ const ownerGroups: ReadonlyArray<
     `sync-metadata-session`,
     `persisted-missing-row-metadata sqlite-missing-row-metadata`,
   ],
+  [
+    `db-adapter-conformance/tests/reference-adapter-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `reference`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `neon-realtime`,
+  ],
+  [
+    `trailbase-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `trailbase`,
+  ],
+  [
+    `rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `rxdb`,
+  ],
+  [
+    `powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `powersync`,
+  ],
+  [
+    `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `electric`,
+  ],
+  [
+    `convex-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `convex`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -838,6 +873,21 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  ...[
+    `reference`,
+    `neon-realtime`,
+    `trailbase`,
+    `rxdb`,
+    `powersync`,
+    `electric`,
+    `convex`,
+  ].map(
+    (driver) =>
+      [
+        `adapter-conformance.eager-live-source.${driver}`,
+        `conforms on a random campaign or a replayed seed`,
+      ] as const,
+  ),
   [
     `query-db.refetch-held-page-end`,
     `generated same-key page shifts.*replay campaign`,
@@ -1047,6 +1097,18 @@ const outsideReplayConfigs = new Map([
   [`scripts`, `oracle-scripts.vitest.config.mjs`],
 ])
 
+/**
+ * An owner inside packages/ that its package's default config excludes, with
+ * the config that runs it. The Neon receiving driver is expected RED, so it
+ * runs only under its own config.
+ */
+const ownerReplayConfigs = new Map([
+  [
+    `packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
+])
+
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
   ...registeredOracleProperties,
 ].map((property) => {
@@ -1087,7 +1149,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
             : outsidePackages
               ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
-              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${ownerReplayConfigs.has(file) ? `--config ${ownerReplayConfigs.get(file)} ` : ``}${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [

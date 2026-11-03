@@ -12,6 +12,7 @@ import {
 } from './optimistic-history-oracle.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 import type { ReplacementRow, Row } from './optimistic-transaction-support.js'
@@ -88,10 +89,14 @@ const sameKeySequences = [
 // insert/update followed by update/delete, or a delete followed by a reinsert.
 // The applyMutations truth table gives the net request: a reinsert that
 // restores the original row cancels the pair; otherwise it is an update from
-// the original row whose changes hold exactly the differing fields. Each of
-// the five sequences and both
+// the original row whose changes hold exactly the differing fields. A field
+// differs by `Object.is`: -0 and 0 are distinct row values, for user writes
+// too (maintainer decision 2026-10-29), so a reinsert of -0 over the original
+// 0 is an update. Each of the five sequences and both
 // handler outcomes runs in the fixed matrix. The generated campaign varies
-// the changed number (1..50) and nonempty note (1..8 chars). Sequence is needed
+// the changed number (1..50, or -0) and the note (1..8 chars, or the
+// original note, so a reinsert can differ from the original row only by a
+// zero's sign; reach `sign-only-reinsert`). Sequence is needed
 // to distinguish cancellation from a delivered net request; outcome separates
 // payload correctness from later rollback; value and note expose dropped fields.
 // An update of an absent key or an insert on an occupied key is invalid here.
@@ -113,10 +118,12 @@ async function runSameKey(
   const original = { id: 1, value: 0, note: `original` }
   const first = { id: 1, value, note: startsAbsent ? `created` : original.note }
   const final = { ...first, note }
-  // Fields of the reinserted row that differ from the original row.
-  const reinsertChanges = Object.fromEntries(
+  // Fields of the final row that differ from the original row: a reinsert's
+  // or an update's changes. An update that writes a field's own value back
+  // records no change for it (the proxy's write law).
+  const changedFields = Object.fromEntries(
     ([`value`, `note`] as const)
-      .filter((field) => final[field] !== original[field])
+      .filter((field) => !Object.is(final[field], original[field]))
       .map((field) => [field, final[field]]),
   )
   let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
@@ -186,7 +193,7 @@ async function runSameKey(
       await Promise.resolve()
       const canceled =
         sequence === `insert-delete` ||
-        (reinserts && Object.keys(reinsertChanges).length === 0)
+        (reinserts && Object.keys(changedFields).length === 0)
       if (fault === `dropped-field`)
         request = request.map((mutation) => ({
           ...mutation,
@@ -207,9 +214,7 @@ async function runSameKey(
                 ? first
                 : startsAbsent
                   ? final
-                  : reinserts
-                    ? reinsertChanges
-                    : { value, note },
+                  : changedFields,
             },
           ]
       expect(request, `net authored payload`).toStrictEqual(expected)
@@ -280,22 +285,60 @@ describe(`Same-key transaction laws`, () => {
   it.each([505201, undefined])(
     `varies merged request fields, seed=%s`,
     async (seed) => {
+      const reach = createOracleReach(
+        `collection-state.same-key`,
+        [`sign-only-reinsert`],
+        { minimum: 3 },
+      )
       await fc.assert(
         fc.asyncProperty(
-          fc.record({
-            sequence: fc.constantFrom(...sameKeySequences),
-            success: fc.boolean(),
-            value: fc.integer({ min: 1, max: 50 }),
-            note: fc
-              .string({ minLength: 1, maxLength: 8 })
-              .map((s) => `new:${s}`),
-          }),
-          (scenario) => runSameKey(scenario),
+          fc.oneof(
+            {
+              weight: 4,
+              arbitrary: fc.record({
+                sequence: fc.constantFrom(...sameKeySequences),
+                success: fc.boolean(),
+                value: fc.oneof(
+                  fc.integer({ min: 1, max: 50 }),
+                  fc.constant(-0),
+                ),
+                note: fc.oneof(
+                  fc
+                    .string({ minLength: 1, maxLength: 8 })
+                    .map((s) => `new:${s}`),
+                  fc.constant(`original`),
+                ),
+              }),
+            },
+            // A reinsert that differs from the original row only by a
+            // zero's sign; at random, one history in 20 is one.
+            {
+              weight: 1,
+              arbitrary: fc.record({
+                sequence: fc.constant(`delete-insert` as const),
+                success: fc.boolean(),
+                value: fc.constant(-0),
+                note: fc.constant(`original`),
+              }),
+            },
+          ),
+          (scenario) => {
+            reach.beginHistory()
+            if (
+              scenario.sequence === `delete-insert` &&
+              Object.is(scenario.value, -0) &&
+              scenario.note === `original`
+            ) {
+              reach.reach(`sign-only-reinsert`)
+            }
+            return runSameKey(scenario)
+          },
         ),
         seed === undefined
           ? oraclePropertyOptions(40, `collection-state.same-key`)
           : { numRuns: oracleRuns(40), seed },
       )
+      reach.assertReached()
     },
   )
   it.each([`dropped-field`, `canceled-persistence`] as const)(

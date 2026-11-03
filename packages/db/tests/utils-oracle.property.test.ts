@@ -218,7 +218,8 @@ const arbitraryDefinedValue = arbitrarySingleValue.filter(
 // The fixed witnesses exercise those two outcomes; deleting either outcome
 // would leave an always-true or always-false comparator undetected. The
 // generated distinct-type grammar names Date/Temporal pairs, Date versus its
-// ISO text and epoch number, and RegExp versus its source text; it does not
+// ISO text and epoch number, RegExp versus its source text, and a typed array
+// versus a record or an array of its elements; it does not
 // claim every cross-class combination. String lengths, integer
 // magnitude, and object keys are fast-check defaults; explicit array/record
 // bounds are 0–5 for equivalence and 0–10 for structural copies, bytes 0–50,
@@ -814,4 +815,17 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
   })
+})
+
+// Appended last: properties are numbered in file order (utils.41).
+describe(`typed-array value class`, () => {
+  // A typed array is its own value class: a record or an array of its
+  // elements, with the same index keys, is not equal to it either way.
+  utilsProperty([arbitraryFloat32Array])(
+    `a typed array differs from a record or an array of its elements in both directions`,
+    (typed) => {
+      assertDistinctTypes(typed, { ...Array.from(typed) }, deepEquals)
+      assertDistinctTypes(typed, Array.from(typed), deepEquals)
+    },
+  )
 })
