@@ -1042,8 +1042,8 @@ while keeping row prototypes strict. Route detached refresh and the attach
 handshake through `captureEntries`, leaving separate capture-time and queued
 publication-time clock checks for their distinct responsibilities. Reject
 absent/non-finite clocks at observer construction. Error 262 follows the existing
-coded production-message contract; generated error-page freshness belongs to the
-release pipeline, so this source change updates only its catalog.
+coded production-message contract. The catalog and generated error page must
+both be committed; CI's ordinary generator check enforces page freshness.
 
 **GREEN:** the final seven-file command passes 381 tests:
 
@@ -1143,3 +1143,166 @@ the explicitly excluded draft bug, and the combined Angular #2327 tree is untest
 Implementation stamp: `b21dba437b23a401baa9d17732712c5e21a9a8d5` contains the third-review production, oracle,
 invariant and coverage changes evaluated above. The following documentation-only
 commit records that exact head; it changes no production or test semantics.
+
+## Four-agent oracle audit and repairs, 2026-11-03
+
+Starting reviewed head: `779466c62c8679a90df940028c7b76d61b7da80f`.
+Four independent reviewers challenged the Set work observer, equality domains,
+observer snapshots, and the overall closure argument. All returned one finding.
+Their results distinguish a production bug, two oracle gaps, and inaccurate
+prose. No new observer-cache production defect was found.
+
+### Law, experiment, and inference
+
+**Sparse arrays (A-01).** Generic and change-event equality read every array
+position. A hole equals undefined, but not a defined number. Symmetry and
+Collection change-message reconstruction supply the authority; draft/persisted
+presence fidelity remains a separate law. `Array(1)` versus `[1]` compared true
+forward and false backward on both the reviewed head and exact main. A real
+Collection probe stored `[1]` without emitting a change or advancing its clock;
+the observer retained undefined. The existing `utils.31` only generated equal
+hole/undefined pairs, and its symmetry arbitrary used dense arrays.
+
+Before production changed, the utility grammar gained a guaranteed hole,
+generated length 1–5, target index and defined number, with other holes,
+undefined and numbers. Both equality APIs/directions receive direct arrays,
+records and singleton Sets. Shared `sparse-array-value-oracle.ts` retains a
+simple positional model; the snapshot owner receives that same model through
+real Collection events, source reads, direct/projected observers in both modes,
+attached/detached reads and retained snapshots. Every generated case executes
+all 24 carrier/receiving-path combinations. Histories write undefined, a defined
+number, a hole, and the number again. They preserve the equivalent neighbor's
+container identity while requiring defined replacements to become visible.
+
+**RED:** from `packages/db`, before the production edit:
+
+```sh
+pnpm exec vitest run tests/utils-oracle.property.test.ts tests/live-query-observer-snapshot-oracle.property.test.ts --testNamePattern='31:|publishes changed array positions' --coverage.enabled=false --maxWorkers=1 --typecheck.enabled=false
+```
+
+Four intended failures, 107 skipped. Utility fixed seed `20260911`, path `0:0`,
+shrinks to `{cells:[undefined],at:0,value:0}` and accepts unequal values. Receiving
+fixed seed `234603`, path `0:0:0:0:0`, shrinks to `{cells:[0],at:0,value:0}`.
+All 24 scenarios report stale positional values: direct paths at the repeated
+hole-to-number write and projected paths at the earlier defined write. This is
+an assertion failure after real applied writes, not setup or scheduling failure.
+The original utility source SHA-256 is
+`d217a89f4a3d44f5839e9a6455e279aa051ae309a6a5ae090247f05ad1fbcba0`.
+
+**Repair:** replace the hole-skipping `Array.every` traversal with an indexed
+loop, preserving the ancestor-map cleanup. No draft comparison branch changes.
+**Reach/GREEN:** seven utility states each reach 200 histories. Fourteen receiving
+states each reach 20 histories in each campaign, including all eight separate
+source/query × mode × attached/detached paths. The full two-file gate passes
+111 tests, and the final focused gate passes all four selected tests with type
+checking. The recorded receiving seed/path also passes guarded direct replay.
+**Mutant:** a Vite transform restores exactly the old hole-skipping traversal;
+guarded `utils.31` and `live-query-observer.sparse-array` replays each execute once
+and fail at positional equality. The first receiving replay attempt lacked its
+named owner mapping; that setup failure is excluded, and the completed manifest
+mapping supplies the executed RED/GREEN. No mutant enters production source.
+Final utility SHA-256:
+`4db39cbcf54439490be28da88b509b97b1ba08a3b98388ac8171399f44f7dd91`.
+
+**Set assignment work (S-01).** The scalar-read bound was honest but did not
+measure cached candidate assignment. A permutation-DFS mutant survived guarded
+`utils.42` seed `20260911`, path `0:0:0`. At width seven, six plain members plus
+one class member versus seven plain members required 96 scalar reads on either
+implementation, while native Map/Set work grew from 197 to 42,828 operations
+(8,660 DFS nodes). A width-eight deficit reached 63,296 operations and 13,700
+nodes while remaining within its read ceiling. No full-campaign survival or
+timeout-based rejection is claimed.
+
+The repaired observer wraps Map.has/get/set/delete and Set.has/add/delete only
+for the synchronous comparator call, after model and inputs are built. It
+restores exact native descriptors in `finally`, including a work-limit throw.
+Both measures get `4*(width+1)^3` small-family bounds. Paired inputs retain
+`4*width` reads and allow `16*(width+1)` native operations. The same cached-DFS
+replay now fails both row directions at operation **2,049 > 2,048**, in 31ms test
+time. Normal campaigns pass all four tests: all thirteen small-family states
+reach 200 histories and all eight paired-family states reach 20. Models,
+budgets and property IDs are unchanged. An ordered-only shortcut survives the
+two work lanes but existing `utils.27` rejects it; this is positive portfolio
+coverage, not another missing law.
+
+**Signed-zero model (E-01).** FID-1's maintainer decision of 2026-10-29 covers user
+writes. The revert model nevertheless encoded -0 and +0 with the same String
+token, including floating typed values and observations. `{f:0}; f=-0` survived
+a DRAFT|ROW→DRAFT mutant in that owner, although the flat-tracking owner already
+rejected it. Production was correct. Model and recorder tokens now preserve the
+sign, with an additive generated root/nested/Float64 assignment lane. Six shared
+examples and 100 generated histories run per campaign. The final gate's separate
+reach is root/nested/Float64 **43/26/37 fixed**, **36/33/37 fresh**. The mutant
+fails the shared required-change assertion on all three paths; restoring legacy
+tokens accepts all three again. The normal three-owner gate passes 127 tests,
+and direct seed/path replay passes. Existing budgets remain. Integer typed-array
+coercion is not changed or claimed.
+
+**Observer prose (O-01).** `checkRead` said its data/state agreement was
+identity-level, but used value comparison. A state-row-cloning mutant passed
+120 tests across the snapshot, history, ordinary observer and pooled suites.
+A separate `toBe` diagnostic rejected it, but no independent API authority
+requires row-root alias identity. The comment now says captured values and
+order; the approved snapshot/container identity law stays unchanged. This is
+a documentation repair, not a weakened assertion or new product promise.
+
+### Lossless audit and reviewer assessment
+
+| ID | Validity | Action | Durable destination |
+| --- | --- | --- | --- |
+| A-01 | Confirmed pre-existing production defect, directly affecting trusted row clocks | Fixed-now, oracle-first indexed traversal | Utility primary owner and shared snapshot receiving driver; coverage map records both |
+| S-01 | Confirmed work-observer gap, no demonstrated current Set production defect | Fixed-now, scoped bookkeeping observation and mutant rejection | Existing Set owner, unchanged truth model and budgets |
+| E-01 | Confirmed stale equivalence; neighboring owner already protects production | Fixed-now, sign-preserving model/recorder and generated receiving paths | Revert owner and FID-1 coverage entry |
+| O-01 | Confirmed prose/assertion mismatch, alias law unsupported | Fixed-now, accurate value/order prose | Existing snapshot checker |
+
+Four raw findings = four fixed-now, with no dropped or deferred audit item.
+Recommend **hire** for all four reviewers: they executed distinguishing attacks,
+reported setup failures separately, respected scope, and separated unsupported
+law claims from production bugs. The work audit correctly limits its observation
+rather than claiming a universal complexity proof. Their positive observations
+remain above; they do not erase the sparse-array counterexample.
+
+### Validation, size and limits
+
+The eleven-owner final gate passes **508 tests**, with no type errors. It covers
+ordinary/snapshot/history/pooled observers, utilities, draft/revert/native/flat
+tracking, production-error messages and generated docs. A later sparse-only gate
+also passes after adding exact membership and carrier-size checks. The Angular
+ordinary/conformance gate passes **109 tests + 1 todo**, no type errors. CI found
+two mechanical omissions on the prior head: error 262's generated page was not
+committed, and an Angular synthetic Collection had no layout clock. Regeneration
+and a coherent row-backed mock layout getter fix them without relaxing checks.
+The ordinary generator gate passes 16 tests.
+
+Exact-main size comparison remains `1443dc92e`: observer −408, Collection −7,
+utility +186 = **−229 minified production bytes**. DB gzip −97, brotli +50; React
+unchanged. All eight app scenarios shrink 49–83 gzip bytes. Brotli varies −161 to
++55; compression is not uniformly smaller. No framework production source changes.
+
+ORC-001/002/003: laws/authority, independent positional and numeric-token models,
+and literate grammar/driver/checkpoints are named in the executable owners.
+ORC-004: length/index/defined value reconstruct the sparse defect, carriers cross
+Set/record recursion, and hole/undefined is the legal equal neighbor; out-of-range
+indexes are normalized to a legal position. Zero-path constructors exclude
+integer conversion and wrong-shaped targets. ORC-005/006/007: real receiving
+paths ran before production changed, wrong designs fail at named comparisons,
+and fixed/fresh budgets plus direct seed/path replays are recorded. ORC-008/009:
+stateless positional/token models introduce no lifecycle state; authored values
+map directly to the named public paths. ORC-010: receiving cleanup preserves
+primary/secondary failures, and scoped native methods restore in finally.
+ORC-011: count/capacity, positional values and sign tokens are structurally
+different from production matching/traversal. ORC-012/013/015/016: this supplement
+records adjacent equal/unequal cases, per-path reach, bounded claims and shared
+comparisons; no unit assertions were inserted as oracle tests. ORC-014: these
+are real core receiving boundaries, not evidence of provider or framework timing.
+
+The work measure does not bound assignments implemented without the observed
+native methods, array scans, allocations, arbitrary nested traversal or all
+graph topologies. Sparse publication does not establish array presence fidelity,
+browser/framework scheduling or provider delivery. Signed-zero checks observe
+final changes/draft/isolation, not every intermediate read or settlement.
+The separate recorded #2334 cleanup/restart defect remains open, #2349's draft
+shape fix remains outside this PR by maintainer decision, and combined #2327
+integration is unverified. General readiness remains unproven; green CI for an
+older head does not validate this new tree. CodeRabbit remains paused at its
+earlier covered production commit.

@@ -15,6 +15,18 @@ import {
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { finishHistory } from './observer-history-cleanup.js'
+import {
+  checkSparseArray,
+  makeSparseArray,
+  sparseArrayCarriers,
+  sparseArrayCase,
+  sparseArrayValues,
+} from './sparse-array-value-oracle.js'
+import type {
+  SparseArrayCarrier,
+  SparseArrayCase,
+  SparseArrayForm,
+} from './sparse-array-value-oracle.js'
 import type { HealthNode, SyncConfig } from '../src/types.js'
 import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
 
@@ -201,7 +213,7 @@ function checkRead(
   } else {
     const data = read.data as ReadonlyArray<Row>
     expect(data.map(plain), `${label}: data rows`).toEqual(rows)
-    // Agreement is identity-level: both views list the same row objects.
+    // Both views expose the captured row values in the same order.
     expect(data, `${label}: data agrees with state`).toEqual([
       ...(read.state?.values() ?? []),
     ])
@@ -1764,4 +1776,232 @@ describe(`publications preserve nested record shape`, () => {
         `observer record shape ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
       )
     })
+})
+
+/**
+ * A defined array position must reach every row consumer after its sync write
+ * applies. Change-event equality treats a hole as undefined, so that neighbor
+ * keeps row containers stable; it cannot suppress a hole-to-number change.
+ * The utility owner's shared grammar supplies values and its positional model.
+ * Real Collection events, direct/projected observers, both modes, and retained
+ * snapshots receive the same law. Each generated case executes every receiving
+ * path, rather than relying on a random choice to reach one. Provider delivery
+ * and framework scheduling remain outside this core publication boundary.
+ */
+const sparseReceivingStates = [
+  `source-granular-attached`,
+  `source-granular-detached`,
+  `source-wholesale-attached`,
+  `source-wholesale-detached`,
+  `query-granular-attached`,
+  `query-granular-detached`,
+  `query-wholesale-attached`,
+  `query-wholesale-detached`,
+  `hole-undefined`,
+  `hole-defined`,
+  `defined-hole`,
+  ...sparseArrayCarriers,
+] as const
+async function checkSparsePublication(
+  spec: SparseArrayCase,
+  carrier: SparseArrayCarrier,
+  mode: `granular` | `wholesale`,
+  projected: boolean,
+  attached: boolean,
+  reach: ReturnType<
+    typeof createOracleReach<(typeof sparseReceivingStates)[number]>
+  >,
+): Promise<void> {
+  type SparseRow = { id: string; payload: object }
+  let sync!: Parameters<SyncConfig<SparseRow, string>[`sync`]>[0]
+  const row = (form: SparseArrayForm): SparseRow => ({
+    id: `a`,
+    payload: makeSparseArray(spec, form, carrier),
+  })
+  const source = createCollection<SparseRow, string>({
+    getKey: (value) => value.id,
+    startSync: true,
+    gcTime: Infinity,
+    sync: {
+      sync(input) {
+        sync = input
+        input.begin()
+        input.write({ type: `insert`, value: row(`hole`) })
+        input.commit()
+        input.markReady()
+      },
+    },
+  })
+  const query = projected
+    ? createLiveQueryCollection({
+        query: new Query().from({ row: source }).select(({ row: value }) => ({
+          id: value.id,
+          payload: value.payload,
+        })),
+        getKey: (value) => value.id,
+        startSync: true,
+        gcTime: Infinity,
+      })
+    : undefined
+  const observer = createLiveQueryObserver(query ?? source, { mode })
+  const mirror = new Map(source.entries())
+  const subscription = source.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) mirror.delete(change.key)
+        else mirror.set(change.key, change.value)
+      }
+    },
+    { includeInitialState: false },
+  )
+  const stop = attached ? observer.subscribe(() => {}) : undefined
+  const retained: Array<{
+    snapshot: LiveQuerySnapshot<SparseRow, string | number>
+    values: Array<number | undefined>
+  }> = []
+  let failure: { error: unknown } | undefined
+  try {
+    if (query) await query.preload()
+    reach.reach(
+      `${projected ? `query` : `source`}-${mode}-${attached ? `attached` : `detached`}`,
+    )
+    reach.reach(carrier)
+    let previous = observer.getSnapshot()
+    retained.push({
+      snapshot: previous,
+      values: sparseArrayValues(spec, `hole`),
+    })
+    const forms = [`undefined`, `defined`, `hole`, `defined`] as const
+    for (const [index, form] of forms.entries()) {
+      const expected = sparseArrayValues(spec, form)
+      sync.begin()
+      sync.write({ type: `update`, value: row(form) })
+      sync.commit()
+      if (query) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const snapshot = observer.getSnapshot()
+      // Check independently received values before proceeding to the next write.
+      expect([...source.keys()], `source membership`).toEqual([`a`])
+      expect([...mirror.keys()], `change-message membership`).toEqual([`a`])
+      expect(
+        snapshot.data!.map((value) => value.id),
+        `snapshot membership`,
+      ).toEqual([`a`])
+      expect([...snapshot.state!.keys()], `snapshot state membership`).toEqual([
+        `a`,
+      ])
+      const observations = [
+        source.get(`a`)!.payload,
+        mirror.get(`a`)!.payload,
+        snapshot.data![0]!.payload,
+        snapshot.state!.get(`a`)!.payload,
+      ]
+      const errors: Array<unknown> = []
+      for (const actual of observations) {
+        try {
+          checkSparseArray(actual, expected, carrier)
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+      if (errors.length)
+        throw new AggregateError(
+          errors,
+          `sparse publication ${index}: ${errors.map(String).join(`; `)}`,
+          { cause: errors[0] },
+        )
+      if (index === 0) {
+        expect(snapshot.data, `equivalent array values keep data`).toBe(
+          previous.data,
+        )
+        expect(snapshot.state, `equivalent array values keep state`).toBe(
+          previous.state,
+        )
+        reach.reach(`hole-undefined`)
+      } else {
+        expect(snapshot.data, `changed array value replaces data`).not.toBe(
+          previous.data,
+        )
+        reach.reach(form === `hole` ? `defined-hole` : `hole-defined`)
+      }
+      retained.push({ snapshot, values: expected })
+      previous = snapshot
+    }
+    for (const { snapshot, values } of retained) {
+      checkSparseArray(snapshot.data![0]!.payload, values, carrier)
+      checkSparseArray(snapshot.state!.get(`a`)!.payload, values, carrier)
+    }
+  } catch (error) {
+    failure = {
+      error: new Error(
+        `${projected ? `query` : `source`}/${mode}/${attached ? `attached` : `detached`}/${carrier}: ${String(error)}`,
+        { cause: error },
+      ),
+    }
+  }
+  await finishHistory(
+    [
+      () => stop?.(),
+      () => subscription.unsubscribe(),
+      () => observer.dispose(),
+      () => query?.cleanup(),
+      () => source.cleanup(),
+    ],
+    failure,
+  )
+}
+declareOracle({ check: [checkSparsePublication] })
+describe(`array value publication`, () => {
+  for (const campaign of [`fixed`, `random`] as const)
+    oracleReplayTest(
+      it,
+      ...(campaign === `fixed` ? [] : [`live-query-observer.sparse-array`]),
+    )(
+      `publishes changed array positions to every receiver (${campaign})`,
+      async () => {
+        const reach = createOracleReach(
+          `live-query-observer.sparse-array`,
+          sparseReceivingStates,
+        )
+        await fc.assert(
+          fc.asyncProperty(sparseArrayCase, async (spec) => {
+            reach.beginHistory()
+            const results = await Promise.allSettled(
+              sparseArrayCarriers.flatMap((carrier) =>
+                ([`granular`, `wholesale`] as const).flatMap((mode) =>
+                  [false, true].flatMap((projected) =>
+                    [false, true].map((attached) =>
+                      checkSparsePublication(
+                        spec,
+                        carrier,
+                        mode,
+                        projected,
+                        attached,
+                        reach,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            )
+            const errors = results.flatMap((result) =>
+              result.status === `rejected` ? [result.reason] : [],
+            )
+            if (errors.length)
+              throw new AggregateError(
+                errors,
+                `sparse receiving paths: ${errors.map(String).join(`; `)}`,
+                { cause: errors[0] },
+              )
+          }),
+          {
+            ...oraclePropertyOptions(20, `live-query-observer.sparse-array`),
+            ...(campaign === `fixed` ? { seed: 234603 } : {}),
+          },
+        )
+        reach.assertReached()
+        process.stdout.write(
+          `observer sparse array ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+        )
+      },
+    )
 })

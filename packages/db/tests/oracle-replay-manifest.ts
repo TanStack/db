@@ -164,7 +164,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
     `live-query-observer`,
-    `retained-snapshot row-container-sharing capture-paths record-shape`,
+    `retained-snapshot row-container-sharing capture-paths record-shape sparse-array`,
   ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
@@ -582,7 +582,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/proxy-revert-oracle.property.test.ts`,
     `proxy`,
-    `revert-history revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
+    `revert-history revert-signed-zero revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
   ],
   [
     `db/tests/proxy-native-methods-oracle.property.test.ts`,
@@ -967,6 +967,10 @@ const replayTestNames = new Map([
   [
     `live-query-observer.record-shape`,
     `compares authored shape at every read.*random`,
+  ],
+  [
+    `live-query-observer.sparse-array`,
+    `publishes changed array positions to every receiver.*random`,
   ],
   [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
   [

@@ -18,6 +18,11 @@ import {
 } from './deep-equals-support'
 import { createOracleReach } from './oracle-reach.js'
 import { declareOracle } from './oracle-declaration.js'
+import {
+  makeSparseArray,
+  sparseArrayCarriers,
+  sparseArrayCase,
+} from './sparse-array-value-oracle.js'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -709,22 +714,46 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    utilsProperty([
-      fc.array(fc.oneof(fc.integer(), fc.constant(`hole`)), {
-        minLength: 1,
-        maxLength: 5,
-      }),
-    ])(`an array hole equals undefined at the same index`, (cells) => {
-      const sparse: Array<unknown> = []
-      sparse.length = cells.length
-      const dense: Array<unknown> = []
-      cells.forEach((cell, index) => {
-        if (cell !== `hole`) sparse[index] = cell
-        dense[index] = cell === `hole` ? undefined : cell
-      })
-      expectEqualityPair(sparse, dense, true)
-      expectEqualityPair({ items: sparse }, { items: dense }, true)
+    const sparseReach = createOracleReach(`utils.sparse-array`, [
+      `hole-undefined`,
+      `hole-defined`,
+      `general`,
+      `row`,
+      ...sparseArrayCarriers,
+    ])
+    afterAll(() => {
+      if (sparseReach.counts().get(`general`)) {
+        sparseReach.assertReached()
+        process.stdout.write(
+          `Sparse array reach ${JSON.stringify(Object.fromEntries(sparseReach.counts()))}\n`,
+        )
+      }
     })
+    utilsProperty([sparseArrayCase])(
+      `array holes equal undefined but differ from defined values`,
+      (spec) => {
+        sparseReach.beginHistory()
+        for (const [name, equal] of [
+          [`general`, deepEquals],
+          [`row`, sameRowValue],
+        ] as const) {
+          for (const carrier of sparseArrayCarriers) {
+            const hole = makeSparseArray(spec, `hole`, carrier)
+            for (const form of [`undefined`, `defined`] as const) {
+              expectEqualityPair(
+                hole,
+                makeSparseArray(spec, form, carrier),
+                form === `undefined`,
+                equal,
+              )
+              sparseReach.reach(`hole-${form}`)
+            }
+            sparseReach.reach(carrier)
+          }
+          sparseReach.reach(name)
+        }
+      },
+    )
   })
   describe(`nested structure consistency`, () => {
     utilsProperty([
@@ -866,8 +895,10 @@ describe(`typed-array value class`, () => {
  * Row equality distinguishes plain/class/null records; generic equality keeps
  * the established plain-record/class bridge.
  * AGENTS.md's Algorithm Efficiency rule excludes combinatorial assignment
- * searches. Scalar record comparisons below get a generous cubic field-read
- * ceiling; this is a work measure, not elapsed time or a nested-value bound.
+ * searches. Scalar reads and native Map/Set operations below get generous
+ * cubic ceilings. Cached candidate comparisons can keep reads polynomial
+ * while a permutation search does factorial assignment work, so both measures
+ * matter. Neither measure bounds elapsed time or arbitrary nested-value work.
  *
  * The model counts authored shape/value tokens. Row equality requires exact
  * counts. Generic equality permits a plain/null record to bridge either keyed
@@ -945,12 +976,54 @@ const setReachStates = [
   `row-forward`,
   `row-reverse`,
 ] as const
+
+// Count comparison work after constructing both inputs and the independent
+// expectation. These synchronous fixtures cannot interleave another comparison
+// while native methods are wrapped. Restore the exact descriptors even when a
+// work ceiling throws; no test-only hook enters production.
+function withSetComparisonOperations(
+  limit: number,
+  compare: () => boolean,
+): boolean {
+  let operations = 0
+  const wrap = (prototype: object, method: string): (() => void) => {
+    const original = Object.getOwnPropertyDescriptor(prototype, method)
+    if (!original || typeof original.value !== `function`) {
+      throw new Error(`Missing native comparison method: ${method}`)
+    }
+    Object.defineProperty(prototype, method, {
+      ...original,
+      value: function (this: unknown, ...args: Array<unknown>): unknown {
+        if (++operations > limit) {
+          throw new Error(
+            `Set collection-operation work: ${operations} exceeds ${limit}`,
+          )
+        }
+        return Reflect.apply(original.value, this, args)
+      },
+    })
+    return () => Object.defineProperty(prototype, method, original)
+  }
+  const restore: Array<() => void> = []
+  try {
+    for (const method of [`has`, `get`, `set`, `delete`]) {
+      restore.push(wrap(Map.prototype, method))
+    }
+    for (const method of [`has`, `add`, `delete`]) {
+      restore.push(wrap(Set.prototype, method))
+    }
+    return compare()
+  } finally {
+    for (const method of restore) method()
+  }
+}
+
 function checkSetBag(
   left: ReadonlyArray<SetRecord>,
   right: ReadonlyArray<SetRecord>,
   cyclic: boolean,
   reach: (state: (typeof setReachStates)[number]) => void,
-  workLimit?: number,
+  workLimits?: { scalarReads: number; collectionOperations: number },
 ): void {
   const errors: Array<Error> = []
   for (const [name, equal] of [
@@ -965,7 +1038,8 @@ function checkSetBag(
       try {
         reach(`${name}-${direction}`)
         let reads = 0
-        const ceiling = workLimit ?? 4 * (Math.max(a.length, b.length) + 1) ** 3
+        const scalarCeiling =
+          workLimits?.scalarReads ?? 4 * (Math.max(a.length, b.length) + 1) ** 3
         const make = (records: ReadonlyArray<SetRecord>) => {
           const result = new Set<object>()
           for (const spec of records) {
@@ -982,9 +1056,9 @@ function checkSetBag(
               get() {
                 // Fail at the work observation, before exponential code can hang.
                 // Allocate diagnostics only on failure; each scalar read is counted.
-                if (++reads > ceiling) {
+                if (++reads > scalarCeiling) {
                   throw new Error(
-                    `Set scalar-field comparison work: ${reads} exceeds ${ceiling}`,
+                    `Set scalar-field comparison work: ${reads} exceeds ${scalarCeiling}`,
                   )
                 }
                 return spec.value
@@ -995,10 +1069,16 @@ function checkSetBag(
           }
           return result
         }
-        expect(equal(make(a), make(b)), `Set bag equality`).toBe(expected)
+        const leftValue = make(a)
+        const rightValue = make(b)
+        const actual = withSetComparisonOperations(
+          workLimits?.collectionOperations ?? scalarCeiling,
+          () => equal(leftValue, rightValue),
+        )
+        expect(actual, `Set bag equality`).toBe(expected)
       } catch (error) {
         errors.push(
-          new Error(`${name} Set comparison: ${String(error)}`, {
+          new Error(`${name} ${direction} Set comparison: ${String(error)}`, {
             cause: error,
           }),
         )
@@ -1027,7 +1107,7 @@ describe(`object Set matching work`, () => {
     }
   })
   utilsProperty([ambiguousSets])(
-    `object Set equality respects multiplicity with polynomial scalar reads`,
+    `object Set equality respects multiplicity with polynomial comparison work`,
     ({ width, value, rotation }) => {
       reach.beginHistory()
       const plain = (count: number, leaf = value): Array<SetRecord> =>
@@ -1086,9 +1166,10 @@ describe(`object Set matching work`, () => {
 
 /**
  * Equal Sets whose corresponding members are equal need no assignment search.
- * The field-read bound is linear for this common paired-input family. It does
- * not impose linear work on arbitrary unordered or unequal Sets. The same
- * independent bag model checks distinct and interchangeable scalar members,
+ * Scalar reads and native Map/Set operations have linear bounds for this
+ * common paired-input family. They do not impose linear work on arbitrary
+ * unordered or unequal Sets. The independent bag model checks distinct and
+ * interchangeable scalar members,
  * with and without links back to the root Set, through both equality APIs.
  * Width varies across 1,024–3,072, including the reported 3,000-member scale.
  */
@@ -1121,7 +1202,7 @@ describe(`paired object Set matching work`, () => {
     }
   })
   utilsProperty([pairedSets])(
-    `paired equal Sets use linear scalar reads at large widths`,
+    `paired equal Sets use linear comparison work at large widths`,
     ({ width, value }) => {
       reach.beginHistory()
       for (const distinct of [false, true]) {
@@ -1133,7 +1214,10 @@ describe(`paired object Set matching work`, () => {
           }),
         )
         for (const cyclic of [false, true]) {
-          checkSetBag(records, records, cyclic, reach.reach, 4 * width)
+          checkSetBag(records, records, cyclic, reach.reach, {
+            scalarReads: 4 * width,
+            collectionOperations: 16 * (width + 1),
+          })
           reach.reach(cyclic ? `cyclic` : `acyclic`)
         }
         reach.reach(distinct ? `distinct` : `interchangeable`)

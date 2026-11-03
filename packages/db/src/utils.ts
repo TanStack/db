@@ -295,9 +295,13 @@ export function deepEqualsInternal(
   if (Array.isArray(a) && !draft) {
     ;(visited ??= new Map()).set(a, b)
 
-    const result = a.every((item, index) =>
-      deepEqualsInternal(item, b[index], mode, visited),
-    )
+    let result = true
+    for (let index = 0; index < a.length; index++) {
+      if (!deepEqualsInternal(a[index], b[index], mode, visited)) {
+        result = false
+        break
+      }
+    }
     visited.delete(a)
     return result
   }
