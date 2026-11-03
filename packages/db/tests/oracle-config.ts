@@ -129,6 +129,10 @@ const staticOracleProperties = [
   `live-query-observer.partial-attach`,
   `live-query-observer.release-failure`,
   `live-query-observer.hydration-error-timing`,
+  `live-query-observer.row-container-sharing`,
+  `live-query-observer.capture-paths`,
+  `live-query-observer.record-shape`,
+  `live-query-observer.sparse-array`,
   `subscription-lifecycle.notification-error`,
   `live-query.start-handoff`,
   `react.descriptor-error-surface`,
@@ -173,6 +177,7 @@ const staticOracleProperties = [
   `proxy.callback-history`,
   `indexeddb.pending-history`,
   `proxy.revert-history`,
+  `proxy.revert-signed-zero`,
   `proxy.revert-nested-round-trips`,
   `proxy.revert-class-writes`,
   `proxy.revert-partial-reverts`,
@@ -487,7 +492,7 @@ const publicationProperties = [
 
 // utils-oracle and comparison-oracle number their properties in file order.
 const utilsProperties = Array.from(
-  { length: 41 },
+  { length: 43 },
   (_, index) => `utils.${index + 1}`,
 )
 const comparisonProperties = Array.from(

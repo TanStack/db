@@ -1,4 +1,5 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
+import { codedMessage, devBuild } from './error-message.js'
 import { runAllCallbacks } from './utils/callbacks.js'
 import {
   getLiveQueryStatusFlags,
@@ -17,8 +18,10 @@ import type { ChangeMessage, CollectionStatus, HealthNode } from './types.js'
  *
  * `getSnapshot()` returns a stable object identity that only changes when the
  * query changes, so `useSyncExternalStore`-style consumers can compare by
- * reference. Each snapshot owns a captured view of `state`/`data`, so reading
- * an older snapshot cannot expose rows from a later revision.
+ * reference. Each snapshot retains a captured view of `state`/`data`, so
+ * reading an older snapshot cannot expose rows from a later revision.
+ * Within one row revision, metadata-only changes retain the row containers.
+ * Cleanup/reset may discard that revision even when its rows were empty.
  */
 export interface LiveQuerySnapshot<
   T extends object,
@@ -99,7 +102,9 @@ export interface LiveQueryObserver<
    * Subscribe to changes. The listener receives the change set (or `undefined`
    * for the synthetic notify a ready collection emits on attach). Granular
    * adapters apply the changes; wholesale adapters can ignore them and re-read
-   * `getSnapshot()`. Returns an unsubscribe function.
+   * `getSnapshot()`. Raw changes can carry fresh equal row objects while a
+   * snapshot retains its capture for the unchanged revision. Returns an
+   * unsubscribe function.
    */
   subscribe: (listener: LiveQueryObserverListener<T, TKey>) => () => void
   /** Resolve once the collection has loaded its first data. */
@@ -168,8 +173,16 @@ class LiveQueryObserverImpl<
   // Whether the cached snapshot was built for the hydration read.
   private cachedServerView = false
   private cachedSnapshot: LiveQuerySnapshot<T, TKey> = DISABLED_SNAPSHOT
+  // Last materialized visible capture, which can be a hydration seed or lag
+  // the live capture until getSnapshot() runs. These are array references.
+  private cachedRows:
+    | {
+        entries: Array<[TKey, T]>
+        data: Array<T>
+        state?: Map<TKey, T>
+      }
+    | undefined
   private layoutRevision = 0
-  private lastLayoutKeys: Array<TKey> | undefined
   private deliveredLayoutRevision: number | undefined
   private readonly subscriptions = new Set<SubscriptionRecord<T, TKey>>()
   // Publications are dispatched FIFO: an emit that happens while another
@@ -195,6 +208,17 @@ class LiveQueryObserverImpl<
     onPreload: (() => void) | undefined,
     suspendUntilReady: boolean,
   ) {
+    if (
+      collection &&
+      (!Number.isFinite(collection._stateRevision) ||
+        !Number.isFinite(collection._layoutRevision))
+    ) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `LiveQueryObserver requires finite Collection row and layout revision clocks`
+          : codedMessage(262),
+      )
+    }
     this.collection = collection
     this.wholesale = wholesale
     this.onPreload = onPreload
@@ -213,22 +237,16 @@ class LiveQueryObserverImpl<
         },
         publish: (changes, entries) => {
           const revision =
-            entries && collection
-              ? this.getCollectionRevision(collection)
-              : undefined
-          if (entries) {
-            this.updateCachedEntries(entries, revision)
-            this.snapshotDirty = true
-          }
+            entries && collection ? collection._stateRevision : undefined
+          const layoutRevision =
+            entries && collection ? collection._layoutRevision : undefined
           this.emit(
             this.wholesale ? undefined : changes,
             undefined,
             entries,
             collection?.status,
             revision,
-            entries && collection
-              ? this.getCollectionLayoutRevision(collection)
-              : undefined,
+            layoutRevision,
             entries !== undefined,
           )
         },
@@ -257,7 +275,24 @@ class LiveQueryObserverImpl<
 
     if (this.snapshotDirty) {
       const entries = this.getVisibleEntries(collection)
-      const data = entries.map(([, value]) => value)
+      // Capture each row revision once. Sharing this value across metadata
+      // snapshots keeps rows lazy and avoids retaining a chain of old snapshots.
+      let rows = this.cachedRows
+      if (!rows || rows.entries !== entries) {
+        // Captured entries already contain the previous ordered keys. Compare
+        // keys directly: serialized signatures can collide for string keys.
+        const previous = rows?.entries
+        if (
+          previous?.length !== entries.length ||
+          entries.some(([key], index) => previous[index]![0] !== key)
+        ) {
+          this.layoutRevision++
+        }
+        rows = this.cachedRows = {
+          entries,
+          data: entries.map(([, value]) => value),
+        }
+      }
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
       // The seed stands in only for a result that is still coming, so an
@@ -271,39 +306,14 @@ class LiveQueryObserverImpl<
           : liveStatus
       this.cachedServerView = forServerSnapshot
 
-      // Bump the layout revision when the ordered key sequence changes
-      // (membership, ordering, or an order-only move). Compare the key sequence
-      // directly rather than via a serialized signature: a joined-with-separator
-      // signature can collide when a key value equals the concatenation of
-      // neighboring keys around the separator. Comparing keys also avoids
-      // materializing a large string on every rebuild; a new key array is only
-      // allocated when the layout actually moved.
-      const prevKeys = this.lastLayoutKeys
-      let layoutChanged =
-        prevKeys === undefined || prevKeys.length !== entries.length
-      if (!layoutChanged) {
-        for (let i = 0; i < entries.length; i++) {
-          if (prevKeys![i] !== entries[i]![0]) {
-            layoutChanged = true
-            break
-          }
-        }
-      }
-      if (layoutChanged) {
-        this.lastLayoutKeys = entries.map(([key]) => key)
-        this.layoutRevision++
-      }
-
       const health = this.publishedHealth
         ? this.publishedHealth.tree
         : (collection as { health?: HealthNode }).health
-      // Most consumers read only `data`; build the keyed view on first read.
-      let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
         get state() {
-          return (state ??= new Map(entries))
+          return (rows.state ??= new Map(rows.entries))
         },
-        data: singleResult ? data[0] : data,
+        data: singleResult ? rows.data[0] : rows.data,
         collection: getPublicCollection(collection),
         layoutRevision: this.layoutRevision,
         status,
@@ -349,92 +359,61 @@ class LiveQueryObserverImpl<
     collection: Collection<T, TKey, any>,
   ): Array<[TKey, T]> {
     if (this.clientBinding?.seed) return this.clientBinding.seed.entries
-    return this.cachedEntries ?? this.captureEntries(collection).entries
-  }
-
-  private getCollectionRevision(
-    collection: Collection<T, TKey, any>,
-  ): number | undefined {
-    const revision = (collection as { _stateRevision?: unknown })._stateRevision
-    return typeof revision === `number` ? revision : undefined
-  }
-
-  private getCollectionLayoutRevision(
-    collection: Collection<T, TKey, any>,
-  ): number | undefined {
-    const revision = (collection as { _layoutRevision?: unknown })
-      ._layoutRevision
-    return typeof revision === `number` ? revision : undefined
+    return this.cachedEntries ?? this.captureEntries(collection)
   }
 
   private readEntries(collection: Collection<T, TKey, any>): {
     entries: Array<[TKey, T]>
-    revision?: number
+    revision: number
+    layoutRevision: number
   } {
-    const entries = Array.from(collection.entries()) as Array<[TKey, T]>
-    const revision = this.getCollectionRevision(collection)
-    return { entries, revision }
+    const revision = collection._stateRevision
+    const layoutRevision = collection._layoutRevision
+    // Reuse the last delivered capture only when both clocks match. A queued
+    // newer publication must still capture its own rows before reentrant writes.
+    const entries =
+      this.cachedEntries &&
+      revision === this.cachedCollectionRevision &&
+      layoutRevision === this.cachedCollectionLayoutRevision
+        ? this.cachedEntries
+        : (Array.from(collection.entries()) as Array<[TKey, T]>)
+    return { entries, revision, layoutRevision }
   }
 
-  private captureEntries(collection: Collection<T, TKey, any>): {
-    entries: Array<[TKey, T]>
-    revision?: number
-  } {
-    const { entries, revision } = this.readEntries(collection)
-    this.updateCachedEntries(entries, revision)
-    return { entries, revision }
+  private captureEntries(
+    collection: Collection<T, TKey, any>,
+  ): Array<[TKey, T]> {
+    const { entries, revision, layoutRevision } = this.readEntries(collection)
+    this.updateCachedEntries(entries, revision, layoutRevision)
+    return this.cachedEntries!
   }
 
   private updateCachedEntries(
     entries: Array<[TKey, T]>,
     revision: number | undefined,
+    layoutRevision: number | undefined,
   ): void {
-    const changed =
-      revision !== undefined
-        ? this.cachedEntries === undefined ||
-          revision !== this.cachedCollectionRevision
-        : !this.entriesEqual(this.cachedEntries, entries)
-
-    this.cachedEntries = entries
+    // Collection clocks are authoritative; equal writes may re-enrich a row
+    // without changing its value. Keep that revision's captured identities.
+    if (
+      this.cachedEntries === undefined ||
+      revision !== this.cachedCollectionRevision ||
+      layoutRevision !== this.cachedCollectionLayoutRevision
+    ) {
+      this.cachedEntries = entries
+      this.snapshotDirty = true
+    }
     this.cachedCollectionRevision = revision
-    if (changed) this.snapshotDirty = true
-  }
-
-  private entriesEqual(
-    left: Array<[TKey, T]> | undefined,
-    right: Array<[TKey, T]>,
-  ): boolean {
-    if (!left || left.length !== right.length) return false
-    return left.every(
-      ([key, value], index) =>
-        right[index]![0] === key && right[index]![1] === value,
-    )
+    this.cachedCollectionLayoutRevision = layoutRevision
   }
 
   /**
-   * While detached there is no delivered-publication clock, so fall back to
-   * the collection revision. Compatible cross-copy collections that predate
-   * `_stateRevision` are compared structurally instead.
+   * A detached read catches up from the Collection's row and layout clocks.
+   * Supported inputs are Collections and pooled views from this DB instance.
    */
   private refreshDetachedState(collection: Collection<T, TKey, any>): void {
     const status = collection.status
-    const revision = this.getCollectionRevision(collection)
-    const layoutRevision = this.getCollectionLayoutRevision(collection)
-
-    if (revision !== undefined) {
-      if (
-        this.cachedEntries === undefined ||
-        revision !== this.cachedCollectionRevision ||
-        layoutRevision !== this.cachedCollectionLayoutRevision
-      ) {
-        this.captureEntries(collection)
-        this.cachedCollectionLayoutRevision = layoutRevision
-        this.snapshotDirty = true
-      }
-    } else {
-      const entries = Array.from(collection.entries()) as Array<[TKey, T]>
-      this.updateCachedEntries(entries, undefined)
-    }
+    this.captureEntries(collection)
 
     // A health-only change moves no row or status. Trees keep their identity
     // until their content changes, so identity tells whether it went stale.
@@ -509,7 +488,7 @@ class LiveQueryObserverImpl<
     this.refreshDetachedState(collection)
     this.attached = true
     this.visibleStatus ??= collection.status
-    this.deliveredLayoutRevision = this.getCollectionLayoutRevision(collection)
+    this.deliveredLayoutRevision = collection._layoutRevision
     const attachedWithHydrationSeed = !!this.clientBinding?.seed
     this.blockDelivery = this.wholesale || attachedWithHydrationSeed
 
@@ -548,7 +527,7 @@ class LiveQueryObserverImpl<
         this.clientBinding?.markAuthoritative()
       }
 
-      const layoutRevision = this.getCollectionLayoutRevision(collection)
+      const layoutRevision = collection._layoutRevision
       let layoutChanged = explicitLayoutChange
       if (
         !explicitLayoutChange &&
@@ -558,23 +537,18 @@ class LiveQueryObserverImpl<
         // Empty ready events predate the explicit layout signal and share its
         // empty-array payload. Only forward an empty batch when the collection
         // confirms that a new layout-only publication occurred.
-        if (
-          layoutRevision === undefined ||
-          layoutRevision === this.deliveredLayoutRevision
-        ) {
+        if (layoutRevision === this.deliveredLayoutRevision) {
           return
         }
         layoutChanged = true
       }
-      if (changes !== undefined && layoutRevision !== undefined) {
+      if (changes !== undefined) {
         this.deliveredLayoutRevision = layoutRevision
       }
       const captured =
-        changes !== undefined
+        changes !== undefined || status === `cleaned-up`
           ? this.readEntries(collection)
-          : status === `cleaned-up`
-            ? this.readEntries(collection)
-            : undefined
+          : undefined
       this.emit(
         changes,
         undefined,
@@ -615,14 +589,12 @@ class LiveQueryObserverImpl<
         notify(undefined, collection.status)
       }),
     )
-    const subscribeLayoutChanges = (
-      collection as Collection<T, TKey, any> & {
-        _subscribeLayoutChanges?: (listener: () => void) => () => void
-      }
-    )._subscribeLayoutChanges
-    if (typeof subscribeLayoutChanges === `function`) {
+    // Pooled views carry layout changes in their ordinary change stream.
+    if (
+      (collection as Partial<Collection<T, TKey, any>>)._subscribeLayoutChanges
+    ) {
       ownRelease(
-        subscribeLayoutChanges.call(collection, () =>
+        collection._subscribeLayoutChanges(() =>
           notify([], collection.status, true),
         ),
       )
@@ -656,18 +628,7 @@ class LiveQueryObserverImpl<
       // immediately after subscribe returns.
       this.flushPublications(!this.wholesale)
       // The render-time read is still current unless the handshake published.
-      const revision = this.getCollectionRevision(collection)
-      const layoutRevision = this.getCollectionLayoutRevision(collection)
-      if (
-        revision === undefined ||
-        this.cachedEntries === undefined ||
-        revision !== this.cachedCollectionRevision ||
-        layoutRevision !== this.cachedCollectionLayoutRevision
-      ) {
-        const { entries } = this.readEntries(collection)
-        this.updateCachedEntries(entries, revision)
-        this.cachedCollectionLayoutRevision = layoutRevision
-      }
+      this.captureEntries(collection)
     }
     if (this.clientBinding?.seed) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
@@ -723,11 +684,8 @@ class LiveQueryObserverImpl<
           this.updateCachedEntries(
             publication.entries,
             publication.collectionRevision,
+            publication.collectionLayoutRevision,
           )
-        }
-        if (publication.collectionLayoutRevision !== undefined) {
-          this.cachedCollectionLayoutRevision =
-            publication.collectionLayoutRevision
         }
         if (publication.layoutChanged) {
           this.snapshotDirty = true

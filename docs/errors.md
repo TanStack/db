@@ -2639,3 +2639,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 limit must be nonnegative
 ```
+
+<a id="error-262"></a>
+
+## Error 262: `live-query-observer.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LiveQueryObserver requires finite Collection row and layout revision clocks
+```
