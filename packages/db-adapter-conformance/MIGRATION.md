@@ -46,8 +46,43 @@ reviewed change.
 1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode, done), and Convex (eager mode, done). Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
 2. **Retire duplicated adapter tests (separate PR, maintainer decision 2026-11-02).** For each adapter on the eager family, classify its existing eager-mode tests and oracles against what the shared oracle generates and observes: remove a test only when the shared family checks the same law, history, path, and observation; narrow one it covers in part; keep the rest. Known overlap: TrailBase's lifecycle oracle and the shared family both own eager startup failure and stream-end health.
 3. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN. Publishing the package for drivers outside this repository (a public package, `@tanstack/db` as a peer dependency, an exported reach counter) is deferred (maintainer decision 2026-11-02).
-4. **The mutations family.** It applies to every adapter except the storage hosts.
+4. **The mutations family (in progress).** It applies to every adapter except the storage hosts.
 5. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
+
+## Next slice: mutations and confirmation (started 2026-11-02)
+
+The family checks what an adapter owes when an application writes, through
+one shared model and one driver per adapter, as the eager family does. Core
+keeps its own owners for laws that no adapter can change: joining a
+transaction (MUT-4) and holding synced commits behind pending optimistic
+state (MUT-5) stay with `packages/db/tests/optimistic-history-oracle.ts`.
+
+- **Laws, first cut:** MUT-1 (the write is visible until it settles), MUT-2
+  (a rejected write rolls back and `isPersisted` rejects with the error),
+  MUT-13 and MUT-3 (one handler call per write, with the authored values),
+  MUT-10 (writes reach the backend in order per Collection), FID-5 and MUT-8
+  (after settlement the backend holds the fold of accepted writes; a rejected
+  write leaves no backend effect), and MUT-7 (under confirmation through sync,
+  the write stays persisting until its own write arrives in a committed
+  batch). Authority: the law set's section 9 and FID-5.
+- **Capabilities:** `adapter-persistence` (the adapter writes to the backend
+  itself: RxDB, TrailBase, PowerSync) and `confirm-through-sync` (the
+  application's handler writes and returns evidence: Electric, Convex).
+- **Model:** the synced rows, the backend rows, and the pending writes in
+  author order with their outcome. Visible rows are the synced rows with the
+  pending writes folded on; a settled write leaves the fold.
+- **Grammar:** inserts, updates, and deletes through the Collection,
+  single or in one manual transaction; the backend accepts or rejects a held
+  write; the backend's own changes arrive through sync (confirming a pending
+  write or not); an external change to another row or the same key.
+- **Observations:** visible rows and change events, each transaction's state
+  and settlement, the backend rows and the order of backend operations,
+  handler calls.
+- **Calibration:** a reference adapter for each capability and hostile
+  mutants per law.
+- **Order:** the family and its reference adapter, then RxDB, TrailBase,
+  PowerSync (adapter persistence), then Electric and Convex (confirmation
+  through sync).
 
 ## Migration log
 
