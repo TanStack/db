@@ -889,3 +889,51 @@ After mutant restoration, this two-owner gate passes 100 tests, with each new
 utility reach at 200 and each pooled receiving comparison at 160. The separate
 pooled GC owner passes 21 tests. The final TypeScript, ESLint, changed-file oracle
 lint, 433-name mangle cache and minified public API commands all exit zero.
+
+
+## 2026-11-03: current-head review and separate cleanup/restart limit
+
+CodeRabbit summary `6606385727`, frozen version `b09f4de339ec`, reports covered
+commit `162eebf398616c0c561b7472557b251ed1cc3a8d` with kind `reviewed`, no actionable
+comments, and minimal merge risk. Its automatic-review pause takes effect after
+that reviewed commit. It emits no new review ID or inline finding. The two
+previous inline comments are marked addressed at this commit. No production
+or oracle repair follows this summary; the changes in this supplement only
+record review accounting and an unresolved lifecycle limit.
+
+| ID | Summary claim | Disposition and evidence |
+| --- | --- | --- |
+| CR-162-01 | No concrete merge-blocking issue found; normal validation pending | Accepted bounded review result, not independent proof of general correctness or green CI |
+| CR-162-02 | Docstrings 11.11%, nine functions/twelve files, three unsupported, threshold 80% | Duplicate of CR-E5-04; updated metric retained, default policy rationale unchanged |
+| CR-162-03 | Full local workspace suite did not run and CI is pending | Duplicate of CR-E5-05; keep the validation boundary |
+| CR-162-04 | Possibly related #2334; no claim that this PR fixes it | Confirmed-open lifecycle witness, recorded below and in the coverage map. No new defect in the declared metadata-sharing or discarded-delivery scope was established |
+
+Four summary claims = one accepted bounded result, two duplicates, one
+confirmed-open separate lifecycle case. Reviewer assessment: useful issue
+navigation and accurate scoped change description. No new repair recommendation
+was supplied. Its no-actionable-comments result does not erase the linked
+counterexample when evaluating wider observer readiness.
+
+Issue #2334 explicitly left production versus model correctness unresolved.
+A temporary replay through the unchanged hydration model and driver reproduces
+its exact input in granular and wholesale mode on `162eebf39`: empty seed;
+attach; ready; write `b=0`; cleanup; restart; write `b=0` again. The source's
+public rows contain `b=0`, but the observer shows none. The Collection row clock
+advances from 2 to 3 while the observer capture stays at 2. A separate diagnostic
+continuation omits only that loading checkpoint, then marks ready and performs
+the original shared comparison: it still fails in both modes at the ready
+checkpoint. That diagnostic is not a GREEN run or an oracle expectation change.
+No production repair or permanent oracle exclusion was made.
+
+This narrows the issue's uncertainty: the mismatch also exists after Collection
+readiness. Source inspection points to subscription state retained across cleanup
+versus the observer's cleared snapshot; a complete causal repair experiment is
+still needed. The primary hydration/lifecycle owner and exact trace are now in
+the coverage map, with #2334 as the durable issue. Its next work must generate
+repeated-key cleanup/restart histories and reject a plausible wrong repair at a
+ready checkpoint. This is a separate open lifecycle boundary, not closure
+claimed by the metadata-sharing and discarded-publication laws above. The
+previous statement that no accepted-contract counterexample remains is limited
+to those declared laws; it does not establish general observer lifecycle
+correctness. The PR description and final readiness report must retain this
+qualification even if current-head CI is green.
