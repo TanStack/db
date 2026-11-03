@@ -97,6 +97,18 @@ export interface ReferenceMutationOptions {
   json?: boolean
   /** A SQL provider, with field updates and confirmation through sync. */
   sql?: boolean
+  /**
+   * The provider can answer before its change feed delivers the copy, so
+   * the adapter confirms each write through sync (`held-echoes`); a SQL
+   * provider implies it.
+   */
+  confirms?: boolean
+  /** The change feed is a log: a withheld copy holds back later ones. */
+  log?: boolean
+  /** The application's handlers persist writes: the adapter orders none. */
+  application?: boolean
+  /** The provider answers requests in arrival order. */
+  inOrder?: boolean
 }
 
 const acceptAtOnce: WritePlan = {
@@ -114,7 +126,8 @@ export class ControlledMutationProvider implements MutationProvider {
   private readonly committed = new Map<number, ConformanceRow>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
-  private readonly withheld: Array<() => void> = []
+  /** Copies not yet fed, in commit order; `own` marks a plan's withholding. */
+  private readonly withheld: Array<{ feed: () => void; own: boolean }> = []
   private readonly log: Array<WriteRequest> = []
   private listener:
     ((change: ProviderChange, sequence: number) => void) | undefined
@@ -190,9 +203,28 @@ export class ControlledMutationProvider implements MutationProvider {
           ),
         )
       }
-      if (plan.held) this.held.push(answer)
-      else answer()
+      // In order, an answer waits behind every earlier unanswered request.
+      const entry = { answer, held: plan.held }
+      this.unanswered.push(entry)
+      if (plan.held) this.held.push(() => this.answerEntry(entry))
+      else if (!this.options.inOrder || this.unanswered[0] === entry)
+        this.answerEntry(entry)
     })
+  }
+
+  /** Requests not yet answered, in arrival order. */
+  private readonly unanswered: Array<{ answer: () => void; held: boolean }> = []
+
+  private answerEntry(entry: { answer: () => void; held: boolean }): void {
+    this.unanswered.splice(this.unanswered.indexOf(entry), 1)
+    entry.answer()
+    // In order, the requests behind it that are not held follow.
+    while (
+      this.options.inOrder &&
+      this.unanswered[0] &&
+      !this.unanswered[0].held
+    )
+      this.answerEntry(this.unanswered[0])
   }
 
   /**
@@ -209,7 +241,9 @@ export class ControlledMutationProvider implements MutationProvider {
         ? change
         : { ...change, row: this.stored(change.row) }
     const feed = () => this.listener?.(fed, sequence)
-    if (withhold) this.withheld.push(feed)
+    // A log feeds in commit order, so a copy waits behind a withheld one.
+    if (withhold || (this.options.log && this.withheld.length > 0))
+      this.withheld.push({ feed, own: withhold })
     else feed()
     return sequence
   }
@@ -225,7 +259,9 @@ export class ControlledMutationProvider implements MutationProvider {
   }
 
   deliver(): void {
-    this.withheld.shift()?.()
+    this.withheld.shift()?.feed()
+    while (this.options.log && this.withheld[0] && !this.withheld[0].own)
+      this.withheld.shift()!.feed()
   }
 
   foreignCommit(change: ProviderChange): void {
@@ -247,7 +283,11 @@ let sequence = 0
 function referenceCollection(
   provider: ControlledMutationProvider,
   mutant: ReferenceMutationMutant | undefined,
-  { sql = false }: ReferenceMutationOptions,
+  {
+    sql = false,
+    confirms = sql,
+    application = false,
+  }: ReferenceMutationOptions,
 ) {
   // MUT-10: each write waits for the earlier one to be decided, by the
   // provider's answer. A write's turn covers sending it; its confirmation
@@ -256,7 +296,7 @@ function referenceCollection(
   const persist = async (
     sendAll: () => Promise<Array<number>>,
   ): Promise<void> => {
-    if (mutant === `writes-concurrently`) {
+    if (mutant === `writes-concurrently` || application) {
       await confirmAll(await sendAll())
       return
     }
@@ -288,7 +328,7 @@ function referenceCollection(
       ? highest >= commit
       : applied.has(commit)
   const confirmed = (commit: number): Promise<void> => {
-    if (!sql || mutant === `settles-on-answer` || isApplied(commit))
+    if (!confirms || mutant === `settles-on-answer` || isApplied(commit))
       return Promise.resolve()
     return new Promise((resolve) => confirmations.set(commit, resolve))
   }
@@ -436,6 +476,10 @@ export function referenceMutationDriver(
   {
     json = mutant === `echoes-authored-row`,
     sql = sqlMutants.has(mutant),
+    log = false,
+    application = false,
+    inOrder = false,
+    confirms = sql,
   }: ReferenceMutationOptions = {},
 ): MutationDriver {
   const capabilities: Array<MutationCapability> = [
@@ -444,19 +488,27 @@ export function referenceMutationDriver(
     `foreign-commits`,
     `server-rewrites`,
   ]
-  if (sql) capabilities.push(`field-updates`, `held-echoes`)
+  if (sql) capabilities.push(`field-updates`)
+  if (confirms) capabilities.push(`held-echoes`)
+  if (log) capabilities.push(`log-ordered-echoes`)
+  if (application) capabilities.push(`application-handlers`)
+  if (inOrder) capabilities.push(`ordered-answers`)
   return {
-    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${mutant ? ` (${mutant})` : ``}`,
+    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${log ? ` (log)` : ``}${application ? ` (application handlers)` : ``}${inOrder ? ` (in order)` : ``}${mutant ? ` (${mutant})` : ``}`,
     ...(json && { undefinedField: `absent` as const }),
     ...(sql && { undefinedField: `null` as const }),
     capabilities: new Set(capabilities),
     create(seed): MutationFixture {
       const provider = new ControlledMutationProvider(
         seed,
-        { json, sql },
+        { json, sql, log, inOrder },
         mutant === `echoes-authored-row`,
       )
-      const collection = referenceCollection(provider, mutant, { sql })
+      const collection = referenceCollection(provider, mutant, {
+        sql,
+        confirms,
+        application,
+      })
       return {
         collection: observedView(collection, {
           row: (row) => row,

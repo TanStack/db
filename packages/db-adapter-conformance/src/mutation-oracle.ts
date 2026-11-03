@@ -108,6 +108,27 @@ export type MutationCapability =
    * proceed while a copy is withheld, and `deliver` delivers the oldest.
    */
   | `held-echoes`
+  /**
+   * The provider's change feed delivers copies in commit order, as a log
+   * does: a withheld copy also holds back every later commit's copy, and
+   * `deliver` releases it with the copies queued behind it.
+   */
+  | `log-ordered-echoes`
+  /**
+   * The application's own handlers persist each write; the adapter supplies
+   * only confirmation utilities. The adapter cannot order the handlers, so
+   * each write's request goes out when it is made: MUT-10 is the
+   * application's, since core does not chain independent transactions
+   * (maintainer decision 2026-11-03).
+   */
+  | `application-handlers`
+  /**
+   * The provider answers requests in the order they arrive, as a server
+   * that runs one client's mutations in order does: a request behind a held
+   * one waits for it. Meaningful with `application-handlers`, whose requests
+   * go out at once.
+   */
+  | `ordered-answers`
 
 /** The optimistic transaction a write call returns. */
 export interface MutationReceipt {
@@ -521,8 +542,10 @@ interface PendingWrite {
   readonly sent?: Readonly<Partial<ConformanceRow>>
   readonly plan: WritePlan
   requested: boolean
-  /** Accepted, with its copy withheld from the change feed (`held-echoes`). */
+  /** Accepted, with its copy not yet delivered by the change feed. */
   answered: boolean
+  /** Its own plan withheld its copy (`held-echoes`). */
+  withheld: boolean
 }
 
 type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
@@ -568,10 +591,18 @@ interface MutationModel {
   readonly undefinedField: `own` | `absent` | `null`
   /** The driver declares `field-updates`. */
   readonly fieldUpdates: boolean
+  /** The adapter orders writes (MUT-10): no `application-handlers`. */
+  readonly ordered: boolean
+  /** The driver declares `log-ordered-echoes`. */
+  readonly logOrdered: boolean
+  /** The driver declares `ordered-answers`. */
+  readonly answersInOrder: boolean
   provider: Map<number, string>
   applied: Map<number, string>
   heldRows: Array<PendingWrite>
   pending: Array<PendingWrite>
+  /** Answered writes whose copies are not delivered, in commit order. */
+  echoes: Array<PendingWrite>
   rewritten: number
   requests: Array<{ type: WriteRequest[`type`]; id: number; value?: string }>
   settlements: Array<ExpectedSettlement>
@@ -579,17 +610,20 @@ interface MutationModel {
 
 function initialModel(
   seed: ReadonlyArray<ConformanceRow>,
-  undefinedField: MutationModel[`undefinedField`] = `own`,
-  fieldUpdates = false,
+  domain: Pick<MutationDriver, `capabilities` | `undefinedField`>,
 ): MutationModel {
   const provider = new Map(seed.map((row) => [row.id, rowValue(row)]))
   return {
-    undefinedField,
-    fieldUpdates,
+    undefinedField: domain.undefinedField ?? `own`,
+    fieldUpdates: domain.capabilities.has(`field-updates`),
+    ordered: !domain.capabilities.has(`application-handlers`),
+    logOrdered: domain.capabilities.has(`log-ordered-echoes`),
+    answersInOrder: domain.capabilities.has(`ordered-answers`),
     provider,
     applied: new Map(provider),
     heldRows: [],
     pending: [],
+    echoes: [],
     rewritten: 0,
     requests: [],
     settlements: [],
@@ -712,8 +746,22 @@ function decide(state: MutationModel, write: PendingWrite): void {
     state.provider.set(write.id, copy)
     if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
   }
-  if (write.plan.echoHeld) write.answered = true
-  else confirm(state, write)
+  // A copy is withheld by its own plan or, from a log, by an earlier one.
+  if (write.plan.echoHeld || (state.logOrdered && state.echoes.length > 0)) {
+    write.answered = true
+    write.withheld = write.plan.echoHeld
+    state.echoes.push(write)
+  } else confirm(state, write)
+}
+
+/**
+ * The oldest withheld copy arrives, and from a log every later copy queued
+ * behind it, up to the next one its own plan withheld.
+ */
+function deliverEchoes(state: MutationModel): void {
+  confirm(state, state.echoes.shift()!)
+  while (state.logOrdered && state.echoes[0] && !state.echoes[0].withheld)
+    confirm(state, state.echoes.shift()!)
 }
 
 /** An accepted write's copy arrives: it fulfills. */
@@ -743,7 +791,21 @@ function retire(state: MutationModel, write: PendingWrite): void {
 function advance(state: MutationModel): Array<RowState> {
   const states: Array<RowState> = []
   for (;;) {
-    const next = undecided(state)
+    // Ordered, the oldest undecided write goes next; with application
+    // handlers, every write goes out when it is made, and the provider
+    // answers each one not held, in arrival order with `ordered-answers`.
+    const next = state.ordered
+      ? undecided(state)
+      : (state.pending.find((write) => !write.requested) ??
+        state.pending.find(
+          (write, index) =>
+            !write.answered &&
+            !write.plan.held &&
+            (!state.answersInOrder ||
+              state.pending
+                .slice(0, index)
+                .every((earlier) => earlier.answered)),
+        ))
     if (!next) return states
     if (!next.requested) {
       next.requested = true
@@ -752,6 +814,7 @@ function advance(state: MutationModel): Array<RowState> {
         id: next.id,
         ...(next.sent === undefined ? {} : { value: requestValue(next.sent) }),
       })
+      if (!state.ordered) continue
     }
     if (next.plan.held) return states
     decide(state, next)
@@ -818,6 +881,7 @@ function stepModel(
         plan: plan(step),
         requested: false,
         answered: false,
+        withheld: false,
       }
       state.settlements.push(`pending`)
       state.pending.push(write)
@@ -839,8 +903,11 @@ function stepModel(
       }
     }
     case `release`: {
-      const next = undecided(state)
-      if (!next?.requested || !next.plan.held) return undefined
+      // The provider answers its oldest held request.
+      const next = state.pending.find(
+        (write) => !write.answered && write.requested && write.plan.held,
+      )
+      if (!next) return undefined
       decide(state, next)
       const published = [visible(state), ...advance(state)]
       return {
@@ -849,9 +916,8 @@ function stepModel(
       }
     }
     case `deliver`: {
-      const oldest = state.pending.find((write) => write.answered)
-      if (!oldest) return undefined
-      confirm(state, oldest)
+      if (state.echoes.length === 0) return undefined
+      deliverEchoes(state)
       const published = [visible(state), ...advance(state)]
       return { done: { kind: `deliver` }, published }
     }
@@ -864,6 +930,28 @@ function stepModel(
       return { done: { kind: `foreign` }, published: [visible(state)] }
     }
   }
+}
+
+/**
+ * Each row's sequence of values from `start` through `states`, a value that
+ * repeats counted once; an absent row is `null`.
+ */
+function rowPaths(start: RowState, states: ReadonlyArray<RowState>): string {
+  const valueOf = (rows: RowState, id: number) =>
+    rows.find(([key]) => key === id)?.[1] ?? null
+  const ids = [
+    ...new Set([start, ...states].flatMap((rows) => rows.map(([id]) => id))),
+  ].sort((a, b) => a - b)
+  return JSON.stringify(
+    ids.map((id) => {
+      const path = [valueOf(start, id)]
+      for (const rows of states) {
+        const value = valueOf(rows, id)
+        if (value !== path.at(-1)) path.push(value)
+      }
+      return [id, path]
+    }),
+  )
 }
 
 /**
@@ -902,6 +990,7 @@ export const mutationReachStates = [
   `held-optimistic-row`,
   `server-rewrote-copy`,
   `echo-held`,
+  `echo-queued-behind-withheld`,
   `quiescent-after-writes`,
 ] as const
 
@@ -920,6 +1009,7 @@ const capabilityOfState: Partial<
   'held-optimistic-row': `held-writes`,
   'server-rewrote-copy': `server-rewrites`,
   'echo-held': `held-echoes`,
+  'echo-queued-behind-withheld': `log-ordered-echoes`,
 }
 
 /** The declared states a driver's capabilities let histories reach. */
@@ -1071,11 +1161,7 @@ export async function checkMutationHistory(
   }
   const fixture = created
   const { collection, provider, writer } = fixture
-  const state = initialModel(
-    history.seed,
-    driver.undefinedField,
-    driver.capabilities.has(`field-updates`),
-  )
+  const state = initialModel(history.seed, driver)
   const receipts: Array<{ current: Settlement }> = []
   const failures: Array<Error> = []
   let accepted = 0
@@ -1169,19 +1255,28 @@ export async function checkMutationHistory(
     stepIndex: number,
     owed: ReadonlyArray<RowState>,
     law: string,
+    settledSeveral: boolean,
   ) => {
     // Each change of row values, in order; a publication of the same row
     // values (a virtual row field change) is not one.
+    const start = published
     const got: Array<RowState> = []
     for (const rows of publications!.take()) {
       if (!sameRows(rows, got.at(-1) ?? published)) got.push(rows)
     }
     published = got.at(-1) ?? published
-    const ok =
-      got.length === owed.length &&
-      got.every((rows, index) => sameRows(rows, owed[index]!))
+    // Writes that settle at one step settle in an order no law fixes, so
+    // then each row's own sequence of values is compared: it does not depend
+    // on that order, and it still shows an earlier synced value or an extra
+    // change.
+    const ok = settledSeveral
+      ? rowPaths(start, got) === rowPaths(start, owed)
+      : got.length === owed.length &&
+        got.every((rows, index) => sameRows(rows, owed[index]!))
     if (!ok) throw violation(`${law} (publication)`, stepIndex, owed, got)
   }
+  const settledCount = () =>
+    state.settlements.filter((settlement) => settlement !== `pending`).length
 
   let rewritten = 0
   // The plan the model decided the last write by; the provider gets it too.
@@ -1210,6 +1305,7 @@ export async function checkMutationHistory(
     await compare(-1)
     for (const [index, step] of steps.entries()) {
       const before = visible(state)
+      const settledBefore = settledCount()
       const result = stepModel(state, step, planFor)
       if (result === undefined) {
         skipped++
@@ -1267,14 +1363,22 @@ export async function checkMutationHistory(
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
       if (state.pending.some((write) => write.answered)) reach(`echo-held`)
+      if (state.echoes.some((write) => !write.withheld))
+        reach(`echo-queued-behind-withheld`)
       rewritten = state.rewritten
       await compare(index)
-      checkPublications(index, owedPublications(before, result.published), law)
+      checkPublications(
+        index,
+        owedPublications(before, result.published),
+        law,
+        settledCount() - settledBefore > 1,
+      )
     }
     // Answer every held request and deliver every withheld copy, reaching a
     // quiescent cut (FID-5).
     while (state.pending.length > 0) {
       const before = visible(state)
+      const settledBefore = settledCount()
       const step: MutationStep = undecided(state)
         ? { kind: `release` }
         : { kind: `deliver` }
@@ -1283,6 +1387,8 @@ export async function checkMutationHistory(
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
       if (state.pending.some((write) => write.answered)) reach(`echo-held`)
+      if (state.echoes.some((write) => !write.withheld))
+        reach(`echo-queued-behind-withheld`)
       rewritten = state.rewritten
       if (step.kind === `deliver`) await provider.deliver!()
       else await provider.release()
@@ -1291,6 +1397,7 @@ export async function checkMutationHistory(
         steps.length,
         owedPublications(before, result.published),
         `MUT-1`,
+        settledCount() - settledBefore > 1,
       )
     }
   } catch (error) {

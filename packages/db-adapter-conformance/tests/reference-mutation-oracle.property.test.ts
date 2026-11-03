@@ -38,6 +38,12 @@ import type { ReferenceMutationMutant } from './reference-mutation-adapter'
  * - **SQL provider.** The fixed campaign also runs with a provider like
  *   TrailBase's or PowerSync's: `undefinedField: 'null'`, `field-updates`,
  *   and `held-echoes`, so the adapter confirms each write through sync.
+ * - **Log provider, application handlers.** The fixed campaign also runs
+ *   like Electric: a SQL provider whose change feed is a log
+ *   (`log-ordered-echoes`) and handlers the application writes, which the
+ *   adapter does not order (`application-handlers`). Another runs like
+ *   Convex: a JSON provider that answers requests in arrival order
+ *   (`ordered-answers`), with a log feed and application handlers.
  * - **Calibration.** Each hostile mutant of the reference adapter breaks one
  *   law, and the fixed campaign must reject it with that law (ORC-006).
  */
@@ -50,6 +56,18 @@ const campaignTimeoutMs = 120_000
 
 const jsonDriver = referenceMutationDriver(undefined, { json: true })
 const sqlDriver = referenceMutationDriver(undefined, { sql: true })
+const logDriver = referenceMutationDriver(undefined, {
+  sql: true,
+  log: true,
+  application: true,
+})
+const inOrderDriver = referenceMutationDriver(undefined, {
+  json: true,
+  log: true,
+  application: true,
+  inOrder: true,
+  confirms: true,
+})
 
 async function campaign(
   options: fc.Parameters<[unknown]>,
@@ -99,6 +117,30 @@ describe(`mutation conformance: reference adapter`, () => {
       const reach = await campaign(
         { seed: 2118, numRuns: oracleRuns(runs) },
         sqlDriver,
+      )
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
+  oracleReplayTest(it)(
+    `conforms with a SQL log provider and application handlers on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        logDriver,
+      )
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
+  oracleReplayTest(it)(
+    `conforms with an in-order JSON log provider and application handlers on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        inOrderDriver,
       )
       reach.assertReached()
     },
