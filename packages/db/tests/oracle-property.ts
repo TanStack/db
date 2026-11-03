@@ -82,10 +82,10 @@
  *   differs between runs of one history breaks replay, shrinking, and the gap
  *   report's comparison, so a driver records relations (before and after,
  *   same or different id) rather than clock readings or random ids.
- * - **Shrinking keeps the law.** A violation can name the law it broke. Once
- *   a history violates one law, a smaller history that violates a different
- *   law counts as passing, so the reported counterexample still shows the
- *   first failure (ORC-010, design D24).
+ * - **Shrinking keeps the failure.** A violation can name the law it broke.
+ *   Once a history fails one way, a setup error, a missed segment state, or
+ *   one law, a smaller history that fails another way counts as passing, so
+ *   the reported counterexample still shows the first failure (ORC-010).
  *
  * The `oracle/no-unit-test` lint rule treats an `oracleProperty` call as an
  * oracle test whose parts are its arguments, when its options are an object
@@ -287,6 +287,8 @@ export interface OraclePropertyOptions<History, Expected, Plan = History> {
     expected: Expected,
   ) => Verdict
   calibrations?: ReadonlyArray<Calibration<History, Plan>>
+  /** Each registered test's limit in milliseconds; 120 seconds by default. */
+  timeout?: number
 }
 
 declare global {
@@ -301,7 +303,6 @@ interface PropertyTest {
   run: () => Promise<void>
   /** Path replays this test runs during; empty stands aside during every one. */
   replays: ReadonlyArray<string>
-  timeout?: number
 }
 
 export function oracleProperty<History, Expected, Plan = History>(
@@ -316,7 +317,11 @@ export function oracleProperty<History, Expected, Plan = History>(
     : generatedTests(options, histories as GeneratedHistories<History>)
   describe(id, () => {
     for (const test of tests)
-      oracleReplayTest(it, ...test.replays)(test.name, test.run, test.timeout)
+      oracleReplayTest(it, ...test.replays)(
+        test.name,
+        test.run,
+        options.timeout ?? 120_000,
+      )
   })
 }
 
@@ -535,7 +540,6 @@ function calibrationTests<History, Expected, Plan>(
   return (options.calibrations ?? []).map((calibration) => ({
     name: `calibration: ${calibration.name}`,
     replays: [],
-    timeout: 120_000,
     run: async () => {
       const seen: Array<string> = []
       for (const { name, history } of candidates()) {
@@ -647,15 +651,25 @@ function generatedTests<History, Expected, Plan>(
       )
   }
 
-  // Each lane gets a fresh predicate: its first violation fixes the law that
-  // shrinking must keep. It counts the histories that entered each state.
+  // Each lane gets a fresh predicate: its first failure fixes the kind that
+  // shrinking must keep, a setup error, a missed segment state, or one law. A
+  // smaller history that fails some other way counts as passing. It counts
+  // the histories that entered each state.
   const predicateFor = (
     segmentOf: Map<History, Segment<History>>,
     counts: Map<string, number>,
   ) => {
-    let firstLaw: string | undefined
+    let firstKind: string | undefined
+    const keeps = (kind: string) => (firstKind ??= kind) === kind
     return async (history: History) => {
-      const { verdict, reached } = await runOne(options, history)
+      let outcome: Awaited<ReturnType<typeof runOne>>
+      try {
+        outcome = await runOne(options, history)
+      } catch (error) {
+        if (keeps(`setup`)) throw error
+        return
+      }
+      const { verdict, reached } = outcome
       for (const state of reached) {
         if (declared !== undefined && !declared.has(state))
           throw new Error(
@@ -666,16 +680,15 @@ function generatedTests<History, Expected, Plan>(
       const segment = segmentOf.get(history)
       if (segment !== undefined) {
         const missing = segment.enters.filter((state) => !reached.has(state))
-        if (missing.length > 0)
+        if (missing.length > 0) {
+          if (!keeps(`segment-reach`)) return
           throw new Error(
             `${id}: segment "${segment.name}" did not enter ${missing.join(`, `)}. A segment must reach every state it names.`,
           )
+        }
       }
       if (verdict.kind === `pass`) return
-      const law = verdict.law ?? verdict.checkpoint
-      firstLaw ??= law
-      // A different law's violation during shrinking is not this failure.
-      if (law !== firstLaw) return
+      if (!keeps(`law:${lawOf(verdict)}`)) return
       throw failure(
         options,
         verdict,
@@ -728,7 +741,6 @@ function generatedTests<History, Expected, Plan>(
   const fixedLanes = source.fixedSeeds.map((seed): PropertyTest => ({
     name: `fixed seed ${seed}`,
     replays: [],
-    timeout: 120_000,
     run: () =>
       runLane(`fixed seed ${seed}`, seed, (examples) => ({
         numRuns: oracleRuns(source.runs) + examples.length,
@@ -741,7 +753,6 @@ function generatedTests<History, Expected, Plan>(
   const randomLane: PropertyTest = {
     name: `random seed`,
     replays: [id],
-    timeout: 120_000,
     run: () => {
       const seed =
         oraclePropertyOptions(source.runs, id).seed ?? Date.now() % 2 ** 31
