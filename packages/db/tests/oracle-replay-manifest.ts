@@ -13,6 +13,12 @@ import { registeredOracleProperties } from './oracle-config.js'
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `db/tests/query/pagination-oracle.property.test.ts`,
+    `pagination`,
+    `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
+    `db/tests/query/limit-admission-oracle.ts`,
+  ],
   ...[
     [`react`, `react-db/tests/conformance.test.tsx`],
     [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
@@ -420,12 +426,12 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix`,
+    `refetch-ordered-prefix refetch-held-page-end`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
     `ordered-loader`,
-    `request-authority unproven-report`,
+    `request-authority unproven-report replay-continuation retirement-invalidation retirement-receiver`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
@@ -551,6 +557,26 @@ const ownerGroups: ReadonlyArray<
     `ordered-window`,
   ],
   [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
+  [
+    `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
+    `live-query-observer`,
+    `hydration-terminal`,
+  ],
+  [
+    `db/tests/notification-laws-oracle.test.ts`,
+    `notification-laws`,
+    `query-publications publication-histories corrupt-prior-values`,
+  ],
+  [
+    `db/tests/proxy-detachment-contract-oracle.test.ts`,
+    `proxy`,
+    `json-data-keys`,
+  ],
+  [
+    `db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts`,
+    `ivm`,
+    `topk-cyclic-payloads-array topk-cyclic-payloads-grouped topk-outer-join-replacements-array topk-outer-join-replacements-grouped`,
+  ],
   // Owners of the replays that moved to the shared variables.
   [
     `browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts`,
@@ -729,7 +755,22 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`,
     `sync-metadata-session`,
-    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand`,
+    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand persisted-seed-reinsert-reload persisted-kept-metadata-durability persisted-queued-metadata-repair`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-seed-reinsert-reload sqlite-kept-metadata-durability`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-recovery.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-recovery-schedules`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-missing-row.test.ts`,
+    `sync-metadata-session`,
+    `persisted-missing-row-metadata sqlite-missing-row-metadata`,
   ],
 ]
 
@@ -817,6 +858,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `query-db.refetch-held-page-end`,
+    `generated same-key page shifts.*replay campaign`,
+  ],
   [`react.window-render`, `window changes at React commit.*fresh`],
   [`preact.window-render`, `window changes at Preact commit.*fresh`],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
@@ -971,6 +1016,12 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`pagination.limit-admission-`)) {
+    const suffix = property.slice(`pagination.limit-admission-`.length)
+    const negative = suffix.endsWith(`-negative`)
+    const path = suffix.slice(0, -(negative ? `-negative` : `-valid`).length)
+    return `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} \\(random\\)`
+  }
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
       case `result-shape`:

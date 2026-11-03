@@ -5,6 +5,18 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `pagination.limit-admission-replay-pending-negative`,
+  `pagination.limit-admission-replay-pending-valid`,
+  `pagination.limit-admission-builder-negative`,
+  `pagination.limit-admission-builder-valid`,
+  `pagination.limit-admission-unstarted-negative`,
+  `pagination.limit-admission-unstarted-valid`,
+  `pagination.limit-admission-ready-negative`,
+  `pagination.limit-admission-ready-valid`,
+  `pagination.limit-admission-initial-pending-negative`,
+  `pagination.limit-admission-initial-pending-valid`,
+  `pagination.limit-admission-move-pending-negative`,
+  `pagination.limit-admission-move-pending-valid`,
   `framework.react.result-shape`,
   `framework.react-dependency-list.result-shape`,
   `framework.preact.result-shape`,
@@ -105,8 +117,12 @@ const staticOracleProperties = [
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
   `query-db.refetch-ordered-prefix`,
+  `query-db.refetch-held-page-end`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
+  `ordered-loader.replay-continuation`,
+  `ordered-loader.retirement-invalidation`,
+  `ordered-loader.retirement-receiver`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
   `replay.ordered-preload-recovery`,
@@ -295,6 +311,14 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-peers`,
   `sync-metadata-session.persisted-peers-full`,
   `sync-metadata-session.persisted-peers-on-demand`,
+  `sync-metadata-session.persisted-seed-reinsert-reload`,
+  `sync-metadata-session.sqlite-seed-reinsert-reload`,
+  `sync-metadata-session.persisted-kept-metadata-durability`,
+  `sync-metadata-session.persisted-queued-metadata-repair`,
+  `sync-metadata-session.sqlite-kept-metadata-durability`,
+  `sync-metadata-session.sqlite-recovery-schedules`,
+  `sync-metadata-session.persisted-missing-row-metadata`,
+  `sync-metadata-session.sqlite-missing-row-metadata`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
   `d2-source.exact-retractions`,
@@ -714,6 +738,23 @@ export function readOracleRunConfig(
   return { multiplier, replaySeed, replayPath, replayProperty }
 }
 
+/**
+ * Select a fresh campaign seed unless the caller supplied one. Report the
+ * selection before fast-check runs: a later reach failure is outside its
+ * reporter and must still be replayable. This line records selection, not
+ * execution; guarded replay witnesses remain the execution evidence.
+ */
+export function oracleCampaignSeed(
+  seed: number | undefined,
+  property: string | undefined,
+): number {
+  const selected = seed ?? Math.floor(Math.random() * 0x100000000) - 0x80000000
+  console.info(
+    `ORACLE_SEED ${JSON.stringify({ property: property ?? null, seed: selected })}`,
+  )
+  return selected
+}
+
 type OracleRunParameters = {
   numRuns: number
   seed?: number
@@ -758,9 +799,10 @@ function randomParameters<TExample>(
           replayPath: undefined,
           replayProperty: undefined,
         }
+  const selectedSeed = oracleCampaignSeed(replaySeed, property)
   const parameters: OracleRunParameters =
     replaySeed === undefined
-      ? { numRuns }
+      ? { numRuns, seed: selectedSeed }
       : {
           numRuns,
           seed: replaySeed,

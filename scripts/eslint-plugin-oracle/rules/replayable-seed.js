@@ -23,7 +23,9 @@
  * random lane's seed themselves.
  *
  * The rule cannot see a seed passed through a helper's parameter from a call
- * elsewhere, or a table built by a function. Reviewers still check those.
+ * elsewhere, a seed computed in a variable (such as
+ * `const seed = options.seed ?? Math.random()`), or a table built by a
+ * function. Reviewers still check those.
  */
 
 import { findVariable } from '../registration.js'

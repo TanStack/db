@@ -1,9 +1,11 @@
+import { oracleCampaignSeed } from './oracle-config'
 import { createOracleReach } from './oracle-reach'
 
 /**
  * Run the same oracle with separate fixed/random reach ledgers. The callback
  * owns its property, grammar, recorder, comparison, and run budget; only seed
- * selection changes between the two calls. Counts are histories, not events:
+ * selection changes between the two calls. Every started campaign reports its
+ * seed and counts even when the callback or reach assertion fails. Counts are histories, not events:
  * call beginHistory once and reach only after observing the named checkpoint.
  * A prefix SEED replay runs one campaign at the callback's full budget, and
  * checks its reach. A SEED/PATH replay runs one recorded history and checks
@@ -54,15 +56,23 @@ export async function runOracleCampaign<TState extends string>(
     const reach = createOracleReach(prefix, states, {
       replaying: path !== undefined,
     })
-    await run(reach, campaign.parameters)
-    reach.assertReached()
-    console.info(
-      `ORACLE_REACH ${JSON.stringify({
-        property: prefix,
-        campaign: campaign.name,
-        minimum: path === undefined ? 1 : null,
-        counts: Object.fromEntries(reach.counts()),
-      })}`,
-    )
+    const parameters = {
+      ...campaign.parameters,
+      seed: oracleCampaignSeed(campaign.parameters.seed, prefix),
+    }
+    try {
+      await run(reach, parameters)
+      reach.assertReached()
+    } finally {
+      console.info(
+        `ORACLE_REACH ${JSON.stringify({
+          property: prefix,
+          campaign: campaign.name,
+          seed: parameters.seed,
+          minimum: path === undefined ? 1 : null,
+          counts: Object.fromEntries(reach.counts()),
+        })}`,
+      )
+    }
   }
 }

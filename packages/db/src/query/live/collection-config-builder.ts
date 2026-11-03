@@ -1,5 +1,6 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { compileCollectionQuery } from '../compiler/index.js'
+import { validateLimit } from '../validate-limit.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
@@ -72,9 +73,13 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * and an unordered one is a fixed one-row result that accepts only its
    * compiled limit at offset 0.
    *
+   * Existing query-shape and reentrancy guards run before limit validation.
+   *
    * @throws `SetWindowRequiresOrderByError` if the query is neither windowed
    * nor a `findOne`, or an unordered `findOne` would move its offset.
    * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
+   * @throws `SetWindowReentrancyError` during synchronous graph or source work.
+   * @throws RangeError if the supplied limit is negative and those guards pass.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -391,6 +396,8 @@ export class CollectionConfigBuilder<
       throw new SetWindowReentrancyError()
     }
 
+    validateLimit(options.limit)
+
     // Keep caller-owned objects out of the long-lived query state. A caller may
     // reuse and mutate its options object after this operation settles.
     const baseWindow =
@@ -461,7 +468,6 @@ export class CollectionConfigBuilder<
         }
       }
     }
-    const previousOperation = this.activeWindowOperation
     const operation: {
       generation: number
       failed: boolean
@@ -488,7 +494,7 @@ export class CollectionConfigBuilder<
       loadOperation?.cancel()
       throw error
     } finally {
-      this.activeWindowOperation = previousOperation
+      this.activeWindowOperation = undefined
     }
 
     const settlement = loadOperation?.wait() ?? true

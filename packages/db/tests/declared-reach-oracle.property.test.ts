@@ -34,8 +34,10 @@
  * `runOracleCampaign` runs a fixed-seed and a random campaign, each with its
  * own reach and a minimum of one. A seed-only run of its replay prefix runs one
  * campaign with that seed and checks its reach; a seed and path run one
- * recorded history and check none. Each campaign that passes reports its
- * counts on one `ORACLE_REACH` line. An invalid prefix environment throws.
+ * recorded history and check none. Every started campaign reports its seed and
+ * counts on one `ORACLE_REACH` line, including a failing campaign. Fresh seed
+ * selection is diagnostic data, not proof that a comparison ran. An invalid
+ * prefix environment throws.
  *
  * The model below states these rules over a generated ledger: a run kind, an
  * optional `replaying` override, the options, the states reached before the
@@ -373,6 +375,7 @@ type CampaignLine = {
   property: string
   campaign: string
   minimum: number | null
+  seed: number
   counts: Record<string, number>
 }
 type CampaignObservation = {
@@ -400,8 +403,8 @@ function campaignLedger(ledger: Ledger): Ledger {
 
 // The campaign model: two campaigns without a prefix seed, one replay
 // campaign with one. Each campaign has a minimum of one and no fixed
-// histories, checks reach unless a path replays it, and reports its counts
-// when it passes. The first failing campaign ends the run.
+// histories, checks reach unless a path replays it, and reports its seed and counts
+// even when reach fails. The first failing campaign ends the run.
 function expectedCampaign(ledger: Ledger): CampaignObservation {
   if (ledger.campaignFault !== undefined) {
     return { parameters: [], lines: [], failure: `invalid environment` }
@@ -413,7 +416,7 @@ function expectedCampaign(ledger: Ledger): CampaignObservation {
     run === `ordinary`
       ? [
           [`fixed`, { seed: ledger.fixedSeed }],
-          [`random`, {}],
+          [`random`, { seed: expect.any(Number) }],
         ]
       : [
           [
@@ -433,13 +436,14 @@ function expectedCampaign(ledger: Ledger): CampaignObservation {
       fixedHistories: 0,
       replaying: run === `path`,
     })
-    if (failure !== undefined) return { parameters, lines, failure }
     lines.push({
       property: campaignPrefix,
       campaign,
       minimum: run === `path` ? null : 1,
+      seed: campaignParameters.seed!,
       counts: Object.fromEntries(counts),
     })
+    if (failure !== undefined) return { parameters, lines, failure }
   }
   return { parameters, lines, failure: undefined }
 }
@@ -458,13 +462,21 @@ function observeCampaign(ledger: Ledger): Promise<CampaignObservation> {
       }> = []
       // The runner reports each campaign's counts on the console.
       const info = vi.spyOn(console, `info`).mockImplementation(() => {})
-      const lines = () =>
-        info.mock.calls.map(
-          ([line]) =>
-            JSON.parse(
-              String(line).replace(/^ORACLE_REACH /, ``),
-            ) as CampaignLine,
-        )
+      const lines = () => {
+        const observations = info.mock.calls
+          .filter(([line]) => String(line).startsWith(`ORACLE_REACH `))
+          .map(
+            ([line]) =>
+              JSON.parse(
+                String(line).replace(/^ORACLE_REACH /, ``),
+              ) as CampaignLine,
+          )
+        for (const [index, line] of observations.entries())
+          expect(line.seed, `reported campaign seed`).toBe(
+            parameters[index]?.seed,
+          )
+        return observations
+      }
       try {
         await runOracleCampaign(
           campaignPrefix,
@@ -518,7 +530,7 @@ function expectedRunParameters(
   examples: ReadonlyArray<number>,
 ) {
   const numRuns = run === `path` ? 1 : baseRuns + examples.length
-  if (run === `ordinary`) return { numRuns, examples }
+  if (run === `ordinary`) return { numRuns, seed: expect.any(Number), examples }
   if (run === `path`) return { numRuns, seed, path, examples }
   return { numRuns, seed, examples }
 }
@@ -558,23 +570,43 @@ function checkRunParameters(
     path: parameters.path,
     examples: parameters.examples,
   })
+  const observe = <T extends { seed?: number }>(select: () => T): T => {
+    const info = vi.spyOn(console, `info`).mockImplementation(() => {})
+    try {
+      const parameters = select()
+      expect(
+        Number.isSafeInteger(parameters.seed),
+        `selected seed is replayable`,
+      ).toBe(true)
+      expect(
+        info.mock.calls.map(([line]) =>
+          JSON.parse(String(line).replace(/^ORACLE_SEED /, ``)),
+        ),
+      ).toEqual([{ property, seed: parameters.seed }])
+      return parameters
+    } finally {
+      info.mockRestore()
+    }
+  }
   const replayed = run === `path` ? property : otherProperty
   // toEqual treats an undefined key as absent.
   expect(
     project(
-      oracleRandomParameters(
-        baseRuns,
-        run === `ordinary`
-          ? undefined
-          : run === `seed`
-            ? {
-                replaySeed: 1,
-                replayPath: undefined,
-                replayProperty: undefined,
-              }
-            : { replaySeed: 1, replayPath: `0`, replayProperty: replayed },
-        property,
-        examples,
+      observe(() =>
+        oracleRandomParameters(
+          baseRuns,
+          run === `ordinary`
+            ? undefined
+            : run === `seed`
+              ? {
+                  replaySeed: 1,
+                  replayPath: undefined,
+                  replayProperty: undefined,
+                }
+              : { replaySeed: 1, replayPath: `0`, replayProperty: replayed },
+          property,
+          examples,
+        ),
       ),
     ),
     `run parameters`,
@@ -582,7 +614,9 @@ function checkRunParameters(
     expectedRunParameters({ run, seed: 1, path: `0` }, baseRuns, examples),
   )
   expect(
-    project(oraclePropertyOptions(baseRuns, property, { examples })),
+    project(
+      observe(() => oraclePropertyOptions(baseRuns, property, { examples })),
+    ),
     `property options under this process`,
   ).toEqual(
     expectedRunParameters(

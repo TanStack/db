@@ -76,336 +76,348 @@ const groupedWindow: typeof topKWithFractionalIndex = (comparator, options) =>
   })
 
 describe.each([
-  { name: `array`, key: `array`, topK: topKWithFractionalIndex },
-  { name: `grouped array`, key: `grouped`, topK: groupedWindow },
-])('Generated fractional $name windows', ({ key, topK }) => {
-  it.each([409036, undefined])(
-    `preserves cyclic payloads through replacements and fresh transients (seed %s)`,
-    (seed) => {
-      fc.assert(
-        fc.property(
-          fc.boolean(),
-          fc.integer({ min: 0, max: 3 }),
-          fc.array(
-            fc.record({
-              key: fc.integer({ min: 1, max: 3 }),
-              value: fc.option(fc.integer({ min: 0, max: 5 }), { nil: null }),
-              additionFirst: fc.boolean(),
-            }),
-            { minLength: 1, maxLength: 20 },
-          ),
-          (useClass, limit, steps) => {
-            class Row {
-              payload: unknown
-              constructor(
-                public id: number,
-                public value: string,
-              ) {
-                this.payload = this
+  {
+    name: `array`,
+    topK: topKWithFractionalIndex,
+    cyclicPayloads: `ivm.topk-cyclic-payloads-array`,
+    outerJoinReplacements: `ivm.topk-outer-join-replacements-array`,
+  },
+  {
+    name: `grouped array`,
+    topK: groupedWindow,
+    cyclicPayloads: `ivm.topk-cyclic-payloads-grouped`,
+    outerJoinReplacements: `ivm.topk-outer-join-replacements-grouped`,
+  },
+])(
+  'Generated fractional $name windows',
+  ({ topK, cyclicPayloads, outerJoinReplacements }) => {
+    it.each([409036, undefined])(
+      `preserves cyclic payloads through replacements and fresh transients (seed %s)`,
+      (seed) => {
+        fc.assert(
+          fc.property(
+            fc.boolean(),
+            fc.integer({ min: 0, max: 3 }),
+            fc.array(
+              fc.record({
+                key: fc.integer({ min: 1, max: 3 }),
+                value: fc.option(fc.integer({ min: 0, max: 5 }), { nil: null }),
+                additionFirst: fc.boolean(),
+              }),
+              { minLength: 1, maxLength: 20 },
+            ),
+            (useClass, limit, steps) => {
+              class Row {
+                payload: unknown
+                constructor(
+                  public id: number,
+                  public value: string,
+                ) {
+                  this.payload = this
+                }
               }
-            }
-            const make = (id: number, value: string) => {
-              if (useClass) return new Row(id, value)
-              const row = { id, value, payload: undefined as unknown }
-              row.payload = row
-              return row
-            }
-            const graph = new D2()
-            const input = graph.newInput<[number, Row]>()
-            const rows = new TopKRelation<number>()
-            const values = new Map<number, string>([[1, `0`]])
-            const live = new Map([[1, make(1, `0`)]])
-            input.pipe(
-              topK((a, b) => a.value.localeCompare(b.value) || a.id - b.id, {
-                limit,
-              }),
-              output((message) => {
-                for (const [[, [row]]] of message.getInner())
-                  expect(row.payload).toBe(row)
-                rows.add(message.getInner())
-              }),
-            )
-            graph.finalize()
-            const check = () =>
-              rows.expectRows(
-                [...values]
-                  .sort(([a, av], [b, bv]) => av.localeCompare(bv) || a - b)
-                  .slice(0, limit)
-                  .map(([id, value]) => [id, id, value]),
+              const make = (id: number, value: string) => {
+                if (useClass) return new Row(id, value)
+                const row = { id, value, payload: undefined as unknown }
+                row.payload = row
+                return row
+              }
+              const graph = new D2()
+              const input = graph.newInput<[number, Row]>()
+              const rows = new TopKRelation<number>()
+              const values = new Map<number, string>([[1, `0`]])
+              const live = new Map([[1, make(1, `0`)]])
+              input.pipe(
+                topK((a, b) => a.value.localeCompare(b.value) || a.id - b.id, {
+                  limit,
+                }),
+                output((message) => {
+                  for (const [[, [row]]] of message.getInner())
+                    expect(row.payload).toBe(row)
+                  rows.add(message.getInner())
+                }),
               )
-            input.sendData(new MultiSet([[[1, live.get(1)!], 1]]))
-            graph.run()
-            check()
-            for (const { key, value, additionFirst } of steps) {
-              const changes: Array<[[number, Row], number]> = []
-              const before = live.get(key)
-              if (before) changes.push([[key, before], -1])
-              if (value === null) {
-                values.delete(key)
-                live.delete(key)
-              } else {
-                const next = make(key, String(value))
-                values.set(key, String(value))
-                live.set(key, next)
-                changes.push([[key, next], 1])
-              }
-              // Independently allocated equal cycles must cancel even when
-              // their deltas straddle a real replacement in separate messages.
-              changes.push([[key, make(key, `transient`)], 1])
-              changes.unshift([[key, make(key, `transient`)], -1])
-              if (additionFirst) changes.reverse()
-              for (const change of changes)
-                input.sendData(new MultiSet([change]))
+              graph.finalize()
+              const check = () =>
+                rows.expectRows(
+                  [...values]
+                    .sort(([a, av], [b, bv]) => av.localeCompare(bv) || a - b)
+                    .slice(0, limit)
+                    .map(([id, value]) => [id, id, value]),
+                )
+              input.sendData(new MultiSet([[[1, live.get(1)!], 1]]))
               graph.run()
               check()
-            }
-          },
-        ),
-        {
-          ...(seed === undefined
-            ? oraclePropertyOptions(30, `ivm.topk-cyclic-payloads-${key}`)
-            : { seed, numRuns: oracleRuns(30) }),
-          examples: [
-            [
-              false,
-              1,
-              [
-                { key: 1, value: 2, additionFirst: true },
-                { key: 1, value: null, additionFirst: false },
-                { key: 1, value: 3, additionFirst: false },
-              ],
-            ],
-          ],
-        },
-      )
-    },
-  )
-
-  it.each([409032, undefined])(
-    `matches outer-join replacements (seed %s)`,
-    (seed) => {
-      fc.assert(
-        fc.property(
-          fc.integer({ min: 0, max: 4 }),
-          fc.array(
-            fc.record({
-              key: fc.integer({ min: 1, max: 4 }),
-              value: fc.option(fc.constantFrom(`a`, `b`, `c`, `d`), {
-                nil: null,
-              }),
-            }),
-            { minLength: 1, maxLength: 20 },
-          ),
-          (limit, steps) => {
-            const graph = new D2()
-            const left = graph.newInput<[number, string]>()
-            const right = graph.newInput<[number, string]>()
-            const rows = new TopKRelation<number>()
-            const matches = new Map<number, string>()
-            left.pipe(
-              join(right, `left`),
-              map(
-                ([id, [fallback, matched]]) =>
-                  [id, { id, value: matched ?? fallback }] as [
-                    number,
-                    { id: number; value: string },
-                  ],
-              ),
-              topK((a, b) => a.value.localeCompare(b.value), { limit }),
-              output((message) => rows.add(message.getInner())),
-            )
-            graph.finalize()
-            left.sendData(
-              new MultiSet([1, 2, 3, 4].map((key) => [[key, `z`], 1])),
-            )
-            graph.run()
-            for (const step of steps) {
-              const changes: Array<[[number, string], number]> = []
-              const old = matches.get(step.key)
-              if (old !== undefined) changes.push([[step.key, old], -1])
-              if (step.value === null) matches.delete(step.key)
-              else {
-                matches.set(step.key, step.value)
-                changes.push([[step.key, step.value], 1])
-              }
-              right.sendData(new MultiSet(changes))
-              graph.run()
-              // Recompute the full left join, then sort and slice. No incremental
-              // state or top-K helper determines the expected result.
-              rows.expectRows(
-                [1, 2, 3, 4]
-                  .map((id) => ({ id, value: matches.get(id) ?? `z` }))
-                  .sort((a, b) => a.value.localeCompare(b.value) || a.id - b.id)
-                  .slice(0, limit)
-                  .map(({ id, value }) => [id, id, value]),
-              )
-            }
-          },
-        ),
-        {
-          ...(seed === undefined
-            ? oraclePropertyOptions(
-                100,
-                `ivm.topk-outer-join-replacements-${key}`,
-              )
-            : { seed, numRuns: oracleRuns(100) }),
-          examples: [
-            [
-              1,
-              [
-                { key: 1, value: `a` },
-                { key: 1, value: null },
-              ],
-            ],
-          ],
-        },
-      )
-    },
-  )
-  it.each(
-    [409031, undefined].flatMap((seed) =>
-      [false, true].map((collision) => ({ seed, collision })),
-    ),
-  )(
-    `matches a signed cumulative relation through keyed histories (seed $seed, collision $collision)`,
-    ({ seed, collision }) => {
-      // The reference relation observes full rows and signed weights. Forcing
-      // every bucket to collide must not change what the graph publishes.
-      if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
-      fc.assert(
-        fc.property(
-          fc.record({
-            limit: fc.integer({ min: 0, max: 6 }),
-            offset: fc.integer({ min: 0, max: 3 }),
-            split: fc.boolean(),
-            transient: fc.boolean(),
-            mapped: fc.boolean(),
-            transientValue: fc.constantFrom(`a`, `b`, `c`, `d`, `transient`),
-            steps: fc.array(
-              fc.record({
-                key: fc.integer({ min: 1, max: 8 }),
-                value: fc.constantFrom(`a`, `b`, `c`, `d`),
-                remove: fc.boolean(),
-                insertFirst: fc.boolean(),
-              }),
-              { minLength: 1, maxLength: 30 },
-            ),
-          }),
-          ({
-            limit,
-            offset,
-            split,
-            transient,
-            mapped,
-            transientValue,
-            steps,
-          }) => {
-            type Row = { id: number; value: string }
-            const graph = new D2()
-            const input = graph.newInput<[number, Row]>()
-            const relation = new TopKRelation<number>()
-            const source = new Map<number, Row>()
-            const projected = mapped
-              ? input.pipe(
-                  map(([key, row]) => [key, { ...row }] as [number, Row]),
-                )
-              : input
-            projected.pipe(
-              topK((a, b) => a.value.localeCompare(b.value), {
-                limit,
-                offset,
-              }),
-              output((message) => {
-                // An always-empty window needs no transfer work. Signed
-                // consolidation alone would hide a cancelling in/out pair.
-                if (limit === 0) expect(message.getInner()).toEqual([])
-                relation.add(message.getInner())
-              }),
-            )
-            graph.finalize()
-            const initial = [1, 2, 3].map((key) => ({
-              key,
-              value: `b`,
-              remove: false,
-              insertFirst: false,
-            }))
-            for (const step of [...initial, ...steps]) {
-              const changes: Array<[[number, Row], number]> = []
-              const old = source.get(step.key)
-              if (old) changes.push([[step.key, { ...old }], -1])
-              source.delete(step.key)
-              if (!step.remove) {
-                const row = { id: step.key, value: step.value }
-                source.set(step.key, row)
-                changes.push([[step.key, { ...row }], 1])
-              }
-              if (transient) {
-                const intermediate: [number, Row] = [
-                  step.key,
-                  { id: step.key, value: transientValue },
-                ]
-                changes.push([intermediate, 1], [intermediate, -1])
-              }
-              if (step.insertFirst) changes.reverse()
-              if (split) {
+              for (const { key, value, additionFirst } of steps) {
+                const changes: Array<[[number, Row], number]> = []
+                const before = live.get(key)
+                if (before) changes.push([[key, before], -1])
+                if (value === null) {
+                  values.delete(key)
+                  live.delete(key)
+                } else {
+                  const next = make(key, String(value))
+                  values.set(key, String(value))
+                  live.set(key, next)
+                  changes.push([[key, next], 1])
+                }
+                // Independently allocated equal cycles must cancel even when
+                // their deltas straddle a real replacement in separate messages.
+                changes.push([[key, make(key, `transient`)], 1])
+                changes.unshift([[key, make(key, `transient`)], -1])
+                if (additionFirst) changes.reverse()
                 for (const change of changes)
                   input.sendData(new MultiSet([change]))
-              } else input.sendData(new MultiSet(changes))
-              graph.run()
-              const expected = [...source.values()]
-                .sort((a, b) => a.value.localeCompare(b.value) || a.id - b.id)
-                .slice(offset, offset + limit)
-                .map((row): [number, number, string] => [
-                  row.id,
-                  row.id,
-                  row.value,
-                ])
-              relation.expectRows(expected)
-            }
-          },
-        ),
-        {
-          seed,
-          numRuns: oracleRuns(100),
-          examples: [
-            [
-              {
-                offset: 1,
-                limit: 1,
-                split: true,
-                transient: true,
-                mapped: true,
-                transientValue: `a`,
-                steps: [
-                  { key: 2, value: `b`, remove: true, insertFirst: false },
-                  { key: 1, value: `a`, remove: false, insertFirst: true },
+                graph.run()
+                check()
+              }
+            },
+          ),
+          {
+            ...(seed === undefined
+              ? oraclePropertyOptions(30, cyclicPayloads)
+              : { seed, numRuns: oracleRuns(30) }),
+            examples: [
+              [
+                false,
+                1,
+                [
+                  { key: 1, value: 2, additionFirst: true },
+                  { key: 1, value: null, additionFirst: false },
+                  { key: 1, value: 3, additionFirst: false },
                 ],
-              },
+              ],
             ],
-            ...[0, 1, 3].flatMap((offset) =>
-              [0, 1].map((limit) => [
-                {
-                  offset,
+          },
+        )
+      },
+    )
+
+    it.each([409032, undefined])(
+      `matches outer-join replacements (seed %s)`,
+      (seed) => {
+        fc.assert(
+          fc.property(
+            fc.integer({ min: 0, max: 4 }),
+            fc.array(
+              fc.record({
+                key: fc.integer({ min: 1, max: 4 }),
+                value: fc.option(fc.constantFrom(`a`, `b`, `c`, `d`), {
+                  nil: null,
+                }),
+              }),
+              { minLength: 1, maxLength: 20 },
+            ),
+            (limit, steps) => {
+              const graph = new D2()
+              const left = graph.newInput<[number, string]>()
+              const right = graph.newInput<[number, string]>()
+              const rows = new TopKRelation<number>()
+              const matches = new Map<number, string>()
+              left.pipe(
+                join(right, `left`),
+                map(
+                  ([id, [fallback, matched]]) =>
+                    [id, { id, value: matched ?? fallback }] as [
+                      number,
+                      { id: number; value: string },
+                    ],
+                ),
+                topK((a, b) => a.value.localeCompare(b.value), { limit }),
+                output((message) => rows.add(message.getInner())),
+              )
+              graph.finalize()
+              left.sendData(
+                new MultiSet([1, 2, 3, 4].map((key) => [[key, `z`], 1])),
+              )
+              graph.run()
+              for (const step of steps) {
+                const changes: Array<[[number, string], number]> = []
+                const old = matches.get(step.key)
+                if (old !== undefined) changes.push([[step.key, old], -1])
+                if (step.value === null) matches.delete(step.key)
+                else {
+                  matches.set(step.key, step.value)
+                  changes.push([[step.key, step.value], 1])
+                }
+                right.sendData(new MultiSet(changes))
+                graph.run()
+                // Recompute the full left join, then sort and slice. No incremental
+                // state or top-K helper determines the expected result.
+                rows.expectRows(
+                  [1, 2, 3, 4]
+                    .map((id) => ({ id, value: matches.get(id) ?? `z` }))
+                    .sort(
+                      (a, b) => a.value.localeCompare(b.value) || a.id - b.id,
+                    )
+                    .slice(0, limit)
+                    .map(({ id, value }) => [id, id, value]),
+                )
+              }
+            },
+          ),
+          {
+            ...(seed === undefined
+              ? oraclePropertyOptions(100, outerJoinReplacements)
+              : { seed, numRuns: oracleRuns(100) }),
+            examples: [
+              [
+                1,
+                [
+                  { key: 1, value: `a` },
+                  { key: 1, value: null },
+                ],
+              ],
+            ],
+          },
+        )
+      },
+    )
+    it.each(
+      [409031, undefined].flatMap((seed) =>
+        [false, true].map((collision) => ({ seed, collision })),
+      ),
+    )(
+      `matches a signed cumulative relation through keyed histories (seed $seed, collision $collision)`,
+      ({ seed, collision }) => {
+        // The reference relation observes full rows and signed weights. Forcing
+        // every bucket to collide must not change what the graph publishes.
+        if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
+        fc.assert(
+          fc.property(
+            fc.record({
+              limit: fc.integer({ min: 0, max: 6 }),
+              offset: fc.integer({ min: 0, max: 3 }),
+              split: fc.boolean(),
+              transient: fc.boolean(),
+              mapped: fc.boolean(),
+              transientValue: fc.constantFrom(`a`, `b`, `c`, `d`, `transient`),
+              steps: fc.array(
+                fc.record({
+                  key: fc.integer({ min: 1, max: 8 }),
+                  value: fc.constantFrom(`a`, `b`, `c`, `d`),
+                  remove: fc.boolean(),
+                  insertFirst: fc.boolean(),
+                }),
+                { minLength: 1, maxLength: 30 },
+              ),
+            }),
+            ({
+              limit,
+              offset,
+              split,
+              transient,
+              mapped,
+              transientValue,
+              steps,
+            }) => {
+              type Row = { id: number; value: string }
+              const graph = new D2()
+              const input = graph.newInput<[number, Row]>()
+              const relation = new TopKRelation<number>()
+              const source = new Map<number, Row>()
+              const projected = mapped
+                ? input.pipe(
+                    map(([key, row]) => [key, { ...row }] as [number, Row]),
+                  )
+                : input
+              projected.pipe(
+                topK((a, b) => a.value.localeCompare(b.value), {
                   limit,
+                  offset,
+                }),
+                output((message) => {
+                  // An always-empty window needs no transfer work. Signed
+                  // consolidation alone would hide a cancelling in/out pair.
+                  if (limit === 0) expect(message.getInner()).toEqual([])
+                  relation.add(message.getInner())
+                }),
+              )
+              graph.finalize()
+              const initial = [1, 2, 3].map((key) => ({
+                key,
+                value: `b`,
+                remove: false,
+                insertFirst: false,
+              }))
+              for (const step of [...initial, ...steps]) {
+                const changes: Array<[[number, Row], number]> = []
+                const old = source.get(step.key)
+                if (old) changes.push([[step.key, { ...old }], -1])
+                source.delete(step.key)
+                if (!step.remove) {
+                  const row = { id: step.key, value: step.value }
+                  source.set(step.key, row)
+                  changes.push([[step.key, { ...row }], 1])
+                }
+                if (transient) {
+                  const intermediate: [number, Row] = [
+                    step.key,
+                    { id: step.key, value: transientValue },
+                  ]
+                  changes.push([intermediate, 1], [intermediate, -1])
+                }
+                if (step.insertFirst) changes.reverse()
+                if (split) {
+                  for (const change of changes)
+                    input.sendData(new MultiSet([change]))
+                } else input.sendData(new MultiSet(changes))
+                graph.run()
+                const expected = [...source.values()]
+                  .sort((a, b) => a.value.localeCompare(b.value) || a.id - b.id)
+                  .slice(offset, offset + limit)
+                  .map((row): [number, number, string] => [
+                    row.id,
+                    row.id,
+                    row.value,
+                  ])
+                relation.expectRows(expected)
+              }
+            },
+          ),
+          {
+            seed,
+            numRuns: oracleRuns(100),
+            examples: [
+              [
+                {
+                  offset: 1,
+                  limit: 1,
                   split: true,
                   transient: true,
                   mapped: true,
                   transientValue: `a`,
                   steps: [
-                    { key: 4, value: `a`, remove: false, insertFirst: true },
-                    { key: 2, value: `c`, remove: false, insertFirst: true },
-                    { key: 1, value: `b`, remove: true, insertFirst: false },
-                    { key: 1, value: `d`, remove: false, insertFirst: false },
+                    { key: 2, value: `b`, remove: true, insertFirst: false },
+                    { key: 1, value: `a`, remove: false, insertFirst: true },
                   ],
                 },
-              ]),
-            ),
-          ],
-        },
-      )
-    },
-  )
-})
+              ],
+              ...[0, 1, 3].flatMap((offset) =>
+                [0, 1].map((limit) => [
+                  {
+                    offset,
+                    limit,
+                    split: true,
+                    transient: true,
+                    mapped: true,
+                    transientValue: `a`,
+                    steps: [
+                      { key: 4, value: `a`, remove: false, insertFirst: true },
+                      { key: 2, value: `c`, remove: false, insertFirst: true },
+                      { key: 1, value: `b`, remove: true, insertFirst: false },
+                      { key: 1, value: `d`, remove: false, insertFirst: false },
+                    ],
+                  },
+                ]),
+              ),
+            ],
+          },
+        )
+      },
+    )
+  },
+)
 
 describe(`Operators`, () => {
   describe(`TopKWithFractionalIndex operator`, () => {

@@ -5,7 +5,11 @@ import { expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleReplayTest, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleReplayTest,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { FakeStorageAdapter } from './harness'
@@ -561,14 +565,15 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     // TANSTACK_DB_ORACLE_PROPERTY=offline.serializer.mutation-wire
     const property = mutationMeaningProperty(`omit-changes`)
     const replay = mutationWireOracle.random
+    const { replaySeed } = readOracleRunConfig()
     const captured = await fc.check(property, {
       ...replay,
-      seed: replay.seed ?? 20260914,
+      seed: replaySeed ?? 20260914,
     })
     expect(captured.failed).toBe(true)
     expect(captured.errorInstance).toMatchObject({ name: `AssertionError` })
     expect(String(captured.errorInstance)).toContain(`mutation wire checkpoint`)
-    if (replay.seed !== undefined) return
+    if (replaySeed !== undefined) return
 
     expect(captured.numShrinks).toBeGreaterThan(0)
     expect(captured.counterexamplePath).toMatch(/^\d+(?::\d+)*$/)

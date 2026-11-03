@@ -659,3 +659,19 @@ of this verification. Existing provider, framework, browser-process and deeper
 history limits remain. Browser and Solid receiving evidence above retains its
 historical source binding. Final-head CI and external review coverage remain
 separate from these local results.
+
+## Integration after the callback port (2026-11-02)
+
+The repair's production code, oracle coverage and patch Changeset landed on
+main through [#2312](https://github.com/TanStack/db/pull/2312). This section
+records #2318's subsequent integration of main
+`30e85464ed2b9b12c5f10981a062427a1fc8daaa` with a normal merge commit.
+
+The conflict resolution retains main's coverage map, including later callback,
+framework, SSR and numeric-window records. It also retains the historical
+source binding in this review. Against that main commit, the resulting change
+is this integration record only. Production, tests, manifests, the lockfile and
+Changesets are identical to main. The earlier RED, GREEN, mutant and size
+results keep their stated historical bindings. No new runtime verification or
+bug-class closure is claimed by this document update. New-head CI and review
+readiness must be checked before the requested merge.

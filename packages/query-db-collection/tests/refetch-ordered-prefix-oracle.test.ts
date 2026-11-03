@@ -81,7 +81,7 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * `loadedSubsets:invalidated` event) start a bounded repair in every paging
  * ordered live query on the source, so they must be rare:
  * - A report needs a reason: some ordered request that was answered before
- *   returned different rows when it was answered again in that step. Any
+ *   changed its key membership or moved its end earlier in that step. Any
  *   step can meet it. A `loadSubset` call can acquire a released page whose
  *   Query an invalidation marked stale; the call settles on the cached rows,
  *   and Query then refetches the page on its own, which is a refetch the
@@ -90,8 +90,9 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   cause. A report says only that pages may have shifted, so a second one
  *   in the same step would repeat the repair for nothing.
  * - A refetch or invalidation of an unchanged backend never reports.
- * - A full page that only loses rows, or whose rows change only in place,
- *   still starts at the same point and ends at or after its old end. With no
+ * - A page whose key membership and leading-order end stay unchanged never
+ *   reports for unrelated payload edits. A full page that only loses rows
+ *   and ends at or after its old end keeps its prefix. With no
  *   later page, no row can fall outside it, so the refetch does not report. A
  *   visible delete or order change already starts the loader's own repair.
  *   A short last page that loses its last row ends earlier, so it may
@@ -221,6 +222,9 @@ function expectedCoverage(
 
 // ## History grammar
 //
+// - `label` changes only a backend label. Under numeric order it is a
+//   payload edit, so the report-work comparison must reject a report caused
+//   only by that edit. Source coverage still compares its complete value.
 // - `upsert` and `delete` change only the backend. The provider sends nothing
 //   until the next refetch, like a Query cache that is not refetched.
 // - `flip` adds or removes one local marker. Removing a window row's marker
@@ -253,6 +257,7 @@ function expectedCoverage(
 // unique.
 type Command =
   | { type: `upsert`; id: number; rank: number }
+  | { type: `label`; id: number; label: string }
   | { type: `delete`; id: number }
   | { type: `flip`; id: number }
   | { type: `observe`; id: number }
@@ -431,6 +436,88 @@ const heldCaseArbitrary: fc.Arbitrary<Case> = fc
     })
   })
 
+// Construct two finite pages with an unmarked source, so the joined window
+// reads past both. The last row of the second page moves earlier without
+// changing that page's keys. A fresh row strictly between its old and new end
+// is in neither autonomous answer. A delete hold on that boundary row hides
+// its visible order update. The shared source-coverage law must see the gap
+// after release. Width, offset, key form, order arity, refresh path, row IDs,
+// and the gap vary; label-only edits are negative controls for report rarity.
+// Numeric order admits finite continuation. The general grammar keeps locale
+// order, which instead takes the documented full-source path.
+type PageEndInput = {
+  terms: 1 | 2
+  functionKey: boolean
+  refresh: `refetch` | `invalidate`
+  gapRank: number
+  limit: number
+  offset: number
+  firstId: number
+}
+
+function pageEndCase(
+  input: PageEndInput,
+  hold: `delete` | `update` | `other-delete` | undefined,
+  direction: `earlier` | `later` = `earlier`,
+): Case {
+  const { terms, functionKey, refresh, gapRank, limit, offset, firstId } = input
+  const size = 2 * limit + offset
+  const boundary = firstId
+  const gap = firstId + size
+  return {
+    scenario: {
+      encoding: `cursor`,
+      functionKey,
+      terms,
+      orderKey: `rank`,
+      pageCap: undefined,
+      limit,
+      offset,
+    },
+    initial: Array.from({ length: size }, (_, index) => ({
+      id: firstId + index,
+      rank: index === 0 ? 0 : index < limit ? 6 + index : 20 + index,
+      marked: false,
+    })),
+    history: [
+      // A non-order field can change without moving a page or its boundary.
+      { type: `label`, id: boundary, label: `payload before hold` },
+      { type: refresh },
+      ...(hold === undefined
+        ? []
+        : [
+            {
+              type: `hold` as const,
+              kind: hold === `other-delete` ? (`delete` as const) : hold,
+              id: hold === `other-delete` ? firstId + limit : boundary,
+            },
+          ]),
+      { type: `invalidate` },
+      { type: `upsert`, id: boundary, rank: direction === `earlier` ? 4 : -1 },
+      ...(direction === `earlier`
+        ? [{ type: `upsert` as const, id: gap, rank: gapRank }]
+        : []),
+      { type: refresh },
+      { type: `release` },
+      { type: `label`, id: gap, label: `payload after release` },
+      { type: refresh },
+    ],
+  }
+}
+
+const sameKeyEndInputArbitrary: fc.Arbitrary<PageEndInput> = fc.record({
+  terms: fc.constantFrom(1 as const, 2 as const),
+  functionKey: fc.boolean(),
+  refresh: fc.constantFrom(`refetch` as const, `invalidate` as const),
+  gapRank: fc.integer({ min: 1, max: 3 }),
+  limit: fc.integer({ min: 1, max: 3 }),
+  offset: fc.integer({ min: 0, max: 1 }),
+  firstId: fc.integer({ min: 0, max: 16 }),
+})
+const sameKeyEndCaseArbitrary = sameKeyEndInputArbitrary.map((input) =>
+  pageEndCase(input, `delete`),
+)
+
 // ## Production driver
 //
 // A real QueryClient backs an on-demand Query Collection with an eager B-tree
@@ -445,6 +532,8 @@ type Run = {
   markers: Set<number>
   apply: (command: Command) => Promise<void>
   requests: Array<LoadSubsetOptions>
+  // Calls at the public adapter boundary, before Query metadata normalization.
+  acquisitions: Array<LoadSubsetOptions>
   // Rows returned by the provider so far.
   servedRows: () => number
   // Requests whose Query key does not match their request data.
@@ -461,9 +550,15 @@ type Run = {
   // Reports that served pages may have shifted (`loadedSubsets:invalidated`
   // events on the source Collection) so far.
   reports: () => number
-  // Ordered requests answered again with different rows than their previous
-  // answer, so far. A report needs one of these.
+  // Ordered reanswers with changed key membership or an earlier end, so far.
+  // A report needs one of these; unrelated value edits do not qualify.
   changedReanswers: () => number
+  // Reanswers with the same keys whose last row moves earlier in the order.
+  sameKeyEarlierEnds: () => number
+  // Same-key earlier ends on the deleted held boundary with an omitted gap.
+  deleteHeldGaps: () => number
+  // Request offsets at which the public report reached the core receiver.
+  reportRequestOffsets: () => ReadonlyArray<number>
   // Make the next change application fail once: a change subscriber throws
   // while the refetched rows commit.
   failNextApplication: () => void
@@ -505,8 +600,11 @@ async function startRun(testCase: Case): Promise<Run> {
     return demandKey === undefined ? [id] : [id, demandKey]
   }
   let failFrom: number | undefined
-  const answers = new Map<string, string>()
+  const answers = new Map<string, Array<Item>>()
   let changedReanswers = 0
+  let sameKeyEarlierEnds = 0
+  let deleteHeldGaps = 0
+  let heldRow: { kind: `update` | `delete`; id: number } | undefined
   const serve = (options: LoadSubsetOptions): Array<Item> => {
     const page = answer(options)
     if (options.orderBy) {
@@ -514,10 +612,42 @@ async function startRun(testCase: Case): Promise<Run> {
         getLoadSubsetDemandKey(options),
         options.offset,
       ])
-      const rows = JSON.stringify(page.map((row) => row.id))
       const previous = answers.get(request)
-      if (previous !== undefined && previous !== rows) changedReanswers++
-      answers.set(request, rows)
+      if (previous !== undefined) {
+        const keys = (rows: Array<Item>) =>
+          rows
+            .map((row) => row.id)
+            .sort()
+            .join(`,`)
+        const changedKeys = keys(previous) !== keys(page)
+        const oldEnd = previous.at(-1)
+        const newEnd = page.at(-1)
+        const earlierEnd =
+          oldEnd !== undefined &&
+          (newEnd === undefined || compareRows(newEnd, oldEnd, scenario) < 0)
+        // Report relevance is independent of payload equality: an order-equal
+        // label edit cannot lose prefix coverage. A moved end can, even when
+        // key membership is unchanged. Complete values remain in the separate
+        // source-coverage comparison.
+        if (changedKeys || earlierEnd) changedReanswers++
+        if (!changedKeys && earlierEnd && newEnd !== undefined) {
+          sameKeyEarlierEnds++
+          if (
+            heldRow?.kind === `delete` &&
+            heldRow.id === oldEnd.id &&
+            [...backend.values()].some(
+              (row) =>
+                compareRows(row, newEnd, scenario) > 0 &&
+                compareRows(row, oldEnd, scenario) < 0 &&
+                !previous.some((before) => before.id === row.id) &&
+                !page.some((after) => after.id === row.id),
+            )
+          ) {
+            deleteHeldGaps++
+          }
+        }
+      }
+      answers.set(request, page)
     }
     return page
   }
@@ -553,35 +683,56 @@ async function startRun(testCase: Case): Promise<Run> {
       queries: { gcTime: Infinity, retry: false, staleTime: Infinity },
     },
   })
-  const items = createCollection(
-    queryCollectionOptions<Item>({
-      id,
-      queryClient,
-      queryKey: scenario.functionKey ? keyFor : [id],
-      syncMode: `on-demand`,
-      queryFn: (context) => {
-        const options = context.meta!.loadSubsetOptions!
-        if (
-          scenario.functionKey &&
-          JSON.stringify(context.queryKey) !== JSON.stringify(keyFor(options))
-        ) {
-          keyMismatches++
-        }
-        return Promise.resolve(serve(options))
-      },
-      getKey: (row) => row.id,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      // A held optimistic write stays persisting until released; the
-      // backend does not change.
-      onUpdate: async () => {
-        await heldWrite
-      },
-      onDelete: async () => {
-        await heldWrite
-      },
-    }),
-  )
+  const config = queryCollectionOptions<Item>({
+    id,
+    queryClient,
+    queryKey: scenario.functionKey ? keyFor : [id],
+    syncMode: `on-demand`,
+    queryFn: (context) => {
+      const options = context.meta!.loadSubsetOptions!
+      if (
+        scenario.functionKey &&
+        JSON.stringify(context.queryKey) !== JSON.stringify(keyFor(options))
+      ) {
+        keyMismatches++
+      }
+      return Promise.resolve(serve(options))
+    },
+    getKey: (row) => row.id,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    // A held optimistic write stays persisting until released; the
+    // backend does not change.
+    onUpdate: async () => {
+      await heldWrite
+    },
+    onDelete: async () => {
+      await heldWrite
+    },
+  })
+  const acquisitions: Array<LoadSubsetOptions> = []
+  const sync = config.sync.sync
+  config.sync = {
+    ...config.sync,
+    sync: (operations) => {
+      const handlers = sync(operations)
+      if (
+        handlers === undefined ||
+        typeof handlers === `function` ||
+        handlers.loadSubset === undefined
+      )
+        return handlers
+      const load = handlers.loadSubset
+      return {
+        ...handlers,
+        loadSubset: (options) => {
+          acquisitions.push(options)
+          return load(options)
+        },
+      }
+    },
+  }
+  const items = createCollection(config)
   let heldWrite: Promise<void> = Promise.resolve()
   // The running hold's release, if any.
   let releaseHold: (() => Promise<void>) | undefined
@@ -605,8 +756,10 @@ async function startRun(testCase: Case): Promise<Run> {
   }
 
   let reports = 0
+  const reportRequestOffsets: Array<number> = []
   items.on(`loadedSubsets:invalidated`, () => {
     reports++
+    reportRequestOffsets.push(acquisitions.length)
   })
   let failApplication = false
   items.subscribeChanges(() => {
@@ -661,6 +814,12 @@ async function startRun(testCase: Case): Promise<Run> {
       case `upsert`:
         backend.set(command.id, toItem(command))
         return
+      case `label`: {
+        const row = backend.get(command.id)
+        if (row !== undefined)
+          backend.set(command.id, { ...row, label: command.label })
+        return
+      }
       case `delete`:
         backend.delete(command.id)
         return
@@ -706,6 +865,7 @@ async function startRun(testCase: Case): Promise<Run> {
       // hold is a no-op then.
       case `hold`:
         if (releaseHold === undefined && items.has(command.id)) {
+          heldRow = { kind: command.kind, id: command.id }
           releaseHold = hold(command.kind, command.id)
           await settle()
         }
@@ -713,6 +873,7 @@ async function startRun(testCase: Case): Promise<Run> {
       case `release`: {
         const release = releaseHold
         releaseHold = undefined
+        heldRow = undefined
         await release?.()
         await Promise.all(heldPreloads.splice(0))
         await settle()
@@ -729,6 +890,7 @@ async function startRun(testCase: Case): Promise<Run> {
     markers,
     apply,
     requests,
+    acquisitions,
     servedRows: () => servedRows,
     keyMismatches: () => keyMismatches,
     setEncoding: (next) => {
@@ -744,6 +906,9 @@ async function startRun(testCase: Case): Promise<Run> {
         .length,
     reports: () => reports,
     changedReanswers: () => changedReanswers,
+    sameKeyEarlierEnds: () => sameKeyEarlierEnds,
+    deleteHeldGaps: () => deleteHeldGaps,
+    reportRequestOffsets: () => reportRequestOffsets,
     failNextApplication: () => {
       failApplication = true
     },
@@ -796,6 +961,8 @@ async function startRun(testCase: Case): Promise<Run> {
 // lagging provider after a continuation page was served. The campaigns must
 // reach it, and must reach such a refetch while a hold is running.
 type Observation = {
+  reachedSameKeyEarlierEndDuringHold: boolean
+  reachedDeleteHeldGapReportAndRepair: boolean
   reachedLaggingRefetchAfterContinuation: boolean
   // A refetch of a lagging provider while an optimistic write held sync rows
   // back.
@@ -825,13 +992,15 @@ function checkReports(
   }
   if (reports > 0 && changedReanswers === 0) {
     throw new Error(
-      `a ${command.type} at ${checkpoint} reported, but no ordered request returned different rows`,
+      `a ${command.type} at ${checkpoint} reported, but no ordered request changed keys or moved its end earlier`,
     )
   }
 }
 
 async function checkCase(testCase: Case): Promise<Observation> {
   const run = await startRun(testCase)
+  let reachedSameKeyEarlierEndDuringHold = false
+  let reachedDeleteHeldGapReportAndRepair = false
   let reachedLaggingRefetchAfterContinuation = false
   let reachedLaggingRefetchDuringHold = false
   let reachedReportDuringHold = false
@@ -890,7 +1059,26 @@ async function checkCase(testCase: Case): Promise<Observation> {
       const requestsBefore = run.requests.length
       const reportsBefore = run.reports()
       const reanswersBefore = run.changedReanswers()
+      const sameKeyEndsBefore = run.sameKeyEarlierEnds()
+      const gapsBefore = run.deleteHeldGaps()
       await run.apply(command)
+      if (
+        run.deleteHeldGaps() > gapsBefore &&
+        run.reports() > reportsBefore &&
+        run
+          .reportRequestOffsets()
+          .slice(reportsBefore)
+          .some((from) =>
+            run.acquisitions
+              .slice(from)
+              .some((request) => request.refetch === true),
+          )
+      ) {
+        reachedDeleteHeldGapReportAndRepair = true
+      }
+      if (run.holding() && run.sameKeyEarlierEnds() > sameKeyEndsBefore) {
+        reachedSameKeyEarlierEndDuringHold = true
+      }
       if (
         command.type === `refetch` &&
         run.holding() &&
@@ -914,7 +1102,11 @@ async function checkCase(testCase: Case): Promise<Observation> {
       if (command.type === `refetch` || command.type === `invalidate`) {
         checkNoNewFullSource(requestsBefore, `${command.type} at step ${step}`)
       }
-      if (command.type === `upsert` || command.type === `delete`) {
+      if (
+        command.type === `upsert` ||
+        command.type === `delete` ||
+        command.type === `label`
+      ) {
         providerCurrent = false
       } else if (command.type === `release`) {
         if (providerCurrent) check(`after release at step ${step}`)
@@ -998,6 +1190,8 @@ async function checkCase(testCase: Case): Promise<Observation> {
     throw new AggregateError(cleanupFailures, `refetch prefix cleanup failed`)
   }
   return {
+    reachedSameKeyEarlierEndDuringHold,
+    reachedDeleteHeldGapReportAndRepair,
     reachedLaggingRefetchAfterContinuation,
     reachedLaggingRefetchDuringHold,
     reachedReportDuringHold,
@@ -1038,7 +1232,7 @@ const campaigns =
 declareOracle({
   check: [checkCase],
   model: [expectedWindow, expectedCoverage],
-  grammar: [caseArbitrary, heldCaseArbitrary],
+  grammar: [caseArbitrary, heldCaseArbitrary, sameKeyEndCaseArbitrary],
 })
 
 describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () => {
@@ -1158,11 +1352,10 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
-  // The gate opens only when a page's keys change. A value change that keeps
-  // every page's keys reaches the loader as an update to a row it already
-  // sent; when the update moves that row in the order, the existing
-  // order-change path repairs the window. Here the first page keeps its keys
-  // while its last row's order value moves.
+  // Without a hold, a page that keeps its keys also reaches the loader as
+  // an order-change update. The held histories below distinguish that path:
+  // accepted rows remain private, so the adapter must report the earlier end
+  // even while a deleted row hides its own order change.
   it.each([`cursor`, `offset`] as const)(
     `repairs when a page keeps its keys but its last row moves (%s encoding)`,
     async (encoding) => {
@@ -1897,6 +2090,151 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     })
   })
 
+  // This is the exact reduced CI history. It has no separate expected
+  // answer: both the window and latent coverage use the shared model.
+  it(`keeps coverage when a held page keeps its key and moves earlier`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        terms: 1,
+        orderKey: `rank`,
+        pageCap: undefined,
+        limit: 1,
+        offset: 0,
+      },
+      initial: [
+        { id: 1, rank: 5, marked: false },
+        { id: 0, rank: 0, marked: false },
+      ],
+      history: [
+        { type: `hold`, kind: `delete`, id: 0 },
+        { type: `upsert`, id: 0, rank: 0 },
+        { type: `invalidate` },
+        { type: `upsert`, id: 0, rank: 1 },
+        { type: `upsert`, id: 2, rank: 0 },
+        { type: `refetch` },
+        { type: `release` },
+        { type: `upsert`, id: 0, rank: 0 },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  const endProperty = `query-db.refetch-held-page-end`
+  const endCampaigns =
+    replay.replayPath === undefined
+      ? ([`fixed`, `random`] as const)
+      : replay.replayProperty === endProperty
+        ? ([`replay`] as const)
+        : ([] as const)
+  it.each(endCampaigns)(
+    `generated same-key page shifts (%s campaign)`,
+    async (campaign) => {
+      const reach = createOracleReach(
+        endProperty,
+        [`earlier end during hold`, `delete-held gap reported and repaired`],
+        { minimum: 24 },
+      )
+      const options =
+        campaign === `fixed`
+          ? { seed: 20261102, numRuns: oracleRuns(24) }
+          : oraclePropertyOptions(24, endProperty)
+      const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)
+      onTestFailed(() => {
+        console.error(
+          `${endProperty} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
+        )
+      })
+      await fc.assert(
+        fc.asyncProperty(sameKeyEndCaseArbitrary, async (testCase) => {
+          reach.beginHistory()
+          const observation = await withDeadline(checkCase(testCase))
+          if (observation.reachedSameKeyEarlierEndDuringHold)
+            reach.reach(`earlier end during hold`)
+          if (observation.reachedDeleteHeldGapReportAndRepair)
+            reach.reach(`delete-held gap reported and repaired`)
+        }),
+        { ...options, seed },
+      )
+      reach.assertReached()
+      console.info(endProperty, campaign, Object.fromEntries(reach.counts()))
+    },
+    120_000,
+  )
+
+  // These widths and adjacent hold regimes cannot depend on a random seed.
+  // Every case still uses the shared model, provider and public comparison.
+  it.skipIf(oracleReplayRequested())(
+    `same-key boundary shifts preserve coverage across widths and hold regimes`,
+    async () => {
+      const states = [1, 2, 3].flatMap((limit) =>
+        [0, 1].map(
+          (offset) => `delete-held gap width ${limit} offset ${offset}`,
+        ),
+      )
+      const reach = createOracleReach(endProperty, states, {
+        fixedHistories: 48,
+      })
+      const counts: Array<{
+        limit: number
+        offset: number
+        hold: string
+        direction: string
+        reports: number
+      }> = []
+      for (const limit of [1, 2, 3]) {
+        for (const offset of [0, 1]) {
+          for (const hold of [
+            `delete`,
+            `update`,
+            `other-delete`,
+            undefined,
+          ] as const) {
+            for (const direction of [`earlier`, `later`] as const) {
+              reach.beginHistory({ fixed: true })
+              const observation = await checkCase(
+                pageEndCase(
+                  {
+                    limit,
+                    offset,
+                    terms: 2,
+                    functionKey: true,
+                    refresh: `refetch`,
+                    gapRank: 2,
+                    firstId: 3,
+                  },
+                  hold,
+                  direction,
+                ),
+              )
+              if (
+                hold === `delete` &&
+                direction === `earlier` &&
+                observation.reachedDeleteHeldGapReportAndRepair
+              )
+                reach.reach(`delete-held gap width ${limit} offset ${offset}`)
+              counts.push({
+                limit,
+                offset,
+                hold: hold ?? `none`,
+                direction,
+                reports: observation.reports,
+              })
+            }
+          }
+        }
+      }
+      reach.assertReached()
+      console.info(
+        `page-end structural reach`,
+        Object.fromEntries(reach.counts()),
+      )
+      console.info(`page-end structural report counts`, JSON.stringify(counts))
+    },
+    120_000,
+  )
+
   // The premise-directed campaign for the skip under a hold. Its reach
   // witness requires refetches that report while a hold is running.
   it.skipIf(oracleReplayRequested())(
@@ -1951,6 +2289,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         { ...options, seed },
       )
       reach.assertReached()
+      console.info(property, campaign, Object.fromEntries(reach.counts()))
     },
     120_000,
   )
