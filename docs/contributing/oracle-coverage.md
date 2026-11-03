@@ -7006,7 +7006,13 @@ throwing, and a second campaign runs the default configuration without an
 app `onError`, declaring the adapter's give-up log. The on-demand lane also
 restarts the Collection and checks that a retired run's snapshot-boundary
 evidence (txid 5 below `xmin` 10) and imported sync metadata (txid 25) stay
-pending until the restarted run is ready, then fulfill. At both cuts a
+pending until the restarted run is ready, then fulfill. Its live attempts after the first load are a
+generated sequence of 0..7 HTTP 503s and synchronous throws of the app's
+`fetchClient`, in any order; the expected outage and the message of the
+attempt that crossed the threshold (HEALTH-4) follow the attempts the
+provider recorded, with reach for an outage led by a throw and one crossed
+by a throw. A success between failed attempts is not generated in this lane;
+the eager lane's empty response covers the reset. At both cuts a
 fresh Collection imports the exported sync metadata, as hydration does, and
 must accept no txid the source does not accept then: the export carried the
 retired run's txids before the restarted run was ready (RED: txid 25
@@ -7078,7 +7084,13 @@ there: RED `READY-4 (status)` at `[fail, prompt restart, fail]`, status
 identity of its log lines, read through the base client, because the
 `onUpdate` handle's `getQueryLogs` looks up the wrong query in Convex
 1.47.0; a version that skips nothing fails `LIFE-2/LIFE-5 (status)` at
-`[fail, restart, changes]`. A cached valid result served to a restarted run is accepted
+`[fail, restart, changes]`. Behind an app's wrapper that exposes only
+`onUpdate` the accessor is missing, so the adapter falls back to the earlier
+rule (no current value until the server's first callback, and the first
+error taken for the replay); a fixed campaign over such a wrapper checks it
+(RED before the fallback: `[fail, restart]` ends in `error`). The wrapper does
+not declare `prompt-after-restart`: there a server answer that comes before
+the replay can still be taken for it (open limit). A cached valid result served to a restarted run is accepted
 client-cache behavior and is not generated, because the model starts a
 restarted run empty. A fixed-seed campaign runs the React client
 (`watchQuery`).
