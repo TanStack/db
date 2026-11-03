@@ -1199,17 +1199,6 @@ function createPowerSyncCollectionConfig<
     ...restConfig,
   }
 
-  // Writes reach the database in author order: each starts after the
-  // earlier one has been observed or rejected (MUT-10).
-  let turn: Promise<unknown> = Promise.resolve()
-  const persist = (
-    transaction: Parameters<PowerSyncTransactor[`applyTransaction`]>[0],
-  ): Promise<void> => {
-    const run = turn.then(() => transactor.applyTransaction(transaction))
-    turn = run.catch(() => {})
-    return run
-  }
-
   const outputConfig: EnhancedPowerSyncCollectionConfig<
     TTable,
     OutputType,
@@ -1222,10 +1211,18 @@ function createPowerSyncCollectionConfig<
     startSync: true,
     syncMode,
     sync,
-    // Each handler's transaction holds a single mutation of its type.
-    onInsert: (params) => persist(params.transaction),
-    onUpdate: (params) => persist(params.transaction),
-    onDelete: (params) => persist(params.transaction),
+    onInsert: async (params) => {
+      // The transaction here should only ever contain a single insert mutation
+      return await transactor.applyTransaction(params.transaction)
+    },
+    onUpdate: async (params) => {
+      // The transaction here should only ever contain a single update mutation
+      return await transactor.applyTransaction(params.transaction)
+    },
+    onDelete: async (params) => {
+      // The transaction here should only ever contain a single delete mutation
+      return await transactor.applyTransaction(params.transaction)
+    },
     utils: {
       getMeta: () => ({
         tableName: viewName,

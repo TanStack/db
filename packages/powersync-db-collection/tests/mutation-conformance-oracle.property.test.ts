@@ -29,9 +29,8 @@ import { powerSyncMutationDriver } from './mutation-conformance-driver'
  * The driver runs a real local PowerSync database, the adapter's provider:
  * the adapter persists each write to it and settles once its diff trigger
  * has observed the write (`confirm-through-sync`, MUT-7). The database can
- * reject or hold a write, another client can write, the watcher can deliver
- * a write's change late, and updates set only their changed columns (the law
- * set's `field-updates`).
+ * reject or hold a write, another client can write, and updates set only
+ * their changed columns (the law set's `field-updates`).
  */
 
 const property = `adapter-conformance.mutations.powersync`

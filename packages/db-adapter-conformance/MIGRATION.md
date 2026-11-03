@@ -31,7 +31,7 @@ reviewed change.
 | ----------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started                                                                                                                                                                                                                              |
-| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations: GREEN (2026-11-03) after a fix, `undefinedField: 'null'`, `field-updates`, `held-echoes`. Driver `powersync-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.powersync`. On-demand: not started                                  |
+| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations: GREEN (2026-11-03), no adapter change, `undefinedField: 'null'`, `field-updates`. Driver `powersync-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.powersync`. On-demand: not started                                          |
 | RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: GREEN (2026-11-03) after a fix, `undefinedField: 'absent'`. Driver `rxdb-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.rxdb`                                                                                                            |
 | TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares `duplicate-key-delivery` and `source-failure-after-ready`. Mutations: GREEN (2026-11-03) after a fix, `undefinedField: 'null'`, `field-updates`, `held-echoes`. Driver `trailbase-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.trailbase`. On-demand: not started |
 | Convex            | eager live source, mutations, on-demand, source shapes                                | Eager: GREEN (2026-11-02) after a fix, per-batch commits, complete results, over the real Convex JavaScript client and a controlled WebSocket. Driver `convex-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.convex`. Mutations, on-demand, source shapes: not started                                                                                                                                                                                 |
@@ -617,3 +617,24 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     so a driver without `server-rewrites` reached an undeclared state. It
     now counts only a plan's rewrite.
   - **Size:** powersync-db-collection +26 gzip bytes for MUT-10.
+- **Decided 2026-11-03, MUT-10 under confirmation through sync.** "The
+  earlier one decides" is the provider's answer, not the write's
+  confirmation through sync: core does not chain independent transactions,
+  and an application that needs that chains them itself. Waiting for
+  confirmation made a burst of 50 PowerSync inserts take 1.6 s instead of
+  31 ms.
+  - **Oracle:** an answered write is decided, so the next write's request is
+    owed; it stays pending until its copy arrives. The reference SQL adapter
+    now starts the next write at the answer and confirms each write by its
+    own commit; new mutants `chains-on-confirmation` (MUT-8) and
+    `confirms-by-high-water`, which confirms a withheld copy once a later
+    one applies (MUT-1).
+  - **PowerSync:** the ordering change is reverted; the write lock already
+    orders its writes. Its driver no longer declares `held-writes` or
+    `held-echoes` (a held statement holds the lock the diff flush needs, and
+    one watcher callback applies every write). GREEN with no adapter change;
+    a mutant that settles before its diff trigger observes the write fails
+    MUT-1.
+  - **TrailBase:** a write starts after the earlier one's HTTP response, not
+    after its change event. The committed version, which waited for the
+    event, fails the fixed campaign.

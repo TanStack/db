@@ -15,12 +15,17 @@
  *   (`field-updates`); the request carries the bound values;
  * - a plan answers the next request inside the adapter's transaction: a
  *   rejection throws the plan's error from the statement, as SQLite does for
- *   a failed write, which rolls the transaction back; a held request waits
- *   until `release`, holding the write lock as a slow disk does;
+ *   a failed write, which rolls the transaction back. The driver does not
+ *   declare `held-writes`: a held statement holds the database's one write
+ *   lock, which the adapter's diff flush also needs, so it would delay the
+ *   confirmation of earlier writes, a coupling the model does not represent;
  * - the adapter applies the database's changes through its change watcher
- *   (`onChangeWithCallback`). With a held echo, the watcher's next callback
- *   waits until `deliver` (`held-echoes`), as a throttled or busy watcher
- *   delays it; the adapter must not settle the write before (MUT-7);
+ *   (`onChangeWithCallback`), which runs at most every 30 ms, so each write's
+ *   copy arrives after the database answers; the adapter must not settle
+ *   the write before it applies (MUT-7), which the publication check sees.
+ *   The driver does not declare `held-echoes`: one watcher callback applies
+ *   every committed write, so it cannot withhold one write's copy while a
+ *   later write proceeds;
  * - a commit by another client is a write to the table that is not the
  *   adapter's, as the SDK's download of server changes is;
  * - the provider's rows are the table's rows. `note` is a nullable text
@@ -77,8 +82,6 @@ const acceptAtOnce: WritePlan = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const drainTimeoutMs = 5_000
-// How long nothing must change before a cut with a held request or echo.
-const quietMs = 25
 
 /** Field names in a statement, without the quoting `sanitizeSQL` adds. */
 const unquote = (name: string) => name.trim().replace(/^['"]|['"]$/g, ``)
@@ -131,11 +134,7 @@ class PowerSyncMutationProvider implements MutationProvider {
   readonly database: PowerSyncDatabase
   readonly file: string
   private readonly plans: Array<WritePlan> = []
-  private readonly held: Array<() => void> = []
   private readonly log: Array<WriteRequest> = []
-  /** Opens the watcher's next callback when an echo is withheld. */
-  private echoes: Array<() => void> = []
-  private gate: Promise<void> | undefined
   private running = 0
   private drained = 0
   private drainTarget: number | undefined
@@ -172,10 +171,7 @@ class PowerSyncMutationProvider implements MutationProvider {
           if (!request) return execute(sql, params)
           this.log.push(request)
           const plan = this.plans.shift() ?? acceptAtOnce
-          if (plan.held)
-            await new Promise<void>((resolve) => this.held.push(resolve))
           if (plan.outcome === `reject`) throw plan.error
-          if (plan.echoHeld) this.withholdEcho()
           wrote = true
           return execute(sql, params)
         }
@@ -184,8 +180,7 @@ class PowerSyncMutationProvider implements MutationProvider {
       if (wrote) this.expectDrain()
       return result
     }) as PowerSyncDatabase[`writeTransaction`]
-    // The adapter's change watcher: count its drains, and hold its next
-    // callback while an echo is withheld.
+    // The adapter's change watcher: count its drains.
     const register = this.database.onChangeWithCallback.bind(this.database)
     this.database.onChangeWithCallback = (handler, options) =>
       register(
@@ -194,7 +189,6 @@ class PowerSyncMutationProvider implements MutationProvider {
           onChange: async (event) => {
             this.running++
             try {
-              await this.gate
               await handler?.onChange(event)
             } finally {
               this.running--
@@ -212,10 +206,6 @@ class PowerSyncMutationProvider implements MutationProvider {
    */
   private expectDrain(): void {
     this.drainTarget = this.drained + this.running + 1
-  }
-
-  private withholdEcho(): void {
-    this.gate = new Promise<void>((resolve) => this.echoes.push(resolve))
   }
 
   /**
@@ -279,21 +269,8 @@ class PowerSyncMutationProvider implements MutationProvider {
     this.plans.push(plan)
   }
 
-  release(): void {
-    this.held.shift()?.()
-  }
-
-  deliver(): void {
-    this.echoes.shift()?.()
-    if (this.echoes.length === 0) this.gate = undefined
-  }
-
-  /** Answers every held request and opens every withheld echo. */
-  drain(): void {
-    for (const answer of this.held.splice(0)) answer()
-    for (const open of this.echoes.splice(0)) open()
-    this.gate = undefined
-  }
+  /** No request is held: the driver does not declare `held-writes`. */
+  release(): void {}
 
   foreignCommit(change: ProviderChange): Promise<void> {
     return this.write(change)
@@ -313,17 +290,11 @@ class PowerSyncMutationProvider implements MutationProvider {
   /**
    * The propagation step (`propagationStep`: the diff-trigger watch). The
    * adapter reaches its write transaction a few milliseconds after a write,
-   * so the step waits until every write's receipt has settled and the
-   * watcher has drained every commit. While a request or an echo is held,
-   * some writes legitimately wait, so it waits instead until the request
-   * log, the watcher, and the receipts are quiet.
+   * and the watcher runs at most every 30 ms, so the step waits until every
+   * write's receipt has settled and the watcher has drained every commit.
    */
   settle = async () => {
     const deadline = Date.now() + drainTimeoutMs
-    const state = () =>
-      `${this.log.length} ${this.drained} ${this.running} ${this.unsettled}`
-    let last = state()
-    let quietSince = Date.now()
     while (Date.now() < deadline) {
       const drainedAll =
         (this.drainTarget === undefined || this.drained >= this.drainTarget) &&
@@ -332,14 +303,7 @@ class PowerSyncMutationProvider implements MutationProvider {
         this.drainTarget = undefined
         return
       }
-      const blocked = this.held.length > 0 || this.gate !== undefined
-      if (blocked && Date.now() - quietSince >= quietMs) return
       await sleep(5)
-      const now = state()
-      if (now !== last) {
-        last = now
-        quietSince = Date.now()
-      }
     }
   }
 
@@ -360,10 +324,8 @@ export function powerSyncMutationDriver(): MutationDriver {
     adapter: `@tanstack/powersync-db-collection (eager)`,
     capabilities: new Set([
       `write-rejection`,
-      `held-writes`,
       `foreign-commits`,
       `field-updates`,
-      `held-echoes`,
     ]),
     undefinedField: `null`,
     async create(seed): Promise<MutationFixture> {
@@ -379,13 +341,6 @@ export function powerSyncMutationDriver(): MutationDriver {
         row: conformanceRow,
         key: conformanceKey,
       })
-      // A held request holds the write lock, which cleanup waits for; a
-      // history that ends early with one held must answer it first.
-      const cleanup = view.cleanup.bind(view)
-      view.cleanup = () => {
-        provider.drain()
-        return cleanup()
-      }
       return {
         collection: view,
         base: () => [...collection.base.values()].map(conformanceRow),
@@ -411,8 +366,6 @@ export function powerSyncMutationDriver(): MutationDriver {
         provider,
         settle: provider.settle,
         dispose: async () => {
-          // A write waiting for its echo would otherwise outlive the history.
-          provider.drain()
           await collection.cleanup()
           await provider.dispose()
         },

@@ -7257,8 +7257,11 @@ removed field is sent in the provider's representation, `null` for a SQL
 provider (`undefinedField: 'null'`, which also sends a complete row with
 every column). With `held-echoes`, the provider can answer an accepted write
 before its change feed delivers the copy, at a `deliver` step: under MUT-7 the
-mutation stays pending, and holds later writes (MUT-10), until its copy
-arrives. A driver can declare several `rejectionKinds`, each reached. Reach: each of insert, update, and delete
+mutation stays pending until its copy arrives. MUT-10's "the earlier one
+decides" is the provider's answer, so a later write's request is owed once
+the earlier write is answered, without waiting for its copy (maintainer
+decision 2026-11-03: core does not chain independent transactions; an
+application that needs that chains them itself). A driver can declare several `rejectionKinds`, each reached. Reach: each of insert, update, and delete
 accepted, a rejected write, a held write, a write queued behind a held one, a
 held write rejected, a commit by another client, an accepted field removal, a
 held optimistic row, a copy the provider rewrote, an answered write whose copy
@@ -7330,24 +7333,27 @@ MUT-1 (a write was confirmed by an earlier event on the same key, so its
 optimistic row dropped before its own event arrived). The adapter now sends
 a removed field as `null`, runs each write after the earlier one settles,
 and confirms a write only by an event after it began; a mutant that keeps the
-old confirmation fails MUT-1. The record API is a test double that bypasses
+old confirmation fails MUT-1. A write starts after the earlier one's HTTP
+response, not after its change event; the version that waited for the event
+fails the fixed campaign (a request owed after the answer is missing). The record API is a test double that bypasses
 the SDK's fetch and SSE decoding.
 
-PowerSync (`undefinedField: 'null'`, `field-updates`, `held-echoes`,
-`write-rejection`, `held-writes`, `foreign-commits`): the driver runs a real
-local PowerSync database, which is the adapter's provider; uploading to a
-PowerSync service is the SDK's upload queue and is outside this owner. A
-request is one `INSERT`, `UPDATE`, or `DELETE` the adapter executes on the
-table inside its write transaction; a rejection throws from that statement,
-and a held request holds the write lock. A held echo holds the change
-watcher's next callback until `deliver`. The propagation step waits until
-every write's receipt settles, or, while a request or echo is held, until the
-request log, the watcher, and the receipts are quiet. The local database does
-not rewrite rows, so `server-rewrites` is not declared. On the parent of the
-fix, both campaigns failed MUT-10: a write started once the earlier one
-committed locally, before its diff trigger observed it. MUT-10's "decides"
-is settlement (the law set counts a synchronously failed handler as decided
-before its receipt settles, as the exception). The adapter now runs each
-write after the earlier one settles. Removal binds an own `undefined` as
-`NULL`, so MUT-8 holds. Limits: removal by assigning `null` and
-multi-mutation transactions are not generated.
+PowerSync (`undefinedField: 'null'`, `field-updates`, `write-rejection`,
+`foreign-commits`): the driver runs a real local PowerSync database, which is
+the adapter's provider; uploading to a PowerSync service is the SDK's upload
+queue and is outside this owner. A request is one `INSERT`, `UPDATE`, or
+`DELETE` the adapter executes on the table inside its write transaction; a
+rejection throws from that statement and rolls the transaction back. The
+database's write lock orders the adapter's writes, which meets MUT-10 under
+the decided-on-answer rule, and each write settles once the adapter's diff
+trigger has observed it (MUT-7); the watcher's 30 ms throttle makes that
+copy arrive late, and a mutant that settles without waiting for it fails
+MUT-1. The adapter needed no change. The propagation step waits until every
+write's receipt settles and the watcher has drained. Limits: `held-writes` is
+not declared, because a held statement holds the one write lock that the
+adapter's diff flush also needs, so it would delay earlier writes'
+confirmation, a coupling the model does not represent; `held-echoes` is not
+declared, because one watcher callback applies every committed write;
+`server-rewrites` is not declared, because the local database rewrites
+nothing; removal by assigning `null` and multi-mutation transactions are not
+generated.
