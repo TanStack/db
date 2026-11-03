@@ -569,32 +569,29 @@ export function trailBaseCollectionOptions<
         )
         return ids.map((id) => String(id))
       }),
+    // A transaction's requests go out one at a time in mutation order, so the
+    // next write starts only after each of them is answered (MUT-8, MUT-10);
+    // a rejection ends the transaction there.
     onUpdate: (params: UpdateMutationFnParams<TItem, TKey>) =>
-      persist(() =>
-        Promise.all(
-          params.transaction.mutations.map(async (tx) => {
-            const { type, changes, key } = tx
-            if (type !== `update`) {
-              throw new ExpectedUpdateTypeError(type)
-            }
-            await config.recordApi.update(key, serialUpd(changes))
-            return String(key)
-          }),
-        ),
-      ),
+      persist(async () => {
+        const ids: Array<string> = []
+        for (const { type, changes, key } of params.transaction.mutations) {
+          if (type !== `update`) throw new ExpectedUpdateTypeError(type)
+          await config.recordApi.update(key, serialUpd(changes))
+          ids.push(String(key))
+        }
+        return ids
+      }),
     onDelete: (params: DeleteMutationFnParams<TItem, TKey>) =>
-      persist(() =>
-        Promise.all(
-          params.transaction.mutations.map(async (tx) => {
-            const { type, key } = tx
-            if (type !== `delete`) {
-              throw new ExpectedDeleteTypeError(type)
-            }
-            await config.recordApi.delete(key)
-            return String(key)
-          }),
-        ),
-      ),
+      persist(async () => {
+        const ids: Array<string> = []
+        for (const { type, key } of params.transaction.mutations) {
+          if (type !== `delete`) throw new ExpectedDeleteTypeError(type)
+          await config.recordApi.delete(key)
+          ids.push(String(key))
+        }
+        return ids
+      }),
     utils: {
       cancel: cancelEventReader,
     },

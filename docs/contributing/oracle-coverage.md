@@ -7360,6 +7360,14 @@ earlier write's late event cannot confirm a later write on the key; with same-ke
 histories, the version that confirmed by any event after the write began
 failed MUT-1 and MUT-7, and a mutant keeping it is rejected. Events from
 another client while a write is pending are outside these histories (MUT-11).
+A transaction's update and delete requests go out one at a time in mutation
+order, so the next write starts only after each is answered, and a rejection
+ends the transaction there; `trailbase.test.ts` holds a supplemental witness
+(RED on the parent: the next write started before a sibling request was
+answered). Multi-mutation transactions are not generated, so this and the
+law for a rejection partway through a transaction (whether later requests
+still go out, and what partial acceptance leaves) remain open: follow-up for
+this owner, decision 2026-11-03.
 The record API is a test double that bypasses the SDK's fetch and SSE
 decoding.
 

@@ -845,6 +845,55 @@ describe(`TrailBase Integration`, () => {
     }
   })
 
+  it(`sends a transaction's updates in order and starts the next write only after they are answered`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    const rows = [1, 2, 3].map((id) => ({ id, updated: 0, data: `row-${id}` }))
+    recordApi.list.mockResolvedValue({ records: rows })
+    const stream = new TransformStream<Event>()
+    recordApi.subscribe.mockResolvedValue(stream.readable)
+    const log: Array<string> = []
+    const second = createDeferred<void>()
+    recordApi.update.mockImplementation((id) => {
+      log.push(`start ${id}`)
+      const answer =
+        id === 1
+          ? Promise.reject(new Error(`rejected`))
+          : id === 2
+            ? second.promise
+            : new Promise<void>(() => {})
+      return answer.finally(() => log.push(`answer ${id}`))
+    })
+    const collection = createCollection(setUp(recordApi))
+    try {
+      await collection.preload()
+      // One transaction updates rows 1 and 2; TrailBase rejects row 1.
+      const batch = collection.update([1, 2], (drafts) => {
+        for (const draft of drafts) draft.updated = 1
+      })
+      const batchSettled = batch.when(`settled`).catch(() => {})
+      const next = collection.update(3, (draft) => {
+        draft.updated = 1
+      })
+      void next.when(`settled`).catch(() => {})
+      await batchSettled
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      second.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Requests go out in mutation order, and the next write's request
+      // starts only once every request of the earlier transaction is
+      // answered (MUT-8, MUT-10).
+      const startsOf = (id: number) => log.indexOf(`start ${id}`)
+      expect(startsOf(1)).toBe(0)
+      expect(startsOf(3)).toBeGreaterThan(0)
+      for (const id of [1, 2]) {
+        if (startsOf(id) >= 0)
+          expect(log.indexOf(`answer ${id}`)).toBeLessThan(startsOf(3))
+      }
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`local inserts, updates and deletes`, async () => {
     // Prepare mock API.
     const recordApi = new MockRecordApi<Data>()
