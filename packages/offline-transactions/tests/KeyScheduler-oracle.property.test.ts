@@ -1,16 +1,11 @@
-import { fc } from '@fast-check/vitest'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { isDeepStrictEqual } from 'node:util'
+import fc from 'fast-check'
+import { vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { BASE_TIME, createTransaction } from './key-scheduler-support'
+import type { Observation } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
-
-const FIFO_LEDGER_PROPERTY = `offline.key-scheduler-fifo-ledger`
 
 type Command =
   | {
@@ -63,9 +58,6 @@ type Snapshot = {
   runningCount: number
 }
 
-const FIXED_SEED = 1815
-const RUNS = oracleRuns(150)
-
 /**
  * # Which offline transaction may run next?
  *
@@ -87,7 +79,8 @@ const RUNS = oracleRuns(150)
  * IDs are unique while pending. At most five IDs exist in generated histories.
  * Slot choice prevents duplicate pending IDs; creation time controls FIFO order;
  * delay and clock advance control readiness; payload makes updates observable.
- * The selector reaches every legal command, including removal during a run.
+ * The selector reaches every legal command, including removal during a run;
+ * it is unbiased, so each legal command is about equally likely.
  * Histories use 1-50 tokens plus automatic retry steps. Slots span 0-4,
  * creation times 0-3 seconds, delays and advances 0-5 seconds, and payloads
  * -5 through 5. The domain includes equal creation times, zero and positive
@@ -96,16 +89,23 @@ const RUNS = oracleRuns(150)
  * completion without active work, and any intervening command before retry.
  *
  * Production driver and refinement check: the driver calls the real
- * executor-facing scheduler methods. After every command, it compares the next
- * eligible ID and payload, ordered pending records, counts, and active state.
+ * executor-facing scheduler methods and records, after every command, the next
+ * eligible ID and payload, ordered pending records, counts, and active state,
+ * plus what `start` was given and what a removal returned. The model computes
+ * the same records from the ledger alone; the check compares them per command,
+ * each field under its law: `fifo` (the next eligible ID), `update` (payloads),
+ * `ledger` (ordered pending records and counts), `serial` (the active count),
+ * and `retirement` (what a removal or clear retires).
  *
- * Reach and controls: one fixed history reaches every transition. Two fixed
- * histories cross retry-deadline order. Five observation mutants prove
- * the comparison rejects bypass, double issue, stale payload, stale clear, and
- * failed selective retirement. The generated property runs at fixed seed 1815
- * and at a random seed with the same budget. Set TANSTACK_DB_ORACLE_SEED,
- * TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY to replay a failure
- * directly.
+ * Reach and controls: one pinned history reaches every transition. Two pinned
+ * histories cross retry-deadline order, and two more pin an active removal
+ * with a waiting sibling and a blocked FIFO head at its retry deadline. Five
+ * calibrations prove the comparison rejects bypass, double issue, stale
+ * payload, stale clear, and failed selective retirement, and three more reject
+ * a stale next payload, revoked work kept in the pending ledger, and a wrong
+ * count. The property is `offline.key-scheduler-fifo-ledger` on
+ * `oracleProperty`; a failure prints the seed, path, and property to set to
+ * replay it, and a path replay runs only the random lane.
  *
  * Limits: persistence, caller promise settlement, leadership, and real timers
  * have separate owners. The model does not promise fairness beyond FIFO order.
@@ -141,7 +141,9 @@ type PlanningState = {
 // scheduler has no corresponding retryable state.
 
 const commandToken = fc.record({
-  selector: fc.nat(),
+  // Unbiased: fast-check biases small naturals, which picked the first few
+  // choices almost always, so start, fail, and retry were rarely generated.
+  selector: fc.noBias(fc.nat()),
   slot: fc.integer({ min: 0, max: 4 }),
   createdAt: fc.integer({ min: 0, max: 3 }),
   delay: fc.integer({ min: 0, max: 5 }),
@@ -249,9 +251,15 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
       })
     }
     if (state.activeId) {
+      // A replay snapshot may name the active ID, a waiting sibling, and an
+      // ID the scheduler does not hold.
       choices.push({
         type: `remove`,
-        ids: [state.activeId, ...removable.slice(0, 1).map(({ id }) => id)],
+        ids: [
+          state.activeId,
+          ...removable.slice(0, 1).map(({ id }) => id),
+          ...(Math.abs(token.payload) % 2 === 1 ? [`missing`] : []),
+        ],
       })
     }
     if (planningNext(state)) choices.push({ type: `start` })
@@ -277,9 +285,68 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
   return history
 }
 
-const legalHistory = fc
-  .array(commandToken, { minLength: 1, maxLength: 50 })
-  .map(buildLegalHistory)
+// The tokens a command list came from, found by search and accepted only if
+// they rebuild that exact list. A pinned command list is then a member of the
+// generated language, and fast-check can shrink it.
+function tokensOf(history: ReadonlyArray<Command>): Array<CommandToken> {
+  const tokens: Array<CommandToken> = []
+  for (let index = 0; index < history.length; index++) {
+    const command = history[index]!
+    const prefix = buildLegalHistory(tokens)
+    const retry = command.type === `fail` ? history[index + 1] : undefined
+    const base: CommandToken = {
+      selector: 0,
+      slot: command.type === `schedule` ? command.slot : 0,
+      createdAt: command.type === `schedule` ? command.createdAt : 0,
+      delay:
+        command.type === `schedule`
+          ? command.delay
+          : retry?.type === `retry`
+            ? retry.delay
+            : 0,
+      payload:
+        command.type === `schedule` || command.type === `bulkUpdate`
+          ? command.payload
+          : retry?.type === `retry`
+            ? retry.payload
+            : 0,
+      duration: command.type === `advance` ? command.duration : 0,
+    }
+    // A removal's IDs come from the token's payload and slot.
+    const candidates =
+      command.type === `remove`
+        ? Array.from({ length: 11 * 5 }, (_, n) => ({
+            ...base,
+            payload: (n % 11) - 5,
+            slot: Math.floor(n / 11),
+          }))
+        : [base]
+    let found: CommandToken | undefined
+    for (const candidate of candidates)
+      for (let selector = 0; selector < 12 && !found; selector++) {
+        const token = { ...candidate, selector }
+        const built = buildLegalHistory([...tokens, token])
+        if (
+          isDeepStrictEqual(built.slice(prefix.length, prefix.length + 1), [
+            command,
+          ])
+        )
+          found = token
+      }
+    if (!found) throw new Error(`command ${index} is not legal here`)
+    tokens.push(found)
+    if (retry?.type === `retry`) index++
+  }
+  if (!isDeepStrictEqual(buildLegalHistory(tokens), history))
+    throw new Error(`not a legal scheduler history`)
+  return tokens
+}
+
+const legalHistory: fc.Arbitrary<Array<Command>> = fc
+  // fast-check's default size keeps arrays near ten elements whatever
+  // maxLength says; `medium` draws lengths across the declared 1 to 50.
+  .array(commandToken, { minLength: 1, maxLength: 50, size: `medium` })
+  .map(buildLegalHistory, (value) => tokensOf(value as Array<Command>))
 
 function cloneTransaction(transaction: OfflineTransaction): OfflineTransaction {
   return {
@@ -308,29 +375,6 @@ function expectedNext(model: Model): OfflineTransaction | undefined {
   return first && first.nextAttemptAt <= model.now ? first : undefined
 }
 
-function snapshot(
-  scheduler: KeyScheduler,
-  observedNext: OfflineTransaction | undefined,
-): Snapshot {
-  return {
-    next: observedNext
-      ? {
-          id: observedNext.id,
-          payload: observedNext.metadata?.payload,
-        }
-      : undefined,
-    pending: scheduler.getAllPendingTransactions().map((transaction) => ({
-      id: transaction.id,
-      createdAt: transaction.createdAt.getTime(),
-      nextAttemptAt: transaction.nextAttemptAt,
-      retryCount: transaction.retryCount,
-      payload: transaction.metadata?.payload,
-    })),
-    pendingCount: scheduler.getPendingCount(),
-    runningCount: scheduler.getRunningCount(),
-  }
-}
-
 function expectedSnapshot(model: Model): Snapshot {
   const next = expectedNext(model)
   return {
@@ -352,458 +396,557 @@ function expectedSnapshot(model: Model): Snapshot {
   }
 }
 
-function assertSnapshot(
-  history: ReadonlyArray<Command>,
-  commandIndex: number,
-  actual: Snapshot,
-  expected: Snapshot,
-): void {
-  expect(actual, JSON.stringify({ history, commandIndex })).toEqual(expected)
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+//
+// The ledger replays the commands and owes, after each one, the scheduler's
+// snapshot, the transaction a `start` is given, and the IDs a removal
+// retires (requested pending IDs other than the active one, once each). A
+// command the lifecycle does not allow is a setup error with its name: the
+// grammar never generates one, so a pin or a grammar change that does is
+// caught here.
+
+type Owed = {
+  snapshot: Snapshot
+  started?: { id: string; payload: unknown }
+  removed?: Array<string>
 }
+const checkpointOf = (index: number, command: Command) =>
+  `${index}: ${command.type}`
 
-type ObservationMutant = {
-  commandIndex: number
-  apply: (snapshot: Snapshot) => Snapshot
-}
-
-function runHistory(
-  history: Array<Command>,
-  observationMutant?: ObservationMutant,
-): Set<Command[`type`]> {
-  vi.useFakeTimers()
-  vi.setSystemTime(BASE_TIME)
-  const scheduler = new KeyScheduler()
-  const model: Model = {
-    now: BASE_TIME,
-    nextSequence: 0,
-    pending: [],
-  }
-  const coverage = new Set<Command[`type`]>()
-
-  history.forEach((nextCommand, commandIndex) => {
-    // TransactionExecutor updates a failed transaction before asking for more
-    // work. Other commands in this short state are not legal lifecycle calls.
-    if (model.retryableId && nextCommand.type !== `retry`) {
-      throw new Error(`retry must immediately follow fail`)
+function ledgerModel(history: ReadonlyArray<Command>): Map<string, Owed> {
+  const model: Model = { now: BASE_TIME, nextSequence: 0, pending: [] }
+  const owed = new Map<string, Owed>()
+  for (const [index, command] of history.entries()) {
+    const extra: Partial<Owed> = {}
+    const illegal = (reason: string) => {
+      throw new Error(`command ${index} (${command.type}): ${reason}`)
     }
-
-    if (nextCommand.type === `schedule`) {
-      const id = `tx-${nextCommand.slot}`
-      if (model.pending.some(({ transaction }) => transaction.id === id)) {
-        throw new Error(`cannot schedule duplicate transaction ${id}`)
-      }
-      const transaction = createTransaction(
-        id,
-        BASE_TIME + nextCommand.createdAt * 1000,
-        model.now + nextCommand.delay * 1000,
-        nextCommand.payload,
+    // TransactionExecutor updates a failed transaction before asking for
+    // more work, so nothing else may come between a failure and its retry.
+    if (model.retryableId && command.type !== `retry`)
+      illegal(`retry must immediately follow fail`)
+    if (command.type === `schedule`) {
+      if (
+        model.pending.some(
+          ({ transaction }) => transaction.id === `tx-${command.slot}`,
+        )
       )
-      scheduler.schedule(transaction)
+        illegal(`tx-${command.slot} is already pending`)
       model.pending.push({
-        transaction: cloneTransaction(transaction),
+        transaction: createTransaction(
+          `tx-${command.slot}`,
+          BASE_TIME + command.createdAt * 1000,
+          model.now + command.delay * 1000,
+          command.payload,
+        ),
         sequence: model.nextSequence++,
       })
-    } else if (nextCommand.type === `getNext`) {
-      scheduler.getNext()
-    } else if (nextCommand.type === `start`) {
-      const transaction = expectedNext(model)
-      if (!transaction) throw new Error(`cannot start without eligible work`)
-      const observedNext = scheduler.getNext()
-      expect({
-        id: observedNext?.id,
-        payload: observedNext?.metadata?.payload,
-      }).toEqual({
+    } else if (command.type === `start`) {
+      const transaction = expectedNext(model) ?? illegal(`no eligible work`)
+      extra.started = {
         id: transaction.id,
         payload: transaction.metadata?.payload,
-      })
-      scheduler.markStarted(observedNext!)
+      }
       model.activeId = transaction.id
-    } else if (nextCommand.type === `complete`) {
-      if (!model.activeId)
-        throw new Error(`cannot complete without active work`)
-      const index = model.pending.findIndex(
-        ({ transaction }) => transaction.id === model.activeId,
+    } else if (command.type === `complete`) {
+      if (!model.activeId) illegal(`no active work`)
+      model.pending = model.pending.filter(
+        ({ transaction }) => transaction.id !== model.activeId,
       )
-      const transaction = model.pending[index]!.transaction
-      scheduler.markCompleted(transaction)
-      model.pending.splice(index, 1)
       model.activeId = undefined
-    } else if (nextCommand.type === `fail`) {
-      if (!model.activeId) throw new Error(`cannot fail without active work`)
-      const transaction = model.pending.find(
-        ({ transaction: candidate }) => candidate.id === model.activeId,
-      )!.transaction
-      model.retryableId = transaction.id
-    } else if (nextCommand.type === `retry`) {
-      if (!model.retryableId) throw new Error(`cannot retry before a failure`)
+    } else if (command.type === `fail`) {
+      if (!model.activeId) illegal(`no active work`)
+      model.retryableId = model.activeId
+    } else if (command.type === `retry`) {
+      if (!model.retryableId) illegal(`no failure to retry`)
       const entry = model.pending.find(
         ({ transaction }) => transaction.id === model.retryableId,
       )!
-      const failedTransaction = entry.transaction
-      const updated = {
-        ...failedTransaction,
-        retryCount: failedTransaction.retryCount + 1,
-        nextAttemptAt: model.now + nextCommand.delay * 1000,
-        metadata: { payload: nextCommand.payload },
+      entry.transaction = {
+        ...entry.transaction,
+        retryCount: entry.transaction.retryCount + 1,
+        nextAttemptAt: model.now + command.delay * 1000,
+        metadata: { payload: command.payload },
       }
-      scheduler.updateTransaction(cloneTransaction(updated))
-      scheduler.markFailed(failedTransaction)
-      entry.transaction = updated
       model.activeId = undefined
       model.retryableId = undefined
-    } else if (nextCommand.type === `bulkUpdate`) {
-      const updated = model.pending.map(({ transaction }) => ({
-        ...transaction,
-        metadata: { payload: nextCommand.payload },
-      }))
-      scheduler.updateTransactions(updated.map(cloneTransaction))
-      for (const [index, transaction] of updated.entries()) {
-        model.pending[index]!.transaction = transaction
-      }
-    } else if (nextCommand.type === `advance`) {
-      const duration = nextCommand.duration * 1000
-      vi.advanceTimersByTime(duration)
-      model.now += duration
-    } else if (nextCommand.type === `remove`) {
-      const expectedRemoved = [
-        ...new Set(nextCommand.ids.filter((id) => id !== model.activeId)),
+    } else if (command.type === `bulkUpdate`) {
+      for (const entry of model.pending)
+        entry.transaction = {
+          ...entry.transaction,
+          metadata: { payload: command.payload },
+        }
+    } else if (command.type === `advance`) {
+      model.now += command.duration * 1000
+    } else if (command.type === `remove`) {
+      extra.removed = [
+        ...new Set(command.ids.filter((id) => id !== model.activeId)),
       ]
-      expect(scheduler.removePendingTransactions(nextCommand.ids)).toEqual(
-        expectedRemoved,
-      )
-      const ids = new Set(nextCommand.ids)
+      const ids = new Set(command.ids)
       model.pending = model.pending.filter(
         ({ transaction }) =>
           transaction.id === model.activeId || !ids.has(transaction.id),
       )
-    } else {
-      scheduler.clear()
+    } else if (command.type === `clear`) {
       model.pending = []
       model.activeId = undefined
       model.retryableId = undefined
     }
-
-    coverage.add(nextCommand.type)
-    const observed = snapshot(scheduler, scheduler.getNext())
-    const actual =
-      observationMutant?.commandIndex === commandIndex
-        ? observationMutant.apply(observed)
-        : observed
-    assertSnapshot(history, commandIndex, actual, expectedSnapshot(model))
-  })
-
-  return coverage
+    owed.set(checkpointOf(index, command), {
+      snapshot: expectedSnapshot(model),
+      ...extra,
+    })
+  }
+  return owed
 }
 
-declareOracle({ check: [runHistory], model: [expectedSnapshot] })
+// ---------------------------------------------------------------------------
+// Production driver
+// ---------------------------------------------------------------------------
+//
+// The driver calls the scheduler as TransactionExecutor does, under a fake
+// clock. It starts whatever `getNext` returns, fails the transaction it
+// started, and builds the retry update from it; it never reads the model.
 
-describe(`KeyScheduler generated lifecycle`, () => {
-  afterEach(() => vi.useRealTimers())
+function snapshotOf(scheduler: KeyScheduler): Snapshot {
+  const next = scheduler.getNext()
+  return {
+    next: next ? { id: next.id, payload: next.metadata?.payload } : undefined,
+    pending: scheduler.getAllPendingTransactions().map((transaction) => ({
+      id: transaction.id,
+      createdAt: transaction.createdAt.getTime(),
+      nextAttemptAt: transaction.nextAttemptAt,
+      retryCount: transaction.retryCount,
+      payload: transaction.metadata?.payload,
+    })),
+    pendingCount: scheduler.getPendingCount(),
+    runningCount: scheduler.getRunningCount(),
+  }
+}
 
-  // The fixed campaign stands aside during any path replay. The random
-  // campaign is the replay of FIFO_LEDGER_PROPERTY: it reseeds under a seed
-  // alone and runs the recorded path under a path replay of that property.
-  oracleReplayTest(it)(
-    `matches the FIFO retry ledger at the fixed seed`,
-    () => {
-      fc.assert(
-        fc.property(legalHistory, (history) => {
-          runHistory(history)
-        }),
-        { seed: FIXED_SEED, numRuns: RUNS },
-      )
-    },
-  )
-
-  oracleReplayTest(it, FIFO_LEDGER_PROPERTY)(
-    `matches the FIFO retry ledger at a random or replayed seed`,
-    () => {
-      fc.assert(
-        fc.property(legalHistory, (history) => {
-          runHistory(history)
-        }),
-        oraclePropertyOptions(150, FIFO_LEDGER_PROPERTY),
-      )
-    },
-  )
-
-  it(`reconstructs active removal with a waiting sibling`, () => {
-    const token = (selector: number, slot = 0): CommandToken => ({
-      selector,
-      slot,
-      createdAt: 0,
-      delay: 0,
-      payload: 1,
-      duration: 0,
-    })
-    const history = buildLegalHistory([
-      token(4), // schedule tx-0
-      token(5, 1), // schedule tx-1
-      token(6), // start tx-0
-      token(6), // request removal of both IDs while tx-0 is active
-      token(6), // complete tx-0
-    ])
-
-    expect(history).toEqual([
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `schedule`, slot: 1, createdAt: 0, delay: 0, payload: 1 },
-      { type: `start` },
-      { type: `remove`, ids: [`tx-0`, `tx-1`] },
-      { type: `complete` },
-    ])
-    runHistory(history)
-
-    const duplicateSlotRequest = buildLegalHistory([token(4), token(5)])
-    expect(duplicateSlotRequest[1]).toEqual({
-      type: `schedule`,
-      slot: 1,
-      createdAt: 0,
-      delay: 0,
-      payload: 1,
-    })
-  })
-
-  it(`reconstructs a blocked FIFO head at the retry deadline`, () => {
-    const token = (
-      selector: number,
-      slot: number,
-      delay = 0,
-      duration = 0,
-    ): CommandToken => ({
-      selector,
-      slot,
-      createdAt: slot,
-      delay,
-      payload: 1,
-      duration,
-    })
-    const history = buildLegalHistory([
-      token(4, 0), // schedule tx-0
-      token(5, 1), // schedule tx-1
-      token(6, 0), // start tx-0
-      token(8, 0, 5), // fail tx-0, then retry after five seconds
-      token(0, 0), // tx-1 is ready but cannot bypass tx-0
-      token(2, 0, 0, 4),
-      token(0, 0), // still before the retry deadline
-      token(2, 0, 0, 1),
-      token(6, 0), // tx-0 becomes eligible at the deadline
-    ])
-
-    expect(history.map(({ type }) => type)).toEqual([
-      `schedule`,
-      `schedule`,
-      `start`,
-      `fail`,
-      `retry`,
-      `getNext`,
-      `advance`,
-      `getNext`,
-      `advance`,
-      `start`,
-    ])
-    expect(history[4]).toEqual({ type: `retry`, delay: 5, payload: 1 })
-    runHistory(history)
-  })
-
-  it(`replays a generated wrong count at the same checkpoint`, () => {
-    const wrongCount = fc.property(legalHistory, (history) => {
-      runHistory(history, {
-        commandIndex: history.length - 1,
-        apply: (actual) => ({
-          ...actual,
-          pendingCount: actual.pendingCount + 1,
-        }),
+function driveScheduler(
+  history: ReadonlyArray<Command>,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  vi.useFakeTimers()
+  vi.setSystemTime(BASE_TIME)
+  try {
+    const scheduler = new KeyScheduler()
+    let active: OfflineTransaction | undefined
+    for (const [index, command] of history.entries()) {
+      const extra: Partial<Owed> = {}
+      if (command.type === `schedule`) {
+        scheduler.schedule(
+          createTransaction(
+            `tx-${command.slot}`,
+            BASE_TIME + command.createdAt * 1000,
+            Date.now() + command.delay * 1000,
+            command.payload,
+          ),
+        )
+      } else if (command.type === `getNext`) {
+        scheduler.getNext()
+      } else if (command.type === `start`) {
+        const next = scheduler.getNext()
+        extra.started = next
+          ? { id: next.id, payload: next.metadata?.payload }
+          : undefined
+        if (next) scheduler.markStarted(next)
+        active = next && cloneTransaction(next)
+      } else if (command.type === `complete`) {
+        if (active) scheduler.markCompleted(active)
+        active = undefined
+      } else if (command.type === `retry`) {
+        if (active) {
+          scheduler.updateTransaction({
+            ...cloneTransaction(active),
+            retryCount: active.retryCount + 1,
+            nextAttemptAt: Date.now() + command.delay * 1000,
+            metadata: { payload: command.payload },
+          })
+          scheduler.markFailed(active)
+        }
+        active = undefined
+      } else if (command.type === `bulkUpdate`) {
+        scheduler.updateTransactions(
+          scheduler.getAllPendingTransactions().map((transaction) => ({
+            ...cloneTransaction(transaction),
+            metadata: { payload: command.payload },
+          })),
+        )
+      } else if (command.type === `advance`) {
+        vi.advanceTimersByTime(command.duration * 1000)
+      } else if (command.type === `remove`) {
+        extra.removed = scheduler.removePendingTransactions(command.ids)
+      } else if (command.type === `clear`) {
+        scheduler.clear()
+        active = undefined
+      }
+      observe(checkpointOf(index, command), {
+        snapshot: snapshotOf(scheduler),
+        ...extra,
       })
-    })
-    const first = fc.check(wrongCount, { seed: FIXED_SEED, numRuns: RUNS })
-    expect(first.failed).toBe(true)
-    expect(String(first.errorInstance)).toContain(`AssertionError:`)
-    expect(String(first.errorInstance)).toContain(`"commandIndex":`)
-    const replayPath = first.counterexamplePath
-    if (replayPath === null) throw new Error(`Missing shrink path`)
+    }
+  } finally {
+    vi.useRealTimers()
+  }
+}
 
-    const replay = fc.check(wrongCount, {
-      seed: first.seed,
-      path: replayPath,
-      numRuns: RUNS,
-    })
-    expect(replay.failed).toBe(true)
-    expect(replay.counterexample).toEqual(first.counterexample)
-    expect(String(replay.errorInstance).split(`\n`)[0]).toEqual(
-      String(first.errorInstance).split(`\n`)[0],
+// ---------------------------------------------------------------------------
+// Check
+// ---------------------------------------------------------------------------
+
+function checkLedger(
+  _history: ReadonlyArray<Command>,
+  trace: ReadonlyArray<Observation>,
+  owed: ReturnType<typeof ledgerModel>,
+) {
+  for (const [checkpoint, expected] of owed) {
+    const seen = trace.find((entry) => entry.checkpoint === checkpoint)
+      ?.value as Owed | undefined
+    if (!seen)
+      return differs(
+        checkpoint,
+        `trace`,
+        undefined,
+        expected,
+        `the driver recorded no "${checkpoint}"`,
+      )!
+    const wrong =
+      differs(
+        checkpoint,
+        `fifo`,
+        seen.started?.id,
+        expected.started?.id,
+        `start was given another transaction`,
+      ) ??
+      differs(
+        checkpoint,
+        `fifo`,
+        seen.snapshot.next?.id,
+        expected.snapshot.next?.id,
+        `another transaction is next`,
+      ) ??
+      differs(
+        checkpoint,
+        `update`,
+        seen.started?.payload,
+        expected.started?.payload,
+        `start was given a stale payload`,
+      ) ??
+      differs(
+        checkpoint,
+        `update`,
+        seen.snapshot.next?.payload,
+        expected.snapshot.next?.payload,
+        `the next transaction has a stale payload`,
+      ) ??
+      differs(
+        checkpoint,
+        `retirement`,
+        seen.removed,
+        expected.removed,
+        `a removal retired other IDs`,
+      ) ??
+      differs(
+        checkpoint,
+        `serial`,
+        seen.snapshot.runningCount,
+        expected.snapshot.runningCount,
+        `the active count differs`,
+      ) ??
+      differs(
+        checkpoint,
+        `retirement`,
+        seen.snapshot.pending.map(({ id }) => id).sort(),
+        expected.snapshot.pending.map(({ id }) => id).sort(),
+        `other transactions are pending`,
+      ) ??
+      differs(
+        checkpoint,
+        `ledger`,
+        seen.snapshot,
+        expected.snapshot,
+        `the pending ledger differs`,
+      )
+    if (wrong) return wrong
+  }
+  return pass
+}
+
+// ---------------------------------------------------------------------------
+// Property
+// ---------------------------------------------------------------------------
+
+const commandTypes = [
+  `schedule`,
+  `getNext`,
+  `start`,
+  `fail`,
+  `retry`,
+  `bulkUpdate`,
+  `remove`,
+  `advance`,
+  `complete`,
+  `clear`,
+] as const
+const schedule = (
+  slot: number,
+  createdAt: number,
+  delay: number,
+  payload: number,
+): Command => ({ type: `schedule`, slot, createdAt, delay, payload })
+
+// Corrupts the first checkpoint whose recorded value `applies` to, or none.
+const corruptFirst =
+  (applies: (value: Owed, checkpoint: string) => Owed | undefined) =>
+  (trace: ReadonlyArray<Observation>) => {
+    const at = trace.findIndex(
+      ({ checkpoint, value }) =>
+        applies(value as Owed, checkpoint) !== undefined,
     )
-  })
-
-  it(`executes every modeled transition in a fixed replay`, () => {
-    const history: Array<Command> = [
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `schedule`, slot: 1, createdAt: 0, delay: 0, payload: 2 },
-      { type: `getNext` },
-      { type: `start` },
-      { type: `remove`, ids: [`tx-0`, `tx-1`, `missing`] },
-      { type: `fail` },
-      { type: `retry`, delay: 2, payload: 3 },
-      { type: `getNext` },
-      { type: `bulkUpdate`, payload: 4 },
-      { type: `advance`, duration: 2 },
-      { type: `start` },
-      { type: `complete` },
-      { type: `clear` },
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 5 },
-    ]
-    expect(runHistory(history)).toEqual(
-      new Set<Command[`type`]>([
-        `schedule`,
-        `getNext`,
-        `start`,
-        `fail`,
-        `retry`,
-        `bulkUpdate`,
-        `remove`,
-        `advance`,
-        `complete`,
-        `clear`,
-      ]),
+    if (at < 0) return undefined
+    return trace.map((entry, index) =>
+      index === at
+        ? { ...entry, value: applies(entry.value as Owed, entry.checkpoint) }
+        : entry,
     )
-  })
+  }
 
-  it.each([
-    [
-      `an earlier retry deadline than its sibling`,
-      [
-        { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-        { type: `schedule`, slot: 1, createdAt: 1, delay: 5, payload: 2 },
-        { type: `start` },
-        { type: `fail` },
-        { type: `retry`, delay: 2, payload: 3 },
-        { type: `advance`, duration: 2 },
-        { type: `start` },
-      ],
+oracleProperty({
+  id: `offline.key-scheduler-fifo-ledger`,
+  law: {
+    statement: `KeyScheduler is one globally serial FIFO queue: equal creation times keep scheduling order, a delayed head blocks younger work, a failure updates retry data before releasing the active transaction without moving it, replay reconciliation retires only unissued IDs, and clear retires all work and leaves the scheduler reusable.`,
+    authority: `the established KeyScheduler FIFO tests and TransactionExecutor's calling order (packages/offline-transactions/src/executor)`,
+    limits: `Persistence, caller promise settlement, leadership, and real timers have separate owners; no fairness beyond FIFO order; at most five IDs.`,
+    owner: `Offline execution`,
+  },
+  histories: {
+    arbitrary: legalHistory,
+    states: [],
+    measured: commandTypes,
+    runs: 150,
+    fixedSeeds: [1815],
+    pins: [
+      {
+        name: `every modeled transition`,
+        enters: [...commandTypes],
+        history: [
+          schedule(0, 0, 0, 1),
+          schedule(1, 0, 0, 2),
+          { type: `getNext` },
+          { type: `start` },
+          { type: `remove`, ids: [`tx-0`, `tx-1`, `missing`] },
+          { type: `fail` },
+          { type: `retry`, delay: 2, payload: 3 },
+          { type: `getNext` },
+          { type: `bulkUpdate`, payload: 4 },
+          { type: `advance`, duration: 2 },
+          { type: `start` },
+          { type: `complete` },
+          { type: `clear` },
+          schedule(0, 0, 0, 5),
+        ],
+      },
+      {
+        name: `an active removal with a waiting sibling`,
+        enters: [`remove`, `complete`],
+        history: [
+          schedule(0, 0, 0, 1),
+          schedule(1, 0, 0, 1),
+          { type: `start` },
+          // Request removal of both IDs while tx-0 is active: only tx-1 retires.
+          { type: `remove`, ids: [`tx-0`, `tx-1`] },
+          { type: `complete` },
+        ],
+      },
+      {
+        name: `a blocked FIFO head at its retry deadline`,
+        enters: [`retry`, `advance`],
+        history: [
+          schedule(0, 0, 0, 1),
+          schedule(1, 1, 0, 1),
+          { type: `start` },
+          { type: `fail` },
+          { type: `retry`, delay: 5, payload: 1 },
+          // tx-1 is ready but cannot bypass tx-0.
+          { type: `getNext` },
+          { type: `advance`, duration: 4 },
+          // Still before the retry deadline.
+          { type: `getNext` },
+          { type: `advance`, duration: 1 },
+          // tx-0 becomes eligible at the deadline.
+          { type: `start` },
+        ],
+      },
+      ...(
+        [
+          [`an earlier retry deadline than its sibling`, 5],
+          [`a later retry deadline than its sibling`, 1],
+        ] as const
+      ).map(([name, siblingDelay]) => ({
+        name,
+        enters: [`retry` as const],
+        history: [
+          schedule(0, 0, 0, 1),
+          schedule(1, 1, siblingDelay, 2),
+          { type: `start` },
+          { type: `fail` },
+          { type: `retry`, delay: 2, payload: 3 },
+          { type: `advance`, duration: 2 },
+          { type: `start` },
+        ] satisfies Array<Command>,
+      })),
     ],
-    [
-      `a later retry deadline than its sibling`,
-      [
-        { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-        { type: `schedule`, slot: 1, createdAt: 1, delay: 1, payload: 2 },
-        { type: `start` },
-        { type: `fail` },
-        { type: `retry`, delay: 2, payload: 3 },
-        { type: `advance`, duration: 2 },
-        { type: `start` },
-      ],
-    ],
-  ] satisfies Array<[string, Array<Command>]>)(
-    `covers %s`,
-    (_name, history) => {
-      runHistory(history)
+  },
+  model: ledgerModel,
+  reached: (history) => [...new Set(history.map(({ type }) => type))],
+  driver: driveScheduler,
+  check: checkLedger,
+  calibrations: [
+    {
+      name: `a ready sibling bypasses the delayed FIFO head`,
+      law: `fifo`,
+      corrupt: corruptFirst((value) =>
+        value.snapshot.next === undefined &&
+        value.snapshot.runningCount === 0 &&
+        value.snapshot.pending.length >= 2
+          ? {
+              ...value,
+              snapshot: {
+                ...value.snapshot,
+                next: {
+                  id: value.snapshot.pending[1]!.id,
+                  payload: value.snapshot.pending[1]!.payload,
+                },
+              },
+            }
+          : undefined,
+      ),
     },
-  )
-
-  it(`rejects bypassing the delayed FIFO head on its scheduler path`, () => {
-    const history: Array<Command> = [
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `schedule`, slot: 1, createdAt: 1, delay: 0, payload: 2 },
-      { type: `start` },
-      { type: `fail` },
-      { type: `retry`, delay: 5, payload: 3 },
-    ]
-
-    expect(() =>
-      runHistory(history, {
-        commandIndex: 4,
-        apply: (actual) => ({
-          ...actual,
-          next: { id: `tx-1`, payload: 2 },
-        }),
-      }),
-    ).toThrow()
-  })
-
-  it(`rejects permitting two active transactions on its scheduler path`, () => {
-    const history: Array<Command> = [
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `start` },
-    ]
-
-    expect(() =>
-      runHistory(history, {
-        commandIndex: 1,
-        apply: (actual) => ({ ...actual, runningCount: 2 }),
-      }),
-    ).toThrow()
-  })
-
-  it(`rejects losing an updated payload on its scheduler path`, () => {
-    const history: Array<Command> = [
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `start` },
-      { type: `fail` },
-      { type: `retry`, delay: 0, payload: 9 },
-    ]
-
-    expect(() =>
-      runHistory(history, {
-        commandIndex: 3,
-        apply: (actual) => ({
-          ...actual,
-          next: actual.next ? { ...actual.next, payload: 1 } : undefined,
-        }),
-      }),
-    ).toThrow()
-  })
-
-  it(`rejects retaining stale work after clear on its scheduler path`, () => {
-    const history: Array<Command> = [
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `start` },
-      { type: `clear` },
-    ]
-
-    expect(() =>
-      runHistory(history, {
-        commandIndex: 2,
-        apply: (actual) => ({
-          ...actual,
-          pending: [
-            {
-              id: `tx-0`,
-              createdAt: BASE_TIME,
-              nextAttemptAt: BASE_TIME,
-              retryCount: 0,
-              payload: 1,
+    {
+      name: `two transactions are active`,
+      law: `serial`,
+      corrupt: corruptFirst((value) =>
+        value.snapshot.runningCount === 1
+          ? { ...value, snapshot: { ...value.snapshot, runningCount: 2 } }
+          : undefined,
+      ),
+    },
+    {
+      name: `a retried transaction starts with its old payload`,
+      law: `update`,
+      corrupt: (trace) => {
+        const retried = trace.findIndex(({ checkpoint }) =>
+          checkpoint.endsWith(`retry`),
+        )
+        const at = trace.findIndex(
+          ({ checkpoint, value }, index) =>
+            index > retried &&
+            retried >= 0 &&
+            checkpoint.endsWith(`start`) &&
+            (value as Owed).started !== undefined,
+        )
+        if (at < 0) return undefined
+        return trace.map((entry, index) => {
+          if (index !== at) return entry
+          const value = entry.value as Owed
+          return {
+            ...entry,
+            value: {
+              ...value,
+              started: { ...value.started!, payload: `stale` },
             },
-          ],
-          pendingCount: 1,
-        }),
+          }
+        })
+      },
+    },
+    {
+      name: `clear keeps stale work`,
+      law: `retirement`,
+      corrupt: corruptFirst((value, checkpoint) =>
+        checkpoint.endsWith(`clear`)
+          ? {
+              ...value,
+              snapshot: {
+                ...value.snapshot,
+                pending: [
+                  {
+                    id: `stale`,
+                    createdAt: BASE_TIME,
+                    nextAttemptAt: BASE_TIME,
+                    retryCount: 0,
+                    payload: 1,
+                  },
+                ],
+                pendingCount: 1,
+              },
+            }
+          : undefined,
+      ),
+    },
+    {
+      name: `the next transaction keeps a stale payload`,
+      law: `update`,
+      corrupt: corruptFirst((value) =>
+        value.snapshot.next
+          ? {
+              ...value,
+              snapshot: {
+                ...value.snapshot,
+                next: { ...value.snapshot.next, payload: `stale` },
+              },
+            }
+          : undefined,
+      ),
+    },
+    {
+      name: `revoked work stays in the pending ledger`,
+      law: `retirement`,
+      corrupt: corruptFirst((value) => {
+        const revoked = value.removed?.[0]
+        return revoked
+          ? {
+              ...value,
+              snapshot: {
+                ...value.snapshot,
+                pending: [
+                  {
+                    id: revoked,
+                    createdAt: BASE_TIME,
+                    nextAttemptAt: BASE_TIME,
+                    retryCount: 0,
+                    payload: 1,
+                  },
+                  ...value.snapshot.pending,
+                ],
+                pendingCount: value.snapshot.pendingCount + 1,
+              },
+            }
+          : undefined
       }),
-    ).toThrow()
-  })
-
-  it(`rejects retaining selectively revoked work on its scheduler path`, () => {
-    const history: Array<Command> = [
-      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
-      { type: `schedule`, slot: 1, createdAt: 1, delay: 0, payload: 2 },
-      { type: `remove`, ids: [`tx-0`] },
-    ]
-
-    expect(() =>
-      runHistory(history, {
-        commandIndex: 2,
-        apply: (actual) => ({
-          ...actual,
-          pending: [
-            {
-              id: `tx-0`,
-              createdAt: BASE_TIME,
-              nextAttemptAt: BASE_TIME,
-              retryCount: 0,
-              payload: 1,
-            },
-            ...actual.pending,
-          ],
-          pendingCount: actual.pendingCount + 1,
-        }),
-      }),
-    ).toThrow()
-  })
+    },
+    {
+      name: `the pending count is off by one`,
+      law: `ledger`,
+      corrupt: corruptFirst((value) => ({
+        ...value,
+        snapshot: {
+          ...value.snapshot,
+          pendingCount: value.snapshot.pendingCount + 1,
+        },
+      })),
+    },
+    {
+      name: `a selective removal keeps the revoked work`,
+      law: `retirement`,
+      corrupt: corruptFirst((value) =>
+        value.removed && value.removed.length > 0
+          ? { ...value, removed: [] }
+          : undefined,
+      ),
+    },
+  ],
 })
