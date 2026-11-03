@@ -8,6 +8,9 @@ import type { EagerLiveSourceDriver } from '../src'
 // setup fails must leave all three as it found them, or later tests in the
 // worker lose their diagnostics (ORC-010).
 describe(`eager live-source check harness`, () => {
+  // Fixtures the failing driver created and disposed.
+  let created = 0
+  let disposed = 0
   const failingSetup = (stage: `create` | `seed`): EagerLiveSourceDriver => {
     const driver = referenceDriver()
     return {
@@ -15,11 +18,15 @@ describe(`eager live-source check harness`, () => {
       create() {
         if (stage === `create`) throw new Error(`driver setup failed`)
         const fixture = driver.create()
+        created++
         return {
           ...fixture,
           provider: Object.assign(Object.create(fixture.provider), {
             seed: () => Promise.reject(new Error(`driver setup failed`)),
           }),
+          dispose: () => {
+            disposed++
+          },
         }
       },
     }
@@ -38,6 +45,8 @@ describe(`eager live-source check harness`, () => {
       expect(console.error).toBe(error)
       expect(console.warn).toBe(warn)
       expect(process.listenerCount(`unhandledRejection`)).toBe(listeners)
+      // A fixture that was created is disposed.
+      expect(disposed).toBe(created)
     },
   )
 })

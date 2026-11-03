@@ -442,9 +442,10 @@ export interface EagerLiveSourceDriver {
  * - `restart`: cleanup, then `preload()` starts a new sync run. With
  *   `prompt-after-restart`, half the restarts are `prompt`: the next step
  *   runs in the same task as `preload()`, and only a synchronous check of
- *   LIFE-5 (status `loading`, no rows) comes between them. One history in six with this capability starts with a failure, a
- *   prompt restart, and a failure or a complete delivery, because random
- *   steps rarely put a failed run's restart next to a failure.
+ *   LIFE-5 (status `loading`, no rows, no problem) comes between them.
+ *   Random steps rarely put a failed run's restart next to a failure, so a
+ *   history can open with a failure, a prompt restart, and a failure or a
+ *   complete delivery (see the scenario prefix below).
  *
  * Keys range over 1..5 and titles over three values, so batches revisit
  * keys, deletes hit live rows, and complete deliveries omit held keys. A row
@@ -817,8 +818,11 @@ export function eagerLiveSourceHistoryArb(
       { minLength: 1, maxLength: 12 },
     )
     .map((elements) => elements.flat())
-  // EVID-2 needs a sequence that random steps rarely produce, so one history
-  // in six starts with it.
+  // EVID-2 and a prompt restart after a failure need sequences that random
+  // steps rarely produce, so a history can open with one: no prefix weighs 5
+  // and each declared scenario 1, so with one scenario one history in six
+  // opens with it, with two one in seven each. A listen-before-fetch startup
+  // burst still comes before the prefix.
   const snapshot = steps[0]!.arbitrary
   const scenarios: Array<fc.Arbitrary<Array<EagerLiveSourceStep>>> = []
   if (capabilities.has(`await-evidence`)) {
@@ -2025,17 +2029,20 @@ export async function checkEagerLiveSourceHistory(
     return []
   }
   const detached = watchDetachedFailures(driver)
-  let fixture: EagerLiveSourceFixture
+  let created: EagerLiveSourceFixture | undefined
   try {
-    fixture = driver.create()
+    created = driver.create()
     if (listenBeforeFetch) {
-      await fixture.provider.seed?.(structuredClone(seedFrom(0)))
+      await created.provider.seed?.(structuredClone(seedFrom(0)))
     }
   } catch (error) {
-    // A setup failure leaves no console or rejection patch behind (ORC-010).
+    // A setup failure leaves no console or rejection patch, and no fixture,
+    // behind (ORC-010).
     detached.stop()
+    await created?.dispose?.()
     throw error
   }
+  const fixture = created
   const { collection, provider } = fixture
   const state = initialModel(seedFrom(0))
   const failures: Array<Error> = []
