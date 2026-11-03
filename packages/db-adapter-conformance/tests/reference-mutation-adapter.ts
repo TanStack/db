@@ -6,16 +6,32 @@
  *
  * The adapter's sync run loads the provider's rows, marks ready, and applies
  * the provider's change feed. Its mutation functions send each mutation to
- * the provider one write at a time per Collection (MUT-10) and return once
- * the provider has answered. An accepted write reaches the change feed before
- * the provider answers, so its sync transaction is committed before the
- * mutation function settles, and core drops the optimistic row in the same
- * publication that applies it (MUT-1).
+ * the provider one write at a time per Collection (MUT-10).
+ *
+ * The provider has three forms:
+ *
+ * - by default it stores structured clones and replaces a row on every
+ *   write. An accepted write reaches the change feed before the provider
+ *   answers, so the mutation function returns once the provider answers:
+ *   its sync transaction is committed before the mutation function settles,
+ *   and core drops the optimistic row in the same publication that applies
+ *   it (MUT-1);
+ * - a JSON provider (`json`) stores and feeds JSON, so a field whose value is
+ *   `undefined` is absent (`undefinedField: 'absent'`);
+ * - a SQL provider (`sql`), like TrailBase's or PowerSync's service, stores
+ *   rows with every column and an absent field as `NULL`, which its rows and
+ *   change feed report as absent (`undefinedField: 'null'`). An update sends
+ *   only its changed fields, a removed one as `null`, and the provider merges
+ *   them into its row (`field-updates`). The provider can answer before its
+ *   change feed delivers the copy (`held-echoes`), so the adapter confirms
+ *   each write through sync: its mutation function returns when its own
+ *   sync run has applied that write's copy (MUT-7).
  */
 import { createCollection } from '@tanstack/db'
 import { observedView, rewriteRow } from '../src'
 import type {
   ConformanceRow,
+  MutationCapability,
   MutationDriver,
   MutationFixture,
   MutationProvider,
@@ -50,43 +66,72 @@ export type ReferenceMutationMutant =
    * into its synced rows, over the provider's rewritten copy.
    */
   | `writes-back-authored`
+  /** MUT-8 (SQL): an update sends the complete row, not its changed fields. */
+  | `sends-complete-row`
+  /**
+   * MUT-8 (SQL): an update sends its changes as JSON as they are, so a
+   * removed field, an own `undefined`, never reaches the provider.
+   */
+  | `drops-removal`
+  /**
+   * MUT-7 (SQL): the mutation function returns when the provider answers,
+   * before its copy arrives through sync.
+   */
+  | `settles-on-answer`
+
+export interface ReferenceMutationOptions {
+  /** A JSON provider. */
+  json?: boolean
+  /** A SQL provider, with field updates and confirmation through sync. */
+  sql?: boolean
+}
 
 const acceptAtOnce: WritePlan = {
   outcome: `accept`,
   held: false,
+  echoHeld: false,
   rewrite: `none`,
   error: new Error(`unplanned write`),
 }
 
-/**
- * A provider that answers writes by plan and feeds every commit back. A JSON
- * provider stores and feeds each row as JSON, so a field whose value is
- * `undefined` is absent; otherwise rows are structured clones.
- */
+const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
+/** A provider that answers writes by plan and feeds every commit back. */
 export class ControlledMutationProvider implements MutationProvider {
   private readonly committed = new Map<number, ConformanceRow>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
+  private readonly withheld: Array<() => void> = []
   private readonly log: Array<WriteRequest> = []
-  private listener: ((change: ProviderChange) => void) | undefined
+  private listener:
+    ((change: ProviderChange, sequence: number) => void) | undefined
+  private commits = 0
 
   constructor(
     seed: ReadonlyArray<ConformanceRow>,
-    private readonly json = false,
+    private readonly options: ReferenceMutationOptions,
     private readonly echoesAuthored = false,
   ) {
     for (const row of seed) this.committed.set(row.id, this.stored(row))
   }
 
-  private stored<T>(value: T): T {
-    return this.json
-      ? (JSON.parse(JSON.stringify(value)) as T)
-      : structuredClone(value)
+  /** A row as this provider stores it. */
+  private stored(row: Partial<ConformanceRow>): ConformanceRow {
+    if (!this.options.json && !this.options.sql)
+      return structuredClone(row) as ConformanceRow
+    const stored = jsonClone(row) as Omit<ConformanceRow, `note`> & {
+      note?: string | null
+    }
+    // A SQL column holds `NULL`, which the provider reports as absent.
+    if (stored.note === null) delete stored.note
+    return stored as ConformanceRow
   }
 
   // The adapter's side: its change feed, initial read, and writes.
 
-  subscribe(listener: (change: ProviderChange) => void): () => void {
+  subscribe(
+    listener: (change: ProviderChange, sequence: number) => void,
+  ): () => void {
     this.listener = listener
     return () => {
       if (this.listener === listener) this.listener = undefined
@@ -97,34 +142,63 @@ export class ControlledMutationProvider implements MutationProvider {
     return [...this.committed.values()].map((row) => structuredClone(row))
   }
 
-  write(request: WriteRequest): Promise<void> {
-    this.log.push(this.stored(request))
+  /**
+   * Answers with the commit's sequence number, which its change feed
+   * carries, so an adapter can confirm the write through sync.
+   */
+  write(request: WriteRequest): Promise<number> {
+    const { json, sql } = this.options
+    this.log.push(json || sql ? jsonClone(request) : structuredClone(request))
     const plan = this.plans.shift() ?? acceptAtOnce
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<number>((resolve, reject) => {
       const answer = () => {
         if (plan.outcome === `reject`) {
           reject(plan.error)
           return
         }
-        this.commit(
-          request.type === `delete`
-            ? { type: `delete`, id: request.id }
-            : { type: `upsert`, row: rewriteRow(request.row!, plan.rewrite) },
+        if (request.type === `delete`) {
+          resolve(
+            this.commit({ type: `delete`, id: request.id }, plan.echoHeld),
+          )
+          return
+        }
+        // A SQL update merges the fields it sends into the stored row.
+        const row =
+          request.type === `update` && sql
+            ? { ...this.committed.get(request.id), ...jsonClone(request.row) }
+            : request.row
+        resolve(
+          this.commit(
+            {
+              type: `upsert`,
+              row: rewriteRow(row as ConformanceRow, plan.rewrite),
+            },
+            plan.echoHeld,
+          ),
         )
-        resolve()
       }
       if (plan.held) this.held.push(answer)
       else answer()
     })
   }
 
-  /** A write replaces the whole row, as a complete-row API does. */
-  private commit(change: ProviderChange): void {
+  /**
+   * Commits a change and feeds it back, at once or at `deliver`. Without
+   * field updates a write replaces the whole row, as a complete-row API does.
+   */
+  private commit(change: ProviderChange, withhold = false): number {
     if (change.type === `delete`) this.committed.delete(change.id)
     else this.committed.set(change.row.id, this.stored(change.row))
-    this.listener?.(
-      this.echoesAuthored ? structuredClone(change) : this.stored(change),
-    )
+    const sequence = ++this.commits
+    const fed = this.echoesAuthored
+      ? structuredClone(change)
+      : change.type === `delete`
+        ? change
+        : { ...change, row: this.stored(change.row) }
+    const feed = () => this.listener?.(fed, sequence)
+    if (withhold) this.withheld.push(feed)
+    else feed()
+    return sequence
   }
 
   // The oracle's side.
@@ -135,6 +209,10 @@ export class ControlledMutationProvider implements MutationProvider {
 
   release(): void {
     this.held.shift()?.()
+  }
+
+  deliver(): void {
+    this.withheld.shift()?.()
   }
 
   foreignCommit(change: ProviderChange): void {
@@ -156,6 +234,7 @@ let sequence = 0
 function referenceCollection(
   provider: ControlledMutationProvider,
   mutant: ReferenceMutationMutant | undefined,
+  { sql = false }: ReferenceMutationOptions,
 ) {
   // MUT-10: each write waits for the earlier one to be decided.
   let turn: Promise<unknown> = Promise.resolve()
@@ -175,11 +254,45 @@ function referenceCollection(
       throw error
     }
   }
+  // MUT-7 (SQL): a write is confirmed when this sync run has applied the
+  // commit its answer names.
+  let applied = 0
+  const confirmations: Array<{ sequence: number; resolve: () => void }> = []
+  const confirmed = (commit: number): Promise<void> => {
+    if (!sql || mutant === `settles-on-answer` || applied >= commit)
+      return Promise.resolve()
+    return new Promise((resolve) =>
+      confirmations.push({ sequence: commit, resolve }),
+    )
+  }
+  const send = async (request: WriteRequest) =>
+    confirmed(await provider.write(request))
   // The `writes-back-authored` mutant writes through the sync run's apply.
   let applyChange: ((change: ProviderChange) => void) | undefined
   const writeBack = (row: ConformanceRow) => {
     if (mutant === `writes-back-authored`)
       applyChange?.({ type: `upsert`, row: structuredClone(row) })
+  }
+  /** The row an update request carries. */
+  const updateRow = (mutation: {
+    key: number
+    modified: ConformanceRow
+    changes: Partial<ConformanceRow>
+  }): Partial<ConformanceRow> => {
+    if (sql && mutant !== `sends-complete-row`) {
+      const changes: Record<string, unknown> = {
+        id: mutation.key,
+        ...mutation.changes,
+      }
+      // A removed field is `NULL` in its column.
+      if (mutant !== `drops-removal`)
+        for (const [field, value] of Object.entries(changes))
+          if (value === undefined) changes[field] = null
+      return changes as Partial<ConformanceRow>
+    }
+    return mutant === `sends-changes-only`
+      ? { id: mutation.key, ...mutation.changes }
+      : structuredClone(mutation.modified)
   }
   const collection = createCollection<ConformanceRow, number>({
     id: `reference-mutations-${++sequence}`,
@@ -210,9 +323,17 @@ function referenceCollection(
         void commit()
         markReady()
         applyChange = apply
-        return provider.subscribe((change) => {
-          if (mutant === `applies-copy-late`) setTimeout(() => apply(change), 0)
-          else apply(change)
+        const receive = (change: ProviderChange, commitSequence: number) => {
+          apply(change)
+          applied = commitSequence
+          for (const waiting of confirmations.splice(0))
+            if (waiting.sequence <= applied) waiting.resolve()
+            else confirmations.push(waiting)
+        }
+        return provider.subscribe((change, commitSequence) => {
+          if (mutant === `applies-copy-late`)
+            setTimeout(() => receive(change, commitSequence), 0)
+          else receive(change, commitSequence)
         })
       },
     },
@@ -223,10 +344,13 @@ function referenceCollection(
             const request = {
               type: `insert` as const,
               id: mutation.key,
-              row: structuredClone(mutation.modified),
+              // A SQL row has every column: an absent field is `NULL`.
+              row: sql
+                ? { note: null as unknown as undefined, ...mutation.modified }
+                : structuredClone(mutation.modified),
             }
-            await provider.write(request)
-            if (mutant === `writes-insert-twice`) await provider.write(request)
+            await send(request)
+            if (mutant === `writes-insert-twice`) await send(request)
             writeBack(mutation.modified)
           }
         }),
@@ -235,16 +359,10 @@ function referenceCollection(
       answer(
         persist(async () => {
           for (const mutation of transaction.mutations) {
-            await provider.write({
+            await send({
               type: `update`,
               id: mutation.key,
-              row:
-                mutant === `sends-changes-only`
-                  ? ({
-                      id: mutation.key,
-                      ...mutation.changes,
-                    } as ConformanceRow)
-                  : structuredClone(mutation.modified),
+              row: updateRow(mutation),
             })
             writeBack(mutation.modified)
           }
@@ -255,7 +373,7 @@ function referenceCollection(
         persist(async () => {
           if (mutant === `skips-delete`) return
           for (const mutation of transaction.mutations) {
-            await provider.write({ type: `delete`, id: mutation.key })
+            await send({ type: `delete`, id: mutation.key })
           }
         }),
       ),
@@ -263,27 +381,39 @@ function referenceCollection(
   return collection
 }
 
+const sqlMutants = new Set<ReferenceMutationMutant | undefined>([
+  `sends-complete-row`,
+  `drops-removal`,
+  `settles-on-answer`,
+])
+
 /** A production driver for the reference adapter, optionally mutated. */
 export function referenceMutationDriver(
   mutant?: ReferenceMutationMutant,
-  { json = mutant === `echoes-authored-row` }: { json?: boolean } = {},
+  {
+    json = mutant === `echoes-authored-row`,
+    sql = sqlMutants.has(mutant),
+  }: ReferenceMutationOptions = {},
 ): MutationDriver {
+  const capabilities: Array<MutationCapability> = [
+    `write-rejection`,
+    `held-writes`,
+    `foreign-commits`,
+    `server-rewrites`,
+  ]
+  if (sql) capabilities.push(`field-updates`, `held-echoes`)
   return {
-    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${mutant ? ` (${mutant})` : ``}`,
+    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${mutant ? ` (${mutant})` : ``}`,
     ...(json && { undefinedField: `absent` as const }),
-    capabilities: new Set([
-      `write-rejection`,
-      `held-writes`,
-      `foreign-commits`,
-      `server-rewrites`,
-    ]),
+    ...(sql && { undefinedField: `null` as const }),
+    capabilities: new Set(capabilities),
     create(seed): MutationFixture {
       const provider = new ControlledMutationProvider(
         seed,
-        json,
+        { json, sql },
         mutant === `echoes-authored-row`,
       )
-      const collection = referenceCollection(provider, mutant)
+      const collection = referenceCollection(provider, mutant, { sql })
       return {
         collection: observedView(collection, {
           row: (row) => row,

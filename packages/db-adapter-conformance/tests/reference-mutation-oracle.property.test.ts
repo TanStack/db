@@ -32,9 +32,12 @@ import type { ReferenceMutationMutant } from './reference-mutation-adapter'
  * - **Campaigns.** The same property, grammar, and run budget run with a
  *   fixed seed and without one (ORC-007). Each fails when fewer than five
  *   histories reach a declared state (ORC-015).
- * - **Value domain.** The same campaigns run with a JSON provider, which
- *   declares `undefinedField: 'absent'`: a field an update removes is absent
- *   from its request and the provider's copy (FID-1's value domain).
+ * - **Value domain.** The fixed campaign also runs with a JSON provider,
+ *   which declares `undefinedField: 'absent'`: a field an update removes is
+ *   absent from its request and the provider's copy (FID-1's value domain).
+ * - **SQL provider.** The fixed campaign also runs with a provider like
+ *   TrailBase's or PowerSync's: `undefinedField: 'null'`, `field-updates`,
+ *   and `held-echoes`, so the adapter confirms each write through sync.
  * - **Calibration.** Each hostile mutant of the reference adapter breaks one
  *   law, and the fixed campaign must reject it with that law (ORC-006).
  */
@@ -46,6 +49,7 @@ const runs = 300
 const campaignTimeoutMs = 120_000
 
 const jsonDriver = referenceMutationDriver(undefined, { json: true })
+const sqlDriver = referenceMutationDriver(undefined, { sql: true })
 
 async function campaign(
   options: fc.Parameters<[unknown]>,
@@ -89,6 +93,18 @@ describe(`mutation conformance: reference adapter`, () => {
     campaignTimeoutMs,
   )
 
+  oracleReplayTest(it)(
+    `conforms with a SQL provider on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        sqlDriver,
+      )
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
   const mutants: Array<[ReferenceMutationMutant, string | RegExp]> = [
     [`applies-copy-late`, `MUT-1`],
     [`swallows-rejection`, `MUT-2`],
@@ -99,6 +115,9 @@ describe(`mutation conformance: reference adapter`, () => {
     [`sends-changes-only`, `MUT-8`],
     [`echoes-authored-row`, /FID-5/],
     [`writes-back-authored`, /FID-5/],
+    [`sends-complete-row`, `MUT-8 (provider requests)`],
+    [`drops-removal`, `MUT-8 (provider requests)`],
+    [`settles-on-answer`, /MUT-1|MUT-7/],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,

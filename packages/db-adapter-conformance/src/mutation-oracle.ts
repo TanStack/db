@@ -92,6 +92,17 @@ export type MutationCapability =
    * server defaults, triggers, and normalization do (`ServerRewrite`).
    */
   | `server-rewrites`
+  /**
+   * Updates send only the changed fields, and the provider merges them into
+   * its row (the law set's `field-updates`, MUT-8).
+   */
+  | `field-updates`
+  /**
+   * The provider can answer an accepted write before its change feed
+   * delivers the copy, which it then delivers at `deliver`. Declare it only
+   * for an adapter that confirms writes through sync (MUT-7).
+   */
+  | `held-echoes`
 
 /** The optimistic transaction a write call returns. */
 export interface MutationReceipt {
@@ -112,8 +123,11 @@ export interface MutationWriter {
 export interface WriteRequest {
   readonly type: `insert` | `update` | `delete`
   readonly id: number
-  /** The row the request carries; absent for a delete. */
-  readonly row?: ConformanceRow
+  /**
+   * The row the request carries; absent for a delete. Under
+   * `field-updates`, an update carries only its changed fields.
+   */
+  readonly row?: Readonly<Partial<ConformanceRow>>
 }
 
 /**
@@ -157,6 +171,11 @@ export interface WritePlan {
   /** Answer only at `release`, so the write stays pending until then. */
   readonly held: boolean
   /**
+   * After accepting, deliver the copy through the change feed only at
+   * `deliver` (`held-echoes`).
+   */
+  readonly echoHeld: boolean
+  /**
    * How the provider rejects, one of the driver's `rejectionKinds`; absent
    * when the driver declares none.
    */
@@ -177,6 +196,8 @@ export interface MutationProvider {
   plan: (plan: WritePlan) => void
   /** Answer the oldest held request by its plan. */
   release: () => void | Promise<void>
+  /** Deliver the oldest withheld copy through the change feed (`held-echoes`). */
+  deliver?: () => void | Promise<void>
   /** Commit a change made by another client (`foreign-commits`). */
   foreignCommit?: (change: ProviderChange) => void | Promise<void>
   /** The provider's committed rows. */
@@ -219,9 +240,11 @@ export interface MutationDriver {
    * as an update that removes a field authors it. FID-1 parameterizes row
    * values by the adapter's value domain: `own` keeps the field as an own
    * `undefined`, as a structured clone does; `absent` drops it, as a JSON
-   * document must, since JSON has no `undefined`. Default `own`.
+   * document must, since JSON has no `undefined`; `null` sends it as `null`
+   * and stores `NULL`, which the provider's rows report as an absent field,
+   * as a SQL row does. Default `own`.
    */
-  readonly undefinedField?: `own` | `absent`
+  readonly undefinedField?: `own` | `absent` | `null`
   /** Console diagnostics the adapter declares (HEALTH-5). */
   readonly declaredDiagnostic?: (
     level: `error` | `warn`,
@@ -251,6 +274,8 @@ export interface MutationDriver {
  *   declares several, is held only with `held-writes`, and rewrites an
  *   accepted insert's or update's row only with `server-rewrites`.
  * - `release`: the provider answers the oldest held request (`held-writes`).
+ * - `deliver`: the provider delivers the oldest copy it answered but
+ *   withheld from its change feed (`held-echoes`).
  * - `foreign`: another client commits an upsert or a delete while no
  *   mutation is pending (`foreign-commits`).
  *
@@ -270,11 +295,13 @@ export type MutationStep =
       readonly note?: string
       readonly outcome: `accept` | `reject`
       readonly held: boolean
+      readonly echoHeld: boolean
       readonly rewrite: ServerRewrite
       /** One of the driver's `rejectionKinds`, for a rejection. */
       readonly rejectionKind?: string
     }
   | { readonly kind: `release` }
+  | { readonly kind: `deliver` }
   | { readonly kind: `foreign`; readonly change: ProviderChange }
 
 export interface MutationHistory {
@@ -313,6 +340,9 @@ export function mutationHistoryArb(
           )
         : fc.constant(`accept` as const),
       held: capabilities.has(`held-writes`) ? fc.boolean() : fc.constant(false),
+      echoHeld: capabilities.has(`held-echoes`)
+        ? fc.boolean()
+        : fc.constant(false),
       rewrite: capabilities.has(`server-rewrites`)
         ? fc.constantFrom<ServerRewrite>(
             `none`,
@@ -329,7 +359,15 @@ export function mutationHistoryArb(
           : fc.constant<string | undefined>(undefined),
     })
     .map(
-      ({ type, row, outcome, held, rewrite, rejectionKind }): MutationStep => ({
+      ({
+        type,
+        row,
+        outcome,
+        held,
+        echoHeld,
+        rewrite,
+        rejectionKind,
+      }): MutationStep => ({
         kind: `write`,
         type,
         id: row.id,
@@ -337,6 +375,7 @@ export function mutationHistoryArb(
         ...(row.note === undefined ? {} : { note: row.note }),
         outcome,
         held,
+        echoHeld: outcome === `accept` && echoHeld,
         rewrite: type === `delete` ? `none` : rewrite,
         ...(outcome === `reject` && rejectionKind !== undefined
           ? { rejectionKind }
@@ -360,6 +399,7 @@ export function mutationHistoryArb(
               title: step.title,
               outcome: step.outcome,
               held: step.held,
+              echoHeld: step.echoHeld,
               rewrite: step.rewrite,
               ...(step.rejectionKind === undefined
                 ? {}
@@ -373,6 +413,12 @@ export function mutationHistoryArb(
     steps.push({
       weight: 3,
       arbitrary: fc.constant({ kind: `release` as const }),
+    })
+  }
+  if (capabilities.has(`held-echoes`)) {
+    steps.push({
+      weight: 3,
+      arbitrary: fc.constant({ kind: `deliver` as const }),
     })
   }
   if (capabilities.has(`foreign-commits`)) {
@@ -431,6 +477,30 @@ function sameRows(a: RowState, b: RowState): boolean {
   )
 }
 
+/**
+ * A request's row as the model compares it: each field it carries other than
+ * the key, in name order, with `undefined` as `null`, since a request is
+ * compared by the fields it sends.
+ */
+function requestValue(fields: Readonly<Partial<ConformanceRow>>): string {
+  return JSON.stringify(
+    Object.keys(fields)
+      .filter((field) => field !== `id`)
+      .sort()
+      .map((field) => [field, fields[field as keyof ConformanceRow] ?? null]),
+  )
+}
+
+/** A model row value back as a row. */
+function rowOf(id: number, value: string): ConformanceRow {
+  const [title, note] = JSON.parse(value) as [string, Array<string | null>]
+  return {
+    id,
+    title,
+    ...(note.length === 0 ? {} : { note: note[0] ?? undefined }),
+  }
+}
+
 /** A mutation whose plan has not decided it yet. */
 interface PendingWrite {
   readonly index: number
@@ -438,12 +508,16 @@ interface PendingWrite {
   readonly id: number
   /** The authored row's model value; absent for a delete. */
   readonly value?: string
-  /** The row its request carries: the authored row in the provider's value domain. */
-  readonly sent?: string
-  /** The row the provider stores if it accepts: `sent` under the plan's rewrite. */
-  readonly copy?: string
+  /**
+   * The fields its request carries, in the provider's value domain: the
+   * authored row, or under `field-updates` an update's changed fields.
+   * Absent for a delete.
+   */
+  readonly sent?: Readonly<Partial<ConformanceRow>>
   readonly plan: WritePlan
   requested: boolean
+  /** Accepted, with its copy withheld from the change feed (`held-echoes`). */
+  answered: boolean
 }
 
 type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
@@ -453,17 +527,20 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  *
  * - `provider` is the provider's committed rows: the seed, every accepted
  *   write's copy, and every commit from another client, in commit order. A
- *   write's copy is its authored row under the driver's `undefinedField`
- *   rule and then its plan's `ServerRewrite`: after a rewrite the
- *   provider's copy, not the authored row, is the row's value (FID-5).
+ *   write's copy is the row it sends (an update under `field-updates`
+ *   merges its fields into the provider's row as it is when the write is
+ *   accepted), stored under the driver's `undefinedField` rule and then the
+ *   plan's `ServerRewrite`: after a rewrite the provider's copy, not the
+ *   authored row, is the row's value (FID-5).
  * - `rewritten` counts accepted writes whose copy differs from their
  *   authored row, for reach.
- * - `pending` lists the mutations not yet decided, in author order. MUT-10
+ * - `pending` lists the mutations not yet settled, in author order. MUT-10
  *   orders their requests: the first is requested at once, and each later
- *   one only after every earlier one is decided.
+ *   one only after every earlier one is decided. An accepted write whose
+ *   copy the provider withholds is `answered`: it stays pending, and so
+ *   holds later writes, until the copy arrives (MUT-7).
  * - `requests` is every write request MUT-8 and MUT-10 allow so far.
  * - `settlements` is each write's `when('settled')` settlement.
- *
  * - `applied` is the synced rows core has applied. An accepted write's
  *   provider copy reaches core as an accepted sync transaction, which is
  *   held while any optimistic transaction is persisting, so `applied` takes
@@ -481,7 +558,9 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  */
 interface MutationModel {
   /** The driver's `undefinedField` declaration. */
-  readonly undefinedField: `own` | `absent`
+  readonly undefinedField: `own` | `absent` | `null`
+  /** The driver declares `field-updates`. */
+  readonly fieldUpdates: boolean
   provider: Map<number, string>
   applied: Map<number, string>
   heldRows: Array<PendingWrite>
@@ -494,10 +573,12 @@ interface MutationModel {
 function initialModel(
   seed: ReadonlyArray<ConformanceRow>,
   undefinedField: MutationModel[`undefinedField`] = `own`,
+  fieldUpdates = false,
 ): MutationModel {
   const provider = new Map(seed.map((row) => [row.id, rowValue(row)]))
   return {
     undefinedField,
+    fieldUpdates,
     provider,
     applied: new Map(provider),
     heldRows: [],
@@ -534,13 +615,60 @@ function authoredRow(
   }
 }
 
-/** The provider's copy of an authored row under its `undefinedField` rule. */
-function storedRow(
-  row: ConformanceRow,
+/**
+ * The fields a request sends for `fields` under the `undefinedField` rule:
+ * `own` keeps an own `undefined`, `absent` drops it, and `null` sends it as
+ * `null`. Under `null` a complete row is a SQL row, so it sends every
+ * column, an absent `note` as `null`; changed fields send only themselves.
+ */
+function sentFields(
+  fields: Readonly<Partial<ConformanceRow>>,
   undefinedField: MutationModel[`undefinedField`],
-): ConformanceRow {
-  if (undefinedField === `own` || row.note !== undefined) return row
-  return { id: row.id, title: row.title }
+  complete: boolean,
+): Partial<ConformanceRow> {
+  if (undefinedField === `own`) return { ...fields }
+  if (fields.note !== undefined) return { ...fields }
+  if (!complete && !Object.hasOwn(fields, `note`)) return { ...fields }
+  const { note: _removed, ...rest } = fields
+  return undefinedField === `null`
+    ? { ...rest, note: null as unknown as undefined }
+    : rest
+}
+
+/**
+ * The fields an update changes, as core's `changes` holds them: each authored
+ * field that differs from the row it was authored over, a removed field as
+ * an own `undefined`.
+ */
+function changedFields(
+  authored: ConformanceRow,
+  over: ConformanceRow,
+): Partial<ConformanceRow> {
+  return {
+    id: authored.id,
+    ...(authored.title === over.title ? {} : { title: authored.title }),
+    ...(Object.hasOwn(authored, `note`) &&
+    (authored.note !== over.note || !Object.hasOwn(over, `note`))
+      ? { note: authored.note }
+      : {}),
+  }
+}
+
+/** The provider's copy of an accepted insert or update. */
+function copyOf(state: MutationModel, write: PendingWrite): ConformanceRow {
+  const sent = write.sent!
+  const base =
+    write.type === `update` && state.fieldUpdates
+      ? rowOf(write.id, state.provider.get(write.id)!)
+      : { id: write.id }
+  const merged = { ...base, ...sent } as ConformanceRow
+  const { note, ...rest } = merged
+  // A stored `undefined` or `NULL` is an absent field, except to a
+  // structured-clone provider, which keeps an own `undefined`.
+  const kept =
+    (note ?? undefined) !== undefined ||
+    (state.undefinedField === `own` && Object.hasOwn(merged, `note`))
+  return rewriteRow(kept ? merged : rest, write.plan.rewrite)
 }
 
 function fold(
@@ -560,17 +688,35 @@ function visible(state: MutationModel): RowState {
   return rowState(fold(fold(state.applied, state.heldRows), state.pending))
 }
 
-/** Decide a write by its plan: an accepted one enters the provider's rows. */
+/**
+ * Decide a write by its plan. An accepted one enters the provider's rows; it
+ * settles at once unless the provider withholds its copy, and then stays
+ * pending, answered, until `confirm` (MUT-7). A rejected one settles.
+ */
 function decide(state: MutationModel, write: PendingWrite): void {
-  if (write.plan.outcome === `accept`) {
-    if (write.type === `delete`) state.provider.delete(write.id)
-    else state.provider.set(write.id, write.copy!)
-    if (write.copy !== write.value) state.rewritten++
-    state.heldRows.push(write)
-    state.settlements[write.index] = `fulfilled`
-  } else {
+  if (write.plan.outcome === `reject`) {
     state.settlements[write.index] = { rejected: write.plan.error }
+    retire(state, write)
+    return
   }
+  if (write.type === `delete`) state.provider.delete(write.id)
+  else {
+    const copy = rowValue(copyOf(state, write))
+    state.provider.set(write.id, copy)
+    if (copy !== write.value) state.rewritten++
+  }
+  if (write.plan.echoHeld) write.answered = true
+  else confirm(state, write)
+}
+
+/** An accepted write's copy arrives: it fulfills. */
+function confirm(state: MutationModel, write: PendingWrite): void {
+  state.heldRows.push(write)
+  state.settlements[write.index] = `fulfilled`
+  retire(state, write)
+}
+
+function retire(state: MutationModel, write: PendingWrite): void {
   state.pending.splice(state.pending.indexOf(write), 1)
   // The last persisting transaction settled: every held sync transaction
   // applies in its publication.
@@ -582,20 +728,23 @@ function decide(state: MutationModel, write: PendingWrite): void {
 
 /**
  * MUT-10: request the first pending mutation if it has not been; a request
- * answered at once is decided at once, which admits the next. Returns the
- * public rows after each decision, for the publication check.
+ * answered at once is decided at once, which admits the next unless its
+ * copy is withheld. Returns the public rows after each decision, for the
+ * publication check.
  */
 function advance(state: MutationModel): Array<RowState> {
   const states: Array<RowState> = []
   for (;;) {
     const first = state.pending[0]
-    if (!first) return states
+    if (!first || first.answered) return states
     if (!first.requested) {
       first.requested = true
       state.requests.push({
         type: first.type,
         id: first.id,
-        ...(first.sent === undefined ? {} : { value: first.sent }),
+        ...(first.sent === undefined
+          ? {}
+          : { value: requestValue(first.sent) }),
       })
     }
     if (first.plan.held) return states
@@ -616,6 +765,7 @@ type StepDone =
       removesField: boolean
     }
   | { kind: `release`; outcome: WritePlan[`outcome`] }
+  | { kind: `deliver` }
   | { kind: `foreign` }
 
 /**
@@ -634,29 +784,29 @@ function stepModel(
       const busy = state.pending.some((write) => write.id === step.id)
       const legal =
         step.type === `insert` ? !held.has(step.id) : held.has(step.id)
-      const row =
-        step.type === `delete`
-          ? undefined
-          : authoredRow(step, held.get(step.id))
+      const over = held.get(step.id)
+      const row = step.type === `delete` ? undefined : authoredRow(step, over)
       const value = row && rowValue(row)
       // An update that changes no field records no mutation in core; no law
       // fixes its persistence, so the grammar leaves it out.
-      const noop = step.type === `update` && held.get(step.id) === value
+      const noop = step.type === `update` && over === value
       if (busy || !legal || noop) return undefined
       const queued = state.pending.length > 0
+      const fields =
+        row && step.type === `update` && state.fieldUpdates
+          ? changedFields(row, rowOf(step.id, over!))
+          : row
       const write: PendingWrite = {
         index: state.settlements.length,
         type: step.type,
         id: step.id,
         ...(row && {
           value: rowValue(row),
-          sent: rowValue(storedRow(row, state.undefinedField)),
-          copy: rowValue(
-            rewriteRow(storedRow(row, state.undefinedField), step.rewrite),
-          ),
+          sent: sentFields(fields!, state.undefinedField, fields === row),
         }),
         plan: plan(step),
         requested: false,
+        answered: false,
       }
       state.settlements.push(`pending`)
       state.pending.push(write)
@@ -679,13 +829,21 @@ function stepModel(
     }
     case `release`: {
       const first = state.pending[0]
-      if (!first?.requested || !first.plan.held) return undefined
+      if (!first?.requested || first.answered || !first.plan.held)
+        return undefined
       decide(state, first)
       const published = [visible(state), ...advance(state)]
       return {
         done: { kind: `release`, outcome: first.plan.outcome },
         published,
       }
+    }
+    case `deliver`: {
+      const first = state.pending[0]
+      if (!first?.answered) return undefined
+      confirm(state, first)
+      const published = [visible(state), ...advance(state)]
+      return { done: { kind: `deliver` }, published }
     }
     case `foreign`: {
       if (state.pending.length > 0) return undefined
@@ -733,6 +891,7 @@ export const mutationReachStates = [
   `field-removed`,
   `held-optimistic-row`,
   `server-rewrote-copy`,
+  `echo-held`,
   `quiescent-after-writes`,
 ] as const
 
@@ -750,6 +909,7 @@ const capabilityOfState: Partial<
   'foreign-commit': `foreign-commits`,
   'held-optimistic-row': `held-writes`,
   'server-rewrote-copy': `server-rewrites`,
+  'echo-held': `held-echoes`,
 }
 
 /** The declared states a driver's capabilities let histories reach. */
@@ -901,7 +1061,11 @@ export async function checkMutationHistory(
   }
   const fixture = created
   const { collection, provider, writer } = fixture
-  const state = initialModel(history.seed, driver.undefinedField)
+  const state = initialModel(
+    history.seed,
+    driver.undefinedField,
+    driver.capabilities.has(`field-updates`),
+  )
   const receipts: Array<{ current: Settlement }> = []
   const failures: Array<Error> = []
   let accepted = 0
@@ -929,7 +1093,9 @@ export async function checkMutationHistory(
     const requests = provider.requests().map((request) => ({
       type: request.type,
       id: request.id,
-      ...(request.row === undefined ? {} : { value: rowValue(request.row) }),
+      ...(request.row === undefined
+        ? {}
+        : { value: requestValue(request.row) }),
     }))
     if (JSON.stringify(requests) !== JSON.stringify(state.requests))
       throw violation(
@@ -949,6 +1115,11 @@ export async function checkMutationHistory(
         visible(state),
         rows,
       )
+    const answered = new Set(
+      state.pending
+        .filter((write) => write.answered)
+        .map((write) => write.index),
+    )
     state.settlements.forEach((expected, index) => {
       const got = receipts[index]!.current
       const ok =
@@ -959,7 +1130,9 @@ export async function checkMutationHistory(
         throw violation(
           typeof expected === `object`
             ? `MUT-2 (settlement)`
-            : `MUT-13 (settlement)`,
+            : answered.has(index)
+              ? `MUT-7 (settlement)`
+              : `MUT-13 (settlement)`,
           stepIndex,
           typeof expected === `object` ? expected.rejected.message : expected,
           typeof got === `object` ? String(got.rejected) : got,
@@ -1011,6 +1184,7 @@ export async function checkMutationHistory(
     lastPlan = {
       outcome: step.outcome,
       held: step.held,
+      echoHeld: step.echoHeld,
       rewrite: step.rewrite,
       ...(step.rejectionKind === undefined
         ? {}
@@ -1053,10 +1227,11 @@ export async function checkMutationHistory(
           wrote++
           if (write.held) reach(`held-write-pending`)
           if (done.queued) reach(`write-queued-behind-held`)
-          if (write.outcome === `reject`) reach(`write-rejected`)
-          if (write.rejectionKind !== undefined)
-            reach(`rejected-as-${write.rejectionKind}`)
-          else if (!write.held) reach(`${write.type}-accepted` as const)
+          if (write.outcome === `reject`) {
+            reach(`write-rejected`)
+            if (write.rejectionKind !== undefined)
+              reach(`rejected-as-${write.rejectionKind}`)
+          } else if (!write.held) reach(`${write.type}-accepted` as const)
           if (done.removesField && write.outcome === `accept`)
             reach(`field-removed`)
           if (write.outcome === `reject` && !write.held) law = `MUT-2`
@@ -1069,6 +1244,9 @@ export async function checkMutationHistory(
             law = `MUT-2`
           }
           break
+        case `deliver`:
+          await provider.deliver!()
+          break
         case `foreign`:
           await provider.foreignCommit!(
             (step as Extract<MutationStep, { kind: `foreign` }>).change,
@@ -1078,19 +1256,26 @@ export async function checkMutationHistory(
       }
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+      if (state.pending.some((write) => write.answered)) reach(`echo-held`)
       rewritten = state.rewritten
       await compare(index)
       checkPublications(index, owedPublications(before, result.published), law)
     }
-    // Answer every held request, reaching a quiescent cut (FID-5).
+    // Answer every held request and deliver every withheld copy, reaching a
+    // quiescent cut (FID-5).
     while (state.pending.length > 0) {
       const before = visible(state)
-      const result = stepModel(state, { kind: `release` }, planFor)
+      const step: MutationStep = state.pending[0]!.answered
+        ? { kind: `deliver` }
+        : { kind: `release` }
+      const result = stepModel(state, step, planFor)
       if (result === undefined) break
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+      if (state.pending.some((write) => write.answered)) reach(`echo-held`)
       rewritten = state.rewritten
-      await provider.release()
+      if (step.kind === `deliver`) await provider.deliver!()
+      else await provider.release()
       await compare(steps.length)
       checkPublications(
         steps.length,

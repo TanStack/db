@@ -90,6 +90,7 @@ const schema = {
 const acceptAtOnce: WritePlan = {
   outcome: `accept`,
   held: false,
+  echoHeld: false,
   rewrite: `none`,
   error: new Error(`unplanned write`),
 }
