@@ -921,10 +921,12 @@ function checkSetBag(
               enumerable: true,
               get() {
                 // Fail at the work observation, before exponential code can hang.
-                expect(
-                  ++reads,
-                  `Set scalar-field comparison work`,
-                ).toBeLessThanOrEqual(ceiling)
+                // Allocate diagnostics only on failure; each scalar read is counted.
+                if (++reads > ceiling) {
+                  throw new Error(
+                    `Set scalar-field comparison work: ${reads} exceeds ${ceiling}`,
+                  )
+                }
                 return spec.value
               },
             })

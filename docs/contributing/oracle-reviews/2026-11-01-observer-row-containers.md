@@ -937,3 +937,31 @@ previous statement that no accepted-contract counterexample remains is limited
 to those declared laws; it does not establish general observer lifecycle
 correctness. The PR description and final readiness report must retain this
 qualification even if current-head CI is green.
+
+## 2026-11-03: Set oracle counter overhead in CI
+
+CI run `41682680312` on `c1fa115f5` passes 14,816 database-shard tests, but
+both `utils.42` campaigns exceed Vitest's five-second timeout. The random
+campaign reports seed `1430169919`; neither failure reports an equality or
+scalar-work mismatch. A local run of those same campaigns passes before the
+repair, with 3.58 seconds of test time. This local result does not reproduce
+the CI timeout.
+
+The scalar getter previously constructed a Vitest assertion on every read.
+It now increments the same counter and throws only when that counter exceeds
+the same cubic ceiling. The bag model, generated inputs, comparison paths,
+100-run budgets, reach requirements, replay identifiers and test timeout stay
+unchanged. No production code changes in this repair.
+
+The same seeded local command after the change reports 0.313 seconds of test
+time. The complete utility owner passes all 87 tests in 0.574 seconds of test
+time. Each of the twelve Set reach states still records 200 histories across
+the fixed and random campaigns. These elapsed measurements describe this local
+run; they create no timing promise.
+
+Restoring the original factorial matcher and replaying seed `20260911`, path
+`0:0:0`, still fails at scalar read 2,049 against ceiling 2,048. This is the
+intended work-observation failure, not a timeout or setup failure. Production
+was restored byte-for-byte afterward. The unchanged bounded equality/work law
+and its limits above continue to apply; this change only reduces checker
+overhead.
