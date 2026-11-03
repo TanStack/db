@@ -467,7 +467,7 @@ const ownerGroups: ReadonlyArray<
     `generation-notice`,
   ],
   [
-    `db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts`,
+    `db-sqlite-persistence-core/tests/persisted-optimistic-history-oracle.property.test.ts`,
     `sqlite-persistence`,
     `optimistic-history`,
   ],

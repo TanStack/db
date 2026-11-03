@@ -697,13 +697,24 @@ const sourceBatch = fc.record({
 })
 // A mutation handler may write a source batch before it returns, and may
 // await that batch's commit receipt.
+type SourceBatchValue =
+  typeof sourceBatch extends fc.Arbitrary<infer Value> ? Value : never
 const handlerSourceBatch = fc.oneof(
   { weight: 3, arbitrary: fc.constant(undefined) },
   {
     weight: 1,
-    arbitrary: fc
-      .tuple(sourceBatch, fc.boolean())
-      .map(([batch, awaitReceipt]) => ({ ...batch, awaitReceipt })),
+    arbitrary: fc.tuple(sourceBatch, fc.boolean()).map(
+      ([batch, awaitReceipt]) => ({ ...batch, awaitReceipt }),
+      // So a pinned handler batch is a member of the language.
+      (value) => {
+        const { awaitReceipt, ...batch } = value as {
+          awaitReceipt?: unknown
+        }
+        if (typeof awaitReceipt !== `boolean`)
+          throw new Error(`not a handler source batch`)
+        return [batch as SourceBatchValue, awaitReceipt]
+      },
+    ),
   },
 )
 export const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
@@ -770,17 +781,22 @@ export const optimisticHistory = fc.record({
   steps: fc.array(optimisticStep, { minLength: 2, maxLength: 24 }),
 })
 // The core grammar plus store steps. While a hold is outstanding, an
-// in-handler batch does not await acceptance.
+// in-handler batch does not await acceptance. Every mapped piece has an
+// unmapper, and no step is an object constant (fast-check compares those by
+// identity), so a pinned or segment-built history is a member of the language.
 // A deferred transaction's signal aborts before its turn.
-const abortStep: fc.Arbitrary<OptimisticStep> = fc
-  .nat(3)
-  .map((slot) => ({ type: `abort-deferred` as const, slot }))
+const abortStep: fc.Arbitrary<OptimisticStep> = fc.record({
+  type: fc.constant(`abort-deferred` as const),
+  slot: fc.nat(3),
+})
 // Holds outnumber releases, so a hold often spans several settlements.
-const storeStep: fc.Arbitrary<OptimisticStep> = fc.constantFrom(
-  { type: `hold-store` as const },
-  { type: `hold-store` as const },
-  { type: `release-store` as const },
-)
+const storeStep: fc.Arbitrary<OptimisticStep> = fc.record({
+  type: fc.constantFrom(
+    `hold-store` as const,
+    `hold-store` as const,
+    `release-store` as const,
+  ),
+})
 function excludeHeldAcceptance(
   steps: Array<OptimisticStep>,
 ): Array<OptimisticStep> {
@@ -800,35 +816,60 @@ function excludeHeldAcceptance(
 // A handler that commits its own key's server row and returns at once, the
 // way a source acknowledges a write when it commits it. The shared grammar's
 // handler batches rarely write their own key.
-const acknowledgedEdit: fc.Arbitrary<OptimisticStep> = fc
-  .tuple(historyRow, fc.boolean(), fc.boolean())
-  .map(([row, isDelete, optimistic]) =>
-    isDelete
-      ? {
-          type: `delete` as const,
-          key: row.id,
-          optimistic,
-          inHandler: {
-            type: `sync` as const,
-            rows: [],
-            deletes: [row.id],
-            truncate: false,
-            copies: 1,
-          },
-        }
-      : {
-          type: `edit` as const,
-          key: row.id,
-          fields: { a: row.a, b: row.b, c: row.c },
-          optimistic,
-          inHandler: {
-            type: `sync` as const,
-            rows: [row],
-            truncate: false,
-            copies: 1,
-          },
-        },
-  )
+const acknowledgedEditStep = ([row, optimistic]: [HistoryRow, boolean]) => ({
+  type: `edit` as const,
+  key: row.id,
+  fields: { a: row.a, b: row.b, c: row.c },
+  optimistic,
+  inHandler: {
+    type: `sync` as const,
+    rows: [row],
+    truncate: false,
+    copies: 1,
+  },
+})
+const acknowledgedDeleteStep = ([key, optimistic]: [number, boolean]) => ({
+  type: `delete` as const,
+  key,
+  optimistic,
+  inHandler: {
+    type: `sync` as const,
+    rows: [],
+    deletes: [key],
+    truncate: false,
+    copies: 1,
+  },
+})
+// An unmapper rebuilds the step from its source and accepts only an exact match.
+function unmapping<Source>(
+  build: (source: Source) => OptimisticStep,
+  source: (step: OptimisticStep) => Source,
+) {
+  return (value: unknown): Source => {
+    const recovered = source(value as OptimisticStep)
+    if (!isDeepStrictEqual(build(recovered), value))
+      throw new Error(`not an acknowledged handler write`)
+    return recovered
+  }
+}
+const acknowledgedEdit: fc.Arbitrary<OptimisticStep> = fc.oneof(
+  fc.tuple(historyRow, fc.boolean()).map(
+    acknowledgedEditStep,
+    unmapping(acknowledgedEditStep, (step) => [
+      (step.type === `edit` && step.inHandler?.type === `sync`
+        ? step.inHandler.rows[0]
+        : undefined) as HistoryRow,
+      step.type === `edit` && step.optimistic,
+    ]),
+  ),
+  fc.tuple(fc.integer({ min: 1, max: 3 }), fc.boolean()).map(
+    acknowledgedDeleteStep,
+    unmapping(acknowledgedDeleteStep, (step) => [
+      step.type === `delete` ? step.key : 0,
+      step.type === `delete` && step.optimistic,
+    ]),
+  ),
+)
 const settleAll: Array<OptimisticStep> = Array.from({ length: 24 }, () => ({
   type: `settle` as const,
   slot: 0,
@@ -846,6 +887,13 @@ const observeEveryKey: Array<OptimisticStep> = [
     copies: 1,
   },
 ]
+const wrappingTail = [...settleAll, ...observeEveryKey]
+/** A wrapping-sync history's steps: its body, then the settle-and-observe tail. */
+export function wrappingSteps(
+  body: Array<OptimisticStep>,
+): Array<OptimisticStep> {
+  return [...excludeHeldAcceptance(body), ...wrappingTail]
+}
 /**
  * The grammar for a wrapping-sync lane: the core grammar plus held durable
  * writes and acknowledged edits.
@@ -868,11 +916,13 @@ export const wrappingSyncHistory = fc.record({
     // Settle every outstanding transaction before the release, so an
     // outstanding hold meets a drain. A settle with nothing active is skipped.
     // Then observe every key through one later source transaction.
-    .map((steps) => [
-      ...excludeHeldAcceptance(steps),
-      ...settleAll,
-      ...observeEveryKey,
-    ]),
+    .map(wrappingSteps, (value) => {
+      const steps = value as Array<OptimisticStep>
+      const body = steps.slice(0, steps.length - wrappingTail.length)
+      if (!isDeepStrictEqual(wrappingSteps(body), steps))
+        throw new Error(`not a wrapping-sync step list`)
+      return body
+    }),
 })
 
 /**

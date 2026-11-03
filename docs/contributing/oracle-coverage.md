@@ -3116,7 +3116,7 @@ The [optimistic-history oracle](https://github.com/TanStack/db/blob/main/package
 now owns the held-row law for sync transactions deferred behind a wrapping
 sync's durable step, and checks that every optimistic mutation is visible in
 the tick that makes it. Its
-[persisted lane](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-optimistic-history.test.ts)
+[persisted lane](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-optimistic-history-oracle.property.test.ts)
 runs the shared grammar through `persistedCollectionOptions` with
 `hold-store` and `release-store` steps and a handler that commits its own
 server row. It was RED before the wrapper reported deferred sync keys to
