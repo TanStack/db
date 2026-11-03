@@ -16,6 +16,7 @@ import {
   mutationReachStatesFor,
 } from '../src'
 import { referenceMutationDriver } from './reference-mutation-adapter'
+import type { MutationDriver } from '../src'
 import type { ReferenceMutationMutant } from './reference-mutation-adapter'
 
 /**
@@ -31,6 +32,9 @@ import type { ReferenceMutationMutant } from './reference-mutation-adapter'
  * - **Campaigns.** The same property, grammar, and run budget run with a
  *   fixed seed and without one (ORC-007). Each fails when fewer than five
  *   histories reach a declared state (ORC-015).
+ * - **Value domain.** The same campaigns run with a JSON provider, which
+ *   declares `undefinedField: 'absent'`: a field an update removes is absent
+ *   from its request and the provider's copy (FID-1's value domain).
  * - **Calibration.** Each hostile mutant of the reference adapter breaks one
  *   law, and the fixed campaign must reject it with that law (ORC-006).
  */
@@ -41,11 +45,16 @@ const historyArb = mutationHistoryArb(driver)
 const runs = 300
 const campaignTimeoutMs = 120_000
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, mutationReachStatesFor(driver), {
+const jsonDriver = referenceMutationDriver(undefined, { json: true })
+
+async function campaign(
+  options: fc.Parameters<[unknown]>,
+  under: MutationDriver = driver,
+) {
+  const reach = createOracleReach(property, mutationReachStatesFor(under), {
     minimum: 5,
   })
-  await fc.assert(mutationProperty(driver, reach), options)
+  await fc.assert(mutationProperty(under, reach), options)
   return reach
 }
 
@@ -68,6 +77,18 @@ describe(`mutation conformance: reference adapter`, () => {
     campaignTimeoutMs,
   )
 
+  oracleReplayTest(it)(
+    `conforms with a JSON provider on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        jsonDriver,
+      )
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
+
   const mutants: Array<[ReferenceMutationMutant, string | RegExp]> = [
     [`applies-copy-late`, `MUT-1`],
     [`swallows-rejection`, `MUT-2`],
@@ -76,6 +97,7 @@ describe(`mutation conformance: reference adapter`, () => {
     [`writes-concurrently`, `MUT-10/MUT-13`],
     [`skips-delete`, /MUT-8|FID-5/],
     [`sends-changes-only`, `MUT-8`],
+    [`echoes-authored-row`, /FID-5/],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,

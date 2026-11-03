@@ -12,7 +12,11 @@
  *   optimistic state. When it fulfills, no publication shows the earlier
  *   synced value: the optimistic row drops in the same publication that
  *   applies the sync transaction carrying the provider's copy of the write.
- *   A one-row write publishes exactly one change of row values. Core also
+ *   While another mutation is persisting, that sync transaction is held and
+ *   the write's optimistic row stays as a held optimistic row until it
+ *   applies (glossary). A one-row write publishes exactly one change of row
+ *   values, and one more when its provider copy differs from the authored
+ *   row, as a JSON provider's does for a removed field. Core also
  *   publishes an update when only a virtual row field changes, such as
  *   `$hasPendingWrites` when the write is confirmed; the check compares row
  *   values only, so such a publication counts as no change here, and the
@@ -24,7 +28,10 @@
  *   exactly its inverse, and other pending mutations stay.
  * - **MUT-13, MUT-3, MUT-8.** Each write reaches the provider as exactly one
  *   request of its type for its key, carrying the authored row (an update
- *   sends the complete authored row).
+ *   sends the complete authored row) in the provider's value domain (FID-1):
+ *   a JSON provider has no `undefined`, so a field the update removes is
+ *   absent from its request and its copy, though the optimistic row holds it
+ *   as an own `undefined`. A driver declares this with `undefinedField`.
  * - **MUT-10.** Writes are ordered per Collection: a write submitted while an
  *   earlier one is pending reaches the provider only after the earlier one
  *   is decided, accepted or rejected.
@@ -152,6 +159,14 @@ export interface MutationDriver {
    * `when('settled')` must reject with the provider's error by identity.
    */
   readonly matchesFailure?: (reported: unknown, failure: Error) => boolean
+  /**
+   * How the provider stores an authored field whose value is `undefined`,
+   * as an update that removes a field authors it. FID-1 parameterizes row
+   * values by the adapter's value domain: `own` keeps the field as an own
+   * `undefined`, as a structured clone does; `absent` drops it, as a JSON
+   * document must, since JSON has no `undefined`. Default `own`.
+   */
+  readonly undefinedField?: `own` | `absent`
   /** Console diagnostics the adapter declares (HEALTH-5). */
   readonly declaredDiagnostic?: (
     level: `error` | `warn`,
@@ -318,6 +333,8 @@ interface PendingWrite {
   readonly id: number
   /** The authored row's model value; absent for a delete. */
   readonly value?: string
+  /** The provider's copy of the authored row; absent for a delete. */
+  readonly stored?: string
   readonly plan: WritePlan
   requested: boolean
 }
@@ -328,29 +345,51 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  * The model holds only what a legal next step can observe:
  *
  * - `provider` is the provider's committed rows: the seed, every accepted
- *   write, and every commit from another client, in commit order.
+ *   write's stored copy, and every commit from another client, in commit
+ *   order. A write's stored copy is its authored row under the driver's
+ *   `undefinedField` rule.
  * - `pending` lists the mutations not yet decided, in author order. MUT-10
  *   orders their requests: the first is requested at once, and each later
  *   one only after every earlier one is decided.
  * - `requests` is every write request MUT-8 and MUT-10 allow so far.
  * - `settlements` is each write's `when('settled')` settlement.
  *
- * The public rows are `provider` with `pending` folded on in author order:
- * core shows a mutation's optimistic state until its mutation function
- * settles, and a fulfilled write's provider copy replaces it in the same
- * publication. Nothing else is state: a decided write is either in
- * `provider` or gone.
+ * - `applied` is the synced rows core has applied. An accepted write's
+ *   provider copy reaches core as an accepted sync transaction, which is
+ *   held while any optimistic transaction is persisting, so `applied` takes
+ *   `provider` only when no mutation is pending.
+ * - `heldRows` lists the accepted writes whose sync transaction is held, in
+ *   author order: each keeps its held optimistic row until that transaction
+ *   applies (glossary: accepted sync transaction, held optimistic row).
+ *
+ * The public rows are `applied` with `heldRows` and then `pending` folded on
+ * in author order: core shows a mutation's optimistic state until its
+ * mutation function settles, and a fulfilled write's provider copy replaces
+ * its held optimistic row in the publication that applies it. With a
+ * structured-clone provider the copy equals the authored row, so only a
+ * provider whose copy differs, such as a JSON one, shows the hold.
  */
 interface MutationModel {
+  /** The driver's `undefinedField` declaration. */
+  readonly undefinedField: `own` | `absent`
   provider: Map<number, string>
+  applied: Map<number, string>
+  heldRows: Array<PendingWrite>
   pending: Array<PendingWrite>
   requests: Array<{ type: WriteRequest[`type`]; id: number; value?: string }>
   settlements: Array<ExpectedSettlement>
 }
 
-function initialModel(seed: ReadonlyArray<ConformanceRow>): MutationModel {
+function initialModel(
+  seed: ReadonlyArray<ConformanceRow>,
+  undefinedField: MutationModel[`undefinedField`] = `own`,
+): MutationModel {
+  const provider = new Map(seed.map((row) => [row.id, rowValue(row)]))
   return {
-    provider: new Map(seed.map((row) => [row.id, rowValue(row)])),
+    undefinedField,
+    provider,
+    applied: new Map(provider),
+    heldRows: [],
     pending: [],
     requests: [],
     settlements: [],
@@ -363,16 +402,16 @@ function initialModel(seed: ReadonlyArray<ConformanceRow>): MutationModel {
  * field (the documented rule in packages/db/tests/proxy-detachment-contract-oracle.test.ts;
  * maintainer decision 2026-11-03).
  */
-function authoredValue(
+function authoredRow(
   step: Extract<MutationStep, { kind: `write` }>,
   held: string | undefined,
-): string {
+): ConformanceRow {
   const removesNote =
     step.type === `update` &&
     step.note === undefined &&
     held !== undefined &&
     (JSON.parse(held) as [string, Array<unknown>])[1].length > 0
-  return rowValue({
+  return {
     id: step.id,
     title: step.title,
     ...(step.note === undefined
@@ -380,7 +419,16 @@ function authoredValue(
         ? { note: undefined }
         : {}
       : { note: step.note }),
-  })
+  }
+}
+
+/** The provider's copy of an authored row under its `undefinedField` rule. */
+function storedRow(
+  row: ConformanceRow,
+  undefinedField: MutationModel[`undefinedField`],
+): ConformanceRow {
+  if (undefinedField === `own` || row.note !== undefined) return row
+  return { id: row.id, title: row.title }
 }
 
 function fold(
@@ -397,19 +445,26 @@ function fold(
 
 /** The public rows the model predicts. */
 function visible(state: MutationModel): RowState {
-  return rowState(fold(state.provider, state.pending))
+  return rowState(fold(fold(state.applied, state.heldRows), state.pending))
 }
 
 /** Decide a write by its plan: an accepted one enters the provider's rows. */
 function decide(state: MutationModel, write: PendingWrite): void {
   if (write.plan.outcome === `accept`) {
     if (write.type === `delete`) state.provider.delete(write.id)
-    else state.provider.set(write.id, write.value!)
+    else state.provider.set(write.id, write.stored!)
+    state.heldRows.push(write)
     state.settlements[write.index] = `fulfilled`
   } else {
     state.settlements[write.index] = { rejected: write.plan.error }
   }
   state.pending.splice(state.pending.indexOf(write), 1)
+  // The last persisting transaction settled: every held sync transaction
+  // applies in its publication.
+  if (state.pending.length === 0) {
+    state.applied = new Map(state.provider)
+    state.heldRows = []
+  }
 }
 
 /**
@@ -427,7 +482,7 @@ function advance(state: MutationModel): Array<RowState> {
       state.requests.push({
         type: first.type,
         id: first.id,
-        ...(first.value === undefined ? {} : { value: first.value }),
+        ...(first.stored === undefined ? {} : { value: first.stored }),
       })
     }
     if (first.plan.held) return states
@@ -444,6 +499,8 @@ type StepDone =
       outcome: WritePlan[`outcome`]
       held: boolean
       queued: boolean
+      /** An update that removes `note`, authored as an own `undefined`. */
+      removesField: boolean
     }
   | { kind: `release`; outcome: WritePlan[`outcome`] }
   | { kind: `foreign` }
@@ -464,10 +521,11 @@ function stepModel(
       const busy = state.pending.some((write) => write.id === step.id)
       const legal =
         step.type === `insert` ? !held.has(step.id) : held.has(step.id)
-      const value =
+      const row =
         step.type === `delete`
           ? undefined
-          : authoredValue(step, held.get(step.id))
+          : authoredRow(step, held.get(step.id))
+      const value = row && rowValue(row)
       // An update that changes no field records no mutation in core; no law
       // fixes its persistence, so the grammar leaves it out.
       const noop = step.type === `update` && held.get(step.id) === value
@@ -477,7 +535,10 @@ function stepModel(
         index: state.settlements.length,
         type: step.type,
         id: step.id,
-        ...(value === undefined ? {} : { value }),
+        ...(row && {
+          value: rowValue(row),
+          stored: rowValue(storedRow(row, state.undefinedField)),
+        }),
         plan: plan(step),
         requested: false,
       }
@@ -492,6 +553,10 @@ function stepModel(
           outcome: step.outcome,
           held: step.held,
           queued,
+          removesField:
+            row !== undefined &&
+            Object.hasOwn(row, `note`) &&
+            row.note === undefined,
         },
         published,
       }
@@ -511,6 +576,7 @@ function stepModel(
       if (step.change.type === `upsert`)
         state.provider.set(step.change.row.id, rowValue(step.change.row))
       else state.provider.delete(step.change.id)
+      state.applied = new Map(state.provider)
       return { done: { kind: `foreign` }, published: [visible(state)] }
     }
   }
@@ -548,6 +614,8 @@ export const mutationReachStates = [
   `write-queued-behind-held`,
   `held-write-rejected`,
   `foreign-commit`,
+  `field-removed`,
+  `held-optimistic-row`,
   `quiescent-after-writes`,
 ] as const
 
@@ -561,6 +629,7 @@ const capabilityOfState: Partial<
   'write-queued-behind-held': `held-writes`,
   'held-write-rejected': `held-writes`,
   'foreign-commit': `foreign-commits`,
+  'held-optimistic-row': `held-writes`,
 }
 
 /** The declared states a driver's capabilities let histories reach. */
@@ -704,7 +773,7 @@ export async function checkMutationHistory(
   }
   const fixture = created
   const { collection, provider, writer } = fixture
-  const state = initialModel(history.seed)
+  const state = initialModel(history.seed, driver.undefinedField)
   const receipts: Array<{ current: Settlement }> = []
   const failures: Array<Error> = []
   let accepted = 0
@@ -849,6 +918,8 @@ export async function checkMutationHistory(
           if (done.queued) reach(`write-queued-behind-held`)
           if (write.outcome === `reject`) reach(`write-rejected`)
           else if (!write.held) reach(`${write.type}-accepted` as const)
+          if (done.removesField && write.outcome === `accept`)
+            reach(`field-removed`)
           if (write.outcome === `reject` && !write.held) law = `MUT-2`
           break
         }
@@ -866,6 +937,7 @@ export async function checkMutationHistory(
           reach(`foreign-commit`)
           break
       }
+      if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       await compare(index)
       checkPublications(index, owedPublications(before, result.published), law)
     }
@@ -874,6 +946,7 @@ export async function checkMutationHistory(
       const before = visible(state)
       const result = stepModel(state, { kind: `release` }, planFor)
       if (result === undefined) break
+      if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       await provider.release()
       await compare(steps.length)
       checkPublications(

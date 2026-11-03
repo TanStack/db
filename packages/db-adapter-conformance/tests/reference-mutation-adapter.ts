@@ -40,6 +40,11 @@ export type ReferenceMutationMutant =
   | `skips-delete`
   /** MUT-8: an update sends only the changed fields. */
   | `sends-changes-only`
+  /**
+   * FID-5: the change feed carries the authored row instead of the stored
+   * copy, so a JSON provider's removed field stays an own `undefined`.
+   */
+  | `echoes-authored-row`
 
 const acceptAtOnce: WritePlan = {
   outcome: `accept`,
@@ -47,7 +52,11 @@ const acceptAtOnce: WritePlan = {
   error: new Error(`unplanned write`),
 }
 
-/** A provider that answers writes by plan and feeds every commit back. */
+/**
+ * A provider that answers writes by plan and feeds every commit back. A JSON
+ * provider stores and feeds each row as JSON, so a field whose value is
+ * `undefined` is absent; otherwise rows are structured clones.
+ */
 export class ControlledMutationProvider implements MutationProvider {
   private readonly committed = new Map<number, ConformanceRow>()
   private readonly plans: Array<WritePlan> = []
@@ -55,8 +64,18 @@ export class ControlledMutationProvider implements MutationProvider {
   private readonly log: Array<WriteRequest> = []
   private listener: ((change: ProviderChange) => void) | undefined
 
-  constructor(seed: ReadonlyArray<ConformanceRow>) {
-    for (const row of seed) this.committed.set(row.id, structuredClone(row))
+  constructor(
+    seed: ReadonlyArray<ConformanceRow>,
+    private readonly json = false,
+    private readonly echoesAuthored = false,
+  ) {
+    for (const row of seed) this.committed.set(row.id, this.stored(row))
+  }
+
+  private stored<T>(value: T): T {
+    return this.json
+      ? (JSON.parse(JSON.stringify(value)) as T)
+      : structuredClone(value)
   }
 
   // The adapter's side: its change feed, initial read, and writes.
@@ -73,7 +92,7 @@ export class ControlledMutationProvider implements MutationProvider {
   }
 
   write(request: WriteRequest): Promise<void> {
-    this.log.push(structuredClone(request))
+    this.log.push(this.stored(request))
     const plan = this.plans.shift() ?? acceptAtOnce
     return new Promise<void>((resolve, reject) => {
       const answer = () => {
@@ -96,8 +115,10 @@ export class ControlledMutationProvider implements MutationProvider {
   /** A write replaces the whole row, as a complete-row API does. */
   private commit(change: ProviderChange): void {
     if (change.type === `delete`) this.committed.delete(change.id)
-    else this.committed.set(change.row.id, structuredClone(change.row))
-    this.listener?.(structuredClone(change))
+    else this.committed.set(change.row.id, this.stored(change.row))
+    this.listener?.(
+      this.echoesAuthored ? structuredClone(change) : this.stored(change),
+    )
   }
 
   // The oracle's side.
@@ -230,16 +251,22 @@ function referenceCollection(
 /** A production driver for the reference adapter, optionally mutated. */
 export function referenceMutationDriver(
   mutant?: ReferenceMutationMutant,
+  { json = mutant === `echoes-authored-row` }: { json?: boolean } = {},
 ): MutationDriver {
   return {
-    adapter: `reference mutations${mutant ? ` (${mutant})` : ``}`,
+    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${mutant ? ` (${mutant})` : ``}`,
+    ...(json && { undefinedField: `absent` as const }),
     capabilities: new Set([
       `write-rejection`,
       `held-writes`,
       `foreign-commits`,
     ]),
     create(seed): MutationFixture {
-      const provider = new ControlledMutationProvider(seed)
+      const provider = new ControlledMutationProvider(
+        seed,
+        json,
+        mutant === `echoes-authored-row`,
+      )
       const collection = referenceCollection(provider, mutant)
       return {
         collection: observedView(collection, {
