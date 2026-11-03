@@ -132,6 +132,54 @@ export function violation(
 }
 
 /**
+ * History checking against allowed cuts (oracle-framework design, form F-E).
+ * A model can often name, in order, the states an observer may see after a
+ * step without fixing which of them it sees: a publication may skip a state
+ * but never go back to an earlier one. `forwardCut` returns the index of the
+ * first cut at or after `from` that equals `observed`, or -1 when the
+ * observation is no allowed state ahead of `from`. The caller keeps the
+ * returned index as the next `from`.
+ */
+export function forwardCut<State>(
+  cuts: ReadonlyArray<State>,
+  observed: State,
+  from: number,
+  same: (allowed: State, observed: State) => boolean,
+): number {
+  for (let index = from; index < cuts.length; index += 1)
+    if (same(cuts[index]!, observed)) return index
+  return -1
+}
+
+/**
+ * Logical time for drivers (oracle-framework design, form F-F). A driver that
+ * must not hang when production never settles a promise waits with
+ * `withinTurns(promise, turns)`: it resolves `true` as soon as the promise
+ * settles, at the same microtask an `await` would, or `false` after `turns`
+ * event-loop turns. The bound counts turns, not milliseconds, so a loaded
+ * machine cannot turn a slow but legal settlement into a timeout. It cannot
+ * wait for work that production schedules on a delayed timer; a driver for
+ * such work controls that timer.
+ */
+export function withinTurns(
+  promise: Promise<unknown>,
+  turns: number,
+): Promise<boolean> {
+  // An object, so the loop reads the flag that the callbacks set.
+  const state = { settled: false }
+  const done = promise.then(
+    () => (state.settled = true),
+    () => (state.settled = true),
+  )
+  const expiry = (async () => {
+    for (let turn = 0; turn < turns && !state.settled; turn += 1)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    return false
+  })()
+  return Promise.race([done, expiry])
+}
+
+/**
  * The check found a history whose observations the law does not allow.
  * `actual` and `expected` are the fields Vitest reads to print a diff.
  */

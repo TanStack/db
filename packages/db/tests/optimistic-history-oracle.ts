@@ -8,6 +8,7 @@ import { createLiveQueryCollection } from '../src/query/index.js'
 import { whenSyncAccepted } from '../src/sync-receipt.js'
 import { createTransaction } from '../src/transactions.js'
 import { declareOracle } from './oracle-declaration.js'
+import { forwardCut, withinTurns } from './oracle-property.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 /**
@@ -1281,9 +1282,11 @@ export async function runOptimisticHistory(
               change.value.id,
             )
           }
-          const next = cuts.findIndex(
-            (cut, index) =>
-              index >= cutIndex && isDeepStrictEqual(cut, publication.replica),
+          const next = forwardCut(
+            cuts,
+            publication.replica,
+            cutIndex,
+            isDeepStrictEqual,
           )
           expect(
             next,
@@ -1553,11 +1556,11 @@ export async function runOptimisticHistory(
             op.tx.rollback({ isSecondaryRollback: !step.cascade })
             op.done.resolve()
           }
-          // A receipt that waited for visibility would deadlock the handler.
-          await Promise.race([
-            op.outcome.settled,
-            new Promise((resolve) => setTimeout(resolve, 20)),
-          ])
+          // A receipt that waited for visibility would deadlock the handler,
+          // so the wait is bounded. Settlement arrives within microtasks in
+          // every history (1,037 settlements, none after the first turn), so
+          // the bound counts event-loop turns, not milliseconds.
+          await withinTurns(op.outcome.settled, 10)
           await Promise.resolve()
           expect(
             op.settledRows,
