@@ -308,6 +308,29 @@ oracleProperty({
     ],
     pins: [
       {
+        // The same history with partial optimistic fields, written as core
+        // edits whose handler batches do not await acceptance.
+        name: `a partial insert and update stay over their server rows behind a held store`,
+        history: {
+          initial: [],
+          steps: wrappingSteps(
+            insertThenUpdateBehindHeldStore.map((step) =>
+              step.type === `edit` && step.inHandler
+                ? {
+                    ...step,
+                    fields: { a: step.fields.a },
+                    inHandler: {
+                      ...step.inHandler,
+                      deletes: [],
+                      awaitReceipt: false,
+                    },
+                  }
+                : step,
+            ),
+          ),
+        },
+      },
+      {
         name: `a settled update stays over its insert while the update's server row waits behind a held store`,
         history: {
           initial: [],

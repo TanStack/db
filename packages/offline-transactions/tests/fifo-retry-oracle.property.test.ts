@@ -22,6 +22,13 @@ import type { OfflineTransaction } from '../src/types'
  * - The executor runs one transaction at a time, in creation order. A later
  *   transaction does not pass an earlier one that has a retry delay, and a
  *   retried transaction keeps its FIFO position.
+ * - Eligible work runs when it becomes eligible: at the head's deadline the
+ *   executor runs the head and every ready transaction behind it, in order,
+ *   until a retriable failure or a storage fault. This is a bounded liveness
+ *   check on a controlled clock, not a wall-clock latency promise; timer count
+ *   and polling strategy are outside the judgment. The `nextAttemptAt`
+ *   eligibility boundary itself is the KeyScheduler oracle's
+ *   (`KeyScheduler-oracle.property.test.ts`).
  * - A retriable provider failure retries the same transaction after its
  *   backoff; nothing behind it runs first.
  * - A `NonRetriableError` removes its row and rejects its caller with that
@@ -39,8 +46,13 @@ import type { OfflineTransaction } from '../src/types'
  *
  * History grammar: two to five transactions with increasing `createdAt`; only
  * the head has a future `nextAttemptAt` (2 to 10,000 ms), and the tail is
- * ready. The delay axis moves the head's eligibility boundary; the
- * checkpoints at delay-1 and delay distinguish early and late wakeups.
+ * ready. Two is the smallest head-and-tail witness; larger counts test that
+ * the whole tail drains, and removing either the tail or the delay loses the
+ * delayed-head history. The delay axis moves the head's eligibility boundary;
+ * the checkpoints at delay-1 and delay distinguish early and late wakeups,
+ * including the 2 ms marginal delay. A tail created before the head,
+ * duplicate IDs, and a ready head are outside the grammar: each changes the
+ * premise.
  *
  * Model: the attempt order and outcomes follow from the plans alone, without
  * the scheduler, timers, or the outbox. At the deadline, attempts run until
@@ -209,11 +221,14 @@ async function driveFifo(
   { delay, plans }: History,
   observe: (checkpoint: string, value: unknown) => void,
 ) {
-  vi.useFakeTimers()
-  // A storage fault stops the executor, which logs the failed retry batch.
-  const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
   let executor: TransactionExecutor | undefined
+  let warn: { mockRestore: () => void } | undefined
+  let primary: unknown
+  let failed = false
   try {
+    vi.useFakeTimers()
+    // A storage fault stops the executor, which logs the failed retry batch.
+    warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
     // Fails the planned phase write or deletion for one transaction.
     const storage = new (class extends FakeStorageAdapter {
       override async set(key: string, value: string): Promise<void> {
@@ -304,11 +319,28 @@ async function driveFifo(
     for (let round = 0; round < 20 && vi.getTimerCount() > 0; round++)
       await vi.advanceTimersByTimeAsync(60_000)
     await record(`after every retry`)
-  } finally {
-    executor?.clear()
-    warn.mockRestore()
-    vi.useRealTimers()
+  } catch (error) {
+    primary = error
+    failed = true
   }
+  // Each release runs even when another fails; a cleanup failure keeps the
+  // driver's own error as its cause.
+  const failures: Array<unknown> = []
+  for (const release of [
+    () => executor?.clear(),
+    () => warn?.mockRestore(),
+    () => vi.useRealTimers(),
+  ])
+    try {
+      release()
+    } catch (error) {
+      failures.push(error)
+    }
+  if (failures.length > 0)
+    throw new AggregateError(failures, `FIFO retry driver cleanup failed`, {
+      cause: failed ? primary : undefined,
+    })
+  if (failed) throw primary
 }
 
 // ---------------------------------------------------------------------------
@@ -376,9 +408,9 @@ const ok: Plan = { failures: 0, final: `success`, storageFault: `none` }
 oracleProperty({
   id: `offline.fifo-retry`,
   law: {
-    statement: `The executor runs transactions one at a time in creation order: a ready tail waits for a delayed or retrying head, a permanent failure lets queued rows continue, and a failed phase write or deletion rejects its caller with the storage error and stops the queue.`,
-    authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement`,
-    limits: `An online executor with one mutation function and no retry hooks; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths are not judged.`,
+    statement: `The executor runs transactions one at a time in creation order: a ready tail waits for a delayed or retrying head, eligible work runs when its deadline passes, a permanent failure lets queued rows continue, and a failed phase write or deletion rejects its caller with the storage error and stops the queue.`,
+    authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement; the eligibility boundary from KeyScheduler-oracle.property.test.ts`,
+    limits: `An online executor with one mutation function, no retry hooks, and jitter off; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths, timer counts, and polling strategy are not judged; liveness on a controlled clock, not wall-clock latency.`,
     owner: `Offline execution`,
   },
   histories: {
@@ -472,12 +504,17 @@ oracleProperty({
     {
       name: `the head never wakes at its deadline`,
       law: `progress`,
-      corrupt: (trace) =>
-        trace.map((entry) =>
-          entry.checkpoint === `at deadline`
-            ? { ...entry, value: { ...(entry.value as State), calls: [] } }
+      // The whole queue is untouched: no calls, every row still stored.
+      corrupt: (trace) => {
+        const queued = trace.find(
+          ({ checkpoint }) => checkpoint === `before deadline`,
+        )?.value as State | undefined
+        return trace.map((entry) =>
+          entry.checkpoint === `at deadline` && queued
+            ? { ...entry, value: queued }
             : entry,
-        ),
+        )
+      },
     },
     {
       name: `the queue continues past a storage fault`,

@@ -2922,6 +2922,7 @@ export function checkOptimisticHistory(
             checkpoint,
             `receipt of source transaction ${id} ${status}, owed ${owed}`,
             `cleanup`,
+            { actual: status, expected: owed },
           )
       }
       continue
@@ -2953,6 +2954,7 @@ export function checkOptimisticHistory(
         checkpoint,
         `the handler returned before writing its source transaction`,
         `handler-batch`,
+        { actual: seen.handlerWrote, expected: true },
       )
     if (owed.completion && seen.completion !== owed.completion)
       return violation(
@@ -2973,6 +2975,7 @@ export function checkOptimisticHistory(
         checkpoint,
         `the subscriber did not commit the suffix during the trigger`,
         `reentrant-suffix`,
+        { actual: seen.suffixCommitted, expected: true },
       )
     if (
       seen.abortedOpen &&
@@ -2982,6 +2985,10 @@ export function checkOptimisticHistory(
         checkpoint,
         `an aborted open transaction: ${JSON.stringify(seen.abortedOpen)}`,
         `aborted-open-batch`,
+        {
+          actual: seen.abortedOpen,
+          expected: { receiptRejected: true, acceptanceRejected: true },
+        },
       )
     for (const publication of seen.raw) {
       const difference = eventSemanticsDifference(
@@ -3004,6 +3011,7 @@ export function checkOptimisticHistory(
             checkpoint,
             `callback key ${JSON.stringify(change.key)} for row ${change.value.id}`,
             `callback-shape`,
+            { actual: change.key, expected: change.value.id },
           )
       const difference = eventSemanticsDifference(
         new Map(publication.before),
@@ -3072,6 +3080,7 @@ export function checkOptimisticHistory(
           checkpoint,
           `receipt of source transaction ${id} ${status} before it applied`,
           `receipts`,
+          { actual: status, expected: `pending` },
         )
     for (const [name, rows] of [
       [`Collection`, seen.rows],

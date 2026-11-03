@@ -3,10 +3,11 @@
  * production driver, and check.
  *
  * An oracle file used to assemble these parts by hand: `declareOracle`, a loop
- * of `it` calls, assertions spread through the driver, and its own cleanup and
- * failure text. `oracleProperty` takes the parts and does the mechanics that
- * every oracle shares, so an oracle file holds only the parts that state its
- * law.
+ * of `it` calls, assertions spread through the driver, and its own failure
+ * text. `oracleProperty` takes the parts and does the mechanics that every
+ * oracle shares, so an oracle file holds only the parts that state its law.
+ * Cleanup stays with the driver: a driver releases what it created before it
+ * returns or throws, so the framework never holds a production resource.
  *
  * The parts keep their jobs separate (oracle rubric, ORC-003):
  *

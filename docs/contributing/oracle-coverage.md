@@ -1271,7 +1271,12 @@ formulation supplies matching and nonmatching controls. Other `singleResult`
 forms, join forms, and scheduling cuts remain outside these owners.
 
 The offline scheduler owner (`packages/offline-transactions/tests/KeyScheduler-oracle.property.test.ts`)
-checks FIFO eligibility and retry order at the scheduler boundary. It does not
+checks FIFO eligibility and retry order at the scheduler boundary, as the
+`oracleProperty` `offline.key-scheduler-fifo-ledger`. Before its port the
+generator drew histories of at most 12 commands (fast-check's default array
+size) with a biased selector, so 4 of 150 histories per lane started any
+transaction and 1 retried; generation now draws 1 to 50 unbiased commands,
+and about a quarter of histories start work and a tenth retry. It does not
 observe the executor's awaited outbox update between `updateTransaction` and
 `markFailed`, or public caller settlement. Those receiving cuts belong with
 `packages/offline-transactions/tests/transaction-settlement-oracle.property.test.ts`.
