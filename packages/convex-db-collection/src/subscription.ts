@@ -42,9 +42,20 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
   // lines belong to that object, so they name the cached result, also when
   // the server answers before the replay. The log accessors are untyped, and
   // the `onUpdate` handle's own one looks up the wrong query, so the
-  // JavaScript client's base client is read. Without them nothing is skipped.
+  // JavaScript client's base client is read. Without them, as behind an
+  // app's wrapper, the subscription has no current value until the server's
+  // first callback (`stale`) and skips the first error (`replay`), which a
+  // server answer that comes first can still take.
   let cached: unknown
-  const isCached = (logs: unknown) => cached !== undefined && logs === cached
+  let stale = false
+  let replay = false
+  const isCached = (read: () => unknown) =>
+    cached !== undefined && read() === cached
+  const holdsCachedError = (read: () => unknown, logs: () => unknown) => {
+    if (!hasCachedError(read)) return
+    cached = logs()
+    stale = replay = cached === undefined
+  }
   const stop = (unsubscribe: () => void) => () => {
     active = false
     unsubscribe()
@@ -64,31 +75,37 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
     if (`closed` in client && client.closed === true) {
       throw new Error(`A closed Convex client cannot sync a collection.`)
     }
+    const base = (client as { client?: Logged<[string, unknown]> }).client
+    const name = getFunctionName(query)
+    const logs = () => base?.localQueryLogs?.(name, args)
     const subscription = client.onUpdate(
       query,
       args,
       (value) => {
+        stale = replay = false
         if (active) receive(value)
       },
       (error) => {
-        if (active && !isCached(logs())) fail(error)
+        if (replay) replay = false
+        else {
+          stale = false
+          if (active && !isCached(logs)) fail(error)
+        }
       },
     )
-    const base = (client as { client?: Logged<[string, unknown]> }).client
-    const name = getFunctionName(query)
-    const logs = () => base?.localQueryLogs?.(name, args)
-    if (hasCachedError(() => subscription.getCurrentValue())) cached = logs()
+    holdsCachedError(() => subscription.getCurrentValue(), logs)
     return {
       getCurrentValue: () =>
-        isCached(logs()) ? undefined : subscription.getCurrentValue(),
+        stale || isCached(logs) ? undefined : subscription.getCurrentValue(),
       unsubscribe: stop(subscription),
     }
   }
   const watch = client.watchQuery(query, args)
   const logs = () => (watch as Logged<[]>).localQueryLogs?.()
-  if (hasCachedError(() => watch.localQueryResult())) cached = logs()
+  holdsCachedError(() => watch.localQueryResult(), logs)
   const unsubscribe = watch.onUpdate(() => {
-    if (!active || isCached(logs())) return
+    stale = false
+    if (!active || isCached(logs)) return
     try {
       const result = watch.localQueryResult()
       if (result !== undefined) receive(result)
@@ -98,7 +115,7 @@ export function subscribeQuery<TQuery extends FunctionReference<`query`>>(
   })
   return {
     getCurrentValue: () =>
-      isCached(logs()) ? undefined : watch.localQueryResult(),
+      stale || isCached(logs) ? undefined : watch.localQueryResult(),
     unsubscribe: stop(unsubscribe),
   }
 }

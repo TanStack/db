@@ -85,6 +85,21 @@ describe(`eager live-source conformance: Convex`, () => {
     },
     campaignTimeoutMs,
   )
+
+  // An app's wrapper that exposes only `onUpdate` hides the client's log
+  // accessor, so the adapter falls back to skipping one replayed error.
+  oracleReplayTest(it)(
+    `conforms over a wrapped JavaScript client on a fixed-seed campaign`,
+    async () => {
+      const reach = await campaign(
+        { seed: 2118, numRuns: oracleRuns(runs) },
+        convexConformanceDriver({ client: `wrapped` }),
+        `${property}.wrapped`,
+      )
+      reach.assertReached()
+    },
+    campaignTimeoutMs,
+  )
 })
 
 declareOracle({

@@ -145,9 +145,9 @@ class ConvexProvider implements ControlledProvider {
     }
     const url = `https://conformance.convex.cloud`
     this.client =
-      kind === `javascript`
-        ? new ConvexClient(url, options)
-        : new ConvexReactClient(url, options)
+      kind === `react`
+        ? new ConvexReactClient(url, options)
+        : new ConvexClient(url, options)
     this.onSend = (message) => {
       const modifications = (message.modifications ?? []) as Array<{
         type: string
@@ -327,9 +327,15 @@ class ConvexProvider implements ControlledProvider {
 
 let sequence = 0
 
-type ClientKind = `javascript` | `react`
+type ClientKind = `javascript` | `react` | `wrapped`
 
-/** `client` selects the Convex JavaScript client or the React client. */
+/**
+ * `client` selects the Convex JavaScript client, the React client, or a
+ * wrapper that exposes only the JavaScript client's `onUpdate`, as an app's
+ * proxy may. Without the client's log accessor the adapter skips one
+ * replayed error, so a prompt restart's failure can still be lost there:
+ * the wrapper does not declare `prompt-after-restart`.
+ */
 export function convexConformanceDriver({
   client = `javascript`,
 }: { client?: ClientKind } = {}): EagerLiveSourceDriver {
@@ -340,7 +346,7 @@ export function convexConformanceDriver({
       `delivery-error`,
       `duplicate-key-delivery`,
       `await-sync`,
-      `prompt-after-restart`,
+      ...(client === `wrapped` ? [] : [`prompt-after-restart` as const]),
     ]),
     changeCommits: `per-batch`,
     duplicateInsert: `error`,
@@ -357,7 +363,10 @@ export function convexConformanceDriver({
       const collection = createCollection(
         convexCollectionOptions({
           id: `convex-conformance-${++sequence}`,
-          client: provider.client,
+          client:
+            client === `wrapped` && provider.client instanceof ConvexClient
+              ? { onUpdate: provider.client.onUpdate.bind(provider.client) }
+              : provider.client,
           query: rowsQuery,
           queryArgs: {},
           getKey: (row) => row.id,
