@@ -1,8 +1,13 @@
 import { DatabaseSync } from 'node:sqlite'
-import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-property.js'
 import type { PersistedTx, SQLiteDriver } from '../src'
+import type { Observation as TraceEntry } from '../../db/tests/oracle-property.js'
 
 /**
  * # Does reopening a persisted Collection repair setup without redoing it?
@@ -26,11 +31,12 @@ import type { PersistedTx, SQLiteDriver } from '../src'
  * read after setup is cached in memory. A partial state may cost more.
  *
  * Model: a starting state is the set of setup facts present. The model names
- * the seven schema objects (type, name, table) from the fact list itself.
- * Their SQL text is taken from a production fresh install on a separate
- * database, so that part checks reopen against fresh install rather than
- * the absolute trigger and table definitions. The expected rows are the
- * seeded rows. A state is complete exactly when every fact is present.
+ * the seven schema objects (type, name, table) from the fact list itself. The
+ * expected rows are the seeded rows. A state is complete exactly when every
+ * fact is present. SQL text is not in the model: the driver also records a
+ * production fresh install on a separate database, and the check compares
+ * the reopened schema with it (a differential law), and the fresh install's
+ * objects with the model's.
  *
  * History grammar, on one node:sqlite database:
  * - Interrupted setup: the registry row exists and setup stopped after the
@@ -50,7 +56,11 @@ import type { PersistedTx, SQLiteDriver } from '../src'
  * first reads another Collection, so global initialization is not measured.
  * It then calls `loadSubset` on the target Collection, and calls it again for
  * the cached baseline. The setup and row observations are taken after the
- * first `loadSubset` resolves.
+ * first `loadSubset` resolves. Each history opens two in-memory databases
+ * and closes both however the history ends.
+ *
+ * The property is `sqlite-persistence.setup-reopen` on `oracleProperty`,
+ * enumerated over all 140 starting states, each its own test.
  */
 
 type Row = { id: string; title: string }
@@ -259,14 +269,13 @@ function bookkeeping(database: DatabaseSync): {
 const readOptions = {}
 const target = (id: string) => ({ kind: `eager` as const, collectionId: id })
 
-async function freshInstallSchema(): Promise<Array<SchemaObject>> {
-  const database = new DatabaseSync(`:memory:`)
+async function freshInstallSchema(
+  database: DatabaseSync,
+): Promise<Array<SchemaObject>> {
   const { driver } = countingDriver(database)
   const adapter = new SQLiteCorePersistenceAdapter({ driver })
   await adapter.loadSubset(target(collectionId), readOptions)
-  const schema = collectionSchema(database)
-  database.close()
-  return schema
+  return collectionSchema(database)
 }
 
 type Start = {
@@ -284,8 +293,10 @@ type Observation = {
   cachedReadCalls: number
 }
 
-async function reopen(start: Start): Promise<Observation> {
-  const database = new DatabaseSync(`:memory:`)
+async function reopen(
+  start: Start,
+  database: DatabaseSync,
+): Promise<Observation> {
   const install = countingDriver(database)
   const installer = new SQLiteCorePersistenceAdapter({
     driver: install.driver,
@@ -321,7 +332,6 @@ async function reopen(start: Start): Promise<Observation> {
   const cachedBefore = totalCalls(reload.counts)
   await adapter.loadSubset(target(collectionId), readOptions)
   const cachedReadCalls = totalCalls(reload.counts) - cachedBefore
-  database.close()
 
   return {
     schema,
@@ -371,47 +381,180 @@ const starts: Array<Start> = [
 ]
 
 // The model: what a fresh adapter's first read must leave behind.
-function expectedRows(start: Start): Array<Row> {
+function setupModel(start: Start) {
   const resets = start.reopenSchemaVersion !== undefined
-  return start.seedRows && !resets ? seededRows : []
+  return {
+    objects: modelSchemaObjects(),
+    rows: start.seedRows && !resets ? seededRows : [],
+    // The work law applies only when all nine facts hold and nothing resets.
+    workLawApplies: start.absent.length === 0 && !resets,
+  }
 }
 
-function workLawApplies(start: Start): boolean {
-  return start.absent.length === 0 && start.reopenSchemaVersion === undefined
-}
-
-declareOracle({ model: [modelSchemaObjects] })
-
-describe(`collection setup reopen oracle`, () => {
-  it(`repairs every legal starting state to a fresh install and skips complete setup`, async () => {
-    const expectedSchema = await freshInstallSchema()
-    // The model's seven objects, independent of production setup.
-    expect(
-      expectedSchema.map(({ type, name, tbl_name }) => ({
-        type,
-        name,
-        tbl_name,
-      })),
-    ).toEqual(modelSchemaObjects())
-
-    for (const start of starts) {
-      const observed = await reopen(start)
-      expect(observed.schema, `${start.name}: schema`).toEqual(expectedSchema)
-      expect(observed.bookkeeping, `${start.name}: bookkeeping`).toEqual({
-        version: true,
-        epoch: true,
-      })
-      expect(observed.rows, `${start.name}: rows`).toEqual(expectedRows(start))
-      if (workLawApplies(start)) {
-        expect(
-          { exec: observed.openCalls.exec, run: observed.openCalls.run },
-          `${start.name}: complete setup issues no DDL or writes`,
-        ).toEqual({ exec: 0, run: 0 })
-        expect(
-          totalCalls(observed.openCalls) - observed.cachedReadCalls,
-          `${start.name}: setup overhead over a cached read`,
-        ).toBeLessThanOrEqual(1)
+// The driver: a fresh install and a reopen, each on its own in-memory
+// database, both closed however the history ends.
+async function driveReopen(
+  start: Start,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const databases: Array<DatabaseSync> = []
+  const open = () => {
+    const database = new DatabaseSync(`:memory:`)
+    databases.push(database)
+    return database
+  }
+  try {
+    observe(`fresh install`, await freshInstallSchema(open()))
+    observe(`reopened`, await reopen(start, open()))
+  } finally {
+    for (const database of databases)
+      try {
+        database.close()
+      } catch {
+        // A database that failed to open has nothing to release.
       }
-    }
-  })
+  }
+}
+
+// The check: the fresh install has the model's seven objects; the reopened
+// Collection's schema equals the fresh install's, both bookkeeping rows
+// exist, and its rows are the model's; when the work law applies, opening
+// issues no DDL or writes and costs at most one call over a cached read.
+function checkReopen(
+  _start: Start,
+  trace: ReadonlyArray<TraceEntry>,
+  owed: ReturnType<typeof setupModel>,
+) {
+  const fresh = trace.find(({ checkpoint }) => checkpoint === `fresh install`)
+    ?.value as Array<SchemaObject> | undefined
+  const seen = trace.find(({ checkpoint }) => checkpoint === `reopened`)
+    ?.value as Observation | undefined
+  if (!fresh || !seen)
+    return violation(`reopened`, `the driver recorded no reopen`, `trace`)
+  const wrong =
+    differs(
+      `fresh install`,
+      `setup`,
+      fresh.map(({ type, name, tbl_name }) => ({ type, name, tbl_name })),
+      owed.objects,
+      `a fresh install created other schema objects than the model names`,
+    ) ??
+    differs(
+      `reopened`,
+      `setup`,
+      seen.schema,
+      fresh,
+      `the reopened schema differs from a fresh install`,
+    ) ??
+    differs(
+      `reopened`,
+      `bookkeeping`,
+      seen.bookkeeping,
+      { version: true, epoch: true },
+      `a bookkeeping row is missing`,
+    ) ??
+    differs(`reopened`, `rows`, seen.rows, owed.rows, `stored rows changed`)
+  if (wrong || !owed.workLawApplies) return wrong ?? pass
+  return (
+    differs(
+      `reopened`,
+      `work`,
+      { exec: seen.openCalls.exec, run: seen.openCalls.run },
+      { exec: 0, run: 0 },
+      `complete setup issued DDL or writes`,
+    ) ??
+    (totalCalls(seen.openCalls) - seen.cachedReadCalls > 1
+      ? violation(
+          `reopened`,
+          `setup cost ${totalCalls(seen.openCalls) - seen.cachedReadCalls} calls over a cached read, owed at most 1`,
+          `work`,
+        )
+      : pass)
+  )
+}
+
+oracleProperty({
+  id: `sqlite-persistence.setup-reopen`,
+  law: {
+    statement: `After a fresh adapter's first read of a registered Collection, its schema objects equal a fresh install's, both bookkeeping rows exist, and stored rows are unchanged, from every legal starting state; when all nine setup facts already hold, the read issues no DDL or writes and costs at most one call more than a cached read.`,
+    authority: `the SQLite core adapter's per-Collection setup contract; the accepted persistence goal that reloads are fast (issue #2204)`,
+    limits: `One node:sqlite database; no cache-generation claims, concurrent adapters, or dropped row tables that still hold rows. SQL text is checked against a production fresh install, not absolute definitions.`,
+    owner: `SQLite persistence`,
+  },
+  histories: starts,
+  label: (start) => start.name,
+  model: setupModel,
+  driver: driveReopen,
+  check: checkReopen,
+  calibrations: [
+    {
+      name: `a trigger is not restored`,
+      law: `setup`,
+      corrupt: (trace) =>
+        trace.map((entry) =>
+          entry.checkpoint === `reopened`
+            ? {
+                ...entry,
+                value: {
+                  ...(entry.value as Observation),
+                  schema: (entry.value as Observation).schema.filter(
+                    ({ type }) => type !== `trigger`,
+                  ),
+                },
+              }
+            : entry,
+        ),
+    },
+    {
+      name: `the reset epoch row is missing`,
+      law: `bookkeeping`,
+      corrupt: (trace) =>
+        trace.map((entry) =>
+          entry.checkpoint === `reopened`
+            ? {
+                ...entry,
+                value: {
+                  ...(entry.value as Observation),
+                  bookkeeping: { version: true, epoch: false },
+                },
+              }
+            : entry,
+        ),
+    },
+    {
+      name: `repair drops stored rows`,
+      law: `rows`,
+      corrupt: (trace) => {
+        const seen = trace.find(({ checkpoint }) => checkpoint === `reopened`)
+          ?.value as Observation | undefined
+        if (!seen?.rows.length) return undefined
+        return trace.map((entry) =>
+          entry.checkpoint === `reopened`
+            ? { ...entry, value: { ...seen, rows: [] } }
+            : entry,
+        )
+      },
+    },
+    {
+      name: `complete setup runs DDL again`,
+      law: `work`,
+      corrupt: (trace, start) =>
+        setupModel(start).workLawApplies
+          ? trace.map((entry) =>
+              entry.checkpoint === `reopened`
+                ? {
+                    ...entry,
+                    value: {
+                      ...(entry.value as Observation),
+                      openCalls: {
+                        ...(entry.value as Observation).openCalls,
+                        exec: 1,
+                      },
+                    },
+                  }
+                : entry,
+            )
+          : undefined,
+    },
+  ],
 })
